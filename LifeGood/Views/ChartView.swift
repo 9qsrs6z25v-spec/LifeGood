@@ -1,0 +1,401 @@
+import SwiftUI
+import Charts
+
+struct ChartView: View {
+    @EnvironmentObject var store: ExpenseStore
+    @State private var selectedPeriod: TimePeriod = .daily
+    @State private var selectedDataPoint: ChartDataPoint?
+
+    private let currencyFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = "TWD"
+        f.currencySymbol = "NT$"
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
+    var chartData: [ChartDataPoint] {
+        store.chartData(for: selectedPeriod)
+    }
+
+    var totalForPeriod: Double {
+        chartData.reduce(0) { $0 + $1.amount }
+    }
+
+    var averageForPeriod: Double {
+        let nonZeroCount = chartData.filter { $0.amount > 0 }.count
+        return nonZeroCount > 0 ? totalForPeriod / Double(nonZeroCount) : 0
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // 時間區間選擇
+                    periodPicker
+
+                    // 統計摘要
+                    statisticsSummary
+
+                    // 趨勢圖表
+                    trendChart
+
+                    // 支出類型比例
+                    expenseTypeBreakdown
+
+                    // 期間明細
+                    periodDetails
+                }
+                .padding(.vertical)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("圖表")
+        }
+    }
+
+    // MARK: - 時間選擇
+
+    private var periodPicker: some View {
+        Picker("時間區間", selection: $selectedPeriod) {
+            ForEach(TimePeriod.allCases, id: \.self) { period in
+                Text(period.rawValue).tag(period)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal)
+    }
+
+    // MARK: - 統計摘要
+
+    private var statisticsSummary: some View {
+        HStack(spacing: 12) {
+            StatCard(
+                title: "總計",
+                value: formatCurrency(totalForPeriod),
+                icon: "sum",
+                color: .green
+            )
+            StatCard(
+                title: "平均",
+                value: formatCurrency(averageForPeriod),
+                icon: "divide",
+                color: .blue
+            )
+            StatCard(
+                title: "最高",
+                value: formatCurrency(chartData.map(\.amount).max() ?? 0),
+                icon: "arrow.up",
+                color: .red
+            )
+        }
+        .padding(.horizontal)
+    }
+
+    // MARK: - 趨勢圖
+
+    private var trendChart: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(periodTitle)
+                .font(.headline)
+                .padding(.horizontal)
+
+            if chartData.isEmpty || chartData.allSatisfy({ $0.amount == 0 }) {
+                Text("尚無資料")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 200)
+            } else {
+                Chart(chartData) { dataPoint in
+                    BarMark(
+                        x: .value("期間", dataPoint.label),
+                        y: .value("金額", dataPoint.amount)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.6)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .cornerRadius(4)
+
+                    if let selected = selectedDataPoint, selected.label == dataPoint.label {
+                        RuleMark(x: .value("選取", dataPoint.label))
+                            .foregroundStyle(.green.opacity(0.3))
+                            .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
+                            .annotation(position: .top) {
+                                Text(formatCurrency(dataPoint.amount))
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.green)
+                                    .padding(4)
+                                    .background(Color(.systemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                                    .shadow(radius: 2)
+                            }
+                    }
+
+                    LineMark(
+                        x: .value("期間", dataPoint.label),
+                        y: .value("金額", dataPoint.amount)
+                    )
+                    .foregroundStyle(.green)
+                    .lineStyle(StrokeStyle(lineWidth: 2))
+                    .interpolationMethod(.catmullRom)
+
+                    PointMark(
+                        x: .value("期間", dataPoint.label),
+                        y: .value("金額", dataPoint.amount)
+                    )
+                    .foregroundStyle(.green)
+                    .symbolSize(dataPoint.amount > 0 ? 30 : 0)
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let label = value.as(String.self) {
+                                Text(abbreviateLabel(label))
+                                    .font(.caption2)
+                                    .rotationEffect(.degrees(-45))
+                            }
+                        }
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let amount = value.as(Double.self) {
+                                Text(abbreviateCurrency(amount))
+                                    .font(.caption2)
+                            }
+                        }
+                    }
+                }
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        Rectangle().fill(.clear).contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        let x = value.location.x - geometry[proxy.plotAreaFrame].origin.x
+                                        if let label: String = proxy.value(atX: x) {
+                                            selectedDataPoint = chartData.first { $0.label == label }
+                                        }
+                                    }
+                                    .onEnded { _ in
+                                        selectedDataPoint = nil
+                                    }
+                            )
+                    }
+                }
+                .frame(height: 220)
+                .padding(.horizontal)
+            }
+        }
+        .padding(.vertical)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        .padding(.horizontal)
+    }
+
+    // MARK: - 支出類型比例
+
+    private var expenseTypeBreakdown: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("支出類型比例")
+                .font(.headline)
+                .padding(.horizontal)
+
+            let variableTotal = store.currentMonthVariableTotal
+            let fixedTotal = store.currentMonthFixedTotal
+            let total = variableTotal + fixedTotal
+
+            if total == 0 {
+                Text("尚無資料")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+            } else {
+                // 比例條
+                HStack(spacing: 0) {
+                    if variableTotal > 0 {
+                        Rectangle()
+                            .fill(Color.orange)
+                            .frame(width: max(4, CGFloat(variableTotal / total) * (UIScreen.main.bounds.width - 64)))
+                    }
+                    if fixedTotal > 0 {
+                        Rectangle()
+                            .fill(Color.blue)
+                            .frame(width: max(4, CGFloat(fixedTotal / total) * (UIScreen.main.bounds.width - 64)))
+                    }
+                }
+                .frame(height: 12)
+                .clipShape(Capsule())
+                .padding(.horizontal)
+
+                HStack(spacing: 24) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.orange).frame(width: 10, height: 10)
+                        VStack(alignment: .leading) {
+                            Text("變動支出")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(formatCurrency(variableTotal))
+                                .font(.subheadline.bold())
+                            Text(String(format: "%.1f%%", total > 0 ? variableTotal / total * 100 : 0))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.blue).frame(width: 10, height: 10)
+                        VStack(alignment: .leading) {
+                            Text("固定支出")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(formatCurrency(fixedTotal))
+                                .font(.subheadline.bold())
+                            Text(String(format: "%.1f%%", total > 0 ? fixedTotal / total * 100 : 0))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal)
+            }
+        }
+        .padding(.vertical)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        .padding(.horizontal)
+    }
+
+    // MARK: - 期間明細
+
+    private var periodDetails: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("期間明細")
+                .font(.headline)
+                .padding(.horizontal)
+
+            let nonZeroData = chartData.filter { $0.amount > 0 }
+
+            if nonZeroData.isEmpty {
+                Text("尚無資料")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(nonZeroData.reversed()) { dataPoint in
+                        HStack {
+                            Text(dataPoint.label)
+                                .font(.subheadline)
+                                .frame(width: 80, alignment: .leading)
+
+                            GeometryReader { geo in
+                                let maxAmount = nonZeroData.map(\.amount).max() ?? 1
+                                let width = CGFloat(dataPoint.amount / maxAmount) * geo.size.width
+
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.green.opacity(0.3))
+                                    .frame(width: max(4, width), height: 20)
+                            }
+                            .frame(height: 20)
+
+                            Text(formatCurrency(dataPoint.amount))
+                                .font(.caption.bold())
+                                .frame(width: 80, alignment: .trailing)
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 6)
+
+                        if dataPoint.id != nonZeroData.reversed().last?.id {
+                            Divider().padding(.leading, 80)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.vertical)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        .padding(.horizontal)
+    }
+
+    // MARK: - Helpers
+
+    private var periodTitle: String {
+        switch selectedPeriod {
+        case .daily: return "每日支出趨勢（近30天）"
+        case .weekly: return "每週支出趨勢（近12週）"
+        case .monthly: return "每月支出趨勢（近12個月）"
+        case .quarterly: return "每季支出趨勢（近8季）"
+        case .yearly: return "每年支出趨勢（近5年）"
+        }
+    }
+
+    private func formatCurrency(_ value: Double) -> String {
+        currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+
+    private func abbreviateCurrency(_ value: Double) -> String {
+        if value >= 10000 {
+            return String(format: "%.0f萬", value / 10000)
+        } else if value >= 1000 {
+            return String(format: "%.1fk", value / 1000)
+        }
+        return String(format: "%.0f", value)
+    }
+
+    private func abbreviateLabel(_ label: String) -> String {
+        if label.count > 5 {
+            return String(label.suffix(4))
+        }
+        return label
+    }
+}
+
+// MARK: - 統計卡片
+
+struct StatCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(color)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.bold())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
+    }
+}
+
+#Preview {
+    ChartView()
+        .environmentObject(ExpenseStore())
+}
