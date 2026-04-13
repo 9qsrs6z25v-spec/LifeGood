@@ -133,39 +133,36 @@ expense,tracker,budget,finance,spending,money,chart,trend,fixed,variable,bookkee
 
 ## 6. 新功能介紹 (What's New)
 
-### 版本 1.1
+### 版本 1.2
 
 #### 繁體中文
 ```
-v1.1 更新內容：
+v1.2 更新內容：
 
 ◆ 新增 App 圖示
   全新設計的綠色主題圖示，結合錢幣符號與趨勢圖，一眼辨識。
 
 ◆ 固定支出智慧投射
-  修正固定支出在各時間區間的計算邏輯。設定在一月的固定支出，現在會自動投射到後續每個月份，不再遺漏。
+  固定支出現在會依週期自動投射到每個月份。一月設定的房租，二月以後也會正確顯示。
   - 年度圖表：每月×12、每季×4、每年×1
   - 月度圖表：每月×1、每季÷3、每年÷12
   - 每日與每週同步依比例換算
 
 ◆ 總覽頁面優化
   本月總支出與今日花費現在正確包含投射的固定支出金額。
+
+◆ 修正 App Icon 格式
+  修正圖示透明通道問題，確保在所有裝置上正確顯示。
 ```
 
 #### English
 ```
-v1.1 What's New:
+v1.2 What's New:
 
-◆ New App Icon
-  Fresh green-themed icon featuring a dollar symbol and trend line.
-
-◆ Smart Fixed Expense Projection
-  Fixed expenses now automatically project into every future period. A rent set in January correctly appears in February and beyond.
-  - Yearly chart: monthly×12, quarterly×4, yearly×1
-  - Monthly chart: monthly×1, quarterly÷3, yearly÷12
-
-◆ Overview Page Improvements
-  Monthly total and today's spending now correctly include projected fixed expenses.
+◆ New App Icon — fresh green-themed icon with dollar symbol and trend line.
+◆ Smart Fixed Expense Projection — fixed expenses auto-project into every future period based on recurrence.
+◆ Overview Improvements — monthly total and today's spending now include projected fixed expenses.
+◆ Icon Format Fix — resolved alpha channel issue for proper display on all devices.
 ```
 
 ---
