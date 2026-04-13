@@ -73,12 +73,12 @@ struct FixedExpenseView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // 月估計
-            let monthlyEstimate = store.fixedExpenses.reduce(0.0) { total, expense in
+            // 年度預估
+            let yearlyEstimate = store.fixedExpenses.reduce(0.0) { total, expense in
                 switch expense.recurrence {
-                case .monthly: return total + expense.amount
-                case .quarterly: return total + expense.amount / 3
-                case .yearly: return total + expense.amount / 12
+                case .monthly: return total + expense.amount * 12
+                case .quarterly: return total + expense.amount * 4
+                case .yearly: return total + expense.amount
                 case .none: return total + expense.amount
                 }
             }
@@ -86,7 +86,7 @@ struct FixedExpenseView: View {
             HStack {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.blue)
-                Text("每月預估固定支出：\(formatCurrency(monthlyEstimate))")
+                Text("年度預估固定支出：\(formatCurrency(yearlyEstimate))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()

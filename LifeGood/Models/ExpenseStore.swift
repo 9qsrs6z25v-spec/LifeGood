@@ -59,20 +59,21 @@ class ExpenseStore: ObservableObject {
         }
     }
 
-    var currentMonthTotal: Double {
-        currentMonthExpenses.reduce(0) { $0 + $1.amount }
-    }
-
     var currentMonthVariableTotal: Double {
         currentMonthExpenses
             .filter { $0.expenseType == .variable }
             .reduce(0) { $0 + $1.amount }
     }
 
+    /// 本月固定支出：所有建立日期 <= 本月的固定支出，依週期換算為月金額
     var currentMonthFixedTotal: Double {
-        currentMonthExpenses
-            .filter { $0.expenseType == .fixed }
-            .reduce(0) { $0 + $1.amount }
+        let calendar = Calendar.current
+        let now = Date()
+        return projectedFixedTotal(for: now, period: .monthly, calendar: calendar)
+    }
+
+    var currentMonthTotal: Double {
+        currentMonthVariableTotal + currentMonthFixedTotal
     }
 
     // MARK: - 今日統計
@@ -80,9 +81,16 @@ class ExpenseStore: ObservableObject {
     var todayTotal: Double {
         let calendar = Calendar.current
         let today = Date()
-        return expenses
-            .filter { calendar.isDateInToday($0.date) }
+
+        // 變動支出：只計今天實際紀錄的
+        let variableToday = expenses
+            .filter { $0.expenseType == .variable && calendar.isDateInToday($0.date) }
             .reduce(0) { $0 + $1.amount }
+
+        // 固定支出：依週期換算每日金額
+        let fixedDaily = projectedFixedTotal(for: today, period: .daily, calendar: calendar)
+
+        return variableToday + fixedDaily
     }
 
     // MARK: - 分類統計
