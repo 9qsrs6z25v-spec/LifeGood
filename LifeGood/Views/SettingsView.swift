@@ -37,6 +37,12 @@ enum ShareItem: Identifiable {
 
 struct SettingsView: View {
     @EnvironmentObject var store: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @AppStorage("appMode") private var appMode: String = AppMode.expense.rawValue
+
+    private var currentMode: AppMode {
+        get { AppMode(rawValue: appMode) ?? .expense }
+    }
 
     // 匯出狀態
     @State private var activeShareItem: ShareItem?
@@ -56,6 +62,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                modeSwitchSection
                 dataManagementSection
                 dataStatsSection
                 dangerZoneSection
@@ -109,6 +116,25 @@ struct SettingsView: View {
             } message: {
                 Text("此操作無法復原，所有支出紀錄將被永久刪除。建議先匯出備份再進行清除。")
             }
+        }
+    }
+
+    // MARK: - 模式切換
+
+    private var modeSwitchSection: some View {
+        Section {
+            Picker("功能模式", selection: $appMode) {
+                ForEach(AppMode.allCases, id: \.rawValue) { mode in
+                    Text(mode.rawValue).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("功能切換")
+        } footer: {
+            Text(currentMode == .expense
+                 ? "目前為記帳模式：管理每日變動支出與固定開支。"
+                 : "目前為理財模式：管理儲蓄險、股票與房地產資產。")
         }
     }
 
@@ -352,4 +378,5 @@ struct SettingsView: View {
 #Preview {
     SettingsView()
         .environmentObject(ExpenseStore())
+        .environmentObject(FinanceStore())
 }

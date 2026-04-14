@@ -2,12 +2,14 @@ import SwiftUI
 
 @main
 struct LifeGoodApp: App {
-    @StateObject private var store = ExpenseStore()
+    @StateObject private var expenseStore = ExpenseStore()
+    @StateObject private var financeStore = FinanceStore()
 
     var body: some Scene {
         WindowGroup {
             MainTabView()
-                .environmentObject(store)
+                .environmentObject(expenseStore)
+                .environmentObject(financeStore)
         }
     }
 }

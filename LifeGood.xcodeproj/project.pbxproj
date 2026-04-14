@@ -17,6 +17,17 @@
 		A01B000001000008 /* AddExpenseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000008 /* AddExpenseView.swift */; };
 		A01B000001000009 /* ChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000009 /* ChartView.swift */; };
 		A01B00000100000D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000D /* SettingsView.swift */; };
+		A01B00000100000E /* AppMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000E /* AppMode.swift */; };
+		A01B00000100000F /* FinanceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000F /* FinanceModels.swift */; };
+		A01B000001000010 /* FinanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000010 /* FinanceStore.swift */; };
+		A01B000001000011 /* FinanceOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000011 /* FinanceOverviewView.swift */; };
+		A01B000001000012 /* SavingsInsuranceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000012 /* SavingsInsuranceView.swift */; };
+		A01B000001000013 /* StockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000013 /* StockView.swift */; };
+		A01B000001000014 /* RealEstateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000014 /* RealEstateView.swift */; };
+		A01B000001000015 /* FinanceChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000015 /* FinanceChartView.swift */; };
+		A01B000001000016 /* AddSavingsInsuranceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000016 /* AddSavingsInsuranceView.swift */; };
+		A01B000001000017 /* AddStockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000017 /* AddStockView.swift */; };
+		A01B000001000018 /* AddRealEstateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000018 /* AddRealEstateView.swift */; };
 		A01B00000100000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000A /* Assets.xcassets */; };
 		A01B00000100000B /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000B /* Preview Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -32,6 +43,17 @@
 		A01A000001000008 /* AddExpenseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddExpenseView.swift; sourceTree = "<group>"; };
 		A01A000001000009 /* ChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartView.swift; sourceTree = "<group>"; };
 		A01A00000100000D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A01A00000100000E /* AppMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMode.swift; sourceTree = "<group>"; };
+		A01A00000100000F /* FinanceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceModels.swift; sourceTree = "<group>"; };
+		A01A000001000010 /* FinanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceStore.swift; sourceTree = "<group>"; };
+		A01A000001000011 /* FinanceOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceOverviewView.swift; sourceTree = "<group>"; };
+		A01A000001000012 /* SavingsInsuranceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavingsInsuranceView.swift; sourceTree = "<group>"; };
+		A01A000001000013 /* StockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockView.swift; sourceTree = "<group>"; };
+		A01A000001000014 /* RealEstateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealEstateView.swift; sourceTree = "<group>"; };
+		A01A000001000015 /* FinanceChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceChartView.swift; sourceTree = "<group>"; };
+		A01A000001000016 /* AddSavingsInsuranceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddSavingsInsuranceView.swift; sourceTree = "<group>"; };
+		A01A000001000017 /* AddStockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddStockView.swift; sourceTree = "<group>"; };
+		A01A000001000018 /* AddRealEstateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddRealEstateView.swift; sourceTree = "<group>"; };
 		A01A00000100000A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A01A00000100000B /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		A01A00000100000C /* LifeGood.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeGood.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -73,6 +95,9 @@
 			children = (
 				A01A000001000002 /* Expense.swift */,
 				A01A000001000003 /* ExpenseStore.swift */,
+				A01A00000100000E /* AppMode.swift */,
+				A01A00000100000F /* FinanceModels.swift */,
+				A01A000001000010 /* FinanceStore.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -87,8 +112,24 @@
 				A01A000001000008 /* AddExpenseView.swift */,
 				A01A000001000009 /* ChartView.swift */,
 				A01A00000100000D /* SettingsView.swift */,
+				A01D000001000007 /* Finance */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		A01D000001000007 /* Finance */ = {
+			isa = PBXGroup;
+			children = (
+				A01A000001000011 /* FinanceOverviewView.swift */,
+				A01A000001000012 /* SavingsInsuranceView.swift */,
+				A01A000001000013 /* StockView.swift */,
+				A01A000001000014 /* RealEstateView.swift */,
+				A01A000001000015 /* FinanceChartView.swift */,
+				A01A000001000016 /* AddSavingsInsuranceView.swift */,
+				A01A000001000017 /* AddStockView.swift */,
+				A01A000001000018 /* AddRealEstateView.swift */,
+			);
+			path = Finance;
 			sourceTree = "<group>";
 		};
 		A01D000001000005 /* Products */ = {
@@ -188,6 +229,17 @@
 				A01B000001000008 /* AddExpenseView.swift in Sources */,
 				A01B000001000009 /* ChartView.swift in Sources */,
 				A01B00000100000D /* SettingsView.swift in Sources */,
+				A01B00000100000E /* AppMode.swift in Sources */,
+				A01B00000100000F /* FinanceModels.swift in Sources */,
+				A01B000001000010 /* FinanceStore.swift in Sources */,
+				A01B000001000011 /* FinanceOverviewView.swift in Sources */,
+				A01B000001000012 /* SavingsInsuranceView.swift in Sources */,
+				A01B000001000013 /* StockView.swift in Sources */,
+				A01B000001000014 /* RealEstateView.swift in Sources */,
+				A01B000001000015 /* FinanceChartView.swift in Sources */,
+				A01B000001000016 /* AddSavingsInsuranceView.swift in Sources */,
+				A01B000001000017 /* AddStockView.swift in Sources */,
+				A01B000001000018 /* AddRealEstateView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -200,7 +252,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -214,7 +266,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -229,7 +281,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -243,7 +295,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
