@@ -1,42 +1,35 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - 匯出用 FileDocument
+// MARK: - Share Sheet (UIKit bridge)
 
-struct JSONDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
 
-    var data: Data
-
-    init(data: Data) {
-        self.data = data
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
 
-    init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
-    }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
-    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
-struct CSVDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.commaSeparatedText] }
+// MARK: - 分享項目
 
-    var text: String
+enum ShareItem: Identifiable {
+    case json(URL)
+    case csv(URL)
 
-    init(text: String) {
-        self.text = text
+    var id: String {
+        switch self {
+        case .json: return "json"
+        case .csv: return "csv"
+        }
     }
 
-    init(configuration: ReadConfiguration) throws {
-        text = String(data: configuration.file.regularFileContents ?? Data(), encoding: .utf8) ?? ""
-    }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        let data = text.data(using: .utf8) ?? Data()
-        return FileWrapper(regularFileWithContents: data)
+    var url: URL {
+        switch self {
+        case .json(let url), .csv(let url): return url
+        }
     }
 }
 
@@ -46,10 +39,9 @@ struct SettingsView: View {
     @EnvironmentObject var store: ExpenseStore
 
     // 匯出狀態
-    @State private var showJSONExporter = false
-    @State private var showCSVExporter = false
-    @State private var jsonDocument: JSONDocument?
-    @State private var csvDocument: CSVDocument?
+    @State private var activeShareItem: ShareItem?
+    @State private var exportErrorMessage = ""
+    @State private var showExportError = false
 
     // 匯入狀態
     @State private var showImporter = false
@@ -70,29 +62,15 @@ struct SettingsView: View {
                 aboutSection
             }
             .navigationTitle("設定")
-            // 匯出 JSON
-            .fileExporter(
-                isPresented: $showJSONExporter,
-                document: jsonDocument,
-                contentType: .json,
-                defaultFilename: "LifeGood_\(dateStamp()).json"
-            ) { result in
-                if case .failure(let error) = result {
-                    importResultMessage = "匯出失敗：\(error.localizedDescription)"
-                    showImportResult = true
-                }
+            // 匯出分享
+            .sheet(item: $activeShareItem) { item in
+                ShareSheet(items: [item.url])
             }
-            // 匯出 CSV
-            .fileExporter(
-                isPresented: $showCSVExporter,
-                document: csvDocument,
-                contentType: .commaSeparatedText,
-                defaultFilename: "LifeGood_\(dateStamp()).csv"
-            ) { result in
-                if case .failure(let error) = result {
-                    importResultMessage = "匯出失敗：\(error.localizedDescription)"
-                    showImportResult = true
-                }
+            // 匯出錯誤
+            .alert("匯出失敗", isPresented: $showExportError) {
+                Button("確定") {}
+            } message: {
+                Text(exportErrorMessage)
             }
             // 匯入
             .fileImporter(
@@ -140,8 +118,7 @@ struct SettingsView: View {
         Section {
             // 匯出 JSON
             Button {
-                jsonDocument = JSONDocument(data: store.exportJSON())
-                showJSONExporter = true
+                exportJSON()
             } label: {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
@@ -159,8 +136,7 @@ struct SettingsView: View {
 
             // 匯出 CSV
             Button {
-                csvDocument = CSVDocument(text: store.exportCSV())
-                showCSVExporter = true
+                exportCSV()
             } label: {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
@@ -282,7 +258,35 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - 匯出
+
+    private func exportJSON() {
+        let data = store.exportJSON()
+        let filename = "LifeGood_\(dateStamp()).json"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try data.write(to: url)
+            activeShareItem = .json(url)
+        } catch {
+            exportErrorMessage = error.localizedDescription
+            showExportError = true
+        }
+    }
+
+    private func exportCSV() {
+        let csv = store.exportCSV()
+        let filename = "LifeGood_\(dateStamp()).csv"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+            activeShareItem = .csv(url)
+        } catch {
+            exportErrorMessage = error.localizedDescription
+            showExportError = true
+        }
+    }
+
+    // MARK: - 匯入
 
     private func handleFileImport(_ result: Result<[URL], Error>) {
         switch result {
@@ -321,6 +325,8 @@ struct SettingsView: View {
         pendingImportData = nil
         showImportResult = true
     }
+
+    // MARK: - Helpers
 
     private func dateStamp() -> String {
         let formatter = DateFormatter()
