@@ -28,6 +28,12 @@ struct MainTabView: View {
                     Label("圖表", systemImage: "chart.line.uptrend.xyaxis")
                 }
                 .tag(3)
+
+            SettingsView()
+                .tabItem {
+                    Label("設定", systemImage: "gearshape.fill")
+                }
+                .tag(4)
         }
         .tint(.green)
     }

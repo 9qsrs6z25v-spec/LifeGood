@@ -312,4 +312,71 @@ class ExpenseStore: ObservableObject {
             expenses = decoded
         }
     }
+
+    // MARK: - 匯出
+
+    func exportJSON() -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return (try? encoder.encode(expenses)) ?? Data()
+    }
+
+    func exportCSV() -> String {
+        var csv = "id,title,amount,date,type,category,recurrence,note\n"
+        let formatter = ISO8601DateFormatter()
+        for e in expenses.sorted(by: { $0.date < $1.date }) {
+            let fields: [String] = [
+                e.id.uuidString,
+                csvEscape(e.title),
+                String(format: "%.2f", e.amount),
+                formatter.string(from: e.date),
+                e.expenseType.rawValue,
+                e.categoryName,
+                e.recurrence?.rawValue ?? "",
+                csvEscape(e.note)
+            ]
+            csv += fields.joined(separator: ",") + "\n"
+        }
+        return csv
+    }
+
+    private func csvEscape(_ value: String) -> String {
+        if value.contains(",") || value.contains("\"") || value.contains("\n") {
+            return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+        }
+        return value
+    }
+
+    // MARK: - 匯入
+
+    enum ImportMode {
+        case merge    // 合併（跳過重複 ID）
+        case replace  // 取代全部
+    }
+
+    func importJSON(data: Data, mode: ImportMode = .merge) -> Int {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let imported = try? decoder.decode([Expense].self, from: data) else {
+            return 0
+        }
+        switch mode {
+        case .merge:
+            let existingIDs = Set(expenses.map(\.id))
+            let newExpenses = imported.filter { !existingIDs.contains($0.id) }
+            expenses.append(contentsOf: newExpenses)
+            return newExpenses.count
+        case .replace:
+            let count = imported.count
+            expenses = imported
+            return count
+        }
+    }
+
+    // MARK: - 清除
+
+    func clearAll() {
+        expenses.removeAll()
+    }
 }
