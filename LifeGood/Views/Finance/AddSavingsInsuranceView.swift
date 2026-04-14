@@ -36,10 +36,12 @@ struct AddSavingsInsuranceView: View {
         return max(0, months / monthsPerPeriod)
     }
 
+    /// 已繳期數：起始日即繳第一期，故 +1，且不超過總期數
     private var elapsedPeriods: Int {
+        guard Date() >= startDate else { return 0 }
         let months = Calendar.current.dateComponents([.month], from: startDate, to: min(Date(), maturityDate)).month ?? 0
         let monthsPerPeriod = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
-        return max(0, months / monthsPerPeriod)
+        return min(months / monthsPerPeriod + 1, totalPeriods)
     }
 
     private var calculatedExpectedReturn: Double {

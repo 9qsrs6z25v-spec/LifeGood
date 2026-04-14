@@ -81,34 +81,39 @@ struct SavingsInsurance: Identifiable, Codable {
         return payment * ((pow(1 + r, n) - 1) / r) * (1 + r)
     }
 
-    /// 計算到期預估領回
-    var calculatedExpectedReturn: Double {
+    /// 總繳費期數
+    var totalPeriods: Int {
         let calendar = Calendar.current
         let totalMonths = calendar.dateComponents([.month], from: startDate, to: maturityDate).month ?? 0
         let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
-        let totalPeriods = max(0, totalMonths / monthsPerPeriod)
+        return max(0, totalMonths / monthsPerPeriod)
+    }
+
+    /// 已繳期數（起始日即繳第一期，故 +1）
+    var elapsedPeriods: Int {
+        let calendar = Calendar.current
+        let now = Date()
+        guard now >= startDate else { return 0 }
+        let elapsedMonths = calendar.dateComponents([.month], from: startDate, to: min(now, maturityDate)).month ?? 0
+        let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
+        return min(elapsedMonths / monthsPerPeriod + 1, totalPeriods)
+    }
+
+    /// 計算到期預估領回
+    var calculatedExpectedReturn: Double {
         let r = annualRate / 100.0 / periodsPerYear
         return Self.futureValue(payment: premiumAmount, ratePerPeriod: r, periods: totalPeriods)
     }
 
     /// 計算目前帳戶價值
     var calculatedCurrentValue: Double {
-        let calendar = Calendar.current
-        let now = Date()
-        let elapsedMonths = calendar.dateComponents([.month], from: startDate, to: min(now, maturityDate)).month ?? 0
-        let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
-        let elapsedPeriods = max(0, elapsedMonths / monthsPerPeriod)
         let r = annualRate / 100.0 / periodsPerYear
         return Self.futureValue(payment: premiumAmount, ratePerPeriod: r, periods: elapsedPeriods)
     }
 
     /// 已繳總額
     var totalPaid: Double {
-        let calendar = Calendar.current
-        let now = Date()
-        let months = calendar.dateComponents([.month], from: startDate, to: min(now, maturityDate)).month ?? 0
-        let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
-        return premiumAmount * Double(max(0, months / monthsPerPeriod))
+        premiumAmount * Double(elapsedPeriods)
     }
 
     /// 報酬率（以預估領回 vs 已繳總額）
