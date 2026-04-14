@@ -152,12 +152,12 @@ struct ChartView: View {
                 }
                 .chartXAxis {
                     AxisMarks(values: .automatic) { value in
-                        AxisGridLine()
-                        AxisValueLabel {
-                            if let label = value.as(String.self) {
+                        if let label = value.as(String.self), visibleXLabels.contains(label) {
+                            AxisGridLine()
+                            AxisValueLabel {
                                 Text(abbreviateLabel(label))
                                     .font(.caption2)
-                                    .rotationEffect(.degrees(-45))
+                                    .rotationEffect(.degrees(xLabelRotation))
                             }
                         }
                     }
@@ -334,6 +334,39 @@ struct ChartView: View {
     }
 
     // MARK: - Helpers
+
+    /// 根據時間維度決定 X 軸要顯示哪些標籤，避免密集重疊
+    private var visibleXLabels: Set<String> {
+        let labels = chartData.map(\.label)
+        let stride: Int
+        switch selectedPeriod {
+        case .daily:     stride = 5   // 30 天 → 顯示 6 個
+        case .weekly:    stride = 2   // 12 週 → 顯示 6 個
+        case .monthly:   stride = 2   // 12 月 → 顯示 6 個
+        case .quarterly: stride = 1   // 8 季 → 全部顯示
+        case .yearly:    stride = 1   // 5 年 → 全部顯示
+        }
+        var visible = Set<String>()
+        for i in Swift.stride(from: 0, to: labels.count, by: stride) {
+            visible.insert(labels[i])
+        }
+        // 確保最後一筆一定顯示
+        if let last = labels.last {
+            visible.insert(last)
+        }
+        return visible
+    }
+
+    /// 根據時間維度決定 X 軸標籤旋轉角度
+    private var xLabelRotation: Double {
+        switch selectedPeriod {
+        case .daily:     return -45
+        case .weekly:    return -45
+        case .monthly:   return -30
+        case .quarterly: return 0
+        case .yearly:    return 0
+        }
+    }
 
     private var periodTitle: String {
         switch selectedPeriod {
