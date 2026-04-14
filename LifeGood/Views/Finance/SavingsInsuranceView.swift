@@ -34,7 +34,7 @@ struct SavingsInsuranceView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("保單總價值")
                     .font(.subheadline).foregroundStyle(.secondary)
-                Text(fmt(store.totalInsuranceValue))
+                Text(fmtTWD(store.totalInsuranceValue))
                     .font(.title2.bold())
             }
             Spacer()
@@ -61,21 +61,35 @@ struct SavingsInsuranceView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(item.name).font(.subheadline.weight(.medium))
+                            HStack(spacing: 6) {
+                                Text(item.name).font(.subheadline.weight(.medium))
+                                Text(item.currency.rawValue)
+                                    .font(.caption2)
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(item.currency == .usd ? Color.blue.opacity(0.12) : Color.green.opacity(0.12))
+                                    .foregroundStyle(item.currency == .usd ? .blue : .green)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
                             if !item.company.isEmpty {
                                 Text(item.company).font(.caption).foregroundStyle(.secondary)
                             }
                         }
                         Spacer()
-                        Text(fmt(item.currentValue)).font(.subheadline.bold())
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(fmt(item.currentValue, currency: item.currency))
+                                .font(.subheadline.bold())
+                            Text("目前價值").font(.caption2).foregroundStyle(.tertiary)
+                        }
                     }
                     HStack {
-                        Label(item.paymentPeriod.rawValue + " " + fmt(item.premiumAmount), systemImage: "calendar")
-                        Spacer()
-                        if item.returnRate != 0 {
-                            Text(String(format: "%.1f%%", item.returnRate))
-                                .foregroundStyle(item.returnRate >= 0 ? .green : .red)
+                        Label(item.paymentPeriod.rawValue + " " + fmt(item.premiumAmount, currency: item.currency), systemImage: "calendar")
+                        if item.annualRate > 0 {
+                            Text(String(format: "%.2f%%", item.annualRate))
+                                .foregroundStyle(.blue)
                         }
+                        Spacer()
+                        Text("期滿 " + fmt(item.expectedReturn, currency: item.currency))
+                            .foregroundStyle(.green)
                     }
                     .font(.caption).foregroundStyle(.secondary)
                 }
@@ -88,7 +102,15 @@ struct SavingsInsuranceView: View {
         .listStyle(.insetGrouped)
     }
 
-    private func fmt(_ v: Double) -> String {
+    private func fmt(_ v: Double, currency: Currency) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencySymbol = currency.symbol
+        f.maximumFractionDigits = currency == .usd ? 2 : 0
+        return f.string(from: NSNumber(value: v)) ?? "\(currency.symbol)0"
+    }
+
+    private func fmtTWD(_ v: Double) -> String {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: v)) ?? "NT$0"

@@ -1,25 +1,43 @@
 import Foundation
 
+// MARK: - 幣別
+
+enum Currency: String, Codable, CaseIterable {
+    case twd = "TWD"
+    case usd = "USD"
+
+    var symbol: String {
+        switch self {
+        case .twd: return "NT$"
+        case .usd: return "US$"
+        }
+    }
+}
+
 // MARK: - 儲蓄險
 
 struct SavingsInsurance: Identifiable, Codable {
     let id: UUID
     var name: String
     var company: String
+    var currency: Currency
     var premiumAmount: Double
     var paymentPeriod: Recurrence
+    var annualRate: Double          // 複利年利率（百分比，如 2.5 表示 2.5%）
     var startDate: Date
     var maturityDate: Date
-    var expectedReturn: Double
-    var currentValue: Double
+    var expectedReturn: Double      // 由複利公式自動計算後儲存
+    var currentValue: Double        // 由複利公式自動計算後儲存
     var note: String
 
     init(
         id: UUID = UUID(),
         name: String,
         company: String = "",
+        currency: Currency = .twd,
         premiumAmount: Double,
         paymentPeriod: Recurrence = .yearly,
+        annualRate: Double = 0,
         startDate: Date = Date(),
         maturityDate: Date = Date(),
         expectedReturn: Double = 0,
@@ -29,8 +47,10 @@ struct SavingsInsurance: Identifiable, Codable {
         self.id = id
         self.name = name
         self.company = company
+        self.currency = currency
         self.premiumAmount = premiumAmount
         self.paymentPeriod = paymentPeriod
+        self.annualRate = annualRate
         self.startDate = startDate
         self.maturityDate = maturityDate
         self.expectedReturn = expectedReturn
@@ -38,13 +58,48 @@ struct SavingsInsurance: Identifiable, Codable {
         self.note = note
     }
 
+    /// 每年繳費期數
+    private var periodsPerYear: Double {
+        switch paymentPeriod {
+        case .monthly: return 12
+        case .quarterly: return 4
+        case .yearly: return 1
+        }
+    }
+
     /// 年繳保費
     var annualPremium: Double {
-        switch paymentPeriod {
-        case .monthly: return premiumAmount * 12
-        case .quarterly: return premiumAmount * 4
-        case .yearly: return premiumAmount
-        }
+        premiumAmount * periodsPerYear
+    }
+
+    /// 複利終值（期初年金）
+    /// FV = PMT * [((1+r)^n - 1) / r] * (1+r)，r=0 時 FV = PMT * n
+    static func futureValue(payment: Double, ratePerPeriod: Double, periods: Int) -> Double {
+        let n = Double(max(0, periods))
+        guard ratePerPeriod > 0 else { return payment * n }
+        let r = ratePerPeriod
+        return payment * ((pow(1 + r, n) - 1) / r) * (1 + r)
+    }
+
+    /// 計算到期預估領回
+    var calculatedExpectedReturn: Double {
+        let calendar = Calendar.current
+        let totalMonths = calendar.dateComponents([.month], from: startDate, to: maturityDate).month ?? 0
+        let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
+        let totalPeriods = max(0, totalMonths / monthsPerPeriod)
+        let r = annualRate / 100.0 / periodsPerYear
+        return Self.futureValue(payment: premiumAmount, ratePerPeriod: r, periods: totalPeriods)
+    }
+
+    /// 計算目前帳戶價值
+    var calculatedCurrentValue: Double {
+        let calendar = Calendar.current
+        let now = Date()
+        let elapsedMonths = calendar.dateComponents([.month], from: startDate, to: min(now, maturityDate)).month ?? 0
+        let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
+        let elapsedPeriods = max(0, elapsedMonths / monthsPerPeriod)
+        let r = annualRate / 100.0 / periodsPerYear
+        return Self.futureValue(payment: premiumAmount, ratePerPeriod: r, periods: elapsedPeriods)
     }
 
     /// 已繳總額
@@ -52,14 +107,11 @@ struct SavingsInsurance: Identifiable, Codable {
         let calendar = Calendar.current
         let now = Date()
         let months = calendar.dateComponents([.month], from: startDate, to: min(now, maturityDate)).month ?? 0
-        switch paymentPeriod {
-        case .monthly: return premiumAmount * Double(max(0, months))
-        case .quarterly: return premiumAmount * Double(max(0, months / 3))
-        case .yearly: return premiumAmount * Double(max(0, months / 12))
-        }
+        let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
+        return premiumAmount * Double(max(0, months / monthsPerPeriod))
     }
 
-    /// 報酬率
+    /// 報酬率（以預估領回 vs 已繳總額）
     var returnRate: Double {
         guard totalPaid > 0 else { return 0 }
         return (expectedReturn - totalPaid) / totalPaid * 100

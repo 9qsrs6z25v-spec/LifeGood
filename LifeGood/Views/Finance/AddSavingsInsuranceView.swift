@@ -8,14 +8,57 @@ struct AddSavingsInsuranceView: View {
 
     @State private var name = ""
     @State private var company = ""
+    @State private var currency: Currency = .twd
     @State private var premiumText = ""
     @State private var paymentPeriod: Recurrence = .yearly
+    @State private var annualRateText = ""
     @State private var startDate = Date()
     @State private var maturityDate = Calendar.current.date(byAdding: .year, value: 6, to: Date()) ?? Date()
-    @State private var expectedReturnText = ""
-    @State private var currentValueText = ""
     @State private var note = ""
     @State private var showError = false
+
+    // MARK: - 自動計算
+
+    private var premium: Double { Double(premiumText) ?? 0 }
+    private var annualRate: Double { Double(annualRateText) ?? 0 }
+
+    private var periodsPerYear: Double {
+        switch paymentPeriod {
+        case .monthly: return 12
+        case .quarterly: return 4
+        case .yearly: return 1
+        }
+    }
+
+    private var totalPeriods: Int {
+        let months = Calendar.current.dateComponents([.month], from: startDate, to: maturityDate).month ?? 0
+        let monthsPerPeriod = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
+        return max(0, months / monthsPerPeriod)
+    }
+
+    private var elapsedPeriods: Int {
+        let months = Calendar.current.dateComponents([.month], from: startDate, to: min(Date(), maturityDate)).month ?? 0
+        let monthsPerPeriod = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
+        return max(0, months / monthsPerPeriod)
+    }
+
+    private var calculatedExpectedReturn: Double {
+        guard premium > 0 else { return 0 }
+        let r = annualRate / 100.0 / periodsPerYear
+        return SavingsInsurance.futureValue(payment: premium, ratePerPeriod: r, periods: totalPeriods)
+    }
+
+    private var calculatedCurrentValue: Double {
+        guard premium > 0 else { return 0 }
+        let r = annualRate / 100.0 / periodsPerYear
+        return SavingsInsurance.futureValue(payment: premium, ratePerPeriod: r, periods: elapsedPeriods)
+    }
+
+    private var totalPaid: Double {
+        premium * Double(elapsedPeriods)
+    }
+
+    private var currencySymbol: String { currency.symbol }
 
     var body: some View {
         NavigationStack {
@@ -26,33 +69,101 @@ struct AddSavingsInsuranceView: View {
                 }
 
                 Section("繳費設定") {
+                    Picker("幣別", selection: $currency) {
+                        ForEach(Currency.allCases, id: \.self) { c in
+                            Text("\(c.symbol) (\(c.rawValue))").tag(c)
+                        }
+                    }
+
                     HStack {
-                        Text("NT$")
+                        Text(currencySymbol)
                             .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .leading)
                         TextField("保費金額", text: $premiumText)
                             .keyboardType(.decimalPad)
                     }
+
                     Picker("繳費週期", selection: $paymentPeriod) {
                         ForEach(Recurrence.allCases, id: \.self) { r in
                             Text(r.rawValue).tag(r)
                         }
                     }
+
+                    HStack {
+                        Text("複利年利率")
+                        Spacer()
+                        TextField("0.00", text: $annualRateText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                        Text("%")
+                            .foregroundStyle(.secondary)
+                    }
+
                     DatePicker("起始日", selection: $startDate, displayedComponents: .date)
                     DatePicker("到期日", selection: $maturityDate, displayedComponents: .date)
                 }
 
-                Section("價值") {
+                Section {
                     HStack {
-                        Text("NT$")
+                        Text("繳費期數")
+                        Spacer()
+                        Text("\(totalPeriods) 期")
                             .foregroundStyle(.secondary)
-                        TextField("期滿預估領回", text: $expectedReturnText)
-                            .keyboardType(.decimalPad)
                     }
                     HStack {
-                        Text("NT$")
+                        Text("已繳期數")
+                        Spacer()
+                        Text("\(elapsedPeriods) 期")
                             .foregroundStyle(.secondary)
-                        TextField("目前帳戶價值", text: $currentValueText)
-                            .keyboardType(.decimalPad)
+                    }
+                    HStack {
+                        Text("已繳總額")
+                        Spacer()
+                        Text(formatCurrency(totalPaid))
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("繳費資訊")
+                }
+
+                Section {
+                    HStack {
+                        Text("目前帳戶價值")
+                        Spacer()
+                        Text(formatCurrency(calculatedCurrentValue))
+                            .font(.body.bold())
+                            .foregroundStyle(.blue)
+                    }
+                    HStack {
+                        Text("期滿預估領回")
+                        Spacer()
+                        Text(formatCurrency(calculatedExpectedReturn))
+                            .font(.body.bold())
+                            .foregroundStyle(.green)
+                    }
+                    if totalPaid > 0 {
+                        HStack {
+                            Text("預估總報酬率")
+                            Spacer()
+                            let roi = (calculatedExpectedReturn - premium * Double(totalPeriods)) / (premium * Double(totalPeriods)) * 100
+                            Text(String(format: "%.2f%%", roi))
+                                .font(.body.bold())
+                                .foregroundStyle(roi >= 0 ? .green : .red)
+                        }
+                        HStack {
+                            Text("複利增值")
+                            Spacer()
+                            let gain = calculatedExpectedReturn - premium * Double(totalPeriods)
+                            Text((gain >= 0 ? "+" : "") + formatCurrency(gain))
+                                .foregroundStyle(gain >= 0 ? .green : .red)
+                        }
+                    }
+                } header: {
+                    Text("自動計算結果")
+                } footer: {
+                    if annualRate > 0 {
+                        Text("以年利率 \(String(format: "%.2f%%", annualRate)) 複利計算，\(paymentPeriod.rawValue)繳 \(formatCurrency(premium))，共 \(totalPeriods) 期。")
                     }
                 }
 
@@ -82,12 +193,14 @@ struct AddSavingsInsuranceView: View {
             }
             .onAppear {
                 if let e = editing {
-                    name = e.name; company = e.company
+                    name = e.name
+                    company = e.company
+                    currency = e.currency
                     premiumText = String(format: "%.0f", e.premiumAmount)
                     paymentPeriod = e.paymentPeriod
-                    startDate = e.startDate; maturityDate = e.maturityDate
-                    expectedReturnText = String(format: "%.0f", e.expectedReturn)
-                    currentValueText = String(format: "%.0f", e.currentValue)
+                    annualRateText = e.annualRate > 0 ? String(format: "%.2f", e.annualRate) : ""
+                    startDate = e.startDate
+                    maturityDate = e.maturityDate
                     note = e.note
                 }
             }
@@ -96,21 +209,32 @@ struct AddSavingsInsuranceView: View {
 
     private func save() {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
-              let premium = Double(premiumText), premium > 0 else {
+              premium > 0 else {
             showError = true; return
         }
         let item = SavingsInsurance(
             id: editing?.id ?? UUID(),
             name: name.trimmingCharacters(in: .whitespaces),
             company: company.trimmingCharacters(in: .whitespaces),
+            currency: currency,
             premiumAmount: premium,
             paymentPeriod: paymentPeriod,
-            startDate: startDate, maturityDate: maturityDate,
-            expectedReturn: Double(expectedReturnText) ?? 0,
-            currentValue: Double(currentValueText) ?? 0,
+            annualRate: annualRate,
+            startDate: startDate,
+            maturityDate: maturityDate,
+            expectedReturn: calculatedExpectedReturn,
+            currentValue: calculatedCurrentValue,
             note: note.trimmingCharacters(in: .whitespaces)
         )
         if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
         dismiss()
+    }
+
+    private func formatCurrency(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencySymbol = currencySymbol
+        f.maximumFractionDigits = currency == .usd ? 2 : 0
+        return f.string(from: NSNumber(value: value)) ?? "\(currencySymbol)0"
     }
 }
