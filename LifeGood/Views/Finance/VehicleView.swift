@@ -128,11 +128,36 @@ struct VehicleView: View {
                 }
             }
 
+            // 變動支出明細
+            if !item.variableExpenses.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(item.variableExpenses.suffix(3)) { ve in
+                        HStack {
+                            Text(ve.category.rawValue)
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.orange.opacity(0.1))
+                                .foregroundStyle(.orange)
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                            Spacer()
+                            Text(fmt(ve.amount)).font(.caption)
+                        }
+                    }
+                    if item.variableExpenses.count > 3 {
+                        Text("還有 \(item.variableExpenses.count - 3) 筆...")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
             HStack {
                 Label("購入 " + fmt(item.purchasePrice), systemImage: "tag")
                 Spacer()
-                if item.monthlyExpense > 0 {
-                    Label("月支出 " + fmt(item.monthlyExpense), systemImage: "fuelpump")
+                let totalVar = item.variableTotal
+                if item.monthlyExpense > 0 || totalVar > 0 {
+                    let label = item.monthlyExpense > 0 ? "月定期 \(fmt(item.monthlyExpense))" : ""
+                    let varLabel = totalVar > 0 ? "變動 \(fmt(totalVar))" : ""
+                    Text([label, varLabel].filter { !$0.isEmpty }.joined(separator: " | "))
                         .foregroundStyle(.orange)
                 }
             }

@@ -43,9 +43,15 @@ struct AddExpenseView: View {
     @State private var reCurrentValueText = ""
     @State private var reMonthlyRentalText = ""
 
+    // MARK: - 汽車變動支出欄位
+
+    @State private var selectedVehicleId: UUID?
+    @State private var selectedVehicleExpenseCategory: VehicleVariableCategory = .fuel
+
     // MARK: - 條件判斷
 
     private var isEditing: Bool { editingExpense != nil }
+    private var isVehicle: Bool { expenseType == .variable && selectedVariableCategory == .vehicle }
     private var isInsurance: Bool { expenseType == .fixed && selectedFixedCategory == .insurance }
     private var isSavingsInsurance: Bool { isInsurance && selectedInsuranceSubCategory == .savings }
     private var isLoan: Bool { expenseType == .fixed && selectedFixedCategory == .loan }
@@ -99,6 +105,9 @@ struct AddExpenseView: View {
                 basicInfoSection
                 categorySection
 
+                if isVehicle {
+                    vehicleLinkSection
+                }
                 if isInsurance {
                     insuranceSubCategorySection
                 }
@@ -181,6 +190,34 @@ struct AddExpenseView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - 汽車連動
+
+    private var vehicleLinkSection: some View {
+        Section {
+            if financeStore.vehicles.isEmpty {
+                Text("尚無車輛，請先在理財模式新增汽車")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                Picker("選擇車輛", selection: $selectedVehicleId) {
+                    Text("請選擇").tag(nil as UUID?)
+                    ForEach(financeStore.vehicles) { v in
+                        Text("\(v.name)\(!v.brand.isEmpty ? " (\(v.brand))" : "")").tag(v.id as UUID?)
+                    }
+                }
+
+                Picker("支出類別", selection: $selectedVehicleExpenseCategory) {
+                    ForEach(VehicleVariableCategory.allCases) { cat in
+                        Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                    }
+                }
+            }
+        } header: {
+            Text("汽車資訊（連動理財模式）")
+        } footer: {
+            Text("儲存後將自動在理財模式的汽車變動支出中新增對應紀錄。")
         }
     }
 
@@ -331,6 +368,13 @@ struct AddExpenseView: View {
             linkedREId = syncRealEstate(mortgageAmount: amount, existingId: linkedREId, expenseId: expenseId)
         }
 
+        // 汽車變動支出連動
+        var linkedVehId = editingExpense?.linkedVehicleId
+        if isVehicle, let vehicleId = selectedVehicleId {
+            linkedVehId = vehicleId
+            syncVehicleVariableExpense(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+        }
+
         let expense = Expense(
             id: expenseId,
             title: title.trimmingCharacters(in: .whitespaces),
@@ -344,6 +388,8 @@ struct AddExpenseView: View {
             loanSubCategory: isLoan ? selectedLoanSubCategory : nil,
             linkedInsuranceId: isSavingsInsurance ? linkedInsId : nil,
             linkedRealEstateId: isMortgage ? linkedREId : nil,
+            linkedVehicleId: isVehicle ? linkedVehId : nil,
+            vehicleExpenseCategory: isVehicle ? selectedVehicleExpenseCategory : nil,
             note: note.trimmingCharacters(in: .whitespaces)
         )
 
@@ -425,6 +471,42 @@ struct AddExpenseView: View {
             reCurrentValueText = linked.currentValue > 0 ? String(format: "%.0f", linked.currentValue) : ""
             reMonthlyRentalText = linked.monthlyRental > 0 ? String(format: "%.0f", linked.monthlyRental) : ""
         }
+
+        // 載入連結的汽車
+        if let linkedId = expense.linkedVehicleId {
+            selectedVehicleId = linkedId
+        }
+        if let veCat = expense.vehicleExpenseCategory {
+            selectedVehicleExpenseCategory = veCat
+        }
+    }
+
+    /// 同步汽車變動支出到理財模式的汽車
+    private func syncVehicleVariableExpense(vehicleId: UUID, expenseId: UUID, amount: Double) {
+        guard var vehicle = financeStore.vehicles.first(where: { $0.id == vehicleId }) else { return }
+
+        let newEntry = VehicleVariableExpense(
+            id: UUID(),
+            category: selectedVehicleExpenseCategory,
+            amount: amount,
+            date: date,
+            linkedExpenseId: expenseId
+        )
+
+        // 檢查是否已有連結的項目（編輯情境）
+        if let existingIdx = vehicle.variableExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+            vehicle.variableExpenses[existingIdx] = VehicleVariableExpense(
+                id: vehicle.variableExpenses[existingIdx].id,
+                category: selectedVehicleExpenseCategory,
+                amount: amount,
+                date: date,
+                linkedExpenseId: expenseId
+            )
+        } else {
+            vehicle.variableExpenses.append(newEntry)
+        }
+
+        financeStore.update(vehicle)
     }
 
     // MARK: - 輔助

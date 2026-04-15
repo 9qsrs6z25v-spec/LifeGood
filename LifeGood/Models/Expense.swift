@@ -10,6 +10,7 @@ enum ExpenseType: String, Codable, CaseIterable {
 enum VariableCategory: String, Codable, CaseIterable, Identifiable {
     case food = "飲食"
     case transportation = "交通"
+    case vehicle = "汽車"
     case entertainment = "娛樂"
     case shopping = "購物"
     case dailyNecessities = "日用品"
@@ -24,6 +25,7 @@ enum VariableCategory: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .food: return "fork.knife"
         case .transportation: return "car.fill"
+        case .vehicle: return "car.circle.fill"
         case .entertainment: return "gamecontroller.fill"
         case .shopping: return "bag.fill"
         case .dailyNecessities: return "house.fill"
@@ -44,6 +46,7 @@ enum VariableCategory: String, Codable, CaseIterable, Identifiable {
         case .medical: return "MedicalColor"
         case .education: return "EducationColor"
         case .social: return "SocialColor"
+        case .vehicle: return "VehicleColor"
         case .other: return "OtherColor"
         }
     }
@@ -117,6 +120,8 @@ struct Expense: Identifiable, Codable {
     var loanSubCategory: LoanSubCategory?
     var linkedInsuranceId: UUID?      // 連結理財模式的儲蓄險 ID
     var linkedRealEstateId: UUID?     // 連結理財模式的房地產 ID
+    var linkedVehicleId: UUID?        // 連結理財模式的汽車 ID
+    var vehicleExpenseCategory: VehicleVariableCategory?  // 汽車變動支出子分類
     var note: String
 
     init(
@@ -132,6 +137,8 @@ struct Expense: Identifiable, Codable {
         loanSubCategory: LoanSubCategory? = nil,
         linkedInsuranceId: UUID? = nil,
         linkedRealEstateId: UUID? = nil,
+        linkedVehicleId: UUID? = nil,
+        vehicleExpenseCategory: VehicleVariableCategory? = nil,
         note: String = ""
     ) {
         self.id = id
@@ -146,12 +153,17 @@ struct Expense: Identifiable, Codable {
         self.loanSubCategory = loanSubCategory
         self.linkedInsuranceId = linkedInsuranceId
         self.linkedRealEstateId = linkedRealEstateId
+        self.linkedVehicleId = linkedVehicleId
+        self.vehicleExpenseCategory = vehicleExpenseCategory
         self.note = note
     }
 
     var categoryName: String {
         switch expenseType {
         case .variable:
+            if variableCategory == .vehicle, let sub = vehicleExpenseCategory {
+                return "汽車 - \(sub.rawValue)"
+            }
             return variableCategory?.rawValue ?? "未分類"
         case .fixed:
             if fixedCategory == .insurance, let sub = insuranceSubCategory {

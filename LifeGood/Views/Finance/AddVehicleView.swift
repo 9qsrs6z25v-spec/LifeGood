@@ -21,9 +21,9 @@ struct AddVehicleView: View {
 
     @State private var fixedItems: [FixedItemState] = []
 
-    // MARK: - 變動支出
+    // MARK: - 變動支出列表
 
-    @State private var variableExpenseText = ""
+    @State private var variableItems: [VariableItemState] = []
 
     /// 定期支出項目的表單狀態
     struct FixedItemState: Identifiable {
@@ -31,6 +31,17 @@ struct AddVehicleView: View {
         var category: VehicleFixedCategory
         var period: VehicleExpensePeriod
         var amountText: String
+        var linkedExpenseId: UUID?
+
+        var amount: Double { Double(amountText) ?? 0 }
+    }
+
+    /// 變動支出項目的表單狀態
+    struct VariableItemState: Identifiable {
+        let id: UUID
+        var category: VehicleVariableCategory
+        var amountText: String
+        var date: Date
         var linkedExpenseId: UUID?
 
         var amount: Double { Double(amountText) ?? 0 }
@@ -165,14 +176,58 @@ struct AddVehicleView: View {
 
     private var variableExpenseSection: some View {
         Section {
-            HStack {
-                Text("NT$").foregroundStyle(.secondary)
-                TextField("每月平均金額", text: $variableExpenseText).keyboardType(.decimalPad)
+            ForEach(Array(variableItems.enumerated()), id: \.element.id) { index, _ in
+                VStack(spacing: 10) {
+                    if index > 0 { Divider() }
+
+                    HStack {
+                        Text("項目 \(index + 1)")
+                            .font(.subheadline.weight(.medium))
+                        Spacer()
+                        Button(role: .destructive) {
+                            variableItems.remove(at: index)
+                        } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Picker("類別", selection: $variableItems[index].category) {
+                        ForEach(VehicleVariableCategory.allCases) { cat in
+                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                        }
+                    }
+
+                    DatePicker("日期", selection: $variableItems[index].date, displayedComponents: .date)
+
+                    HStack {
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("金額", text: $variableItems[index].amountText)
+                            .keyboardType(.decimalPad)
+                    }
+                }
+            }
+
+            Button {
+                variableItems.append(VariableItemState(
+                    id: UUID(),
+                    category: .fuel,
+                    amountText: "",
+                    date: Date()
+                ))
+            } label: {
+                Label("新增變動支出", systemImage: "plus.circle")
+                    .foregroundStyle(.green)
             }
         } header: {
             Text("變動支出")
         } footer: {
-            Text("油錢、停車、洗車、臨時維修等每月平均費用。")
+            if !variableItems.isEmpty {
+                let total = variableItems.reduce(0.0) { $0 + $1.amount }
+                Text("變動支出合計 \(formatCurrency(total))，儲存後將自動連動記帳模式的變動支出。")
+            } else {
+                Text("油錢、停車、洗車、臨時維修等支出，每筆單獨記錄。")
+            }
         }
     }
 
@@ -183,8 +238,8 @@ struct AddVehicleView: View {
         let purchase = (Double(purchasePriceText) ?? 0) * 10000
         let current = (Double(currentValueText) ?? 0) * 10000
         let fixedMonthly = fixedItems.reduce(0.0) { $0 + $1.period.toMonthly($1.amount) }
-        let variable = Double(variableExpenseText) ?? 0
-        let totalMonthly = fixedMonthly + variable
+        let variableTotal = variableItems.reduce(0.0) { $0 + $1.amount }
+        let totalMonthly = fixedMonthly
 
         if purchase > 0 || totalMonthly > 0 {
             Section("試算") {
@@ -200,12 +255,14 @@ struct AddVehicleView: View {
                 }
                 if totalMonthly > 0 {
                     HStack {
-                        Text("每月總支出"); Spacer()
+                        Text("每月定期支出"); Spacer()
                         Text(formatCurrency(totalMonthly)).font(.body.bold()).foregroundStyle(.orange)
                     }
+                }
+                if variableTotal > 0 {
                     HStack {
-                        Text("年度總支出"); Spacer()
-                        Text(formatCurrency(totalMonthly * 12)).foregroundStyle(.secondary)
+                        Text("變動支出累計"); Spacer()
+                        Text(formatCurrency(variableTotal)).foregroundStyle(.orange)
                     }
                 }
             }
@@ -252,6 +309,23 @@ struct AddVehicleView: View {
             ))
         }
 
+        // 同步變動支出到記帳變動支出
+        var syncedVariableExpenses: [VehicleVariableExpense] = []
+        for item in variableItems where item.amount > 0 {
+            let expenseId = syncVariableExpense(
+                vehicleId: vehicleId,
+                vehicleName: trimmedName,
+                item: item
+            )
+            syncedVariableExpenses.append(VehicleVariableExpense(
+                id: item.id,
+                category: item.category,
+                amount: item.amount,
+                date: item.date,
+                linkedExpenseId: expenseId
+            ))
+        }
+
         let vehicle = Vehicle(
             id: vehicleId,
             name: trimmedName,
@@ -260,7 +334,7 @@ struct AddVehicleView: View {
             purchasePrice: price,
             currentValue: currentVal,
             fixedExpenses: syncedFixedExpenses,
-            variableExpense: Double(variableExpenseText) ?? 0,
+            variableExpenses: syncedVariableExpenses,
             note: trimmedNote
         )
         if editing != nil { financeStore.update(vehicle) } else { financeStore.add(vehicle) }
@@ -313,6 +387,31 @@ struct AddVehicleView: View {
         return expenseId
     }
 
+    /// 同步單筆變動支出到記帳模式的變動支出
+    private func syncVariableExpense(vehicleId: UUID, vehicleName: String, item: VariableItemState) -> UUID {
+        let expenseId = item.linkedExpenseId ?? UUID()
+
+        let expense = Expense(
+            id: expenseId,
+            title: "\(vehicleName) - \(item.category.rawValue)",
+            amount: item.amount,
+            date: item.date,
+            expenseType: .variable,
+            variableCategory: .vehicle,
+            linkedVehicleId: vehicleId,
+            vehicleExpenseCategory: item.category,
+            note: ""
+        )
+
+        if item.linkedExpenseId != nil {
+            expenseStore.update(expense)
+        } else {
+            expenseStore.add(expense)
+        }
+
+        return expenseId
+    }
+
     // MARK: - 載入編輯
 
     private func loadEditing() {
@@ -321,7 +420,6 @@ struct AddVehicleView: View {
         purchaseDate = e.purchaseDate
         purchasePriceText = e.purchasePrice > 0 ? String(format: "%g", e.purchasePrice / 10000) : ""
         currentValueText = e.currentValue > 0 ? String(format: "%g", e.currentValue / 10000) : ""
-        variableExpenseText = e.variableExpense > 0 ? String(format: "%.0f", e.variableExpense) : ""
         note = e.note
 
         fixedItems = e.fixedExpenses.map { fe in
@@ -331,6 +429,16 @@ struct AddVehicleView: View {
                 period: fe.period,
                 amountText: fe.amount > 0 ? String(format: "%.0f", fe.amount) : "",
                 linkedExpenseId: fe.linkedExpenseId
+            )
+        }
+
+        variableItems = e.variableExpenses.map { ve in
+            VariableItemState(
+                id: ve.id,
+                category: ve.category,
+                amountText: ve.amount > 0 ? String(format: "%.0f", ve.amount) : "",
+                date: ve.date,
+                linkedExpenseId: ve.linkedExpenseId
             )
         }
     }

@@ -275,6 +275,52 @@ struct VehicleFixedExpense: Identifiable, Codable {
     var monthlyAmount: Double { period.toMonthly(amount) }
 }
 
+// MARK: - 汽車變動支出項目
+
+enum VehicleVariableCategory: String, Codable, CaseIterable, Identifiable {
+    case fuel = "油錢"
+    case parking = "停車"
+    case maintenance = "保養"
+    case wash = "洗車"
+    case repair = "維修"
+    case other = "其他"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .fuel: return "fuelpump"
+        case .parking: return "parkingsign.circle"
+        case .maintenance: return "wrench.and.screwdriver"
+        case .wash: return "drop.circle"
+        case .repair: return "hammer"
+        case .other: return "ellipsis.circle"
+        }
+    }
+}
+
+struct VehicleVariableExpense: Identifiable, Codable {
+    let id: UUID
+    var category: VehicleVariableCategory
+    var amount: Double
+    var date: Date
+    var linkedExpenseId: UUID?       // 連結記帳模式的變動支出 ID
+
+    init(
+        id: UUID = UUID(),
+        category: VehicleVariableCategory = .fuel,
+        amount: Double = 0,
+        date: Date = Date(),
+        linkedExpenseId: UUID? = nil
+    ) {
+        self.id = id
+        self.category = category
+        self.amount = amount
+        self.date = date
+        self.linkedExpenseId = linkedExpenseId
+    }
+}
+
 // MARK: - 汽車
 
 struct Vehicle: Identifiable, Codable {
@@ -284,8 +330,8 @@ struct Vehicle: Identifiable, Codable {
     var purchaseDate: Date
     var purchasePrice: Double
     var currentValue: Double
-    var fixedExpenses: [VehicleFixedExpense]   // 定期支出（車貸/稅費/訂閱）
-    var variableExpense: Double                // 變動支出（月均：油錢、停車等）
+    var fixedExpenses: [VehicleFixedExpense]       // 定期支出（車貸/稅費/訂閱）
+    var variableExpenses: [VehicleVariableExpense]  // 變動支出（油錢/停車/保養等）
     var note: String
 
     init(
@@ -296,7 +342,7 @@ struct Vehicle: Identifiable, Codable {
         purchasePrice: Double = 0,
         currentValue: Double = 0,
         fixedExpenses: [VehicleFixedExpense] = [],
-        variableExpense: Double = 0,
+        variableExpenses: [VehicleVariableExpense] = [],
         note: String = ""
     ) {
         self.id = id
@@ -306,7 +352,7 @@ struct Vehicle: Identifiable, Codable {
         self.purchasePrice = purchasePrice
         self.currentValue = currentValue
         self.fixedExpenses = fixedExpenses
-        self.variableExpense = variableExpense
+        self.variableExpenses = variableExpenses
         self.note = note
     }
 
@@ -314,8 +360,12 @@ struct Vehicle: Identifiable, Codable {
     var monthlyFixedTotal: Double {
         fixedExpenses.reduce(0) { $0 + $1.monthlyAmount }
     }
-    /// 每月總支出（定期 + 變動）
-    var monthlyExpense: Double { monthlyFixedTotal + variableExpense }
+    /// 變動支出合計
+    var variableTotal: Double {
+        variableExpenses.reduce(0) { $0 + $1.amount }
+    }
+    /// 每月總支出（定期 + 變動 — 變動為實際累計非月均）
+    var monthlyExpense: Double { monthlyFixedTotal }
     /// 折舊金額
     var depreciation: Double { purchasePrice - currentValue }
     /// 折舊率
