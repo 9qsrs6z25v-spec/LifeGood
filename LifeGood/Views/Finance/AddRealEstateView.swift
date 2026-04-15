@@ -28,15 +28,19 @@ struct AddRealEstateView: View {
                     DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
                 }
 
-                Section("價值") {
+                Section {
                     HStack {
-                        Text("NT$").foregroundStyle(.secondary)
                         TextField("購入價格", text: $purchasePriceText).keyboardType(.decimalPad)
+                        Text("萬元").foregroundStyle(.secondary)
                     }
                     HStack {
-                        Text("NT$").foregroundStyle(.secondary)
                         TextField("目前估值", text: $currentValueText).keyboardType(.decimalPad)
+                        Text("萬元").foregroundStyle(.secondary)
                     }
+                } header: {
+                    Text("價值")
+                } footer: {
+                    Text("以萬元為單位輸入，例如輸入 1500 代表 NT$15,000,000。")
                 }
 
                 Section {
@@ -95,8 +99,8 @@ struct AddRealEstateView: View {
                 if let e = editing {
                     name = e.name; address = e.address
                     purchaseDate = e.purchaseDate
-                    purchasePriceText = String(format: "%.0f", e.purchasePrice)
-                    currentValueText = String(format: "%.0f", e.currentValue)
+                    purchasePriceText = e.purchasePrice > 0 ? String(format: "%g", e.purchasePrice / 10000) : ""
+                    currentValueText = e.currentValue > 0 ? String(format: "%g", e.currentValue / 10000) : ""
                     monthlyRentalText = e.monthlyRental > 0 ? String(format: "%.0f", e.monthlyRental) : ""
                     monthlyMortgageText = e.monthlyMortgage > 0 ? String(format: "%.0f", e.monthlyMortgage) : ""
                     note = e.note
@@ -107,10 +111,12 @@ struct AddRealEstateView: View {
 
     private func save() {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
-              let price = Double(purchasePriceText), price > 0 else {
+              let priceWan = Double(purchasePriceText), priceWan > 0 else {
             showError = true; return
         }
 
+        let price = priceWan * 10000
+        let currentVal = (Double(currentValueText) ?? priceWan) * 10000
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let reId = editing?.id ?? UUID()
@@ -133,7 +139,7 @@ struct AddRealEstateView: View {
             address: address.trimmingCharacters(in: .whitespaces),
             purchaseDate: purchaseDate,
             purchasePrice: price,
-            currentValue: Double(currentValueText) ?? price,
+            currentValue: currentVal,
             monthlyRental: Double(monthlyRentalText) ?? 0,
             monthlyMortgage: mortgageAmount,
             linkedExpenseId: mortgageAmount > 0 ? expenseId : nil,

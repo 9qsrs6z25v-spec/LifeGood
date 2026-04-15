@@ -78,18 +78,22 @@ struct AddVehicleView: View {
         }
     }
 
-    // MARK: - 價值
+    // MARK: - 價值（以萬為單位輸入）
 
     private var valueSection: some View {
-        Section("價值") {
+        Section {
             HStack {
-                Text("NT$").foregroundStyle(.secondary)
                 TextField("購入價格", text: $purchasePriceText).keyboardType(.decimalPad)
+                Text("萬元").foregroundStyle(.secondary)
             }
             HStack {
-                Text("NT$").foregroundStyle(.secondary)
                 TextField("目前估值", text: $currentValueText).keyboardType(.decimalPad)
+                Text("萬元").foregroundStyle(.secondary)
             }
+        } header: {
+            Text("價值")
+        } footer: {
+            Text("以萬元為單位輸入，例如輸入 80 代表 NT$800,000。")
         }
     }
 
@@ -176,8 +180,8 @@ struct AddVehicleView: View {
 
     @ViewBuilder
     private var calcSection: some View {
-        let purchase = Double(purchasePriceText) ?? 0
-        let current = Double(currentValueText) ?? 0
+        let purchase = (Double(purchasePriceText) ?? 0) * 10000
+        let current = (Double(currentValueText) ?? 0) * 10000
         let fixedMonthly = fixedItems.reduce(0.0) { $0 + $1.period.toMonthly($1.amount) }
         let variable = Double(variableExpenseText) ?? 0
         let totalMonthly = fixedMonthly + variable
@@ -220,10 +224,12 @@ struct AddVehicleView: View {
 
     private func save() {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
-              let price = Double(purchasePriceText), price > 0 else {
+              let priceWan = Double(purchasePriceText), priceWan > 0 else {
             showError = true; return
         }
 
+        let price = priceWan * 10000
+        let currentVal = (Double(currentValueText) ?? priceWan) * 10000
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let vehicleId = editing?.id ?? UUID()
@@ -252,7 +258,7 @@ struct AddVehicleView: View {
             brand: brand.trimmingCharacters(in: .whitespaces),
             purchaseDate: purchaseDate,
             purchasePrice: price,
-            currentValue: Double(currentValueText) ?? price,
+            currentValue: currentVal,
             fixedExpenses: syncedFixedExpenses,
             variableExpense: Double(variableExpenseText) ?? 0,
             note: trimmedNote
@@ -313,8 +319,8 @@ struct AddVehicleView: View {
         guard let e = editing else { return }
         name = e.name; brand = e.brand
         purchaseDate = e.purchaseDate
-        purchasePriceText = String(format: "%.0f", e.purchasePrice)
-        currentValueText = e.currentValue > 0 ? String(format: "%.0f", e.currentValue) : ""
+        purchasePriceText = e.purchasePrice > 0 ? String(format: "%g", e.purchasePrice / 10000) : ""
+        currentValueText = e.currentValue > 0 ? String(format: "%g", e.currentValue / 10000) : ""
         variableExpenseText = e.variableExpense > 0 ? String(format: "%.0f", e.variableExpense) : ""
         note = e.note
 
