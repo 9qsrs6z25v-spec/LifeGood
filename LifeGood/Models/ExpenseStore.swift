@@ -4,11 +4,12 @@ import SwiftUI
 class ExpenseStore: ObservableObject {
     @Published var expenses: [Expense] = [] {
         didSet {
-            save()
+            if !isLoading { save() }
         }
     }
 
     private let saveKey = "lifegood_expenses"
+    private var isLoading = false
 
     init() {
         load()
@@ -307,10 +308,12 @@ class ExpenseStore: ObservableObject {
     }
 
     private func load() {
+        isLoading = true
         if let data = UserDefaults.standard.data(forKey: saveKey),
            let decoded = try? JSONDecoder().decode([Expense].self, from: data) {
             expenses = decoded
         }
+        isLoading = false
     }
 
     // MARK: - 匯出
