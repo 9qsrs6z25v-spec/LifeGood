@@ -9,10 +9,21 @@ struct SavingsInsuranceView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 summaryHeader
+
                 if store.insurances.isEmpty {
                     emptyState
                 } else {
-                    insuranceList
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(store.insurances) { item in
+                                insuranceCard(item)
+                                    .onTapGesture { editingItem = item }
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.top, 16)
+                        .padding(.bottom, 20)
+                    }
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -55,51 +66,60 @@ struct SavingsInsuranceView: View {
         }.frame(maxWidth: .infinity)
     }
 
-    private var insuranceList: some View {
-        List {
-            ForEach(store.insurances) { item in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(item.name).font(.subheadline.weight(.medium))
-                                Text(item.currency.rawValue)
-                                    .font(.caption2)
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(item.currency == .usd ? Color.blue.opacity(0.12) : Color.green.opacity(0.12))
-                                    .foregroundStyle(item.currency == .usd ? .blue : .green)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                            }
-                            if !item.company.isEmpty {
-                                Text(item.company).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(fmt(item.currentValue, currency: item.currency))
-                                .font(.subheadline.bold())
-                            Text("目前價值").font(.caption2).foregroundStyle(.tertiary)
-                        }
+    private func insuranceCard(_ item: SavingsInsurance) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(item.name).font(.subheadline.weight(.semibold))
+                        Text(item.currency.rawValue)
+                            .font(.caption2.weight(.medium))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(item.currency == .usd ? Color.blue.opacity(0.12) : Color.green.opacity(0.12))
+                            .foregroundStyle(item.currency == .usd ? .blue : .green)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
-                    HStack {
-                        Label(item.paymentPeriod.rawValue + " " + fmt(item.premiumAmount, currency: item.currency), systemImage: "calendar")
-                        if item.annualRate > 0 {
-                            Text(String(format: "%.2f%%", item.annualRate))
-                                .foregroundStyle(.blue)
-                        }
-                        Spacer()
-                        Text("期滿 " + fmt(item.expectedReturn, currency: item.currency))
-                            .foregroundStyle(.green)
+                    if !item.company.isEmpty {
+                        Text(item.company).font(.caption).foregroundStyle(.secondary)
                     }
-                    .font(.caption).foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
-                .onTapGesture { editingItem = item }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(fmt(item.currentValue, currency: item.currency))
+                        .font(.subheadline.bold())
+                    Text("目前價值").font(.caption2).foregroundStyle(.tertiary)
+                }
             }
-            .onDelete { offsets in store.deleteInsurance(at: offsets) }
+
+            Divider()
+
+            HStack {
+                Label(item.paymentPeriod.rawValue + " " + fmt(item.premiumAmount, currency: item.currency), systemImage: "calendar")
+                if item.annualRate > 0 {
+                    Text(String(format: "%.2f%%", item.annualRate))
+                        .foregroundStyle(.blue)
+                }
+                Spacer()
+                Text("期滿 " + fmt(item.expectedReturn, currency: item.currency))
+                    .foregroundStyle(.green)
+            }
+            .font(.caption).foregroundStyle(.secondary)
         }
-        .listStyle(.insetGrouped)
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(.systemGray4), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        .contextMenu {
+            Button(role: .destructive) {
+                store.deleteInsurance(item)
+            } label: {
+                Label("刪除", systemImage: "trash")
+            }
+        }
     }
 
     private func fmt(_ v: Double, currency: Currency) -> String {
