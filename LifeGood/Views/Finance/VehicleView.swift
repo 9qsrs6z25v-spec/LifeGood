@@ -108,6 +108,26 @@ struct VehicleView: View {
 
             Divider()
 
+            // 定期支出明細
+            if !item.fixedExpenses.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(item.fixedExpenses) { fe in
+                        HStack {
+                            Text(fe.category.rawValue)
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.blue.opacity(0.1))
+                                .foregroundStyle(.blue)
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                            Text(fe.period == .monthly ? "每月" : "每年")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                            Spacer()
+                            Text(fmt(fe.amount)).font(.caption)
+                        }
+                    }
+                }
+            }
+
             HStack {
                 Label("購入 " + fmt(item.purchasePrice), systemImage: "tag")
                 Spacer()

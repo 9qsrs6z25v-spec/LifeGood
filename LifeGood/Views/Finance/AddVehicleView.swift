@@ -2,71 +2,49 @@ import SwiftUI
 
 struct AddVehicleView: View {
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: Vehicle?
+
+    // MARK: - 基本欄位
 
     @State private var name = ""
     @State private var brand = ""
     @State private var purchaseDate = Date()
     @State private var purchasePriceText = ""
     @State private var currentValueText = ""
-    @State private var monthlyExpenseText = ""
     @State private var note = ""
     @State private var showError = false
+
+    // MARK: - 定期支出列表
+
+    @State private var fixedItems: [FixedItemState] = []
+
+    // MARK: - 變動支出
+
+    @State private var variableExpenseText = ""
+
+    /// 定期支出項目的表單狀態
+    struct FixedItemState: Identifiable {
+        let id: UUID
+        var category: VehicleFixedCategory
+        var period: VehicleExpensePeriod
+        var amountText: String
+        var linkedExpenseId: UUID?
+
+        var amount: Double { Double(amountText) ?? 0 }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("車輛資訊") {
-                    TextField("車名（如 Model Y）", text: $name)
-                    TextField("品牌（如 Tesla）", text: $brand)
-                    DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
-                }
-
-                Section("價值") {
-                    HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("購入價格", text: $purchasePriceText).keyboardType(.decimalPad)
-                    }
-                    HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("目前估值", text: $currentValueText).keyboardType(.decimalPad)
-                    }
-                }
-
-                Section {
-                    HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("每月養車費用", text: $monthlyExpenseText).keyboardType(.decimalPad)
-                    }
-                } header: {
-                    Text("每月支出")
-                } footer: {
-                    Text("包含油錢、保養、停車、保險等每月平均費用。")
-                }
-
-                if let purchase = Double(purchasePriceText), purchase > 0,
-                   let current = Double(currentValueText), current > 0 {
-                    Section("試算") {
-                        HStack {
-                            Text("折舊金額")
-                            Spacer()
-                            Text(formatCurrency(purchase - current))
-                                .foregroundStyle(.red)
-                        }
-                        HStack {
-                            Text("折舊率")
-                            Spacer()
-                            Text(String(format: "%.1f%%", (purchase - current) / purchase * 100))
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-
-                Section("備註") {
-                    TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
-                }
+                vehicleInfoSection
+                valueSection
+                fixedExpenseSection
+                variableExpenseSection
+                calcSection
+                noteSection
 
                 if showError {
                     Section {
@@ -86,36 +64,269 @@ struct AddVehicleView: View {
                         .bold().foregroundStyle(.green)
                 }
             }
-            .onAppear {
-                if let e = editing {
-                    name = e.name; brand = e.brand
-                    purchaseDate = e.purchaseDate
-                    purchasePriceText = String(format: "%.0f", e.purchasePrice)
-                    currentValueText = e.currentValue > 0 ? String(format: "%.0f", e.currentValue) : ""
-                    monthlyExpenseText = e.monthlyExpense > 0 ? String(format: "%.0f", e.monthlyExpense) : ""
-                    note = e.note
+            .onAppear { loadEditing() }
+        }
+    }
+
+    // MARK: - 車輛資訊
+
+    private var vehicleInfoSection: some View {
+        Section("車輛資訊") {
+            TextField("車名（如 Model Y）", text: $name)
+            TextField("品牌（如 Tesla）", text: $brand)
+            DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
+        }
+    }
+
+    // MARK: - 價值
+
+    private var valueSection: some View {
+        Section("價值") {
+            HStack {
+                Text("NT$").foregroundStyle(.secondary)
+                TextField("購入價格", text: $purchasePriceText).keyboardType(.decimalPad)
+            }
+            HStack {
+                Text("NT$").foregroundStyle(.secondary)
+                TextField("目前估值", text: $currentValueText).keyboardType(.decimalPad)
+            }
+        }
+    }
+
+    // MARK: - 定期支出
+
+    private var fixedExpenseSection: some View {
+        Section {
+            ForEach(Array(fixedItems.enumerated()), id: \.element.id) { index, _ in
+                VStack(spacing: 10) {
+                    if index > 0 {
+                        Divider()
+                    }
+
+                    HStack {
+                        Text("項目 \(index + 1)")
+                            .font(.subheadline.weight(.medium))
+                        Spacer()
+                        Button(role: .destructive) {
+                            fixedItems.remove(at: index)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Picker("項目", selection: $fixedItems[index].category) {
+                        ForEach(VehicleFixedCategory.allCases) { cat in
+                            Text(cat.rawValue).tag(cat)
+                        }
+                    }
+
+                    Picker("週期", selection: $fixedItems[index].period) {
+                        ForEach(VehicleExpensePeriod.allCases) { p in
+                            Text(p.rawValue == "月" ? "每月" : "每年").tag(p)
+                        }
+                    }
+
+                    HStack {
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("金額", text: $fixedItems[index].amountText)
+                            .keyboardType(.decimalPad)
+                    }
+                }
+            }
+
+            Button {
+                fixedItems.append(FixedItemState(
+                    id: UUID(),
+                    category: .carLoan,
+                    period: .monthly,
+                    amountText: ""
+                ))
+            } label: {
+                Label("新增定期支出", systemImage: "plus.circle")
+                    .foregroundStyle(.green)
+            }
+        } header: {
+            Text("定期支出")
+        } footer: {
+            if !fixedItems.isEmpty {
+                let monthlyTotal = fixedItems.reduce(0.0) { $0 + $1.period.toMonthly($1.amount) }
+                Text("定期支出合計每月 \(formatCurrency(monthlyTotal))，儲存後將自動連動記帳模式的固定支出。")
+            }
+        }
+    }
+
+    // MARK: - 變動支出
+
+    private var variableExpenseSection: some View {
+        Section {
+            HStack {
+                Text("NT$").foregroundStyle(.secondary)
+                TextField("每月平均金額", text: $variableExpenseText).keyboardType(.decimalPad)
+            }
+        } header: {
+            Text("變動支出")
+        } footer: {
+            Text("油錢、停車、洗車、臨時維修等每月平均費用。")
+        }
+    }
+
+    // MARK: - 試算
+
+    @ViewBuilder
+    private var calcSection: some View {
+        let purchase = Double(purchasePriceText) ?? 0
+        let current = Double(currentValueText) ?? 0
+        let fixedMonthly = fixedItems.reduce(0.0) { $0 + $1.period.toMonthly($1.amount) }
+        let variable = Double(variableExpenseText) ?? 0
+        let totalMonthly = fixedMonthly + variable
+
+        if purchase > 0 || totalMonthly > 0 {
+            Section("試算") {
+                if purchase > 0, current > 0 {
+                    HStack {
+                        Text("折舊金額"); Spacer()
+                        Text(formatCurrency(purchase - current)).foregroundStyle(.red)
+                    }
+                    HStack {
+                        Text("折舊率"); Spacer()
+                        Text(String(format: "%.1f%%", (purchase - current) / purchase * 100)).foregroundStyle(.red)
+                    }
+                }
+                if totalMonthly > 0 {
+                    HStack {
+                        Text("每月總支出"); Spacer()
+                        Text(formatCurrency(totalMonthly)).font(.body.bold()).foregroundStyle(.orange)
+                    }
+                    HStack {
+                        Text("年度總支出"); Spacer()
+                        Text(formatCurrency(totalMonthly * 12)).foregroundStyle(.secondary)
+                    }
                 }
             }
         }
     }
+
+    // MARK: - 備註
+
+    private var noteSection: some View {
+        Section("備註") {
+            TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+        }
+    }
+
+    // MARK: - 儲存
 
     private func save() {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
               let price = Double(purchasePriceText), price > 0 else {
             showError = true; return
         }
-        let item = Vehicle(
-            id: editing?.id ?? UUID(),
-            name: name.trimmingCharacters(in: .whitespaces),
+
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        let trimmedNote = note.trimmingCharacters(in: .whitespaces)
+        let vehicleId = editing?.id ?? UUID()
+
+        // 同步定期支出到記帳固定支出
+        var syncedFixedExpenses: [VehicleFixedExpense] = []
+        for item in fixedItems where item.amount > 0 {
+            let expenseId = syncFixedExpense(
+                vehicleId: vehicleId,
+                vehicleName: trimmedName,
+                item: item,
+                note: trimmedNote
+            )
+            syncedFixedExpenses.append(VehicleFixedExpense(
+                id: item.id,
+                category: item.category,
+                amount: item.amount,
+                period: item.period,
+                linkedExpenseId: expenseId
+            ))
+        }
+
+        let vehicle = Vehicle(
+            id: vehicleId,
+            name: trimmedName,
             brand: brand.trimmingCharacters(in: .whitespaces),
             purchaseDate: purchaseDate,
             purchasePrice: price,
             currentValue: Double(currentValueText) ?? price,
-            monthlyExpense: Double(monthlyExpenseText) ?? 0,
-            note: note.trimmingCharacters(in: .whitespaces)
+            fixedExpenses: syncedFixedExpenses,
+            variableExpense: Double(variableExpenseText) ?? 0,
+            note: trimmedNote
         )
-        if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
+        if editing != nil { financeStore.update(vehicle) } else { financeStore.add(vehicle) }
         dismiss()
+    }
+
+    /// 同步單筆定期支出到記帳模式的固定支出
+    private func syncFixedExpense(vehicleId: UUID, vehicleName: String, item: FixedItemState, note: String) -> UUID {
+        let expenseId = item.linkedExpenseId ?? UUID()
+        let recurrence: Recurrence = item.period == .monthly ? .monthly : .yearly
+
+        // 依照項目類型決定固定支出的分類
+        let fixedCategory: FixedCategory
+        let loanSub: LoanSubCategory?
+        let expenseTitle: String
+
+        switch item.category {
+        case .carLoan:
+            fixedCategory = .loan
+            loanSub = .car
+            expenseTitle = "\(vehicleName) - 車貸"
+        case .tax:
+            fixedCategory = .other
+            loanSub = nil
+            expenseTitle = "\(vehicleName) - 稅費"
+        case .subscription:
+            fixedCategory = .subscription
+            loanSub = nil
+            expenseTitle = "\(vehicleName) - 訂閱"
+        }
+
+        let expense = Expense(
+            id: expenseId,
+            title: expenseTitle,
+            amount: item.amount,
+            date: purchaseDate,
+            expenseType: .fixed,
+            fixedCategory: fixedCategory,
+            recurrence: recurrence,
+            loanSubCategory: loanSub,
+            note: note
+        )
+
+        if item.linkedExpenseId != nil {
+            expenseStore.update(expense)
+        } else {
+            expenseStore.add(expense)
+        }
+
+        return expenseId
+    }
+
+    // MARK: - 載入編輯
+
+    private func loadEditing() {
+        guard let e = editing else { return }
+        name = e.name; brand = e.brand
+        purchaseDate = e.purchaseDate
+        purchasePriceText = String(format: "%.0f", e.purchasePrice)
+        currentValueText = e.currentValue > 0 ? String(format: "%.0f", e.currentValue) : ""
+        variableExpenseText = e.variableExpense > 0 ? String(format: "%.0f", e.variableExpense) : ""
+        note = e.note
+
+        fixedItems = e.fixedExpenses.map { fe in
+            FixedItemState(
+                id: fe.id,
+                category: fe.category,
+                period: fe.period,
+                amountText: fe.amount > 0 ? String(format: "%.0f", fe.amount) : "",
+                linkedExpenseId: fe.linkedExpenseId
+            )
+        }
     }
 
     private func formatCurrency(_ value: Double) -> String {
