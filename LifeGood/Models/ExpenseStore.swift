@@ -4,11 +4,12 @@ import SwiftUI
 class ExpenseStore: ObservableObject {
     @Published var expenses: [Expense] = [] {
         didSet {
-            save()
+            if !isLoading { save() }
         }
     }
 
     private let saveKey = "lifegood_expenses"
+    private var isLoading = false
 
     init() {
         load()
@@ -59,20 +60,21 @@ class ExpenseStore: ObservableObject {
         }
     }
 
-    var currentMonthTotal: Double {
-        currentMonthExpenses.reduce(0) { $0 + $1.amount }
-    }
-
     var currentMonthVariableTotal: Double {
         currentMonthExpenses
             .filter { $0.expenseType == .variable }
             .reduce(0) { $0 + $1.amount }
     }
 
+    /// 本月固定支出：所有建立日期 <= 本月的固定支出，依週期換算為月金額
     var currentMonthFixedTotal: Double {
-        currentMonthExpenses
-            .filter { $0.expenseType == .fixed }
-            .reduce(0) { $0 + $1.amount }
+        let calendar = Calendar.current
+        let now = Date()
+        return projectedFixedTotal(for: now, period: .monthly, calendar: calendar)
+    }
+
+    var currentMonthTotal: Double {
+        currentMonthVariableTotal + currentMonthFixedTotal
     }
 
     // MARK: - 今日統計
@@ -80,9 +82,16 @@ class ExpenseStore: ObservableObject {
     var todayTotal: Double {
         let calendar = Calendar.current
         let today = Date()
-        return expenses
-            .filter { calendar.isDateInToday($0.date) }
+
+        // 變動支出：只計今天實際紀錄的
+        let variableToday = expenses
+            .filter { $0.expenseType == .variable && calendar.isDateInToday($0.date) }
             .reduce(0) { $0 + $1.amount }
+
+        // 固定支出：依週期換算每日金額
+        let fixedDaily = projectedFixedTotal(for: today, period: .daily, calendar: calendar)
+
+        return variableToday + fixedDaily
     }
 
     // MARK: - 分類統計
@@ -104,6 +113,50 @@ class ExpenseStore: ObservableObject {
 
         return totals.map { (category: $0.key, amount: $0.value) }
             .sorted { $0.amount > $1.amount }
+    }
+
+    // MARK: - 固定支出週期換算
+
+    /// 將固定支出金額依據週期換算為指定時間區間的等效金額
+    /// - Parameters:
+    ///   - expense: 固定支出
+    ///   - period: 目標時間區間
+    /// - Returns: 換算後的金額
+    private func projectedAmount(for expense: Expense, in period: TimePeriod) -> Double {
+        guard expense.expenseType == .fixed, let recurrence = expense.recurrence else {
+            return expense.amount
+        }
+
+        switch (recurrence, period) {
+        // 每月 → 各區間
+        case (.monthly, .daily):    return expense.amount / 30.0
+        case (.monthly, .weekly):   return expense.amount / 4.33
+        case (.monthly, .monthly):  return expense.amount
+        case (.monthly, .quarterly): return expense.amount * 3.0
+        case (.monthly, .yearly):   return expense.amount * 12.0
+        // 每季 → 各區間
+        case (.quarterly, .daily):    return expense.amount / 91.0
+        case (.quarterly, .weekly):   return expense.amount / 13.0
+        case (.quarterly, .monthly):  return expense.amount / 3.0
+        case (.quarterly, .quarterly): return expense.amount
+        case (.quarterly, .yearly):   return expense.amount * 4.0
+        // 每年 → 各區間
+        case (.yearly, .daily):    return expense.amount / 365.0
+        case (.yearly, .weekly):   return expense.amount / 52.0
+        case (.yearly, .monthly):  return expense.amount / 12.0
+        case (.yearly, .quarterly): return expense.amount / 4.0
+        case (.yearly, .yearly):   return expense.amount
+        }
+    }
+
+    /// 計算某個時間點的固定支出投射總額（只計入建立日期 <= periodDate 的固定支出）
+    private func projectedFixedTotal(for periodDate: Date, period: TimePeriod, calendar: Calendar) -> Double {
+        let activeFixed = expenses.filter { expense in
+            expense.expenseType == .fixed &&
+            expense.recurrence != nil &&
+            calendar.startOfDay(for: expense.date) <= calendar.startOfDay(for: periodDate)
+        }
+        return activeFixed.reduce(0) { $0 + projectedAmount(for: $1, in: period) }
     }
 
     // MARK: - 圖表資料
@@ -134,12 +187,18 @@ class ExpenseStore: ObservableObject {
         for dayOffset in (0..<30).reversed() {
             guard let date = calendar.date(byAdding: .day, value: -dayOffset, to: now) else { continue }
             let startOfDay = calendar.startOfDay(for: date)
-            let total = expenses
-                .filter { calendar.isDate($0.date, inSameDayAs: startOfDay) }
+
+            // 變動支出：按實際日期加總
+            let variableTotal = expenses
+                .filter { $0.expenseType == .variable && calendar.isDate($0.date, inSameDayAs: startOfDay) }
                 .reduce(0) { $0 + $1.amount }
+
+            // 固定支出：依週期投射每日金額
+            let fixedTotal = projectedFixedTotal(for: startOfDay, period: .daily, calendar: calendar)
+
             results.append(ChartDataPoint(
                 label: formatter.string(from: date),
-                amount: total,
+                amount: variableTotal + fixedTotal,
                 date: startOfDay
             ))
         }
@@ -155,12 +214,16 @@ class ExpenseStore: ObservableObject {
             guard let weekStart = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: now),
                   let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) else { continue }
             let startOfWeek = calendar.startOfDay(for: weekStart)
-            let total = expenses
-                .filter { $0.date >= startOfWeek && $0.date < weekEnd }
+
+            let variableTotal = expenses
+                .filter { $0.expenseType == .variable && $0.date >= startOfWeek && $0.date < weekEnd }
                 .reduce(0) { $0 + $1.amount }
+
+            let fixedTotal = projectedFixedTotal(for: startOfWeek, period: .weekly, calendar: calendar)
+
             results.append(ChartDataPoint(
                 label: formatter.string(from: startOfWeek),
-                amount: total,
+                amount: variableTotal + fixedTotal,
                 date: startOfWeek
             ))
         }
@@ -174,12 +237,16 @@ class ExpenseStore: ObservableObject {
         var results: [ChartDataPoint] = []
         for monthOffset in (0..<12).reversed() {
             guard let date = calendar.date(byAdding: .month, value: -monthOffset, to: now) else { continue }
-            let total = expenses
-                .filter { calendar.isDate($0.date, equalTo: date, toGranularity: .month) }
+
+            let variableTotal = expenses
+                .filter { $0.expenseType == .variable && calendar.isDate($0.date, equalTo: date, toGranularity: .month) }
                 .reduce(0) { $0 + $1.amount }
+
+            let fixedTotal = projectedFixedTotal(for: date, period: .monthly, calendar: calendar)
+
             results.append(ChartDataPoint(
                 label: formatter.string(from: date),
-                amount: total,
+                amount: variableTotal + fixedTotal,
                 date: date
             ))
         }
@@ -193,15 +260,17 @@ class ExpenseStore: ObservableObject {
             let quarter = (calendar.component(.month, from: date) - 1) / 3 + 1
             let year = calendar.component(.year, from: date)
 
-            let total = expenses.filter { expense in
-                let expQuarter = (calendar.component(.month, from: expense.date) - 1) / 3 + 1
-                let expYear = calendar.component(.year, from: expense.date)
-                return expQuarter == quarter && expYear == year
+            let variableTotal = expenses.filter { expense in
+                expense.expenseType == .variable &&
+                (calendar.component(.month, from: expense.date) - 1) / 3 + 1 == quarter &&
+                calendar.component(.year, from: expense.date) == year
             }.reduce(0) { $0 + $1.amount }
+
+            let fixedTotal = projectedFixedTotal(for: date, period: .quarterly, calendar: calendar)
 
             results.append(ChartDataPoint(
                 label: "\(year)Q\(quarter)",
-                amount: total,
+                amount: variableTotal + fixedTotal,
                 date: date
             ))
         }
@@ -212,13 +281,18 @@ class ExpenseStore: ObservableObject {
         var results: [ChartDataPoint] = []
         for yearOffset in (0..<5).reversed() {
             guard let date = calendar.date(byAdding: .year, value: -yearOffset, to: now) else { continue }
-            let total = expenses
-                .filter { calendar.isDate($0.date, equalTo: date, toGranularity: .year) }
+
+            let variableTotal = expenses
+                .filter { $0.expenseType == .variable && calendar.isDate($0.date, equalTo: date, toGranularity: .year) }
                 .reduce(0) { $0 + $1.amount }
+
+            // 固定支出：依週期換算成年度金額（每月×12、每季×4、每年×1）
+            let fixedTotal = projectedFixedTotal(for: date, period: .yearly, calendar: calendar)
+
             let year = calendar.component(.year, from: date)
             results.append(ChartDataPoint(
                 label: "\(year)",
-                amount: total,
+                amount: variableTotal + fixedTotal,
                 date: date
             ))
         }
@@ -234,9 +308,78 @@ class ExpenseStore: ObservableObject {
     }
 
     private func load() {
+        isLoading = true
         if let data = UserDefaults.standard.data(forKey: saveKey),
            let decoded = try? JSONDecoder().decode([Expense].self, from: data) {
             expenses = decoded
         }
+        isLoading = false
+    }
+
+    // MARK: - 匯出
+
+    func exportJSON() -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return (try? encoder.encode(expenses)) ?? Data()
+    }
+
+    func exportCSV() -> String {
+        var csv = "id,title,amount,date,type,category,recurrence,note\n"
+        let formatter = ISO8601DateFormatter()
+        for e in expenses.sorted(by: { $0.date < $1.date }) {
+            let fields: [String] = [
+                e.id.uuidString,
+                csvEscape(e.title),
+                String(format: "%.2f", e.amount),
+                formatter.string(from: e.date),
+                e.expenseType.rawValue,
+                e.categoryName,
+                e.recurrence?.rawValue ?? "",
+                csvEscape(e.note)
+            ]
+            csv += fields.joined(separator: ",") + "\n"
+        }
+        return csv
+    }
+
+    private func csvEscape(_ value: String) -> String {
+        if value.contains(",") || value.contains("\"") || value.contains("\n") {
+            return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+        }
+        return value
+    }
+
+    // MARK: - 匯入
+
+    enum ImportMode {
+        case merge    // 合併（跳過重複 ID）
+        case replace  // 取代全部
+    }
+
+    func importJSON(data: Data, mode: ImportMode = .merge) -> Int {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let imported = try? decoder.decode([Expense].self, from: data) else {
+            return 0
+        }
+        switch mode {
+        case .merge:
+            let existingIDs = Set(expenses.map(\.id))
+            let newExpenses = imported.filter { !existingIDs.contains($0.id) }
+            expenses.append(contentsOf: newExpenses)
+            return newExpenses.count
+        case .replace:
+            let count = imported.count
+            expenses = imported
+            return count
+        }
+    }
+
+    // MARK: - 清除
+
+    func clearAll() {
+        expenses.removeAll()
     }
 }
