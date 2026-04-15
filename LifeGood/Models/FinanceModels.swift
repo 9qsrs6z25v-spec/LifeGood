@@ -182,6 +182,7 @@ struct RealEstate: Identifiable, Codable {
     var currentValue: Double
     var monthlyRental: Double
     var monthlyMortgage: Double
+    var linkedExpenseId: UUID?     // 連結記帳模式的固定支出（房貸）ID
     var note: String
 
     init(
@@ -193,6 +194,7 @@ struct RealEstate: Identifiable, Codable {
         currentValue: Double = 0,
         monthlyRental: Double = 0,
         monthlyMortgage: Double = 0,
+        linkedExpenseId: UUID? = nil,
         note: String = ""
     ) {
         self.id = id
@@ -203,6 +205,7 @@ struct RealEstate: Identifiable, Codable {
         self.currentValue = currentValue
         self.monthlyRental = monthlyRental
         self.monthlyMortgage = monthlyMortgage
+        self.linkedExpenseId = linkedExpenseId
         self.note = note
     }
 

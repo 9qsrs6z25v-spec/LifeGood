@@ -23,7 +23,11 @@ struct AddExpenseView: View {
 
     @State private var selectedInsuranceSubCategory: InsuranceSubCategory = .savings
 
-    // MARK: - 儲蓄險欄位（保險-儲蓄險時顯示）
+    // MARK: - 貸款子分類
+
+    @State private var selectedLoanSubCategory: LoanSubCategory = .mortgage
+
+    // MARK: - 儲蓄險欄位
 
     @State private var insCompany = ""
     @State private var insCurrency: Currency = .twd
@@ -31,9 +35,21 @@ struct AddExpenseView: View {
     @State private var insStartDate = Date()
     @State private var insMaturityDate = Calendar.current.date(byAdding: .year, value: 6, to: Date()) ?? Date()
 
+    // MARK: - 房貸欄位（連動房地產）
+
+    @State private var reAddress = ""
+    @State private var rePurchaseDate = Date()
+    @State private var rePurchasePriceText = ""
+    @State private var reCurrentValueText = ""
+    @State private var reMonthlyRentalText = ""
+
+    // MARK: - 條件判斷
+
     private var isEditing: Bool { editingExpense != nil }
     private var isInsurance: Bool { expenseType == .fixed && selectedFixedCategory == .insurance }
     private var isSavingsInsurance: Bool { isInsurance && selectedInsuranceSubCategory == .savings }
+    private var isLoan: Bool { expenseType == .fixed && selectedFixedCategory == .loan }
+    private var isMortgage: Bool { isLoan && selectedLoanSubCategory == .mortgage }
 
     // MARK: - 儲蓄險自動計算
 
@@ -86,19 +102,19 @@ struct AddExpenseView: View {
                 if isInsurance {
                     insuranceSubCategorySection
                 }
+                if isLoan {
+                    loanSubCategorySection
+                }
 
                 if isSavingsInsurance {
                     savingsInsuranceSection
                     savingsCalcSection
-                } else if expenseType == .fixed {
-                    // 非儲蓄險的固定支出：一般備註
-                    Section("備註") {
-                        TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
-                    }
-                } else {
-                    Section("備註") {
-                        TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
-                    }
+                } else if isMortgage {
+                    mortgageRealEstateSection
+                }
+
+                Section("備註") {
+                    TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                 }
 
                 if showValidationError {
@@ -128,17 +144,10 @@ struct AddExpenseView: View {
         Section("基本資訊") {
             TextField("名稱", text: $title)
 
-            if isSavingsInsurance {
-                // 儲蓄險金額在下方繳費設定中填寫，這裡顯示幣別+金額
-                HStack {
-                    Text(insCurrencySymbol).foregroundStyle(.secondary)
-                    TextField("保費金額", text: $amountText).keyboardType(.decimalPad)
-                }
-            } else {
-                HStack {
-                    Text("NT$").foregroundStyle(.secondary)
-                    TextField("金額", text: $amountText).keyboardType(.decimalPad)
-                }
+            HStack {
+                Text(isSavingsInsurance ? insCurrencySymbol : "NT$").foregroundStyle(.secondary)
+                TextField(isMortgage ? "每月房貸金額" : (isSavingsInsurance ? "保費金額" : "金額"), text: $amountText)
+                    .keyboardType(.decimalPad)
             }
 
             if !isSavingsInsurance {
@@ -188,6 +197,44 @@ struct AddExpenseView: View {
         }
     }
 
+    // MARK: - 貸款子分類
+
+    private var loanSubCategorySection: some View {
+        Section("貸款類別") {
+            Picker("貸款類別", selection: $selectedLoanSubCategory) {
+                ForEach(LoanSubCategory.allCases) { sub in
+                    Text(sub.rawValue).tag(sub)
+                }
+            }
+            .pickerStyle(.menu)
+        }
+    }
+
+    // MARK: - 房貸連動房地產欄位
+
+    private var mortgageRealEstateSection: some View {
+        Section {
+            TextField("地址", text: $reAddress)
+            DatePicker("購入日期", selection: $rePurchaseDate, displayedComponents: .date)
+            HStack {
+                Text("NT$").foregroundStyle(.secondary)
+                TextField("購入價格", text: $rePurchasePriceText).keyboardType(.decimalPad)
+            }
+            HStack {
+                Text("NT$").foregroundStyle(.secondary)
+                TextField("目前估值", text: $reCurrentValueText).keyboardType(.decimalPad)
+            }
+            HStack {
+                Text("NT$").foregroundStyle(.secondary)
+                TextField("月租金收入（選填）", text: $reMonthlyRentalText).keyboardType(.decimalPad)
+            }
+        } header: {
+            Text("房地產資訊（連動理財模式）")
+        } footer: {
+            Text("儲存後將自動在理財模式的房地產中建立或更新對應物件。")
+        }
+    }
+
     // MARK: - 儲蓄險詳細欄位
 
     private var savingsInsuranceSection: some View {
@@ -198,13 +245,11 @@ struct AddExpenseView: View {
                         Text("\(c.symbol) (\(c.rawValue))").tag(c)
                     }
                 }
-
                 Picker("繳費週期", selection: $selectedRecurrence) {
                     ForEach(Recurrence.allCases, id: \.self) { r in
                         Text(r.rawValue).tag(r)
                     }
                 }
-
                 HStack {
                     Text("複利年利率")
                     Spacer()
@@ -214,15 +259,9 @@ struct AddExpenseView: View {
                         .frame(width: 80)
                     Text("%").foregroundStyle(.secondary)
                 }
-
                 TextField("保險公司", text: $insCompany)
-
                 DatePicker("起始日", selection: $insStartDate, displayedComponents: .date)
                 DatePicker("到期日", selection: $insMaturityDate, displayedComponents: .date)
-            }
-
-            Section("備註") {
-                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
             }
         }
     }
@@ -236,34 +275,28 @@ struct AddExpenseView: View {
                 row("已繳期數", "\(insElapsedPeriods) 期")
                 row("已繳總額", formatCurrency(insPremium * Double(insElapsedPeriods)))
             }
-
             Section {
                 HStack {
-                    Text("目前帳戶價值")
-                    Spacer()
+                    Text("目前帳戶價值"); Spacer()
                     Text(formatCurrency(insCurrentValue)).font(.body.bold()).foregroundStyle(.blue)
                 }
                 HStack {
-                    Text("期滿預估領回")
-                    Spacer()
+                    Text("期滿預估領回"); Spacer()
                     Text(formatCurrency(insExpectedReturn)).font(.body.bold()).foregroundStyle(.green)
                 }
                 if insTotalPeriods > 0 {
                     let totalPremium = insPremium * Double(insTotalPeriods)
                     let gain = insExpectedReturn - totalPremium
                     HStack {
-                        Text("複利增值")
-                        Spacer()
+                        Text("複利增值"); Spacer()
                         Text((gain >= 0 ? "+" : "") + formatCurrency(gain))
                             .foregroundStyle(gain >= 0 ? .green : .red)
                     }
                     if totalPremium > 0 {
                         HStack {
-                            Text("預估總報酬率")
-                            Spacer()
+                            Text("預估總報酬率"); Spacer()
                             Text(String(format: "%.2f%%", gain / totalPremium * 100))
-                                .font(.body.bold())
-                                .foregroundStyle(gain >= 0 ? .green : .red)
+                                .font(.body.bold()).foregroundStyle(gain >= 0 ? .green : .red)
                         }
                     }
                 }
@@ -287,11 +320,15 @@ struct AddExpenseView: View {
         }
 
         let expenseId = editingExpense?.id ?? UUID()
-        var linkedId = editingExpense?.linkedInsuranceId
+        var linkedInsId = editingExpense?.linkedInsuranceId
+        var linkedREId = editingExpense?.linkedRealEstateId
 
         if isSavingsInsurance {
-            // 同步建立/更新理財模式的儲蓄險（帶反向連結）
-            linkedId = syncSavingsInsurance(amount: amount, existingId: linkedId, expenseId: expenseId)
+            linkedInsId = syncSavingsInsurance(amount: amount, existingId: linkedInsId, expenseId: expenseId)
+        }
+
+        if isMortgage {
+            linkedREId = syncRealEstate(mortgageAmount: amount, existingId: linkedREId, expenseId: expenseId)
         }
 
         let expense = Expense(
@@ -304,23 +341,19 @@ struct AddExpenseView: View {
             fixedCategory: expenseType == .fixed ? selectedFixedCategory : nil,
             recurrence: expenseType == .fixed ? selectedRecurrence : nil,
             insuranceSubCategory: isInsurance ? selectedInsuranceSubCategory : nil,
-            linkedInsuranceId: isSavingsInsurance ? linkedId : nil,
+            loanSubCategory: isLoan ? selectedLoanSubCategory : nil,
+            linkedInsuranceId: isSavingsInsurance ? linkedInsId : nil,
+            linkedRealEstateId: isMortgage ? linkedREId : nil,
             note: note.trimmingCharacters(in: .whitespaces)
         )
 
-        if isEditing {
-            store.update(expense)
-        } else {
-            store.add(expense)
-        }
-
+        if isEditing { store.update(expense) } else { store.add(expense) }
         dismiss()
     }
 
-    /// 同步建立或更新理財模式的儲蓄險紀錄（含反向連結 expenseId）
+    /// 同步建立或更新理財模式的儲蓄險
     private func syncSavingsInsurance(amount: Double, existingId: UUID?, expenseId: UUID) -> UUID {
         let insuranceId = existingId ?? UUID()
-
         let insurance = SavingsInsurance(
             id: insuranceId,
             name: title.trimmingCharacters(in: .whitespaces),
@@ -336,17 +369,30 @@ struct AddExpenseView: View {
             linkedExpenseId: expenseId,
             note: note.trimmingCharacters(in: .whitespaces)
         )
-
-        if existingId != nil {
-            financeStore.update(insurance)
-        } else {
-            financeStore.add(insurance)
-        }
-
+        if existingId != nil { financeStore.update(insurance) } else { financeStore.add(insurance) }
         return insuranceId
     }
 
-    // MARK: - Load Editing
+    /// 同步建立或更新理財模式的房地產
+    private func syncRealEstate(mortgageAmount: Double, existingId: UUID?, expenseId: UUID) -> UUID {
+        let reId = existingId ?? UUID()
+        let realEstate = RealEstate(
+            id: reId,
+            name: title.trimmingCharacters(in: .whitespaces),
+            address: reAddress.trimmingCharacters(in: .whitespaces),
+            purchaseDate: rePurchaseDate,
+            purchasePrice: Double(rePurchasePriceText) ?? 0,
+            currentValue: Double(reCurrentValueText) ?? 0,
+            monthlyRental: Double(reMonthlyRentalText) ?? 0,
+            monthlyMortgage: mortgageAmount,
+            linkedExpenseId: expenseId,
+            note: note.trimmingCharacters(in: .whitespaces)
+        )
+        if existingId != nil { financeStore.update(realEstate) } else { financeStore.add(realEstate) }
+        return reId
+    }
+
+    // MARK: - 載入編輯資料
 
     private func loadEditing() {
         guard let expense = editingExpense else { return }
@@ -357,9 +403,10 @@ struct AddExpenseView: View {
         if let fc = expense.fixedCategory { selectedFixedCategory = fc }
         if let rec = expense.recurrence { selectedRecurrence = rec }
         if let sub = expense.insuranceSubCategory { selectedInsuranceSubCategory = sub }
+        if let sub = expense.loanSubCategory { selectedLoanSubCategory = sub }
         note = expense.note
 
-        // 載入連結的儲蓄險資料
+        // 載入連結的儲蓄險
         if let linkedId = expense.linkedInsuranceId,
            let linked = financeStore.insurances.first(where: { $0.id == linkedId }) {
             insCompany = linked.company
@@ -368,14 +415,23 @@ struct AddExpenseView: View {
             insStartDate = linked.startDate
             insMaturityDate = linked.maturityDate
         }
+
+        // 載入連結的房地產
+        if let linkedId = expense.linkedRealEstateId,
+           let linked = financeStore.realEstates.first(where: { $0.id == linkedId }) {
+            reAddress = linked.address
+            rePurchaseDate = linked.purchaseDate
+            rePurchasePriceText = linked.purchasePrice > 0 ? String(format: "%.0f", linked.purchasePrice) : ""
+            reCurrentValueText = linked.currentValue > 0 ? String(format: "%.0f", linked.currentValue) : ""
+            reMonthlyRentalText = linked.monthlyRental > 0 ? String(format: "%.0f", linked.monthlyRental) : ""
+        }
     }
 
-    // MARK: - Helpers
+    // MARK: - 輔助
 
     private func row(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label)
-            Spacer()
+            Text(label); Spacer()
             Text(value).foregroundStyle(.secondary)
         }
     }
@@ -383,9 +439,9 @@ struct AddExpenseView: View {
     private func formatCurrency(_ value: Double) -> String {
         let f = NumberFormatter()
         f.numberStyle = .currency
-        f.currencySymbol = insCurrencySymbol
+        f.currencySymbol = isSavingsInsurance ? insCurrencySymbol : "NT$"
         f.maximumFractionDigits = isSavingsInsurance && insCurrency == .usd ? 2 : 0
-        return f.string(from: NSNumber(value: value)) ?? "\(insCurrencySymbol)0"
+        return f.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 }
 

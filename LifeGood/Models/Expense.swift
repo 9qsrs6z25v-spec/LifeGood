@@ -94,6 +94,15 @@ enum InsuranceSubCategory: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// MARK: - 貸款子分類
+enum LoanSubCategory: String, Codable, CaseIterable, Identifiable {
+    case car = "車貸"
+    case mortgage = "房貸"
+    case personal = "信貸"
+
+    var id: String { rawValue }
+}
+
 // MARK: - 支出資料模型
 struct Expense: Identifiable, Codable {
     let id: UUID
@@ -105,7 +114,9 @@ struct Expense: Identifiable, Codable {
     var fixedCategory: FixedCategory?
     var recurrence: Recurrence?
     var insuranceSubCategory: InsuranceSubCategory?
-    var linkedInsuranceId: UUID?  // 連結理財模式的儲蓄險 ID
+    var loanSubCategory: LoanSubCategory?
+    var linkedInsuranceId: UUID?      // 連結理財模式的儲蓄險 ID
+    var linkedRealEstateId: UUID?     // 連結理財模式的房地產 ID
     var note: String
 
     init(
@@ -118,7 +129,9 @@ struct Expense: Identifiable, Codable {
         fixedCategory: FixedCategory? = nil,
         recurrence: Recurrence? = nil,
         insuranceSubCategory: InsuranceSubCategory? = nil,
+        loanSubCategory: LoanSubCategory? = nil,
         linkedInsuranceId: UUID? = nil,
+        linkedRealEstateId: UUID? = nil,
         note: String = ""
     ) {
         self.id = id
@@ -130,7 +143,9 @@ struct Expense: Identifiable, Codable {
         self.fixedCategory = fixedCategory
         self.recurrence = recurrence
         self.insuranceSubCategory = insuranceSubCategory
+        self.loanSubCategory = loanSubCategory
         self.linkedInsuranceId = linkedInsuranceId
+        self.linkedRealEstateId = linkedRealEstateId
         self.note = note
     }
 
@@ -141,6 +156,9 @@ struct Expense: Identifiable, Codable {
         case .fixed:
             if fixedCategory == .insurance, let sub = insuranceSubCategory {
                 return "保險 - \(sub.rawValue)"
+            }
+            if fixedCategory == .loan, let sub = loanSubCategory {
+                return "貸款 - \(sub.rawValue)"
             }
             return fixedCategory?.rawValue ?? "未分類"
         }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AddRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: RealEstate?
@@ -16,6 +17,8 @@ struct AddRealEstateView: View {
     @State private var note = ""
     @State private var showError = false
 
+    private var mortgageAmount: Double { Double(monthlyMortgageText) ?? 0 }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -27,31 +30,29 @@ struct AddRealEstateView: View {
 
                 Section("價值") {
                     HStack {
-                        Text("NT$")
-                            .foregroundStyle(.secondary)
-                        TextField("購入價格", text: $purchasePriceText)
-                            .keyboardType(.decimalPad)
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("購入價格", text: $purchasePriceText).keyboardType(.decimalPad)
                     }
                     HStack {
-                        Text("NT$")
-                            .foregroundStyle(.secondary)
-                        TextField("目前估值", text: $currentValueText)
-                            .keyboardType(.decimalPad)
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("目前估值", text: $currentValueText).keyboardType(.decimalPad)
                     }
                 }
 
-                Section("每月收支") {
+                Section {
                     HStack {
-                        Text("NT$")
-                            .foregroundStyle(.secondary)
-                        TextField("月租金收入", text: $monthlyRentalText)
-                            .keyboardType(.decimalPad)
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("月租金收入", text: $monthlyRentalText).keyboardType(.decimalPad)
                     }
                     HStack {
-                        Text("NT$")
-                            .foregroundStyle(.secondary)
-                        TextField("月房貸支出", text: $monthlyMortgageText)
-                            .keyboardType(.decimalPad)
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("月房貸支出", text: $monthlyMortgageText).keyboardType(.decimalPad)
+                    }
+                } header: {
+                    Text("每月收支")
+                } footer: {
+                    if mortgageAmount > 0 {
+                        Text("儲存後將自動在記帳模式的固定支出中建立或更新對應的房貸紀錄。")
                     }
                 }
 
@@ -69,8 +70,7 @@ struct AddRealEstateView: View {
                 }
 
                 Section("備註") {
-                    TextField("選填備註", text: $note, axis: .vertical)
-                        .lineLimit(3)
+                    TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                 }
 
                 if showError {
@@ -97,8 +97,8 @@ struct AddRealEstateView: View {
                     purchaseDate = e.purchaseDate
                     purchasePriceText = String(format: "%.0f", e.purchasePrice)
                     currentValueText = String(format: "%.0f", e.currentValue)
-                    monthlyRentalText = String(format: "%.0f", e.monthlyRental)
-                    monthlyMortgageText = String(format: "%.0f", e.monthlyMortgage)
+                    monthlyRentalText = e.monthlyRental > 0 ? String(format: "%.0f", e.monthlyRental) : ""
+                    monthlyMortgageText = e.monthlyMortgage > 0 ? String(format: "%.0f", e.monthlyMortgage) : ""
                     note = e.note
                 }
             }
@@ -110,19 +110,63 @@ struct AddRealEstateView: View {
               let price = Double(purchasePriceText), price > 0 else {
             showError = true; return
         }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        let trimmedNote = note.trimmingCharacters(in: .whitespaces)
+        let reId = editing?.id ?? UUID()
+        let existingExpenseId = editing?.linkedExpenseId
+
+        // 房貸 > 0 時同步建立/更新固定支出
+        var expenseId = existingExpenseId
+        if mortgageAmount > 0 {
+            expenseId = syncMortgageExpense(
+                realEstateId: reId,
+                existingExpenseId: existingExpenseId,
+                name: trimmedName,
+                note: trimmedNote
+            )
+        }
+
         let item = RealEstate(
-            id: editing?.id ?? UUID(),
-            name: name.trimmingCharacters(in: .whitespaces),
+            id: reId,
+            name: trimmedName,
             address: address.trimmingCharacters(in: .whitespaces),
             purchaseDate: purchaseDate,
             purchasePrice: price,
             currentValue: Double(currentValueText) ?? price,
             monthlyRental: Double(monthlyRentalText) ?? 0,
-            monthlyMortgage: Double(monthlyMortgageText) ?? 0,
-            note: note.trimmingCharacters(in: .whitespaces)
+            monthlyMortgage: mortgageAmount,
+            linkedExpenseId: mortgageAmount > 0 ? expenseId : nil,
+            note: trimmedNote
         )
         if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
         dismiss()
+    }
+
+    /// 同步建立或更新記帳模式的固定支出（貸款-房貸）
+    private func syncMortgageExpense(realEstateId: UUID, existingExpenseId: UUID?, name: String, note: String) -> UUID {
+        let expenseId = existingExpenseId ?? UUID()
+
+        let expense = Expense(
+            id: expenseId,
+            title: name,
+            amount: mortgageAmount,
+            date: purchaseDate,
+            expenseType: .fixed,
+            fixedCategory: .loan,
+            recurrence: .monthly,
+            loanSubCategory: .mortgage,
+            linkedRealEstateId: realEstateId,
+            note: note
+        )
+
+        if existingExpenseId != nil {
+            expenseStore.update(expense)
+        } else {
+            expenseStore.add(expense)
+        }
+
+        return expenseId
     }
 
     private func formatCurrency(_ value: Double) -> String {
