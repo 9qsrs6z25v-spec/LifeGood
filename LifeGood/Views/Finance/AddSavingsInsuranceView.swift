@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AddSavingsInsuranceView: View {
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: SavingsInsurance?
@@ -214,10 +215,27 @@ struct AddSavingsInsuranceView: View {
               premium > 0 else {
             showError = true; return
         }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        let trimmedCompany = company.trimmingCharacters(in: .whitespaces)
+        let trimmedNote = note.trimmingCharacters(in: .whitespaces)
+
+        let insuranceId = editing?.id ?? UUID()
+        let existingExpenseId = editing?.linkedExpenseId
+
+        // 同步建立或更新固定支出紀錄
+        let expenseId = syncFixedExpense(
+            insuranceId: insuranceId,
+            existingExpenseId: existingExpenseId,
+            name: trimmedName,
+            note: trimmedNote
+        )
+
+        // 儲存儲蓄險紀錄
         let item = SavingsInsurance(
-            id: editing?.id ?? UUID(),
-            name: name.trimmingCharacters(in: .whitespaces),
-            company: company.trimmingCharacters(in: .whitespaces),
+            id: insuranceId,
+            name: trimmedName,
+            company: trimmedCompany,
             currency: currency,
             premiumAmount: premium,
             paymentPeriod: paymentPeriod,
@@ -226,10 +244,37 @@ struct AddSavingsInsuranceView: View {
             maturityDate: maturityDate,
             expectedReturn: calculatedExpectedReturn,
             currentValue: calculatedCurrentValue,
-            note: note.trimmingCharacters(in: .whitespaces)
+            linkedExpenseId: expenseId,
+            note: trimmedNote
         )
         if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
         dismiss()
+    }
+
+    /// 同步建立或更新記帳模式的固定支出紀錄
+    private func syncFixedExpense(insuranceId: UUID, existingExpenseId: UUID?, name: String, note: String) -> UUID {
+        let expenseId = existingExpenseId ?? UUID()
+
+        let expense = Expense(
+            id: expenseId,
+            title: name,
+            amount: premium,
+            date: startDate,
+            expenseType: .fixed,
+            fixedCategory: .insurance,
+            recurrence: paymentPeriod,
+            insuranceSubCategory: .savings,
+            linkedInsuranceId: insuranceId,
+            note: note
+        )
+
+        if existingExpenseId != nil {
+            expenseStore.update(expense)
+        } else {
+            expenseStore.add(expense)
+        }
+
+        return expenseId
     }
 
     private func formatCurrency(_ value: Double) -> String {

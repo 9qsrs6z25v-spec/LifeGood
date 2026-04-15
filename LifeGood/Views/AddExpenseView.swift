@@ -277,7 +277,7 @@ struct AddExpenseView: View {
         }
     }
 
-    // MARK: - Save
+    // MARK: - 儲存
 
     private func saveExpense() {
         guard !title.trimmingCharacters(in: .whitespaces).isEmpty,
@@ -286,18 +286,16 @@ struct AddExpenseView: View {
             return
         }
 
-        // 決定連結的儲蓄險 ID
+        let expenseId = editingExpense?.id ?? UUID()
         var linkedId = editingExpense?.linkedInsuranceId
 
         if isSavingsInsurance {
-            // 同步建立/更新理財模式的儲蓄險
-            linkedId = syncSavingsInsurance(amount: amount, existingId: linkedId)
-            // 儲蓄險用起始日作為支出日期
-            date = insStartDate
+            // 同步建立/更新理財模式的儲蓄險（帶反向連結）
+            linkedId = syncSavingsInsurance(amount: amount, existingId: linkedId, expenseId: expenseId)
         }
 
         let expense = Expense(
-            id: editingExpense?.id ?? UUID(),
+            id: expenseId,
             title: title.trimmingCharacters(in: .whitespaces),
             amount: amount,
             date: isSavingsInsurance ? insStartDate : date,
@@ -319,8 +317,8 @@ struct AddExpenseView: View {
         dismiss()
     }
 
-    /// 同步建立或更新理財模式的儲蓄險紀錄
-    private func syncSavingsInsurance(amount: Double, existingId: UUID?) -> UUID {
+    /// 同步建立或更新理財模式的儲蓄險紀錄（含反向連結 expenseId）
+    private func syncSavingsInsurance(amount: Double, existingId: UUID?, expenseId: UUID) -> UUID {
         let insuranceId = existingId ?? UUID()
 
         let insurance = SavingsInsurance(
@@ -335,6 +333,7 @@ struct AddExpenseView: View {
             maturityDate: insMaturityDate,
             expectedReturn: insExpectedReturn,
             currentValue: insCurrentValue,
+            linkedExpenseId: expenseId,
             note: note.trimmingCharacters(in: .whitespaces)
         )
 

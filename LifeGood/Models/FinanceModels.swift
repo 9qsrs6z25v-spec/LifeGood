@@ -28,6 +28,7 @@ struct SavingsInsurance: Identifiable, Codable {
     var maturityDate: Date
     var expectedReturn: Double      // 由複利公式自動計算後儲存
     var currentValue: Double        // 由複利公式自動計算後儲存
+    var linkedExpenseId: UUID?      // 連結記帳模式的固定支出 ID
     var note: String
 
     init(
@@ -42,6 +43,7 @@ struct SavingsInsurance: Identifiable, Codable {
         maturityDate: Date = Date(),
         expectedReturn: Double = 0,
         currentValue: Double = 0,
+        linkedExpenseId: UUID? = nil,
         note: String = ""
     ) {
         self.id = id
@@ -55,6 +57,7 @@ struct SavingsInsurance: Identifiable, Codable {
         self.maturityDate = maturityDate
         self.expectedReturn = expectedReturn
         self.currentValue = currentValue
+        self.linkedExpenseId = linkedExpenseId
         self.note = note
     }
 
