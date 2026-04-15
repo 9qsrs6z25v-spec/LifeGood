@@ -63,17 +63,21 @@ struct MainTabView: View {
             .tabItem { Label("股票", systemImage: "chart.line.uptrend.xyaxis") }
             .tag(2)
 
+        VehicleView()
+            .tabItem { Label("汽車", systemImage: "car.fill") }
+            .tag(3)
+
         RealEstateView()
             .tabItem { Label("房地產", systemImage: "building.2.fill") }
-            .tag(3)
+            .tag(4)
 
         FinanceChartView()
             .tabItem { Label("圖表", systemImage: "chart.pie.fill") }
-            .tag(4)
+            .tag(5)
 
         SettingsView()
             .tabItem { Label("設定", systemImage: "gearshape.fill") }
-            .tag(5)
+            .tag(6)
     }
 }
 

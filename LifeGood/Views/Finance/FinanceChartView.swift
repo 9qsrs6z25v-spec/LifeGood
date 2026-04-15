@@ -224,6 +224,7 @@ struct FinanceChartView: View {
         switch type {
         case .savingsInsurance: return .blue
         case .stock: return .orange
+        case .vehicle: return .teal
         case .realEstate: return .purple
         }
     }

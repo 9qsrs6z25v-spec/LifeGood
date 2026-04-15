@@ -225,11 +225,63 @@ struct RealEstate: Identifiable, Codable {
     }
 }
 
+// MARK: - 汽車
+
+struct Vehicle: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    var brand: String
+    var purchaseDate: Date
+    var purchasePrice: Double
+    var currentValue: Double
+    var monthlyExpense: Double      // 每月養車費用（油錢、保養、停車等）
+    var note: String
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        brand: String = "",
+        purchaseDate: Date = Date(),
+        purchasePrice: Double = 0,
+        currentValue: Double = 0,
+        monthlyExpense: Double = 0,
+        note: String = ""
+    ) {
+        self.id = id
+        self.name = name
+        self.brand = brand
+        self.purchaseDate = purchaseDate
+        self.purchasePrice = purchasePrice
+        self.currentValue = currentValue
+        self.monthlyExpense = monthlyExpense
+        self.note = note
+    }
+
+    /// 折舊金額
+    var depreciation: Double { purchasePrice - currentValue }
+    /// 折舊率
+    var depreciationRate: Double {
+        guard purchasePrice > 0 else { return 0 }
+        return depreciation / purchasePrice * 100
+    }
+    /// 持有年數
+    var yearsOwned: Double {
+        let days = Calendar.current.dateComponents([.day], from: purchaseDate, to: Date()).day ?? 0
+        return Double(max(0, days)) / 365.0
+    }
+    /// 年均折舊
+    var annualDepreciation: Double {
+        guard yearsOwned > 0 else { return 0 }
+        return depreciation / yearsOwned
+    }
+}
+
 // MARK: - 資產類別（圖表用）
 
 enum AssetType: String, CaseIterable {
     case savingsInsurance = "儲蓄險"
     case stock = "股票"
+    case vehicle = "汽車"
     case realEstate = "房地產"
 }
 

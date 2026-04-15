@@ -41,13 +41,19 @@ struct FinanceOverviewView: View {
     // MARK: - 三大類
 
     private var assetCards: some View {
-        HStack(spacing: 12) {
-            assetCard(title: "儲蓄險", amount: store.totalInsuranceValue,
-                      icon: "shield.fill", color: .blue, count: store.insurances.count)
-            assetCard(title: "股票", amount: store.totalStockValue,
-                      icon: "chart.line.uptrend.xyaxis", color: .orange, count: store.stocks.count)
-            assetCard(title: "房地產", amount: store.totalRealEstateValue,
-                      icon: "building.2.fill", color: .purple, count: store.realEstates.count)
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                assetCard(title: "儲蓄險", amount: store.totalInsuranceValue,
+                          icon: "shield.fill", color: .blue, count: store.insurances.count)
+                assetCard(title: "股票", amount: store.totalStockValue,
+                          icon: "chart.line.uptrend.xyaxis", color: .orange, count: store.stocks.count)
+            }
+            HStack(spacing: 12) {
+                assetCard(title: "汽車", amount: store.totalVehicleValue,
+                          icon: "car.fill", color: .teal, count: store.vehicles.count)
+                assetCard(title: "房地產", amount: store.totalRealEstateValue,
+                          icon: "building.2.fill", color: .purple, count: store.realEstates.count)
+            }
         }
         .padding(.horizontal)
     }
@@ -149,6 +155,7 @@ struct FinanceOverviewView: View {
         switch type {
         case .savingsInsurance: return .blue
         case .stock: return .orange
+        case .vehicle: return .teal
         case .realEstate: return .purple
         }
     }
