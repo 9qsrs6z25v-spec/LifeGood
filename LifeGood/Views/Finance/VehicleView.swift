@@ -190,25 +190,6 @@ struct VehicleView: View {
                 .stroke(Color(.systemGray4), lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-        .contextMenu {
-            Button(role: .destructive) {
-                // 刪除所有連結的固定支出
-                for fe in item.fixedExpenses {
-                    if let linkedId = fe.linkedExpenseId {
-                        expenseStore.expenses.removeAll { $0.id == linkedId }
-                    }
-                }
-                // 刪除所有連結的變動支出
-                for ve in item.variableExpenses {
-                    if let linkedId = ve.linkedExpenseId {
-                        expenseStore.expenses.removeAll { $0.id == linkedId }
-                    }
-                }
-                store.deleteVehicle(item)
-            } label: {
-                Label("刪除", systemImage: "trash")
-            }
-        }
     }
 
     private func fmt(_ v: Double) -> String {

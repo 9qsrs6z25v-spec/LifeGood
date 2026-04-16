@@ -136,13 +136,6 @@ struct StockView: View {
                 .stroke(Color(.systemGray4), lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-        .contextMenu {
-            Button(role: .destructive) {
-                store.deleteStock(item)
-            } label: {
-                Label("刪除", systemImage: "trash")
-            }
-        }
     }
 
     private func fmt(_ v: Double) -> String {

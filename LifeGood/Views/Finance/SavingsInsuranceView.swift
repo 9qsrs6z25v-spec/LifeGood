@@ -125,16 +125,6 @@ struct SavingsInsuranceView: View {
                 .stroke(Color(.systemGray4), lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-        .contextMenu {
-            Button(role: .destructive) {
-                if let linkedId = item.linkedExpenseId {
-                    expenseStore.expenses.removeAll { $0.id == linkedId }
-                }
-                store.deleteInsurance(item)
-            } label: {
-                Label("刪除", systemImage: "trash")
-            }
-        }
     }
 
     private func fmt(_ v: Double, currency: Currency) -> String {
