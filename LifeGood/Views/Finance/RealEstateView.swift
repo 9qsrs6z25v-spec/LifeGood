@@ -147,14 +147,20 @@ struct RealEstateView: View {
                     Label("房貸 " + fmt(item.monthlyMortgage), systemImage: "creditcard")
                 }
                 Spacer()
-                if item.variableTotal > 0 {
-                    Text("支出 " + fmt(item.variableTotal)).foregroundStyle(.orange)
-                } else if item.monthlyRental > 0 {
-                    Text(String(format: "報酬率 %.1f%%", item.rentalYield))
-                        .foregroundStyle(.blue)
+                let totalExpense = item.monthlyMortgage + item.variableTotal
+                if totalExpense > 0 {
+                    Text("總支出 " + fmt(totalExpense)).foregroundStyle(.orange)
                 }
             }
             .font(.caption).foregroundStyle(.secondary)
+
+            if item.monthlyRental > 0 {
+                HStack {
+                    Spacer()
+                    Text(String(format: "報酬率 %.1f%%", item.rentalYield))
+                        .font(.caption).foregroundStyle(.blue)
+                }
+            }
         }
         .padding(14)
         .background(Color(.systemBackground))
