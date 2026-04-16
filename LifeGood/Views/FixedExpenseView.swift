@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FixedExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
     @State private var showingAddSheet = false
     @State private var expenseToEdit: Expense?
 
@@ -132,7 +133,7 @@ struct FixedExpenseView: View {
                             }
                     }
                     .onDelete { offsets in
-                        store.delete(at: offsets, from: expenses)
+                        deleteWithSync(offsets: offsets, from: expenses)
                     }
                 }
             }
@@ -148,6 +149,28 @@ struct FixedExpenseView: View {
             Text(formatCurrency(expenses.reduce(0) { $0 + $1.amount }))
                 .font(.caption.bold())
         }
+    }
+
+    /// 刪除固定支出時同步刪除理財連結項目
+    private func deleteWithSync(offsets: IndexSet, from list: [Expense]) {
+        for index in offsets {
+            let expense = list[index]
+            // 刪除連結的儲蓄險
+            if let linkedId = expense.linkedInsuranceId {
+                financeStore.deleteInsurance(SavingsInsurance(id: linkedId, name: "", premiumAmount: 0))
+            }
+            // 刪除連結的房地產
+            if let linkedId = expense.linkedRealEstateId {
+                financeStore.deleteRealEstate(RealEstate(id: linkedId, name: ""))
+            }
+            // 刪除連結的汽車定期支出項目
+            if let linkedId = expense.linkedVehicleId,
+               var vehicle = financeStore.vehicles.first(where: { $0.id == linkedId }) {
+                vehicle.fixedExpenses.removeAll { $0.linkedExpenseId == expense.id }
+                financeStore.update(vehicle)
+            }
+        }
+        store.delete(at: offsets, from: list)
     }
 
     private func formatCurrency(_ value: Double) -> String {

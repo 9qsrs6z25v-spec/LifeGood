@@ -56,6 +56,7 @@ struct AddExpenseView: View {
     private var isSavingsInsurance: Bool { isInsurance && selectedInsuranceSubCategory == .savings }
     private var isLoan: Bool { expenseType == .fixed && selectedFixedCategory == .loan }
     private var isMortgage: Bool { isLoan && selectedLoanSubCategory == .mortgage }
+    private var isCarLoan: Bool { isLoan && selectedLoanSubCategory == .car }
 
     // MARK: - 儲蓄險自動計算
 
@@ -120,6 +121,8 @@ struct AddExpenseView: View {
                     savingsCalcSection
                 } else if isMortgage {
                     mortgageRealEstateSection
+                } else if isCarLoan {
+                    carLoanVehicleSection
                 }
 
                 Section("備註") {
@@ -247,6 +250,28 @@ struct AddExpenseView: View {
         }
     }
 
+    // MARK: - 車貸連動汽車
+
+    private var carLoanVehicleSection: some View {
+        Section {
+            if financeStore.vehicles.isEmpty {
+                Text("尚無車輛，請先在理財模式新增汽車")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                Picker("選擇車輛", selection: $selectedVehicleId) {
+                    Text("請選擇").tag(nil as UUID?)
+                    ForEach(financeStore.vehicles) { v in
+                        Text("\(v.name)\(!v.brand.isEmpty ? " (\(v.brand))" : "")").tag(v.id as UUID?)
+                    }
+                }
+            }
+        } header: {
+            Text("車輛資訊（連動理財模式）")
+        } footer: {
+            Text("儲存後將自動在理財模式的汽車定期支出中新增對應的車貸紀錄。")
+        }
+    }
+
     // MARK: - 房貸連動房地產欄位
 
     private var mortgageRealEstateSection: some View {
@@ -368,8 +393,14 @@ struct AddExpenseView: View {
             linkedREId = syncRealEstate(mortgageAmount: amount, existingId: linkedREId, expenseId: expenseId)
         }
 
-        // 汽車變動支出連動
+        // 車貸連動汽車定期支出
         var linkedVehId = editingExpense?.linkedVehicleId
+        if isCarLoan, let vehicleId = selectedVehicleId {
+            linkedVehId = vehicleId
+            syncCarLoanToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+        }
+
+        // 汽車變動支出連動
         if isVehicle, let vehicleId = selectedVehicleId {
             linkedVehId = vehicleId
             syncVehicleVariableExpense(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
@@ -388,7 +419,7 @@ struct AddExpenseView: View {
             loanSubCategory: isLoan ? selectedLoanSubCategory : nil,
             linkedInsuranceId: isSavingsInsurance ? linkedInsId : nil,
             linkedRealEstateId: isMortgage ? linkedREId : nil,
-            linkedVehicleId: isVehicle ? linkedVehId : nil,
+            linkedVehicleId: (isVehicle || isCarLoan) ? linkedVehId : nil,
             vehicleExpenseCategory: isVehicle ? selectedVehicleExpenseCategory : nil,
             note: note.trimmingCharacters(in: .whitespaces)
         )
@@ -436,6 +467,33 @@ struct AddExpenseView: View {
         )
         if existingId != nil { financeStore.update(realEstate) } else { financeStore.add(realEstate) }
         return reId
+    }
+
+    /// 同步車貸到理財模式的汽車定期支出
+    private func syncCarLoanToVehicle(vehicleId: UUID, expenseId: UUID, amount: Double) {
+        guard var vehicle = financeStore.vehicles.first(where: { $0.id == vehicleId }) else { return }
+
+        let newEntry = VehicleFixedExpense(
+            id: UUID(),
+            category: .carLoan,
+            amount: amount,
+            period: selectedRecurrence == .yearly ? .yearly : .monthly,
+            linkedExpenseId: expenseId
+        )
+
+        if let existingIdx = vehicle.fixedExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+            vehicle.fixedExpenses[existingIdx] = VehicleFixedExpense(
+                id: vehicle.fixedExpenses[existingIdx].id,
+                category: .carLoan,
+                amount: amount,
+                period: selectedRecurrence == .yearly ? .yearly : .monthly,
+                linkedExpenseId: expenseId
+            )
+        } else {
+            vehicle.fixedExpenses.append(newEntry)
+        }
+
+        financeStore.update(vehicle)
     }
 
     // MARK: - 載入編輯資料

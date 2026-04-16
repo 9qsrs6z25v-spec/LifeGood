@@ -2,6 +2,7 @@ import SwiftUI
 
 struct VariableExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
     @State private var showingAddSheet = false
     @State private var selectedCategory: VariableCategory?
     @State private var expenseToEdit: Expense?
@@ -138,12 +139,25 @@ struct VariableExpenseView: View {
                             }
                     }
                     .onDelete { offsets in
-                        store.delete(at: offsets, from: expenses)
+                        deleteWithSync(offsets: offsets, from: expenses)
                     }
                 }
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    /// 刪除變動支出時同步刪除理財連結項目
+    private func deleteWithSync(offsets: IndexSet, from list: [Expense]) {
+        for index in offsets {
+            let expense = list[index]
+            if let vehicleId = expense.linkedVehicleId,
+               var vehicle = financeStore.vehicles.first(where: { $0.id == vehicleId }) {
+                vehicle.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
+                financeStore.update(vehicle)
+            }
+        }
+        store.delete(at: offsets, from: list)
     }
 
     // MARK: - 依日期分組

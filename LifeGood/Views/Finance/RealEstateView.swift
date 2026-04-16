@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RealEstateView: View {
     @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @State private var showAdd = false
     @State private var editingItem: RealEstate?
 
@@ -125,6 +126,9 @@ struct RealEstateView: View {
         .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
         .contextMenu {
             Button(role: .destructive) {
+                if let linkedId = item.linkedExpenseId {
+                    expenseStore.expenses.removeAll { $0.id == linkedId }
+                }
                 store.deleteRealEstate(item)
             } label: {
                 Label("刪除", systemImage: "trash")
