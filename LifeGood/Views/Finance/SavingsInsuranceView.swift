@@ -53,16 +53,55 @@ struct SavingsInsuranceView: View {
     }
 
     private var summaryHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("保單總價值")
+        VStack(spacing: 10) {
+            HStack {
+                Text("保單總覽")
                     .font(.subheadline).foregroundStyle(.secondary)
-                Text(fmtTWD(store.totalInsuranceValue))
-                    .font(.title2.bold())
+                Spacer()
+                Text("\(store.insurances.count) 張保單")
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
-            Spacer()
-            Text("\(store.insurances.count) 張保單")
-                .font(.subheadline).foregroundStyle(.secondary)
+
+            // 依幣別分組顯示
+            let grouped = Dictionary(grouping: store.insurances, by: { $0.currency })
+            ForEach(Currency.allCases, id: \.self) { currency in
+                if let items = grouped[currency], !items.isEmpty {
+                    let totalCurrent = items.reduce(0) { $0 + $1.currentValue }
+                    let totalPaid = items.reduce(0) { $0 + $1.totalPaid }
+                    let gain = totalCurrent - totalPaid
+                    let gainRate = totalPaid > 0 ? gain / totalPaid * 100 : 0
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("目前價值 (\(currency.rawValue))")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(fmt(totalCurrent, currency: currency))
+                                .font(.title3.bold())
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("已繳總額")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(fmt(totalPaid, currency: currency))
+                                .font(.subheadline)
+                        }
+                    }
+
+                    HStack {
+                        let isPositive = gain >= 0
+                        Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
+                            .font(.caption).foregroundStyle(isPositive ? .green : .red)
+                        Text((isPositive ? "+" : "") + fmt(gain, currency: currency))
+                            .font(.caption.bold()).foregroundStyle(isPositive ? .green : .red)
+                        Text(String(format: "(%@%.2f%%)", isPositive ? "+" : "", gainRate))
+                            .font(.caption2).foregroundStyle(isPositive ? .green : .red)
+                        Spacer()
+                    }
+                    .padding(8)
+                    .background((gain >= 0 ? Color.green : Color.red).opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+            }
         }
         .padding()
         .background(Color(.systemBackground))
