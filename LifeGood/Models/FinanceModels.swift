@@ -171,6 +171,57 @@ struct Stock: Identifiable, Codable {
     }
 }
 
+// MARK: - 房地產貸款項目
+
+struct RealEstateMortgageItem: Identifiable, Codable {
+    let id: UUID
+    var title: String
+    var amount: Double          // 每期繳款金額
+    var totalPeriods: Int       // 總期數
+    var linkedExpenseId: UUID?  // 連結記帳固定支出
+
+    init(
+        id: UUID = UUID(),
+        title: String = "",
+        amount: Double = 0,
+        totalPeriods: Int = 240,
+        linkedExpenseId: UUID? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.amount = amount
+        self.totalPeriods = totalPeriods
+        self.linkedExpenseId = linkedExpenseId
+    }
+
+    /// 貸款總額
+    var totalAmount: Double { amount * Double(totalPeriods) }
+}
+
+// MARK: - 房地產已支出金額項目
+
+struct RealEstatePaidItem: Identifiable, Codable {
+    let id: UUID
+    var title: String           // 例如 "頭期款", "簽約金"
+    var amount: Double
+    var date: Date
+    var linkedExpenseId: UUID?
+
+    init(
+        id: UUID = UUID(),
+        title: String = "",
+        amount: Double = 0,
+        date: Date = Date(),
+        linkedExpenseId: UUID? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.amount = amount
+        self.date = date
+        self.linkedExpenseId = linkedExpenseId
+    }
+}
+
 // MARK: - 房地產變動支出
 
 enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
@@ -227,9 +278,10 @@ struct RealEstate: Identifiable, Codable {
     var purchasePrice: Double
     var currentValue: Double
     var monthlyRental: Double
-    var monthlyMortgage: Double
+    var mortgageItems: [RealEstateMortgageItem]       // 貸款項目（多筆，各有期數）
+    var paidItems: [RealEstatePaidItem]               // 已支出房屋金額（頭期款等）
     var variableExpenses: [RealEstateVariableExpense]  // 變動支出（裝修/維修/家具等）
-    var linkedExpenseId: UUID?     // 連結記帳模式的固定支出（房貸）ID
+    var linkedExpenseId: UUID?     // 向下相容（舊版單筆房貸連結）
     var note: String
 
     init(
@@ -240,7 +292,8 @@ struct RealEstate: Identifiable, Codable {
         purchasePrice: Double = 0,
         currentValue: Double = 0,
         monthlyRental: Double = 0,
-        monthlyMortgage: Double = 0,
+        mortgageItems: [RealEstateMortgageItem] = [],
+        paidItems: [RealEstatePaidItem] = [],
         variableExpenses: [RealEstateVariableExpense] = [],
         linkedExpenseId: UUID? = nil,
         note: String = ""
@@ -252,12 +305,19 @@ struct RealEstate: Identifiable, Codable {
         self.purchasePrice = purchasePrice
         self.currentValue = currentValue
         self.monthlyRental = monthlyRental
-        self.monthlyMortgage = monthlyMortgage
+        self.mortgageItems = mortgageItems
+        self.paidItems = paidItems
         self.variableExpenses = variableExpenses
         self.linkedExpenseId = linkedExpenseId
         self.note = note
     }
 
+    /// 每月房貸合計
+    var monthlyMortgage: Double { mortgageItems.reduce(0) { $0 + $1.amount } }
+    /// 貸款總額
+    var totalMortgageAmount: Double { mortgageItems.reduce(0) { $0 + $1.totalAmount } }
+    /// 已支出房屋金額合計
+    var totalPaid: Double { paidItems.reduce(0) { $0 + $1.amount } }
     /// 房產增值
     var appreciation: Double { currentValue - purchasePrice }
     /// 增值率

@@ -23,13 +23,27 @@ struct RealEstateView: View {
                                 .onTapGesture { editingItem = item }
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
-                                        if let linkedId = item.linkedExpenseId {
-                                            expenseStore.expenses.removeAll { $0.id == linkedId }
+                                        // 刪除連結的貸款固定支出
+                                        for m in item.mortgageItems {
+                                            if let linkedId = m.linkedExpenseId {
+                                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                                            }
                                         }
+                                        // 刪除連結的已支出項目
+                                        for p in item.paidItems {
+                                            if let linkedId = p.linkedExpenseId {
+                                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                                            }
+                                        }
+                                        // 刪除連結的變動支出
                                         for ve in item.variableExpenses {
                                             if let linkedId = ve.linkedExpenseId {
                                                 expenseStore.expenses.removeAll { $0.id == linkedId }
                                             }
+                                        }
+                                        // 舊版相容
+                                        if let linkedId = item.linkedExpenseId {
+                                            expenseStore.expenses.removeAll { $0.id == linkedId }
                                         }
                                         store.deleteRealEstate(item)
                                     } label: {
@@ -116,6 +130,47 @@ struct RealEstateView: View {
             }
 
             Divider()
+
+            // 貸款明細
+            if !item.mortgageItems.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(item.mortgageItems) { m in
+                        HStack {
+                            Text(m.title.isEmpty ? "房貸" : m.title)
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.blue.opacity(0.1))
+                                .foregroundStyle(.blue)
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                            Text("\(m.totalPeriods)期").font(.caption2).foregroundStyle(.tertiary)
+                            Spacer()
+                            Text(fmt(m.amount) + "/月").font(.caption)
+                        }
+                    }
+                }
+            }
+
+            // 已支出明細
+            if !item.paidItems.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(item.paidItems.suffix(2)) { p in
+                        HStack {
+                            Text(p.title.isEmpty ? "已付款" : p.title)
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.purple.opacity(0.1))
+                                .foregroundStyle(.purple)
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                            Spacer()
+                            Text(fmt(p.amount)).font(.caption)
+                        }
+                    }
+                    if item.paidItems.count > 2 {
+                        Text("還有 \(item.paidItems.count - 2) 筆...")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+            }
 
             // 變動支出明細
             if !item.variableExpenses.isEmpty {
