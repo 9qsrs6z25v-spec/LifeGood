@@ -765,6 +765,13 @@ struct AddExpenseView: View {
     /// 同步建立或更新理財模式的房地產
     private func syncRealEstate(mortgageAmount: Double, existingId: UUID?, expenseId: UUID) -> UUID {
         let reId = existingId ?? UUID()
+        let mortgageItem = RealEstateMortgageItem(
+            title: title.trimmingCharacters(in: .whitespaces) + " - 房貸",
+            amount: mortgageAmount,
+            totalPeriods: 240,
+            startDate: rePurchaseDate,
+            linkedExpenseId: expenseId
+        )
         let realEstate = RealEstate(
             id: reId,
             name: title.trimmingCharacters(in: .whitespaces),
@@ -773,8 +780,7 @@ struct AddExpenseView: View {
             purchasePrice: Double(rePurchasePriceText) ?? 0,
             currentValue: Double(reCurrentValueText) ?? 0,
             monthlyRental: Double(reMonthlyRentalText) ?? 0,
-            monthlyMortgage: mortgageAmount,
-            linkedExpenseId: expenseId,
+            mortgageItems: [mortgageItem],
             note: note.trimmingCharacters(in: .whitespaces)
         )
         if existingId != nil { financeStore.update(realEstate) } else { financeStore.add(realEstate) }
