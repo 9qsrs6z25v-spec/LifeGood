@@ -73,6 +73,22 @@ struct AddExpenseView: View {
     @State private var selectedRealEstateLinkId: UUID?
     @State private var selectedRealEstateExpenseCategory: RealEstateExpenseCategory = .renovation
 
+    // MARK: - 固定支出關聯資產
+
+    enum FixedAssetLinkType: String, CaseIterable, Identifiable {
+        case none = "無"
+        case vehicle = "汽車"
+        case realEstate = "房地產"
+        case insurance = "儲蓄險"
+
+        var id: String { rawValue }
+    }
+
+    @State private var selectedFixedAssetLink: FixedAssetLinkType = .none
+    @State private var fixedLinkVehicleId: UUID?
+    @State private var fixedLinkRealEstateId: UUID?
+    @State private var fixedLinkInsuranceId: UUID?
+
     // MARK: - 條件判斷
 
     private var isEditing: Bool { editingExpense != nil }
@@ -81,6 +97,7 @@ struct AddExpenseView: View {
     private var isLoan: Bool { expenseType == .fixed && selectedFixedCategory == .loan }
     private var isMortgage: Bool { isLoan && selectedLoanSubCategory == .mortgage }
     private var isCarLoan: Bool { isLoan && selectedLoanSubCategory == .car }
+    private var showFixedAssetLink: Bool { expenseType == .fixed && !isInsurance && !isLoan }
 
     // MARK: - 儲蓄險自動計算
 
@@ -150,6 +167,14 @@ struct AddExpenseView: View {
                     mortgageRealEstateSection
                 } else if isCarLoan {
                     carLoanVehicleSection
+                }
+
+                // 固定支出：一般類別的關聯資產
+                if showFixedAssetLink {
+                    fixedAssetLinkSection
+                    if selectedFixedAssetLink == .vehicle { fixedVehicleLinkSection }
+                    if selectedFixedAssetLink == .realEstate { fixedRealEstateLinkSection }
+                    if selectedFixedAssetLink == .insurance { fixedInsuranceLinkSection }
                 }
 
                 Section("備註") {
@@ -502,6 +527,71 @@ struct AddExpenseView: View {
         }
     }
 
+    // MARK: - 固定支出關聯資產
+
+    private var fixedAssetLinkSection: some View {
+        Section {
+            Picker("關聯資產", selection: $selectedFixedAssetLink) {
+                ForEach(FixedAssetLinkType.allCases) { type in
+                    Text(type.rawValue).tag(type)
+                }
+            }
+            .pickerStyle(.menu)
+        } header: {
+            Text("關聯理財資產（選填）")
+        } footer: {
+            Text("選擇後可將此筆固定支出連結到理財模式的對應項目。")
+        }
+    }
+
+    private var fixedVehicleLinkSection: some View {
+        Section("汽車（連動理財模式）") {
+            if financeStore.vehicles.isEmpty {
+                Text("尚無車輛，請先在理財模式新增汽車")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                Picker("選擇車輛", selection: $fixedLinkVehicleId) {
+                    Text("請選擇").tag(nil as UUID?)
+                    ForEach(financeStore.vehicles) { v in
+                        Text("\(v.name)\(!v.brand.isEmpty ? " (\(v.brand))" : "")").tag(v.id as UUID?)
+                    }
+                }
+            }
+        }
+    }
+
+    private var fixedRealEstateLinkSection: some View {
+        Section("房地產（連動理財模式）") {
+            if financeStore.realEstates.isEmpty {
+                Text("尚無房地產，請先在理財模式新增")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                Picker("選擇物件", selection: $fixedLinkRealEstateId) {
+                    Text("請選擇").tag(nil as UUID?)
+                    ForEach(financeStore.realEstates) { re in
+                        Text("\(re.name)\(!re.address.isEmpty ? " (\(re.address))" : "")").tag(re.id as UUID?)
+                    }
+                }
+            }
+        }
+    }
+
+    private var fixedInsuranceLinkSection: some View {
+        Section("儲蓄險（連動理財模式）") {
+            if financeStore.insurances.isEmpty {
+                Text("尚無儲蓄險，請先在理財模式新增")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                Picker("選擇保單", selection: $fixedLinkInsuranceId) {
+                    Text("請選擇").tag(nil as UUID?)
+                    ForEach(financeStore.insurances) { ins in
+                        Text("\(ins.name)\(!ins.company.isEmpty ? " (\(ins.company))" : "")").tag(ins.id as UUID?)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - 儲存
 
     private func saveExpense() {
@@ -537,6 +627,23 @@ struct AddExpenseView: View {
         if isCarLoan, let vehicleId = selectedVehicleId {
             linkedVehId = vehicleId
             syncCarLoanToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+        }
+
+        // 固定支出一般類別關聯資產
+        if showFixedAssetLink {
+            switch selectedFixedAssetLink {
+            case .vehicle:
+                if let vehicleId = fixedLinkVehicleId {
+                    linkedVehId = vehicleId
+                    syncFixedToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+                }
+            case .realEstate:
+                linkedREId = fixedLinkRealEstateId
+            case .insurance:
+                linkedInsId = fixedLinkInsuranceId
+            case .none:
+                break
+            }
         }
 
         // 變動支出關聯資產連動
@@ -701,6 +808,31 @@ struct AddExpenseView: View {
         financeStore.update(vehicle)
     }
 
+    /// 同步固定支出到汽車定期支出（一般類別關聯用，category 依 fixedCategory 決定）
+    private func syncFixedToVehicle(vehicleId: UUID, expenseId: UUID, amount: Double) {
+        guard var vehicle = financeStore.vehicles.first(where: { $0.id == vehicleId }) else { return }
+
+        let category: VehicleFixedCategory
+        switch selectedFixedCategory {
+        case .subscription: category = .subscription
+        default: category = .tax  // 房租/水電/管理費等歸為稅費雜支
+        }
+
+        let period: VehicleExpensePeriod = selectedRecurrence == .yearly ? .yearly : .monthly
+
+        if let idx = vehicle.fixedExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+            vehicle.fixedExpenses[idx] = VehicleFixedExpense(
+                id: vehicle.fixedExpenses[idx].id,
+                category: category, amount: amount, period: period, linkedExpenseId: expenseId
+            )
+        } else {
+            vehicle.fixedExpenses.append(VehicleFixedExpense(
+                id: UUID(), category: category, amount: amount, period: period, linkedExpenseId: expenseId
+            ))
+        }
+        financeStore.update(vehicle)
+    }
+
     // MARK: - 載入編輯資料
 
     private func loadEditing() {
@@ -757,6 +889,20 @@ struct AddExpenseView: View {
             } else if expense.linkedRealEstateId != nil {
                 selectedAssetLink = .realEstate
                 selectedRealEstateLinkId = expense.linkedRealEstateId
+            }
+        }
+
+        // 載入固定支出（非保險/貸款）的資產連結
+        if expense.expenseType == .fixed && expense.fixedCategory != .insurance && expense.fixedCategory != .loan {
+            if expense.linkedVehicleId != nil {
+                selectedFixedAssetLink = .vehicle
+                fixedLinkVehicleId = expense.linkedVehicleId
+            } else if expense.linkedRealEstateId != nil {
+                selectedFixedAssetLink = .realEstate
+                fixedLinkRealEstateId = expense.linkedRealEstateId
+            } else if expense.linkedInsuranceId != nil {
+                selectedFixedAssetLink = .insurance
+                fixedLinkInsuranceId = expense.linkedInsuranceId
             }
         }
     }
