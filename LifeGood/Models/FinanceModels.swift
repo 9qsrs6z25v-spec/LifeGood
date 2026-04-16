@@ -388,6 +388,23 @@ struct RealEstate: Identifiable, Codable {
         case monthlyMortgage // 舊版欄位，僅用於解碼
     }
 
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(address, forKey: .address)
+        try c.encode(purchaseDate, forKey: .purchaseDate)
+        try c.encode(purchasePrice, forKey: .purchasePrice)
+        try c.encode(currentValue, forKey: .currentValue)
+        try c.encode(monthlyRental, forKey: .monthlyRental)
+        try c.encode(mortgageItems, forKey: .mortgageItems)
+        try c.encode(paidItems, forKey: .paidItems)
+        try c.encode(variableExpenses, forKey: .variableExpenses)
+        try c.encodeIfPresent(linkedExpenseId, forKey: .linkedExpenseId)
+        try c.encode(note, forKey: .note)
+        // monthlyMortgage 不編碼（計算屬性）
+    }
+
     /// 每月房貸合計
     var monthlyMortgage: Double { mortgageItems.reduce(0) { $0 + $1.amount } }
     /// 貸款總額
