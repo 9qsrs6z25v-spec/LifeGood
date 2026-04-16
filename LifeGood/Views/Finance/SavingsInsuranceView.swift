@@ -14,17 +14,28 @@ struct SavingsInsuranceView: View {
                 if store.insurances.isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(store.insurances) { item in
-                                insuranceCard(item)
-                                    .onTapGesture { editingItem = item }
-                            }
+                    List {
+                        ForEach(store.insurances) { item in
+                            insuranceCard(item)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .onTapGesture { editingItem = item }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        if let linkedId = item.linkedExpenseId {
+                                            expenseStore.expenses.removeAll { $0.id == linkedId }
+                                        }
+                                        store.deleteInsurance(item)
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
                         }
-                        .padding(.horizontal)
-                        .padding(.top, 16)
-                        .padding(.bottom, 20)
                     }
+                    .listStyle(.plain)
+                    .background(Color(.systemGroupedBackground))
+                    .scrollContentBackground(.hidden)
                 }
             }
             .background(Color(.systemGroupedBackground))

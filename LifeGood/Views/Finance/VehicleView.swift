@@ -14,17 +14,35 @@ struct VehicleView: View {
                 if store.vehicles.isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(store.vehicles) { item in
-                                vehicleCard(item)
-                                    .onTapGesture { editingItem = item }
-                            }
+                    List {
+                        ForEach(store.vehicles) { item in
+                            vehicleCard(item)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .onTapGesture { editingItem = item }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        for fe in item.fixedExpenses {
+                                            if let linkedId = fe.linkedExpenseId {
+                                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                                            }
+                                        }
+                                        for ve in item.variableExpenses {
+                                            if let linkedId = ve.linkedExpenseId {
+                                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                                            }
+                                        }
+                                        store.deleteVehicle(item)
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
                         }
-                        .padding(.horizontal)
-                        .padding(.top, 16)
-                        .padding(.bottom, 20)
                     }
+                    .listStyle(.plain)
+                    .background(Color(.systemGroupedBackground))
+                    .scrollContentBackground(.hidden)
                 }
             }
             .background(Color(.systemGroupedBackground))

@@ -13,17 +13,25 @@ struct StockView: View {
                 if store.stocks.isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(store.stocks) { item in
-                                stockCard(item)
-                                    .onTapGesture { editingItem = item }
-                            }
+                    List {
+                        ForEach(store.stocks) { item in
+                            stockCard(item)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .onTapGesture { editingItem = item }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        store.deleteStock(item)
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
                         }
-                        .padding(.horizontal)
-                        .padding(.top, 16)
-                        .padding(.bottom, 20)
                     }
+                    .listStyle(.plain)
+                    .background(Color(.systemGroupedBackground))
+                    .scrollContentBackground(.hidden)
                 }
             }
             .background(Color(.systemGroupedBackground))
