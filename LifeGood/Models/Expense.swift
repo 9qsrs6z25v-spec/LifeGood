@@ -161,6 +161,33 @@ struct Expense: Identifiable, Codable {
         self.note = note
     }
 
+    // MARK: - 向下相容解碼
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        amount = try c.decode(Double.self, forKey: .amount)
+        date = try c.decode(Date.self, forKey: .date)
+        expenseType = try c.decode(ExpenseType.self, forKey: .expenseType)
+        variableCategory = try? c.decode(VariableCategory.self, forKey: .variableCategory)
+        fixedCategory = try? c.decode(FixedCategory.self, forKey: .fixedCategory)
+        recurrence = try? c.decode(Recurrence.self, forKey: .recurrence)
+        insuranceSubCategory = try? c.decode(InsuranceSubCategory.self, forKey: .insuranceSubCategory)
+        loanSubCategory = try? c.decode(LoanSubCategory.self, forKey: .loanSubCategory)
+        linkedInsuranceId = try? c.decode(UUID.self, forKey: .linkedInsuranceId)
+        linkedStockId = try? c.decode(UUID.self, forKey: .linkedStockId)
+        linkedRealEstateId = try? c.decode(UUID.self, forKey: .linkedRealEstateId)
+        linkedVehicleId = try? c.decode(UUID.self, forKey: .linkedVehicleId)
+        vehicleExpenseCategory = try? c.decode(VehicleVariableCategory.self, forKey: .vehicleExpenseCategory)
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
+        case insuranceSubCategory, loanSubCategory
+        case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
+        case vehicleExpenseCategory, note
+    }
+
     var categoryName: String {
         switch expenseType {
         case .variable:

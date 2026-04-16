@@ -61,6 +61,28 @@ struct SavingsInsurance: Identifiable, Codable {
         self.note = note
     }
 
+    // MARK: - 向下相容解碼
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        company = (try? c.decode(String.self, forKey: .company)) ?? ""
+        currency = (try? c.decode(Currency.self, forKey: .currency)) ?? .twd
+        premiumAmount = try c.decode(Double.self, forKey: .premiumAmount)
+        paymentPeriod = try c.decode(Recurrence.self, forKey: .paymentPeriod)
+        annualRate = (try? c.decode(Double.self, forKey: .annualRate)) ?? 0
+        startDate = try c.decode(Date.self, forKey: .startDate)
+        maturityDate = try c.decode(Date.self, forKey: .maturityDate)
+        expectedReturn = (try? c.decode(Double.self, forKey: .expectedReturn)) ?? 0
+        currentValue = (try? c.decode(Double.self, forKey: .currentValue)) ?? 0
+        linkedExpenseId = try? c.decode(UUID.self, forKey: .linkedExpenseId)
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, name, company, currency, premiumAmount, paymentPeriod, annualRate
+        case startDate, maturityDate, expectedReturn, currentValue, linkedExpenseId, note
+    }
+
     /// 每年繳費期數
     private var periodsPerYear: Double {
         switch paymentPeriod {
@@ -197,6 +219,19 @@ struct RealEstateMortgageItem: Identifiable, Codable {
         self.linkedExpenseId = linkedExpenseId
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        amount = (try? c.decode(Double.self, forKey: .amount)) ?? 0
+        totalPeriods = (try? c.decode(Int.self, forKey: .totalPeriods)) ?? 240
+        startDate = (try? c.decode(Date.self, forKey: .startDate)) ?? Date()
+        linkedExpenseId = try? c.decode(UUID.self, forKey: .linkedExpenseId)
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, title, amount, totalPeriods, startDate, linkedExpenseId
+    }
+
     /// 貸款總額
     var totalAmount: Double { amount * Double(totalPeriods) }
 
@@ -322,6 +357,35 @@ struct RealEstate: Identifiable, Codable {
         self.variableExpenses = variableExpenses
         self.linkedExpenseId = linkedExpenseId
         self.note = note
+    }
+
+    // MARK: - 向下相容解碼
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        address = (try? c.decode(String.self, forKey: .address)) ?? ""
+        purchaseDate = (try? c.decode(Date.self, forKey: .purchaseDate)) ?? Date()
+        purchasePrice = (try? c.decode(Double.self, forKey: .purchasePrice)) ?? 0
+        currentValue = (try? c.decode(Double.self, forKey: .currentValue)) ?? 0
+        monthlyRental = (try? c.decode(Double.self, forKey: .monthlyRental)) ?? 0
+        mortgageItems = (try? c.decode([RealEstateMortgageItem].self, forKey: .mortgageItems)) ?? []
+        paidItems = (try? c.decode([RealEstatePaidItem].self, forKey: .paidItems)) ?? []
+        variableExpenses = (try? c.decode([RealEstateVariableExpense].self, forKey: .variableExpenses)) ?? []
+        linkedExpenseId = try? c.decode(UUID.self, forKey: .linkedExpenseId)
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+
+        // 向下相容：舊版有 monthlyMortgage 欄位，轉為 mortgageItems
+        if mortgageItems.isEmpty,
+           let oldMortgage = try? c.decode(Double.self, forKey: .monthlyMortgage),
+           oldMortgage > 0 {
+            mortgageItems = [RealEstateMortgageItem(title: "房貸", amount: oldMortgage)]
+        }
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, name, address, purchaseDate, purchasePrice, currentValue, monthlyRental
+        case mortgageItems, paidItems, variableExpenses, linkedExpenseId, note
+        case monthlyMortgage // 舊版欄位，僅用於解碼
     }
 
     /// 每月房貸合計
@@ -516,6 +580,25 @@ struct Vehicle: Identifiable, Codable {
         self.fixedExpenses = fixedExpenses
         self.variableExpenses = variableExpenses
         self.note = note
+    }
+
+    // MARK: - 向下相容解碼
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        brand = (try? c.decode(String.self, forKey: .brand)) ?? ""
+        powerType = (try? c.decode(VehiclePowerType.self, forKey: .powerType)) ?? .gasoline
+        purchaseDate = (try? c.decode(Date.self, forKey: .purchaseDate)) ?? Date()
+        purchasePrice = (try? c.decode(Double.self, forKey: .purchasePrice)) ?? 0
+        currentValue = (try? c.decode(Double.self, forKey: .currentValue)) ?? 0
+        fixedExpenses = (try? c.decode([VehicleFixedExpense].self, forKey: .fixedExpenses)) ?? []
+        variableExpenses = (try? c.decode([VehicleVariableExpense].self, forKey: .variableExpenses)) ?? []
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, name, brand, powerType, purchaseDate, purchasePrice, currentValue
+        case fixedExpenses, variableExpenses, note
     }
 
     /// 每月定期支出合計

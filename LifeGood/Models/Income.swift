@@ -71,6 +71,22 @@ struct Income: Identifiable, Codable {
         self.note = note
     }
 
+    // MARK: - 向下相容解碼
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        amount = try c.decode(Double.self, forKey: .amount)
+        date = try c.decode(Date.self, forKey: .date)
+        category = (try? c.decode(IncomeCategory.self, forKey: .category)) ?? .salary
+        period = (try? c.decode(IncomePeriod.self, forKey: .period)) ?? .monthly
+        isFixedSalary = (try? c.decode(Bool.self, forKey: .isFixedSalary)) ?? false
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, title, amount, date, category, period, isFixedSalary, note
+    }
+
     /// 換算月收入
     var monthlyAmount: Double {
         if category == .salary && !isFixedSalary {
