@@ -171,6 +171,52 @@ struct Stock: Identifiable, Codable {
     }
 }
 
+// MARK: - 房地產變動支出
+
+enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
+    case renovation = "裝修"
+    case repair = "維修"
+    case furniture = "家具"
+    case cleaning = "清潔"
+    case tax = "稅費"
+    case other = "其他"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .renovation: return "paintbrush"
+        case .repair: return "wrench"
+        case .furniture: return "sofa"
+        case .cleaning: return "sparkles"
+        case .tax: return "doc.text"
+        case .other: return "ellipsis.circle"
+        }
+    }
+}
+
+struct RealEstateVariableExpense: Identifiable, Codable {
+    let id: UUID
+    var category: RealEstateExpenseCategory
+    var amount: Double
+    var date: Date
+    var linkedExpenseId: UUID?
+
+    init(
+        id: UUID = UUID(),
+        category: RealEstateExpenseCategory = .renovation,
+        amount: Double = 0,
+        date: Date = Date(),
+        linkedExpenseId: UUID? = nil
+    ) {
+        self.id = id
+        self.category = category
+        self.amount = amount
+        self.date = date
+        self.linkedExpenseId = linkedExpenseId
+    }
+}
+
 // MARK: - 房地產
 
 struct RealEstate: Identifiable, Codable {
@@ -182,6 +228,7 @@ struct RealEstate: Identifiable, Codable {
     var currentValue: Double
     var monthlyRental: Double
     var monthlyMortgage: Double
+    var variableExpenses: [RealEstateVariableExpense]  // 變動支出（裝修/維修/家具等）
     var linkedExpenseId: UUID?     // 連結記帳模式的固定支出（房貸）ID
     var note: String
 
@@ -194,6 +241,7 @@ struct RealEstate: Identifiable, Codable {
         currentValue: Double = 0,
         monthlyRental: Double = 0,
         monthlyMortgage: Double = 0,
+        variableExpenses: [RealEstateVariableExpense] = [],
         linkedExpenseId: UUID? = nil,
         note: String = ""
     ) {
@@ -205,6 +253,7 @@ struct RealEstate: Identifiable, Codable {
         self.currentValue = currentValue
         self.monthlyRental = monthlyRental
         self.monthlyMortgage = monthlyMortgage
+        self.variableExpenses = variableExpenses
         self.linkedExpenseId = linkedExpenseId
         self.note = note
     }
@@ -216,6 +265,8 @@ struct RealEstate: Identifiable, Codable {
         guard purchasePrice > 0 else { return 0 }
         return appreciation / purchasePrice * 100
     }
+    /// 變動支出合計
+    var variableTotal: Double { variableExpenses.reduce(0) { $0 + $1.amount } }
     /// 每月淨現金流（租金 - 房貸）
     var monthlyCashFlow: Double { monthlyRental - monthlyMortgage }
     /// 年租金報酬率

@@ -151,10 +151,17 @@ struct VariableExpenseView: View {
     private func deleteWithSync(offsets: IndexSet, from list: [Expense]) {
         for index in offsets {
             let expense = list[index]
+            // 同步刪除汽車變動支出
             if let vehicleId = expense.linkedVehicleId,
                var vehicle = financeStore.vehicles.first(where: { $0.id == vehicleId }) {
                 vehicle.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
                 financeStore.update(vehicle)
+            }
+            // 同步刪除房地產變動支出
+            if let reId = expense.linkedRealEstateId,
+               var re = financeStore.realEstates.first(where: { $0.id == reId }) {
+                re.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
+                financeStore.update(re)
             }
         }
         store.delete(at: offsets, from: list)

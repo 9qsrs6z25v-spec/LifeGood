@@ -71,6 +71,7 @@ struct AddExpenseView: View {
     // 儲蓄險/房地產選擇器
     @State private var selectedInsuranceLinkId: UUID?
     @State private var selectedRealEstateLinkId: UUID?
+    @State private var selectedRealEstateExpenseCategory: RealEstateExpenseCategory = .renovation
 
     // MARK: - 條件判斷
 
@@ -306,11 +307,17 @@ struct AddExpenseView: View {
                         Text("\(re.name)\(!re.address.isEmpty ? " (\(re.address))" : "")").tag(re.id as UUID?)
                     }
                 }
+
+                Picker("支出類別", selection: $selectedRealEstateExpenseCategory) {
+                    ForEach(RealEstateExpenseCategory.allCases) { cat in
+                        Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                    }
+                }
             }
         } header: {
             Text("房地產（連動理財模式）")
         } footer: {
-            Text("將此筆支出關聯到已有的房地產物件（如裝修、管理費等）。")
+            Text("儲存後將自動在理財模式的房地產變動支出中新增對應紀錄。")
         }
     }
 
@@ -545,7 +552,10 @@ struct AddExpenseView: View {
             case .insurance:
                 linkedInsId = selectedInsuranceLinkId
             case .realEstate:
-                linkedREId = selectedRealEstateLinkId
+                if let reId = selectedRealEstateLinkId {
+                    linkedREId = reId
+                    syncRealEstateVariableExpense(realEstateId: reId, expenseId: expenseId, amount: amount)
+                }
             case .none:
                 break
             }
@@ -594,6 +604,33 @@ struct AddExpenseView: View {
 
         if existingId != nil { financeStore.update(stock) } else { financeStore.add(stock) }
         return stockId
+    }
+
+    /// 同步房地產變動支出
+    private func syncRealEstateVariableExpense(realEstateId: UUID, expenseId: UUID, amount: Double) {
+        guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
+
+        let newEntry = RealEstateVariableExpense(
+            id: UUID(),
+            category: selectedRealEstateExpenseCategory,
+            amount: amount,
+            date: date,
+            linkedExpenseId: expenseId
+        )
+
+        if let idx = re.variableExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+            re.variableExpenses[idx] = RealEstateVariableExpense(
+                id: re.variableExpenses[idx].id,
+                category: selectedRealEstateExpenseCategory,
+                amount: amount,
+                date: date,
+                linkedExpenseId: expenseId
+            )
+        } else {
+            re.variableExpenses.append(newEntry)
+        }
+
+        financeStore.update(re)
     }
 
     /// 同步建立或更新理財模式的儲蓄險

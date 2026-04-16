@@ -26,6 +26,11 @@ struct RealEstateView: View {
                                         if let linkedId = item.linkedExpenseId {
                                             expenseStore.expenses.removeAll { $0.id == linkedId }
                                         }
+                                        for ve in item.variableExpenses {
+                                            if let linkedId = ve.linkedExpenseId {
+                                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                                            }
+                                        }
                                         store.deleteRealEstate(item)
                                     } label: {
                                         Label("刪除", systemImage: "trash")
@@ -112,6 +117,28 @@ struct RealEstateView: View {
 
             Divider()
 
+            // 變動支出明細
+            if !item.variableExpenses.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(item.variableExpenses.suffix(3)) { ve in
+                        HStack {
+                            Text(ve.category.rawValue)
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.orange.opacity(0.1))
+                                .foregroundStyle(.orange)
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                            Spacer()
+                            Text(fmt(ve.amount)).font(.caption)
+                        }
+                    }
+                    if item.variableExpenses.count > 3 {
+                        Text("還有 \(item.variableExpenses.count - 3) 筆...")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
             HStack {
                 if item.monthlyRental > 0 {
                     Label("月租 " + fmt(item.monthlyRental), systemImage: "dollarsign.circle")
@@ -120,7 +147,9 @@ struct RealEstateView: View {
                     Label("房貸 " + fmt(item.monthlyMortgage), systemImage: "creditcard")
                 }
                 Spacer()
-                if item.monthlyRental > 0 {
+                if item.variableTotal > 0 {
+                    Text("支出 " + fmt(item.variableTotal)).foregroundStyle(.orange)
+                } else if item.monthlyRental > 0 {
                     Text(String(format: "報酬率 %.1f%%", item.rentalYield))
                         .foregroundStyle(.blue)
                 }
