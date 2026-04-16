@@ -65,7 +65,7 @@ struct VehicleView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("車輛總估值")
                         .font(.subheadline).foregroundStyle(.secondary)
-                    Text(fmt(store.totalVehicleValue))
+                    Text("\(fmtWan(store.totalVehicleValue)) 萬")
                         .font(.title2.bold())
                 }
                 Spacer()
@@ -75,7 +75,7 @@ struct VehicleView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("總購入成本").font(.caption).foregroundStyle(.secondary)
-                    Text(fmt(store.vehicles.reduce(0) { $0 + $1.purchasePrice })).font(.caption.bold())
+                    Text("\(fmtWan(store.vehicles.reduce(0) { $0 + $1.purchasePrice })) 萬").font(.caption.bold())
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
@@ -126,15 +126,16 @@ struct VehicleView: View {
                             )
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
-                    Text(String(format: "持有 %.1f 年", item.yearsOwned))
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text("估值 \(fmtWan(item.currentValue)) 萬")
+                        .font(.subheadline.bold())
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(fmt(item.currentValue)).font(.subheadline.bold())
                     Text(String(format: "折舊 %.1f%%", item.depreciationRate))
                         .font(.caption.bold())
                         .foregroundStyle(.red)
+                    Text(String(format: "持有 %.1f 年", item.yearsOwned))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
 
@@ -183,7 +184,7 @@ struct VehicleView: View {
             }
 
             HStack {
-                Label("購入 " + fmt(item.purchasePrice), systemImage: "tag")
+                Label("購入 \(fmtWan(item.purchasePrice)) 萬", systemImage: "tag")
                 Spacer()
                 let totalVar = item.variableTotal
                 if item.monthlyExpense > 0 || totalVar > 0 {
@@ -209,5 +210,9 @@ struct VehicleView: View {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: v)) ?? "NT$0"
+    }
+
+    private func fmtWan(_ v: Double) -> String {
+        String(format: "%g", v / 10000)
     }
 }
