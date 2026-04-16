@@ -3,19 +3,21 @@ import SwiftUI
 
 class ExpenseStore: ObservableObject {
     @Published var expenses: [Expense] = [] {
-        didSet {
-            if !isLoading { save() }
-        }
+        didSet { if !isLoading { save() } }
+    }
+    @Published var incomes: [Income] = [] {
+        didSet { if !isLoading { save() } }
     }
 
     private let saveKey = "lifegood_expenses"
+    private let incomeKey = "lifegood_incomes"
     private var isLoading = false
 
     init() {
         load()
     }
 
-    // MARK: - CRUD
+    // MARK: - 支出 CRUD
 
     func add(_ expense: Expense) {
         expenses.append(expense)
@@ -34,6 +36,56 @@ class ExpenseStore: ObservableObject {
     func delete(at offsets: IndexSet, from list: [Expense]) {
         let idsToDelete = offsets.map { list[$0].id }
         expenses.removeAll { idsToDelete.contains($0.id) }
+    }
+
+    // MARK: - 收入 CRUD
+
+    func add(_ income: Income) { incomes.append(income) }
+
+    func update(_ income: Income) {
+        if let i = incomes.firstIndex(where: { $0.id == income.id }) { incomes[i] = income }
+    }
+
+    func deleteIncome(_ income: Income) {
+        incomes.removeAll { $0.id == income.id }
+    }
+
+    func deleteIncome(at offsets: IndexSet, from list: [Income]) {
+        let ids = offsets.map { list[$0].id }
+        incomes.removeAll { ids.contains($0.id) }
+    }
+
+    // MARK: - 收入統計
+
+    var currentMonthIncomes: [Income] {
+        let calendar = Calendar.current
+        let now = Date()
+        return incomes.filter {
+            calendar.isDate($0.date, equalTo: now, toGranularity: .month)
+        }
+    }
+
+    /// 本月收入合計（單次收入 + 週期收入的月等效金額）
+    var currentMonthIncomeTotal: Double {
+        let calendar = Calendar.current
+        let now = Date()
+
+        // 單次收入：只計本月實際紀錄的
+        let onceTotal = incomes
+            .filter { $0.period == .once && calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
+            .reduce(0) { $0 + $1.amount }
+
+        // 週期性收入：建立日期 <= 本月的，換算為月金額
+        let recurringTotal = incomes
+            .filter { $0.period != .once && calendar.startOfDay(for: $0.date) <= calendar.startOfDay(for: now) }
+            .reduce(0) { $0 + $1.monthlyAmount }
+
+        return onceTotal + recurringTotal
+    }
+
+    /// 本月收支餘額
+    var currentMonthBalance: Double {
+        currentMonthIncomeTotal - currentMonthTotal
     }
 
     // MARK: - 篩選
@@ -305,6 +357,9 @@ class ExpenseStore: ObservableObject {
         if let data = try? JSONEncoder().encode(expenses) {
             UserDefaults.standard.set(data, forKey: saveKey)
         }
+        if let data = try? JSONEncoder().encode(incomes) {
+            UserDefaults.standard.set(data, forKey: incomeKey)
+        }
     }
 
     private func load() {
@@ -312,6 +367,10 @@ class ExpenseStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: saveKey),
            let decoded = try? JSONDecoder().decode([Expense].self, from: data) {
             expenses = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: incomeKey),
+           let decoded = try? JSONDecoder().decode([Income].self, from: data) {
+            incomes = decoded
         }
         isLoading = false
     }

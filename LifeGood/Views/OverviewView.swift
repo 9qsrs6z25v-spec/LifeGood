@@ -16,11 +16,17 @@ struct OverviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    // 本月總支出卡片
-                    monthlyTotalCard
+                    // 本月收支摘要
+                    monthlyBalanceCard
 
-                    // 支出分類摘要
+                    // 收支分類摘要
                     HStack(spacing: 12) {
+                        summaryCard(
+                            title: "收入",
+                            amount: store.currentMonthIncomeTotal,
+                            icon: "banknote.fill",
+                            color: .green
+                        )
                         summaryCard(
                             title: "變動支出",
                             amount: store.currentMonthVariableTotal,
@@ -52,24 +58,42 @@ struct OverviewView: View {
         }
     }
 
-    // MARK: - 本月總支出
+    // MARK: - 本月收支摘要
 
-    private var monthlyTotalCard: some View {
-        VStack(spacing: 8) {
-            Text("本月總支出")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.8))
+    private var monthlyBalanceCard: some View {
+        VStack(spacing: 12) {
+            let balance = store.currentMonthBalance
+            let isPositive = balance >= 0
 
-            Text(formatCurrency(store.currentMonthTotal))
-                .font(.system(size: 36, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("本月收入").font(.caption).foregroundStyle(.white.opacity(0.7))
+                    Text(formatCurrency(store.currentMonthIncomeTotal))
+                        .font(.title3.bold()).foregroundStyle(.white)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("本月支出").font(.caption).foregroundStyle(.white.opacity(0.7))
+                    Text(formatCurrency(store.currentMonthTotal))
+                        .font(.title3.bold()).foregroundStyle(.white)
+                }
+            }
+
+            Divider().background(.white.opacity(0.3))
+
+            HStack {
+                Text("收支餘額").font(.subheadline).foregroundStyle(.white.opacity(0.8))
+                Spacer()
+                Text((isPositive ? "+" : "") + formatCurrency(balance))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
 
             Text(currentMonthString())
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.6))
+                .font(.caption).foregroundStyle(.white.opacity(0.5))
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
+        .padding(20)
         .background(
             LinearGradient(
                 colors: [Color.green, Color.green.opacity(0.7)],

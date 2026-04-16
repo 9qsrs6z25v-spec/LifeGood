@@ -30,21 +30,25 @@ struct MainTabView: View {
             .tabItem { Label("總覽", systemImage: "house.fill") }
             .tag(0)
 
+        IncomeView()
+            .tabItem { Label("收入", systemImage: "banknote.fill") }
+            .tag(1)
+
         VariableExpenseView()
             .tabItem { Label("變動支出", systemImage: "arrow.up.arrow.down.circle.fill") }
-            .tag(1)
+            .tag(2)
 
         FixedExpenseView()
             .tabItem { Label("固定支出", systemImage: "pin.circle.fill") }
-            .tag(2)
+            .tag(3)
 
         ChartView()
             .tabItem { Label("圖表", systemImage: "chart.line.uptrend.xyaxis") }
-            .tag(3)
+            .tag(4)
 
         SettingsView()
             .tabItem { Label("設定", systemImage: "gearshape.fill") }
-            .tag(4)
+            .tag(5)
     }
 
     // MARK: - 理財模式

@@ -1,0 +1,199 @@
+import SwiftUI
+
+struct IncomeView: View {
+    @EnvironmentObject var store: ExpenseStore
+    @State private var showAdd = false
+    @State private var editingItem: Income?
+    @State private var selectedCategory: IncomeCategory?
+
+    private let currencyFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f
+    }()
+
+    var filteredIncomes: [Income] {
+        let sorted = store.incomes.sorted { $0.date > $1.date }
+        if let cat = selectedCategory {
+            return sorted.filter { $0.category == cat }
+        }
+        return sorted
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                summaryHeader
+                categoryFilter
+
+                if filteredIncomes.isEmpty {
+                    emptyState
+                } else {
+                    incomeList
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("收入")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAdd = true } label: {
+                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    }
+                }
+            }
+            .sheet(isPresented: $showAdd) { AddIncomeView() }
+            .sheet(item: $editingItem) { item in AddIncomeView(editing: item) }
+        }
+    }
+
+    // MARK: - 摘要
+
+    private var summaryHeader: some View {
+        VStack(spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("本月收入")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Text(fmt(store.currentMonthIncomeTotal))
+                        .font(.title2.bold()).foregroundStyle(.green)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("收支餘額")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    let balance = store.currentMonthBalance
+                    Text(fmt(balance))
+                        .font(.title3.bold())
+                        .foregroundStyle(balance >= 0 ? .green : .red)
+                }
+            }
+
+            // 週期收入摘要
+            let recurringMonthly = store.incomes
+                .filter { $0.period != .once }
+                .reduce(0.0) { $0 + $1.monthlyAmount }
+            if recurringMonthly > 0 {
+                HStack {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundStyle(.blue)
+                    Text("固定月收入：\(fmt(recurringMonthly))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(10)
+                .background(Color.blue.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+    }
+
+    // MARK: - 篩選
+
+    private var categoryFilter: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                FilterChip(title: "全部", isSelected: selectedCategory == nil) {
+                    selectedCategory = nil
+                }
+                ForEach(IncomeCategory.allCases) { cat in
+                    FilterChip(title: cat.rawValue, icon: cat.icon, isSelected: selectedCategory == cat) {
+                        selectedCategory = cat
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+        }
+        .background(Color(.systemBackground))
+    }
+
+    // MARK: - 空狀態
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: "banknote").font(.system(size: 48)).foregroundStyle(.secondary)
+            Text("尚無收入紀錄").font(.headline).foregroundStyle(.secondary)
+            Text("點擊右上角 + 新增收入").font(.subheadline).foregroundStyle(.tertiary)
+            Spacer()
+        }.frame(maxWidth: .infinity)
+    }
+
+    // MARK: - 列表
+
+    private var incomeList: some View {
+        List {
+            ForEach(groupedByDate(), id: \.key) { dateString, incomes in
+                Section(header: Text(dateString)) {
+                    ForEach(incomes) { income in
+                        incomeRow(income)
+                            .contentShape(Rectangle())
+                            .onTapGesture { editingItem = income }
+                    }
+                    .onDelete { offsets in
+                        store.deleteIncome(at: offsets, from: incomes)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func incomeRow(_ income: Income) -> some View {
+        HStack {
+            Image(systemName: income.category.icon)
+                .font(.title3).foregroundStyle(.green)
+                .frame(width: 36, height: 36)
+                .background(Color.green.opacity(0.1))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(income.title).font(.subheadline.weight(.medium))
+                HStack(spacing: 4) {
+                    Text(income.category.rawValue)
+                    if income.period != .once {
+                        Text(income.period.rawValue)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.blue.opacity(0.1))
+                            .foregroundStyle(.blue)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+                    if !income.note.isEmpty {
+                        Text("- \(income.note)")
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+
+            Spacer()
+
+            Text(fmt(income.amount))
+                .font(.subheadline.bold()).foregroundStyle(.green)
+        }
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - 分組
+
+    private func groupedByDate() -> [(key: String, value: [Income])] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M月d日 EEEE"
+        formatter.locale = Locale(identifier: "zh_TW")
+
+        let grouped = Dictionary(grouping: filteredIncomes) { income in
+            formatter.string(from: income.date)
+        }
+
+        return grouped.sorted { pair1, pair2 in
+            guard let d1 = pair1.value.first?.date, let d2 = pair2.value.first?.date else { return false }
+            return d1 > d2
+        }
+    }
+
+    private func fmt(_ v: Double) -> String {
+        currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
+    }
+}
