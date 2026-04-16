@@ -126,17 +126,16 @@ struct VehicleView: View {
                             )
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
-                    Text("估值 \(fmtWan(item.currentValue)) 萬")
-                        .font(.subheadline.bold())
+                    HStack(spacing: 6) {
+                        Text("估值 \(fmtWan(item.currentValue)) 萬")
+                            .font(.caption)
+                        Text(String(format: "折舊 %.1f%%", item.depreciationRate))
+                            .font(.caption).foregroundStyle(.red)
+                        Text(String(format: "持有 %.1f 年", item.yearsOwned))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(String(format: "折舊 %.1f%%", item.depreciationRate))
-                        .font(.caption.bold())
-                        .foregroundStyle(.red)
-                    Text(String(format: "持有 %.1f 年", item.yearsOwned))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
             }
 
             Divider()
