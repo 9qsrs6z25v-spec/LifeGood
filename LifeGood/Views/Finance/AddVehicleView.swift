@@ -392,6 +392,7 @@ struct AddVehicleView: View {
             fixedCategory: fixedCategory,
             recurrence: recurrence,
             loanSubCategory: loanSub,
+            linkedVehicleId: vehicleId,
             note: note
         )
 
