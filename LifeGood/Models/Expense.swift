@@ -119,6 +119,7 @@ struct Expense: Identifiable, Codable {
     var insuranceSubCategory: InsuranceSubCategory?
     var loanSubCategory: LoanSubCategory?
     var linkedInsuranceId: UUID?      // 連結理財模式的儲蓄險 ID
+    var linkedStockId: UUID?          // 連結理財模式的股票 ID
     var linkedRealEstateId: UUID?     // 連結理財模式的房地產 ID
     var linkedVehicleId: UUID?        // 連結理財模式的汽車 ID
     var vehicleExpenseCategory: VehicleVariableCategory?  // 汽車變動支出子分類
@@ -136,6 +137,7 @@ struct Expense: Identifiable, Codable {
         insuranceSubCategory: InsuranceSubCategory? = nil,
         loanSubCategory: LoanSubCategory? = nil,
         linkedInsuranceId: UUID? = nil,
+        linkedStockId: UUID? = nil,
         linkedRealEstateId: UUID? = nil,
         linkedVehicleId: UUID? = nil,
         vehicleExpenseCategory: VehicleVariableCategory? = nil,
@@ -152,6 +154,7 @@ struct Expense: Identifiable, Codable {
         self.insuranceSubCategory = insuranceSubCategory
         self.loanSubCategory = loanSubCategory
         self.linkedInsuranceId = linkedInsuranceId
+        self.linkedStockId = linkedStockId
         self.linkedRealEstateId = linkedRealEstateId
         self.linkedVehicleId = linkedVehicleId
         self.vehicleExpenseCategory = vehicleExpenseCategory

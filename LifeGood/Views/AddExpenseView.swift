@@ -43,15 +43,38 @@ struct AddExpenseView: View {
     @State private var reCurrentValueText = ""
     @State private var reMonthlyRentalText = ""
 
-    // MARK: - 汽車變動支出欄位
+    // MARK: - 變動支出關聯資產
 
+    enum AssetLinkType: String, CaseIterable, Identifiable {
+        case none = "無"
+        case vehicle = "汽車"
+        case stock = "股票"
+        case insurance = "儲蓄險"
+        case realEstate = "房地產"
+
+        var id: String { rawValue }
+    }
+
+    @State private var selectedAssetLink: AssetLinkType = .none
+
+    // 汽車
     @State private var selectedVehicleId: UUID?
     @State private var selectedVehicleExpenseCategory: VehicleVariableCategory = .fuel
+
+    // 股票（新增投資）
+    @State private var stockName = ""
+    @State private var stockSymbol = ""
+    @State private var stockSharesText = ""
+    @State private var stockPriceText = ""
+    @State private var stockCurrentPriceText = ""
+
+    // 儲蓄險/房地產選擇器
+    @State private var selectedInsuranceLinkId: UUID?
+    @State private var selectedRealEstateLinkId: UUID?
 
     // MARK: - 條件判斷
 
     private var isEditing: Bool { editingExpense != nil }
-    private var isVehicle: Bool { expenseType == .variable && selectedVariableCategory == .vehicle }
     private var isInsurance: Bool { expenseType == .fixed && selectedFixedCategory == .insurance }
     private var isSavingsInsurance: Bool { isInsurance && selectedInsuranceSubCategory == .savings }
     private var isLoan: Bool { expenseType == .fixed && selectedFixedCategory == .loan }
@@ -106,15 +129,18 @@ struct AddExpenseView: View {
                 basicInfoSection
                 categorySection
 
-                if isVehicle {
-                    vehicleLinkSection
+                // 變動支出：關聯資產選擇
+                if expenseType == .variable {
+                    assetLinkSection
+                    if selectedAssetLink == .vehicle { vehicleLinkSection }
+                    if selectedAssetLink == .stock { stockLinkSection }
+                    if selectedAssetLink == .insurance { insuranceLinkSection }
+                    if selectedAssetLink == .realEstate { realEstateLinkSection }
                 }
-                if isInsurance {
-                    insuranceSubCategorySection
-                }
-                if isLoan {
-                    loanSubCategorySection
-                }
+
+                // 固定支出：保險/貸款子分類
+                if isInsurance { insuranceSubCategorySection }
+                if isLoan { loanSubCategorySection }
 
                 if isSavingsInsurance {
                     savingsInsuranceSection
@@ -193,6 +219,98 @@ struct AddExpenseView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - 關聯資產選擇
+
+    private var assetLinkSection: some View {
+        Section {
+            Picker("關聯資產", selection: $selectedAssetLink) {
+                ForEach(AssetLinkType.allCases) { type in
+                    Text(type.rawValue).tag(type)
+                }
+            }
+            .pickerStyle(.menu)
+        } header: {
+            Text("關聯理財資產（選填）")
+        } footer: {
+            Text("選擇後可將此筆支出連結到理財模式的對應項目。")
+        }
+    }
+
+    // MARK: - 股票連動
+
+    private var stockLinkSection: some View {
+        Section {
+            TextField("股票名稱", text: $stockName)
+            TextField("股票代號（選填）", text: $stockSymbol)
+            TextField("股數", text: $stockSharesText).keyboardType(.decimalPad)
+            HStack {
+                Text("NT$").foregroundStyle(.secondary)
+                TextField("買入價格（每股）", text: $stockPriceText).keyboardType(.decimalPad)
+            }
+            HStack {
+                Text("NT$").foregroundStyle(.secondary)
+                TextField("目前價格（每股，選填）", text: $stockCurrentPriceText).keyboardType(.decimalPad)
+            }
+
+            if let shares = Double(stockSharesText), shares > 0,
+               let price = Double(stockPriceText), price > 0 {
+                HStack {
+                    Text("投入金額")
+                    Spacer()
+                    Text(formatCurrency(shares * price)).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("股票投資（連動理財模式）")
+        } footer: {
+            Text("儲存後將自動在理財模式的股票頁面建立對應的持股紀錄。金額欄位將自動填入投入金額。")
+        }
+    }
+
+    // MARK: - 儲蓄險連動（變動支出）
+
+    private var insuranceLinkSection: some View {
+        Section {
+            if financeStore.insurances.isEmpty {
+                Text("尚無儲蓄險，請先在理財模式新增")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                Picker("選擇保單", selection: $selectedInsuranceLinkId) {
+                    Text("請選擇").tag(nil as UUID?)
+                    ForEach(financeStore.insurances) { ins in
+                        Text("\(ins.name)\(!ins.company.isEmpty ? " (\(ins.company))" : "")").tag(ins.id as UUID?)
+                    }
+                }
+            }
+        } header: {
+            Text("儲蓄險（連動理財模式）")
+        } footer: {
+            Text("將此筆支出關聯到已有的儲蓄險保單。")
+        }
+    }
+
+    // MARK: - 房地產連動（變動支出）
+
+    private var realEstateLinkSection: some View {
+        Section {
+            if financeStore.realEstates.isEmpty {
+                Text("尚無房地產，請先在理財模式新增")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                Picker("選擇物件", selection: $selectedRealEstateLinkId) {
+                    Text("請選擇").tag(nil as UUID?)
+                    ForEach(financeStore.realEstates) { re in
+                        Text("\(re.name)\(!re.address.isEmpty ? " (\(re.address))" : "")").tag(re.id as UUID?)
+                    }
+                }
+            }
+        } header: {
+            Text("房地產（連動理財模式）")
+        } footer: {
+            Text("將此筆支出關聯到已有的房地產物件（如裝修、管理費等）。")
         }
     }
 
@@ -380,40 +498,62 @@ struct AddExpenseView: View {
     // MARK: - 儲存
 
     private func saveExpense() {
-        guard !title.trimmingCharacters(in: .whitespaces).isEmpty,
-              let amount = Double(amountText), amount > 0 else {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
+
+        // 股票連動時自動計算金額
+        var finalAmountText = amountText
+        if expenseType == .variable && selectedAssetLink == .stock {
+            if let shares = Double(stockSharesText), let price = Double(stockPriceText), shares > 0, price > 0 {
+                finalAmountText = String(format: "%.0f", shares * price)
+            }
+        }
+
+        guard !trimmedTitle.isEmpty,
+              let amount = Double(finalAmountText), amount > 0 else {
             showValidationError = true
             return
         }
 
         let expenseId = editingExpense?.id ?? UUID()
         var linkedInsId = editingExpense?.linkedInsuranceId
+        var linkedStkId = editingExpense?.linkedStockId
         var linkedREId = editingExpense?.linkedRealEstateId
+        var linkedVehId = editingExpense?.linkedVehicleId
 
+        // 固定支出連動
         if isSavingsInsurance {
             linkedInsId = syncSavingsInsurance(amount: amount, existingId: linkedInsId, expenseId: expenseId)
         }
-
         if isMortgage {
             linkedREId = syncRealEstate(mortgageAmount: amount, existingId: linkedREId, expenseId: expenseId)
         }
-
-        // 車貸連動汽車定期支出
-        var linkedVehId = editingExpense?.linkedVehicleId
         if isCarLoan, let vehicleId = selectedVehicleId {
             linkedVehId = vehicleId
             syncCarLoanToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
         }
 
-        // 汽車變動支出連動
-        if isVehicle, let vehicleId = selectedVehicleId {
-            linkedVehId = vehicleId
-            syncVehicleVariableExpense(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+        // 變動支出關聯資產連動
+        if expenseType == .variable {
+            switch selectedAssetLink {
+            case .vehicle:
+                if let vehicleId = selectedVehicleId {
+                    linkedVehId = vehicleId
+                    syncVehicleVariableExpense(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+                }
+            case .stock:
+                linkedStkId = syncStockInvestment(existingId: linkedStkId)
+            case .insurance:
+                linkedInsId = selectedInsuranceLinkId
+            case .realEstate:
+                linkedREId = selectedRealEstateLinkId
+            case .none:
+                break
+            }
         }
 
         let expense = Expense(
             id: expenseId,
-            title: title.trimmingCharacters(in: .whitespaces),
+            title: trimmedTitle,
             amount: amount,
             date: isSavingsInsurance ? insStartDate : date,
             expenseType: expenseType,
@@ -422,15 +562,38 @@ struct AddExpenseView: View {
             recurrence: expenseType == .fixed ? selectedRecurrence : nil,
             insuranceSubCategory: isInsurance ? selectedInsuranceSubCategory : nil,
             loanSubCategory: isLoan ? selectedLoanSubCategory : nil,
-            linkedInsuranceId: isSavingsInsurance ? linkedInsId : nil,
-            linkedRealEstateId: isMortgage ? linkedREId : nil,
-            linkedVehicleId: (isVehicle || isCarLoan) ? linkedVehId : nil,
-            vehicleExpenseCategory: isVehicle ? selectedVehicleExpenseCategory : nil,
+            linkedInsuranceId: linkedInsId,
+            linkedStockId: linkedStkId,
+            linkedRealEstateId: linkedREId,
+            linkedVehicleId: linkedVehId,
+            vehicleExpenseCategory: (expenseType == .variable && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil,
             note: note.trimmingCharacters(in: .whitespaces)
         )
 
         if isEditing { store.update(expense) } else { store.add(expense) }
         dismiss()
+    }
+
+    /// 同步建立股票投資紀錄
+    private func syncStockInvestment(existingId: UUID?) -> UUID {
+        let stockId = existingId ?? UUID()
+        let shares = Double(stockSharesText) ?? 0
+        let price = Double(stockPriceText) ?? 0
+        let currentPrice = Double(stockCurrentPriceText) ?? price
+
+        let stock = Stock(
+            id: stockId,
+            name: stockName.trimmingCharacters(in: .whitespaces).isEmpty ? title.trimmingCharacters(in: .whitespaces) : stockName.trimmingCharacters(in: .whitespaces),
+            symbol: stockSymbol.trimmingCharacters(in: .whitespaces).uppercased(),
+            purchaseDate: date,
+            shares: shares,
+            purchasePrice: price,
+            currentPrice: currentPrice,
+            note: note.trimmingCharacters(in: .whitespaces)
+        )
+
+        if existingId != nil { financeStore.update(stock) } else { financeStore.add(stock) }
+        return stockId
     }
 
     /// 同步建立或更新理財模式的儲蓄險
@@ -535,12 +698,29 @@ struct AddExpenseView: View {
             reMonthlyRentalText = linked.monthlyRental > 0 ? String(format: "%.0f", linked.monthlyRental) : ""
         }
 
-        // 載入連結的汽車
-        if let linkedId = expense.linkedVehicleId {
-            selectedVehicleId = linkedId
-        }
-        if let veCat = expense.vehicleExpenseCategory {
-            selectedVehicleExpenseCategory = veCat
+        // 載入變動支出的資產連結
+        if expense.expenseType == .variable {
+            if expense.linkedVehicleId != nil {
+                selectedAssetLink = .vehicle
+                selectedVehicleId = expense.linkedVehicleId
+                if let veCat = expense.vehicleExpenseCategory {
+                    selectedVehicleExpenseCategory = veCat
+                }
+            } else if let linkedId = expense.linkedStockId,
+                      let linked = financeStore.stocks.first(where: { $0.id == linkedId }) {
+                selectedAssetLink = .stock
+                stockName = linked.name
+                stockSymbol = linked.symbol
+                stockSharesText = String(format: "%.0f", linked.shares)
+                stockPriceText = String(format: "%.2f", linked.purchasePrice)
+                stockCurrentPriceText = linked.currentPrice > 0 ? String(format: "%.2f", linked.currentPrice) : ""
+            } else if expense.linkedInsuranceId != nil {
+                selectedAssetLink = .insurance
+                selectedInsuranceLinkId = expense.linkedInsuranceId
+            } else if expense.linkedRealEstateId != nil {
+                selectedAssetLink = .realEstate
+                selectedRealEstateLinkId = expense.linkedRealEstateId
+            }
         }
     }
 
