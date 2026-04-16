@@ -112,6 +112,19 @@ struct VehicleView: View {
                                 .background(Color(.systemGray5))
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                         }
+                        Label(item.powerType.rawValue, systemImage: item.powerType.icon)
+                            .font(.caption2.weight(.medium))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(
+                                item.powerType == .electric ? Color.green.opacity(0.12) :
+                                item.powerType == .hybrid ? Color.blue.opacity(0.12) :
+                                Color.orange.opacity(0.12)
+                            )
+                            .foregroundStyle(
+                                item.powerType == .electric ? .green :
+                                item.powerType == .hybrid ? .blue : .orange
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     Text(String(format: "持有 %.1f 年", item.yearsOwned))
                         .font(.caption).foregroundStyle(.secondary)

@@ -11,6 +11,7 @@ struct AddVehicleView: View {
 
     @State private var name = ""
     @State private var brand = ""
+    @State private var powerType: VehiclePowerType = .gasoline
     @State private var purchaseDate = Date()
     @State private var purchasePriceText = ""
     @State private var currentValueText = ""
@@ -85,6 +86,13 @@ struct AddVehicleView: View {
         Section("車輛資訊") {
             TextField("車名（如 Model Y）", text: $name)
             TextField("品牌（如 Tesla）", text: $brand)
+
+            Picker("動力類型", selection: $powerType) {
+                ForEach(VehiclePowerType.allCases) { type in
+                    Label(type.rawValue, systemImage: type.icon).tag(type)
+                }
+            }
+
             DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
         }
     }
@@ -201,7 +209,7 @@ struct AddVehicleView: View {
                     }
 
                     Picker("類別", selection: $variableItems[index].category) {
-                        ForEach(VehicleVariableCategory.allCases) { cat in
+                        ForEach(VehicleVariableCategory.categories(for: powerType)) { cat in
                             Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                         }
                     }
@@ -338,6 +346,7 @@ struct AddVehicleView: View {
             id: vehicleId,
             name: trimmedName,
             brand: brand.trimmingCharacters(in: .whitespaces),
+            powerType: powerType,
             purchaseDate: purchaseDate,
             purchasePrice: price,
             currentValue: currentVal,
@@ -425,6 +434,7 @@ struct AddVehicleView: View {
     private func loadEditing() {
         guard let e = editing else { return }
         name = e.name; brand = e.brand
+        powerType = e.powerType
         purchaseDate = e.purchaseDate
         purchasePriceText = e.purchasePrice > 0 ? String(format: "%g", e.purchasePrice / 10000) : ""
         currentValueText = e.currentValue > 0 ? String(format: "%g", e.currentValue / 10000) : ""

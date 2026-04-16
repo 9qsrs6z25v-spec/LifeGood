@@ -275,10 +275,29 @@ struct VehicleFixedExpense: Identifiable, Codable {
     var monthlyAmount: Double { period.toMonthly(amount) }
 }
 
+// MARK: - 汽車動力類型
+
+enum VehiclePowerType: String, Codable, CaseIterable, Identifiable {
+    case gasoline = "油車"
+    case electric = "電車"
+    case hybrid = "混合動力"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .gasoline: return "fuelpump.fill"
+        case .electric: return "bolt.car.fill"
+        case .hybrid: return "arrow.triangle.2.circlepath"
+        }
+    }
+}
+
 // MARK: - 汽車變動支出項目
 
 enum VehicleVariableCategory: String, Codable, CaseIterable, Identifiable {
     case fuel = "油錢"
+    case electricity = "電費"
     case parking = "停車"
     case maintenance = "保養"
     case wash = "洗車"
@@ -290,11 +309,24 @@ enum VehicleVariableCategory: String, Codable, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .fuel: return "fuelpump"
+        case .electricity: return "bolt.fill"
         case .parking: return "parkingsign.circle"
         case .maintenance: return "wrench.and.screwdriver"
         case .wash: return "drop.circle"
         case .repair: return "hammer"
         case .other: return "ellipsis.circle"
+        }
+    }
+
+    /// 根據動力類型篩選可用的變動支出分類
+    static func categories(for powerType: VehiclePowerType) -> [VehicleVariableCategory] {
+        switch powerType {
+        case .gasoline:
+            return [.fuel, .parking, .maintenance, .wash, .repair, .other]
+        case .electric:
+            return [.electricity, .parking, .maintenance, .wash, .repair, .other]
+        case .hybrid:
+            return [.fuel, .electricity, .parking, .maintenance, .wash, .repair, .other]
         }
     }
 }
@@ -327,17 +359,19 @@ struct Vehicle: Identifiable, Codable {
     let id: UUID
     var name: String
     var brand: String
+    var powerType: VehiclePowerType
     var purchaseDate: Date
     var purchasePrice: Double
     var currentValue: Double
     var fixedExpenses: [VehicleFixedExpense]       // 定期支出（車貸/稅費/訂閱）
-    var variableExpenses: [VehicleVariableExpense]  // 變動支出（油錢/停車/保養等）
+    var variableExpenses: [VehicleVariableExpense]  // 變動支出（依動力類型：油錢或電費等）
     var note: String
 
     init(
         id: UUID = UUID(),
         name: String,
         brand: String = "",
+        powerType: VehiclePowerType = .gasoline,
         purchaseDate: Date = Date(),
         purchasePrice: Double = 0,
         currentValue: Double = 0,
@@ -348,6 +382,7 @@ struct Vehicle: Identifiable, Codable {
         self.id = id
         self.name = name
         self.brand = brand
+        self.powerType = powerType
         self.purchaseDate = purchaseDate
         self.purchasePrice = purchasePrice
         self.currentValue = currentValue

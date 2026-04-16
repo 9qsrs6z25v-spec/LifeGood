@@ -211,8 +211,13 @@ struct AddExpenseView: View {
                     }
                 }
 
+                let selectedVehicle = financeStore.vehicles.first { $0.id == selectedVehicleId }
+                let availableCategories = VehicleVariableCategory.categories(
+                    for: selectedVehicle?.powerType ?? .gasoline
+                )
+
                 Picker("支出類別", selection: $selectedVehicleExpenseCategory) {
-                    ForEach(VehicleVariableCategory.allCases) { cat in
+                    ForEach(availableCategories) { cat in
                         Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                     }
                 }
@@ -220,7 +225,7 @@ struct AddExpenseView: View {
         } header: {
             Text("汽車資訊（連動理財模式）")
         } footer: {
-            Text("儲存後將自動在理財模式的汽車變動支出中新增對應紀錄。")
+            Text("支出類別會依照車輛動力類型自動篩選（油車→油錢、電車→電費、混合→兩者皆有）。")
         }
     }
 
