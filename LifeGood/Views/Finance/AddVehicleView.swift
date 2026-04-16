@@ -123,6 +123,10 @@ struct AddVehicleView: View {
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         Button(role: .destructive) {
+                            let item = fixedItems[index]
+                            if let linkedId = item.linkedExpenseId {
+                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                            }
                             fixedItems.remove(at: index)
                         } label: {
                             Image(systemName: "minus.circle.fill")
@@ -185,6 +189,10 @@ struct AddVehicleView: View {
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         Button(role: .destructive) {
+                            let item = variableItems[index]
+                            if let linkedId = item.linkedExpenseId {
+                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                            }
                             variableItems.remove(at: index)
                         } label: {
                             Image(systemName: "minus.circle.fill").foregroundStyle(.red)
