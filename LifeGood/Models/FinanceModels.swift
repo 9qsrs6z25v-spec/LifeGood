@@ -178,6 +178,7 @@ struct RealEstateMortgageItem: Identifiable, Codable {
     var title: String
     var amount: Double          // 每期繳款金額
     var totalPeriods: Int       // 總期數
+    var startDate: Date         // 貸款起始日
     var linkedExpenseId: UUID?  // 連結記帳固定支出
 
     init(
@@ -185,17 +186,28 @@ struct RealEstateMortgageItem: Identifiable, Codable {
         title: String = "",
         amount: Double = 0,
         totalPeriods: Int = 240,
+        startDate: Date = Date(),
         linkedExpenseId: UUID? = nil
     ) {
         self.id = id
         self.title = title
         self.amount = amount
         self.totalPeriods = totalPeriods
+        self.startDate = startDate
         self.linkedExpenseId = linkedExpenseId
     }
 
     /// 貸款總額
     var totalAmount: Double { amount * Double(totalPeriods) }
+
+    /// 已繳期數（從起始日算到今天，每月一期）
+    var elapsedPeriods: Int {
+        let months = Calendar.current.dateComponents([.month], from: startDate, to: Date()).month ?? 0
+        return min(max(0, months), totalPeriods)
+    }
+
+    /// 已繳貸款金額
+    var paidAmount: Double { amount * Double(elapsedPeriods) }
 }
 
 // MARK: - 房地產已支出金額項目
@@ -316,8 +328,12 @@ struct RealEstate: Identifiable, Codable {
     var monthlyMortgage: Double { mortgageItems.reduce(0) { $0 + $1.amount } }
     /// 貸款總額
     var totalMortgageAmount: Double { mortgageItems.reduce(0) { $0 + $1.totalAmount } }
-    /// 已支出房屋金額合計
+    /// 已繳貸款金額合計
+    var totalMortgagePaid: Double { mortgageItems.reduce(0) { $0 + $1.paidAmount } }
+    /// 已支出房屋金額合計（頭期款等）
     var totalPaid: Double { paidItems.reduce(0) { $0 + $1.amount } }
+    /// 房屋總已支出（已支出 + 已繳貸款）
+    var totalAllPaid: Double { totalPaid + totalMortgagePaid }
     /// 房產增值
     var appreciation: Double { currentValue - purchasePrice }
     /// 增值率

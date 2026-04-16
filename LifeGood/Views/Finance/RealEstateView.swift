@@ -142,10 +142,16 @@ struct RealEstateView: View {
                                 .background(Color.blue.opacity(0.1))
                                 .foregroundStyle(.blue)
                                 .clipShape(RoundedRectangle(cornerRadius: 3))
-                            Text("\(m.totalPeriods)期").font(.caption2).foregroundStyle(.tertiary)
+                            Text("\(m.elapsedPeriods)/\(m.totalPeriods)期")
+                                .font(.caption2).foregroundStyle(.tertiary)
                             Spacer()
                             Text(fmt(m.amount) + "/月").font(.caption)
                         }
+                    }
+                    HStack {
+                        Text("已繳貸款").font(.caption2).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(fmt(item.totalMortgagePaid)).font(.caption.bold()).foregroundStyle(.blue)
                     }
                 }
             }
@@ -199,12 +205,11 @@ struct RealEstateView: View {
                     Label("月租 " + fmt(item.monthlyRental), systemImage: "dollarsign.circle")
                 }
                 if item.monthlyMortgage > 0 {
-                    Label("房貸 " + fmt(item.monthlyMortgage), systemImage: "creditcard")
+                    Label("月貸 " + fmt(item.monthlyMortgage), systemImage: "creditcard")
                 }
                 Spacer()
-                let totalExpense = item.monthlyMortgage + item.variableTotal
-                if totalExpense > 0 {
-                    Text("總支出 " + fmt(totalExpense)).foregroundStyle(.orange)
+                if item.totalAllPaid > 0 {
+                    Text("已付 " + fmt(item.totalAllPaid)).foregroundStyle(.red)
                 }
             }
             .font(.caption).foregroundStyle(.secondary)

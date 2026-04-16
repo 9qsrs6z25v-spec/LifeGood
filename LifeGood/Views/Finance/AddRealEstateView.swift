@@ -25,10 +25,17 @@ struct AddRealEstateView: View {
         var title: String
         var amountText: String
         var periodsText: String
+        var startDate: Date
         var linkedExpenseId: UUID?
 
         var amount: Double { Double(amountText) ?? 0 }
         var periods: Int { Int(periodsText) ?? 0 }
+
+        var elapsedPeriods: Int {
+            let months = Calendar.current.dateComponents([.month], from: startDate, to: Date()).month ?? 0
+            return min(max(0, months), periods)
+        }
+        var paidAmount: Double { amount * Double(elapsedPeriods) }
     }
 
     // MARK: - 已支出房屋金額列表
@@ -176,6 +183,8 @@ struct AddRealEstateView: View {
                         }
                     }
 
+                    DatePicker("起始日", selection: $mortgageItems[index].startDate, displayedComponents: .date)
+
                     if mortgageItems[index].amount > 0, mortgageItems[index].periods > 0 {
                         HStack {
                             Text("貸款總額")
@@ -183,13 +192,21 @@ struct AddRealEstateView: View {
                             Text(formatCurrency(mortgageItems[index].amount * Double(mortgageItems[index].periods)))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        HStack {
+                            Text("已繳")
+                            Text("\(mortgageItems[index].elapsedPeriods)/\(mortgageItems[index].periods) 期")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(formatCurrency(mortgageItems[index].paidAmount))
+                                .font(.caption.bold()).foregroundStyle(.blue)
+                        }
                     }
                 }
             }
 
             Button {
                 mortgageItems.append(MortgageItemState(
-                    id: UUID(), title: "", amountText: "", periodsText: "240"
+                    id: UUID(), title: "", amountText: "", periodsText: "240", startDate: purchaseDate
                 ))
             } label: {
                 Label("新增貸款項目", systemImage: "plus.circle").foregroundStyle(.green)
@@ -316,9 +333,11 @@ struct AddRealEstateView: View {
     private var calcSection: some View {
         let rental = Double(monthlyRentalText) ?? 0
         let mortgageMonthly = mortgageItems.reduce(0.0) { $0 + $1.amount }
+        let mortgagePaidTotal = mortgageItems.reduce(0.0) { $0 + $1.paidAmount }
         let paidTotal = paidItems.reduce(0.0) { $0 + $1.amount }
         let varTotal = variableItems.reduce(0.0) { $0 + $1.amount }
         let mortgageTotal = mortgageItems.reduce(0.0) { $0 + $1.amount * Double($1.periods) }
+        let allPaid = paidTotal + mortgagePaidTotal + varTotal
 
         if rental > 0 || mortgageMonthly > 0 || paidTotal > 0 || varTotal > 0 {
             Section("試算") {
@@ -335,10 +354,16 @@ struct AddRealEstateView: View {
                         Text(formatCurrency(mortgageTotal)).foregroundStyle(.secondary)
                     }
                 }
+                if mortgagePaidTotal > 0 {
+                    HStack {
+                        Text("已繳貸款金額"); Spacer()
+                        Text(formatCurrency(mortgagePaidTotal)).foregroundStyle(.blue)
+                    }
+                }
                 if paidTotal > 0 {
                     HStack {
                         Text("已支出房屋金額"); Spacer()
-                        Text(formatCurrency(paidTotal)).foregroundStyle(.blue)
+                        Text(formatCurrency(paidTotal)).foregroundStyle(.purple)
                     }
                 }
                 if varTotal > 0 {
@@ -348,8 +373,8 @@ struct AddRealEstateView: View {
                     }
                 }
                 HStack {
-                    Text("總支出"); Spacer()
-                    Text(formatCurrency(paidTotal + varTotal + mortgageMonthly))
+                    Text("房屋總已支出"); Spacer()
+                    Text(formatCurrency(allPaid))
                         .font(.body.bold()).foregroundStyle(.red)
                 }
             }
@@ -376,7 +401,8 @@ struct AddRealEstateView: View {
             let expId = syncMortgageItemExpense(reId: reId, reName: trimmedName, item: item, note: trimmedNote)
             syncedMortgages.append(RealEstateMortgageItem(
                 id: item.id, title: item.title.trimmingCharacters(in: .whitespaces),
-                amount: item.amount, totalPeriods: item.periods, linkedExpenseId: expId
+                amount: item.amount, totalPeriods: item.periods,
+                startDate: item.startDate, linkedExpenseId: expId
             ))
         }
 
@@ -471,6 +497,7 @@ struct AddRealEstateView: View {
                 id: m.id, title: m.title,
                 amountText: m.amount > 0 ? String(format: "%.0f", m.amount) : "",
                 periodsText: m.totalPeriods > 0 ? "\(m.totalPeriods)" : "",
+                startDate: m.startDate,
                 linkedExpenseId: m.linkedExpenseId
             )
         }
