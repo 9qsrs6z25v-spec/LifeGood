@@ -34,16 +34,47 @@ struct IncomeView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("收入")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    HStack(spacing: 8) {
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text("總收入")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Text("\(fmtWan(totalIncomeAll)) 萬")
+                                .font(.subheadline.bold()).foregroundStyle(.green)
+                        }
+                        Button { showAdd = true } label: {
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
             }
             .sheet(isPresented: $showAdd) { AddIncomeView() }
             .sheet(item: $editingItem) { item in AddIncomeView(editing: item) }
         }
+    }
+
+    /// 所有收入加總（含已繳的固定薪水展開到每一個已發生月份）
+    private var totalIncomeAll: Double {
+        let calendar = Calendar.current
+        let now = Date()
+        return store.incomes.reduce(0.0) { sum, income in
+            switch income.period {
+            case .once:
+                return sum + income.amount
+            case .monthly:
+                let months = calendar.dateComponents([.month], from: income.date, to: now).month ?? 0
+                return sum + income.amount * Double(max(1, months + 1))
+            case .yearly:
+                let years = calendar.dateComponents([.year], from: income.date, to: now).year ?? 0
+                return sum + income.amount * Double(max(1, years + 1))
+            }
+        }
+    }
+
+    private func fmtWan(_ v: Double) -> String {
+        String(format: "%g", v / 10000)
     }
 
     // MARK: - 摘要
