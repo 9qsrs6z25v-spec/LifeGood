@@ -166,23 +166,23 @@ struct VehicleDetailView: View {
             HStack {
                 VStack(spacing: 2) {
                     Text("購入")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? .white.opacity(0.5) : .tertiary)
+                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
                     Text("\(fmtWan(vehicle.purchasePrice)) 萬")
-                        .font(.caption.bold()).foregroundStyle(rarity == .legendary ? .white.opacity(0.8) : .primary)
+                        .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
                 }
                 Spacer()
                 VStack(spacing: 2) {
                     Text("折舊")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? .white.opacity(0.5) : .tertiary)
+                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
                     Text(String(format: "%.1f%%", vehicle.depreciationRate))
                         .font(.caption.bold()).foregroundStyle(.red)
                 }
                 Spacer()
                 VStack(spacing: 2) {
                     Text("持有")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? .white.opacity(0.5) : .tertiary)
+                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
                     Text(String(format: "%.1f 年", vehicle.yearsOwned))
-                        .font(.caption.bold()).foregroundStyle(rarity == .legendary ? .white.opacity(0.8) : .primary)
+                        .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
                 }
             }
             .padding(.horizontal, 24)
