@@ -1,135 +1,15 @@
 import SwiftUI
 
-// MARK: - 卡牌稀有度
-
-enum CardRarity {
-    case common
-    case uncommon
-    case rare
-    case epic
-    case legendary
-
-    /// 汽車分級：0~50萬 / 51~100萬 / 101~200萬 / 201萬以上
-    init(price: Double) {
-        let wan = price / 10000
-        switch wan {
-        case ..<51: self = .common
-        case ..<101: self = .uncommon
-        case ..<201: self = .rare
-        default: self = .legendary
-        }
-    }
-
-    /// 房地產分級：0~600萬 / 601~1000萬 / 1001~1500萬 / 1501~2000萬 / 2001萬以上
-    static func realEstate(price: Double) -> CardRarity {
-        let wan = price / 10000
-        switch wan {
-        case ..<601: return .common
-        case ..<1001: return .uncommon
-        case ..<1501: return .rare
-        case ..<2001: return .epic
-        default: return .legendary
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .common: return "COMMON"
-        case .uncommon: return "UNCOMMON"
-        case .rare: return "RARE"
-        case .epic: return "EPIC"
-        case .legendary: return "LEGENDARY"
-        }
-    }
-
-    var borderGradient: [Color] {
-        switch self {
-        case .common: return [.gray.opacity(0.4), .gray.opacity(0.2)]
-        case .uncommon: return [.cyan, .blue.opacity(0.6), .cyan]
-        case .rare: return [.yellow, .orange, .yellow]
-        case .epic: return [.purple, .pink, .purple, .indigo, .purple]
-        case .legendary: return [.purple, .pink, .orange, .yellow, .green, .cyan, .blue, .purple]
-        }
-    }
-
-    var bgGradient: [Color] {
-        switch self {
-        case .common: return [Color(.systemBackground), Color(.systemGray6)]
-        case .uncommon: return [Color(.systemBackground), Color.cyan.opacity(0.05)]
-        case .rare: return [Color(.systemBackground), Color.orange.opacity(0.08)]
-        case .epic: return [Color(.systemBackground), Color.purple.opacity(0.10)]
-        case .legendary: return [Color.black.opacity(0.9), Color.purple.opacity(0.15), Color.black.opacity(0.9)]
-        }
-    }
-
-    var borderWidth: CGFloat {
-        switch self {
-        case .common: return 1
-        case .uncommon: return 2
-        case .rare: return 2.5
-        case .epic: return 2.8
-        case .legendary: return 3
-        }
-    }
-
-    var textColor: Color {
-        switch self {
-        case .common: return .primary
-        case .uncommon: return .cyan
-        case .rare: return .orange
-        case .epic: return .purple
-        case .legendary: return .yellow
-        }
-    }
-
-    var shadowColor: Color {
-        switch self {
-        case .common: return .clear
-        case .uncommon: return .cyan.opacity(0.3)
-        case .rare: return .orange.opacity(0.4)
-        case .epic: return .purple.opacity(0.45)
-        case .legendary: return .purple.opacity(0.5)
-        }
-    }
-}
-
-// MARK: - 售出印章
-
-struct SoldStamp: View {
-    var size: CGFloat = 18
-
-    var body: some View {
-        Text("售出")
-            .font(.system(size: size, weight: .heavy, design: .rounded))
-            .tracking(2)
-            .foregroundStyle(.red)
-            .padding(.horizontal, size * 0.55)
-            .padding(.vertical, size * 0.2)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.white)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(.red, lineWidth: size * 0.14)
-            )
-            .rotationEffect(.degrees(-15))
-            .shadow(color: .black.opacity(0.3), radius: size * 0.18, x: size * 0.08, y: size * 0.15)
-    }
-}
-
-// MARK: - 汽車檢視卡片
-
-struct VehicleDetailView: View {
+struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
-    let vehicle: Vehicle
+    let estate: RealEstate
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
 
-    private var rarity: CardRarity { CardRarity(price: vehicle.purchasePrice) }
+    private var rarity: CardRarity { CardRarity.realEstate(price: estate.purchasePrice) }
 
     var body: some View {
         NavigationStack {
@@ -137,12 +17,12 @@ struct VehicleDetailView: View {
                 VStack(spacing: 24) {
                     flashCard
                     infoSection
-                    expenseSection
+                    actionSection
                 }
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("車輛卡片")
+            .navigationTitle("房地產卡片")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -150,11 +30,11 @@ struct VehicleDetailView: View {
                 }
             }
             .sheet(isPresented: $showEdit) {
-                AddVehicleView(editing: vehicle)
+                AddRealEstateView(editing: estate)
             }
-            .alert("確定要刪除這輛車嗎？", isPresented: $showDeleteConfirm) {
+            .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
-                    deleteVehicle()
+                    deleteEstate()
                     dismiss()
                 }
                 Button("取消", role: .cancel) {}
@@ -168,37 +48,38 @@ struct VehicleDetailView: View {
 
     private var flashCard: some View {
         VStack(spacing: 0) {
-            // 頂部稀有度標籤
             HStack {
                 Text(rarity.label)
                     .font(.caption2.weight(.heavy))
                     .tracking(2)
                     .foregroundStyle(rarity.textColor)
                 Spacer()
-                Label(vehicle.powerType.rawValue, systemImage: vehicle.powerType.icon)
+                Label("房地產", systemImage: "building.2.fill")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(rarity == .legendary ? .yellow : .secondary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
 
-            // 車名 + 品牌
             VStack(spacing: 6) {
-                Text(vehicle.name)
+                Text(estate.name)
                     .font(.title.weight(.bold))
                     .foregroundStyle(rarity == .legendary ? .white : .primary)
+                    .multilineTextAlignment(.center)
 
-                if !vehicle.brand.isEmpty {
-                    Text(vehicle.brand)
+                if !estate.address.isEmpty {
+                    Text(estate.address)
                         .font(.subheadline)
                         .foregroundStyle(rarity == .legendary ? .white.opacity(0.7) : .secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
                 }
             }
             .padding(.top, 16)
+            .padding(.horizontal, 24)
 
-            // 估值（大字）
             VStack(spacing: 4) {
-                Text("\(fmtWan(vehicle.currentValue))")
+                Text("\(fmtWan(estate.currentValue))")
                     .font(.system(size: 52, weight: .bold, design: .rounded))
                     .foregroundStyle(rarity.textColor)
                 Text("萬元")
@@ -207,26 +88,25 @@ struct VehicleDetailView: View {
             }
             .padding(.vertical, 20)
 
-            // 底部資訊列
             HStack {
                 VStack(spacing: 2) {
                     Text("購入")
                         .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text("\(fmtWan(vehicle.purchasePrice)) 萬")
+                    Text("\(fmtWan(estate.purchasePrice)) 萬")
                         .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
                 }
                 Spacer()
                 VStack(spacing: 2) {
-                    Text("折舊")
+                    Text("增值率")
                         .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(String(format: "%.1f%%", vehicle.depreciationRate))
-                        .font(.caption.bold()).foregroundStyle(.red)
+                    Text(String(format: "%@%.1f%%", estate.appreciationRate >= 0 ? "+" : "", estate.appreciationRate))
+                        .font(.caption.bold()).foregroundStyle(estate.appreciationRate >= 0 ? .green : .red)
                 }
                 Spacer()
                 VStack(spacing: 2) {
-                    Text("持有")
+                    Text("月租")
                         .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(String(format: "%.1f 年", vehicle.yearsOwned))
+                    Text(estate.monthlyRental > 0 ? fmt(estate.monthlyRental) : "—")
                         .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
                 }
             }
@@ -246,42 +126,60 @@ struct VehicleDetailView: View {
                 )
         )
         .shadow(color: rarity.shadowColor, radius: rarity == .legendary ? 15 : 8, y: 4)
-        .overlay(alignment: .topLeading) {
-            if vehicle.isSold {
-                SoldStamp(size: 32)
-                    .offset(x: -10, y: -14)
-            }
-        }
         .padding(.horizontal, 24)
-        .padding(.top, 16)
+        .padding(.top, 8)
     }
 
     // MARK: - 詳細資訊
 
     private var infoSection: some View {
         VStack(spacing: 0) {
-            if !vehicle.fixedExpenses.isEmpty {
-                sectionHeader("定期支出")
-                ForEach(vehicle.fixedExpenses) { fe in
+            if !estate.mortgageItems.isEmpty {
+                sectionHeader("貸款明細")
+                ForEach(estate.mortgageItems) { m in
                     HStack {
-                        Text(fe.category.rawValue)
+                        Text(m.title.isEmpty ? "房貸" : m.title)
                             .font(.caption.weight(.medium))
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Color.blue.opacity(0.1))
                             .foregroundStyle(.blue)
                             .clipShape(RoundedRectangle(cornerRadius: 4))
-                        Text(fe.period == .monthly ? "每月" : "每年")
+                        Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Text(fmt(fe.amount)).font(.subheadline.bold())
+                        Text(fmt(m.amount) + "/月").font(.subheadline.bold())
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
+                }
+                HStack {
+                    Text("已繳貸款").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(fmt(estate.totalMortgagePaid))
+                        .font(.subheadline.bold()).foregroundStyle(.blue)
+                }
+                .padding(.horizontal).padding(.vertical, 6)
+            }
+
+            if !estate.paidItems.isEmpty {
+                sectionHeader("已支出")
+                ForEach(estate.paidItems) { p in
+                    HStack {
+                        Text(p.title.isEmpty ? "已付款" : p.title)
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.purple.opacity(0.1))
+                            .foregroundStyle(.purple)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                        Spacer()
+                        Text(fmt(p.amount)).font(.subheadline.bold())
                     }
                     .padding(.horizontal).padding(.vertical, 8)
                 }
             }
 
-            if !vehicle.variableExpenses.isEmpty {
+            if !estate.variableExpenses.isEmpty {
                 sectionHeader("變動支出")
-                ForEach(vehicle.variableExpenses) { ve in
+                ForEach(estate.variableExpenses) { ve in
                     HStack {
                         Text(ve.category.rawValue)
                             .font(.caption.weight(.medium))
@@ -295,7 +193,28 @@ struct VehicleDetailView: View {
                     .padding(.horizontal).padding(.vertical, 8)
                 }
             }
+
+            if estate.monthlyRental > 0 {
+                sectionHeader("收益")
+                HStack {
+                    Text("月淨現金流").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    let flow = estate.monthlyCashFlow
+                    Text(fmt(flow))
+                        .font(.subheadline.bold())
+                        .foregroundStyle(flow >= 0 ? .green : .red)
+                }
+                .padding(.horizontal).padding(.vertical, 8)
+                HStack {
+                    Text("年租金報酬率").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.2f%%", estate.rentalYield))
+                        .font(.subheadline.bold()).foregroundStyle(.blue)
+                }
+                .padding(.horizontal).padding(.vertical, 8)
+            }
         }
+        .padding(.bottom, 8)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
@@ -303,7 +222,7 @@ struct VehicleDetailView: View {
 
     // MARK: - 操作按鈕
 
-    private var expenseSection: some View {
+    private var actionSection: some View {
         VStack(spacing: 12) {
             Button {
                 showEdit = true
@@ -342,18 +261,26 @@ struct VehicleDetailView: View {
         .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
     }
 
-    private func deleteVehicle() {
-        for fe in vehicle.fixedExpenses {
-            if let linkedId = fe.linkedExpenseId {
+    private func deleteEstate() {
+        for m in estate.mortgageItems {
+            if let linkedId = m.linkedExpenseId {
                 expenseStore.expenses.removeAll { $0.id == linkedId }
             }
         }
-        for ve in vehicle.variableExpenses {
+        for p in estate.paidItems {
+            if let linkedId = p.linkedExpenseId {
+                expenseStore.expenses.removeAll { $0.id == linkedId }
+            }
+        }
+        for ve in estate.variableExpenses {
             if let linkedId = ve.linkedExpenseId {
                 expenseStore.expenses.removeAll { $0.id == linkedId }
             }
         }
-        store.deleteVehicle(vehicle)
+        if let linkedId = estate.linkedExpenseId {
+            expenseStore.expenses.removeAll { $0.id == linkedId }
+        }
+        store.deleteRealEstate(estate)
     }
 
     private func fmt(_ v: Double) -> String {
