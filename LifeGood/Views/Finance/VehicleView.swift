@@ -5,6 +5,7 @@ struct VehicleView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
     @State private var showAdd = false
     @State private var editingItem: Vehicle?
+    @State private var viewingItem: Vehicle?
 
     var body: some View {
         NavigationStack {
@@ -20,7 +21,7 @@ struct VehicleView: View {
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                .onTapGesture { editingItem = item }
+                                .onTapGesture { viewingItem = item }
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
                                         for fe in item.fixedExpenses {
@@ -55,6 +56,7 @@ struct VehicleView: View {
                 }
             }
             .sheet(isPresented: $showAdd) { AddVehicleView() }
+            .sheet(item: $viewingItem) { item in VehicleDetailView(vehicle: item) }
             .sheet(item: $editingItem) { item in AddVehicleView(editing: item) }
         }
     }
@@ -200,9 +202,15 @@ struct VehicleView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray4), lineWidth: 0.5)
+                .stroke(
+                    AngularGradient(
+                        colors: CardRarity(price: item.purchasePrice).borderGradient,
+                        center: .center
+                    ),
+                    lineWidth: CardRarity(price: item.purchasePrice).borderWidth
+                )
         )
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        .shadow(color: CardRarity(price: item.purchasePrice).shadowColor, radius: 6, y: 2)
     }
 
     private func fmt(_ v: Double) -> String {
