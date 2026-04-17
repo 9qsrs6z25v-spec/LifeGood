@@ -1,11 +1,47 @@
 import SwiftUI
 
+enum VehicleSortOption: String, CaseIterable, Identifiable {
+    case purchasePrice = "購入價格"
+    case currentValue = "估值"
+    case depreciationRate = "折舊率"
+    case yearsOwned = "持有年數"
+    case monthlyExpense = "每月養車費"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .purchasePrice: return "tag"
+        case .currentValue: return "chart.line.uptrend.xyaxis"
+        case .depreciationRate: return "arrow.down.right"
+        case .yearsOwned: return "calendar"
+        case .monthlyExpense: return "creditcard"
+        }
+    }
+}
+
 struct VehicleView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
     @State private var showAdd = false
     @State private var editingItem: Vehicle?
     @State private var viewingItem: Vehicle?
+    @State private var sortOption: VehicleSortOption = .purchasePrice
+    @State private var sortAscending = false
+
+    private var sortedVehicles: [Vehicle] {
+        store.vehicles.sorted { a, b in
+            let result: Bool
+            switch sortOption {
+            case .purchasePrice: result = a.purchasePrice > b.purchasePrice
+            case .currentValue: result = a.currentValue > b.currentValue
+            case .depreciationRate: result = a.depreciationRate > b.depreciationRate
+            case .yearsOwned: result = a.yearsOwned > b.yearsOwned
+            case .monthlyExpense: result = a.monthlyExpense > b.monthlyExpense
+            }
+            return sortAscending ? !result : result
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -16,7 +52,7 @@ struct VehicleView: View {
                     emptyState
                 } else {
                     List {
-                        ForEach(store.vehicles) { item in
+                        ForEach(sortedVehicles) { item in
                             vehicleCard(item)
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
@@ -50,8 +86,40 @@ struct VehicleView: View {
             .navigationTitle("汽車")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    HStack(spacing: 12) {
+                        Menu {
+                            ForEach(VehicleSortOption.allCases) { option in
+                                Button {
+                                    if sortOption == option {
+                                        sortAscending.toggle()
+                                    } else {
+                                        sortOption = option
+                                        sortAscending = false
+                                    }
+                                } label: {
+                                    Label {
+                                        Text(option.rawValue)
+                                    } icon: {
+                                        if sortOption == option {
+                                            Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
+                                        } else {
+                                            Image(systemName: option.icon)
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.up.arrow.down")
+                                Text(sortOption.rawValue)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+
+                        Button { showAdd = true } label: {
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
             }
@@ -105,29 +173,7 @@ struct VehicleView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(item.name).font(.subheadline.weight(.semibold))
-                        if !item.brand.isEmpty {
-                            Text(item.brand)
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color(.systemGray5))
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                        }
-                        Label(item.powerType.rawValue, systemImage: item.powerType.icon)
-                            .font(.caption2.weight(.medium))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(
-                                item.powerType == .electric ? Color.green.opacity(0.12) :
-                                item.powerType == .hybrid ? Color.blue.opacity(0.12) :
-                                Color.orange.opacity(0.12)
-                            )
-                            .foregroundStyle(
-                                item.powerType == .electric ? .green :
-                                item.powerType == .hybrid ? .blue : .orange
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
+                    Text(item.name).font(.subheadline.weight(.semibold))
                     HStack(spacing: 6) {
                         Text("估值 \(fmtWan(item.currentValue)) 萬")
                             .font(.caption)
@@ -138,6 +184,28 @@ struct VehicleView: View {
                     }
                 }
                 Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    if !item.brand.isEmpty {
+                        Text(item.brand)
+                            .font(.caption2.weight(.medium))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color(.systemGray5))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    Label(item.powerType.rawValue, systemImage: item.powerType.icon)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(
+                            item.powerType == .electric ? Color.green.opacity(0.12) :
+                            item.powerType == .hybrid ? Color.blue.opacity(0.12) :
+                            Color.orange.opacity(0.12)
+                        )
+                        .foregroundStyle(
+                            item.powerType == .electric ? .green :
+                            item.powerType == .hybrid ? .blue : .orange
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
             }
 
             Divider()
