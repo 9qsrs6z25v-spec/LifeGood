@@ -85,12 +85,16 @@ struct SoldStamp: View {
             .foregroundStyle(.red)
             .padding(.horizontal, size * 0.55)
             .padding(.vertical, size * 0.2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.white)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(.red, lineWidth: size * 0.12)
+                    .stroke(.red, lineWidth: size * 0.14)
             )
             .rotationEffect(.degrees(-15))
-            .opacity(0.85)
+            .shadow(color: .black.opacity(0.3), radius: size * 0.18, x: size * 0.08, y: size * 0.15)
     }
 }
 
@@ -224,12 +228,12 @@ struct VehicleDetailView: View {
         .shadow(color: rarity.shadowColor, radius: rarity == .legendary ? 15 : 8, y: 4)
         .overlay(alignment: .topLeading) {
             if vehicle.isSold {
-                SoldStamp(size: 28)
-                    .padding(.leading, 20)
-                    .padding(.top, 18)
+                SoldStamp(size: 32)
+                    .offset(x: -10, y: -14)
             }
         }
         .padding(.horizontal, 24)
+        .padding(.top, 16)
     }
 
     // MARK: - 詳細資訊

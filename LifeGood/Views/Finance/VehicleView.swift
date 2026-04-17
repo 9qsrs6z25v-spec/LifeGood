@@ -188,25 +188,30 @@ struct VehicleView: View {
                     if !item.brand.isEmpty {
                         Text(item.brand)
                             .font(.caption2.weight(.medium))
+                            .lineLimit(1)
                             .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(Color(.systemGray5))
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
-                    Label(item.powerType.rawValue, systemImage: item.powerType.icon)
-                        .font(.caption2.weight(.medium))
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(
-                            item.powerType == .electric ? Color.green.opacity(0.12) :
-                            item.powerType == .hybrid ? Color.blue.opacity(0.12) :
-                            Color.orange.opacity(0.12)
-                        )
-                        .foregroundStyle(
-                            item.powerType == .electric ? .green :
-                            item.powerType == .hybrid ? .blue : .orange
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    HStack(spacing: 4) {
+                        Image(systemName: item.powerType.icon)
+                        Text(item.powerType.rawValue).lineLimit(1)
+                    }
+                    .font(.caption2.weight(.medium))
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(
+                        item.powerType == .electric ? Color.green.opacity(0.12) :
+                        item.powerType == .hybrid ? Color.blue.opacity(0.12) :
+                        Color.orange.opacity(0.12)
+                    )
+                    .foregroundStyle(
+                        item.powerType == .electric ? .green :
+                        item.powerType == .hybrid ? .blue : .orange
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
                 .fixedSize(horizontal: true, vertical: false)
             }
@@ -284,9 +289,8 @@ struct VehicleView: View {
         .shadow(color: CardRarity(price: item.purchasePrice).shadowColor, radius: 6, y: 2)
         .overlay(alignment: .topLeading) {
             if item.isSold {
-                SoldStamp(size: 14)
-                    .padding(.leading, 8)
-                    .padding(.top, 6)
+                SoldStamp(size: 16)
+                    .offset(x: -8, y: -8)
             }
         }
     }
