@@ -10,6 +10,8 @@ struct AddRealEstateView: View {
     @State private var name = ""
     @State private var address = ""
     @State private var purchaseDate = Date()
+    @State private var isSold = false
+    @State private var soldDate = Date()
     @State private var purchasePriceText = ""
     @State private var currentValueText = ""
     @State private var monthlyRentalText = ""
@@ -107,6 +109,11 @@ struct AddRealEstateView: View {
             TextField("物件名稱", text: $name)
             TextField("地址", text: $address)
             DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
+
+            Toggle("已售出", isOn: $isSold)
+            if isSold {
+                DatePicker("售出日期", selection: $soldDate, in: purchaseDate..., displayedComponents: .date)
+            }
         }
     }
 
@@ -429,7 +436,9 @@ struct AddRealEstateView: View {
         let re = RealEstate(
             id: reId, name: trimmedName,
             address: address.trimmingCharacters(in: .whitespaces),
-            purchaseDate: purchaseDate, purchasePrice: price, currentValue: currentVal,
+            purchaseDate: purchaseDate,
+            soldDate: isSold ? soldDate : nil,
+            purchasePrice: price, currentValue: currentVal,
             monthlyRental: Double(monthlyRentalText) ?? 0,
             mortgageItems: syncedMortgages,
             paidItems: syncedPaids,
@@ -487,6 +496,11 @@ struct AddRealEstateView: View {
         guard let e = editing else { return }
         name = e.name; address = e.address
         purchaseDate = e.purchaseDate
+        if let sd = e.soldDate {
+            isSold = true; soldDate = sd
+        } else {
+            isSold = false; soldDate = Date()
+        }
         purchasePriceText = e.purchasePrice > 0 ? String(format: "%g", e.purchasePrice / 10000) : ""
         currentValueText = e.currentValue > 0 ? String(format: "%g", e.currentValue / 10000) : ""
         monthlyRentalText = e.monthlyRental > 0 ? String(format: "%.0f", e.monthlyRental) : ""

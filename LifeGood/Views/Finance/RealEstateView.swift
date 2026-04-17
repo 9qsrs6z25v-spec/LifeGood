@@ -238,6 +238,12 @@ struct RealEstateView: View {
                 )
         )
         .shadow(color: CardRarity.realEstate(price: item.purchasePrice).shadowColor, radius: 6, y: 2)
+        .overlay(alignment: .topLeading) {
+            if item.isSold {
+                SoldStamp(size: 16)
+                    .offset(x: -8, y: -8)
+            }
+        }
     }
 
     private func fmt(_ v: Double) -> String {

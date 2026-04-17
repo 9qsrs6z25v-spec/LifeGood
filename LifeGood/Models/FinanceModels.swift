@@ -322,6 +322,7 @@ struct RealEstate: Identifiable, Codable {
     var name: String
     var address: String
     var purchaseDate: Date
+    var soldDate: Date?                            // 售出日期（nil 表示仍持有）
     var purchasePrice: Double
     var currentValue: Double
     var monthlyRental: Double
@@ -336,6 +337,7 @@ struct RealEstate: Identifiable, Codable {
         name: String,
         address: String = "",
         purchaseDate: Date = Date(),
+        soldDate: Date? = nil,
         purchasePrice: Double = 0,
         currentValue: Double = 0,
         monthlyRental: Double = 0,
@@ -349,6 +351,7 @@ struct RealEstate: Identifiable, Codable {
         self.name = name
         self.address = address
         self.purchaseDate = purchaseDate
+        self.soldDate = soldDate
         self.purchasePrice = purchasePrice
         self.currentValue = currentValue
         self.monthlyRental = monthlyRental
@@ -366,6 +369,7 @@ struct RealEstate: Identifiable, Codable {
         name = try c.decode(String.self, forKey: .name)
         address = (try? c.decode(String.self, forKey: .address)) ?? ""
         purchaseDate = (try? c.decode(Date.self, forKey: .purchaseDate)) ?? Date()
+        soldDate = try? c.decode(Date.self, forKey: .soldDate)
         purchasePrice = (try? c.decode(Double.self, forKey: .purchasePrice)) ?? 0
         currentValue = (try? c.decode(Double.self, forKey: .currentValue)) ?? 0
         monthlyRental = (try? c.decode(Double.self, forKey: .monthlyRental)) ?? 0
@@ -383,7 +387,7 @@ struct RealEstate: Identifiable, Codable {
         }
     }
     private enum CodingKeys: String, CodingKey {
-        case id, name, address, purchaseDate, purchasePrice, currentValue, monthlyRental
+        case id, name, address, purchaseDate, soldDate, purchasePrice, currentValue, monthlyRental
         case mortgageItems, paidItems, variableExpenses, linkedExpenseId, note
         case monthlyMortgage // 舊版欄位，僅用於解碼
     }
@@ -394,6 +398,7 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(name, forKey: .name)
         try c.encode(address, forKey: .address)
         try c.encode(purchaseDate, forKey: .purchaseDate)
+        try c.encodeIfPresent(soldDate, forKey: .soldDate)
         try c.encode(purchasePrice, forKey: .purchasePrice)
         try c.encode(currentValue, forKey: .currentValue)
         try c.encode(monthlyRental, forKey: .monthlyRental)
@@ -402,8 +407,10 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(variableExpenses, forKey: .variableExpenses)
         try c.encodeIfPresent(linkedExpenseId, forKey: .linkedExpenseId)
         try c.encode(note, forKey: .note)
-        // monthlyMortgage 不編碼（計算屬性）
     }
+
+    /// 是否已售出
+    var isSold: Bool { soldDate != nil }
 
     /// 每月房貸合計
     var monthlyMortgage: Double { mortgageItems.reduce(0) { $0 + $1.amount } }

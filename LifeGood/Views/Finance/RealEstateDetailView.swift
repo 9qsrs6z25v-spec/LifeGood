@@ -126,8 +126,14 @@ struct RealEstateDetailView: View {
                 )
         )
         .shadow(color: rarity.shadowColor, radius: rarity == .legendary ? 15 : 8, y: 4)
+        .overlay(alignment: .topLeading) {
+            if estate.isSold {
+                SoldStamp(size: 32)
+                    .offset(x: -10, y: -14)
+            }
+        }
         .padding(.horizontal, 24)
-        .padding(.top, 8)
+        .padding(.top, 16)
     }
 
     // MARK: - 詳細資訊
