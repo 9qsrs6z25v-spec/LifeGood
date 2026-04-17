@@ -188,12 +188,14 @@ struct VehicleView: View {
                     if !item.brand.isEmpty {
                         Text(item.brand)
                             .font(.caption2.weight(.medium))
+                            .frame(maxWidth: .infinity)
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Color(.systemGray5))
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     Label(item.powerType.rawValue, systemImage: item.powerType.icon)
                         .font(.caption2.weight(.medium))
+                        .frame(maxWidth: .infinity)
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(
                             item.powerType == .electric ? Color.green.opacity(0.12) :
@@ -206,6 +208,7 @@ struct VehicleView: View {
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
+                .fixedSize(horizontal: true, vertical: false)
             }
 
             Divider()
