@@ -20,7 +20,7 @@ struct OverviewView: View {
                     monthlyBalanceCard
 
                     // 收支分類摘要
-                    HStack(spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
                         summaryCard(
                             title: "收入",
                             amount: store.currentMonthIncomeTotal,
@@ -117,11 +117,18 @@ struct OverviewView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text(formatCurrency(amount))
-                .font(.title3.bold())
-                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(formatWan(amount))
+                    .font(.title3.bold())
+                    .foregroundStyle(.primary)
+                Text("萬")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding()
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -258,6 +265,16 @@ struct OverviewView: View {
 
     private func formatCurrency(_ value: Double) -> String {
         currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+
+    private func formatWan(_ value: Double) -> String {
+        let wan = value / 10000
+        if wan == 0 { return "0" }
+        if abs(wan) >= 10 {
+            return String(format: "%.1f", wan)
+        } else {
+            return String(format: "%.2f", wan)
+        }
     }
 
     private func formatDate(_ date: Date) -> String {
