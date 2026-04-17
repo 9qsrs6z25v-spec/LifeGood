@@ -282,6 +282,13 @@ struct VehicleView: View {
                 )
         )
         .shadow(color: CardRarity(price: item.purchasePrice).shadowColor, radius: 6, y: 2)
+        .overlay(alignment: .topLeading) {
+            if item.isSold {
+                SoldStamp(size: 14)
+                    .padding(.leading, 8)
+                    .padding(.top, 6)
+            }
+        }
     }
 
     private func fmt(_ v: Double) -> String {

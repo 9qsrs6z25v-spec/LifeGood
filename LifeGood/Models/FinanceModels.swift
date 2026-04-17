@@ -569,6 +569,7 @@ struct Vehicle: Identifiable, Codable {
     var brand: String
     var powerType: VehiclePowerType
     var purchaseDate: Date
+    var soldDate: Date?                            // 售出日期（nil 表示仍持有）
     var purchasePrice: Double
     var currentValue: Double
     var fixedExpenses: [VehicleFixedExpense]       // 定期支出（車貸/稅費/訂閱）
@@ -581,6 +582,7 @@ struct Vehicle: Identifiable, Codable {
         brand: String = "",
         powerType: VehiclePowerType = .gasoline,
         purchaseDate: Date = Date(),
+        soldDate: Date? = nil,
         purchasePrice: Double = 0,
         currentValue: Double = 0,
         fixedExpenses: [VehicleFixedExpense] = [],
@@ -592,6 +594,7 @@ struct Vehicle: Identifiable, Codable {
         self.brand = brand
         self.powerType = powerType
         self.purchaseDate = purchaseDate
+        self.soldDate = soldDate
         self.purchasePrice = purchasePrice
         self.currentValue = currentValue
         self.fixedExpenses = fixedExpenses
@@ -607,6 +610,7 @@ struct Vehicle: Identifiable, Codable {
         brand = (try? c.decode(String.self, forKey: .brand)) ?? ""
         powerType = (try? c.decode(VehiclePowerType.self, forKey: .powerType)) ?? .gasoline
         purchaseDate = (try? c.decode(Date.self, forKey: .purchaseDate)) ?? Date()
+        soldDate = try? c.decode(Date.self, forKey: .soldDate)
         purchasePrice = (try? c.decode(Double.self, forKey: .purchasePrice)) ?? 0
         currentValue = (try? c.decode(Double.self, forKey: .currentValue)) ?? 0
         fixedExpenses = (try? c.decode([VehicleFixedExpense].self, forKey: .fixedExpenses)) ?? []
@@ -614,10 +618,12 @@ struct Vehicle: Identifiable, Codable {
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
     }
     private enum CodingKeys: String, CodingKey {
-        case id, name, brand, powerType, purchaseDate, purchasePrice, currentValue
+        case id, name, brand, powerType, purchaseDate, soldDate, purchasePrice, currentValue
         case fixedExpenses, variableExpenses, note
     }
 
+    /// 是否已售出
+    var isSold: Bool { soldDate != nil }
     /// 每月定期支出合計
     var monthlyFixedTotal: Double {
         fixedExpenses.reduce(0) { $0 + $1.monthlyAmount }
@@ -635,9 +641,10 @@ struct Vehicle: Identifiable, Codable {
         guard purchasePrice > 0 else { return 0 }
         return depreciation / purchasePrice * 100
     }
-    /// 持有年數
+    /// 持有年數（若已售出則使用售出日期計算）
     var yearsOwned: Double {
-        let days = Calendar.current.dateComponents([.day], from: purchaseDate, to: Date()).day ?? 0
+        let endDate = soldDate ?? Date()
+        let days = Calendar.current.dateComponents([.day], from: purchaseDate, to: endDate).day ?? 0
         return Double(max(0, days)) / 365.0
     }
     /// 年均折舊

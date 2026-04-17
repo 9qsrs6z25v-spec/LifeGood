@@ -13,6 +13,8 @@ struct AddVehicleView: View {
     @State private var brand = ""
     @State private var powerType: VehiclePowerType = .gasoline
     @State private var purchaseDate = Date()
+    @State private var isSold = false
+    @State private var soldDate = Date()
     @State private var purchasePriceText = ""
     @State private var currentValueText = ""
     @State private var note = ""
@@ -94,6 +96,11 @@ struct AddVehicleView: View {
             }
 
             DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
+
+            Toggle("已售出", isOn: $isSold)
+            if isSold {
+                DatePicker("售出日期", selection: $soldDate, in: purchaseDate..., displayedComponents: .date)
+            }
         }
     }
 
@@ -348,6 +355,7 @@ struct AddVehicleView: View {
             brand: brand.trimmingCharacters(in: .whitespaces),
             powerType: powerType,
             purchaseDate: purchaseDate,
+            soldDate: isSold ? soldDate : nil,
             purchasePrice: price,
             currentValue: currentVal,
             fixedExpenses: syncedFixedExpenses,
@@ -437,6 +445,13 @@ struct AddVehicleView: View {
         name = e.name; brand = e.brand
         powerType = e.powerType
         purchaseDate = e.purchaseDate
+        if let sd = e.soldDate {
+            isSold = true
+            soldDate = sd
+        } else {
+            isSold = false
+            soldDate = Date()
+        }
         purchasePriceText = e.purchasePrice > 0 ? String(format: "%g", e.purchasePrice / 10000) : ""
         currentValueText = e.currentValue > 0 ? String(format: "%g", e.currentValue / 10000) : ""
         note = e.note

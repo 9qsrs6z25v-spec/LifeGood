@@ -73,6 +73,27 @@ enum CardRarity {
     }
 }
 
+// MARK: - 售出印章
+
+struct SoldStamp: View {
+    var size: CGFloat = 18
+
+    var body: some View {
+        Text("售出")
+            .font(.system(size: size, weight: .heavy, design: .rounded))
+            .tracking(2)
+            .foregroundStyle(.red)
+            .padding(.horizontal, size * 0.55)
+            .padding(.vertical, size * 0.2)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(.red, lineWidth: size * 0.12)
+            )
+            .rotationEffect(.degrees(-15))
+            .opacity(0.85)
+    }
+}
+
 // MARK: - 汽車檢視卡片
 
 struct VehicleDetailView: View {
@@ -201,6 +222,13 @@ struct VehicleDetailView: View {
                 )
         )
         .shadow(color: rarity.shadowColor, radius: rarity == .legendary ? 15 : 8, y: 4)
+        .overlay(alignment: .topLeading) {
+            if vehicle.isSold {
+                SoldStamp(size: 28)
+                    .padding(.leading, 20)
+                    .padding(.top, 18)
+            }
+        }
         .padding(.horizontal, 24)
     }
 
