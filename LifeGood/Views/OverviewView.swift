@@ -68,13 +68,13 @@ struct OverviewView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("本月收入").font(.caption).foregroundStyle(.white.opacity(0.7))
-                    Text(formatCurrency(store.currentMonthIncomeTotal))
+                    Text(smartCurrency(store.currentMonthIncomeTotal))
                         .font(.title3.bold()).foregroundStyle(.white)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("本月支出").font(.caption).foregroundStyle(.white.opacity(0.7))
-                    Text(formatCurrency(store.currentMonthTotal))
+                    Text(smartCurrency(store.currentMonthTotal))
                         .font(.title3.bold()).foregroundStyle(.white)
                 }
             }
@@ -84,7 +84,7 @@ struct OverviewView: View {
             HStack {
                 Text("收支餘額").font(.subheadline).foregroundStyle(.white.opacity(0.8))
                 Spacer()
-                Text((isPositive ? "+" : "") + formatCurrency(balance))
+                Text((isPositive ? "+" : "") + smartCurrency(balance))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
             }
@@ -119,14 +119,9 @@ struct OverviewView: View {
 
             Spacer(minLength: 0)
 
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(formatWan(amount))
-                    .font(.title3.bold())
-                    .foregroundStyle(.primary)
-                Text("萬")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text(smartCurrency(amount))
+                .font(.title3.bold())
+                .foregroundStyle(.primary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding()
@@ -143,7 +138,7 @@ struct OverviewView: View {
                 Text("今日花費")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text(formatCurrency(store.todayTotal))
+                Text(smartCurrency(store.todayTotal))
                     .font(.title2.bold())
             }
             Spacer()
@@ -184,7 +179,7 @@ struct OverviewView: View {
                             Text(item.category.rawValue)
                                 .font(.subheadline)
                             Spacer()
-                            Text(formatCurrency(item.amount))
+                            Text(smartCurrency(item.amount))
                                 .font(.subheadline.bold())
                         }
                         .padding(.horizontal)
@@ -238,7 +233,7 @@ struct OverviewView: View {
                             Spacer()
 
                             VStack(alignment: .trailing, spacing: 2) {
-                                Text(formatCurrency(expense.amount))
+                                Text(smartCurrency(expense.amount))
                                     .font(.subheadline.bold())
                                 Text(formatDate(expense.date))
                                     .font(.caption)
@@ -267,14 +262,16 @@ struct OverviewView: View {
         currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 
-    private func formatWan(_ value: Double) -> String {
-        let wan = value / 10000
-        if wan == 0 { return "0" }
-        if abs(wan) >= 10 {
-            return String(format: "%.1f", wan)
-        } else {
-            return String(format: "%.2f", wan)
+    private func smartCurrency(_ value: Double) -> String {
+        if abs(value) >= 10000 {
+            let wan = value / 10000
+            if abs(wan) >= 10 {
+                return String(format: "%.1f 萬", wan)
+            } else {
+                return String(format: "%.2f 萬", wan)
+            }
         }
+        return formatCurrency(value)
     }
 
     private func formatDate(_ date: Date) -> String {
