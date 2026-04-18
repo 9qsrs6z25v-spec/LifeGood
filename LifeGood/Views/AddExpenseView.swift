@@ -158,6 +158,13 @@ struct AddExpenseView: View {
                     // 關聯汽車時自動歸為「汽車」分類，隱藏分類區塊
                     if selectedAssetLink != .vehicle { categorySection }
                 } else {
+                    // 固定支出：先選關聯資產（若適用），再選分類
+                    if showFixedAssetLink {
+                        fixedAssetLinkSection
+                        if selectedFixedAssetLink == .vehicle { fixedVehicleLinkSection }
+                        if selectedFixedAssetLink == .realEstate { fixedRealEstateLinkSection }
+                        if selectedFixedAssetLink == .insurance { fixedInsuranceLinkSection }
+                    }
                     categorySection
                 }
 
@@ -172,14 +179,6 @@ struct AddExpenseView: View {
                     mortgageRealEstateSection
                 } else if isCarLoan {
                     carLoanVehicleSection
-                }
-
-                // 固定支出：一般類別的關聯資產
-                if showFixedAssetLink {
-                    fixedAssetLinkSection
-                    if selectedFixedAssetLink == .vehicle { fixedVehicleLinkSection }
-                    if selectedFixedAssetLink == .realEstate { fixedRealEstateLinkSection }
-                    if selectedFixedAssetLink == .insurance { fixedInsuranceLinkSection }
                 }
 
                 Section("備註") {
@@ -951,6 +950,12 @@ struct AddExpenseView: View {
             rePurchasePriceText = linked.purchasePrice > 0 ? String(format: "%.0f", linked.purchasePrice) : ""
             reCurrentValueText = linked.currentValue > 0 ? String(format: "%.0f", linked.currentValue) : ""
             reMonthlyRentalText = linked.monthlyRental > 0 ? String(format: "%.0f", linked.monthlyRental) : ""
+        }
+
+        // 載入車貸連結的車輛
+        if expense.expenseType == .fixed && expense.fixedCategory == .loan
+           && expense.loanSubCategory == .car && expense.linkedVehicleId != nil {
+            selectedVehicleId = expense.linkedVehicleId
         }
 
         // 載入變動支出的資產連結
