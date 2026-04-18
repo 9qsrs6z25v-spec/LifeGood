@@ -42,6 +42,8 @@ struct AddExpenseView: View {
     @State private var rePurchasePriceText = ""
     @State private var reCurrentValueText = ""
     @State private var reMonthlyRentalText = ""
+    @State private var mortgageLinkExisting = false
+    @State private var selectedMortgageRealEstateId: UUID?
 
     // MARK: - 變動支出關聯資產
 
@@ -427,28 +429,51 @@ struct AddExpenseView: View {
         }
     }
 
-    // MARK: - 房貸連動房地產欄位
+    // MARK: - 房貸連動房地產
 
     private var mortgageRealEstateSection: some View {
         Section {
-            TextField("地址", text: $reAddress)
-            DatePicker("購入日期", selection: $rePurchaseDate, displayedComponents: .date)
-            HStack {
-                Text("NT$").foregroundStyle(.secondary)
-                TextField("購入價格", text: $rePurchasePriceText).keyboardType(.decimalPad)
+            Picker("連動方式", selection: $mortgageLinkExisting) {
+                Text("新增物件").tag(false)
+                Text("選擇既有").tag(true)
             }
-            HStack {
-                Text("NT$").foregroundStyle(.secondary)
-                TextField("目前估值", text: $reCurrentValueText).keyboardType(.decimalPad)
-            }
-            HStack {
-                Text("NT$").foregroundStyle(.secondary)
-                TextField("月租金收入（選填）", text: $reMonthlyRentalText).keyboardType(.decimalPad)
+            .pickerStyle(.segmented)
+
+            if mortgageLinkExisting {
+                if financeStore.realEstates.isEmpty {
+                    Text("尚無房地產，請先在理財模式新增物件")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    Picker("選擇物件", selection: $selectedMortgageRealEstateId) {
+                        Text("請選擇").tag(nil as UUID?)
+                        ForEach(financeStore.realEstates) { re in
+                            Text("\(re.name)\(!re.address.isEmpty ? " (\(re.address))" : "")")
+                                .tag(re.id as UUID?)
+                        }
+                    }
+                }
+            } else {
+                TextField("地址", text: $reAddress)
+                DatePicker("購入日期", selection: $rePurchaseDate, displayedComponents: .date)
+                HStack {
+                    Text("NT$").foregroundStyle(.secondary)
+                    TextField("購入價格", text: $rePurchasePriceText).keyboardType(.decimalPad)
+                }
+                HStack {
+                    Text("NT$").foregroundStyle(.secondary)
+                    TextField("目前估值", text: $reCurrentValueText).keyboardType(.decimalPad)
+                }
+                HStack {
+                    Text("NT$").foregroundStyle(.secondary)
+                    TextField("月租金收入（選填）", text: $reMonthlyRentalText).keyboardType(.decimalPad)
+                }
             }
         } header: {
             Text("房地產資訊（連動理財模式）")
         } footer: {
-            Text("儲存後將自動在理財模式的房地產中建立或更新對應物件。")
+            Text(mortgageLinkExisting
+                 ? "儲存後將自動在選擇的房地產物件中新增對應的房貸紀錄。"
+                 : "儲存後將自動在理財模式的房地產中建立或更新對應物件。")
         }
     }
 
@@ -622,7 +647,12 @@ struct AddExpenseView: View {
             linkedInsId = syncSavingsInsurance(amount: amount, existingId: linkedInsId, expenseId: expenseId)
         }
         if isMortgage {
-            linkedREId = syncRealEstate(mortgageAmount: amount, existingId: linkedREId, expenseId: expenseId)
+            if mortgageLinkExisting, let reId = selectedMortgageRealEstateId {
+                linkedREId = reId
+                syncMortgageToExistingRealEstate(realEstateId: reId, expenseId: expenseId, amount: amount)
+            } else {
+                linkedREId = syncRealEstate(mortgageAmount: amount, existingId: linkedREId, expenseId: expenseId)
+            }
         }
         if isCarLoan, let vehicleId = selectedVehicleId {
             linkedVehId = vehicleId
@@ -787,6 +817,33 @@ struct AddExpenseView: View {
         return reId
     }
 
+    /// 同步房貸到既有房地產物件
+    private func syncMortgageToExistingRealEstate(realEstateId: UUID, expenseId: UUID, amount: Double) {
+        guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
+
+        let mortgageItem = RealEstateMortgageItem(
+            title: title.trimmingCharacters(in: .whitespaces),
+            amount: amount,
+            totalPeriods: 240,
+            startDate: date,
+            linkedExpenseId: expenseId
+        )
+
+        if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+            re.mortgageItems[idx] = RealEstateMortgageItem(
+                id: re.mortgageItems[idx].id,
+                title: title.trimmingCharacters(in: .whitespaces),
+                amount: amount,
+                totalPeriods: re.mortgageItems[idx].totalPeriods,
+                startDate: re.mortgageItems[idx].startDate,
+                linkedExpenseId: expenseId
+            )
+        } else {
+            re.mortgageItems.append(mortgageItem)
+        }
+        financeStore.update(re)
+    }
+
     /// 同步車貸到理財模式的汽車定期支出
     private func syncCarLoanToVehicle(vehicleId: UUID, expenseId: UUID, amount: Double) {
         guard var vehicle = financeStore.vehicles.first(where: { $0.id == vehicleId }) else { return }
@@ -866,6 +923,10 @@ struct AddExpenseView: View {
         // 載入連結的房地產
         if let linkedId = expense.linkedRealEstateId,
            let linked = financeStore.realEstates.first(where: { $0.id == linkedId }) {
+            if expense.loanSubCategory == .mortgage {
+                mortgageLinkExisting = true
+                selectedMortgageRealEstateId = linkedId
+            }
             reAddress = linked.address
             rePurchaseDate = linked.purchaseDate
             rePurchasePriceText = linked.purchasePrice > 0 ? String(format: "%.0f", linked.purchasePrice) : ""
