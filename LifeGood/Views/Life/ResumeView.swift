@@ -61,9 +61,18 @@ struct HolographicWatermark: View {
 struct ProfileFlashCard: View {
     let profile: UserProfile
     let totalAssets: Double
+    let spouse: FamilyMember?
     let onEdit: () -> Void
 
     private let rarity: CardRarity = .legendary
+
+    private var spouseDisplay: String {
+        if let s = spouse {
+            if !s.englishName.isEmpty { return s.englishName }
+            if !s.chineseName.isEmpty { return s.chineseName }
+        }
+        return profile.spouse.isEmpty ? "—" : profile.spouse
+    }
 
     var body: some View {
         ZStack {
@@ -114,7 +123,7 @@ struct ProfileFlashCard: View {
                     Spacer()
                     infoColumn("職稱", profile.jobTitle.isEmpty ? "—" : profile.jobTitle)
                     Spacer()
-                    infoColumn("配偶", profile.spouse.isEmpty ? "—" : profile.spouse)
+                    infoColumn("配偶", spouseDisplay)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 16)
@@ -230,8 +239,10 @@ struct ResumeView: View {
     @State private var editingItem: LifeMilestone?
     @State private var selectedCategory: MilestoneCategory?
 
+    private var realMilestoneIDs: Set<UUID> { Set(store.milestones.map(\.id)) }
+
     var filtered: [LifeMilestone] {
-        let sorted = store.milestones.sorted { $0.date > $1.date }
+        let sorted = store.allMilestones.sorted { $0.date > $1.date }
         if let cat = selectedCategory { return sorted.filter { $0.category == cat } }
         return sorted
     }
@@ -248,10 +259,13 @@ struct ResumeView: View {
                         ForEach(filtered) { item in
                             milestoneRow(item)
                                 .contentShape(Rectangle())
-                                .onTapGesture { editingItem = item }
+                                .onTapGesture {
+                                    if realMilestoneIDs.contains(item.id) { editingItem = item }
+                                }
                         }
                         .onDelete { offsets in
                             let items = offsets.map { filtered[$0] }
+                                .filter { realMilestoneIDs.contains($0.id) }
                             items.forEach { store.deleteMilestone($0) }
                         }
                     }
@@ -350,6 +364,10 @@ struct AddMilestoneView: View {
     @State private var familyRole: FamilyMemberRole = .spouse
     @State private var familyChineseName = ""
     @State private var familyEnglishName = ""
+    @State private var hasMarriageDate = false
+    @State private var marriageDate = Date()
+    @State private var isDivorced = false
+    @State private var divorceDate = Date()
 
     private var isFamily: Bool { category == .family }
 
@@ -379,6 +397,19 @@ struct AddMilestoneView: View {
                         TextField("中文姓名", text: $familyChineseName)
                         TextField("英文姓名", text: $familyEnglishName)
                             .autocapitalization(.words)
+
+                        if familyRole == .spouse {
+                            Toggle("填入結婚時間", isOn: $hasMarriageDate)
+                            if hasMarriageDate {
+                                DatePicker("結婚日期", selection: $marriageDate, displayedComponents: .date)
+                            }
+                            Toggle("已離婚", isOn: $isDivorced)
+                            if isDivorced {
+                                DatePicker("離婚日期", selection: $divorceDate,
+                                           in: (hasMarriageDate ? marriageDate : Date.distantPast)...,
+                                           displayedComponents: .date)
+                            }
+                        }
                     } else {
                         TextField("標題", text: $title)
                         DatePicker("日期", selection: $date, displayedComponents: .date)
@@ -412,11 +443,15 @@ struct AddMilestoneView: View {
 
     private func save() {
         if isFamily {
+            let isSpouse = familyRole == .spouse
             let member = FamilyMember(
                 id: editingFamily?.id ?? UUID(),
                 role: familyRole,
                 chineseName: familyChineseName.trimmingCharacters(in: .whitespaces),
-                englishName: familyEnglishName.trimmingCharacters(in: .whitespaces)
+                englishName: familyEnglishName.trimmingCharacters(in: .whitespaces),
+                marriageDate: isSpouse && hasMarriageDate ? marriageDate : nil,
+                isDivorced: isSpouse && isDivorced,
+                divorceDate: isSpouse && isDivorced ? divorceDate : nil
             )
             if editingFamily != nil { store.update(member) } else { store.add(member) }
         } else {
@@ -439,6 +474,11 @@ struct AddMilestoneView: View {
         if let f = editingFamily {
             category = .family; familyRole = f.role
             familyChineseName = f.chineseName; familyEnglishName = f.englishName
+            if let md = f.marriageDate {
+                hasMarriageDate = true; marriageDate = md
+            }
+            isDivorced = f.isDivorced
+            if let dd = f.divorceDate { divorceDate = dd }
             return
         }
         category = initialCategory

@@ -61,6 +61,55 @@ class LifeStore: ObservableObject {
         }
     }
 
+    // MARK: - 家庭衍生里程碑
+
+    /// 配偶（若有）
+    var spouse: FamilyMember? {
+        familyMembers.first(where: { $0.role == .spouse })
+    }
+
+    /// 從家庭成員衍生的虛擬里程碑（結婚 / 離婚），ID 使用穩定命名空間避免重複
+    var familyDerivedMilestones: [LifeMilestone] {
+        var items: [LifeMilestone] = []
+        for member in familyMembers where member.role == .spouse {
+            let name = member.chineseName.isEmpty ? (member.englishName.isEmpty ? "配偶" : member.englishName) : member.chineseName
+            if let md = member.marriageDate {
+                items.append(LifeMilestone(
+                    id: deriveID(member.id, suffix: "marriage"),
+                    title: "與 \(name) 結婚",
+                    date: md,
+                    category: .marriage,
+                    note: ""
+                ))
+            }
+            if member.isDivorced, let dd = member.divorceDate {
+                items.append(LifeMilestone(
+                    id: deriveID(member.id, suffix: "divorce"),
+                    title: "與 \(name) 離婚",
+                    date: dd,
+                    category: .family,
+                    note: ""
+                ))
+            }
+        }
+        return items
+    }
+
+    /// 真實 + 衍生里程碑合併
+    var allMilestones: [LifeMilestone] {
+        milestones + familyDerivedMilestones
+    }
+
+    private func deriveID(_ base: UUID, suffix: String) -> UUID {
+        let data = (base.uuidString + ":" + suffix).data(using: .utf8) ?? Data()
+        var bytes = [UInt8](repeating: 0, count: 16)
+        for (i, b) in data.prefix(16).enumerated() { bytes[i] = b }
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3],
+                          bytes[4], bytes[5], bytes[6], bytes[7],
+                          bytes[8], bytes[9], bytes[10], bytes[11],
+                          bytes[12], bytes[13], bytes[14], bytes[15]))
+    }
+
     // MARK: - 統計
 
     var upcomingSchedules: [Schedule] {
