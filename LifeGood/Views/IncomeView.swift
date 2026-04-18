@@ -80,23 +80,46 @@ struct IncomeView: View {
     // MARK: - 摘要
 
     private var summaryHeader: some View {
-        VStack(spacing: 8) {
+        let useEstimate = !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
+        let displayedIncome = useEstimate ? store.estimatedMonthlyIncome : store.currentMonthIncomeTotal
+        let displayedBalance = displayedIncome - store.currentMonthTotal
+
+        return VStack(spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("本月收入")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    Text(fmt(store.currentMonthIncomeTotal))
-                        .font(.title2.bold()).foregroundStyle(.green)
+                    HStack(spacing: 4) {
+                        Text(useEstimate ? "本月收入（預估）" : "本月收入")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        if useEstimate {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .font(.caption2).foregroundStyle(.orange)
+                        }
+                    }
+                    Text(fmt(displayedIncome))
+                        .font(.title2.bold())
+                        .foregroundStyle(useEstimate ? .orange : .green)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("收支餘額")
                         .font(.subheadline).foregroundStyle(.secondary)
-                    let balance = store.currentMonthBalance
-                    Text(fmt(balance))
+                    Text(fmt(displayedBalance))
                         .font(.title3.bold())
-                        .foregroundStyle(balance >= 0 ? .green : .red)
+                        .foregroundStyle(displayedBalance >= 0 ? .green : .red)
                 }
+            }
+
+            if useEstimate {
+                HStack {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.orange)
+                    Text("本月尚無收入紀錄，顯示近 6 個月中位數預估")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
             // 週期收入摘要
