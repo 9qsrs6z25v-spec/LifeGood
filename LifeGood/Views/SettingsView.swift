@@ -38,6 +38,7 @@ enum ShareItem: Identifiable {
 struct SettingsView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var lifeStore: LifeStore
     @AppStorage("appMode") private var appMode: String = AppMode.expense.rawValue
 
     private var currentMode: AppMode {
@@ -111,10 +112,12 @@ struct SettingsView: View {
             .alert("確定要清除所有資料嗎？", isPresented: $showClearConfirm) {
                 Button("清除全部", role: .destructive) {
                     store.clearAll()
+                    financeStore.clearAll()
+                    lifeStore.clearAll()
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("此操作無法復原，所有支出紀錄將被永久刪除。建議先匯出備份再進行清除。")
+                Text("此操作無法復原，所有三個模式的資料將被永久刪除。建議先匯出備份再進行清除。")
             }
         }
     }
@@ -203,7 +206,7 @@ struct SettingsView: View {
         } header: {
             Text("資料管理")
         } footer: {
-            Text("匯出的 JSON 檔案可用於備份或轉移至其他裝置。CSV 檔案適合在試算表軟體中檢視分析。")
+            Text("匯出會一次包含「記帳/理財/人生」三個模式的完整資料。JSON 可做完整備份與還原，CSV 則分區節顯示各類資料方便在試算表檢視。")
         }
     }
 
@@ -212,30 +215,30 @@ struct SettingsView: View {
     private var dataStatsSection: some View {
         Section("資料統計") {
             HStack {
-                Label("總筆數", systemImage: "number")
+                Label("記帳", systemImage: "yensign.circle")
                 Spacer()
-                Text("\(store.expenses.count) 筆")
+                Text("\(store.expenses.count + store.incomes.count) 筆")
                     .foregroundStyle(.secondary)
             }
 
             HStack {
-                Label("變動支出", systemImage: "arrow.up.arrow.down.circle")
+                Label("理財", systemImage: "chart.pie")
                 Spacer()
-                Text("\(store.variableExpenses.count) 筆")
+                Text("\(financeStore.insurances.count + financeStore.stocks.count + financeStore.vehicles.count + financeStore.realEstates.count) 筆")
                     .foregroundStyle(.secondary)
             }
 
             HStack {
-                Label("固定支出", systemImage: "pin.circle")
+                Label("人生", systemImage: "star.circle")
                 Spacer()
-                Text("\(store.fixedExpenses.count) 筆")
+                Text("\(lifeStore.milestones.count) 筆")
                     .foregroundStyle(.secondary)
             }
 
             if let earliest = store.expenses.map(\.date).min(),
                let latest = store.expenses.map(\.date).max() {
                 HStack {
-                    Label("資料區間", systemImage: "calendar")
+                    Label("支出區間", systemImage: "calendar")
                     Spacer()
                     Text("\(formatDate(earliest)) ~ \(formatDate(latest))")
                         .font(.caption)
@@ -254,12 +257,20 @@ struct SettingsView: View {
             } label: {
                 Label("清除所有資料", systemImage: "trash")
             }
-            .disabled(store.expenses.isEmpty)
+            .disabled(isAllDataEmpty)
         } header: {
             Text("危險操作")
         } footer: {
-            Text("清除後無法復原，請先匯出備份。")
+            Text("清除後無法復原，所有三個模式的資料都會被刪除，請先匯出備份。")
         }
+    }
+
+    private var isAllDataEmpty: Bool {
+        store.expenses.isEmpty && store.incomes.isEmpty &&
+        financeStore.insurances.isEmpty && financeStore.stocks.isEmpty &&
+        financeStore.vehicles.isEmpty && financeStore.realEstates.isEmpty &&
+        lifeStore.milestones.isEmpty && lifeStore.relationships.isEmpty &&
+        lifeStore.pets.isEmpty && lifeStore.schedules.isEmpty
     }
 
     // MARK: - 關於
@@ -292,7 +303,7 @@ struct SettingsView: View {
     // MARK: - 匯出
 
     private func exportJSON() {
-        let data = store.exportJSON()
+        let data = UnifiedExporter.exportJSON(expense: store, finance: financeStore, life: lifeStore)
         let filename = "LifeGood_\(dateStamp()).json"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         do {
@@ -305,7 +316,7 @@ struct SettingsView: View {
     }
 
     private func exportCSV() {
-        let csv = store.exportCSV()
+        let csv = UnifiedExporter.exportCSV(expense: store, finance: financeStore, life: lifeStore)
         let filename = "LifeGood_\(dateStamp()).csv"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         do {
@@ -344,14 +355,17 @@ struct SettingsView: View {
         }
     }
 
-    private func performImport(mode: ExpenseStore.ImportMode) {
+    private func performImport(mode: UnifiedImporter.Mode) {
         guard let data = pendingImportData else { return }
-        let count = store.importJSON(data: data, mode: mode)
+        let result = UnifiedImporter.importData(
+            data: data, mode: mode,
+            expense: store, finance: financeStore, life: lifeStore
+        )
         switch mode {
         case .merge:
-            importResultMessage = "成功匯入 \(count) 筆新紀錄"
+            importResultMessage = "成功合併匯入：\(result.summary)"
         case .replace:
-            importResultMessage = "已取代為匯入的 \(count) 筆紀錄"
+            importResultMessage = "已取代為匯入資料：\(result.summary)"
         }
         pendingImportData = nil
         showImportResult = true
@@ -384,4 +398,5 @@ struct SettingsView: View {
     SettingsView()
         .environmentObject(ExpenseStore())
         .environmentObject(FinanceStore())
+        .environmentObject(LifeStore())
 }

@@ -39,6 +39,7 @@
 		A01B000001000021 /* LifeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000021 /* LifeStore.swift */; };
 		A01B000001000022 /* LifeOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000022 /* LifeOverviewView.swift */; };
 		A01B000001000023 /* ResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000023 /* ResumeView.swift */; };
+		A01B000001000027 /* UnifiedExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000027 /* UnifiedExport.swift */; };
 		A01B00000100000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000A /* Assets.xcassets */; };
 		A01B00000100000B /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000B /* Preview Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -76,6 +77,7 @@
 		A01A000001000021 /* LifeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeStore.swift; sourceTree = "<group>"; };
 		A01A000001000022 /* LifeOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000023 /* ResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeView.swift; sourceTree = "<group>"; };
+		A01A000001000027 /* UnifiedExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedExport.swift; sourceTree = "<group>"; };
 		A01A00000100000A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A01A00000100000B /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		A01A00000100000C /* LifeGood.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeGood.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -123,6 +125,7 @@
 				A01A000001000010 /* FinanceStore.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000021 /* LifeStore.swift */,
+				A01A000001000027 /* UnifiedExport.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -292,6 +295,7 @@
 				A01B000001000021 /* LifeStore.swift in Sources */,
 				A01B000001000022 /* LifeOverviewView.swift in Sources */,
 				A01B000001000023 /* ResumeView.swift in Sources */,
+				A01B000001000027 /* UnifiedExport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

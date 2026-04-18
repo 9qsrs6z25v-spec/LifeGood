@@ -102,4 +102,13 @@ class LifeStore: ObservableObject {
             schedules = items
         }
     }
+
+    // MARK: - 清除
+
+    func clearAll() {
+        milestones.removeAll()
+        relationships.removeAll()
+        pets.removeAll()
+        schedules.removeAll()
+    }
 }
