@@ -5,4 +5,5 @@ import Foundation
 enum AppMode: String, CaseIterable {
     case expense = "記帳"
     case finance = "理財"
+    case life = "人生"
 }

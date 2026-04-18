@@ -132,9 +132,14 @@ struct SettingsView: View {
         } header: {
             Text("功能切換")
         } footer: {
-            Text(currentMode == .expense
-                 ? "目前為記帳模式：管理每日變動支出與固定開支。"
-                 : "目前為理財模式：管理儲蓄險、股票與房地產資產。")
+            switch currentMode {
+            case .expense:
+                Text("目前為記帳模式：管理每日變動支出與固定開支。")
+            case .finance:
+                Text("目前為理財模式：管理儲蓄險、股票與房地產資產。")
+            case .life:
+                Text("目前為人生模式：記錄里程碑、人際關係、寵物與行程。")
+            }
         }
     }
 
