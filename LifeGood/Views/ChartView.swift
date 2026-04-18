@@ -179,7 +179,8 @@ struct ChartView: View {
                             .gesture(
                                 DragGesture(minimumDistance: 0)
                                     .onChanged { value in
-                                        let x = value.location.x - geometry[proxy.plotAreaFrame].origin.x
+                                        let plotOrigin = proxy.plotFrame.map { geometry[$0].origin.x } ?? 0
+                                        let x = value.location.x - plotOrigin
                                         if let label: String = proxy.value(atX: x) {
                                             selectedDataPoint = chartData.first { $0.label == label }
                                         }

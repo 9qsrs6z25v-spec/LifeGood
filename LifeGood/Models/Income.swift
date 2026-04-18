@@ -15,7 +15,7 @@ enum IncomeCategory: String, Codable, CaseIterable, Identifiable {
         case .salary: return "briefcase.fill"
         case .bonus: return "star.fill"
         case .gift: return "gift.fill"
-        case .luck: return "clover.fill"
+        case .luck: return "sparkles"
         }
     }
 
