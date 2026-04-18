@@ -68,25 +68,35 @@ class LifeStore: ObservableObject {
         familyMembers.first(where: { $0.role == .spouse })
     }
 
-    /// 從家庭成員衍生的虛擬里程碑（結婚 / 離婚），ID 使用穩定命名空間避免重複
+    /// 從家庭成員衍生的虛擬里程碑（結婚 / 離婚 / 出生），ID 使用穩定命名空間避免重複
     var familyDerivedMilestones: [LifeMilestone] {
         var items: [LifeMilestone] = []
-        for member in familyMembers where member.role == .spouse {
-            let name = member.chineseName.isEmpty ? (member.englishName.isEmpty ? "配偶" : member.englishName) : member.chineseName
-            if let md = member.marriageDate {
+        for member in familyMembers {
+            let name = member.chineseName.isEmpty ? (member.englishName.isEmpty ? member.role.rawValue : member.englishName) : member.chineseName
+            if member.role == .spouse {
+                if let md = member.marriageDate {
+                    items.append(LifeMilestone(
+                        id: deriveID(member.id, suffix: "marriage"),
+                        title: "與 \(name) 結婚",
+                        date: md,
+                        category: .marriage,
+                        note: ""
+                    ))
+                }
+                if member.isDivorced, let dd = member.divorceDate {
+                    items.append(LifeMilestone(
+                        id: deriveID(member.id, suffix: "divorce"),
+                        title: "與 \(name) 離婚",
+                        date: dd,
+                        category: .family,
+                        note: ""
+                    ))
+                }
+            } else if let bd = member.birthday {
                 items.append(LifeMilestone(
-                    id: deriveID(member.id, suffix: "marriage"),
-                    title: "與 \(name) 結婚",
-                    date: md,
-                    category: .marriage,
-                    note: ""
-                ))
-            }
-            if member.isDivorced, let dd = member.divorceDate {
-                items.append(LifeMilestone(
-                    id: deriveID(member.id, suffix: "divorce"),
-                    title: "與 \(name) 離婚",
-                    date: dd,
+                    id: deriveID(member.id, suffix: "birthday"),
+                    title: "\(member.role.rawValue) \(name) 出生",
+                    date: bd,
                     category: .family,
                     note: ""
                 ))

@@ -64,7 +64,22 @@ struct FamilyView: View {
             }
 
             Spacer()
+
+            if let bd = member.birthday {
+                Text(formatDate(bd)).font(.caption).foregroundStyle(.secondary)
+            } else if member.role == .spouse, let md = member.marriageDate {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("結 \(formatDate(md))").font(.caption2).foregroundStyle(.secondary)
+                    if member.isDivorced, let dd = member.divorceDate {
+                        Text("離 \(formatDate(dd))").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
         .padding(.vertical, 2)
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
     }
 }

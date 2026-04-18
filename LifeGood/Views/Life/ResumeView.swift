@@ -368,6 +368,7 @@ struct AddMilestoneView: View {
     @State private var marriageDate = Date()
     @State private var isDivorced = false
     @State private var divorceDate = Date()
+    @State private var familyBirthday = Date()
 
     private var isFamily: Bool { category == .family }
 
@@ -409,6 +410,8 @@ struct AddMilestoneView: View {
                                            in: (hasMarriageDate ? marriageDate : Date.distantPast)...,
                                            displayedComponents: .date)
                             }
+                        } else {
+                            DatePicker("出生日期", selection: $familyBirthday, displayedComponents: .date)
                         }
                     } else {
                         TextField("標題", text: $title)
@@ -449,6 +452,7 @@ struct AddMilestoneView: View {
                 role: familyRole,
                 chineseName: familyChineseName.trimmingCharacters(in: .whitespaces),
                 englishName: familyEnglishName.trimmingCharacters(in: .whitespaces),
+                birthday: isSpouse ? nil : familyBirthday,
                 marriageDate: isSpouse && hasMarriageDate ? marriageDate : nil,
                 isDivorced: isSpouse && isDivorced,
                 divorceDate: isSpouse && isDivorced ? divorceDate : nil
@@ -474,6 +478,7 @@ struct AddMilestoneView: View {
         if let f = editingFamily {
             category = .family; familyRole = f.role
             familyChineseName = f.chineseName; familyEnglishName = f.englishName
+            if let bd = f.birthday { familyBirthday = bd }
             if let md = f.marriageDate {
                 hasMarriageDate = true; marriageDate = md
             }

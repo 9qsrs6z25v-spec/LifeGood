@@ -47,15 +47,18 @@ struct FamilyMember: Identifiable, Codable {
     var role: FamilyMemberRole
     var chineseName: String
     var englishName: String
+    var birthday: Date?
     var marriageDate: Date?
     var isDivorced: Bool
     var divorceDate: Date?
 
     init(id: UUID = UUID(), role: FamilyMemberRole = .spouse,
          chineseName: String = "", englishName: String = "",
+         birthday: Date? = nil,
          marriageDate: Date? = nil, isDivorced: Bool = false, divorceDate: Date? = nil) {
         self.id = id; self.role = role
         self.chineseName = chineseName; self.englishName = englishName
+        self.birthday = birthday
         self.marriageDate = marriageDate
         self.isDivorced = isDivorced
         self.divorceDate = divorceDate
@@ -67,6 +70,7 @@ struct FamilyMember: Identifiable, Codable {
         role = try c.decode(FamilyMemberRole.self, forKey: .role)
         chineseName = (try? c.decode(String.self, forKey: .chineseName)) ?? ""
         englishName = (try? c.decode(String.self, forKey: .englishName)) ?? ""
+        birthday = try? c.decode(Date.self, forKey: .birthday)
         marriageDate = try? c.decode(Date.self, forKey: .marriageDate)
         isDivorced = (try? c.decode(Bool.self, forKey: .isDivorced)) ?? false
         divorceDate = try? c.decode(Date.self, forKey: .divorceDate)
@@ -78,13 +82,14 @@ struct FamilyMember: Identifiable, Codable {
         try c.encode(role, forKey: .role)
         try c.encode(chineseName, forKey: .chineseName)
         try c.encode(englishName, forKey: .englishName)
+        try c.encodeIfPresent(birthday, forKey: .birthday)
         try c.encodeIfPresent(marriageDate, forKey: .marriageDate)
         try c.encode(isDivorced, forKey: .isDivorced)
         try c.encodeIfPresent(divorceDate, forKey: .divorceDate)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, chineseName, englishName, marriageDate, isDivorced, divorceDate
+        case id, role, chineseName, englishName, birthday, marriageDate, isDivorced, divorceDate
     }
 }
 
