@@ -147,15 +147,18 @@ struct AddExpenseView: View {
         NavigationStack {
             Form {
                 basicInfoSection
-                categorySection
 
-                // 變動支出：關聯資產選擇
+                // 變動支出：先選關聯資產，再選分類
                 if expenseType == .variable {
                     assetLinkSection
                     if selectedAssetLink == .vehicle { vehicleLinkSection }
                     if selectedAssetLink == .stock { stockLinkSection }
                     if selectedAssetLink == .insurance { insuranceLinkSection }
                     if selectedAssetLink == .realEstate { realEstateLinkSection }
+                    // 關聯汽車時自動歸為「汽車」分類，隱藏分類區塊
+                    if selectedAssetLink != .vehicle { categorySection }
+                } else {
+                    categorySection
                 }
 
                 // 固定支出：保險/貸款子分類
@@ -201,7 +204,23 @@ struct AddExpenseView: View {
                 }
             }
             .onAppear { loadEditing() }
+            .onChange(of: selectedAssetLink) { _, newValue in
+                if newValue == .vehicle {
+                    selectedVariableCategory = .vehicle
+                    applyVehicleAutoTitle()
+                }
+            }
+            .onChange(of: selectedVehicleId) { _, _ in applyVehicleAutoTitle() }
+            .onChange(of: selectedVehicleExpenseCategory) { _, _ in applyVehicleAutoTitle() }
         }
+    }
+
+    private func applyVehicleAutoTitle() {
+        guard expenseType == .variable, selectedAssetLink == .vehicle,
+              let id = selectedVehicleId,
+              let vehicle = financeStore.vehicles.first(where: { $0.id == id })
+        else { return }
+        title = "\(vehicle.name)-\(selectedVehicleExpenseCategory.rawValue)"
     }
 
     // MARK: - 基本資訊
@@ -377,7 +396,7 @@ struct AddExpenseView: View {
         } header: {
             Text("汽車資訊（連動理財模式）")
         } footer: {
-            Text("支出類別會依照車輛動力類型自動篩選（油車→油錢、電車→電費、混合→兩者皆有）。")
+            Text("選擇後分類自動設為「汽車」並隱藏分類區塊，名稱自動生成為「車輛-支出類別」。支出類別會依照車輛動力類型自動篩選。")
         }
     }
 
