@@ -206,27 +206,94 @@ struct AddExpenseView: View {
             .onChange(of: selectedAssetLink) { _, newValue in
                 if newValue == .vehicle {
                     selectedVariableCategory = .vehicle
-                    applyVehicleAutoTitle()
                 }
+                applyAutoTitleIfLinked()
             }
-            .onChange(of: selectedVehicleId) { _, _ in applyVehicleAutoTitle() }
-            .onChange(of: selectedVehicleExpenseCategory) { _, _ in applyVehicleAutoTitle() }
+            .onChange(of: selectedVehicleId) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: selectedVehicleExpenseCategory) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: selectedRealEstateLinkId) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: selectedRealEstateExpenseCategory) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: selectedMortgageRealEstateId) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: mortgageLinkExisting) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: selectedFixedAssetLink) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: fixedLinkVehicleId) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: selectedFixedCategory) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: selectedLoanSubCategory) { _, _ in applyAutoTitleIfLinked() }
         }
     }
 
-    private func applyVehicleAutoTitle() {
-        guard expenseType == .variable, selectedAssetLink == .vehicle,
-              let id = selectedVehicleId,
-              let vehicle = financeStore.vehicles.first(where: { $0.id == id })
-        else { return }
-        title = "\(vehicle.name)-\(selectedVehicleExpenseCategory.rawValue)"
+    // MARK: - 連結資產名稱自動生成
+
+    /// 若此筆支出連結到理財模式中的具體項目（車輛/房地產），回傳自動生成的名稱「項目 N：型號-類別」。
+    private var linkedAssetTitle: String? {
+        // 變動支出 - 汽車
+        if expenseType == .variable, selectedAssetLink == .vehicle,
+           let id = selectedVehicleId,
+           let vehicle = financeStore.vehicles.first(where: { $0.id == id }) {
+            let n = itemNumber(in: vehicle.variableExpenses) { $0.linkedExpenseId }
+            return "項目 \(n)：\(vehicle.name)-\(selectedVehicleExpenseCategory.rawValue)"
+        }
+        // 變動支出 - 房地產
+        if expenseType == .variable, selectedAssetLink == .realEstate,
+           let id = selectedRealEstateLinkId,
+           let re = financeStore.realEstates.first(where: { $0.id == id }) {
+            let n = itemNumber(in: re.variableExpenses) { $0.linkedExpenseId }
+            return "項目 \(n)：\(re.name)-\(selectedRealEstateExpenseCategory.rawValue)"
+        }
+        // 固定支出 - 車貸
+        if isCarLoan,
+           let id = selectedVehicleId,
+           let vehicle = financeStore.vehicles.first(where: { $0.id == id }) {
+            let n = itemNumber(in: vehicle.fixedExpenses) { $0.linkedExpenseId }
+            return "項目 \(n)：\(vehicle.name)-車貸"
+        }
+        // 固定支出 - 房貸（連動既有物件）
+        if isMortgage, mortgageLinkExisting,
+           let id = selectedMortgageRealEstateId,
+           let re = financeStore.realEstates.first(where: { $0.id == id }) {
+            let n = itemNumber(in: re.mortgageItems) { $0.linkedExpenseId }
+            return "項目 \(n)：\(re.name)-房貸"
+        }
+        // 固定支出 - 一般類別連結汽車
+        if expenseType == .fixed, showFixedAssetLink, selectedFixedAssetLink == .vehicle,
+           let id = fixedLinkVehicleId,
+           let vehicle = financeStore.vehicles.first(where: { $0.id == id }) {
+            let n = itemNumber(in: vehicle.fixedExpenses) { $0.linkedExpenseId }
+            return "項目 \(n)：\(vehicle.name)-\(selectedFixedCategory.rawValue)"
+        }
+        return nil
+    }
+
+    private func itemNumber<T>(in items: [T], idExtractor: (T) -> UUID?) -> Int {
+        if let id = editingExpense?.id,
+           let idx = items.firstIndex(where: { idExtractor($0) == id }) {
+            return idx + 1
+        }
+        return items.count + 1
+    }
+
+    private func applyAutoTitleIfLinked() {
+        if let auto = linkedAssetTitle {
+            title = auto
+        }
     }
 
     // MARK: - 基本資訊
 
     private var basicInfoSection: some View {
         Section("基本資訊") {
-            TextField("名稱", text: $title)
+            if linkedAssetTitle != nil {
+                HStack {
+                    Text("名稱")
+                    Spacer()
+                    Text(title)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(2)
+                }
+            } else {
+                TextField("名稱", text: $title)
+            }
 
             HStack {
                 Text(isSavingsInsurance ? insCurrencySymbol : "NT$").foregroundStyle(.secondary)
@@ -395,7 +462,7 @@ struct AddExpenseView: View {
         } header: {
             Text("汽車資訊（連動理財模式）")
         } footer: {
-            Text("選擇後分類自動設為「汽車」並隱藏分類區塊，名稱自動生成為「車輛-支出類別」。支出類別會依照車輛動力類型自動篩選。")
+            Text("選擇後分類自動設為「汽車」並隱藏分類區塊，名稱自動生成為「項目 N：型號-支出類別」並轉為唯讀。支出類別會依照車輛動力類型自動篩選。")
         }
     }
 
@@ -996,6 +1063,9 @@ struct AddExpenseView: View {
                 fixedLinkInsuranceId = expense.linkedInsuranceId
             }
         }
+
+        // 編輯時若已連動理財項目，依目前清單重新計算「項目 N：型號-類別」
+        applyAutoTitleIfLinked()
     }
 
     /// 同步汽車變動支出到理財模式的汽車
