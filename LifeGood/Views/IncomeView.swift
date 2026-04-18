@@ -74,7 +74,7 @@ struct IncomeView: View {
     }
 
     private func fmtWan(_ v: Double) -> String {
-        String(format: "%g", v / 10000)
+        String(format: "%.0f", v / 10000)
     }
 
     // MARK: - 摘要
