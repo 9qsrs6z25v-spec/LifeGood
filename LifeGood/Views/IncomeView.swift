@@ -34,7 +34,7 @@ struct IncomeView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("收入")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 8) {
