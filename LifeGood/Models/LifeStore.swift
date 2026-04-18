@@ -2,6 +2,7 @@ import Foundation
 
 class LifeStore: ObservableObject {
     @Published var profile: UserProfile = UserProfile() { didSet { if !isLoading { save() } } }
+    @Published var familyMembers: [FamilyMember] = [] { didSet { if !isLoading { save() } } }
     @Published var milestones: [LifeMilestone] = [] { didSet { if !isLoading { save() } } }
     @Published var relationships: [Relationship] = [] { didSet { if !isLoading { save() } } }
     @Published var pets: [Pet] = [] { didSet { if !isLoading { save() } } }
@@ -14,6 +15,14 @@ class LifeStore: ObservableObject {
     // MARK: - 個人檔案
 
     func updateProfile(_ profile: UserProfile) { self.profile = profile }
+
+    // MARK: - 家庭成員 CRUD
+
+    func add(_ item: FamilyMember) { familyMembers.append(item) }
+    func update(_ item: FamilyMember) {
+        if let i = familyMembers.firstIndex(where: { $0.id == item.id }) { familyMembers[i] = item }
+    }
+    func deleteFamilyMember(_ item: FamilyMember) { familyMembers.removeAll { $0.id == item.id } }
 
     // MARK: - 里程碑 CRUD
 
@@ -74,6 +83,9 @@ class LifeStore: ObservableObject {
         if let data = try? encoder.encode(profile) {
             UserDefaults.standard.set(data, forKey: "life_profile")
         }
+        if let data = try? encoder.encode(familyMembers) {
+            UserDefaults.standard.set(data, forKey: "life_family")
+        }
         if let data = try? encoder.encode(milestones) {
             UserDefaults.standard.set(data, forKey: "life_milestones")
         }
@@ -97,6 +109,10 @@ class LifeStore: ObservableObject {
            let p = try? decoder.decode(UserProfile.self, from: data) {
             profile = p
         }
+        if let data = UserDefaults.standard.data(forKey: "life_family"),
+           let items = try? decoder.decode([FamilyMember].self, from: data) {
+            familyMembers = items
+        }
         if let data = UserDefaults.standard.data(forKey: "life_milestones"),
            let items = try? decoder.decode([LifeMilestone].self, from: data) {
             milestones = items
@@ -119,6 +135,7 @@ class LifeStore: ObservableObject {
 
     func clearAll() {
         profile = UserProfile()
+        familyMembers.removeAll()
         milestones.removeAll()
         relationships.removeAll()
         pets.removeAll()

@@ -19,6 +19,42 @@ struct UserProfile: Codable {
     }
 }
 
+// MARK: - 家庭成員
+
+enum FamilyMemberRole: String, Codable, CaseIterable, Identifiable {
+    case spouse = "配偶"
+    case son = "兒子"
+    case daughter = "女兒"
+    case elderBrother = "哥哥"
+    case elderSister = "姐姐"
+    case youngerBrother = "弟弟"
+    case youngerSister = "妹妹"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .spouse: return "heart.circle.fill"
+        case .son, .daughter: return "figure.child"
+        case .elderBrother, .youngerBrother: return "figure.stand"
+        case .elderSister, .youngerSister: return "figure.stand.dress"
+        }
+    }
+}
+
+struct FamilyMember: Identifiable, Codable {
+    let id: UUID
+    var role: FamilyMemberRole
+    var chineseName: String
+    var englishName: String
+
+    init(id: UUID = UUID(), role: FamilyMemberRole = .spouse,
+         chineseName: String = "", englishName: String = "") {
+        self.id = id; self.role = role
+        self.chineseName = chineseName; self.englishName = englishName
+    }
+}
+
 // MARK: - 里程碑分類
 
 enum MilestoneCategory: String, Codable, CaseIterable, Identifiable {

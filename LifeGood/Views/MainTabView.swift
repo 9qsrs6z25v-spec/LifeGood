@@ -85,6 +85,8 @@ struct MainTabView: View {
     }
     // MARK: - 人生模式
 
+    @EnvironmentObject var lifeStore: LifeStore
+
     @ViewBuilder
     private var lifeTabs: some View {
         LifeOverviewView()
@@ -95,9 +97,15 @@ struct MainTabView: View {
             .tabItem { Label("履歷", systemImage: "trophy.fill") }
             .tag(1)
 
+        if !lifeStore.familyMembers.isEmpty {
+            FamilyView()
+                .tabItem { Label("家庭", systemImage: "person.3.fill") }
+                .tag(2)
+        }
+
         SettingsView()
             .tabItem { Label("設定", systemImage: "gearshape.fill") }
-            .tag(2)
+            .tag(lifeStore.familyMembers.isEmpty ? 2 : 3)
     }
 }
 

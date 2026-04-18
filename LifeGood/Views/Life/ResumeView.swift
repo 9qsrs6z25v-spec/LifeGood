@@ -339,55 +339,108 @@ struct AddMilestoneView: View {
     @Environment(\.dismiss) private var dismiss
 
     var editing: LifeMilestone?
+    var editingFamily: FamilyMember?
+    var initialCategory: MilestoneCategory = .other
 
+    @State private var category: MilestoneCategory = .other
     @State private var title = ""
     @State private var date = Date()
-    @State private var category: MilestoneCategory = .other
     @State private var note = ""
+
+    @State private var familyRole: FamilyMemberRole = .spouse
+    @State private var familyChineseName = ""
+    @State private var familyEnglishName = ""
+
+    private var isFamily: Bool { category == .family }
+
+    private var canSave: Bool {
+        if isFamily {
+            return !familyChineseName.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        return !title.trimmingCharacters(in: .whitespaces).isEmpty
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("基本資訊") {
-                    TextField("標題", text: $title)
-                    DatePicker("日期", selection: $date, displayedComponents: .date)
                     Picker("分類", selection: $category) {
                         ForEach(MilestoneCategory.allCases) { cat in
                             Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                         }
                     }
+
+                    if isFamily {
+                        Picker("關係", selection: $familyRole) {
+                            ForEach(FamilyMemberRole.allCases) { role in
+                                Label(role.rawValue, systemImage: role.icon).tag(role)
+                            }
+                        }
+                        TextField("中文姓名", text: $familyChineseName)
+                        TextField("英文姓名", text: $familyEnglishName)
+                            .autocapitalization(.words)
+                    } else {
+                        TextField("標題", text: $title)
+                        DatePicker("日期", selection: $date, displayedComponents: .date)
+                    }
                 }
-                Section("備註") {
-                    TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                if !isFamily {
+                    Section("備註") {
+                        TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                    }
                 }
             }
-            .navigationTitle(editing != nil ? "編輯里程碑" : "新增里程碑")
+            .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
+                    Button(editing != nil || editingFamily != nil ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(!canSave)
                 }
             }
             .onAppear { loadEditing() }
         }
     }
 
+    private var navTitle: String {
+        if editingFamily != nil { return "編輯家庭成員" }
+        if editing != nil { return "編輯里程碑" }
+        return isFamily ? "新增家庭成員" : "新增里程碑"
+    }
+
     private func save() {
-        let item = LifeMilestone(
-            id: editing?.id ?? UUID(),
-            title: title.trimmingCharacters(in: .whitespaces),
-            date: date, category: category,
-            note: note.trimmingCharacters(in: .whitespaces)
-        )
-        if editing != nil { store.update(item) } else { store.add(item) }
+        if isFamily {
+            let member = FamilyMember(
+                id: editingFamily?.id ?? UUID(),
+                role: familyRole,
+                chineseName: familyChineseName.trimmingCharacters(in: .whitespaces),
+                englishName: familyEnglishName.trimmingCharacters(in: .whitespaces)
+            )
+            if editingFamily != nil { store.update(member) } else { store.add(member) }
+        } else {
+            let item = LifeMilestone(
+                id: editing?.id ?? UUID(),
+                title: title.trimmingCharacters(in: .whitespaces),
+                date: date, category: category,
+                note: note.trimmingCharacters(in: .whitespaces)
+            )
+            if editing != nil { store.update(item) } else { store.add(item) }
+        }
         dismiss()
     }
 
     private func loadEditing() {
-        guard let e = editing else { return }
-        title = e.title; date = e.date; category = e.category; note = e.note
+        if let e = editing {
+            title = e.title; date = e.date; category = e.category; note = e.note
+            return
+        }
+        if let f = editingFamily {
+            category = .family; familyRole = f.role
+            familyChineseName = f.chineseName; familyEnglishName = f.englishName
+            return
+        }
+        category = initialCategory
     }
 }

@@ -23,6 +23,7 @@ struct UnifiedExport: Codable {
 
     struct LifeBundle: Codable {
         var profile: UserProfile?
+        var familyMembers: [FamilyMember]?
         var milestones: [LifeMilestone]
         var relationships: [Relationship]
         var pets: [Pet]
@@ -42,6 +43,7 @@ struct UnifiedExport: Codable {
             ),
             life: LifeBundle(
                 profile: life.profile,
+                familyMembers: life.familyMembers,
                 milestones: life.milestones,
                 relationships: life.relationships,
                 pets: life.pets,
@@ -220,6 +222,7 @@ enum UnifiedImporter {
         var stocks: Int = 0
         var vehicles: Int = 0
         var realEstates: Int = 0
+        var familyMembers: Int = 0
         var milestones: Int = 0
         var relationships: Int = 0
         var pets: Int = 0
@@ -233,6 +236,7 @@ enum UnifiedImporter {
             if stocks > 0 { parts.append("股票 \(stocks)") }
             if vehicles > 0 { parts.append("汽車 \(vehicles)") }
             if realEstates > 0 { parts.append("房地產 \(realEstates)") }
+            if familyMembers > 0 { parts.append("家庭 \(familyMembers)") }
             if milestones > 0 { parts.append("里程碑 \(milestones)") }
             if relationships > 0 { parts.append("人脈 \(relationships)") }
             if pets > 0 { parts.append("寵物 \(pets)") }
@@ -293,6 +297,7 @@ enum UnifiedImporter {
             finance.vehicles = payload.finance.vehicles
             finance.realEstates = payload.finance.realEstates
             if let profile = payload.life.profile { life.profile = profile }
+            if let members = payload.life.familyMembers { life.familyMembers = members }
             life.milestones = payload.life.milestones
             life.relationships = payload.life.relationships
             life.pets = payload.life.pets
@@ -304,6 +309,7 @@ enum UnifiedImporter {
             result.stocks = payload.finance.stocks.count
             result.vehicles = payload.finance.vehicles.count
             result.realEstates = payload.finance.realEstates.count
+            result.familyMembers = payload.life.familyMembers?.count ?? 0
             result.milestones = payload.life.milestones.count
             result.relationships = payload.life.relationships.count
             result.pets = payload.life.pets.count
@@ -311,6 +317,11 @@ enum UnifiedImporter {
 
         case .merge:
             if let profile = payload.life.profile { life.profile = profile }
+            if let members = payload.life.familyMembers {
+                let newFamily = mergeItems(existing: life.familyMembers, incoming: members)
+                life.familyMembers.append(contentsOf: newFamily)
+                result.familyMembers = newFamily.count
+            }
             let newExpenses = mergeItems(existing: expense.expenses, incoming: payload.expense.expenses)
             expense.expenses.append(contentsOf: newExpenses)
             result.expenses = newExpenses.count
