@@ -228,6 +228,17 @@ struct RealEstateMortgageItem: Identifiable, Codable {
         startDate = (try? c.decode(Date.self, forKey: .startDate)) ?? Date()
         linkedExpenseId = try? c.decode(UUID.self, forKey: .linkedExpenseId)
     }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(title, forKey: .title)
+        try c.encode(amount, forKey: .amount)
+        try c.encode(totalPeriods, forKey: .totalPeriods)
+        try c.encode(startDate, forKey: .startDate)
+        try c.encodeIfPresent(linkedExpenseId, forKey: .linkedExpenseId)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, totalPeriods, startDate, linkedExpenseId
     }
