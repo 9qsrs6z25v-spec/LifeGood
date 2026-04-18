@@ -1,6 +1,7 @@
 import Foundation
 
 class LifeStore: ObservableObject {
+    @Published var profile: UserProfile = UserProfile() { didSet { if !isLoading { save() } } }
     @Published var milestones: [LifeMilestone] = [] { didSet { if !isLoading { save() } } }
     @Published var relationships: [Relationship] = [] { didSet { if !isLoading { save() } } }
     @Published var pets: [Pet] = [] { didSet { if !isLoading { save() } } }
@@ -9,6 +10,10 @@ class LifeStore: ObservableObject {
     private var isLoading = false
 
     init() { load() }
+
+    // MARK: - 個人檔案
+
+    func updateProfile(_ profile: UserProfile) { self.profile = profile }
 
     // MARK: - 里程碑 CRUD
 
@@ -66,6 +71,9 @@ class LifeStore: ObservableObject {
 
     private func save() {
         let encoder = JSONEncoder()
+        if let data = try? encoder.encode(profile) {
+            UserDefaults.standard.set(data, forKey: "life_profile")
+        }
         if let data = try? encoder.encode(milestones) {
             UserDefaults.standard.set(data, forKey: "life_milestones")
         }
@@ -85,6 +93,10 @@ class LifeStore: ObservableObject {
         defer { isLoading = false }
         let decoder = JSONDecoder()
 
+        if let data = UserDefaults.standard.data(forKey: "life_profile"),
+           let p = try? decoder.decode(UserProfile.self, from: data) {
+            profile = p
+        }
         if let data = UserDefaults.standard.data(forKey: "life_milestones"),
            let items = try? decoder.decode([LifeMilestone].self, from: data) {
             milestones = items
@@ -106,6 +118,7 @@ class LifeStore: ObservableObject {
     // MARK: - 清除
 
     func clearAll() {
+        profile = UserProfile()
         milestones.removeAll()
         relationships.removeAll()
         pets.removeAll()

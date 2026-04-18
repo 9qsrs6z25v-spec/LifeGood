@@ -22,6 +22,7 @@ struct UnifiedExport: Codable {
     }
 
     struct LifeBundle: Codable {
+        var profile: UserProfile?
         var milestones: [LifeMilestone]
         var relationships: [Relationship]
         var pets: [Pet]
@@ -40,6 +41,7 @@ struct UnifiedExport: Codable {
                 realEstates: finance.realEstates
             ),
             life: LifeBundle(
+                profile: life.profile,
                 milestones: life.milestones,
                 relationships: life.relationships,
                 pets: life.pets,
@@ -290,6 +292,7 @@ enum UnifiedImporter {
             finance.stocks = payload.finance.stocks
             finance.vehicles = payload.finance.vehicles
             finance.realEstates = payload.finance.realEstates
+            if let profile = payload.life.profile { life.profile = profile }
             life.milestones = payload.life.milestones
             life.relationships = payload.life.relationships
             life.pets = payload.life.pets
@@ -307,6 +310,7 @@ enum UnifiedImporter {
             result.schedules = payload.life.schedules.count
 
         case .merge:
+            if let profile = payload.life.profile { life.profile = profile }
             let newExpenses = mergeItems(existing: expense.expenses, incoming: payload.expense.expenses)
             expense.expenses.append(contentsOf: newExpenses)
             result.expenses = newExpenses.count

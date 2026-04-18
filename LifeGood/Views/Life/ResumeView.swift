@@ -1,8 +1,232 @@
 import SwiftUI
 
+// MARK: - 防偽浮水印
+
+struct HolographicWatermark: View {
+    let text: String
+    @State private var phase: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geo in
+            let rows = Int(geo.size.height / 28) + 2
+            let cols = Int(geo.size.width / 120) + 2
+
+            Canvas { ctx, size in
+                for row in 0..<rows {
+                    for col in 0..<cols {
+                        let offset: CGFloat = row.isMultiple(of: 2) ? 50 : 0
+                        let x = CGFloat(col) * 120 + offset - 40
+                        let y = CGFloat(row) * 28
+                        ctx.drawLayer { inner in
+                            inner.translateBy(x: x, y: y)
+                            inner.rotate(by: .degrees(-25))
+                            inner.draw(
+                                Text(text)
+                                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.06)),
+                                at: .zero
+                            )
+                        }
+                    }
+                }
+            }
+            .overlay(
+                LinearGradient(
+                    colors: [
+                        .clear,
+                        .white.opacity(0.08),
+                        .clear,
+                        .white.opacity(0.05),
+                        .clear
+                    ],
+                    startPoint: UnitPoint(x: phase - 0.3, y: phase - 0.3),
+                    endPoint: UnitPoint(x: phase + 0.3, y: phase + 0.3)
+                )
+                .blendMode(.overlay)
+            )
+        }
+        .allowsHitTesting(false)
+        .onAppear {
+            withAnimation(.linear(duration: 3.5).repeatForever(autoreverses: false)) {
+                phase = 1.5
+            }
+        }
+    }
+}
+
+// MARK: - 個人檔案閃卡
+
+struct ProfileFlashCard: View {
+    let profile: UserProfile
+    let totalAssets: Double
+    let onEdit: () -> Void
+
+    private let rarity: CardRarity = .legendary
+
+    var body: some View {
+        ZStack {
+            VStack(spacing: 0) {
+                // 頂部標籤
+                HStack {
+                    Text(rarity.label)
+                        .font(.caption2.weight(.heavy))
+                        .tracking(2)
+                        .foregroundStyle(rarity.textColor)
+                    Spacer()
+                    Button(action: onEdit) {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.yellow)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+
+                // 姓名
+                VStack(spacing: 4) {
+                    Text(profile.chineseName.isEmpty ? "未設定姓名" : profile.chineseName)
+                        .font(.title.weight(.bold))
+                        .foregroundStyle(.white)
+                    if !profile.englishName.isEmpty {
+                        Text(profile.englishName)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                }
+                .padding(.top, 14)
+
+                // 財富總計
+                VStack(spacing: 4) {
+                    Text(fmtWan(totalAssets))
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundStyle(rarity.textColor)
+                    Text("萬元 總資產")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                .padding(.vertical, 16)
+
+                // 底部資訊列
+                HStack {
+                    infoColumn("公司", profile.company.isEmpty ? "—" : profile.company)
+                    Spacer()
+                    infoColumn("職稱", profile.jobTitle.isEmpty ? "—" : profile.jobTitle)
+                    Spacer()
+                    infoColumn("配偶", profile.spouse.isEmpty ? "—" : profile.spouse)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+            }
+            .zIndex(1)
+
+            // 防偽浮水印
+            if !profile.englishName.isEmpty {
+                HolographicWatermark(text: profile.englishName)
+            }
+        }
+        .background(
+            LinearGradient(colors: rarity.bgGradient,
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(
+                    AngularGradient(colors: rarity.borderGradient, center: .center),
+                    lineWidth: rarity.borderWidth
+                )
+        )
+        .shadow(color: rarity.shadowColor, radius: 15, y: 4)
+        .padding(.horizontal, 24)
+        .padding(.top, 16)
+    }
+
+    private func infoColumn(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.5))
+            Text(value)
+                .font(.caption.bold())
+                .foregroundStyle(.white.opacity(0.8))
+                .lineLimit(1)
+        }
+    }
+
+    private func fmtWan(_ v: Double) -> String {
+        String(format: "%.0f", v / 10000)
+    }
+}
+
+// MARK: - 編輯個人檔案
+
+struct EditProfileView: View {
+    @EnvironmentObject var store: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var chineseName = ""
+    @State private var englishName = ""
+    @State private var company = ""
+    @State private var jobTitle = ""
+    @State private var spouse = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("姓名") {
+                    TextField("中文姓名", text: $chineseName)
+                    TextField("英文姓名", text: $englishName)
+                        .autocapitalization(.words)
+                }
+                Section("工作") {
+                    TextField("公司名稱", text: $company)
+                    TextField("職稱", text: $jobTitle)
+                }
+                Section("家庭") {
+                    TextField("配偶", text: $spouse)
+                }
+            }
+            .navigationTitle("編輯個人檔案")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("儲存") { save() }
+                        .bold().foregroundStyle(.green)
+                }
+            }
+            .onAppear { loadProfile() }
+        }
+    }
+
+    private func save() {
+        store.updateProfile(UserProfile(
+            chineseName: chineseName.trimmingCharacters(in: .whitespaces),
+            englishName: englishName.trimmingCharacters(in: .whitespaces),
+            company: company.trimmingCharacters(in: .whitespaces),
+            jobTitle: jobTitle.trimmingCharacters(in: .whitespaces),
+            spouse: spouse.trimmingCharacters(in: .whitespaces)
+        ))
+        dismiss()
+    }
+
+    private func loadProfile() {
+        let p = store.profile
+        chineseName = p.chineseName
+        englishName = p.englishName
+        company = p.company
+        jobTitle = p.jobTitle
+        spouse = p.spouse
+    }
+}
+
+// MARK: - 履歷頁面
+
 struct ResumeView: View {
     @EnvironmentObject var store: LifeStore
+    @EnvironmentObject var financeStore: FinanceStore
     @State private var showAdd = false
+    @State private var showEditProfile = false
     @State private var editingItem: LifeMilestone?
     @State private var selectedCategory: MilestoneCategory?
 
@@ -15,6 +239,15 @@ struct ResumeView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                ScrollView {
+                    ProfileFlashCard(
+                        profile: store.profile,
+                        totalAssets: financeStore.totalAssets,
+                        onEdit: { showEditProfile = true }
+                    )
+                }
+                .frame(height: 260)
+
                 categoryFilter
 
                 if filtered.isEmpty {
@@ -44,6 +277,7 @@ struct ResumeView: View {
                 }
             }
             .sheet(isPresented: $showAdd) { AddMilestoneView() }
+            .sheet(isPresented: $showEditProfile) { EditProfileView() }
             .sheet(item: $editingItem) { item in AddMilestoneView(editing: item) }
         }
     }

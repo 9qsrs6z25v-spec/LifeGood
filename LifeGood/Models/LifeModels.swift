@@ -1,5 +1,24 @@
 import Foundation
 
+// MARK: - 個人檔案
+
+struct UserProfile: Codable {
+    var chineseName: String
+    var englishName: String
+    var company: String
+    var jobTitle: String
+    var spouse: String
+
+    init(chineseName: String = "", englishName: String = "",
+         company: String = "", jobTitle: String = "", spouse: String = "") {
+        self.chineseName = chineseName
+        self.englishName = englishName
+        self.company = company
+        self.jobTitle = jobTitle
+        self.spouse = spouse
+    }
+}
+
 // MARK: - 里程碑分類
 
 enum MilestoneCategory: String, Codable, CaseIterable, Identifiable {
