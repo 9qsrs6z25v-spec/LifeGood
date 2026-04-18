@@ -8,22 +8,24 @@ struct HolographicWatermark: View {
 
     var body: some View {
         GeometryReader { geo in
-            let rows = Int(geo.size.height / 28) + 2
-            let cols = Int(geo.size.width / 120) + 2
+            let rowHeight: CGFloat = 110
+            let colWidth: CGFloat = 420
+            let rows = Int(geo.size.height / rowHeight) + 3
+            let cols = Int(geo.size.width / colWidth) + 3
 
             Canvas { ctx, size in
-                for row in 0..<rows {
-                    for col in 0..<cols {
-                        let offset: CGFloat = row.isMultiple(of: 2) ? 50 : 0
-                        let x = CGFloat(col) * 120 + offset - 40
-                        let y = CGFloat(row) * 28
+                for row in -1..<rows {
+                    for col in -1..<cols {
+                        let offset: CGFloat = row.isMultiple(of: 2) ? colWidth / 2 : 0
+                        let x = CGFloat(col) * colWidth + offset
+                        let y = CGFloat(row) * rowHeight
                         ctx.drawLayer { inner in
                             inner.translateBy(x: x, y: y)
-                            inner.rotate(by: .degrees(-25))
+                            inner.rotate(by: .degrees(-50))
                             inner.draw(
                                 Text(text)
-                                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.06)),
+                                    .font(.system(size: 88, weight: .black, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.10)),
                                 at: .zero
                             )
                         }
@@ -32,23 +34,23 @@ struct HolographicWatermark: View {
             }
             .overlay(
                 LinearGradient(
-                    colors: [
-                        .clear,
-                        .white.opacity(0.08),
-                        .clear,
-                        .white.opacity(0.05),
-                        .clear
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .white.opacity(0.28), location: 0.45),
+                        .init(color: .white.opacity(0.45), location: 0.5),
+                        .init(color: .white.opacity(0.28), location: 0.55),
+                        .init(color: .clear, location: 1)
                     ],
-                    startPoint: UnitPoint(x: phase - 0.3, y: phase - 0.3),
-                    endPoint: UnitPoint(x: phase + 0.3, y: phase + 0.3)
+                    startPoint: UnitPoint(x: phase - 0.5, y: phase - 0.5),
+                    endPoint: UnitPoint(x: phase + 0.5, y: phase + 0.5)
                 )
-                .blendMode(.overlay)
+                .blendMode(.plusLighter)
             )
         }
         .allowsHitTesting(false)
         .onAppear {
-            withAnimation(.linear(duration: 3.5).repeatForever(autoreverses: false)) {
-                phase = 1.5
+            withAnimation(.linear(duration: 2.8).repeatForever(autoreverses: false)) {
+                phase = 1.8
             }
         }
     }
