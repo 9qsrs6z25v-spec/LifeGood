@@ -470,7 +470,8 @@ struct AddRealEstateView: View {
         let expense = Expense(
             id: expenseId, title: title, amount: item.amount, date: item.date,
             expenseType: .variable, variableCategory: .dailyNecessities,
-            linkedRealEstateId: reId, note: ""
+            linkedRealEstateId: reId,
+            realEstateExpenseCategory: .housePayment, note: ""
         )
         if item.linkedExpenseId != nil { expenseStore.update(expense) }
         else { expenseStore.add(expense) }
@@ -483,7 +484,8 @@ struct AddRealEstateView: View {
             id: expenseId, title: "\(reName) - \(item.category.rawValue)",
             amount: item.amount, date: item.date,
             expenseType: .variable, variableCategory: .dailyNecessities,
-            linkedRealEstateId: reId, note: ""
+            linkedRealEstateId: reId,
+            realEstateExpenseCategory: item.category, note: ""
         )
         if item.linkedExpenseId != nil { expenseStore.update(expense) }
         else { expenseStore.add(expense) }

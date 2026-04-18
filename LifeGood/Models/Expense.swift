@@ -123,6 +123,7 @@ struct Expense: Identifiable, Codable {
     var linkedRealEstateId: UUID?     // 連結理財模式的房地產 ID
     var linkedVehicleId: UUID?        // 連結理財模式的汽車 ID
     var vehicleExpenseCategory: VehicleVariableCategory?  // 汽車變動支出子分類
+    var realEstateExpenseCategory: RealEstateExpenseCategory?  // 房地產變動支出子分類
     var note: String
 
     init(
@@ -141,6 +142,7 @@ struct Expense: Identifiable, Codable {
         linkedRealEstateId: UUID? = nil,
         linkedVehicleId: UUID? = nil,
         vehicleExpenseCategory: VehicleVariableCategory? = nil,
+        realEstateExpenseCategory: RealEstateExpenseCategory? = nil,
         note: String = ""
     ) {
         self.id = id
@@ -158,6 +160,7 @@ struct Expense: Identifiable, Codable {
         self.linkedRealEstateId = linkedRealEstateId
         self.linkedVehicleId = linkedVehicleId
         self.vehicleExpenseCategory = vehicleExpenseCategory
+        self.realEstateExpenseCategory = realEstateExpenseCategory
         self.note = note
     }
 
@@ -179,13 +182,14 @@ struct Expense: Identifiable, Codable {
         linkedRealEstateId = try? c.decode(UUID.self, forKey: .linkedRealEstateId)
         linkedVehicleId = try? c.decode(UUID.self, forKey: .linkedVehicleId)
         vehicleExpenseCategory = try? c.decode(VehicleVariableCategory.self, forKey: .vehicleExpenseCategory)
+        realEstateExpenseCategory = try? c.decode(RealEstateExpenseCategory.self, forKey: .realEstateExpenseCategory)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
         case insuranceSubCategory, loanSubCategory
         case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
-        case vehicleExpenseCategory, note
+        case vehicleExpenseCategory, realEstateExpenseCategory, note
     }
 
     var categoryName: String {
@@ -193,6 +197,9 @@ struct Expense: Identifiable, Codable {
         case .variable:
             if variableCategory == .vehicle, let sub = vehicleExpenseCategory {
                 return "汽車 - \(sub.rawValue)"
+            }
+            if linkedRealEstateId != nil, let sub = realEstateExpenseCategory {
+                return "房地產 - \(sub.rawValue)"
             }
             return variableCategory?.rawValue ?? "未分類"
         case .fixed:

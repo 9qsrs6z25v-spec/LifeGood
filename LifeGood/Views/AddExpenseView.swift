@@ -799,6 +799,7 @@ struct AddExpenseView: View {
             linkedRealEstateId: linkedREId,
             linkedVehicleId: linkedVehId,
             vehicleExpenseCategory: (expenseType == .variable && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil,
+            realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
             note: note.trimmingCharacters(in: .whitespaces)
         )
 
@@ -1047,6 +1048,9 @@ struct AddExpenseView: View {
             } else if expense.linkedRealEstateId != nil {
                 selectedAssetLink = .realEstate
                 selectedRealEstateLinkId = expense.linkedRealEstateId
+                if let reCat = expense.realEstateExpenseCategory {
+                    selectedRealEstateExpenseCategory = reCat
+                }
             }
         }
 

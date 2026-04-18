@@ -283,6 +283,7 @@ struct RealEstatePaidItem: Identifiable, Codable {
 // MARK: - 房地產變動支出
 
 enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
+    case housePayment = "房屋價金"
     case renovation = "裝修"
     case repair = "維修"
     case furniture = "家具"
@@ -294,6 +295,7 @@ enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .housePayment: return "banknote"
         case .renovation: return "paintbrush"
         case .repair: return "wrench"
         case .furniture: return "sofa"
