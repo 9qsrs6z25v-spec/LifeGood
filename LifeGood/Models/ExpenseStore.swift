@@ -88,6 +88,47 @@ class ExpenseStore: ObservableObject {
         currentMonthIncomeTotal - currentMonthTotal
     }
 
+    /// 當月是否有實際收入紀錄
+    var hasCurrentMonthIncome: Bool { currentMonthIncomeTotal > 0 }
+
+    /// 過去月份收入中位數（用於當月無收入時預估）
+    var estimatedMonthlyIncome: Double {
+        let calendar = Calendar.current
+        let now = Date()
+
+        var monthlyTotals: [Double] = []
+        for i in 1...6 {
+            guard let monthDate = calendar.date(byAdding: .month, value: -i, to: now) else { continue }
+            let total = incomeTotal(for: monthDate)
+            if total > 0 { monthlyTotals.append(total) }
+        }
+
+        guard !monthlyTotals.isEmpty else { return 0 }
+        let sorted = monthlyTotals.sorted()
+        let count = sorted.count
+        if count % 2 == 0 {
+            return (sorted[count / 2 - 1] + sorted[count / 2]) / 2
+        }
+        return sorted[count / 2]
+    }
+
+    /// 計算指定月份的收入合計
+    private func incomeTotal(for date: Date) -> Double {
+        let calendar = Calendar.current
+        guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: date)),
+              let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else { return 0 }
+
+        let onceTotal = incomes
+            .filter { $0.period == .once && calendar.isDate($0.date, equalTo: date, toGranularity: .month) }
+            .reduce(0) { $0 + $1.amount }
+
+        let recurringTotal = incomes
+            .filter { $0.period != .once && $0.date < monthEnd }
+            .reduce(0) { $0 + $1.monthlyAmount }
+
+        return onceTotal + recurringTotal
+    }
+
     // MARK: - 篩選
 
     var variableExpenses: [Expense] {

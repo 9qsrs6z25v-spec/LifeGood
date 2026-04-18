@@ -12,6 +12,14 @@ struct OverviewView: View {
         return f
     }()
 
+    private var displayedIncome: Double {
+        store.hasCurrentMonthIncome ? store.currentMonthIncomeTotal : store.estimatedMonthlyIncome
+    }
+
+    private var isEstimated: Bool {
+        !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -22,8 +30,8 @@ struct OverviewView: View {
                     // 收支分類摘要
                     HStack(alignment: .top, spacing: 12) {
                         summaryCard(
-                            title: "收入",
-                            amount: store.currentMonthIncomeTotal,
+                            title: isEstimated ? "收入 (預估)" : "收入",
+                            amount: displayedIncome,
                             icon: "banknote.fill",
                             color: .green
                         )
@@ -62,13 +70,24 @@ struct OverviewView: View {
 
     private var monthlyBalanceCard: some View {
         VStack(spacing: 12) {
-            let balance = store.currentMonthBalance
+            let income = displayedIncome
+            let balance = income - store.currentMonthTotal
             let isPositive = balance >= 0
 
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("本月收入").font(.caption).foregroundStyle(.white.opacity(0.7))
-                    Text(smartCurrency(store.currentMonthIncomeTotal))
+                    HStack(spacing: 4) {
+                        Text("本月收入").font(.caption).foregroundStyle(.white.opacity(0.7))
+                        if isEstimated {
+                            Text("預估")
+                                .font(.system(size: 9, weight: .semibold))
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(Color.white.opacity(0.25))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    Text(smartCurrency(income))
                         .font(.title3.bold()).foregroundStyle(.white)
                 }
                 Spacer()
@@ -82,7 +101,17 @@ struct OverviewView: View {
             Divider().background(.white.opacity(0.3))
 
             HStack {
-                Text("收支餘額").font(.subheadline).foregroundStyle(.white.opacity(0.8))
+                HStack(spacing: 4) {
+                    Text("收支餘額").font(.subheadline).foregroundStyle(.white.opacity(0.8))
+                    if isEstimated {
+                        Text("預估")
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.white.opacity(0.25))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .foregroundStyle(.white)
+                    }
+                }
                 Spacer()
                 Text((isPositive ? "+" : "") + smartCurrency(balance))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
