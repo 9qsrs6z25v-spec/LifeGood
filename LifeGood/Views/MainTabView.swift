@@ -86,6 +86,7 @@ struct MainTabView: View {
     // MARK: - 人生模式
 
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var financeStore: FinanceStore
 
     @ViewBuilder
     private var lifeTabs: some View {
@@ -103,9 +104,22 @@ struct MainTabView: View {
                 .tag(2)
         }
 
+        if !financeStore.realEstates.isEmpty {
+            LifeRealEstateView()
+                .tabItem { Label("房地產", systemImage: "building.2.fill") }
+                .tag(lifeStore.familyMembers.isEmpty ? 2 : 3)
+        }
+
         SettingsView()
             .tabItem { Label("設定", systemImage: "gearshape.fill") }
-            .tag(lifeStore.familyMembers.isEmpty ? 2 : 3)
+            .tag(settingsTag)
+    }
+
+    private var settingsTag: Int {
+        var tag = 2
+        if !lifeStore.familyMembers.isEmpty { tag += 1 }
+        if !financeStore.realEstates.isEmpty { tag += 1 }
+        return tag
     }
 }
 

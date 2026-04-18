@@ -110,6 +110,37 @@ class LifeStore: ObservableObject {
         milestones + familyDerivedMilestones
     }
 
+    /// 房地產衍生里程碑（傳入理財房地產列表，產生購入/售出虛擬里程碑）
+    func realEstateDerivedMilestones(from realEstates: [RealEstate]) -> [LifeMilestone] {
+        var items: [LifeMilestone] = []
+        for re in realEstates {
+            let priceNote = re.purchasePrice > 0
+                ? String(format: "%.0f 萬", re.purchasePrice / 10000) : ""
+            items.append(LifeMilestone(
+                id: deriveID(re.id, suffix: "re-purchase"),
+                title: "購入 \(re.name)",
+                date: re.purchaseDate,
+                category: .realEstate,
+                note: priceNote
+            ))
+            if let sd = re.soldDate {
+                items.append(LifeMilestone(
+                    id: deriveID(re.id, suffix: "re-sold"),
+                    title: "售出 \(re.name)",
+                    date: sd,
+                    category: .realEstate,
+                    note: ""
+                ))
+            }
+        }
+        return items
+    }
+
+    /// 結合所有里程碑（含家庭與房地產衍生）
+    func combinedMilestones(realEstates: [RealEstate]) -> [LifeMilestone] {
+        allMilestones + realEstateDerivedMilestones(from: realEstates)
+    }
+
     private func deriveID(_ base: UUID, suffix: String) -> UUID {
         let data = (base.uuidString + ":" + suffix).data(using: .utf8) ?? Data()
         var bytes = [UInt8](repeating: 0, count: 16)

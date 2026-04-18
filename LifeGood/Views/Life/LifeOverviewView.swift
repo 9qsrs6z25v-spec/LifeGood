@@ -35,7 +35,7 @@ struct LifeOverviewView: View {
 
     private var statsCard: some View {
         HStack(spacing: 12) {
-            statBadge(title: "總里程碑", count: store.allMilestones.count,
+            statBadge(title: "總里程碑", count: store.combinedMilestones(realEstates: financeStore.realEstates).count,
                       icon: "trophy.fill", color: .orange)
             statBadge(title: "本年新增", count: milestonesThisYear,
                       icon: "calendar.badge.plus", color: .green)
@@ -60,13 +60,13 @@ struct LifeOverviewView: View {
 
     private var milestonesThisYear: Int {
         let year = Calendar.current.component(.year, from: Date())
-        return store.allMilestones.filter {
+        return store.combinedMilestones(realEstates: financeStore.realEstates).filter {
             Calendar.current.component(.year, from: $0.date) == year
         }.count
     }
 
     private var usedCategories: Int {
-        Set(store.allMilestones.map { $0.category }).count
+        Set(store.combinedMilestones(realEstates: financeStore.realEstates).map { $0.category }).count
     }
 
     // MARK: - 里程碑時間軸
@@ -75,7 +75,7 @@ struct LifeOverviewView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("最近里程碑").font(.headline).padding(.horizontal)
 
-            let sorted = store.allMilestones.sorted { $0.date > $1.date }
+            let sorted = store.combinedMilestones(realEstates: financeStore.realEstates).sorted { $0.date > $1.date }
             let recent = Array(sorted.prefix(5))
             if recent.isEmpty {
                 Text("暫無里程碑").font(.subheadline).foregroundStyle(.secondary)
@@ -108,7 +108,7 @@ struct LifeOverviewView: View {
     // MARK: - 分類統計
 
     private var categoryBreakdownSection: some View {
-        let grouped = Dictionary(grouping: store.allMilestones, by: { $0.category })
+        let grouped = Dictionary(grouping: store.combinedMilestones(realEstates: financeStore.realEstates), by: { $0.category })
         let entries = MilestoneCategory.allCases
             .compactMap { cat -> (MilestoneCategory, Int)? in
                 guard let count = grouped[cat]?.count, count > 0 else { return nil }

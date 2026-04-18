@@ -235,6 +235,7 @@ struct EditProfileView: View {
 
 struct ResumeView: View {
     @EnvironmentObject var store: LifeStore
+    @EnvironmentObject var financeStore: FinanceStore
     @State private var showAdd = false
     @State private var editingItem: LifeMilestone?
     @State private var selectedCategory: MilestoneCategory?
@@ -242,7 +243,8 @@ struct ResumeView: View {
     private var realMilestoneIDs: Set<UUID> { Set(store.milestones.map(\.id)) }
 
     var filtered: [LifeMilestone] {
-        let sorted = store.allMilestones.sorted { $0.date > $1.date }
+        let sorted = store.combinedMilestones(realEstates: financeStore.realEstates)
+            .sorted { $0.date > $1.date }
         if let cat = selectedCategory { return sorted.filter { $0.category == cat } }
         return sorted
     }
@@ -350,6 +352,7 @@ struct ResumeView: View {
 
 struct AddMilestoneView: View {
     @EnvironmentObject var store: LifeStore
+    @EnvironmentObject var financeStore: FinanceStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: LifeMilestone?
@@ -370,11 +373,24 @@ struct AddMilestoneView: View {
     @State private var divorceDate = Date()
     @State private var familyBirthday = Date()
 
+    enum RealEstateMode: String, CaseIterable, Identifiable {
+        case existing = "連結既有"
+        case new = "新增物件"
+        var id: String { rawValue }
+    }
+    @State private var realEstateMode: RealEstateMode = .existing
+    @State private var selectedRealEstateId: UUID?
+    @State private var showAddRealEstate = false
+
     private var isFamily: Bool { category == .family }
+    private var isRealEstate: Bool { category == .realEstate }
 
     private var canSave: Bool {
         if isFamily {
             return !familyChineseName.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        if isRealEstate {
+            return realEstateMode == .existing && selectedRealEstateId != nil
         }
         return !title.trimmingCharacters(in: .whitespaces).isEmpty
     }
@@ -413,16 +429,61 @@ struct AddMilestoneView: View {
                         } else {
                             DatePicker("出生日期", selection: $familyBirthday, displayedComponents: .date)
                         }
+                    } else if isRealEstate {
+                        Picker("方式", selection: $realEstateMode) {
+                            ForEach(RealEstateMode.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+
+                        if realEstateMode == .existing {
+                            if financeStore.realEstates.isEmpty {
+                                Text("尚無房地產，請選擇「新增物件」")
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                            } else {
+                                Picker("選擇物件", selection: $selectedRealEstateId) {
+                                    Text("請選擇").tag(nil as UUID?)
+                                    ForEach(financeStore.realEstates) { re in
+                                        Text(re.name).tag(re.id as UUID?)
+                                    }
+                                }
+                                if let id = selectedRealEstateId,
+                                   let re = financeStore.realEstates.first(where: { $0.id == id }) {
+                                    HStack { Text("購入價格"); Spacer()
+                                        Text(formatWan(re.purchasePrice)).foregroundStyle(.secondary)
+                                    }
+                                    HStack { Text("購入日期"); Spacer()
+                                        Text(formatDateOnly(re.purchaseDate)).foregroundStyle(.secondary)
+                                    }
+                                    if let sd = re.soldDate {
+                                        HStack { Text("售出日期"); Spacer()
+                                            Text(formatDateOnly(sd)).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Button {
+                                showAddRealEstate = true
+                            } label: {
+                                Label("開啟新增房地產介面", systemImage: "plus.circle.fill")
+                                    .foregroundStyle(.green)
+                            }
+                            Text("將開啟理財模式的新增房地產介面，填寫完成後將自動建立購入里程碑。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     } else {
                         TextField("標題", text: $title)
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                     }
                 }
-                if !isFamily {
+                if !isFamily && !isRealEstate {
                     Section("備註") {
                         TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                     }
                 }
+            }
+            .sheet(isPresented: $showAddRealEstate, onDismiss: { dismiss() }) {
+                AddRealEstateView()
             }
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -435,6 +496,11 @@ struct AddMilestoneView: View {
                 }
             }
             .onAppear { loadEditing() }
+            .onChange(of: category) { _, newValue in
+                if newValue == .realEstate && financeStore.realEstates.isEmpty {
+                    realEstateMode = .new
+                }
+            }
         }
     }
 
@@ -458,6 +524,9 @@ struct AddMilestoneView: View {
                 divorceDate: isSpouse && isDivorced ? divorceDate : nil
             )
             if editingFamily != nil { store.update(member) } else { store.add(member) }
+        } else if isRealEstate {
+            // 連結既有：里程碑由 realEstateDerivedMilestones 自動產生，不需建立實體
+            // 新增物件：在按下「開啟新增房地產介面」時已開啟另一視窗，此處僅關閉
         } else {
             let item = LifeMilestone(
                 id: editing?.id ?? UUID(),
@@ -468,6 +537,14 @@ struct AddMilestoneView: View {
             if editing != nil { store.update(item) } else { store.add(item) }
         }
         dismiss()
+    }
+
+    private func formatWan(_ v: Double) -> String {
+        v > 0 ? String(format: "%.0f 萬", v / 10000) : "—"
+    }
+
+    private func formatDateOnly(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
     }
 
     private func loadEditing() {
@@ -487,5 +564,8 @@ struct AddMilestoneView: View {
             return
         }
         category = initialCategory
+        if isRealEstate && financeStore.realEstates.isEmpty {
+            realEstateMode = .new
+        }
     }
 }
