@@ -95,21 +95,9 @@ struct MainTabView: View {
             .tabItem { Label("履歷", systemImage: "trophy.fill") }
             .tag(1)
 
-        RelationshipView()
-            .tabItem { Label("人際", systemImage: "person.2.fill") }
-            .tag(2)
-
-        PetView()
-            .tabItem { Label("寵物", systemImage: "pawprint.fill") }
-            .tag(3)
-
-        ScheduleView()
-            .tabItem { Label("行程", systemImage: "calendar") }
-            .tag(4)
-
         SettingsView()
             .tabItem { Label("設定", systemImage: "gearshape.fill") }
-            .tag(5)
+            .tag(2)
     }
 }
 

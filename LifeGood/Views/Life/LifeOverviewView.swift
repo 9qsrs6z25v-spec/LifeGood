@@ -8,10 +8,8 @@ struct LifeOverviewView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     statsCard
-                    upcomingSection
-                    recentInteractionsSection
-                    petSummarySection
                     milestoneTimelineSection
+                    categoryBreakdownSection
                 }
                 .padding(.vertical)
             }
@@ -24,10 +22,12 @@ struct LifeOverviewView: View {
 
     private var statsCard: some View {
         HStack(spacing: 12) {
-            statBadge(title: "里程碑", count: store.milestones.count, icon: "trophy.fill", color: .orange)
-            statBadge(title: "人脈", count: store.relationships.count, icon: "person.2.fill", color: .blue)
-            statBadge(title: "寵物", count: store.pets.count, icon: "pawprint.fill", color: .pink)
-            statBadge(title: "待辦", count: store.upcomingSchedules.count, icon: "calendar", color: .green)
+            statBadge(title: "總里程碑", count: store.milestones.count,
+                      icon: "trophy.fill", color: .orange)
+            statBadge(title: "本年新增", count: milestonesThisYear,
+                      icon: "calendar.badge.plus", color: .green)
+            statBadge(title: "分類數", count: usedCategories,
+                      icon: "square.grid.2x2.fill", color: .blue)
         }
         .padding(.horizontal)
     }
@@ -45,116 +45,22 @@ struct LifeOverviewView: View {
         .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
     }
 
-    // MARK: - 近期行程
-
-    private var upcomingSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("近期行程").font(.headline).padding(.horizontal)
-
-            let upcoming = Array(store.upcomingSchedules.prefix(5))
-            if upcoming.isEmpty {
-                Text("暫無行程").font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity).padding(.vertical, 20)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(upcoming) { item in
-                        HStack {
-                            Image(systemName: item.category.icon)
-                                .frame(width: 30).foregroundStyle(.green)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title).font(.subheadline)
-                                Text(formatDate(item.date)).font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if !item.location.isEmpty {
-                                Text(item.location).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.horizontal).padding(.vertical, 10)
-                        if item.id != upcoming.last?.id { Divider().padding(.leading, 50) }
-                    }
-                }
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
-                .padding(.horizontal)
-            }
-        }
+    private var milestonesThisYear: Int {
+        let year = Calendar.current.component(.year, from: Date())
+        return store.milestones.filter {
+            Calendar.current.component(.year, from: $0.date) == year
+        }.count
     }
 
-    // MARK: - 最近互動
-
-    private var recentInteractionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("最近互動").font(.headline).padding(.horizontal)
-
-            let recent = Array(store.recentInteractions.prefix(5))
-            if recent.isEmpty {
-                Text("暫無互動紀錄").font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity).padding(.vertical, 20)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(recent.enumerated()), id: \.element.interaction.id) { index, item in
-                        HStack {
-                            Image(systemName: item.relationship.group.icon)
-                                .frame(width: 30).foregroundStyle(.blue)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.relationship.name).font(.subheadline)
-                                Text(item.interaction.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                            Spacer()
-                            Text(formatDate(item.interaction.date)).font(.caption).foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal).padding(.vertical, 10)
-                        if index < recent.count - 1 { Divider().padding(.leading, 50) }
-                    }
-                }
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
-                .padding(.horizontal)
-            }
-        }
-    }
-
-    // MARK: - 寵物摘要
-
-    private var petSummarySection: some View {
-        Group {
-            if !store.pets.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("我的寵物").font(.headline).padding(.horizontal)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(store.pets) { pet in
-                                VStack(spacing: 6) {
-                                    Image(systemName: pet.type.icon)
-                                        .font(.title2).foregroundStyle(.pink)
-                                    Text(pet.name).font(.subheadline.bold())
-                                    if let age = pet.age {
-                                        Text(String(format: "%.1f 歲", age))
-                                            .font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                                .frame(width: 90)
-                                .padding(.vertical, 12)
-                                .background(Color(.systemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                }
-            }
-        }
+    private var usedCategories: Int {
+        Set(store.milestones.map { $0.category }).count
     }
 
     // MARK: - 里程碑時間軸
 
     private var milestoneTimelineSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("人生里程碑").font(.headline).padding(.horizontal)
+            Text("最近里程碑").font(.headline).padding(.horizontal)
 
             let sorted = store.milestones.sorted { $0.date > $1.date }
             let recent = Array(sorted.prefix(5))
@@ -186,7 +92,43 @@ struct LifeOverviewView: View {
         }
     }
 
+    // MARK: - 分類統計
+
+    private var categoryBreakdownSection: some View {
+        let grouped = Dictionary(grouping: store.milestones, by: { $0.category })
+        let entries = MilestoneCategory.allCases
+            .compactMap { cat -> (MilestoneCategory, Int)? in
+                guard let count = grouped[cat]?.count, count > 0 else { return nil }
+                return (cat, count)
+            }
+
+        return Group {
+            if !entries.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("分類統計").font(.headline).padding(.horizontal)
+                    VStack(spacing: 0) {
+                        ForEach(Array(entries.enumerated()), id: \.element.0) { index, entry in
+                            HStack {
+                                Image(systemName: entry.0.icon)
+                                    .frame(width: 30).foregroundStyle(.orange)
+                                Text(entry.0.rawValue).font(.subheadline)
+                                Spacer()
+                                Text("\(entry.1) 筆").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal).padding(.vertical, 10)
+                            if index < entries.count - 1 { Divider().padding(.leading, 50) }
+                        }
+                    }
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+                    .padding(.horizontal)
+                }
+            }
+        }
+    }
+
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: date)
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
     }
 }
