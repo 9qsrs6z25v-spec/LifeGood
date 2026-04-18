@@ -585,6 +585,7 @@ struct Vehicle: Identifiable, Codable {
     let id: UUID
     var name: String
     var brand: String
+    var ownerName: String
     var powerType: VehiclePowerType
     var purchaseDate: Date
     var soldDate: Date?                            // 售出日期（nil 表示仍持有）
@@ -598,6 +599,7 @@ struct Vehicle: Identifiable, Codable {
         id: UUID = UUID(),
         name: String,
         brand: String = "",
+        ownerName: String = "",
         powerType: VehiclePowerType = .gasoline,
         purchaseDate: Date = Date(),
         soldDate: Date? = nil,
@@ -610,6 +612,7 @@ struct Vehicle: Identifiable, Codable {
         self.id = id
         self.name = name
         self.brand = brand
+        self.ownerName = ownerName
         self.powerType = powerType
         self.purchaseDate = purchaseDate
         self.soldDate = soldDate
@@ -626,6 +629,7 @@ struct Vehicle: Identifiable, Codable {
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         brand = (try? c.decode(String.self, forKey: .brand)) ?? ""
+        ownerName = (try? c.decode(String.self, forKey: .ownerName)) ?? ""
         powerType = (try? c.decode(VehiclePowerType.self, forKey: .powerType)) ?? .gasoline
         purchaseDate = (try? c.decode(Date.self, forKey: .purchaseDate)) ?? Date()
         soldDate = try? c.decode(Date.self, forKey: .soldDate)
@@ -635,8 +639,25 @@ struct Vehicle: Identifiable, Codable {
         variableExpenses = (try? c.decode([VehicleVariableExpense].self, forKey: .variableExpenses)) ?? []
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
     }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(brand, forKey: .brand)
+        try c.encode(ownerName, forKey: .ownerName)
+        try c.encode(powerType, forKey: .powerType)
+        try c.encode(purchaseDate, forKey: .purchaseDate)
+        try c.encodeIfPresent(soldDate, forKey: .soldDate)
+        try c.encode(purchasePrice, forKey: .purchasePrice)
+        try c.encode(currentValue, forKey: .currentValue)
+        try c.encode(fixedExpenses, forKey: .fixedExpenses)
+        try c.encode(variableExpenses, forKey: .variableExpenses)
+        try c.encode(note, forKey: .note)
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case id, name, brand, powerType, purchaseDate, soldDate, purchasePrice, currentValue
+        case id, name, brand, ownerName, powerType, purchaseDate, soldDate, purchasePrice, currentValue
         case fixedExpenses, variableExpenses, note
     }
 

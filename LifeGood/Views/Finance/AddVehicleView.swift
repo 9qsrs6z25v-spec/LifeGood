@@ -3,6 +3,7 @@ import SwiftUI
 struct AddVehicleView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: Vehicle?
@@ -11,6 +12,7 @@ struct AddVehicleView: View {
 
     @State private var name = ""
     @State private var brand = ""
+    @State private var ownerName = ""
     @State private var powerType: VehiclePowerType = .gasoline
     @State private var purchaseDate = Date()
     @State private var isSold = false
@@ -84,10 +86,30 @@ struct AddVehicleView: View {
 
     // MARK: - 車輛資訊
 
+    private var ownerOptions: [String] {
+        var names: [String] = []
+        let profileName = lifeStore.profile.chineseName
+        if !profileName.isEmpty { names.append(profileName) }
+        for m in lifeStore.familyMembers {
+            let n = m.chineseName.isEmpty ? m.englishName : m.chineseName
+            if !n.isEmpty { names.append(n) }
+        }
+        return names
+    }
+
     private var vehicleInfoSection: some View {
         Section("車輛資訊") {
             TextField("車名（如 Model Y）", text: $name)
             TextField("品牌（如 Tesla）", text: $brand)
+
+            if !ownerOptions.isEmpty {
+                Picker("車輛所有人", selection: $ownerName) {
+                    Text("未指定").tag("")
+                    ForEach(ownerOptions, id: \.self) { n in
+                        Text(n).tag(n)
+                    }
+                }
+            }
 
             Picker("動力類型", selection: $powerType) {
                 ForEach(VehiclePowerType.allCases) { type in
@@ -136,6 +158,10 @@ struct AddVehicleView: View {
                     HStack {
                         Text("項目 \(index + 1)")
                             .font(.subheadline.weight(.medium))
+                        if !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                            Text("\(name.trimmingCharacters(in: .whitespaces))-\(fixedItems[index].category.rawValue)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Spacer()
                         Button(role: .destructive) {
                             let item = fixedItems[index]
@@ -202,6 +228,10 @@ struct AddVehicleView: View {
                     HStack {
                         Text("項目 \(index + 1)")
                             .font(.subheadline.weight(.medium))
+                        if !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                            Text("\(name.trimmingCharacters(in: .whitespaces))-\(variableItems[index].category.rawValue)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Spacer()
                         Button(role: .destructive) {
                             let item = variableItems[index]
@@ -353,6 +383,7 @@ struct AddVehicleView: View {
             id: vehicleId,
             name: trimmedName,
             brand: brand.trimmingCharacters(in: .whitespaces),
+            ownerName: ownerName,
             powerType: powerType,
             purchaseDate: purchaseDate,
             soldDate: isSold ? soldDate : nil,
@@ -442,7 +473,7 @@ struct AddVehicleView: View {
 
     private func loadEditing() {
         guard let e = editing else { return }
-        name = e.name; brand = e.brand
+        name = e.name; brand = e.brand; ownerName = e.ownerName
         powerType = e.powerType
         purchaseDate = e.purchaseDate
         if let sd = e.soldDate {
