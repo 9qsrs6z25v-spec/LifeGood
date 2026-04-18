@@ -226,9 +226,7 @@ struct EditProfileView: View {
 
 struct ResumeView: View {
     @EnvironmentObject var store: LifeStore
-    @EnvironmentObject var financeStore: FinanceStore
     @State private var showAdd = false
-    @State private var showEditProfile = false
     @State private var editingItem: LifeMilestone?
     @State private var selectedCategory: MilestoneCategory?
 
@@ -241,15 +239,6 @@ struct ResumeView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ScrollView {
-                    ProfileFlashCard(
-                        profile: store.profile,
-                        totalAssets: financeStore.totalAssets,
-                        onEdit: { showEditProfile = true }
-                    )
-                }
-                .frame(height: 260)
-
                 categoryFilter
 
                 if filtered.isEmpty {
@@ -279,7 +268,6 @@ struct ResumeView: View {
                 }
             }
             .sheet(isPresented: $showAdd) { AddMilestoneView() }
-            .sheet(isPresented: $showEditProfile) { EditProfileView() }
             .sheet(item: $editingItem) { item in AddMilestoneView(editing: item) }
         }
     }

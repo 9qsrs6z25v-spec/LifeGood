@@ -2,19 +2,31 @@ import SwiftUI
 
 struct LifeOverviewView: View {
     @EnvironmentObject var store: LifeStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @State private var showEditProfile = false
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    statsCard
-                    milestoneTimelineSection
-                    categoryBreakdownSection
+            VStack(spacing: 0) {
+                ProfileFlashCard(
+                    profile: store.profile,
+                    totalAssets: financeStore.totalAssets,
+                    onEdit: { showEditProfile = true }
+                )
+                .padding(.bottom, 8)
+
+                ScrollView {
+                    VStack(spacing: 20) {
+                        statsCard
+                        milestoneTimelineSection
+                        categoryBreakdownSection
+                    }
+                    .padding(.vertical)
                 }
-                .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("人生總覽")
+            .sheet(isPresented: $showEditProfile) { EditProfileView() }
         }
     }
 
