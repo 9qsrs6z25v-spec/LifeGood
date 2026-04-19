@@ -9,7 +9,7 @@ struct AddSavingsInsuranceView: View {
 
     @State private var name = ""
     @State private var company = ""
-    @State private var currency: Currency = .twd
+    @State private var currencyCode: String = "NT$"
     @State private var premiumText = ""
     @State private var paymentPeriod: Recurrence = .yearly
     @State private var annualRateText = ""
@@ -61,7 +61,8 @@ struct AddSavingsInsuranceView: View {
         premium * Double(elapsedPeriods)
     }
 
-    private var currencySymbol: String { currency.symbol }
+    private var currencySymbol: String { currencyCode }
+    private var isUSD: Bool { currencyCode == "US$" || currencyCode == "USD" || currencyCode.lowercased() == "美金" }
 
     var body: some View {
         NavigationStack {
@@ -72,9 +73,36 @@ struct AddSavingsInsuranceView: View {
                 }
 
                 Section("繳費設定") {
-                    Picker("幣別", selection: $currency) {
-                        ForEach(Currency.allCases, id: \.self) { c in
-                            Text("\(c.symbol) (\(c.rawValue))").tag(c)
+                    HStack {
+                        Text("幣別")
+                        Spacer()
+                        Menu {
+                            Button {
+                                currencyCode = "NT$"
+                            } label: {
+                                if currencyCode == "NT$" {
+                                    Label("NT$", systemImage: "checkmark")
+                                } else {
+                                    Text("NT$")
+                                }
+                            }
+                            ForEach(expenseStore.currencyRates) { rate in
+                                Button {
+                                    currencyCode = rate.code
+                                } label: {
+                                    if currencyCode == rate.code {
+                                        Label("\(rate.code)（1=\(rateDisplay(rate.rate)) 元）", systemImage: "checkmark")
+                                    } else {
+                                        Text("\(rate.code)（1=\(rateDisplay(rate.rate)) 元）")
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 2) {
+                                Text(currencyCode)
+                                Image(systemName: "chevron.down").font(.caption2)
+                            }
+                            .foregroundStyle(.secondary)
                         }
                     }
 
@@ -198,7 +226,7 @@ struct AddSavingsInsuranceView: View {
                 if let e = editing {
                     name = e.name
                     company = e.company
-                    currency = e.currency
+                    currencyCode = e.currencyCode
                     premiumText = String(format: "%.0f", e.premiumAmount)
                     paymentPeriod = e.paymentPeriod
                     annualRateText = e.annualRate > 0 ? String(format: "%.2f", e.annualRate) : ""
@@ -236,7 +264,7 @@ struct AddSavingsInsuranceView: View {
             id: insuranceId,
             name: trimmedName,
             company: trimmedCompany,
-            currency: currency,
+            currencyCode: currencyCode,
             premiumAmount: premium,
             paymentPeriod: paymentPeriod,
             annualRate: annualRate,
@@ -281,7 +309,14 @@ struct AddSavingsInsuranceView: View {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencySymbol = currencySymbol
-        f.maximumFractionDigits = currency == .usd ? 2 : 0
+        f.maximumFractionDigits = isUSD ? 2 : 0
         return f.string(from: NSNumber(value: value)) ?? "\(currencySymbol)0"
+    }
+
+    private func rateDisplay(_ value: Double) -> String {
+        if value == value.rounded() {
+            return String(format: "%.0f", value)
+        }
+        return String(format: "%g", value)
     }
 }

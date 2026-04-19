@@ -112,7 +112,7 @@ enum UnifiedExporter {
                 s.id.uuidString,
                 esc(s.name),
                 esc(s.company),
-                s.currency.rawValue,
+                s.currencyCode,
                 String(format: "%.2f", s.premiumAmount),
                 s.paymentPeriod.rawValue,
                 String(format: "%.4f", s.annualRate),

@@ -63,9 +63,14 @@ struct SavingsInsuranceView: View {
             }
 
             // 依幣別分組顯示
-            let grouped = Dictionary(grouping: store.insurances, by: { $0.currency })
-            ForEach(Currency.allCases, id: \.self) { currency in
-                if let items = grouped[currency], !items.isEmpty {
+            let grouped = Dictionary(grouping: store.insurances, by: { $0.currencyCode })
+            let codes = grouped.keys.sorted { a, b in
+                if a == "NT$" { return true }
+                if b == "NT$" { return false }
+                return a < b
+            }
+            ForEach(codes, id: \.self) { code in
+                if let items = grouped[code], !items.isEmpty {
                     let totalCurrent = items.reduce(0) { $0 + $1.currentValue }
                     let totalPaid = items.reduce(0) { $0 + $1.totalPaid }
                     let gain = totalCurrent - totalPaid
@@ -73,16 +78,16 @@ struct SavingsInsuranceView: View {
 
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("目前價值 (\(currency.rawValue))")
+                            Text("目前價值 (\(code))")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Text(fmt(totalCurrent, currency: currency))
+                            Text(fmt(totalCurrent, code: code))
                                 .font(.title3.bold())
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
                             Text("已繳總額")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Text(fmt(totalPaid, currency: currency))
+                            Text(fmt(totalPaid, code: code))
                                 .font(.subheadline)
                         }
                     }
@@ -91,7 +96,7 @@ struct SavingsInsuranceView: View {
                         let isPositive = gain >= 0
                         Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
                             .font(.caption).foregroundStyle(isPositive ? .green : .red)
-                        Text((isPositive ? "+" : "") + fmt(gain, currency: currency))
+                        Text((isPositive ? "+" : "") + fmt(gain, code: code))
                             .font(.caption.bold()).foregroundStyle(isPositive ? .green : .red)
                         Text(String(format: "(%@%.2f%%)", isPositive ? "+" : "", gainRate))
                             .font(.caption2).foregroundStyle(isPositive ? .green : .red)
@@ -118,16 +123,17 @@ struct SavingsInsuranceView: View {
     }
 
     private func insuranceCard(_ item: SavingsInsurance) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let isNT = item.currencyCode == "NT$"
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(item.name).font(.subheadline.weight(.semibold))
-                        Text(item.currency.rawValue)
+                        Text(item.currencyCode)
                             .font(.caption2.weight(.medium))
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(item.currency == .usd ? Color.blue.opacity(0.12) : Color.green.opacity(0.12))
-                            .foregroundStyle(item.currency == .usd ? .blue : .green)
+                            .background(isNT ? Color.green.opacity(0.12) : Color.blue.opacity(0.12))
+                            .foregroundStyle(isNT ? .green : .blue)
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     if !item.company.isEmpty {
@@ -136,7 +142,7 @@ struct SavingsInsuranceView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(fmt(item.currentValue, currency: item.currency))
+                    Text(fmt(item.currentValue, code: item.currencyCode))
                         .font(.subheadline.bold())
                     Text("目前價值").font(.caption2).foregroundStyle(.tertiary)
                 }
@@ -145,13 +151,13 @@ struct SavingsInsuranceView: View {
             Divider()
 
             HStack {
-                Label(item.paymentPeriod.rawValue + " " + fmt(item.premiumAmount, currency: item.currency), systemImage: "calendar")
+                Label(item.paymentPeriod.rawValue + " " + fmt(item.premiumAmount, code: item.currencyCode), systemImage: "calendar")
                 if item.annualRate > 0 {
                     Text(String(format: "%.2f%%", item.annualRate))
                         .foregroundStyle(.blue)
                 }
                 Spacer()
-                Text("期滿 " + fmt(item.expectedReturn, currency: item.currency))
+                Text("期滿 " + fmt(item.expectedReturn, code: item.currencyCode))
                     .foregroundStyle(.green)
             }
             .font(.caption).foregroundStyle(.secondary)
@@ -166,12 +172,13 @@ struct SavingsInsuranceView: View {
         .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
     }
 
-    private func fmt(_ v: Double, currency: Currency) -> String {
+    private func fmt(_ v: Double, code: String) -> String {
+        let isUSD = code == "US$" || code == "USD" || code.lowercased() == "美金"
         let f = NumberFormatter()
         f.numberStyle = .currency
-        f.currencySymbol = currency.symbol
-        f.maximumFractionDigits = currency == .usd ? 2 : 0
-        return f.string(from: NSNumber(value: v)) ?? "\(currency.symbol)0"
+        f.currencySymbol = code
+        f.maximumFractionDigits = isUSD ? 2 : 0
+        return f.string(from: NSNumber(value: v)) ?? "\(code)0"
     }
 
     private func fmtTWD(_ v: Double) -> String {

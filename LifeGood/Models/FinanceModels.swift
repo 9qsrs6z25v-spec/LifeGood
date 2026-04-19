@@ -34,7 +34,7 @@ struct SavingsInsurance: Identifiable, Codable {
     let id: UUID
     var name: String
     var company: String
-    var currency: Currency
+    var currencyCode: String        // 例：NT$、美金、日圓（取代原 Currency 列舉）
     var premiumAmount: Double
     var paymentPeriod: Recurrence
     var annualRate: Double          // 複利年利率（百分比，如 2.5 表示 2.5%）
@@ -49,7 +49,7 @@ struct SavingsInsurance: Identifiable, Codable {
         id: UUID = UUID(),
         name: String,
         company: String = "",
-        currency: Currency = .twd,
+        currencyCode: String = "NT$",
         premiumAmount: Double,
         paymentPeriod: Recurrence = .yearly,
         annualRate: Double = 0,
@@ -63,7 +63,7 @@ struct SavingsInsurance: Identifiable, Codable {
         self.id = id
         self.name = name
         self.company = company
-        self.currency = currency
+        self.currencyCode = currencyCode
         self.premiumAmount = premiumAmount
         self.paymentPeriod = paymentPeriod
         self.annualRate = annualRate
@@ -81,7 +81,13 @@ struct SavingsInsurance: Identifiable, Codable {
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         company = (try? c.decode(String.self, forKey: .company)) ?? ""
-        currency = (try? c.decode(Currency.self, forKey: .currency)) ?? .twd
+        if let code = try? c.decode(String.self, forKey: .currencyCode) {
+            currencyCode = code
+        } else if let legacy = try? c.decode(Currency.self, forKey: .currency) {
+            currencyCode = legacy.symbol
+        } else {
+            currencyCode = "NT$"
+        }
         premiumAmount = try c.decode(Double.self, forKey: .premiumAmount)
         paymentPeriod = try c.decode(Recurrence.self, forKey: .paymentPeriod)
         annualRate = (try? c.decode(Double.self, forKey: .annualRate)) ?? 0
@@ -93,7 +99,7 @@ struct SavingsInsurance: Identifiable, Codable {
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
     }
     private enum CodingKeys: String, CodingKey {
-        case id, name, company, currency, premiumAmount, paymentPeriod, annualRate
+        case id, name, company, currency, currencyCode, premiumAmount, paymentPeriod, annualRate
         case startDate, maturityDate, expectedReturn, currentValue, linkedExpenseId, note
     }
 

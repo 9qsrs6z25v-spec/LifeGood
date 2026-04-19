@@ -30,7 +30,7 @@ struct AddExpenseView: View {
     // MARK: - 儲蓄險欄位
 
     @State private var insCompany = ""
-    @State private var insCurrency: Currency = .twd
+    @State private var insCurrencyCode: String = "NT$"
     @State private var insRateText = ""
 
     // MARK: - 自訂幣別（左側 NT$ 選擇）
@@ -143,7 +143,8 @@ struct AddExpenseView: View {
         return SavingsInsurance.futureValue(payment: insPremium, ratePerPeriod: r, periods: insElapsedPeriods)
     }
 
-    private var insCurrencySymbol: String { isSavingsInsurance ? insCurrency.symbol : "NT$" }
+    private var insCurrencySymbol: String { isSavingsInsurance ? insCurrencyCode : "NT$" }
+    private var insIsUSD: Bool { insCurrencyCode == "US$" || insCurrencyCode == "USD" || insCurrencyCode.lowercased() == "美金" }
 
     // MARK: - Body
 
@@ -612,9 +613,36 @@ struct AddExpenseView: View {
     private var savingsInsuranceSection: some View {
         Group {
             Section("繳費設定") {
-                Picker("幣別", selection: $insCurrency) {
-                    ForEach(Currency.allCases, id: \.self) { c in
-                        Text("\(c.symbol) (\(c.rawValue))").tag(c)
+                HStack {
+                    Text("幣別")
+                    Spacer()
+                    Menu {
+                        Button {
+                            insCurrencyCode = "NT$"
+                        } label: {
+                            if insCurrencyCode == "NT$" {
+                                Label("NT$", systemImage: "checkmark")
+                            } else {
+                                Text("NT$")
+                            }
+                        }
+                        ForEach(store.currencyRates) { rate in
+                            Button {
+                                insCurrencyCode = rate.code
+                            } label: {
+                                if insCurrencyCode == rate.code {
+                                    Label("\(rate.code)（1=\(rateDisplay(rate.rate)) 元）", systemImage: "checkmark")
+                                } else {
+                                    Text("\(rate.code)（1=\(rateDisplay(rate.rate)) 元）")
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text(insCurrencyCode)
+                            Image(systemName: "chevron.down").font(.caption2)
+                        }
+                        .foregroundStyle(.secondary)
                     }
                 }
                 Picker("繳費週期", selection: $selectedRecurrence) {
@@ -942,7 +970,7 @@ struct AddExpenseView: View {
             id: insuranceId,
             name: title.trimmingCharacters(in: .whitespaces),
             company: insCompany.trimmingCharacters(in: .whitespaces),
-            currency: insCurrency,
+            currencyCode: insCurrencyCode,
             premiumAmount: amount,
             paymentPeriod: selectedRecurrence,
             annualRate: insRate,
@@ -1079,7 +1107,7 @@ struct AddExpenseView: View {
         if let linkedId = expense.linkedInsuranceId,
            let linked = financeStore.insurances.first(where: { $0.id == linkedId }) {
             insCompany = linked.company
-            insCurrency = linked.currency
+            insCurrencyCode = linked.currencyCode
             insRateText = linked.annualRate > 0 ? String(format: "%.2f", linked.annualRate) : ""
             insStartDate = linked.startDate
             insMaturityDate = linked.maturityDate
@@ -1192,7 +1220,7 @@ struct AddExpenseView: View {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencySymbol = isSavingsInsurance ? insCurrencySymbol : "NT$"
-        f.maximumFractionDigits = isSavingsInsurance && insCurrency == .usd ? 2 : 0
+        f.maximumFractionDigits = isSavingsInsurance && insIsUSD ? 2 : 0
         return f.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 
