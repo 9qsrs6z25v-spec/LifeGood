@@ -155,8 +155,11 @@ struct AddExpenseView: View {
                     if selectedAssetLink == .stock { stockLinkSection }
                     if selectedAssetLink == .insurance { insuranceLinkSection }
                     if selectedAssetLink == .realEstate { realEstateLinkSection }
-                    // 關聯汽車時自動歸為「汽車」分類，隱藏分類區塊
-                    if selectedAssetLink != .vehicle { categorySection }
+                    // 關聯汽車自動歸為「汽車」、房屋價金自動歸為「房地產」，隱藏分類區塊
+                    if selectedAssetLink != .vehicle
+                        && !(selectedAssetLink == .realEstate && selectedRealEstateExpenseCategory == .housePayment) {
+                        categorySection
+                    }
                 } else {
                     // 固定支出：先選關聯資產（若適用），再選分類
                     if showFixedAssetLink {
@@ -206,13 +209,20 @@ struct AddExpenseView: View {
             .onChange(of: selectedAssetLink) { _, newValue in
                 if newValue == .vehicle {
                     selectedVariableCategory = .vehicle
+                } else if newValue == .realEstate && selectedRealEstateExpenseCategory == .housePayment {
+                    selectedVariableCategory = .realEstate
                 }
                 applyAutoTitleIfLinked()
             }
             .onChange(of: selectedVehicleId) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: selectedVehicleExpenseCategory) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: selectedRealEstateLinkId) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedRealEstateExpenseCategory) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: selectedRealEstateExpenseCategory) { _, newValue in
+                if selectedAssetLink == .realEstate && newValue == .housePayment {
+                    selectedVariableCategory = .realEstate
+                }
+                applyAutoTitleIfLinked()
+            }
             .onChange(of: selectedMortgageRealEstateId) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: mortgageLinkExisting) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: selectedFixedAssetLink) { _, _ in applyAutoTitleIfLinked() }

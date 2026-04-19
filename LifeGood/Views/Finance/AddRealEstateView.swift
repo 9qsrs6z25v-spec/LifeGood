@@ -490,7 +490,7 @@ struct AddRealEstateView: View {
         let title = item.title.isEmpty ? "\(reName) - 已付款" : "\(reName) - \(item.title)"
         let expense = Expense(
             id: expenseId, title: title, amount: item.amount, date: item.date,
-            expenseType: .variable, variableCategory: .dailyNecessities,
+            expenseType: .variable, variableCategory: .realEstate,
             linkedRealEstateId: reId,
             realEstateExpenseCategory: .housePayment, note: ""
         )
@@ -504,7 +504,7 @@ struct AddRealEstateView: View {
         let expense = Expense(
             id: expenseId, title: "\(reName) - \(item.category.rawValue)",
             amount: item.amount, date: item.date,
-            expenseType: .variable, variableCategory: .dailyNecessities,
+            expenseType: .variable, variableCategory: .realEstate,
             linkedRealEstateId: reId,
             realEstateExpenseCategory: item.category, note: ""
         )

@@ -11,6 +11,7 @@ enum VariableCategory: String, Codable, CaseIterable, Identifiable {
     case food = "飲食"
     case transportation = "交通"
     case vehicle = "汽車"
+    case realEstate = "房地產"
     case entertainment = "娛樂"
     case shopping = "購物"
     case dailyNecessities = "日用品"
@@ -26,6 +27,7 @@ enum VariableCategory: String, Codable, CaseIterable, Identifiable {
         case .food: return "fork.knife"
         case .transportation: return "car.fill"
         case .vehicle: return "car.circle.fill"
+        case .realEstate: return "building.2.fill"
         case .entertainment: return "gamecontroller.fill"
         case .shopping: return "bag.fill"
         case .dailyNecessities: return "house.fill"
@@ -47,6 +49,7 @@ enum VariableCategory: String, Codable, CaseIterable, Identifiable {
         case .education: return "EducationColor"
         case .social: return "SocialColor"
         case .vehicle: return "VehicleColor"
+        case .realEstate: return "RealEstateColor"
         case .other: return "OtherColor"
         }
     }
