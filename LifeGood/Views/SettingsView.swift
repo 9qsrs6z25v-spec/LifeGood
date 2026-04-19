@@ -231,7 +231,7 @@ struct SettingsView: View {
             HStack {
                 Label("人生", systemImage: "star.circle")
                 Spacer()
-                Text("\(lifeStore.milestones.count) 筆")
+                Text("\(lifeStore.milestones.count + lifeStore.familyMembers.count + financeStore.realEstates.count) 筆")
                     .foregroundStyle(.secondary)
             }
 
