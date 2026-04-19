@@ -64,6 +64,7 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 modeSwitchSection
+                currencyRateSection
                 dataManagementSection
                 dataStatsSection
                 dangerZoneSection
@@ -143,6 +144,45 @@ struct SettingsView: View {
             case .life:
                 Text("目前為人生模式：記錄里程碑、人際關係、寵物與行程。")
             }
+        }
+    }
+
+    // MARK: - 手動設定匯率
+
+    private var currencyRateSection: some View {
+        Section {
+            ForEach(Array(store.currencyRates.enumerated()), id: \.element.id) { index, _ in
+                HStack(spacing: 8) {
+                    TextField("幣別", text: $store.currencyRates[index].code)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("=")
+                        .foregroundStyle(.secondary)
+                    TextField("比值", value: $store.currencyRates[index].rate, format: .number)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(maxWidth: 80)
+                    Text("元")
+                        .foregroundStyle(.secondary)
+                    Button(role: .destructive) {
+                        store.currencyRates.remove(at: index)
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Button {
+                store.currencyRates.append(CurrencyRate())
+            } label: {
+                Label("新增匯率", systemImage: "plus.circle")
+                    .foregroundStyle(.green)
+            }
+        } header: {
+            Text("手動設定匯率")
+        } footer: {
+            Text("輸入幣別代號與對 NT$ 的比值（例：美金 = 32 元）。新增後，記帳的金額輸入欄位左側即可選擇該幣別，輸入金額時將自動換算為 NT$。")
         }
     }
 

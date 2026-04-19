@@ -32,6 +32,10 @@ struct AddExpenseView: View {
     @State private var insCompany = ""
     @State private var insCurrency: Currency = .twd
     @State private var insRateText = ""
+
+    // MARK: - 自訂幣別（左側 NT$ 選擇）
+
+    @State private var selectedCurrencyCode: String = "NT$"
     @State private var insStartDate = Date()
     @State private var insMaturityDate = Calendar.current.date(byAdding: .year, value: 6, to: Date()) ?? Date()
 
@@ -306,7 +310,38 @@ struct AddExpenseView: View {
             }
 
             HStack {
-                Text(isSavingsInsurance ? insCurrencySymbol : "NT$").foregroundStyle(.secondary)
+                if isSavingsInsurance {
+                    Text(insCurrencySymbol).foregroundStyle(.secondary)
+                } else {
+                    Menu {
+                        Button {
+                            selectedCurrencyCode = "NT$"
+                        } label: {
+                            if selectedCurrencyCode == "NT$" {
+                                Label("NT$", systemImage: "checkmark")
+                            } else {
+                                Text("NT$")
+                            }
+                        }
+                        ForEach(store.currencyRates) { rate in
+                            Button {
+                                selectedCurrencyCode = rate.code
+                            } label: {
+                                if selectedCurrencyCode == rate.code {
+                                    Label("\(rate.code)（1=\(rateDisplay(rate.rate)) 元）", systemImage: "checkmark")
+                                } else {
+                                    Text("\(rate.code)（1=\(rateDisplay(rate.rate)) 元）")
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text(selectedCurrencyCode)
+                            Image(systemName: "chevron.down").font(.caption2)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                }
                 TextField(isMortgage ? "每月房貸金額" : (isSavingsInsurance ? "保費金額" : "金額"), text: $amountText)
                     .keyboardType(.decimalPad)
             }
@@ -726,10 +761,13 @@ struct AddExpenseView: View {
         }
 
         guard !trimmedTitle.isEmpty,
-              let amount = Double(finalAmountText), amount > 0 else {
+              let rawAmount = Double(finalAmountText), rawAmount > 0 else {
             showValidationError = true
             return
         }
+
+        // 自訂幣別換算為 NT$（儲蓄險不適用，使用其自身幣別欄位）
+        let amount = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
 
         let expenseId = editingExpense?.id ?? UUID()
         var linkedInsId = editingExpense?.linkedInsuranceId
@@ -1153,6 +1191,21 @@ struct AddExpenseView: View {
         f.currencySymbol = isSavingsInsurance ? insCurrencySymbol : "NT$"
         f.maximumFractionDigits = isSavingsInsurance && insCurrency == .usd ? 2 : 0
         return f.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+
+    private func rateDisplay(_ value: Double) -> String {
+        if value == value.rounded() {
+            return String(format: "%.0f", value)
+        }
+        return String(format: "%g", value)
+    }
+
+    private var currencyMultiplier: Double {
+        if selectedCurrencyCode == "NT$" { return 1 }
+        if let rate = store.currencyRates.first(where: { $0.code == selectedCurrencyCode }), rate.rate > 0 {
+            return rate.rate
+        }
+        return 1
     }
 }
 

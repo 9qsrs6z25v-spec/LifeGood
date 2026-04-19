@@ -8,9 +8,13 @@ class ExpenseStore: ObservableObject {
     @Published var incomes: [Income] = [] {
         didSet { if !isLoading { save() } }
     }
+    @Published var currencyRates: [CurrencyRate] = [] {
+        didSet { if !isLoading { saveCurrencyRates() } }
+    }
 
     private let saveKey = "lifegood_expenses"
     private let incomeKey = "lifegood_incomes"
+    private let currencyRatesKey = "lifegood_currency_rates"
     private var isLoading = false
 
     init() {
@@ -403,6 +407,12 @@ class ExpenseStore: ObservableObject {
         }
     }
 
+    private func saveCurrencyRates() {
+        if let data = try? JSONEncoder().encode(currencyRates) {
+            UserDefaults.standard.set(data, forKey: currencyRatesKey)
+        }
+    }
+
     private func load() {
         isLoading = true
         if let data = UserDefaults.standard.data(forKey: saveKey),
@@ -412,6 +422,10 @@ class ExpenseStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: incomeKey),
            let decoded = try? JSONDecoder().decode([Income].self, from: data) {
             incomes = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: currencyRatesKey),
+           let decoded = try? JSONDecoder().decode([CurrencyRate].self, from: data) {
+            currencyRates = decoded
         }
         isLoading = false
     }

@@ -14,6 +14,20 @@ enum Currency: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - 自訂匯率
+
+struct CurrencyRate: Identifiable, Codable {
+    let id: UUID
+    var code: String   // 例：美金
+    var rate: Double   // 例：32（1 單位 = 32 NT$）
+
+    init(id: UUID = UUID(), code: String = "", rate: Double = 0) {
+        self.id = id
+        self.code = code
+        self.rate = rate
+    }
+}
+
 // MARK: - 儲蓄險
 
 struct SavingsInsurance: Identifiable, Codable {
