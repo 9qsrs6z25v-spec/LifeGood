@@ -906,9 +906,11 @@ struct AddExpenseView: View {
             }
         } else {
             // 其餘類別 → variableExpenses（變動支出）
+            let trimmedNote = note.trimmingCharacters(in: .whitespaces)
             let newEntry = RealEstateVariableExpense(
                 id: UUID(),
                 category: selectedRealEstateExpenseCategory,
+                name: trimmedNote,
                 amount: amount,
                 date: date,
                 linkedExpenseId: expenseId
@@ -920,6 +922,7 @@ struct AddExpenseView: View {
                 re.variableExpenses[idx] = RealEstateVariableExpense(
                     id: re.variableExpenses[idx].id,
                     category: selectedRealEstateExpenseCategory,
+                    name: trimmedNote,
                     amount: amount,
                     date: date,
                     linkedExpenseId: expenseId
