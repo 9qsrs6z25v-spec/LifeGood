@@ -520,6 +520,8 @@ enum VehiclePowerType: String, Codable, CaseIterable, Identifiable {
     case gasoline = "油車"
     case electric = "電車"
     case hybrid = "混合動力"
+    case motorcycle = "機車"
+    case electricMotorcycle = "電動機車"
 
     var id: String { rawValue }
 
@@ -528,6 +530,8 @@ enum VehiclePowerType: String, Codable, CaseIterable, Identifiable {
         case .gasoline: return "fuelpump.fill"
         case .electric: return "bolt.car.fill"
         case .hybrid: return "arrow.triangle.2.circlepath"
+        case .motorcycle: return "scooter"
+        case .electricMotorcycle: return "bolt.fill"
         }
     }
 }
@@ -566,6 +570,10 @@ enum VehicleVariableCategory: String, Codable, CaseIterable, Identifiable {
             return [.electricity, .parking, .maintenance, .wash, .repair, .other]
         case .hybrid:
             return [.fuel, .electricity, .parking, .maintenance, .wash, .repair, .other]
+        case .motorcycle:
+            return [.fuel, .parking, .maintenance, .wash, .repair, .other]
+        case .electricMotorcycle:
+            return [.electricity, .parking, .maintenance, .wash, .repair, .other]
         }
     }
 }

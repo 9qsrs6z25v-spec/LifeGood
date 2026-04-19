@@ -68,7 +68,7 @@ struct MainTabView: View {
             .tag(2)
 
         VehicleView()
-            .tabItem { Label("汽車", systemImage: "car.fill") }
+            .tabItem { Label("載具", systemImage: "car.fill") }
             .tag(3)
 
         RealEstateView()
