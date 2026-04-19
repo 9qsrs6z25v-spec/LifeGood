@@ -330,6 +330,33 @@ struct RealEstateVariableExpense: Identifiable, Codable {
     }
 }
 
+// MARK: - 樓層功能
+
+enum FloorFunction: String, Codable, CaseIterable, Identifiable {
+    case parking = "停車"
+    case livingRoom = "客廳"
+    case kitchen = "廚房"
+    case masterBedroom = "主臥"
+    case guestBedroom = "客臥"
+    case musicRoom = "音樂室"
+    case playroom = "遊樂室"
+    case storage = "倉庫"
+
+    var id: String { rawValue }
+}
+
+struct FloorInfo: Identifiable, Codable {
+    let id: UUID
+    var floorNumber: String
+    var functions: [FloorFunction]
+
+    init(id: UUID = UUID(), floorNumber: String = "", functions: [FloorFunction] = []) {
+        self.id = id
+        self.floorNumber = floorNumber
+        self.functions = functions
+    }
+}
+
 // MARK: - 房地產保險項目
 
 struct RealEstateInsuranceItem: Identifiable, Codable {
@@ -405,9 +432,10 @@ struct RealEstate: Identifiable, Codable {
     var landSituation: String          // 座落
     var landNumber: String             // 地號
     var landArea: Double               // 面積
-    var totalFloors: Int               // 有幾個樓層
-    var fromFloor: Int                 // 從幾樓
-    var toFloor: Int                   // 到幾樓
+    var totalFloors: Int               // 有幾個樓層（向下相容，新版由 floors.count 覆寫）
+    var fromFloor: Int                 // 從幾樓（向下相容）
+    var toFloor: Int                   // 到幾樓（向下相容）
+    var floors: [FloorInfo]            // 各樓層資訊
     var waterMeterNumber: String       // 水號
     var waterMeterOwner: String        // 水 所有權人
     var electricityMeterNumber: String // 電號
@@ -440,6 +468,7 @@ struct RealEstate: Identifiable, Codable {
         totalFloors: Int = 0,
         fromFloor: Int = 0,
         toFloor: Int = 0,
+        floors: [FloorInfo] = [],
         waterMeterNumber: String = "",
         waterMeterOwner: String = "",
         electricityMeterNumber: String = "",
@@ -471,6 +500,7 @@ struct RealEstate: Identifiable, Codable {
         self.totalFloors = totalFloors
         self.fromFloor = fromFloor
         self.toFloor = toFloor
+        self.floors = floors
         self.waterMeterNumber = waterMeterNumber
         self.waterMeterOwner = waterMeterOwner
         self.electricityMeterNumber = electricityMeterNumber
@@ -506,6 +536,7 @@ struct RealEstate: Identifiable, Codable {
         totalFloors = (try? c.decode(Int.self, forKey: .totalFloors)) ?? 0
         fromFloor = (try? c.decode(Int.self, forKey: .fromFloor)) ?? 0
         toFloor = (try? c.decode(Int.self, forKey: .toFloor)) ?? 0
+        floors = (try? c.decode([FloorInfo].self, forKey: .floors)) ?? []
         waterMeterNumber = (try? c.decode(String.self, forKey: .waterMeterNumber)) ?? ""
         waterMeterOwner = (try? c.decode(String.self, forKey: .waterMeterOwner)) ?? ""
         electricityMeterNumber = (try? c.decode(String.self, forKey: .electricityMeterNumber)) ?? ""
@@ -526,7 +557,7 @@ struct RealEstate: Identifiable, Codable {
         case id, name, city, address, purchaseDate, soldDate, purchasePrice, currentValue, monthlyRental
         case mortgageItems, paidItems, variableExpenses, linkedExpenseId, note
         case pingCount, landOwner, landSituation, landNumber, landArea
-        case totalFloors, fromFloor, toFloor
+        case totalFloors, fromFloor, toFloor, floors
         case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
         case gasMeterNumber, gasMeterOwner, insuranceItems, propertyAssets
         case monthlyMortgage // 舊版欄位，僅用於解碼
@@ -556,6 +587,7 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(totalFloors, forKey: .totalFloors)
         try c.encode(fromFloor, forKey: .fromFloor)
         try c.encode(toFloor, forKey: .toFloor)
+        try c.encode(floors, forKey: .floors)
         try c.encode(waterMeterNumber, forKey: .waterMeterNumber)
         try c.encode(waterMeterOwner, forKey: .waterMeterOwner)
         try c.encode(electricityMeterNumber, forKey: .electricityMeterNumber)

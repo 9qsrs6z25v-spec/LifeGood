@@ -264,20 +264,43 @@ struct RealEstateDetailView: View {
     private var houseInfoSection: some View {
         VStack(spacing: 0) {
             let hasProperty = estate.pingCount > 0 || !estate.landOwner.isEmpty
-                || !estate.landSituation.isEmpty || !estate.landNumber.isEmpty
-                || estate.landArea > 0 || estate.totalFloors > 0
-                || estate.fromFloor > 0 || estate.toFloor > 0
 
             if hasProperty {
                 sectionHeader("房屋資料")
                 if estate.pingCount > 0 { infoRow("坪數", String(format: "%g 坪", estate.pingCount)) }
                 if !estate.landOwner.isEmpty { infoRow("所有權人", estate.landOwner) }
+            }
+
+            let hasDetail = !estate.landSituation.isEmpty || !estate.landNumber.isEmpty
+                || estate.landArea > 0
+
+            if hasDetail {
+                sectionHeader("詳細")
                 if !estate.landSituation.isEmpty { infoRow("座落", estate.landSituation) }
                 if !estate.landNumber.isEmpty { infoRow("地號", estate.landNumber) }
                 if estate.landArea > 0 { infoRow("面積", String(format: "%g ㎡", estate.landArea)) }
-                if estate.totalFloors > 0 { infoRow("總樓層", "\(estate.totalFloors) 層") }
-                if estate.fromFloor > 0 || estate.toFloor > 0 {
-                    infoRow("樓層範圍", "\(estate.fromFloor) ~ \(estate.toFloor) 樓")
+            }
+
+            if !estate.floors.isEmpty {
+                sectionHeader("樓層資訊（\(estate.floors.count) 層）")
+                ForEach(estate.floors) { floor in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(floor.floorNumber.isEmpty ? "未編號" : floor.floorNumber)
+                            .font(.subheadline.weight(.semibold))
+                        if !floor.functions.isEmpty {
+                            HStack(spacing: 6) {
+                                ForEach(floor.functions, id: \.self) { fn in
+                                    Text(fn.rawValue)
+                                        .font(.caption2)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color.green.opacity(0.12))
+                                        .foregroundStyle(.green)
+                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
                 }
             }
 
@@ -354,7 +377,7 @@ struct RealEstateDetailView: View {
                 }
             }
 
-            if !hasProperty && !hasUtilities && estate.insuranceItems.isEmpty && estate.propertyAssets.isEmpty {
+            if !hasProperty && !hasDetail && estate.floors.isEmpty && !hasUtilities && estate.insuranceItems.isEmpty && estate.propertyAssets.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.system(size: 36)).foregroundStyle(.tertiary)

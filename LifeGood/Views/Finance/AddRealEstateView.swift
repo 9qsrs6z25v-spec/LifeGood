@@ -3,6 +3,7 @@ import SwiftUI
 struct AddRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: RealEstate?
@@ -37,12 +38,17 @@ struct AddRealEstateView: View {
     // MARK: - 人生模式欄位
     @State private var pingCountText = ""
     @State private var landOwner = ""
+    @State private var ownerPickerSelection = ""
     @State private var landSituation = ""
     @State private var landNumber = ""
     @State private var landAreaText = ""
-    @State private var totalFloorsText = ""
-    @State private var fromFloorText = ""
-    @State private var toFloorText = ""
+    @State private var floorItems: [FloorItemState] = []
+
+    struct FloorItemState: Identifiable {
+        let id: UUID
+        var floorNumber: String
+        var functions: Set<FloorFunction>
+    }
     @State private var waterMeterNumber = ""
     @State private var waterMeterOwner = ""
     @State private var electricityMeterNumber = ""
@@ -148,6 +154,8 @@ struct AddRealEstateView: View {
                     }
                 } else {
                     propertyDetailSection
+                    landDetailSection
+                    floorSection
                     utilitiesSection
                     insuranceSection
                     propertyAssetSection
@@ -199,15 +207,37 @@ struct AddRealEstateView: View {
 
     // MARK: - 價值
 
+    private var pingCount: Double { Double(pingCountText) ?? 0 }
+
+    private func perPingText(_ wanText: String) -> String {
+        guard pingCount > 0, let wan = Double(wanText), wan > 0 else { return "" }
+        let perPing = wan / pingCount
+        return String(format: "%.1f 萬/坪", perPing)
+    }
+
     private var valueSection: some View {
         Section {
             HStack {
-                TextField("購入價格", text: $purchasePriceText).keyboardType(.decimalPad)
-                Text("萬元").foregroundStyle(.secondary)
+                HStack {
+                    TextField("購入價格", text: $purchasePriceText).keyboardType(.decimalPad)
+                    Text("萬元").foregroundStyle(.secondary)
+                }
+                if pingCount > 0, let pp = perPingText(purchasePriceText) as String?, !pp.isEmpty {
+                    Divider()
+                    Text(pp).font(.caption).foregroundStyle(.tertiary)
+                        .frame(minWidth: 80, alignment: .trailing)
+                }
             }
             HStack {
-                TextField("目前估值", text: $currentValueText).keyboardType(.decimalPad)
-                Text("萬元").foregroundStyle(.secondary)
+                HStack {
+                    TextField("目前估值", text: $currentValueText).keyboardType(.decimalPad)
+                    Text("萬元").foregroundStyle(.secondary)
+                }
+                if pingCount > 0, let pp = perPingText(currentValueText) as String?, !pp.isEmpty {
+                    Divider()
+                    Text(pp).font(.caption).foregroundStyle(.tertiary)
+                        .frame(minWidth: 80, alignment: .trailing)
+                }
             }
         } header: {
             Text("價值")
@@ -416,30 +446,104 @@ struct AddRealEstateView: View {
 
     // MARK: - 房屋資料（人生）
 
+    private var ownerCandidates: [String] {
+        var names: [String] = []
+        let myName = lifeStore.profile.chineseName
+        if !myName.isEmpty { names.append(myName) }
+        for member in lifeStore.familyMembers where !member.chineseName.isEmpty {
+            names.append(member.chineseName)
+        }
+        return names
+    }
+
     private var propertyDetailSection: some View {
         Section("房屋資料") {
             HStack {
                 TextField("坪數", text: $pingCountText).keyboardType(.decimalPad)
                 Text("坪").foregroundStyle(.secondary)
             }
-            TextField("所有權人", text: $landOwner)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("所有權人").font(.caption).foregroundStyle(.secondary)
+                if !ownerCandidates.isEmpty {
+                    Picker("選擇人員", selection: $ownerPickerSelection) {
+                        Text("手動輸入").tag("")
+                        ForEach(ownerCandidates, id: \.self) { name in
+                            Text(name).tag(name)
+                        }
+                    }
+                    .onChange(of: ownerPickerSelection) { _, newValue in
+                        if !newValue.isEmpty { landOwner = newValue }
+                    }
+                }
+                if ownerPickerSelection.isEmpty {
+                    TextField("手動輸入所有權人", text: $landOwner)
+                }
+            }
+        }
+    }
+
+    private var landDetailSection: some View {
+        Section("詳細") {
             TextField("座落", text: $landSituation)
             TextField("地號", text: $landNumber)
             HStack {
                 TextField("面積", text: $landAreaText).keyboardType(.decimalPad)
                 Text("㎡").foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var floorSection: some View {
+        Section {
             HStack {
-                TextField("總樓層", text: $totalFloorsText).keyboardType(.numberPad)
-                Text("層").foregroundStyle(.secondary)
+                Text("樓層數")
+                Spacer()
+                Text("\(floorItems.count) 層").foregroundStyle(.secondary)
             }
-            HStack {
-                TextField("從", text: $fromFloorText).keyboardType(.numberPad)
-                Text("樓").foregroundStyle(.secondary)
-                Text("~").foregroundStyle(.tertiary)
-                TextField("到", text: $toFloorText).keyboardType(.numberPad)
-                Text("樓").foregroundStyle(.secondary)
+
+            ForEach(Array(floorItems.enumerated()), id: \.element.id) { index, _ in
+                VStack(spacing: 8) {
+                    HStack {
+                        TextField("樓層編號（如 B1、1F）", text: $floorItems[index].floorNumber)
+                            .font(.subheadline.weight(.medium))
+                        Spacer()
+                        Button(role: .destructive) {
+                            floorItems.remove(at: index)
+                        } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                        }.buttonStyle(.plain)
+                    }
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
+                        ForEach(FloorFunction.allCases) { fn in
+                            let isOn = floorItems[index].functions.contains(fn)
+                            Button {
+                                if isOn { floorItems[index].functions.remove(fn) }
+                                else { floorItems[index].functions.insert(fn) }
+                            } label: {
+                                Text(fn.rawValue)
+                                    .font(.caption)
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity)
+                                    .background(isOn ? Color.green.opacity(0.2) : Color(.tertiarySystemFill))
+                                    .foregroundStyle(isOn ? .green : .secondary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
             }
+
+            Button {
+                floorItems.append(FloorItemState(id: UUID(), floorNumber: "", functions: []))
+            } label: {
+                Label("新增樓層", systemImage: "plus.circle").foregroundStyle(.green)
+            }
+        } header: {
+            Text("樓層資訊")
         }
     }
 
@@ -727,9 +831,10 @@ struct AddRealEstateView: View {
             landSituation: landSituation.trimmingCharacters(in: .whitespaces),
             landNumber: landNumber.trimmingCharacters(in: .whitespaces),
             landArea: Double(landAreaText) ?? 0,
-            totalFloors: Int(totalFloorsText) ?? 0,
-            fromFloor: Int(fromFloorText) ?? 0,
-            toFloor: Int(toFloorText) ?? 0,
+            totalFloors: floorItems.count,
+            fromFloor: 0,
+            toFloor: 0,
+            floors: floorItems.map { FloorInfo(id: $0.id, floorNumber: $0.floorNumber, functions: Array($0.functions)) },
             waterMeterNumber: waterMeterNumber.trimmingCharacters(in: .whitespaces),
             waterMeterOwner: waterMeterOwner.trimmingCharacters(in: .whitespaces),
             electricityMeterNumber: electricityMeterNumber.trimmingCharacters(in: .whitespaces),
@@ -860,12 +965,15 @@ struct AddRealEstateView: View {
         // 人生模式欄位
         pingCountText = e.pingCount > 0 ? String(format: "%g", e.pingCount) : ""
         landOwner = e.landOwner
+        if ownerCandidates.contains(e.landOwner) {
+            ownerPickerSelection = e.landOwner
+        }
         landSituation = e.landSituation
         landNumber = e.landNumber
         landAreaText = e.landArea > 0 ? String(format: "%g", e.landArea) : ""
-        totalFloorsText = e.totalFloors > 0 ? "\(e.totalFloors)" : ""
-        fromFloorText = e.fromFloor > 0 ? "\(e.fromFloor)" : ""
-        toFloorText = e.toFloor > 0 ? "\(e.toFloor)" : ""
+        floorItems = e.floors.map { f in
+            FloorItemState(id: f.id, floorNumber: f.floorNumber, functions: Set(f.functions))
+        }
         waterMeterNumber = e.waterMeterNumber
         waterMeterOwner = e.waterMeterOwner
         electricityMeterNumber = e.electricityMeterNumber
