@@ -102,6 +102,22 @@ struct SavingsInsurance: Identifiable, Codable {
         case id, name, company, currency, currencyCode, premiumAmount, paymentPeriod, annualRate
         case startDate, maturityDate, expectedReturn, currentValue, linkedExpenseId, note
     }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(company, forKey: .company)
+        try c.encode(currencyCode, forKey: .currencyCode)
+        try c.encode(premiumAmount, forKey: .premiumAmount)
+        try c.encode(paymentPeriod, forKey: .paymentPeriod)
+        try c.encode(annualRate, forKey: .annualRate)
+        try c.encode(startDate, forKey: .startDate)
+        try c.encode(maturityDate, forKey: .maturityDate)
+        try c.encode(expectedReturn, forKey: .expectedReturn)
+        try c.encode(currentValue, forKey: .currentValue)
+        try c.encodeIfPresent(linkedExpenseId, forKey: .linkedExpenseId)
+        try c.encode(note, forKey: .note)
+    }
 
     /// 每年繳費期數
     private var periodsPerYear: Double {
