@@ -5,9 +5,19 @@ struct RealEstateDetailView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
-    let estate: RealEstate
+    let estateId: UUID
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
+
+    private var estate: RealEstate {
+        store.realEstates.first(where: { $0.id == estateId }) ?? placeholder
+    }
+
+    private let placeholder = RealEstate(name: "")
+
+    init(estate: RealEstate) {
+        self.estateId = estate.id
+    }
 
     private var rarity: CardRarity { CardRarity.realEstate(price: estate.purchasePrice) }
 
