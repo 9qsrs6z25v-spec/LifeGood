@@ -202,11 +202,14 @@ struct LifeRealEstateView: View {
         if isDeselecting {
             resetCamera()
         } else if let coord = Self.cityCoords[city] {
+            // 往南偏移使大頭針顯示在地圖上半部，避免被底部面板遮住
+            let span = MKCoordinateSpan(latitudeDelta: 1.2, longitudeDelta: 1.2)
+            let offsetCenter = CLLocationCoordinate2D(
+                latitude: coord.latitude - span.latitudeDelta * 0.28,
+                longitude: coord.longitude
+            )
             withAnimation(.easeInOut(duration: 0.6)) {
-                cameraPosition = .region(MKCoordinateRegion(
-                    center: coord,
-                    span: MKCoordinateSpan(latitudeDelta: 1.2, longitudeDelta: 1.2)
-                ))
+                cameraPosition = .region(MKCoordinateRegion(center: offsetCenter, span: span))
             }
         }
     }
