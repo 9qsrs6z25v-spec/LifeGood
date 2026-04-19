@@ -128,6 +128,7 @@ struct Expense: Identifiable, Codable {
     var vehicleExpenseCategory: VehicleVariableCategory?  // 汽車變動支出子分類
     var realEstateExpenseCategory: RealEstateExpenseCategory?  // 房地產變動支出子分類
     var note: String
+    var currencyCode: String
 
     init(
         id: UUID = UUID(),
@@ -146,7 +147,8 @@ struct Expense: Identifiable, Codable {
         linkedVehicleId: UUID? = nil,
         vehicleExpenseCategory: VehicleVariableCategory? = nil,
         realEstateExpenseCategory: RealEstateExpenseCategory? = nil,
-        note: String = ""
+        note: String = "",
+        currencyCode: String = "NT$"
     ) {
         self.id = id
         self.title = title
@@ -165,6 +167,7 @@ struct Expense: Identifiable, Codable {
         self.vehicleExpenseCategory = vehicleExpenseCategory
         self.realEstateExpenseCategory = realEstateExpenseCategory
         self.note = note
+        self.currencyCode = currencyCode
     }
 
     // MARK: - 向下相容解碼
@@ -187,12 +190,13 @@ struct Expense: Identifiable, Codable {
         vehicleExpenseCategory = try? c.decode(VehicleVariableCategory.self, forKey: .vehicleExpenseCategory)
         realEstateExpenseCategory = try? c.decode(RealEstateExpenseCategory.self, forKey: .realEstateExpenseCategory)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        currencyCode = (try? c.decode(String.self, forKey: .currencyCode)) ?? "NT$"
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
         case insuranceSubCategory, loanSubCategory
         case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
-        case vehicleExpenseCategory, realEstateExpenseCategory, note
+        case vehicleExpenseCategory, realEstateExpenseCategory, note, currencyCode
     }
 
     var categoryName: String {

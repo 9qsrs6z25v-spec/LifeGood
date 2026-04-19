@@ -859,6 +859,7 @@ struct AddExpenseView: View {
             }
         }
 
+        let savedCurrencyCode = isSavingsInsurance ? insCurrencyCode : selectedCurrencyCode
         let expense = Expense(
             id: expenseId,
             title: trimmedTitle,
@@ -876,7 +877,8 @@ struct AddExpenseView: View {
             linkedVehicleId: linkedVehId,
             vehicleExpenseCategory: (expenseType == .variable && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil,
             realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
-            note: note.trimmingCharacters(in: .whitespaces)
+            note: note.trimmingCharacters(in: .whitespaces),
+            currencyCode: savedCurrencyCode
         )
 
         if isEditing { store.update(expense) } else { store.add(expense) }
@@ -1094,7 +1096,15 @@ struct AddExpenseView: View {
     private func loadEditing() {
         guard let expense = editingExpense else { return }
         title = expense.title
-        amountText = String(format: "%.0f", expense.amount)
+        selectedCurrencyCode = expense.currencyCode
+        // 還原為原始幣別金額顯示
+        if expense.currencyCode != "NT$",
+           let rate = store.currencyRates.first(where: { $0.code == expense.currencyCode }),
+           rate.rate > 0 {
+            amountText = String(format: "%.0f", expense.amount / rate.rate)
+        } else {
+            amountText = String(format: "%.0f", expense.amount)
+        }
         date = expense.date
         if let vc = expense.variableCategory { selectedVariableCategory = vc }
         if let fc = expense.fixedCategory { selectedFixedCategory = fc }
