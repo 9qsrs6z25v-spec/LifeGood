@@ -6,10 +6,12 @@ struct LifeRealEstateView: View {
     @State private var showAdd = false
     @State private var viewingItem: RealEstate?
     @State private var selectedCity: String?
-    @State private var cameraPosition: MapCameraPosition = .region(MKCoordinateRegion(
+    @State private var cameraPosition: MapCameraPosition = .region(Self.taiwanRegion)
+
+    private static let taiwanRegion = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 23.75, longitude: 121.0),
         span: MKCoordinateSpan(latitudeDelta: 4.5, longitudeDelta: 5.5)
-    ))
+    )
 
     // MARK: - 台灣縣市座標（縣市政府中心點）
     static let cityCoords: [String: CLLocationCoordinate2D] = [
@@ -138,6 +140,7 @@ struct LifeRealEstateView: View {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     selectedCity = nil
                 }
+                resetCamera()
             }
 
             // 底部浮動列表
@@ -192,17 +195,25 @@ struct LifeRealEstateView: View {
     }
 
     private func togglePin(_ city: String) {
+        let isDeselecting = selectedCity == city
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            selectedCity = (selectedCity == city ? nil : city)
+            selectedCity = isDeselecting ? nil : city
         }
-        // 將地圖中心移至選取縣市
-        if selectedCity == city, let coord = Self.cityCoords[city] {
+        if isDeselecting {
+            resetCamera()
+        } else if let coord = Self.cityCoords[city] {
             withAnimation(.easeInOut(duration: 0.6)) {
                 cameraPosition = .region(MKCoordinateRegion(
                     center: coord,
                     span: MKCoordinateSpan(latitudeDelta: 1.2, longitudeDelta: 1.2)
                 ))
             }
+        }
+    }
+
+    private func resetCamera() {
+        withAnimation(.easeInOut(duration: 0.6)) {
+            cameraPosition = .region(Self.taiwanRegion)
         }
     }
 
@@ -220,6 +231,7 @@ struct LifeRealEstateView: View {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         selectedCity = nil
                     }
+                    resetCamera()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3).foregroundStyle(.secondary)
