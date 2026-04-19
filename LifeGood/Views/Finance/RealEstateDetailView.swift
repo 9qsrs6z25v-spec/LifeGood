@@ -9,6 +9,12 @@ struct RealEstateDetailView: View {
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
 
+    enum DetailTab: String, CaseIterable {
+        case finance = "理財"
+        case house = "房屋資料"
+    }
+    @State private var detailTab: DetailTab = .finance
+
     private var estate: RealEstate {
         store.realEstates.first(where: { $0.id == estateId }) ?? placeholder
     }
@@ -26,7 +32,12 @@ struct RealEstateDetailView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     flashCard
-                    infoSection
+                    tabPicker
+                    if detailTab == .finance {
+                        infoSection
+                    } else {
+                        houseInfoSection
+                    }
                     actionSection
                 }
                 .padding(.vertical)
@@ -234,6 +245,156 @@ struct RealEstateDetailView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
+    }
+
+    // MARK: - 分頁選擇器
+
+    private var tabPicker: some View {
+        Picker("", selection: $detailTab) {
+            ForEach(DetailTab.allCases, id: \.self) { tab in
+                Text(tab.rawValue).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal)
+    }
+
+    // MARK: - 房屋資料（人生）
+
+    private var houseInfoSection: some View {
+        VStack(spacing: 0) {
+            let hasProperty = estate.pingCount > 0 || !estate.landOwner.isEmpty
+                || !estate.landSituation.isEmpty || !estate.landNumber.isEmpty
+                || estate.landArea > 0 || estate.totalFloors > 0
+                || estate.fromFloor > 0 || estate.toFloor > 0
+
+            if hasProperty {
+                sectionHeader("房屋資料")
+                if estate.pingCount > 0 { infoRow("坪數", String(format: "%g 坪", estate.pingCount)) }
+                if !estate.landOwner.isEmpty { infoRow("所有權人", estate.landOwner) }
+                if !estate.landSituation.isEmpty { infoRow("座落", estate.landSituation) }
+                if !estate.landNumber.isEmpty { infoRow("地號", estate.landNumber) }
+                if estate.landArea > 0 { infoRow("面積", String(format: "%g ㎡", estate.landArea)) }
+                if estate.totalFloors > 0 { infoRow("總樓層", "\(estate.totalFloors) 層") }
+                if estate.fromFloor > 0 || estate.toFloor > 0 {
+                    infoRow("樓層範圍", "\(estate.fromFloor) ~ \(estate.toFloor) 樓")
+                }
+            }
+
+            let hasUtilities = !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty
+                || !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty
+                || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty
+
+            if hasUtilities {
+                sectionHeader("水電瓦斯")
+                if !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty {
+                    utilityRow(icon: "drop.fill", color: .blue,
+                               number: estate.waterMeterNumber, owner: estate.waterMeterOwner,
+                               numberLabel: "水號")
+                }
+                if !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty {
+                    utilityRow(icon: "bolt.fill", color: .yellow,
+                               number: estate.electricityMeterNumber, owner: estate.electricityMeterOwner,
+                               numberLabel: "電號")
+                }
+                if !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty {
+                    utilityRow(icon: "flame.fill", color: .orange,
+                               number: estate.gasMeterNumber, owner: estate.gasMeterOwner,
+                               numberLabel: "瓦斯表號")
+                }
+            }
+
+            if !estate.insuranceItems.isEmpty {
+                sectionHeader("保險項目")
+                ForEach(estate.insuranceItems) { ins in
+                    HStack {
+                        Image(systemName: "shield.fill").foregroundStyle(.indigo)
+                        Text(ins.policyNumber.isEmpty ? "未填險號" : ins.policyNumber)
+                            .font(.subheadline)
+                            .foregroundStyle(ins.policyNumber.isEmpty ? .tertiary : .primary)
+                        Spacer()
+                        if ins.amount > 0 {
+                            Text(fmt(ins.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
+                        }
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
+                }
+            }
+
+            if !estate.propertyAssets.isEmpty {
+                sectionHeader("房屋附屬資產")
+                ForEach(estate.propertyAssets) { asset in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(asset.category.rawValue)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.1))
+                                .foregroundStyle(.orange)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            Text(asset.name.isEmpty ? "—" : asset.name)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if asset.amount > 0 {
+                                Text(fmt(asset.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
+                            }
+                        }
+                        HStack(spacing: 10) {
+                            if !asset.brand.isEmpty {
+                                Text("廠牌 \(asset.brand)")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            if !asset.floorLocation.isEmpty {
+                                Text("位置 \(asset.floorLocation)")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
+                }
+            }
+
+            if !hasProperty && !hasUtilities && estate.insuranceItems.isEmpty && estate.propertyAssets.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 36)).foregroundStyle(.tertiary)
+                    Text("尚未填寫房屋資料").font(.subheadline).foregroundStyle(.secondary)
+                    Text("點擊下方編輯按鈕填寫").font(.caption).foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 32)
+            }
+        }
+        .padding(.bottom, 8)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.subheadline.weight(.medium))
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+    }
+
+    private func utilityRow(icon: String, color: Color, number: String, owner: String, numberLabel: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).foregroundStyle(color).frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(numberLabel).font(.caption2).foregroundStyle(.secondary)
+                    Text(number.isEmpty ? "—" : number).font(.subheadline.weight(.medium))
+                }
+                if !owner.isEmpty {
+                    Text("所有權人：\(owner)").font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal).padding(.vertical, 8)
     }
 
     // MARK: - 操作按鈕

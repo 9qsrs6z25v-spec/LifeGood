@@ -9,7 +9,7 @@ struct AddRealEstateView: View {
 
     enum EditTab: String, CaseIterable {
         case finance = "理財"
-        case life = "人生"
+        case house = "房屋資料"
     }
     @State private var editTab: EditTab = .finance
 
