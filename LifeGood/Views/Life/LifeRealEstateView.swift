@@ -133,9 +133,9 @@ struct LifeRealEstateView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.name).font(.subheadline.weight(.semibold))
 
-                if !item.address.isEmpty {
-                    Label(item.address, systemImage: "mappin.circle.fill")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if !item.fullAddress.isEmpty {
+                    Label(item.fullAddress, systemImage: "mappin.circle.fill")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
 
                 HStack(spacing: 12) {

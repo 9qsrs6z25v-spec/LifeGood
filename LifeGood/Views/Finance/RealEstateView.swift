@@ -118,8 +118,8 @@ struct RealEstateView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.name).font(.subheadline.weight(.semibold))
-                    if !item.address.isEmpty {
-                        Text(item.address).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    if !item.fullAddress.isEmpty {
+                        Text(item.fullAddress).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 Spacer()

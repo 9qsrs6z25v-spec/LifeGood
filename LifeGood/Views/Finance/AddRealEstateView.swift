@@ -8,8 +8,18 @@ struct AddRealEstateView: View {
     var editing: RealEstate?
 
     @State private var name = ""
+    @State private var city = ""
     @State private var address = ""
     @State private var purchaseDate = Date()
+
+    // 台灣縣市（6 直轄市 + 3 省轄市 + 13 縣）
+    static let taiwanCities: [String] = [
+        "臺北市", "新北市", "桃園市", "臺中市", "臺南市", "高雄市",
+        "基隆市", "新竹市", "嘉義市",
+        "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣",
+        "屏東縣", "宜蘭縣", "花蓮縣", "臺東縣",
+        "澎湖縣", "金門縣", "連江縣"
+    ]
     @State private var isSold = false
     @State private var soldDate = Date()
     @State private var purchasePriceText = ""
@@ -107,7 +117,17 @@ struct AddRealEstateView: View {
     private var infoSection: some View {
         Section("物件資訊") {
             TextField("物件名稱", text: $name)
-            TextField("地址", text: $address)
+
+            Picker("縣市", selection: $city) {
+                Text("請選擇").tag("")
+                ForEach(Self.taiwanCities, id: \.self) { c in
+                    Text(c).tag(c)
+                }
+            }
+
+            TextField("地址（可多行）", text: $address, axis: .vertical)
+                .lineLimit(2...5)
+
             DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
 
             Toggle("已售出", isOn: $isSold)
@@ -435,7 +455,8 @@ struct AddRealEstateView: View {
 
         let re = RealEstate(
             id: reId, name: trimmedName,
-            address: address.trimmingCharacters(in: .whitespaces),
+            city: city,
+            address: address.trimmingCharacters(in: .whitespacesAndNewlines),
             purchaseDate: purchaseDate,
             soldDate: isSold ? soldDate : nil,
             purchasePrice: price, currentValue: currentVal,
@@ -496,7 +517,7 @@ struct AddRealEstateView: View {
 
     private func loadEditing() {
         guard let e = editing else { return }
-        name = e.name; address = e.address
+        name = e.name; city = e.city; address = e.address
         purchaseDate = e.purchaseDate
         if let sd = e.soldDate {
             isSold = true; soldDate = sd

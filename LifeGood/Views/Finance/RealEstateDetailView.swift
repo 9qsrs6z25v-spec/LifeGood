@@ -67,12 +67,12 @@ struct RealEstateDetailView: View {
                     .foregroundStyle(rarity == .legendary ? .white : .primary)
                     .multilineTextAlignment(.center)
 
-                if !estate.address.isEmpty {
-                    Text(estate.address)
+                if !estate.fullAddress.isEmpty {
+                    Text(estate.fullAddress)
                         .font(.subheadline)
                         .foregroundStyle(rarity == .legendary ? .white.opacity(0.7) : .secondary)
                         .multilineTextAlignment(.center)
-                        .lineLimit(2)
+                        .lineLimit(3)
                 }
             }
             .padding(.top, 16)

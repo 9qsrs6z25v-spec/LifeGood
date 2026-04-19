@@ -333,6 +333,7 @@ struct RealEstateVariableExpense: Identifiable, Codable {
 struct RealEstate: Identifiable, Codable {
     let id: UUID
     var name: String
+    var city: String                              // 台灣縣市
     var address: String
     var purchaseDate: Date
     var soldDate: Date?                            // 售出日期（nil 表示仍持有）
@@ -348,6 +349,7 @@ struct RealEstate: Identifiable, Codable {
     init(
         id: UUID = UUID(),
         name: String,
+        city: String = "",
         address: String = "",
         purchaseDate: Date = Date(),
         soldDate: Date? = nil,
@@ -362,6 +364,7 @@ struct RealEstate: Identifiable, Codable {
     ) {
         self.id = id
         self.name = name
+        self.city = city
         self.address = address
         self.purchaseDate = purchaseDate
         self.soldDate = soldDate
@@ -380,6 +383,7 @@ struct RealEstate: Identifiable, Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
+        city = (try? c.decode(String.self, forKey: .city)) ?? ""
         address = (try? c.decode(String.self, forKey: .address)) ?? ""
         purchaseDate = (try? c.decode(Date.self, forKey: .purchaseDate)) ?? Date()
         soldDate = try? c.decode(Date.self, forKey: .soldDate)
@@ -400,7 +404,7 @@ struct RealEstate: Identifiable, Codable {
         }
     }
     private enum CodingKeys: String, CodingKey {
-        case id, name, address, purchaseDate, soldDate, purchasePrice, currentValue, monthlyRental
+        case id, name, city, address, purchaseDate, soldDate, purchasePrice, currentValue, monthlyRental
         case mortgageItems, paidItems, variableExpenses, linkedExpenseId, note
         case monthlyMortgage // 舊版欄位，僅用於解碼
     }
@@ -409,6 +413,7 @@ struct RealEstate: Identifiable, Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
+        try c.encode(city, forKey: .city)
         try c.encode(address, forKey: .address)
         try c.encode(purchaseDate, forKey: .purchaseDate)
         try c.encodeIfPresent(soldDate, forKey: .soldDate)
@@ -420,6 +425,12 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(variableExpenses, forKey: .variableExpenses)
         try c.encodeIfPresent(linkedExpenseId, forKey: .linkedExpenseId)
         try c.encode(note, forKey: .note)
+    }
+
+    /// 顯示用的完整地點（縣市 + 地址）
+    var fullAddress: String {
+        let parts = [city, address].filter { !$0.isEmpty }
+        return parts.joined(separator: " ")
     }
 
     /// 是否已售出

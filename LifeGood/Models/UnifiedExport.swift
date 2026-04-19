@@ -165,11 +165,12 @@ enum UnifiedExporter {
 
         // 理財 - 房地產
         csv += "## 房地產 (Real Estates)\n"
-        csv += "id,name,address,purchaseDate,purchasePrice,currentValue,monthlyRental,soldDate,note\n"
+        csv += "id,name,city,address,purchaseDate,purchasePrice,currentValue,monthlyRental,soldDate,note\n"
         for r in finance.realEstates {
             let fields: [String] = [
                 r.id.uuidString,
                 esc(r.name),
+                esc(r.city),
                 esc(r.address),
                 iso.string(from: r.purchaseDate),
                 String(format: "%.2f", r.purchasePrice),
