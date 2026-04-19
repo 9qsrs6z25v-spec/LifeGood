@@ -1,15 +1,64 @@
 import SwiftUI
+import MapKit
 
 struct LifeRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @State private var showAdd = false
     @State private var viewingItem: RealEstate?
+    @State private var selectedCity: String?
+    @State private var cameraPosition: MapCameraPosition = .region(MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 23.75, longitude: 121.0),
+        span: MKCoordinateSpan(latitudeDelta: 4.5, longitudeDelta: 5.5)
+    ))
+
+    // MARK: - 台灣縣市座標（縣市政府中心點）
+    static let cityCoords: [String: CLLocationCoordinate2D] = [
+        "臺北市": .init(latitude: 25.0330, longitude: 121.5654),
+        "新北市": .init(latitude: 25.0120, longitude: 121.4657),
+        "桃園市": .init(latitude: 24.9936, longitude: 121.3010),
+        "臺中市": .init(latitude: 24.1477, longitude: 120.6736),
+        "臺南市": .init(latitude: 22.9997, longitude: 120.2270),
+        "高雄市": .init(latitude: 22.6273, longitude: 120.3014),
+        "基隆市": .init(latitude: 25.1276, longitude: 121.7392),
+        "新竹市": .init(latitude: 24.8138, longitude: 120.9675),
+        "嘉義市": .init(latitude: 23.4801, longitude: 120.4491),
+        "新竹縣": .init(latitude: 24.8387, longitude: 121.0177),
+        "苗栗縣": .init(latitude: 24.5602, longitude: 120.8214),
+        "彰化縣": .init(latitude: 24.0518, longitude: 120.5161),
+        "南投縣": .init(latitude: 23.9157, longitude: 120.6869),
+        "雲林縣": .init(latitude: 23.7092, longitude: 120.4313),
+        "嘉義縣": .init(latitude: 23.4518, longitude: 120.2555),
+        "屏東縣": .init(latitude: 22.5519, longitude: 120.5487),
+        "宜蘭縣": .init(latitude: 24.7021, longitude: 121.7378),
+        "花蓮縣": .init(latitude: 23.9872, longitude: 121.6015),
+        "臺東縣": .init(latitude: 22.7583, longitude: 121.1444),
+        "澎湖縣": .init(latitude: 23.5712, longitude: 119.5793),
+        "金門縣": .init(latitude: 24.4370, longitude: 118.3172),
+        "連江縣": .init(latitude: 26.1605, longitude: 119.9515)
+    ]
 
     private var ownedCount: Int {
         financeStore.realEstates.filter { $0.soldDate == nil }.count
     }
     private var soldCount: Int {
         financeStore.realEstates.filter { $0.soldDate != nil }.count
+    }
+
+    /// 依縣市分組（僅包含有設定縣市的物件）
+    private var propertiesByCity: [(city: String, items: [RealEstate])] {
+        Dictionary(grouping: financeStore.realEstates.filter { !$0.city.isEmpty }, by: \.city)
+            .map { (city: $0.key, items: $0.value) }
+    }
+
+    /// 當前選取縣市的物件
+    private var selectedCityItems: [RealEstate] {
+        guard let city = selectedCity else { return [] }
+        return financeStore.realEstates.filter { $0.city == city }
+    }
+
+    /// 無設定縣市的物件
+    private var unclassifiedItems: [RealEstate] {
+        financeStore.realEstates.filter { $0.city.isEmpty }
     }
 
     var body: some View {
@@ -20,32 +69,7 @@ struct LifeRealEstateView: View {
                 if financeStore.realEstates.isEmpty {
                     emptyState
                 } else {
-                    List {
-                        if ownedCount > 0 {
-                            Section {
-                                ForEach(financeStore.realEstates.filter { $0.soldDate == nil }) { item in
-                                    estateRow(item)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture { viewingItem = item }
-                                }
-                            } header: {
-                                sectionHeader("持有中", icon: "building.2.fill", count: ownedCount, color: .green)
-                            }
-                        }
-
-                        if soldCount > 0 {
-                            Section {
-                                ForEach(financeStore.realEstates.filter { $0.soldDate != nil }) { item in
-                                    estateRow(item)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture { viewingItem = item }
-                                }
-                            } header: {
-                                sectionHeader("已售出", icon: "checkmark.seal.fill", count: soldCount, color: .red)
-                            }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
+                    mapView
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -62,7 +86,7 @@ struct LifeRealEstateView: View {
         }
     }
 
-    // MARK: - 摘要（里程碑視角）
+    // MARK: - 摘要
 
     private var summaryHeader: some View {
         HStack(spacing: 0) {
@@ -78,12 +102,9 @@ struct LifeRealEstateView: View {
 
     private func statBlock(icon: String, label: String, value: String, color: Color) -> some View {
         VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.title3).foregroundStyle(color)
-            Text(value)
-                .font(.title2.bold())
-            Text(label)
-                .font(.caption).foregroundStyle(.secondary)
+            Image(systemName: icon).font(.title3).foregroundStyle(color)
+            Text(value).font(.title2.bold())
+            Text(label).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -98,30 +119,138 @@ struct LifeRealEstateView: View {
         }.frame(maxWidth: .infinity)
     }
 
-    // MARK: - Section Header
+    // MARK: - 地圖
 
-    private func sectionHeader(_ title: String, icon: String, count: Int, color: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(color)
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-            Text("\(count)")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(color, in: Capsule())
-            Spacer()
+    private var mapView: some View {
+        ZStack(alignment: .bottom) {
+            Map(position: $cameraPosition) {
+                ForEach(propertiesByCity, id: \.city) { entry in
+                    if let coord = Self.cityCoords[entry.city] {
+                        Annotation(entry.city, coordinate: coord, anchor: .bottom) {
+                            pinView(city: entry.city, count: entry.items.count)
+                                .onTapGesture { togglePin(entry.city) }
+                        }
+                    }
+                }
+            }
+            .mapStyle(.standard(pointsOfInterest: .excludingAll))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    selectedCity = nil
+                }
+            }
+
+            // 底部浮動列表
+            if let city = selectedCity {
+                cityPanel(city: city, items: selectedCityItems)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, unclassifiedItems.isEmpty ? 12 : 64)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .move(edge: .bottom).combined(with: .opacity)
+                    ))
+            }
+
+            // 未分類縣市的物件（底部 chip）
+            if !unclassifiedItems.isEmpty {
+                unclassifiedChip
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            }
         }
-        .textCase(nil)
-        .padding(.vertical, 2)
     }
 
-    // MARK: - 項目列（著重地點與日期）
+    // MARK: - 大頭針
 
-    private func estateRow(_ item: RealEstate) -> some View {
+    private func pinView(city: String, count: Int) -> some View {
+        let isSelected = selectedCity == city
+        return VStack(spacing: 0) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(colors: [.purple, .pink],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .frame(width: isSelected ? 44 : 36, height: isSelected ? 44 : 36)
+                    .shadow(color: .purple.opacity(0.4), radius: isSelected ? 8 : 4, y: 2)
+                    .overlay(Circle().stroke(.white, lineWidth: 2))
+
+                VStack(spacing: -2) {
+                    Image(systemName: "building.2.fill")
+                        .font(.caption2).foregroundStyle(.white)
+                    Text("\(count)")
+                        .font(.caption2.bold()).foregroundStyle(.white)
+                }
+            }
+            Image(systemName: "arrowtriangle.down.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.purple)
+                .offset(y: -4)
+        }
+        .scaleEffect(isSelected ? 1.1 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+    }
+
+    private func togglePin(_ city: String) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            selectedCity = (selectedCity == city ? nil : city)
+        }
+        // 將地圖中心移至選取縣市
+        if selectedCity == city, let coord = Self.cityCoords[city] {
+            withAnimation(.easeInOut(duration: 0.6)) {
+                cameraPosition = .region(MKCoordinateRegion(
+                    center: coord,
+                    span: MKCoordinateSpan(latitudeDelta: 1.2, longitudeDelta: 1.2)
+                ))
+            }
+        }
+    }
+
+    // MARK: - 縣市物件面板
+
+    private func cityPanel(city: String, items: [RealEstate]) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "mappin.circle.fill")
+                    .font(.title3).foregroundStyle(.purple)
+                Text(city).font(.headline)
+                Text("\(items.count) 筆").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        selectedCity = nil
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground))
+
+            Divider()
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                        Button {
+                            viewingItem = item
+                        } label: {
+                            itemRow(item)
+                        }
+                        .buttonStyle(.plain)
+                        if idx < items.count - 1 { Divider().padding(.leading, 56) }
+                    }
+                }
+            }
+            .frame(maxHeight: 260)
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+    }
+
+    private func itemRow(_ item: RealEstate) -> some View {
         HStack(spacing: 12) {
             Image(systemName: item.soldDate != nil ? "building.2" : "building.2.fill")
                 .font(.title3)
@@ -130,21 +259,19 @@ struct LifeRealEstateView: View {
                 .background((item.soldDate != nil ? Color.red : Color.purple).opacity(0.1))
                 .clipShape(Circle())
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(item.name).font(.subheadline.weight(.semibold))
-
-                if !item.fullAddress.isEmpty {
-                    Label(item.fullAddress, systemImage: "mappin.circle.fill")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    .foregroundStyle(.primary)
+                if !item.address.isEmpty {
+                    Text(item.address)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     Label(formatDate(item.purchaseDate), systemImage: "calendar")
-                        .font(.caption).foregroundStyle(.green)
-
+                        .font(.caption2).foregroundStyle(.green)
                     if let sd = item.soldDate {
                         Label(formatDate(sd), systemImage: "checkmark.seal")
-                            .font(.caption).foregroundStyle(.red)
+                            .font(.caption2).foregroundStyle(.red)
                     }
                 }
             }
@@ -154,10 +281,32 @@ struct LifeRealEstateView: View {
             Image(systemName: "chevron.right")
                 .font(.caption).foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .contentShape(Rectangle())
     }
 
-    // MARK: - 格式化
+    // MARK: - 未分類縣市 chip
+
+    private var unclassifiedChip: some View {
+        Menu {
+            ForEach(unclassifiedItems) { item in
+                Button {
+                    viewingItem = item
+                } label: {
+                    Label(item.name, systemImage: "building.2")
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle.fill")
+                Text("未設定縣市 \(unclassifiedItems.count) 筆").font(.caption.bold())
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+            .foregroundStyle(.orange)
+            .shadow(color: .black.opacity(0.1), radius: 3, y: 2)
+        }
+    }
 
     private func formatDate(_ d: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
