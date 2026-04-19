@@ -429,7 +429,7 @@ struct AddExpenseView: View {
         } header: {
             Text("房地產（連動理財模式）")
         } footer: {
-            Text("儲存後將自動在理財模式的房地產變動支出中新增對應紀錄。")
+            Text("房屋價金將同步至已支出房屋金額章節，其餘類別同步至變動支出章節。")
         }
     }
 
@@ -829,28 +829,56 @@ struct AddExpenseView: View {
         return stockId
     }
 
-    /// 同步房地產變動支出
+    /// 同步房地產支出（房屋價金→已支出章節，其餘→變動支出章節）
     private func syncRealEstateVariableExpense(realEstateId: UUID, expenseId: UUID, amount: Double) {
         guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
 
-        let newEntry = RealEstateVariableExpense(
-            id: UUID(),
-            category: selectedRealEstateExpenseCategory,
-            amount: amount,
-            date: date,
-            linkedExpenseId: expenseId
-        )
+        if selectedRealEstateExpenseCategory == .housePayment {
+            // 房屋價金 → paidItems（已支出房屋金額）
+            let newPaid = RealEstatePaidItem(
+                id: UUID(),
+                title: title.trimmingCharacters(in: .whitespaces),
+                amount: amount,
+                date: date,
+                linkedExpenseId: expenseId
+            )
+            // 編輯時先從 variableExpenses 移除（修正舊資料歸錯章節）
+            re.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
 
-        if let idx = re.variableExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
-            re.variableExpenses[idx] = RealEstateVariableExpense(
-                id: re.variableExpenses[idx].id,
+            if let idx = re.paidItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+                re.paidItems[idx] = RealEstatePaidItem(
+                    id: re.paidItems[idx].id,
+                    title: title.trimmingCharacters(in: .whitespaces),
+                    amount: amount,
+                    date: date,
+                    linkedExpenseId: expenseId
+                )
+            } else {
+                re.paidItems.append(newPaid)
+            }
+        } else {
+            // 其餘類別 → variableExpenses（變動支出）
+            let newEntry = RealEstateVariableExpense(
+                id: UUID(),
                 category: selectedRealEstateExpenseCategory,
                 amount: amount,
                 date: date,
                 linkedExpenseId: expenseId
             )
-        } else {
-            re.variableExpenses.append(newEntry)
+            // 編輯時先從 paidItems 移除（修正類別切換時的歸屬）
+            re.paidItems.removeAll { $0.linkedExpenseId == expenseId }
+
+            if let idx = re.variableExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+                re.variableExpenses[idx] = RealEstateVariableExpense(
+                    id: re.variableExpenses[idx].id,
+                    category: selectedRealEstateExpenseCategory,
+                    amount: amount,
+                    date: date,
+                    linkedExpenseId: expenseId
+                )
+            } else {
+                re.variableExpenses.append(newEntry)
+            }
         }
 
         financeStore.update(re)
