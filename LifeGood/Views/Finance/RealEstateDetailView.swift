@@ -282,26 +282,7 @@ struct RealEstateDetailView: View {
             }
 
             if !estate.floors.isEmpty {
-                sectionHeader("樓層資訊（\(estate.floors.count) 層）")
-                ForEach(estate.floors) { floor in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(floor.floorNumber.isEmpty ? "未編號" : floor.floorNumber)
-                            .font(.subheadline.weight(.semibold))
-                        if !floor.functions.isEmpty {
-                            HStack(spacing: 6) {
-                                ForEach(floor.functions, id: \.self) { fn in
-                                    Text(fn.rawValue)
-                                        .font(.caption2)
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Color.green.opacity(0.12))
-                                        .foregroundStyle(.green)
-                                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal).padding(.vertical, 8)
-                }
+                buildingVisualization
             }
 
             let hasUtilities = !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty
@@ -392,6 +373,238 @@ struct RealEstateDetailView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
+    }
+
+    // MARK: - 建物立體圖
+
+    private static let cyanColor = Color(red: 0, green: 0.85, blue: 1.0)
+
+    private var sortedFloors: [FloorInfo] {
+        estate.floors.sorted { floorOrder($0) < floorOrder($1) }
+    }
+
+    private func floorOrder(_ f: FloorInfo) -> Int {
+        let s = f.floorNumber.uppercased()
+            .replacingOccurrences(of: "F", with: "")
+            .replacingOccurrences(of: "樓", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("B") { return -(Int(s.dropFirst()) ?? 0) }
+        return Int(s) ?? 0
+    }
+
+    private var buildingVisualization: some View {
+        let sorted = sortedFloors
+        let count = sorted.count
+        let floorH: CGFloat = 56
+        let depth: CGFloat = 36
+        let depthY: CGFloat = depth * 0.55
+
+        return VStack(spacing: 0) {
+            sectionHeader("樓層資訊（\(count) 層）")
+
+            ZStack(alignment: .topLeading) {
+                // 建物線框
+                if estate.buildingType == .townhouse {
+                    townhouseWireframe(floorCount: count, floorH: floorH, depth: depth, depthY: depthY)
+                } else {
+                    apartmentWireframe(userFloors: sorted, floorH: floorH, depth: depth, depthY: depthY)
+                }
+
+                // 樓層標籤
+                if estate.buildingType == .townhouse {
+                    VStack(spacing: 0) {
+                        ForEach(sorted.reversed()) { floor in
+                            floorLabel(floor).frame(height: floorH)
+                        }
+                    }
+                    .padding(.leading, 178)
+                    .padding(.top, depthY)
+                } else {
+                    let totalVisible = max(count, 8)
+                    let userStart = (totalVisible - count) / 2
+                    VStack(spacing: 0) {
+                        ForEach(sorted.reversed()) { floor in
+                            floorLabel(floor).frame(height: floorH)
+                        }
+                    }
+                    .padding(.leading, 188)
+                    .padding(.top, depthY + CGFloat(userStart) * floorH)
+                }
+            }
+            .frame(height: CGFloat(estate.buildingType == .townhouse ? count : max(count, 8)) * floorH + depthY + 8)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(red: 0.03, green: 0.05, blue: 0.12))
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func townhouseWireframe(floorCount: Int, floorH: CGFloat, depth: CGFloat, depthY: CGFloat) -> some View {
+        let bWidth: CGFloat = 140
+        let bX: CGFloat = 16
+        let bH = CGFloat(floorCount) * floorH
+
+        return Canvas { context, size in
+            let cyan = Self.cyanColor
+
+            // Front face fill
+            let frontRect = CGRect(x: bX, y: depthY, width: bWidth, height: bH)
+            context.fill(Path(frontRect), with: .color(cyan.opacity(0.04)))
+
+            // Right side fill
+            var sideFill = Path()
+            sideFill.move(to: CGPoint(x: bX + bWidth, y: depthY))
+            sideFill.addLine(to: CGPoint(x: bX + bWidth + depth, y: 0))
+            sideFill.addLine(to: CGPoint(x: bX + bWidth + depth, y: bH))
+            sideFill.addLine(to: CGPoint(x: bX + bWidth, y: depthY + bH))
+            sideFill.closeSubpath()
+            context.fill(sideFill, with: .color(cyan.opacity(0.025)))
+
+            // Top face fill
+            var topFill = Path()
+            topFill.move(to: CGPoint(x: bX, y: depthY))
+            topFill.addLine(to: CGPoint(x: bX + depth, y: 0))
+            topFill.addLine(to: CGPoint(x: bX + bWidth + depth, y: 0))
+            topFill.addLine(to: CGPoint(x: bX + bWidth, y: depthY))
+            topFill.closeSubpath()
+            context.fill(topFill, with: .color(cyan.opacity(0.03)))
+
+            // Wireframe outline
+            var wire = Path()
+            wire.addRect(frontRect)
+            wire.addPath(sideFill)
+            wire.addPath(topFill)
+            context.stroke(wire, with: .color(cyan.opacity(0.5)), style: StrokeStyle(lineWidth: 1.2))
+
+            // Floor separator lines
+            for i in 1..<floorCount {
+                let y = depthY + CGFloat(i) * floorH
+                var line = Path()
+                line.move(to: CGPoint(x: bX, y: y))
+                line.addLine(to: CGPoint(x: bX + bWidth, y: y))
+                line.move(to: CGPoint(x: bX + bWidth, y: y))
+                line.addLine(to: CGPoint(x: bX + bWidth + depth, y: y - depthY))
+                context.stroke(line, with: .color(cyan.opacity(0.25)), style: StrokeStyle(lineWidth: 0.8))
+            }
+
+            // Glow scan line
+            let scanY = depthY + bH * 0.5
+            var scanLine = Path()
+            scanLine.move(to: CGPoint(x: bX, y: scanY))
+            scanLine.addLine(to: CGPoint(x: bX + bWidth, y: scanY))
+            context.stroke(scanLine, with: .color(cyan.opacity(0.15)), style: StrokeStyle(lineWidth: 3))
+
+            // Connector lines to labels
+            for i in 0..<floorCount {
+                let y = depthY + CGFloat(i) * floorH + floorH / 2
+                var conn = Path()
+                conn.move(to: CGPoint(x: bX + bWidth + depth + 2, y: y))
+                conn.addLine(to: CGPoint(x: bX + bWidth + depth + 18, y: y))
+                context.stroke(conn, with: .color(cyan.opacity(0.3)), style: StrokeStyle(lineWidth: 0.8, dash: [3, 2]))
+            }
+        }
+        .frame(width: 200)
+        .shadow(color: Self.cyanColor.opacity(0.15), radius: 12, y: 0)
+    }
+
+    private func apartmentWireframe(userFloors: [FloorInfo], floorH: CGFloat, depth: CGFloat, depthY: CGFloat) -> some View {
+        let bWidth: CGFloat = 140
+        let bX: CGFloat = 16
+        let totalVisible = max(userFloors.count, 8)
+        let bH = CGFloat(totalVisible) * floorH
+        let userStart = (totalVisible - userFloors.count) / 2
+
+        return Canvas { context, size in
+            let cyan = Self.cyanColor
+
+            // Building outline
+            let frontRect = CGRect(x: bX, y: depthY, width: bWidth, height: bH)
+            context.fill(Path(frontRect), with: .color(cyan.opacity(0.02)))
+
+            var wire = Path()
+            wire.addRect(frontRect)
+
+            var side = Path()
+            side.move(to: CGPoint(x: bX + bWidth, y: depthY))
+            side.addLine(to: CGPoint(x: bX + bWidth + depth, y: 0))
+            side.addLine(to: CGPoint(x: bX + bWidth + depth, y: bH))
+            side.addLine(to: CGPoint(x: bX + bWidth, y: depthY + bH))
+            side.closeSubpath()
+            wire.addPath(side)
+
+            var top = Path()
+            top.move(to: CGPoint(x: bX, y: depthY))
+            top.addLine(to: CGPoint(x: bX + depth, y: 0))
+            top.addLine(to: CGPoint(x: bX + bWidth + depth, y: 0))
+            top.addLine(to: CGPoint(x: bX + bWidth, y: depthY))
+            top.closeSubpath()
+            wire.addPath(top)
+
+            context.stroke(wire, with: .color(cyan.opacity(0.35)), style: StrokeStyle(lineWidth: 1))
+
+            // All floor lines (dimmed)
+            for i in 1..<totalVisible {
+                let y = depthY + CGFloat(i) * floorH
+                var line = Path()
+                line.move(to: CGPoint(x: bX, y: y))
+                line.addLine(to: CGPoint(x: bX + bWidth, y: y))
+                line.move(to: CGPoint(x: bX + bWidth, y: y))
+                line.addLine(to: CGPoint(x: bX + bWidth + depth, y: y - depthY))
+                context.stroke(line, with: .color(cyan.opacity(0.12)), style: StrokeStyle(lineWidth: 0.5))
+            }
+
+            // Highlight user's floors
+            for i in 0..<userFloors.count {
+                let row = userStart + i
+                let y = depthY + CGFloat(row) * floorH
+                let highlight = CGRect(x: bX + 1, y: y + 1, width: bWidth - 2, height: floorH - 2)
+                context.fill(Path(highlight), with: .color(cyan.opacity(0.1)))
+                context.stroke(Path(highlight), with: .color(cyan.opacity(0.6)), style: StrokeStyle(lineWidth: 1.5))
+            }
+
+            // Connector lines to labels
+            for i in 0..<userFloors.count {
+                let row = userStart + i
+                let y = depthY + CGFloat(row) * floorH + floorH / 2
+                var conn = Path()
+                conn.move(to: CGPoint(x: bX + bWidth + depth + 2, y: y))
+                conn.addLine(to: CGPoint(x: bX + bWidth + depth + 18, y: y))
+                context.stroke(conn, with: .color(cyan.opacity(0.3)), style: StrokeStyle(lineWidth: 0.8, dash: [3, 2]))
+            }
+        }
+        .frame(width: 200)
+        .shadow(color: Self.cyanColor.opacity(0.1), radius: 10, y: 0)
+    }
+
+    private func floorLabel(_ floor: FloorInfo) -> some View {
+        let cyan = Self.cyanColor
+        let fnText = floor.functions.map(\.rawValue).joined(separator: "與")
+
+        return HStack(spacing: 6) {
+            Text(floor.floorNumber.isEmpty ? "—" : floor.floorNumber)
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundStyle(cyan)
+
+            if !fnText.isEmpty {
+                Text(fnText)
+                    .font(.caption2)
+                    .foregroundStyle(cyan.opacity(0.8))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(cyan.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(cyan.opacity(0.2), lineWidth: 0.8)
+                )
+        )
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {

@@ -36,6 +36,7 @@ struct AddRealEstateView: View {
     @State private var showError = false
 
     // MARK: - 人生模式欄位
+    @State private var buildingType: BuildingType = .townhouse
     @State private var pingCountText = ""
     @State private var landOwner = ""
     @State private var ownerPickerSelection = ""
@@ -458,6 +459,12 @@ struct AddRealEstateView: View {
 
     private var propertyDetailSection: some View {
         Section("房屋資料") {
+            Picker("建物類型", selection: $buildingType) {
+                ForEach(BuildingType.allCases) { type in
+                    Text(type.rawValue).tag(type)
+                }
+            }
+
             HStack {
                 TextField("坪數", text: $pingCountText).keyboardType(.decimalPad)
                 Text("坪").foregroundStyle(.secondary)
@@ -826,6 +833,7 @@ struct AddRealEstateView: View {
             paidItems: syncedPaids,
             variableExpenses: syncedVariable,
             note: trimmedNote,
+            buildingType: buildingType,
             pingCount: Double(pingCountText) ?? 0,
             landOwner: landOwner.trimmingCharacters(in: .whitespaces),
             landSituation: landSituation.trimmingCharacters(in: .whitespaces),
@@ -963,6 +971,7 @@ struct AddRealEstateView: View {
         }
 
         // 人生模式欄位
+        buildingType = e.buildingType
         pingCountText = e.pingCount > 0 ? String(format: "%g", e.pingCount) : ""
         landOwner = e.landOwner
         if ownerCandidates.contains(e.landOwner) {

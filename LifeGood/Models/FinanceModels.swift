@@ -330,6 +330,14 @@ struct RealEstateVariableExpense: Identifiable, Codable {
     }
 }
 
+// MARK: - 建物類型
+
+enum BuildingType: String, Codable, CaseIterable, Identifiable {
+    case townhouse = "透天"
+    case apartment = "大樓"
+    var id: String { rawValue }
+}
+
 // MARK: - 樓層功能
 
 enum FloorFunction: String, Codable, CaseIterable, Identifiable {
@@ -427,6 +435,7 @@ struct RealEstate: Identifiable, Codable {
     var note: String
 
     // MARK: 人生模式欄位
+    var buildingType: BuildingType     // 透天/大樓
     var pingCount: Double              // 坪數
     var landOwner: String              // 所有權人
     var landSituation: String          // 座落
@@ -460,6 +469,7 @@ struct RealEstate: Identifiable, Codable {
         variableExpenses: [RealEstateVariableExpense] = [],
         linkedExpenseId: UUID? = nil,
         note: String = "",
+        buildingType: BuildingType = .townhouse,
         pingCount: Double = 0,
         landOwner: String = "",
         landSituation: String = "",
@@ -492,6 +502,7 @@ struct RealEstate: Identifiable, Codable {
         self.variableExpenses = variableExpenses
         self.linkedExpenseId = linkedExpenseId
         self.note = note
+        self.buildingType = buildingType
         self.pingCount = pingCount
         self.landOwner = landOwner
         self.landSituation = landSituation
@@ -528,6 +539,7 @@ struct RealEstate: Identifiable, Codable {
         variableExpenses = (try? c.decode([RealEstateVariableExpense].self, forKey: .variableExpenses)) ?? []
         linkedExpenseId = try? c.decode(UUID.self, forKey: .linkedExpenseId)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        buildingType = (try? c.decode(BuildingType.self, forKey: .buildingType)) ?? .townhouse
         pingCount = (try? c.decode(Double.self, forKey: .pingCount)) ?? 0
         landOwner = (try? c.decode(String.self, forKey: .landOwner)) ?? ""
         landSituation = (try? c.decode(String.self, forKey: .landSituation)) ?? ""
@@ -556,7 +568,7 @@ struct RealEstate: Identifiable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, name, city, address, purchaseDate, soldDate, purchasePrice, currentValue, monthlyRental
         case mortgageItems, paidItems, variableExpenses, linkedExpenseId, note
-        case pingCount, landOwner, landSituation, landNumber, landArea
+        case buildingType, pingCount, landOwner, landSituation, landNumber, landArea
         case totalFloors, fromFloor, toFloor, floors
         case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
         case gasMeterNumber, gasMeterOwner, insuranceItems, propertyAssets
@@ -579,6 +591,7 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(variableExpenses, forKey: .variableExpenses)
         try c.encodeIfPresent(linkedExpenseId, forKey: .linkedExpenseId)
         try c.encode(note, forKey: .note)
+        try c.encode(buildingType, forKey: .buildingType)
         try c.encode(pingCount, forKey: .pingCount)
         try c.encode(landOwner, forKey: .landOwner)
         try c.encode(landSituation, forKey: .landSituation)
