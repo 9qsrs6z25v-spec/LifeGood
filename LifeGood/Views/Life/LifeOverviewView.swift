@@ -124,7 +124,7 @@ struct LifeOverviewView: View {
                             HStack {
                                 Image(systemName: entry.0.icon)
                                     .frame(width: 30).foregroundStyle(.orange)
-                                Text(entry.0.rawValue).font(.subheadline)
+                                Text(entry.0.displayName).font(.subheadline)
                                 Spacer()
                                 Text("\(entry.1) 筆").font(.caption).foregroundStyle(.secondary)
                             }

@@ -242,36 +242,46 @@ struct ResumeView: View {
 
     private var realMilestoneIDs: Set<UUID> { Set(store.milestones.map(\.id)) }
 
-    var filtered: [LifeMilestone] {
-        let sorted = store.combinedMilestones(realEstates: financeStore.realEstates)
+    /// 分節顯示順序，配偶置頂
+    private let sectionOrder: [MilestoneCategory] = [
+        .marriage, .family, .realEstate, .career, .education,
+        .achievement, .travel, .pet, .health, .other
+    ]
+
+    /// 全部（含衍生）里程碑，由新到舊排序
+    private var allSorted: [LifeMilestone] {
+        store.combinedMilestones(realEstates: financeStore.realEstates)
             .sorted { $0.date > $1.date }
-        if let cat = selectedCategory { return sorted.filter { $0.category == cat } }
-        return sorted
     }
+
+    /// 只在有選擇篩選時使用，顯示平面列表
+    private var filteredByCategory: [LifeMilestone] {
+        guard let cat = selectedCategory else { return [] }
+        return allSorted.filter { $0.category == cat }
+    }
+
+    /// 依分類分組（保留 sectionOrder 順序，跳過空分類）
+    private var groupedSections: [(category: MilestoneCategory, items: [LifeMilestone])] {
+        let grouped = Dictionary(grouping: allSorted, by: \.category)
+        return sectionOrder.compactMap { cat in
+            guard let items = grouped[cat], !items.isEmpty else { return nil }
+            return (cat, items)
+        }
+    }
+
+    private var isEmptyAll: Bool { allSorted.isEmpty }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 categoryFilter
 
-                if filtered.isEmpty {
+                if isEmptyAll {
                     emptyState
+                } else if let cat = selectedCategory {
+                    filteredList(category: cat)
                 } else {
-                    List {
-                        ForEach(filtered) { item in
-                            milestoneRow(item)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    if realMilestoneIDs.contains(item.id) { editingItem = item }
-                                }
-                        }
-                        .onDelete { offsets in
-                            let items = offsets.map { filtered[$0] }
-                                .filter { realMilestoneIDs.contains($0.id) }
-                            items.forEach { store.deleteMilestone($0) }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
+                    groupedList
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -288,6 +298,94 @@ struct ResumeView: View {
         }
     }
 
+    // MARK: - 列表
+
+    private var groupedList: some View {
+        List {
+            ForEach(groupedSections, id: \.category) { section in
+                Section {
+                    ForEach(section.items) { item in
+                        milestoneRow(item)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if realMilestoneIDs.contains(item.id) { editingItem = item }
+                            }
+                    }
+                    .onDelete { offsets in
+                        let items = offsets.map { section.items[$0] }
+                            .filter { realMilestoneIDs.contains($0.id) }
+                        items.forEach { store.deleteMilestone($0) }
+                    }
+                } header: {
+                    sectionHeader(section.category, count: section.items.count)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func filteredList(category: MilestoneCategory) -> some View {
+        let items = filteredByCategory
+        return List {
+            if items.isEmpty {
+                Text("此分類尚無紀錄")
+                    .foregroundStyle(.secondary).font(.subheadline)
+            } else {
+                Section {
+                    ForEach(items) { item in
+                        milestoneRow(item)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if realMilestoneIDs.contains(item.id) { editingItem = item }
+                            }
+                    }
+                    .onDelete { offsets in
+                        let toDelete = offsets.map { items[$0] }
+                            .filter { realMilestoneIDs.contains($0.id) }
+                        toDelete.forEach { store.deleteMilestone($0) }
+                    }
+                } header: {
+                    sectionHeader(category, count: items.count)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func sectionHeader(_ cat: MilestoneCategory, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: cat.icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(categoryColor(cat))
+            Text(cat.displayName)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text("\(count)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(categoryColor(cat), in: Capsule())
+            Spacer()
+        }
+        .textCase(nil)
+        .padding(.vertical, 2)
+    }
+
+    private func categoryColor(_ cat: MilestoneCategory) -> Color {
+        switch cat {
+        case .marriage: return .pink
+        case .family: return .red
+        case .realEstate: return .purple
+        case .career: return .blue
+        case .education: return .indigo
+        case .achievement: return .yellow
+        case .travel: return .teal
+        case .pet: return .brown
+        case .health: return .green
+        case .other: return .gray
+        }
+    }
+
     private var categoryFilter: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -295,7 +393,7 @@ struct ResumeView: View {
                     selectedCategory = nil
                 }
                 ForEach(MilestoneCategory.allCases) { cat in
-                    FilterChip(title: cat.rawValue, icon: cat.icon, isSelected: selectedCategory == cat) {
+                    FilterChip(title: cat.displayName, icon: cat.icon, isSelected: selectedCategory == cat) {
                         selectedCategory = cat
                     }
                 }
@@ -318,20 +416,17 @@ struct ResumeView: View {
     private func milestoneRow(_ item: LifeMilestone) -> some View {
         HStack {
             Image(systemName: item.category.icon)
-                .font(.title3).foregroundStyle(.orange)
+                .font(.title3).foregroundStyle(categoryColor(item.category))
                 .frame(width: 36, height: 36)
-                .background(Color.orange.opacity(0.1))
+                .background(categoryColor(item.category).opacity(0.12))
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).font(.subheadline.weight(.medium))
-                HStack(spacing: 4) {
-                    Text(item.category.rawValue)
-                    if !item.note.isEmpty {
-                        Text("- \(item.note)")
-                    }
+                if !item.note.isEmpty {
+                    Text(item.note)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
 
             Spacer()
@@ -401,7 +496,7 @@ struct AddMilestoneView: View {
                 Section("基本資訊") {
                     Picker("分類", selection: $category) {
                         ForEach(MilestoneCategory.allCases) { cat in
-                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                            Label(cat.displayName, systemImage: cat.icon).tag(cat)
                         }
                     }
 

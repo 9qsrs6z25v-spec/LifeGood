@@ -88,7 +88,7 @@ class LifeStore: ObservableObject {
                         id: deriveID(member.id, suffix: "divorce"),
                         title: "與 \(name) 離婚",
                         date: dd,
-                        category: .family,
+                        category: .marriage,
                         note: ""
                     ))
                 }

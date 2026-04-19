@@ -96,30 +96,38 @@ struct FamilyMember: Identifiable, Codable {
 // MARK: - 里程碑分類
 
 enum MilestoneCategory: String, Codable, CaseIterable, Identifiable {
+    case marriage = "結婚"
+    case family = "家庭"
+    case realEstate = "房地產"
     case career = "職涯"
     case education = "學歷"
-    case family = "家庭"
-    case marriage = "結婚"
-    case realEstate = "房地產"
+    case achievement = "成就"
+    case travel = "旅行"
     case pet = "寵物"
     case health = "健康"
-    case travel = "旅行"
-    case achievement = "成就"
     case other = "其他"
 
     var id: String { rawValue }
 
+    /// UI 顯示名稱（可與 rawValue 不同，以保持資料向下相容）
+    var displayName: String {
+        switch self {
+        case .marriage: return "配偶"
+        default: return rawValue
+        }
+    }
+
     var icon: String {
         switch self {
+        case .marriage: return "heart.circle.fill"
+        case .family: return "heart.fill"
+        case .realEstate: return "building.2.fill"
         case .career: return "briefcase.fill"
         case .education: return "graduationcap.fill"
-        case .family: return "heart.fill"
-        case .marriage: return "heart.circle.fill"
-        case .realEstate: return "building.2.fill"
+        case .achievement: return "trophy.fill"
+        case .travel: return "airplane"
         case .pet: return "pawprint.fill"
         case .health: return "cross.fill"
-        case .travel: return "airplane"
-        case .achievement: return "trophy.fill"
         case .other: return "star.fill"
         }
     }
