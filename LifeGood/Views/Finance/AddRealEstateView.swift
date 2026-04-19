@@ -865,7 +865,7 @@ struct AddRealEstateView: View {
         let expenseId = item.linkedExpenseId ?? UUID()
         let title = item.title.isEmpty ? "\(reName) - 房貸" : "\(reName) - \(item.title)"
         let expense = Expense(
-            id: expenseId, title: title, amount: item.amount, date: purchaseDate,
+            id: expenseId, title: title, amount: item.amount, date: item.startDate,
             expenseType: .fixed, fixedCategory: .loan, recurrence: .monthly,
             loanSubCategory: .mortgage, linkedRealEstateId: reId, note: note
         )
