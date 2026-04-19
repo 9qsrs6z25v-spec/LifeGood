@@ -121,6 +121,7 @@ struct AddRealEstateView: View {
     struct VariableItemState: Identifiable {
         let id: UUID
         var category: RealEstateExpenseCategory
+        var name: String
         var amountText: String
         var date: Date
         var linkedExpenseId: UUID?
@@ -406,7 +407,8 @@ struct AddRealEstateView: View {
 
                     HStack {
                         Text("項目 \(index + 1)").font(.subheadline.weight(.medium))
-                        Spacer()
+                        TextField("名稱", text: $variableItems[index].name)
+                            .multilineTextAlignment(.trailing)
                         Button(role: .destructive) {
                             let item = variableItems[index]
                             if let linkedId = item.linkedExpenseId {
@@ -433,7 +435,7 @@ struct AddRealEstateView: View {
 
             Button {
                 variableItems.append(VariableItemState(
-                    id: UUID(), category: .renovation, amountText: "", date: Date()
+                    id: UUID(), category: .renovation, name: "", amountText: "", date: Date()
                 ))
             } label: {
                 Label("新增變動支出", systemImage: "plus.circle").foregroundStyle(.green)
@@ -781,6 +783,7 @@ struct AddRealEstateView: View {
             let expId = syncVariableExpense(reId: reId, reName: trimmedName, item: item)
             syncedVariable.append(RealEstateVariableExpense(
                 id: item.id, category: item.category,
+                name: item.name.trimmingCharacters(in: .whitespaces),
                 amount: item.amount, date: item.date, linkedExpenseId: expId
             ))
         }
@@ -887,12 +890,13 @@ struct AddRealEstateView: View {
 
     private func syncVariableExpense(reId: UUID, reName: String, item: VariableItemState) -> UUID {
         let expenseId = item.linkedExpenseId ?? UUID()
+        let trimmedName = item.name.trimmingCharacters(in: .whitespaces)
         let expense = Expense(
             id: expenseId, title: "\(reName) - \(item.category.rawValue)",
             amount: item.amount, date: item.date,
             expenseType: .variable, variableCategory: .realEstate,
             linkedRealEstateId: reId,
-            realEstateExpenseCategory: item.category, note: ""
+            realEstateExpenseCategory: item.category, note: trimmedName
         )
         if item.linkedExpenseId != nil { expenseStore.update(expense) }
         else { expenseStore.add(expense) }
@@ -965,6 +969,7 @@ struct AddRealEstateView: View {
         variableItems = e.variableExpenses.map { ve in
             VariableItemState(
                 id: ve.id, category: ve.category,
+                name: ve.name,
                 amountText: ve.amount > 0 ? String(format: "%.0f", ve.amount) : "",
                 date: ve.date, linkedExpenseId: ve.linkedExpenseId
             )

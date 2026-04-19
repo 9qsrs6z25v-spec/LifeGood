@@ -311,6 +311,7 @@ enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
 struct RealEstateVariableExpense: Identifiable, Codable {
     let id: UUID
     var category: RealEstateExpenseCategory
+    var name: String
     var amount: Double
     var date: Date
     var linkedExpenseId: UUID?
@@ -318,15 +319,27 @@ struct RealEstateVariableExpense: Identifiable, Codable {
     init(
         id: UUID = UUID(),
         category: RealEstateExpenseCategory = .renovation,
+        name: String = "",
         amount: Double = 0,
         date: Date = Date(),
         linkedExpenseId: UUID? = nil
     ) {
         self.id = id
         self.category = category
+        self.name = name
         self.amount = amount
         self.date = date
         self.linkedExpenseId = linkedExpenseId
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        category = try c.decode(RealEstateExpenseCategory.self, forKey: .category)
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        amount = try c.decode(Double.self, forKey: .amount)
+        date = try c.decode(Date.self, forKey: .date)
+        linkedExpenseId = try? c.decode(UUID.self, forKey: .linkedExpenseId)
     }
 }
 

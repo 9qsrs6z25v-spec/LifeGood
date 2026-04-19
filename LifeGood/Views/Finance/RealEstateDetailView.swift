@@ -214,6 +214,11 @@ struct RealEstateDetailView: View {
                             .background(Color.orange.opacity(0.1))
                             .foregroundStyle(.orange)
                             .clipShape(RoundedRectangle(cornerRadius: 4))
+                        if !ve.name.isEmpty {
+                            Text(ve.name)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         Spacer()
                         Text(fmt(ve.amount)).font(.subheadline.bold())
                     }
