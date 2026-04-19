@@ -2,9 +2,15 @@ import SwiftUI
 
 struct LifeRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
-    @EnvironmentObject var expenseStore: ExpenseStore
     @State private var showAdd = false
     @State private var viewingItem: RealEstate?
+
+    private var ownedCount: Int {
+        financeStore.realEstates.filter { $0.soldDate == nil }.count
+    }
+    private var soldCount: Int {
+        financeStore.realEstates.filter { $0.soldDate != nil }.count
+    }
 
     var body: some View {
         NavigationStack {
@@ -15,24 +21,31 @@ struct LifeRealEstateView: View {
                     emptyState
                 } else {
                     List {
-                        ForEach(financeStore.realEstates) { item in
-                            estateCard(item)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                .onTapGesture { viewingItem = item }
-                                .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) {
-                                        deleteEstate(item)
-                                    } label: {
-                                        Label("刪除", systemImage: "trash")
-                                    }
+                        if ownedCount > 0 {
+                            Section {
+                                ForEach(financeStore.realEstates.filter { $0.soldDate == nil }) { item in
+                                    estateRow(item)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { viewingItem = item }
                                 }
+                            } header: {
+                                sectionHeader("持有中", icon: "building.2.fill", count: ownedCount, color: .green)
+                            }
+                        }
+
+                        if soldCount > 0 {
+                            Section {
+                                ForEach(financeStore.realEstates.filter { $0.soldDate != nil }) { item in
+                                    estateRow(item)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { viewingItem = item }
+                                }
+                            } header: {
+                                sectionHeader("已售出", icon: "checkmark.seal.fill", count: soldCount, color: .red)
+                            }
                         }
                     }
-                    .listStyle(.plain)
-                    .background(Color(.systemGroupedBackground))
-                    .scrollContentBackground(.hidden)
+                    .listStyle(.insetGrouped)
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -49,39 +62,30 @@ struct LifeRealEstateView: View {
         }
     }
 
-    // MARK: - 摘要列
+    // MARK: - 摘要（里程碑視角）
 
     private var summaryHeader: some View {
-        VStack(spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("房產總估值")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    Text(fmt(financeStore.totalRealEstateValue))
-                        .font(.title2.bold())
-                }
-                Spacer()
-                Text("\(financeStore.realEstates.count) 筆物件")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            }
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("月租金收入").font(.caption).foregroundStyle(.secondary)
-                    Text(fmt(financeStore.monthlyRentalIncome))
-                        .font(.caption.bold()).foregroundStyle(.green)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("月淨現金流").font(.caption).foregroundStyle(.secondary)
-                    let flow = financeStore.monthlyCashFlow
-                    Text(fmt(flow))
-                        .font(.caption.bold())
-                        .foregroundStyle(flow >= 0 ? .green : .red)
-                }
-            }
+        HStack(spacing: 0) {
+            statBlock(icon: "building.2.fill", label: "購入", value: "\(financeStore.realEstates.count)", color: .purple)
+            Divider().frame(height: 40)
+            statBlock(icon: "house.fill", label: "持有中", value: "\(ownedCount)", color: .green)
+            Divider().frame(height: 40)
+            statBlock(icon: "checkmark.seal.fill", label: "已售出", value: "\(soldCount)", color: .red)
         }
-        .padding()
+        .padding(.vertical, 14)
         .background(Color(.systemBackground))
+    }
+
+    private func statBlock(icon: String, label: String, value: String, color: Color) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.title3).foregroundStyle(color)
+            Text(value)
+                .font(.title2.bold())
+            Text(label)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var emptyState: some View {
@@ -94,141 +98,66 @@ struct LifeRealEstateView: View {
         }.frame(maxWidth: .infinity)
     }
 
-    // MARK: - 房產卡片（與理財模式相同樣式）
+    // MARK: - Section Header
 
-    private func estateCard(_ item: RealEstate) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.name).font(.subheadline.weight(.semibold))
-                    if !item.address.isEmpty {
-                        Text(item.address).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(fmt(item.currentValue)).font(.subheadline.bold())
-                    Text(String(format: "%@%.1f%%",
-                                item.appreciationRate >= 0 ? "+" : "",
-                                item.appreciationRate))
-                        .font(.caption.bold())
-                        .foregroundStyle(item.appreciationRate >= 0 ? .green : .red)
-                }
-            }
-
-            Divider()
-
-            // 買入 / 售出
-            HStack(spacing: 6) {
-                Label("購入 " + formatDate(item.purchaseDate), systemImage: "calendar")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                if let sd = item.soldDate {
-                    Label("售出 " + formatDate(sd), systemImage: "checkmark.seal")
-                        .font(.caption).foregroundStyle(.red)
-                }
-            }
-
-            // 貸款明細
-            if !item.mortgageItems.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(item.mortgageItems) { m in
-                        HStack {
-                            Text(m.title.isEmpty ? "房貸" : m.title)
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(Color.blue.opacity(0.1))
-                                .foregroundStyle(.blue)
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
-                            Text("\(m.elapsedPeriods)/\(m.totalPeriods)期")
-                                .font(.caption2).foregroundStyle(.tertiary)
-                            Spacer()
-                            Text(fmt(m.amount) + "/月").font(.caption)
-                        }
-                    }
-                    HStack {
-                        Text("已繳貸款").font(.caption2).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(fmt(item.totalMortgagePaid))
-                            .font(.caption.bold()).foregroundStyle(.blue)
-                    }
-                }
-            }
-
-            HStack {
-                if item.monthlyRental > 0 {
-                    Label("月租 " + fmt(item.monthlyRental), systemImage: "dollarsign.circle")
-                }
-                if item.monthlyMortgage > 0 {
-                    Label("月貸 " + fmt(item.monthlyMortgage), systemImage: "creditcard")
-                }
-                Spacer()
-                if item.totalAllPaid > 0 {
-                    Text("已付 " + fmt(item.totalAllPaid)).foregroundStyle(.red)
-                }
-            }
-            .font(.caption).foregroundStyle(.secondary)
-
-            if item.monthlyRental > 0 {
-                HStack {
-                    Spacer()
-                    Text(String(format: "報酬率 %.1f%%", item.rentalYield))
-                        .font(.caption).foregroundStyle(.blue)
-                }
-            }
+    private func sectionHeader(_ title: String, icon: String, count: Int, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text("\(count)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(color, in: Capsule())
+            Spacer()
         }
-        .padding(14)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(
-                    AngularGradient(
-                        colors: CardRarity.realEstate(price: item.purchasePrice).borderGradient,
-                        center: .center
-                    ),
-                    lineWidth: CardRarity.realEstate(price: item.purchasePrice).borderWidth
-                )
-        )
-        .shadow(color: CardRarity.realEstate(price: item.purchasePrice).shadowColor, radius: 6, y: 2)
-        .overlay(alignment: .topLeading) {
-            if item.isSold {
-                SoldStamp(size: 16).offset(x: -8, y: -8)
-            }
-        }
+        .textCase(nil)
+        .padding(.vertical, 2)
     }
 
-    // MARK: - 刪除（連動刪除記帳連結）
+    // MARK: - 項目列（著重地點與日期）
 
-    private func deleteEstate(_ item: RealEstate) {
-        for m in item.mortgageItems {
-            if let linkedId = m.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
+    private func estateRow(_ item: RealEstate) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: item.soldDate != nil ? "building.2" : "building.2.fill")
+                .font(.title3)
+                .foregroundStyle(item.soldDate != nil ? .red : .purple)
+                .frame(width: 40, height: 40)
+                .background((item.soldDate != nil ? Color.red : Color.purple).opacity(0.1))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.name).font(.subheadline.weight(.semibold))
+
+                if !item.address.isEmpty {
+                    Label(item.address, systemImage: "mappin.circle.fill")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+
+                HStack(spacing: 12) {
+                    Label(formatDate(item.purchaseDate), systemImage: "calendar")
+                        .font(.caption).foregroundStyle(.green)
+
+                    if let sd = item.soldDate {
+                        Label(formatDate(sd), systemImage: "checkmark.seal")
+                            .font(.caption).foregroundStyle(.red)
+                    }
+                }
             }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption).foregroundStyle(.tertiary)
         }
-        for p in item.paidItems {
-            if let linkedId = p.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
-        }
-        for ve in item.variableExpenses {
-            if let linkedId = ve.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
-        }
-        if let linkedId = item.linkedExpenseId {
-            expenseStore.expenses.removeAll { $0.id == linkedId }
-        }
-        financeStore.deleteRealEstate(item)
+        .padding(.vertical, 4)
     }
 
     // MARK: - 格式化
-
-    private func fmt(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
-    }
 
     private func formatDate(_ d: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
