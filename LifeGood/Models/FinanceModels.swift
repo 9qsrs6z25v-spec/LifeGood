@@ -289,6 +289,7 @@ enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
     case furniture = "家具"
     case cleaning = "清潔"
     case tax = "稅費"
+    case insurance = "保險"
     case other = "其他"
 
     var id: String { rawValue }
@@ -301,6 +302,7 @@ enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
         case .furniture: return "sofa"
         case .cleaning: return "sparkles"
         case .tax: return "doc.text"
+        case .insurance: return "shield.fill"
         case .other: return "ellipsis.circle"
         }
     }
@@ -328,6 +330,57 @@ struct RealEstateVariableExpense: Identifiable, Codable {
     }
 }
 
+// MARK: - 房地產保險項目
+
+struct RealEstateInsuranceItem: Identifiable, Codable {
+    let id: UUID
+    var policyNumber: String
+    var amount: Double
+    var linkedExpenseId: UUID?
+
+    init(
+        id: UUID = UUID(),
+        policyNumber: String = "",
+        amount: Double = 0,
+        linkedExpenseId: UUID? = nil
+    ) {
+        self.id = id
+        self.policyNumber = policyNumber
+        self.amount = amount
+        self.linkedExpenseId = linkedExpenseId
+    }
+}
+
+// MARK: - 房屋附屬資產
+
+struct RealEstatePropertyAsset: Identifiable, Codable {
+    let id: UUID
+    var category: RealEstateExpenseCategory
+    var name: String
+    var brand: String
+    var floorLocation: String
+    var amount: Double
+    var linkedExpenseId: UUID?
+
+    init(
+        id: UUID = UUID(),
+        category: RealEstateExpenseCategory = .furniture,
+        name: String = "",
+        brand: String = "",
+        floorLocation: String = "",
+        amount: Double = 0,
+        linkedExpenseId: UUID? = nil
+    ) {
+        self.id = id
+        self.category = category
+        self.name = name
+        self.brand = brand
+        self.floorLocation = floorLocation
+        self.amount = amount
+        self.linkedExpenseId = linkedExpenseId
+    }
+}
+
 // MARK: - 房地產
 
 struct RealEstate: Identifiable, Codable {
@@ -346,6 +399,24 @@ struct RealEstate: Identifiable, Codable {
     var linkedExpenseId: UUID?     // 向下相容（舊版單筆房貸連結）
     var note: String
 
+    // MARK: 人生模式欄位
+    var pingCount: Double              // 坪數
+    var landOwner: String              // 所有權人
+    var landSituation: String          // 座落
+    var landNumber: String             // 地號
+    var landArea: Double               // 面積
+    var totalFloors: Int               // 有幾個樓層
+    var fromFloor: Int                 // 從幾樓
+    var toFloor: Int                   // 到幾樓
+    var waterMeterNumber: String       // 水號
+    var waterMeterOwner: String        // 水 所有權人
+    var electricityMeterNumber: String // 電號
+    var electricityMeterOwner: String  // 電 所有權人
+    var gasMeterNumber: String         // 瓦斯表號
+    var gasMeterOwner: String          // 瓦斯 所有權人
+    var insuranceItems: [RealEstateInsuranceItem]      // 保險項目
+    var propertyAssets: [RealEstatePropertyAsset]       // 房屋附屬資產
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -360,7 +431,23 @@ struct RealEstate: Identifiable, Codable {
         paidItems: [RealEstatePaidItem] = [],
         variableExpenses: [RealEstateVariableExpense] = [],
         linkedExpenseId: UUID? = nil,
-        note: String = ""
+        note: String = "",
+        pingCount: Double = 0,
+        landOwner: String = "",
+        landSituation: String = "",
+        landNumber: String = "",
+        landArea: Double = 0,
+        totalFloors: Int = 0,
+        fromFloor: Int = 0,
+        toFloor: Int = 0,
+        waterMeterNumber: String = "",
+        waterMeterOwner: String = "",
+        electricityMeterNumber: String = "",
+        electricityMeterOwner: String = "",
+        gasMeterNumber: String = "",
+        gasMeterOwner: String = "",
+        insuranceItems: [RealEstateInsuranceItem] = [],
+        propertyAssets: [RealEstatePropertyAsset] = []
     ) {
         self.id = id
         self.name = name
@@ -376,6 +463,22 @@ struct RealEstate: Identifiable, Codable {
         self.variableExpenses = variableExpenses
         self.linkedExpenseId = linkedExpenseId
         self.note = note
+        self.pingCount = pingCount
+        self.landOwner = landOwner
+        self.landSituation = landSituation
+        self.landNumber = landNumber
+        self.landArea = landArea
+        self.totalFloors = totalFloors
+        self.fromFloor = fromFloor
+        self.toFloor = toFloor
+        self.waterMeterNumber = waterMeterNumber
+        self.waterMeterOwner = waterMeterOwner
+        self.electricityMeterNumber = electricityMeterNumber
+        self.electricityMeterOwner = electricityMeterOwner
+        self.gasMeterNumber = gasMeterNumber
+        self.gasMeterOwner = gasMeterOwner
+        self.insuranceItems = insuranceItems
+        self.propertyAssets = propertyAssets
     }
 
     // MARK: - 向下相容解碼
@@ -395,6 +498,22 @@ struct RealEstate: Identifiable, Codable {
         variableExpenses = (try? c.decode([RealEstateVariableExpense].self, forKey: .variableExpenses)) ?? []
         linkedExpenseId = try? c.decode(UUID.self, forKey: .linkedExpenseId)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        pingCount = (try? c.decode(Double.self, forKey: .pingCount)) ?? 0
+        landOwner = (try? c.decode(String.self, forKey: .landOwner)) ?? ""
+        landSituation = (try? c.decode(String.self, forKey: .landSituation)) ?? ""
+        landNumber = (try? c.decode(String.self, forKey: .landNumber)) ?? ""
+        landArea = (try? c.decode(Double.self, forKey: .landArea)) ?? 0
+        totalFloors = (try? c.decode(Int.self, forKey: .totalFloors)) ?? 0
+        fromFloor = (try? c.decode(Int.self, forKey: .fromFloor)) ?? 0
+        toFloor = (try? c.decode(Int.self, forKey: .toFloor)) ?? 0
+        waterMeterNumber = (try? c.decode(String.self, forKey: .waterMeterNumber)) ?? ""
+        waterMeterOwner = (try? c.decode(String.self, forKey: .waterMeterOwner)) ?? ""
+        electricityMeterNumber = (try? c.decode(String.self, forKey: .electricityMeterNumber)) ?? ""
+        electricityMeterOwner = (try? c.decode(String.self, forKey: .electricityMeterOwner)) ?? ""
+        gasMeterNumber = (try? c.decode(String.self, forKey: .gasMeterNumber)) ?? ""
+        gasMeterOwner = (try? c.decode(String.self, forKey: .gasMeterOwner)) ?? ""
+        insuranceItems = (try? c.decode([RealEstateInsuranceItem].self, forKey: .insuranceItems)) ?? []
+        propertyAssets = (try? c.decode([RealEstatePropertyAsset].self, forKey: .propertyAssets)) ?? []
 
         // 向下相容：舊版有 monthlyMortgage 欄位，轉為 mortgageItems
         if mortgageItems.isEmpty,
@@ -406,6 +525,10 @@ struct RealEstate: Identifiable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, name, city, address, purchaseDate, soldDate, purchasePrice, currentValue, monthlyRental
         case mortgageItems, paidItems, variableExpenses, linkedExpenseId, note
+        case pingCount, landOwner, landSituation, landNumber, landArea
+        case totalFloors, fromFloor, toFloor
+        case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
+        case gasMeterNumber, gasMeterOwner, insuranceItems, propertyAssets
         case monthlyMortgage // 舊版欄位，僅用於解碼
     }
 
@@ -425,6 +548,22 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(variableExpenses, forKey: .variableExpenses)
         try c.encodeIfPresent(linkedExpenseId, forKey: .linkedExpenseId)
         try c.encode(note, forKey: .note)
+        try c.encode(pingCount, forKey: .pingCount)
+        try c.encode(landOwner, forKey: .landOwner)
+        try c.encode(landSituation, forKey: .landSituation)
+        try c.encode(landNumber, forKey: .landNumber)
+        try c.encode(landArea, forKey: .landArea)
+        try c.encode(totalFloors, forKey: .totalFloors)
+        try c.encode(fromFloor, forKey: .fromFloor)
+        try c.encode(toFloor, forKey: .toFloor)
+        try c.encode(waterMeterNumber, forKey: .waterMeterNumber)
+        try c.encode(waterMeterOwner, forKey: .waterMeterOwner)
+        try c.encode(electricityMeterNumber, forKey: .electricityMeterNumber)
+        try c.encode(electricityMeterOwner, forKey: .electricityMeterOwner)
+        try c.encode(gasMeterNumber, forKey: .gasMeterNumber)
+        try c.encode(gasMeterOwner, forKey: .gasMeterOwner)
+        try c.encode(insuranceItems, forKey: .insuranceItems)
+        try c.encode(propertyAssets, forKey: .propertyAssets)
     }
 
     /// 顯示用的完整地點（縣市 + 地址）

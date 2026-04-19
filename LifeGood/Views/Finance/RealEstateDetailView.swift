@@ -293,6 +293,16 @@ struct RealEstateDetailView: View {
                 expenseStore.expenses.removeAll { $0.id == linkedId }
             }
         }
+        for ins in estate.insuranceItems {
+            if let linkedId = ins.linkedExpenseId {
+                expenseStore.expenses.removeAll { $0.id == linkedId }
+            }
+        }
+        for asset in estate.propertyAssets {
+            if let linkedId = asset.linkedExpenseId {
+                expenseStore.expenses.removeAll { $0.id == linkedId }
+            }
+        }
         if let linkedId = estate.linkedExpenseId {
             expenseStore.expenses.removeAll { $0.id == linkedId }
         }

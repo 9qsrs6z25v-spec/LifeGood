@@ -7,6 +7,12 @@ struct AddRealEstateView: View {
 
     var editing: RealEstate?
 
+    enum EditTab: String, CaseIterable {
+        case finance = "理財"
+        case life = "人生"
+    }
+    @State private var editTab: EditTab = .finance
+
     @State private var name = ""
     @State private var city = ""
     @State private var address = ""
@@ -27,6 +33,43 @@ struct AddRealEstateView: View {
     @State private var monthlyRentalText = ""
     @State private var note = ""
     @State private var showError = false
+
+    // MARK: - 人生模式欄位
+    @State private var pingCountText = ""
+    @State private var landOwner = ""
+    @State private var landSituation = ""
+    @State private var landNumber = ""
+    @State private var landAreaText = ""
+    @State private var totalFloorsText = ""
+    @State private var fromFloorText = ""
+    @State private var toFloorText = ""
+    @State private var waterMeterNumber = ""
+    @State private var waterMeterOwner = ""
+    @State private var electricityMeterNumber = ""
+    @State private var electricityMeterOwner = ""
+    @State private var gasMeterNumber = ""
+    @State private var gasMeterOwner = ""
+    @State private var insuranceItems: [InsuranceItemState] = []
+    @State private var assetItems: [AssetItemState] = []
+
+    struct InsuranceItemState: Identifiable {
+        let id: UUID
+        var policyNumber: String
+        var amountText: String
+        var linkedExpenseId: UUID?
+        var amount: Double { Double(amountText) ?? 0 }
+    }
+
+    struct AssetItemState: Identifiable {
+        let id: UUID
+        var category: RealEstateExpenseCategory
+        var name: String
+        var brand: String
+        var floorLocation: String
+        var amountText: String
+        var linkedExpenseId: UUID?
+        var amount: Double { Double(amountText) ?? 0 }
+    }
 
     // MARK: - 貸款項目列表
 
@@ -82,15 +125,32 @@ struct AddRealEstateView: View {
         NavigationStack {
             Form {
                 infoSection
-                valueSection
-                rentalSection
-                mortgageSection
-                paidSection
-                variableExpenseSection
-                calcSection
 
-                Section("備註") {
-                    TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                Picker("", selection: $editTab) {
+                    ForEach(EditTab.allCases, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+
+                if editTab == .finance {
+                    valueSection
+                    rentalSection
+                    mortgageSection
+                    paidSection
+                    variableExpenseSection
+                    calcSection
+
+                    Section("備註") {
+                        TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                    }
+                } else {
+                    propertyDetailSection
+                    utilitiesSection
+                    insuranceSection
+                    propertyAssetSection
                 }
 
                 if showError {
@@ -354,6 +414,167 @@ struct AddRealEstateView: View {
         }
     }
 
+    // MARK: - 房屋資料（人生）
+
+    private var propertyDetailSection: some View {
+        Section("房屋資料") {
+            HStack {
+                TextField("坪數", text: $pingCountText).keyboardType(.decimalPad)
+                Text("坪").foregroundStyle(.secondary)
+            }
+            TextField("所有權人", text: $landOwner)
+            TextField("座落", text: $landSituation)
+            TextField("地號", text: $landNumber)
+            HStack {
+                TextField("面積", text: $landAreaText).keyboardType(.decimalPad)
+                Text("㎡").foregroundStyle(.secondary)
+            }
+            HStack {
+                TextField("總樓層", text: $totalFloorsText).keyboardType(.numberPad)
+                Text("層").foregroundStyle(.secondary)
+            }
+            HStack {
+                TextField("從", text: $fromFloorText).keyboardType(.numberPad)
+                Text("樓").foregroundStyle(.secondary)
+                Text("~").foregroundStyle(.tertiary)
+                TextField("到", text: $toFloorText).keyboardType(.numberPad)
+                Text("樓").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - 水電瓦斯（人生）
+
+    private var utilitiesSection: some View {
+        Section("水電瓦斯") {
+            HStack {
+                Image(systemName: "drop.fill").foregroundStyle(.blue).frame(width: 24)
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("水號", text: $waterMeterNumber)
+                    TextField("所有權人", text: $waterMeterOwner)
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Image(systemName: "bolt.fill").foregroundStyle(.yellow).frame(width: 24)
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("電號", text: $electricityMeterNumber)
+                    TextField("所有權人", text: $electricityMeterOwner)
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Image(systemName: "flame.fill").foregroundStyle(.orange).frame(width: 24)
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("瓦斯表號", text: $gasMeterNumber)
+                    TextField("所有權人", text: $gasMeterOwner)
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - 保險項目（人生）
+
+    private var insuranceSection: some View {
+        Section {
+            ForEach(Array(insuranceItems.enumerated()), id: \.element.id) { index, _ in
+                VStack(spacing: 10) {
+                    if index > 0 { Divider() }
+
+                    HStack {
+                        Text("保險 \(index + 1)").font(.subheadline.weight(.medium))
+                        Spacer()
+                        Button(role: .destructive) {
+                            let item = insuranceItems[index]
+                            if let linkedId = item.linkedExpenseId {
+                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                            }
+                            insuranceItems.remove(at: index)
+                        } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                        }.buttonStyle(.plain)
+                    }
+
+                    TextField("火災地震險號", text: $insuranceItems[index].policyNumber)
+
+                    HStack {
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("價格", text: $insuranceItems[index].amountText)
+                            .keyboardType(.decimalPad)
+                    }
+                }
+            }
+
+            Button {
+                insuranceItems.append(InsuranceItemState(
+                    id: UUID(), policyNumber: "", amountText: ""
+                ))
+            } label: {
+                Label("新增保險項目", systemImage: "plus.circle").foregroundStyle(.green)
+            }
+        } header: {
+            Text("保險項目")
+        } footer: {
+            Text("有填入價格的保險項目將自動列入變動支出。")
+        }
+    }
+
+    // MARK: - 房屋附屬資產（人生）
+
+    private var propertyAssetSection: some View {
+        Section {
+            ForEach(Array(assetItems.enumerated()), id: \.element.id) { index, _ in
+                VStack(spacing: 10) {
+                    if index > 0 { Divider() }
+
+                    HStack {
+                        Text("資產 \(index + 1)").font(.subheadline.weight(.medium))
+                        Spacer()
+                        Button(role: .destructive) {
+                            let item = assetItems[index]
+                            if let linkedId = item.linkedExpenseId {
+                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                            }
+                            assetItems.remove(at: index)
+                        } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                        }.buttonStyle(.plain)
+                    }
+
+                    Picker("類別", selection: $assetItems[index].category) {
+                        ForEach(RealEstateExpenseCategory.allCases) { cat in
+                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                        }
+                    }
+
+                    TextField("名稱", text: $assetItems[index].name)
+                    TextField("廠牌", text: $assetItems[index].brand)
+                    TextField("位置樓層", text: $assetItems[index].floorLocation)
+
+                    HStack {
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("價格", text: $assetItems[index].amountText)
+                            .keyboardType(.decimalPad)
+                    }
+                }
+            }
+
+            Button {
+                assetItems.append(AssetItemState(
+                    id: UUID(), category: .furniture, name: "", brand: "",
+                    floorLocation: "", amountText: ""
+                ))
+            } label: {
+                Label("新增附屬資產", systemImage: "plus.circle").foregroundStyle(.green)
+            }
+        } header: {
+            Text("房屋附屬資產")
+        } footer: {
+            Text("有填入價格的附屬資產將自動列入變動支出。")
+        }
+    }
+
     // MARK: - 試算
 
     @ViewBuilder
@@ -453,6 +674,42 @@ struct AddRealEstateView: View {
             ))
         }
 
+        // 同步保險項目到變動支出（有價格才連動）
+        var syncedInsurance: [RealEstateInsuranceItem] = []
+        for item in insuranceItems {
+            if item.amount > 0 {
+                let expId = syncInsuranceExpense(reId: reId, reName: trimmedName, item: item)
+                syncedInsurance.append(RealEstateInsuranceItem(
+                    id: item.id, policyNumber: item.policyNumber,
+                    amount: item.amount, linkedExpenseId: expId
+                ))
+            } else {
+                syncedInsurance.append(RealEstateInsuranceItem(
+                    id: item.id, policyNumber: item.policyNumber,
+                    amount: 0, linkedExpenseId: nil
+                ))
+            }
+        }
+
+        // 同步附屬資產到變動支出（有價格才連動）
+        var syncedAssets: [RealEstatePropertyAsset] = []
+        for item in assetItems {
+            if item.amount > 0 {
+                let expId = syncAssetExpense(reId: reId, reName: trimmedName, item: item)
+                syncedAssets.append(RealEstatePropertyAsset(
+                    id: item.id, category: item.category, name: item.name,
+                    brand: item.brand, floorLocation: item.floorLocation,
+                    amount: item.amount, linkedExpenseId: expId
+                ))
+            } else {
+                syncedAssets.append(RealEstatePropertyAsset(
+                    id: item.id, category: item.category, name: item.name,
+                    brand: item.brand, floorLocation: item.floorLocation,
+                    amount: 0, linkedExpenseId: nil
+                ))
+            }
+        }
+
         let re = RealEstate(
             id: reId, name: trimmedName,
             city: city,
@@ -464,7 +721,23 @@ struct AddRealEstateView: View {
             mortgageItems: syncedMortgages,
             paidItems: syncedPaids,
             variableExpenses: syncedVariable,
-            note: trimmedNote
+            note: trimmedNote,
+            pingCount: Double(pingCountText) ?? 0,
+            landOwner: landOwner.trimmingCharacters(in: .whitespaces),
+            landSituation: landSituation.trimmingCharacters(in: .whitespaces),
+            landNumber: landNumber.trimmingCharacters(in: .whitespaces),
+            landArea: Double(landAreaText) ?? 0,
+            totalFloors: Int(totalFloorsText) ?? 0,
+            fromFloor: Int(fromFloorText) ?? 0,
+            toFloor: Int(toFloorText) ?? 0,
+            waterMeterNumber: waterMeterNumber.trimmingCharacters(in: .whitespaces),
+            waterMeterOwner: waterMeterOwner.trimmingCharacters(in: .whitespaces),
+            electricityMeterNumber: electricityMeterNumber.trimmingCharacters(in: .whitespaces),
+            electricityMeterOwner: electricityMeterOwner.trimmingCharacters(in: .whitespaces),
+            gasMeterNumber: gasMeterNumber.trimmingCharacters(in: .whitespaces),
+            gasMeterOwner: gasMeterOwner.trimmingCharacters(in: .whitespaces),
+            insuranceItems: syncedInsurance,
+            propertyAssets: syncedAssets
         )
         if editing != nil { financeStore.update(re) } else { financeStore.add(re) }
         dismiss()
@@ -513,6 +786,35 @@ struct AddRealEstateView: View {
         return expenseId
     }
 
+    private func syncInsuranceExpense(reId: UUID, reName: String, item: InsuranceItemState) -> UUID {
+        let expenseId = item.linkedExpenseId ?? UUID()
+        let title = item.policyNumber.isEmpty ? "\(reName) - 保險" : "\(reName) - \(item.policyNumber)"
+        let expense = Expense(
+            id: expenseId, title: title, amount: item.amount, date: purchaseDate,
+            expenseType: .variable, variableCategory: .realEstate,
+            linkedRealEstateId: reId,
+            realEstateExpenseCategory: .insurance, note: ""
+        )
+        if item.linkedExpenseId != nil { expenseStore.update(expense) }
+        else { expenseStore.add(expense) }
+        return expenseId
+    }
+
+    private func syncAssetExpense(reId: UUID, reName: String, item: AssetItemState) -> UUID {
+        let expenseId = item.linkedExpenseId ?? UUID()
+        let label = item.name.isEmpty ? item.category.rawValue : item.name
+        let expense = Expense(
+            id: expenseId, title: "\(reName) - \(label)",
+            amount: item.amount, date: purchaseDate,
+            expenseType: .variable, variableCategory: .realEstate,
+            linkedRealEstateId: reId,
+            realEstateExpenseCategory: item.category, note: ""
+        )
+        if item.linkedExpenseId != nil { expenseStore.update(expense) }
+        else { expenseStore.add(expense) }
+        return expenseId
+    }
+
     // MARK: - 載入編輯
 
     private func loadEditing() {
@@ -552,6 +854,39 @@ struct AddRealEstateView: View {
                 id: ve.id, category: ve.category,
                 amountText: ve.amount > 0 ? String(format: "%.0f", ve.amount) : "",
                 date: ve.date, linkedExpenseId: ve.linkedExpenseId
+            )
+        }
+
+        // 人生模式欄位
+        pingCountText = e.pingCount > 0 ? String(format: "%g", e.pingCount) : ""
+        landOwner = e.landOwner
+        landSituation = e.landSituation
+        landNumber = e.landNumber
+        landAreaText = e.landArea > 0 ? String(format: "%g", e.landArea) : ""
+        totalFloorsText = e.totalFloors > 0 ? "\(e.totalFloors)" : ""
+        fromFloorText = e.fromFloor > 0 ? "\(e.fromFloor)" : ""
+        toFloorText = e.toFloor > 0 ? "\(e.toFloor)" : ""
+        waterMeterNumber = e.waterMeterNumber
+        waterMeterOwner = e.waterMeterOwner
+        electricityMeterNumber = e.electricityMeterNumber
+        electricityMeterOwner = e.electricityMeterOwner
+        gasMeterNumber = e.gasMeterNumber
+        gasMeterOwner = e.gasMeterOwner
+
+        insuranceItems = e.insuranceItems.map { ins in
+            InsuranceItemState(
+                id: ins.id, policyNumber: ins.policyNumber,
+                amountText: ins.amount > 0 ? String(format: "%.0f", ins.amount) : "",
+                linkedExpenseId: ins.linkedExpenseId
+            )
+        }
+
+        assetItems = e.propertyAssets.map { a in
+            AssetItemState(
+                id: a.id, category: a.category, name: a.name,
+                brand: a.brand, floorLocation: a.floorLocation,
+                amountText: a.amount > 0 ? String(format: "%.0f", a.amount) : "",
+                linkedExpenseId: a.linkedExpenseId
             )
         }
     }
