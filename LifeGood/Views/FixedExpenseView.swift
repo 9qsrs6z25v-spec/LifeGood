@@ -155,13 +155,23 @@ struct FixedExpenseView: View {
     private func deleteWithSync(offsets: IndexSet, from list: [Expense]) {
         for index in offsets {
             let expense = list[index]
-            // 刪除連結的儲蓄險
-            if let linkedId = expense.linkedInsuranceId {
-                financeStore.deleteInsurance(SavingsInsurance(id: linkedId, name: "", premiumAmount: 0))
+            // 解除連結的儲蓄險（僅清除連結，不刪除整筆儲蓄險）
+            if let linkedId = expense.linkedInsuranceId,
+               var ins = financeStore.insurances.first(where: { $0.id == linkedId }) {
+                if ins.linkedExpenseId == expense.id {
+                    ins.linkedExpenseId = nil
+                    financeStore.update(ins)
+                }
             }
-            // 刪除連結的房地產
-            if let linkedId = expense.linkedRealEstateId {
-                financeStore.deleteRealEstate(RealEstate(id: linkedId, name: ""))
+            // 刪除房地產中對應的貸款/已支出/變動支出項目（不刪除整筆房地產）
+            if let linkedId = expense.linkedRealEstateId,
+               var re = financeStore.realEstates.first(where: { $0.id == linkedId }) {
+                re.mortgageItems.removeAll { $0.linkedExpenseId == expense.id }
+                re.paidItems.removeAll { $0.linkedExpenseId == expense.id }
+                re.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
+                re.insuranceItems.removeAll { $0.linkedExpenseId == expense.id }
+                re.propertyAssets.removeAll { $0.linkedExpenseId == expense.id }
+                financeStore.update(re)
             }
             // 刪除連結的汽車定期支出項目
             if let linkedId = expense.linkedVehicleId,
