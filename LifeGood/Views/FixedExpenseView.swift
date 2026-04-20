@@ -74,14 +74,9 @@ struct FixedExpenseView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // 年度預估
+            // 年度預估（依開始日期計算今年度剩餘期數）
             let yearlyEstimate = store.fixedExpenses.reduce(0.0) { total, expense in
-                switch expense.recurrence {
-                case .monthly: return total + expense.amount * 12
-                case .quarterly: return total + expense.amount * 4
-                case .yearly: return total + expense.amount
-                case .none: return total + expense.amount
-                }
+                total + expense.amount * Double(occurrencesThisYear(for: expense))
             }
 
             HStack {
@@ -185,6 +180,32 @@ struct FixedExpenseView: View {
 
     private func formatCurrency(_ value: Double) -> String {
         currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+
+    /// 依開始日期與週期，估算該筆固定支出在當年度內發生的次數
+    private func occurrencesThisYear(for expense: Expense) -> Int {
+        let calendar = Calendar.current
+        let now = Date()
+        let year = calendar.component(.year, from: now)
+        guard let yearStart = calendar.date(from: DateComponents(year: year, month: 1, day: 1)),
+              let yearEnd = calendar.date(from: DateComponents(year: year, month: 12, day: 31)) else {
+            return 0
+        }
+        let effectiveStart = max(expense.date, yearStart)
+        if effectiveStart > yearEnd { return 0 }
+
+        switch expense.recurrence {
+        case .monthly:
+            let months = calendar.dateComponents([.month], from: effectiveStart, to: yearEnd).month ?? 0
+            return max(0, months + 1)
+        case .quarterly:
+            let months = calendar.dateComponents([.month], from: effectiveStart, to: yearEnd).month ?? 0
+            return max(0, months / 3 + 1)
+        case .yearly:
+            return expense.date <= yearEnd ? 1 : 0
+        case .none:
+            return expense.date <= yearEnd ? 1 : 0
+        }
     }
 }
 
