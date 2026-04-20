@@ -865,7 +865,7 @@ struct AddRealEstateView: View {
     private func syncMortgageItemExpense(reId: UUID, reName: String, item: MortgageItemState, itemIndex: Int, note: String) -> UUID {
         let expenseId = item.linkedExpenseId ?? UUID()
         let mortgageName = item.title.trimmingCharacters(in: .whitespaces).isEmpty ? "房貸" : item.title.trimmingCharacters(in: .whitespaces)
-        let title = "【\(reName)】\(itemIndex)-\(mortgageName)"
+        let title = "【\(reName)】貸款\(itemIndex)-\(mortgageName)"
         let expense = Expense(
             id: expenseId, title: title, amount: item.amount, date: item.startDate,
             expenseType: .fixed, fixedCategory: .loan, recurrence: .monthly,

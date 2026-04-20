@@ -271,7 +271,7 @@ struct AddExpenseView: View {
            let id = selectedMortgageRealEstateId,
            let re = financeStore.realEstates.first(where: { $0.id == id }) {
             let n = itemNumber(in: re.mortgageItems) { $0.linkedExpenseId }
-            return "【\(re.name)】\(n)-房貸"
+            return "【\(re.name)】貸款\(n)-房貸"
         }
         // 固定支出 - 一般類別連結汽車
         if expenseType == .fixed, showFixedAssetLink, selectedFixedAssetLink == .vehicle,
@@ -830,14 +830,14 @@ struct AddExpenseView: View {
                 if let re = financeStore.realEstates.first(where: { $0.id == reId }) {
                     let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }).map { $0 + 1 } ?? re.mortgageItems.count
                     let mTitle = re.mortgageItems.first(where: { $0.linkedExpenseId == expenseId })?.title ?? "房貸"
-                    trimmedTitle = "【\(re.name)】\(idx)-\(mTitle)"
+                    trimmedTitle = "【\(re.name)】貸款\(idx)-\(mTitle)"
                 }
             } else {
                 linkedREId = syncRealEstate(mortgageAmount: amount, existingId: linkedREId, expenseId: expenseId)
                 if let re = financeStore.realEstates.first(where: { $0.id == linkedREId }) {
                     let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }).map { $0 + 1 } ?? re.mortgageItems.count
                     let mTitle = re.mortgageItems.first(where: { $0.linkedExpenseId == expenseId })?.title ?? "房貸"
-                    trimmedTitle = "【\(re.name)】\(idx)-\(mTitle)"
+                    trimmedTitle = "【\(re.name)】貸款\(idx)-\(mTitle)"
                 }
             }
         }
