@@ -41,11 +41,15 @@ struct AddExpenseView: View {
 
     // MARK: - 房貸欄位（連動房地產）
 
+    @State private var reName = ""
+    @State private var reCity = ""
     @State private var reAddress = ""
     @State private var rePurchaseDate = Date()
-    @State private var rePurchasePriceText = ""
-    @State private var reCurrentValueText = ""
-    @State private var reMonthlyRentalText = ""
+    @State private var reIsSold = false
+    @State private var reSoldDate = Date()
+    @State private var rePurchasePriceText = ""   // 萬元
+    @State private var reCurrentValueText = ""    // 萬元
+    @State private var reMonthlyRentalText = ""   // NT$
     @State private var mortgageLinkExisting = false
     @State private var selectedMortgageRealEstateId: UUID?
 
@@ -584,15 +588,27 @@ struct AddExpenseView: View {
                     }
                 }
             } else {
-                TextField("地址", text: $reAddress)
+                TextField("物件名稱", text: $reName)
+                Picker("縣市", selection: $reCity) {
+                    Text("請選擇").tag("")
+                    ForEach(AddRealEstateView.taiwanCities, id: \.self) { c in
+                        Text(c).tag(c)
+                    }
+                }
+                TextField("地址（可多行）", text: $reAddress, axis: .vertical)
+                    .lineLimit(2...5)
                 DatePicker("購入日期", selection: $rePurchaseDate, displayedComponents: .date)
-                HStack {
-                    Text("NT$").foregroundStyle(.secondary)
-                    TextField("購入價格", text: $rePurchasePriceText).keyboardType(.decimalPad)
+                Toggle("已售出", isOn: $reIsSold)
+                if reIsSold {
+                    DatePicker("售出日期", selection: $reSoldDate, in: rePurchaseDate..., displayedComponents: .date)
                 }
                 HStack {
-                    Text("NT$").foregroundStyle(.secondary)
+                    TextField("購入價格", text: $rePurchasePriceText).keyboardType(.decimalPad)
+                    Text("萬元").foregroundStyle(.secondary)
+                }
+                HStack {
                     TextField("目前估值", text: $reCurrentValueText).keyboardType(.decimalPad)
+                    Text("萬元").foregroundStyle(.secondary)
                 }
                 HStack {
                     Text("NT$").foregroundStyle(.secondary)
@@ -604,7 +620,7 @@ struct AddExpenseView: View {
         } footer: {
             Text(mortgageLinkExisting
                  ? "儲存後將自動在選擇的房地產物件中新增對應的房貸紀錄。"
-                 : "儲存後將自動在理財模式的房地產中建立或更新對應物件。")
+                 : "儲存後將自動在理財模式的房地產中建立或更新對應物件（價格以萬元為單位，例如 1500 代表 NT$15,000,000）。")
         }
     }
 
@@ -989,7 +1005,8 @@ struct AddExpenseView: View {
 
     /// 同步建立或更新理財模式的房地產
     private func syncRealEstate(mortgageAmount: Double, existingId: UUID?, expenseId: UUID) -> UUID {
-        let reId = existingId ?? UUID()
+        let existingRE = existingId.flatMap { id in financeStore.realEstates.first(where: { $0.id == id }) }
+        let reId = existingRE?.id ?? UUID()
         let mortgageItem = RealEstateMortgageItem(
             title: title.trimmingCharacters(in: .whitespaces) + " - 房貸",
             amount: mortgageAmount,
@@ -997,18 +1014,50 @@ struct AddExpenseView: View {
             startDate: rePurchaseDate,
             linkedExpenseId: expenseId
         )
-        let realEstate = RealEstate(
-            id: reId,
-            name: title.trimmingCharacters(in: .whitespaces),
-            address: reAddress.trimmingCharacters(in: .whitespaces),
-            purchaseDate: rePurchaseDate,
-            purchasePrice: Double(rePurchasePriceText) ?? 0,
-            currentValue: Double(reCurrentValueText) ?? 0,
-            monthlyRental: Double(reMonthlyRentalText) ?? 0,
-            mortgageItems: [mortgageItem],
-            note: note.trimmingCharacters(in: .whitespaces)
-        )
-        if existingId != nil { financeStore.update(realEstate) } else { financeStore.add(realEstate) }
+        let trimmedName = reName.trimmingCharacters(in: .whitespaces)
+        let resolvedName = trimmedName.isEmpty ? title.trimmingCharacters(in: .whitespaces) : trimmedName
+        let purchasePrice = (Double(rePurchasePriceText) ?? 0) * 10000
+        let currentValue = (Double(reCurrentValueText) ?? 0) * 10000
+
+        if var re = existingRE {
+            re.name = resolvedName
+            re.city = reCity
+            re.address = reAddress.trimmingCharacters(in: .whitespaces)
+            re.purchaseDate = rePurchaseDate
+            re.soldDate = reIsSold ? reSoldDate : nil
+            re.purchasePrice = purchasePrice
+            re.currentValue = currentValue
+            re.monthlyRental = Double(reMonthlyRentalText) ?? 0
+            re.note = note.trimmingCharacters(in: .whitespaces)
+            if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+                re.mortgageItems[idx] = RealEstateMortgageItem(
+                    id: re.mortgageItems[idx].id,
+                    title: mortgageItem.title,
+                    amount: mortgageAmount,
+                    totalPeriods: re.mortgageItems[idx].totalPeriods,
+                    startDate: re.mortgageItems[idx].startDate,
+                    linkedExpenseId: expenseId
+                )
+            } else {
+                re.mortgageItems.append(mortgageItem)
+            }
+            financeStore.update(re)
+        } else {
+            let realEstate = RealEstate(
+                id: reId,
+                name: resolvedName,
+                city: reCity,
+                address: reAddress.trimmingCharacters(in: .whitespaces),
+                purchaseDate: rePurchaseDate,
+                soldDate: reIsSold ? reSoldDate : nil,
+                purchasePrice: purchasePrice,
+                currentValue: currentValue,
+                monthlyRental: Double(reMonthlyRentalText) ?? 0,
+                mortgageItems: [mortgageItem],
+                note: note.trimmingCharacters(in: .whitespaces)
+            )
+            financeStore.add(realEstate)
+        }
         return reId
     }
 
@@ -1130,11 +1179,21 @@ struct AddExpenseView: View {
                 mortgageLinkExisting = true
                 selectedMortgageRealEstateId = linkedId
             }
+            reName = linked.name
+            reCity = linked.city
             reAddress = linked.address
             rePurchaseDate = linked.purchaseDate
-            rePurchasePriceText = linked.purchasePrice > 0 ? String(format: "%.0f", linked.purchasePrice) : ""
-            reCurrentValueText = linked.currentValue > 0 ? String(format: "%.0f", linked.currentValue) : ""
+            reIsSold = linked.soldDate != nil
+            reSoldDate = linked.soldDate ?? Date()
+            let purchaseWan = linked.purchasePrice / 10000
+            let currentWan = linked.currentValue / 10000
+            rePurchasePriceText = purchaseWan > 0 ? formatWan(purchaseWan) : ""
+            reCurrentValueText = currentWan > 0 ? formatWan(currentWan) : ""
             reMonthlyRentalText = linked.monthlyRental > 0 ? String(format: "%.0f", linked.monthlyRental) : ""
+        } else if expense.linkedRealEstateId != nil && expense.loanSubCategory == .mortgage {
+            // 連結的房地產已被刪除，切回「新增物件」模式讓使用者可重新建立
+            mortgageLinkExisting = false
+            selectedMortgageRealEstateId = nil
         }
 
         // 載入車貸連結的車輛
@@ -1235,6 +1294,13 @@ struct AddExpenseView: View {
     }
 
     private func rateDisplay(_ value: Double) -> String {
+        if value == value.rounded() {
+            return String(format: "%.0f", value)
+        }
+        return String(format: "%g", value)
+    }
+
+    private func formatWan(_ value: Double) -> String {
         if value == value.rounded() {
             return String(format: "%.0f", value)
         }
