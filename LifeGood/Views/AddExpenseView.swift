@@ -82,6 +82,7 @@ struct AddExpenseView: View {
     @State private var selectedInsuranceLinkId: UUID?
     @State private var selectedRealEstateLinkId: UUID?
     @State private var selectedRealEstateExpenseCategory: RealEstateExpenseCategory = .renovation
+    @State private var realEstateLinkExisting: Bool = true
 
     // MARK: - 固定支出關聯資產
 
@@ -226,6 +227,7 @@ struct AddExpenseView: View {
             .onChange(of: selectedVehicleId) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: selectedVehicleExpenseCategory) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: selectedRealEstateLinkId) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: realEstateLinkExisting) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: selectedRealEstateExpenseCategory) { _, newValue in
                 if selectedAssetLink == .realEstate && newValue == .housePayment {
                     selectedVariableCategory = .realEstate
@@ -473,27 +475,64 @@ struct AddExpenseView: View {
 
     private var realEstateLinkSection: some View {
         Section {
-            if financeStore.realEstates.isEmpty {
-                Text("尚無房地產，請先在理財模式新增")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            } else {
-                Picker("選擇物件", selection: $selectedRealEstateLinkId) {
-                    Text("請選擇").tag(nil as UUID?)
-                    ForEach(financeStore.realEstates) { re in
-                        Text("\(re.name)\(!re.address.isEmpty ? " (\(re.address))" : "")").tag(re.id as UUID?)
+            Picker("連動方式", selection: $realEstateLinkExisting) {
+                Text("新增物件").tag(false)
+                Text("選擇既有").tag(true)
+            }
+            .pickerStyle(.segmented)
+
+            if realEstateLinkExisting {
+                if financeStore.realEstates.isEmpty {
+                    Text("尚無房地產，請切換至「新增物件」")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    Picker("選擇物件", selection: $selectedRealEstateLinkId) {
+                        Text("請選擇").tag(nil as UUID?)
+                        ForEach(financeStore.realEstates) { re in
+                            Text("\(re.name)\(!re.address.isEmpty ? " (\(re.address))" : "")").tag(re.id as UUID?)
+                        }
                     }
                 }
-
-                Picker("支出類別", selection: $selectedRealEstateExpenseCategory) {
-                    ForEach(RealEstateExpenseCategory.allCases) { cat in
-                        Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+            } else {
+                TextField("物件名稱", text: $reName)
+                Picker("縣市", selection: $reCity) {
+                    Text("請選擇").tag("")
+                    ForEach(AddRealEstateView.taiwanCities, id: \.self) { c in
+                        Text(c).tag(c)
                     }
+                }
+                TextField("地址（可多行）", text: $reAddress, axis: .vertical)
+                    .lineLimit(2...5)
+                DatePicker("購入日期", selection: $rePurchaseDate, displayedComponents: .date)
+                Toggle("已售出", isOn: $reIsSold)
+                if reIsSold {
+                    DatePicker("售出日期", selection: $reSoldDate, in: rePurchaseDate..., displayedComponents: .date)
+                }
+                HStack {
+                    TextField("購入價格", text: $rePurchasePriceText).keyboardType(.decimalPad)
+                    Text("萬元").foregroundStyle(.secondary)
+                }
+                HStack {
+                    TextField("目前估值", text: $reCurrentValueText).keyboardType(.decimalPad)
+                    Text("萬元").foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("NT$").foregroundStyle(.secondary)
+                    TextField("月租金收入（選填）", text: $reMonthlyRentalText).keyboardType(.decimalPad)
+                }
+            }
+
+            Picker("支出類別", selection: $selectedRealEstateExpenseCategory) {
+                ForEach(RealEstateExpenseCategory.allCases) { cat in
+                    Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                 }
             }
         } header: {
             Text("房地產（連動理財模式）")
         } footer: {
-            Text("房屋價金將同步至已支出房屋金額章節，其餘類別同步至變動支出章節。")
+            Text(realEstateLinkExisting
+                 ? "房屋價金將同步至已支出房屋金額章節，其餘類別同步至變動支出章節。"
+                 : "儲存後將自動在理財模式建立房地產物件，並將本筆支出同步至對應章節。")
         }
     }
 
@@ -890,9 +929,16 @@ struct AddExpenseView: View {
             case .insurance:
                 linkedInsId = selectedInsuranceLinkId
             case .realEstate:
-                if let reId = selectedRealEstateLinkId {
+                if realEstateLinkExisting {
+                    if let reId = selectedRealEstateLinkId {
+                        linkedREId = reId
+                        syncRealEstateVariableExpense(realEstateId: reId, expenseId: expenseId, amount: amount)
+                    }
+                } else {
+                    let reId = syncNewRealEstateForVariable(existingId: linkedREId)
                     linkedREId = reId
                     syncRealEstateVariableExpense(realEstateId: reId, expenseId: expenseId, amount: amount)
+                    selectedRealEstateLinkId = reId
                 }
             case .none:
                 break
@@ -1003,6 +1049,43 @@ struct AddExpenseView: View {
         }
 
         financeStore.update(re)
+    }
+
+    /// 變動支出連動「新增物件」模式：建立或更新房地產主檔（不含貸款），回傳物件 ID
+    private func syncNewRealEstateForVariable(existingId: UUID?) -> UUID {
+        let existingRE = existingId.flatMap { id in financeStore.realEstates.first(where: { $0.id == id }) }
+        let reId = existingRE?.id ?? UUID()
+        let trimmedName = reName.trimmingCharacters(in: .whitespaces)
+        let resolvedName = trimmedName.isEmpty ? title.trimmingCharacters(in: .whitespaces) : trimmedName
+        let purchasePrice = (Double(rePurchasePriceText) ?? 0) * 10000
+        let currentValue = (Double(reCurrentValueText) ?? 0) * 10000
+
+        if var re = existingRE {
+            re.name = resolvedName
+            re.city = reCity
+            re.address = reAddress.trimmingCharacters(in: .whitespaces)
+            re.purchaseDate = rePurchaseDate
+            re.soldDate = reIsSold ? reSoldDate : nil
+            re.purchasePrice = purchasePrice
+            re.currentValue = currentValue
+            re.monthlyRental = Double(reMonthlyRentalText) ?? 0
+            financeStore.update(re)
+        } else {
+            let realEstate = RealEstate(
+                id: reId,
+                name: resolvedName,
+                city: reCity,
+                address: reAddress.trimmingCharacters(in: .whitespaces),
+                purchaseDate: rePurchaseDate,
+                soldDate: reIsSold ? reSoldDate : nil,
+                purchasePrice: purchasePrice,
+                currentValue: currentValue,
+                monthlyRental: Double(reMonthlyRentalText) ?? 0,
+                note: ""
+            )
+            financeStore.add(realEstate)
+        }
+        return reId
     }
 
     /// 同步建立或更新理財模式的儲蓄險
@@ -1254,9 +1337,15 @@ struct AddExpenseView: View {
             } else if expense.linkedInsuranceId != nil {
                 selectedAssetLink = .insurance
                 selectedInsuranceLinkId = expense.linkedInsuranceId
-            } else if expense.linkedRealEstateId != nil {
+            } else if let reId = expense.linkedRealEstateId {
                 selectedAssetLink = .realEstate
-                selectedRealEstateLinkId = expense.linkedRealEstateId
+                if financeStore.realEstates.contains(where: { $0.id == reId }) {
+                    realEstateLinkExisting = true
+                    selectedRealEstateLinkId = reId
+                } else {
+                    realEstateLinkExisting = false
+                    selectedRealEstateLinkId = nil
+                }
                 if let reCat = expense.realEstateExpenseCategory {
                     selectedRealEstateExpenseCategory = reCat
                 }
