@@ -12,6 +12,7 @@ struct UnifiedExport: Codable {
     struct ExpenseBundle: Codable {
         var expenses: [Expense]
         var incomes: [Income]
+        var currencyRates: [CurrencyRate]?
     }
 
     struct FinanceBundle: Codable {
@@ -34,7 +35,7 @@ struct UnifiedExport: Codable {
         UnifiedExport(
             version: "2",
             exportDate: Date(),
-            expense: ExpenseBundle(expenses: expense.expenses, incomes: expense.incomes),
+            expense: ExpenseBundle(expenses: expense.expenses, incomes: expense.incomes, currencyRates: expense.currencyRates),
             finance: FinanceBundle(
                 insurances: finance.insurances,
                 stocks: finance.stocks,
@@ -293,6 +294,7 @@ enum UnifiedImporter {
         case .replace:
             expense.expenses = payload.expense.expenses
             expense.incomes = payload.expense.incomes
+            if let rates = payload.expense.currencyRates { expense.currencyRates = rates }
             finance.insurances = payload.finance.insurances
             finance.stocks = payload.finance.stocks
             finance.vehicles = payload.finance.vehicles
@@ -317,6 +319,10 @@ enum UnifiedImporter {
             result.schedules = payload.life.schedules.count
 
         case .merge:
+            if let rates = payload.expense.currencyRates {
+                let newRates = mergeItems(existing: expense.currencyRates, incoming: rates)
+                expense.currencyRates.append(contentsOf: newRates)
+            }
             if let profile = payload.life.profile { life.profile = profile }
             if let members = payload.life.familyMembers {
                 let newFamily = mergeItems(existing: life.familyMembers, incoming: members)

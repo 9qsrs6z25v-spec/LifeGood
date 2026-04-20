@@ -40,6 +40,7 @@
 		A01B000001000022 /* LifeOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000022 /* LifeOverviewView.swift */; };
 		A01B000001000023 /* ResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000023 /* ResumeView.swift */; };
 		A01B000001000027 /* UnifiedExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000027 /* UnifiedExport.swift */; };
+		A01B000001000030 /* BackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000030 /* BackupManager.swift */; };
 		A01B000001000028 /* FamilyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000028 /* FamilyView.swift */; };
 		A01B000001000029 /* LifeRealEstateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000029 /* LifeRealEstateView.swift */; };
 		A01B00000100000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000A /* Assets.xcassets */; };
@@ -80,6 +81,7 @@
 		A01A000001000022 /* LifeOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000023 /* ResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000027 /* UnifiedExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedExport.swift; sourceTree = "<group>"; };
+		A01A000001000030 /* BackupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupManager.swift; sourceTree = "<group>"; };
 		A01A000001000028 /* FamilyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyView.swift; sourceTree = "<group>"; };
 		A01A000001000029 /* LifeRealEstateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeRealEstateView.swift; sourceTree = "<group>"; };
 		A01A00000100000A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -130,6 +132,7 @@
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000021 /* LifeStore.swift */,
 				A01A000001000027 /* UnifiedExport.swift */,
+				A01A000001000030 /* BackupManager.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -304,6 +307,7 @@
 				A01B000001000028 /* FamilyView.swift in Sources */,
 				A01B000001000029 /* LifeRealEstateView.swift in Sources */,
 				A01B000001000027 /* UnifiedExport.swift in Sources */,
+				A01B000001000030 /* BackupManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -316,7 +320,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 57;
+				CURRENT_PROJECT_VERSION = 58;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -330,7 +334,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 6.6;
+				MARKETING_VERSION = 6.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -345,7 +349,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 57;
+				CURRENT_PROJECT_VERSION = 58;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -359,7 +363,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 6.6;
+				MARKETING_VERSION = 6.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

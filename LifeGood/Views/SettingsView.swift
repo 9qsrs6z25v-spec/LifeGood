@@ -60,6 +60,12 @@ struct SettingsView: View {
     // 清除狀態
     @State private var showClearConfirm = false
 
+    // 復原狀態
+    @State private var showRestoreConfirm = false
+    @State private var restoreCandidate: (url: URL, date: Date)?
+    @State private var showRestoreResult = false
+    @State private var restoreResultMessage = ""
+
     var body: some View {
         NavigationStack {
             List {
@@ -67,6 +73,7 @@ struct SettingsView: View {
                 currencyRateSection
                 dataManagementSection
                 dataStatsSection
+                restoreSection
                 dangerZoneSection
                 aboutSection
             }
@@ -119,6 +126,21 @@ struct SettingsView: View {
                 Button("取消", role: .cancel) {}
             } message: {
                 Text("此操作無法復原，所有三個模式的資料將被永久刪除。建議先匯出備份再進行清除。")
+            }
+            // 復原確認
+            .alert("確定要復原資料嗎？", isPresented: $showRestoreConfirm) {
+                Button("復原", role: .destructive) { performRestore() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                if let candidate = restoreCandidate {
+                    Text("將復原至 \(formatRestoreDate(candidate.date)) 的資料快照。目前的所有資料將被覆蓋。")
+                }
+            }
+            // 復原結果
+            .alert("復原結果", isPresented: $showRestoreResult) {
+                Button("確定") {}
+            } message: {
+                Text(restoreResultMessage)
             }
         }
     }
@@ -286,6 +308,65 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    // MARK: - 復原資料
+
+    private var restoreSection: some View {
+        Section {
+            Button {
+                restoreCandidate = BackupManager.shared.findRestoreCandidate()
+                if restoreCandidate != nil {
+                    showRestoreConfirm = true
+                } else {
+                    restoreResultMessage = "目前沒有一小時前的資料快照可供復原。系統會在使用 App 時自動建立快照（間隔約 10 分鐘）。"
+                    showRestoreResult = true
+                }
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("復原一小時前的資料")
+                        if let candidate = BackupManager.shared.findRestoreCandidate() {
+                            Text("可用快照：\(formatRestoreDate(candidate.date))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("尚無可用的快照")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } icon: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundStyle(.orange)
+                }
+            }
+            .foregroundStyle(.primary)
+        } header: {
+            Text("資料復原")
+        } footer: {
+            Text("App 會自動建立資料快照（每 10 分鐘一次，保留 24 小時）。復原後目前的資料將被覆蓋為快照時的狀態。")
+        }
+    }
+
+    private func performRestore() {
+        guard let candidate = restoreCandidate else { return }
+        // 復原前先建立一份當前快照，以防誤操作
+        BackupManager.shared.createSnapshot(expense: store, finance: financeStore, life: lifeStore)
+        let success = BackupManager.shared.restore(
+            from: candidate.url,
+            expense: store, finance: financeStore, life: lifeStore
+        )
+        restoreResultMessage = success
+            ? "已成功復原至 \(formatRestoreDate(candidate.date)) 的資料。"
+            : "復原失敗，快照資料可能已損壞。"
+        showRestoreResult = true
+    }
+
+    private func formatRestoreDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy/M/d HH:mm"
+        return formatter.string(from: date)
     }
 
     // MARK: - 危險區域
