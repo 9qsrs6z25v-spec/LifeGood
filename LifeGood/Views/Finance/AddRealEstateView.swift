@@ -758,8 +758,9 @@ struct AddRealEstateView: View {
 
         // 同步貸款項目到固定支出
         var syncedMortgages: [RealEstateMortgageItem] = []
-        for item in mortgageItems where item.amount > 0 {
-            let expId = syncMortgageItemExpense(reId: reId, reName: trimmedName, item: item, note: trimmedNote)
+        let validMortgages = mortgageItems.filter { $0.amount > 0 }
+        for (idx, item) in validMortgages.enumerated() {
+            let expId = syncMortgageItemExpense(reId: reId, reName: trimmedName, item: item, itemIndex: idx + 1, note: trimmedNote)
             syncedMortgages.append(RealEstateMortgageItem(
                 id: item.id, title: item.title.trimmingCharacters(in: .whitespaces),
                 amount: item.amount, totalPeriods: item.periods,
@@ -861,9 +862,10 @@ struct AddRealEstateView: View {
 
     // MARK: - 同步函式
 
-    private func syncMortgageItemExpense(reId: UUID, reName: String, item: MortgageItemState, note: String) -> UUID {
+    private func syncMortgageItemExpense(reId: UUID, reName: String, item: MortgageItemState, itemIndex: Int, note: String) -> UUID {
         let expenseId = item.linkedExpenseId ?? UUID()
-        let title = item.title.isEmpty ? "\(reName) - 房貸" : "\(reName) - \(item.title)"
+        let mortgageName = item.title.trimmingCharacters(in: .whitespaces).isEmpty ? "房貸" : item.title.trimmingCharacters(in: .whitespaces)
+        let title = "【\(reName)】\(itemIndex)-\(mortgageName)"
         let expense = Expense(
             id: expenseId, title: title, amount: item.amount, date: item.startDate,
             expenseType: .fixed, fixedCategory: .loan, recurrence: .monthly,

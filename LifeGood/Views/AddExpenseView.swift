@@ -271,7 +271,7 @@ struct AddExpenseView: View {
            let id = selectedMortgageRealEstateId,
            let re = financeStore.realEstates.first(where: { $0.id == id }) {
             let n = itemNumber(in: re.mortgageItems) { $0.linkedExpenseId }
-            return "項目 \(n)：\(re.name)-房貸"
+            return "【\(re.name)】\(n)-房貸"
         }
         // 固定支出 - 一般類別連結汽車
         if expenseType == .fixed, showFixedAssetLink, selectedFixedAssetLink == .vehicle,
@@ -794,7 +794,7 @@ struct AddExpenseView: View {
     // MARK: - 儲存
 
     private func saveExpense() {
-        let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
+        var trimmedTitle = title.trimmingCharacters(in: .whitespaces)
 
         // 股票連動時自動計算金額
         var finalAmountText = amountText
@@ -827,8 +827,18 @@ struct AddExpenseView: View {
             if mortgageLinkExisting, let reId = selectedMortgageRealEstateId {
                 linkedREId = reId
                 syncMortgageToExistingRealEstate(realEstateId: reId, expenseId: expenseId, amount: amount)
+                if let re = financeStore.realEstates.first(where: { $0.id == reId }) {
+                    let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }).map { $0 + 1 } ?? re.mortgageItems.count
+                    let mTitle = re.mortgageItems.first(where: { $0.linkedExpenseId == expenseId })?.title ?? "房貸"
+                    trimmedTitle = "【\(re.name)】\(idx)-\(mTitle)"
+                }
             } else {
                 linkedREId = syncRealEstate(mortgageAmount: amount, existingId: linkedREId, expenseId: expenseId)
+                if let re = financeStore.realEstates.first(where: { $0.id == linkedREId }) {
+                    let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }).map { $0 + 1 } ?? re.mortgageItems.count
+                    let mTitle = re.mortgageItems.first(where: { $0.linkedExpenseId == expenseId })?.title ?? "房貸"
+                    trimmedTitle = "【\(re.name)】\(idx)-\(mTitle)"
+                }
             }
         }
         if isCarLoan, let vehicleId = selectedVehicleId {
@@ -1008,7 +1018,7 @@ struct AddExpenseView: View {
         let existingRE = existingId.flatMap { id in financeStore.realEstates.first(where: { $0.id == id }) }
         let reId = existingRE?.id ?? UUID()
         let mortgageItem = RealEstateMortgageItem(
-            title: title.trimmingCharacters(in: .whitespaces) + " - 房貸",
+            title: "房貸",
             amount: mortgageAmount,
             totalPeriods: 240,
             startDate: rePurchaseDate,
@@ -1032,7 +1042,7 @@ struct AddExpenseView: View {
             if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
                 re.mortgageItems[idx] = RealEstateMortgageItem(
                     id: re.mortgageItems[idx].id,
-                    title: mortgageItem.title,
+                    title: re.mortgageItems[idx].title,
                     amount: mortgageAmount,
                     totalPeriods: re.mortgageItems[idx].totalPeriods,
                     startDate: re.mortgageItems[idx].startDate,
@@ -1065,24 +1075,23 @@ struct AddExpenseView: View {
     private func syncMortgageToExistingRealEstate(realEstateId: UUID, expenseId: UUID, amount: Double) {
         guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
 
-        let mortgageItem = RealEstateMortgageItem(
-            title: title.trimmingCharacters(in: .whitespaces),
-            amount: amount,
-            totalPeriods: 240,
-            startDate: date,
-            linkedExpenseId: expenseId
-        )
-
         if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
             re.mortgageItems[idx] = RealEstateMortgageItem(
                 id: re.mortgageItems[idx].id,
-                title: title.trimmingCharacters(in: .whitespaces),
+                title: re.mortgageItems[idx].title,
                 amount: amount,
                 totalPeriods: re.mortgageItems[idx].totalPeriods,
                 startDate: re.mortgageItems[idx].startDate,
                 linkedExpenseId: expenseId
             )
         } else {
+            let mortgageItem = RealEstateMortgageItem(
+                title: "房貸",
+                amount: amount,
+                totalPeriods: 240,
+                startDate: date,
+                linkedExpenseId: expenseId
+            )
             re.mortgageItems.append(mortgageItem)
         }
         financeStore.update(re)
