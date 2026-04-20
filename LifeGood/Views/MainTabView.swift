@@ -73,6 +73,21 @@ enum LifeFeature: String, CaseIterable, Identifiable {
     }
 }
 
+enum ManagementFeature: String, CaseIterable, Identifiable {
+    case subordinates
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .subordinates: return "部屬"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .subordinates: return "person.2.fill"
+        }
+    }
+}
+
 // MARK: - 主畫面
 
 struct MainTabView: View {
@@ -80,7 +95,9 @@ struct MainTabView: View {
     @AppStorage("expense_feature") private var expenseFeatureRaw: String = ExpenseFeature.overview.rawValue
     @AppStorage("finance_feature") private var financeFeatureRaw: String = FinanceFeature.overview.rawValue
     @AppStorage("life_feature") private var lifeFeatureRaw: String = LifeFeature.overview.rawValue
+    @AppStorage("management_feature") private var managementFeatureRaw: String = ManagementFeature.subordinates.rawValue
     @State private var isSettingsActive: Bool = false
+    @State private var isManagementMode: Bool = false
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -101,6 +118,10 @@ struct MainTabView: View {
         LifeFeature(rawValue: lifeFeatureRaw) ?? .overview
     }
 
+    private var managementFeature: ManagementFeature {
+        ManagementFeature(rawValue: managementFeatureRaw) ?? .subordinates
+    }
+
     private var currentFeatureTitle: String {
         switch currentMode {
         case .expense: return expenseFeature.title
@@ -117,6 +138,20 @@ struct MainTabView: View {
         }
     }
 
+    private var isCurrentlyManagerial: Bool {
+        lifeStore.milestones
+            .filter { $0.category == .career }
+            .sorted { $0.date > $1.date }
+            .first(where: {
+                let sub = $0.careerSubCategory
+                return sub == .join || sub == .promote || sub == .transfer || sub == .demote
+            })?.isManagerial == true
+    }
+
+    private var showManagementToggle: Bool {
+        currentMode == .life && lifeFeature == .career && isCurrentlyManagerial && !isSettingsActive
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             contentView
@@ -129,6 +164,10 @@ struct MainTabView: View {
         .tint(.green)
         .onChange(of: appMode) { _, _ in
             isSettingsActive = false
+            isManagementMode = false
+        }
+        .onChange(of: lifeFeatureRaw) { _, _ in
+            isManagementMode = false
         }
     }
 
@@ -138,12 +177,21 @@ struct MainTabView: View {
     private var contentView: some View {
         if isSettingsActive {
             SettingsView()
+        } else if isManagementMode && showManagementToggle {
+            managementContent
         } else {
             switch currentMode {
             case .expense: expenseContent
             case .finance: financeContent
             case .life: lifeContent
             }
+        }
+    }
+
+    @ViewBuilder
+    private var managementContent: some View {
+        switch managementFeature {
+        case .subordinates: SubordinateView()
         }
     }
 
@@ -207,8 +255,19 @@ struct MainTabView: View {
             featureMenu
                 .frame(maxWidth: .infinity)
 
+            if showManagementToggle {
+                managementToggleButton
+                    .frame(maxWidth: .infinity)
+            }
+
+            if isManagementMode && showManagementToggle {
+                managementMenu
+                    .frame(maxWidth: .infinity)
+            }
+
             Button {
                 isSettingsActive = true
+                isManagementMode = false
             } label: {
                 VStack(spacing: 4) {
                     Image(systemName: "gearshape.fill")
@@ -224,6 +283,49 @@ struct MainTabView: View {
         }
         .padding(.vertical, 4)
         .background(.bar)
+    }
+
+    private var managementToggleButton: some View {
+        Button {
+            isManagementMode.toggle()
+            isSettingsActive = false
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: isManagementMode ? "person.badge.shield.checkmark.fill" : "person.badge.shield.checkmark")
+                    .font(.system(size: 22))
+                Text("管理")
+                    .font(.caption2)
+            }
+            .foregroundStyle(isManagementMode ? Color.orange : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+    }
+
+    private var managementMenu: some View {
+        Menu {
+            ForEach(ManagementFeature.allCases) { feature in
+                Button {
+                    managementFeatureRaw = feature.rawValue
+                    isSettingsActive = false
+                } label: {
+                    Label(feature.title, systemImage: feature.icon)
+                }
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: managementFeature.icon)
+                    .font(.system(size: 22))
+                Text(managementFeature.title)
+                    .font(.caption2)
+            }
+            .foregroundStyle(isManagementMode && !isSettingsActive ? Color.orange : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .menuOrder(.fixed)
     }
 
     private var featureMenu: some View {

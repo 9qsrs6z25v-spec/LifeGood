@@ -7,6 +7,7 @@ class LifeStore: ObservableObject {
     @Published var relationships: [Relationship] = [] { didSet { if !isLoading { save() } } }
     @Published var pets: [Pet] = [] { didSet { if !isLoading { save() } } }
     @Published var schedules: [Schedule] = [] { didSet { if !isLoading { save() } } }
+    @Published var subordinates: [Subordinate] = [] { didSet { if !isLoading { save() } } }
 
     private var isLoading = false
 
@@ -60,6 +61,14 @@ class LifeStore: ObservableObject {
             schedules[i].isCompleted.toggle()
         }
     }
+
+    // MARK: - 部屬 CRUD
+
+    func add(_ item: Subordinate) { subordinates.append(item) }
+    func update(_ item: Subordinate) {
+        if let i = subordinates.firstIndex(where: { $0.id == item.id }) { subordinates[i] = item }
+    }
+    func deleteSubordinate(_ item: Subordinate) { subordinates.removeAll { $0.id == item.id } }
 
     // MARK: - 家庭衍生里程碑
 
@@ -188,6 +197,9 @@ class LifeStore: ObservableObject {
         if let data = try? encoder.encode(schedules) {
             UserDefaults.standard.set(data, forKey: "life_schedules")
         }
+        if let data = try? encoder.encode(subordinates) {
+            UserDefaults.standard.set(data, forKey: "life_subordinates")
+        }
     }
 
     private func load() {
@@ -219,6 +231,10 @@ class LifeStore: ObservableObject {
            let items = try? decoder.decode([Schedule].self, from: data) {
             schedules = items
         }
+        if let data = UserDefaults.standard.data(forKey: "life_subordinates"),
+           let items = try? decoder.decode([Subordinate].self, from: data) {
+            subordinates = items
+        }
     }
 
     // MARK: - 清除
@@ -230,5 +246,6 @@ class LifeStore: ObservableObject {
         relationships.removeAll()
         pets.removeAll()
         schedules.removeAll()
+        subordinates.removeAll()
     }
 }

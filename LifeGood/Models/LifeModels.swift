@@ -395,3 +395,19 @@ struct Schedule: Identifiable, Codable {
         self.location = location; self.isCompleted = isCompleted; self.note = note
     }
 }
+
+// MARK: - 部屬
+
+struct Subordinate: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    var jobTitle: String
+    var department: String
+    var note: String
+
+    init(id: UUID = UUID(), name: String, jobTitle: String = "",
+         department: String = "", note: String = "") {
+        self.id = id; self.name = name; self.jobTitle = jobTitle
+        self.department = department; self.note = note
+    }
+}
