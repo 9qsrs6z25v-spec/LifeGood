@@ -234,7 +234,17 @@ struct CareerView: View {
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title).font(.subheadline.weight(.medium))
+                HStack(spacing: 6) {
+                    Text(item.title).font(.subheadline.weight(.medium))
+                    if item.isManagerial == true {
+                        Text("管理職")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.18))
+                            .foregroundStyle(.orange)
+                            .clipShape(Capsule())
+                    }
+                }
                 subtitle(for: item)
             }
 

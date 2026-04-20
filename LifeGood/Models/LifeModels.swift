@@ -169,19 +169,45 @@ struct LifeMilestone: Identifiable, Codable {
     var jobGrade: String?
     var mood: String?
     var futurePlan: String?
+    var isManagerial: Bool?
 
     init(id: UUID = UUID(), title: String, date: Date = Date(),
          category: MilestoneCategory = .other, note: String = "",
          careerSubCategory: CareerSubCategory? = nil,
          companyName: String? = nil, department: String? = nil,
          jobTitle: String? = nil, jobGrade: String? = nil,
-         mood: String? = nil, futurePlan: String? = nil) {
+         mood: String? = nil, futurePlan: String? = nil,
+         isManagerial: Bool? = nil) {
         self.id = id; self.title = title; self.date = date
         self.category = category; self.note = note
         self.careerSubCategory = careerSubCategory
         self.companyName = companyName; self.department = department
         self.jobTitle = jobTitle; self.jobGrade = jobGrade
         self.mood = mood; self.futurePlan = futurePlan
+        self.isManagerial = isManagerial
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        date = try c.decode(Date.self, forKey: .date)
+        category = try c.decode(MilestoneCategory.self, forKey: .category)
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        careerSubCategory = try? c.decode(CareerSubCategory.self, forKey: .careerSubCategory)
+        companyName = try? c.decode(String.self, forKey: .companyName)
+        department = try? c.decode(String.self, forKey: .department)
+        jobTitle = try? c.decode(String.self, forKey: .jobTitle)
+        jobGrade = try? c.decode(String.self, forKey: .jobGrade)
+        mood = try? c.decode(String.self, forKey: .mood)
+        futurePlan = try? c.decode(String.self, forKey: .futurePlan)
+        isManagerial = try? c.decode(Bool.self, forKey: .isManagerial)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, date, category, note
+        case careerSubCategory, companyName, department, jobTitle, jobGrade
+        case mood, futurePlan, isManagerial
     }
 }
 

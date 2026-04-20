@@ -508,6 +508,7 @@ struct AddMilestoneView: View {
     @State private var jobGrade = ""
     @State private var mood = ""
     @State private var futurePlan = ""
+    @State private var isManagerial = false
 
     private var isFamily: Bool { category == .family }
     private var isRealEstate: Bool { category == .realEstate }
@@ -690,6 +691,10 @@ struct AddMilestoneView: View {
         }
 
         DatePicker("日期", selection: $date, displayedComponents: .date)
+
+        if careerSub == .join || careerSub == .promote || careerSub == .transfer {
+            Toggle("是否為管理職", isOn: $isManagerial)
+        }
     }
 
     @ViewBuilder
@@ -736,6 +741,12 @@ struct AddMilestoneView: View {
             // 新增物件：在按下「開啟新增房地產介面」時已開啟另一視窗，此處僅關閉
         } else if isCareer {
             let autoTitle = generateCareerTitle()
+            let managerial: Bool? = {
+                switch careerSub {
+                case .join, .promote, .transfer: return isManagerial
+                default: return nil
+                }
+            }()
             let item = LifeMilestone(
                 id: editing?.id ?? UUID(),
                 title: autoTitle, date: date, category: .career,
@@ -746,7 +757,8 @@ struct AddMilestoneView: View {
                 jobTitle: jobTitle.trimmingCharacters(in: .whitespaces).isEmpty ? nil : jobTitle.trimmingCharacters(in: .whitespaces),
                 jobGrade: jobGrade.trimmingCharacters(in: .whitespaces).isEmpty ? nil : jobGrade.trimmingCharacters(in: .whitespaces),
                 mood: mood.trimmingCharacters(in: .whitespaces).isEmpty ? nil : mood.trimmingCharacters(in: .whitespaces),
-                futurePlan: futurePlan.trimmingCharacters(in: .whitespaces).isEmpty ? nil : futurePlan.trimmingCharacters(in: .whitespaces)
+                futurePlan: futurePlan.trimmingCharacters(in: .whitespaces).isEmpty ? nil : futurePlan.trimmingCharacters(in: .whitespaces),
+                isManagerial: managerial
             )
             if editing != nil { store.update(item) } else { store.add(item) }
         } else {
@@ -811,6 +823,7 @@ struct AddMilestoneView: View {
             jobGrade = e.jobGrade ?? ""
             mood = e.mood ?? ""
             futurePlan = e.futurePlan ?? ""
+            isManagerial = e.isManagerial ?? false
             return
         }
         if let f = editingFamily {
