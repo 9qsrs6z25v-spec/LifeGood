@@ -100,7 +100,6 @@ struct MainTabView: View {
     }
 
     private var currentFeatureTitle: String {
-        if isSettingsActive { return "設定" }
         switch currentMode {
         case .expense: return expenseFeature.title
         case .finance: return financeFeature.title
@@ -109,7 +108,6 @@ struct MainTabView: View {
     }
 
     private var currentFeatureIcon: String {
-        if isSettingsActive { return "gearshape.fill" }
         switch currentMode {
         case .expense: return expenseFeature.icon
         case .finance: return financeFeature.icon
@@ -218,40 +216,51 @@ struct MainTabView: View {
 
     private var featureMenu: some View {
         Menu {
-            Picker("模式", selection: $appMode) {
+            Section("切換模式") {
                 ForEach(AppMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue).tag(mode.rawValue)
+                    Button {
+                        if appMode != mode.rawValue {
+                            appMode = mode.rawValue
+                        }
+                        isSettingsActive = false
+                    } label: {
+                        if appMode == mode.rawValue {
+                            Label(mode.rawValue, systemImage: "checkmark")
+                        } else {
+                            Text(mode.rawValue)
+                        }
+                    }
                 }
             }
 
-            Divider()
-
-            switch currentMode {
-            case .expense:
-                ForEach(ExpenseFeature.allCases) { feature in
-                    Button {
-                        expenseFeatureRaw = feature.rawValue
-                        isSettingsActive = false
-                    } label: {
-                        Label(feature.title, systemImage: feature.icon)
+            Section("功能頁面") {
+                switch currentMode {
+                case .expense:
+                    ForEach(ExpenseFeature.allCases) { feature in
+                        Button {
+                            expenseFeatureRaw = feature.rawValue
+                            isSettingsActive = false
+                        } label: {
+                            Label(feature.title, systemImage: feature.icon)
+                        }
                     }
-                }
-            case .finance:
-                ForEach(FinanceFeature.allCases) { feature in
-                    Button {
-                        financeFeatureRaw = feature.rawValue
-                        isSettingsActive = false
-                    } label: {
-                        Label(feature.title, systemImage: feature.icon)
+                case .finance:
+                    ForEach(FinanceFeature.allCases) { feature in
+                        Button {
+                            financeFeatureRaw = feature.rawValue
+                            isSettingsActive = false
+                        } label: {
+                            Label(feature.title, systemImage: feature.icon)
+                        }
                     }
-                }
-            case .life:
-                ForEach(lifeAvailableFeatures) { feature in
-                    Button {
-                        lifeFeatureRaw = feature.rawValue
-                        isSettingsActive = false
-                    } label: {
-                        Label(feature.title, systemImage: feature.icon)
+                case .life:
+                    ForEach(lifeAvailableFeatures) { feature in
+                        Button {
+                            lifeFeatureRaw = feature.rawValue
+                            isSettingsActive = false
+                        } label: {
+                            Label(feature.title, systemImage: feature.icon)
+                        }
                     }
                 }
             }
@@ -267,6 +276,7 @@ struct MainTabView: View {
             .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
+        .menuOrder(.fixed)
     }
 
     private var lifeAvailableFeatures: [LifeFeature] {
