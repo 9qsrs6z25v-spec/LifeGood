@@ -133,6 +133,27 @@ enum MilestoneCategory: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - 職涯子分類
+
+enum CareerSubCategory: String, Codable, CaseIterable, Identifiable {
+    case join = "入職"
+    case promote = "升職"
+    case transfer = "轉職"
+    case demote = "降職"
+    case resign = "離職"
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .join: return "arrow.right.to.line"
+        case .promote: return "arrow.up.circle.fill"
+        case .transfer: return "arrow.left.arrow.right"
+        case .demote: return "arrow.down.circle.fill"
+        case .resign: return "arrow.right.square"
+        }
+    }
+}
+
 struct LifeMilestone: Identifiable, Codable {
     let id: UUID
     var title: String
@@ -140,10 +161,27 @@ struct LifeMilestone: Identifiable, Codable {
     var category: MilestoneCategory
     var note: String
 
+    // 職涯專屬欄位
+    var careerSubCategory: CareerSubCategory?
+    var companyName: String?
+    var department: String?
+    var jobTitle: String?
+    var jobGrade: String?
+    var mood: String?
+    var futurePlan: String?
+
     init(id: UUID = UUID(), title: String, date: Date = Date(),
-         category: MilestoneCategory = .other, note: String = "") {
+         category: MilestoneCategory = .other, note: String = "",
+         careerSubCategory: CareerSubCategory? = nil,
+         companyName: String? = nil, department: String? = nil,
+         jobTitle: String? = nil, jobGrade: String? = nil,
+         mood: String? = nil, futurePlan: String? = nil) {
         self.id = id; self.title = title; self.date = date
         self.category = category; self.note = note
+        self.careerSubCategory = careerSubCategory
+        self.companyName = companyName; self.department = department
+        self.jobTitle = jobTitle; self.jobGrade = jobGrade
+        self.mood = mood; self.futurePlan = futurePlan
     }
 }
 

@@ -415,7 +415,7 @@ struct ResumeView: View {
 
     private func milestoneRow(_ item: LifeMilestone) -> some View {
         HStack {
-            Image(systemName: item.category.icon)
+            Image(systemName: item.careerSubCategory?.icon ?? item.category.icon)
                 .font(.title3).foregroundStyle(categoryColor(item.category))
                 .frame(width: 36, height: 36)
                 .background(categoryColor(item.category).opacity(0.12))
@@ -423,7 +423,9 @@ struct ResumeView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).font(.subheadline.weight(.medium))
-                if !item.note.isEmpty {
+                if let sub = item.careerSubCategory {
+                    careerSubtitle(item, sub: sub)
+                } else if !item.note.isEmpty {
                     Text(item.note)
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -434,6 +436,27 @@ struct ResumeView: View {
             Text(formatDate(item.date)).font(.caption).foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func careerSubtitle(_ item: LifeMilestone, sub: CareerSubCategory) -> some View {
+        let parts: [String] = {
+            var p: [String] = []
+            if let d = item.department, !d.isEmpty { p.append(d) }
+            if let j = item.jobTitle, !j.isEmpty { p.append(j) }
+            if let g = item.jobGrade, !g.isEmpty { p.append(g) }
+            return p
+        }()
+        if sub == .resign {
+            if let m = item.mood, !m.isEmpty {
+                Text(m).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        } else if !parts.isEmpty {
+            Text(parts.joined(separator: " · "))
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        } else if !item.note.isEmpty {
+            Text(item.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
     }
 
     private func formatDate(_ date: Date) -> String {
@@ -477,8 +500,18 @@ struct AddMilestoneView: View {
     @State private var selectedRealEstateId: UUID?
     @State private var showAddRealEstate = false
 
+    // 職涯專屬
+    @State private var careerSub: CareerSubCategory = .join
+    @State private var companyName = ""
+    @State private var department = ""
+    @State private var jobTitle = ""
+    @State private var jobGrade = ""
+    @State private var mood = ""
+    @State private var futurePlan = ""
+
     private var isFamily: Bool { category == .family }
     private var isRealEstate: Bool { category == .realEstate }
+    private var isCareer: Bool { category == .career }
 
     private var canSave: Bool {
         if isFamily {
@@ -486,6 +519,14 @@ struct AddMilestoneView: View {
         }
         if isRealEstate {
             return realEstateMode == .existing && selectedRealEstateId != nil
+        }
+        if isCareer {
+            switch careerSub {
+            case .join: return !companyName.trimmingCharacters(in: .whitespaces).isEmpty
+            case .promote, .demote: return !jobTitle.trimmingCharacters(in: .whitespaces).isEmpty
+            case .transfer: return !department.trimmingCharacters(in: .whitespaces).isEmpty
+            case .resign: return true
+            }
         }
         return !title.trimmingCharacters(in: .whitespaces).isEmpty
     }
@@ -501,77 +542,20 @@ struct AddMilestoneView: View {
                     }
 
                     if isFamily {
-                        Picker("關係", selection: $familyRole) {
-                            ForEach(FamilyMemberRole.allCases) { role in
-                                Label(role.rawValue, systemImage: role.icon).tag(role)
-                            }
-                        }
-                        TextField("中文姓名", text: $familyChineseName)
-                        TextField("英文姓名", text: $familyEnglishName)
-                            .autocapitalization(.words)
-
-                        if familyRole == .spouse {
-                            Toggle("填入結婚時間", isOn: $hasMarriageDate)
-                            if hasMarriageDate {
-                                DatePicker("結婚日期", selection: $marriageDate, displayedComponents: .date)
-                            }
-                            Toggle("已離婚", isOn: $isDivorced)
-                            if isDivorced {
-                                DatePicker("離婚日期", selection: $divorceDate,
-                                           in: (hasMarriageDate ? marriageDate : Date.distantPast)...,
-                                           displayedComponents: .date)
-                            }
-                        } else {
-                            DatePicker("出生日期", selection: $familyBirthday, displayedComponents: .date)
-                        }
+                        familyFields
                     } else if isRealEstate {
-                        Picker("方式", selection: $realEstateMode) {
-                            ForEach(RealEstateMode.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-
-                        if realEstateMode == .existing {
-                            if financeStore.realEstates.isEmpty {
-                                Text("尚無房地產，請選擇「新增物件」")
-                                    .font(.subheadline).foregroundStyle(.secondary)
-                            } else {
-                                Picker("選擇物件", selection: $selectedRealEstateId) {
-                                    Text("請選擇").tag(nil as UUID?)
-                                    ForEach(financeStore.realEstates) { re in
-                                        Text(re.name).tag(re.id as UUID?)
-                                    }
-                                }
-                                if let id = selectedRealEstateId,
-                                   let re = financeStore.realEstates.first(where: { $0.id == id }) {
-                                    HStack { Text("購入價格"); Spacer()
-                                        Text(formatWan(re.purchasePrice)).foregroundStyle(.secondary)
-                                    }
-                                    HStack { Text("購入日期"); Spacer()
-                                        Text(formatDateOnly(re.purchaseDate)).foregroundStyle(.secondary)
-                                    }
-                                    if let sd = re.soldDate {
-                                        HStack { Text("售出日期"); Spacer()
-                                            Text(formatDateOnly(sd)).foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            Button {
-                                showAddRealEstate = true
-                            } label: {
-                                Label("開啟新增房地產介面", systemImage: "plus.circle.fill")
-                                    .foregroundStyle(.green)
-                            }
-                            Text("將開啟理財模式的新增房地產介面，填寫完成後將自動建立購入里程碑。")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
+                        realEstateFields
+                    } else if isCareer {
+                        careerFields
                     } else {
                         TextField("標題", text: $title)
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                     }
                 }
-                if !isFamily && !isRealEstate {
+                if isCareer {
+                    careerExtraSection
+                }
+                if !isFamily && !isRealEstate && !isCareer {
                     Section("備註") {
                         TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                     }
@@ -599,11 +583,139 @@ struct AddMilestoneView: View {
         }
     }
 
+    // MARK: - 家庭欄位
+
+    @ViewBuilder
+    private var familyFields: some View {
+        Picker("關係", selection: $familyRole) {
+            ForEach(FamilyMemberRole.allCases) { role in
+                Label(role.rawValue, systemImage: role.icon).tag(role)
+            }
+        }
+        TextField("中文姓名", text: $familyChineseName)
+        TextField("英文姓名", text: $familyEnglishName)
+            .autocapitalization(.words)
+
+        if familyRole == .spouse {
+            Toggle("填入結婚時間", isOn: $hasMarriageDate)
+            if hasMarriageDate {
+                DatePicker("結婚日期", selection: $marriageDate, displayedComponents: .date)
+            }
+            Toggle("已離婚", isOn: $isDivorced)
+            if isDivorced {
+                DatePicker("離婚日期", selection: $divorceDate,
+                           in: (hasMarriageDate ? marriageDate : Date.distantPast)...,
+                           displayedComponents: .date)
+            }
+        } else {
+            DatePicker("出生日期", selection: $familyBirthday, displayedComponents: .date)
+        }
+    }
+
+    // MARK: - 房地產欄位
+
+    @ViewBuilder
+    private var realEstateFields: some View {
+        Picker("方式", selection: $realEstateMode) {
+            ForEach(RealEstateMode.allCases) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+
+        if realEstateMode == .existing {
+            if financeStore.realEstates.isEmpty {
+                Text("尚無房地產，請選擇「新增物件」")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                Picker("選擇物件", selection: $selectedRealEstateId) {
+                    Text("請選擇").tag(nil as UUID?)
+                    ForEach(financeStore.realEstates) { re in
+                        Text(re.name).tag(re.id as UUID?)
+                    }
+                }
+                if let id = selectedRealEstateId,
+                   let re = financeStore.realEstates.first(where: { $0.id == id }) {
+                    HStack { Text("購入價格"); Spacer()
+                        Text(formatWan(re.purchasePrice)).foregroundStyle(.secondary)
+                    }
+                    HStack { Text("購入日期"); Spacer()
+                        Text(formatDateOnly(re.purchaseDate)).foregroundStyle(.secondary)
+                    }
+                    if let sd = re.soldDate {
+                        HStack { Text("售出日期"); Spacer()
+                            Text(formatDateOnly(sd)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        } else {
+            Button {
+                showAddRealEstate = true
+            } label: {
+                Label("開啟新增房地產介面", systemImage: "plus.circle.fill")
+                    .foregroundStyle(.green)
+            }
+            Text("將開啟理財模式的新增房地產介面，填寫完成後將自動建立購入里程碑。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - 職涯欄位
+
+    @ViewBuilder
+    private var careerFields: some View {
+        Picker("子分類", selection: $careerSub) {
+            ForEach(CareerSubCategory.allCases) { sub in
+                Label(sub.rawValue, systemImage: sub.icon).tag(sub)
+            }
+        }
+
+        switch careerSub {
+        case .join:
+            TextField("公司名稱", text: $companyName)
+            TextField("部門", text: $department)
+            TextField("職位名稱", text: $jobTitle)
+            TextField("職等編號", text: $jobGrade)
+        case .promote:
+            TextField("更新後職位名稱", text: $jobTitle)
+            TextField("更新後職等編號", text: $jobGrade)
+        case .transfer:
+            TextField("更新後部門", text: $department)
+            TextField("職位名稱", text: $jobTitle)
+            TextField("職等編號", text: $jobGrade)
+        case .demote:
+            TextField("更新後職位名稱", text: $jobTitle)
+            TextField("更新後職等編號", text: $jobGrade)
+        case .resign:
+            EmptyView()
+        }
+
+        DatePicker("日期", selection: $date, displayedComponents: .date)
+    }
+
+    @ViewBuilder
+    private var careerExtraSection: some View {
+        if careerSub == .resign {
+            Section("心境與規劃") {
+                TextField("心境", text: $mood, axis: .vertical).lineLimit(3)
+                TextField("未來規劃", text: $futurePlan, axis: .vertical).lineLimit(3)
+            }
+        } else {
+            Section("備註") {
+                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            }
+        }
+    }
+
+    // MARK: - 導航標題
+
     private var navTitle: String {
         if editingFamily != nil { return "編輯家庭成員" }
         if editing != nil { return "編輯里程碑" }
-        return isFamily ? "新增家庭成員" : "新增里程碑"
+        if isFamily { return "新增家庭成員" }
+        return "新增里程碑"
     }
+
+    // MARK: - 儲存
 
     private func save() {
         if isFamily {
@@ -622,6 +734,21 @@ struct AddMilestoneView: View {
         } else if isRealEstate {
             // 連結既有：里程碑由 realEstateDerivedMilestones 自動產生，不需建立實體
             // 新增物件：在按下「開啟新增房地產介面」時已開啟另一視窗，此處僅關閉
+        } else if isCareer {
+            let autoTitle = generateCareerTitle()
+            let item = LifeMilestone(
+                id: editing?.id ?? UUID(),
+                title: autoTitle, date: date, category: .career,
+                note: careerSub == .resign ? "" : note.trimmingCharacters(in: .whitespaces),
+                careerSubCategory: careerSub,
+                companyName: companyName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : companyName.trimmingCharacters(in: .whitespaces),
+                department: department.trimmingCharacters(in: .whitespaces).isEmpty ? nil : department.trimmingCharacters(in: .whitespaces),
+                jobTitle: jobTitle.trimmingCharacters(in: .whitespaces).isEmpty ? nil : jobTitle.trimmingCharacters(in: .whitespaces),
+                jobGrade: jobGrade.trimmingCharacters(in: .whitespaces).isEmpty ? nil : jobGrade.trimmingCharacters(in: .whitespaces),
+                mood: mood.trimmingCharacters(in: .whitespaces).isEmpty ? nil : mood.trimmingCharacters(in: .whitespaces),
+                futurePlan: futurePlan.trimmingCharacters(in: .whitespaces).isEmpty ? nil : futurePlan.trimmingCharacters(in: .whitespaces)
+            )
+            if editing != nil { store.update(item) } else { store.add(item) }
         } else {
             let item = LifeMilestone(
                 id: editing?.id ?? UUID(),
@@ -634,6 +761,36 @@ struct AddMilestoneView: View {
         dismiss()
     }
 
+    private var latestCompanyName: String? {
+        store.milestones
+            .filter { $0.category == .career && $0.companyName != nil && !$0.companyName!.isEmpty }
+            .sorted { $0.date > $1.date }
+            .first?.companyName
+    }
+
+    private func generateCareerTitle() -> String {
+        let co = companyName.trimmingCharacters(in: .whitespaces)
+        let jt = jobTitle.trimmingCharacters(in: .whitespaces)
+        let dp = department.trimmingCharacters(in: .whitespaces)
+        switch careerSub {
+        case .join:
+            let parts = [co, jt].filter { !$0.isEmpty }
+            return "入職 " + parts.joined(separator: " - ")
+        case .promote:
+            return jt.isEmpty ? "升職" : "升職為 \(jt)"
+        case .transfer:
+            let parts = [dp, jt].filter { !$0.isEmpty }
+            return "轉職至 " + parts.joined(separator: " - ")
+        case .demote:
+            return jt.isEmpty ? "降職" : "降職為 \(jt)"
+        case .resign:
+            let company = co.isEmpty ? (latestCompanyName ?? "") : co
+            return company.isEmpty ? "離職" : "從 \(company) 離職"
+        }
+    }
+
+    // MARK: - 工具
+
     private func formatWan(_ v: Double) -> String {
         v > 0 ? String(format: "%.0f 萬", v / 10000) : "—"
     }
@@ -642,9 +799,18 @@ struct AddMilestoneView: View {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
     }
 
+    // MARK: - 載入編輯
+
     private func loadEditing() {
         if let e = editing {
             title = e.title; date = e.date; category = e.category; note = e.note
+            if let sub = e.careerSubCategory { careerSub = sub }
+            companyName = e.companyName ?? ""
+            department = e.department ?? ""
+            jobTitle = e.jobTitle ?? ""
+            jobGrade = e.jobGrade ?? ""
+            mood = e.mood ?? ""
+            futurePlan = e.futurePlan ?? ""
             return
         }
         if let f = editingFamily {
