@@ -234,6 +234,9 @@ struct AddExpenseView: View {
             }
             .onChange(of: selectedMortgageRealEstateId) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: mortgageLinkExisting) { _, _ in applyAutoTitleIfLinked() }
+            .onChange(of: note) { _, _ in
+                if isMortgage { applyAutoTitleIfLinked() }
+            }
             .onChange(of: selectedFixedAssetLink) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: fixedLinkVehicleId) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: selectedFixedCategory) { _, _ in applyAutoTitleIfLinked() }
@@ -271,7 +274,18 @@ struct AddExpenseView: View {
            let id = selectedMortgageRealEstateId,
            let re = financeStore.realEstates.first(where: { $0.id == id }) {
             let n = itemNumber(in: re.mortgageItems) { $0.linkedExpenseId }
-            return "【\(re.name)】貸款\(n)-房貸"
+            let trimmedNote = note.trimmingCharacters(in: .whitespaces)
+            let mortgageName: String
+            if !trimmedNote.isEmpty {
+                mortgageName = trimmedNote
+            } else if let expenseId = editingExpense?.id,
+                      let item = re.mortgageItems.first(where: { $0.linkedExpenseId == expenseId }),
+                      !item.title.trimmingCharacters(in: .whitespaces).isEmpty {
+                mortgageName = item.title.trimmingCharacters(in: .whitespaces)
+            } else {
+                mortgageName = "房貸"
+            }
+            return "【\(re.name)】貸款\(n)-\(mortgageName)"
         }
         // 固定支出 - 一般類別連結汽車
         if expenseType == .fixed, showFixedAssetLink, selectedFixedAssetLink == .vehicle,
@@ -1017,8 +1031,10 @@ struct AddExpenseView: View {
     private func syncRealEstate(mortgageAmount: Double, existingId: UUID?, expenseId: UUID) -> UUID {
         let existingRE = existingId.flatMap { id in financeStore.realEstates.first(where: { $0.id == id }) }
         let reId = existingRE?.id ?? UUID()
+        let trimmedNote = note.trimmingCharacters(in: .whitespaces)
+        let mortgageTitle = trimmedNote.isEmpty ? "房貸" : trimmedNote
         let mortgageItem = RealEstateMortgageItem(
-            title: "房貸",
+            title: mortgageTitle,
             amount: mortgageAmount,
             totalPeriods: 240,
             startDate: rePurchaseDate,
@@ -1038,11 +1054,10 @@ struct AddExpenseView: View {
             re.purchasePrice = purchasePrice
             re.currentValue = currentValue
             re.monthlyRental = Double(reMonthlyRentalText) ?? 0
-            re.note = note.trimmingCharacters(in: .whitespaces)
             if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
                 re.mortgageItems[idx] = RealEstateMortgageItem(
                     id: re.mortgageItems[idx].id,
-                    title: re.mortgageItems[idx].title,
+                    title: mortgageTitle,
                     amount: mortgageAmount,
                     totalPeriods: re.mortgageItems[idx].totalPeriods,
                     startDate: re.mortgageItems[idx].startDate,
@@ -1064,7 +1079,7 @@ struct AddExpenseView: View {
                 currentValue: currentValue,
                 monthlyRental: Double(reMonthlyRentalText) ?? 0,
                 mortgageItems: [mortgageItem],
-                note: note.trimmingCharacters(in: .whitespaces)
+                note: ""
             )
             financeStore.add(realEstate)
         }
@@ -1074,11 +1089,13 @@ struct AddExpenseView: View {
     /// 同步房貸到既有房地產物件
     private func syncMortgageToExistingRealEstate(realEstateId: UUID, expenseId: UUID, amount: Double) {
         guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
+        let trimmedNote = note.trimmingCharacters(in: .whitespaces)
+        let mortgageTitle = trimmedNote.isEmpty ? "房貸" : trimmedNote
 
         if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
             re.mortgageItems[idx] = RealEstateMortgageItem(
                 id: re.mortgageItems[idx].id,
-                title: re.mortgageItems[idx].title,
+                title: mortgageTitle,
                 amount: amount,
                 totalPeriods: re.mortgageItems[idx].totalPeriods,
                 startDate: re.mortgageItems[idx].startDate,
@@ -1086,7 +1103,7 @@ struct AddExpenseView: View {
             )
         } else {
             let mortgageItem = RealEstateMortgageItem(
-                title: "房貸",
+                title: mortgageTitle,
                 amount: amount,
                 totalPeriods: 240,
                 startDate: date,
@@ -1187,6 +1204,13 @@ struct AddExpenseView: View {
             if expense.loanSubCategory == .mortgage {
                 mortgageLinkExisting = true
                 selectedMortgageRealEstateId = linkedId
+                // 備註自動讀取對應貸款項目的名稱（若目前備註為空或與原先相同）
+                if let item = linked.mortgageItems.first(where: { $0.linkedExpenseId == expense.id }) {
+                    let mortgageTitle = item.title.trimmingCharacters(in: .whitespaces)
+                    if !mortgageTitle.isEmpty {
+                        note = mortgageTitle
+                    }
+                }
             }
             reName = linked.name
             reCity = linked.city
