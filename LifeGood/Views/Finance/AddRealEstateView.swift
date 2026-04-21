@@ -42,6 +42,10 @@ struct AddRealEstateView: View {
     @State private var showVariable = false
     @State private var showLandDetail = false
     @State private var showFloor = false
+    @State private var showUtilities = false
+    @State private var showInsurance = false
+    @State private var showAsset = false
+    @State private var showFeaturePicker = false
 
     // MARK: - 人生模式欄位
     @State private var buildingType: BuildingType = .townhouse
@@ -166,9 +170,9 @@ struct AddRealEstateView: View {
                     propertyDetailSection
                     if showLandDetail { landDetailSection }
                     if showFloor { floorSection }
-                    utilitiesSection
-                    insuranceSection
-                    propertyAssetSection
+                    if showUtilities { utilitiesSection }
+                    if showInsurance { insuranceSection }
+                    if showAsset { propertyAssetSection }
                 }
 
                 if showError {
@@ -183,7 +187,13 @@ struct AddRealEstateView: View {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
-                        featureToggleMenu
+                        Button { showFeaturePicker.toggle() } label: {
+                            Image(systemName: "checklist")
+                                .foregroundStyle(.blue)
+                        }
+                        .popover(isPresented: $showFeaturePicker, arrowEdge: .top) {
+                            featureToggleList
+                        }
                         Button(editing != nil ? "儲存" : "新增") { save() }
                             .bold().foregroundStyle(.green)
                     }
@@ -195,8 +205,8 @@ struct AddRealEstateView: View {
 
     // MARK: - 功能選別選單
 
-    private var featureToggleMenu: some View {
-        Menu {
+    private var featureToggleList: some View {
+        List {
             Section("理財") {
                 Toggle(isOn: $showRental) { Label("租金收入", systemImage: "dollarsign.circle") }
                 Toggle(isOn: $showMortgage) { Label("貸款項目", systemImage: "building.columns") }
@@ -206,11 +216,14 @@ struct AddRealEstateView: View {
             Section("房屋資料") {
                 Toggle(isOn: $showLandDetail) { Label("詳細", systemImage: "map") }
                 Toggle(isOn: $showFloor) { Label("樓層資訊", systemImage: "building.2") }
+                Toggle(isOn: $showUtilities) { Label("水電瓦斯", systemImage: "bolt.fill") }
+                Toggle(isOn: $showInsurance) { Label("保險項目", systemImage: "shield.fill") }
+                Toggle(isOn: $showAsset) { Label("房屋附屬資產", systemImage: "sofa.fill") }
             }
-        } label: {
-            Image(systemName: "checklist")
-                .foregroundStyle(.blue)
         }
+        .listStyle(.insetGrouped)
+        .frame(width: 300, height: 460)
+        .presentationCompactAdaptation(.popover)
     }
 
     // MARK: - 物件資訊
@@ -976,6 +989,9 @@ struct AddRealEstateView: View {
         showVariable = !e.variableExpenses.isEmpty
         showLandDetail = !e.landSituation.isEmpty || !e.landNumber.isEmpty || e.landArea > 0
         showFloor = !e.floors.isEmpty
+        showUtilities = !e.waterMeterNumber.isEmpty || !e.electricityMeterNumber.isEmpty || !e.gasMeterNumber.isEmpty
+        showInsurance = !e.insuranceItems.isEmpty
+        showAsset = !e.propertyAssets.isEmpty
 
         name = e.name; city = e.city; address = e.address
         purchaseDate = e.purchaseDate
