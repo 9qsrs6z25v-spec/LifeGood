@@ -157,8 +157,6 @@ struct MainTabView: View {
             contentView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Divider()
-
             bottomBar
         }
         .tint(.green)
@@ -251,38 +249,29 @@ struct MainTabView: View {
     // MARK: - 底部導覽列
 
     private var bottomBar: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 24) {
             featureMenu
-                .frame(maxWidth: .infinity)
 
             if showManagementToggle {
                 managementToggleButton
-                    .frame(maxWidth: .infinity)
             }
 
             if isManagementMode && showManagementToggle {
                 managementMenu
-                    .frame(maxWidth: .infinity)
             }
 
             Button {
                 isSettingsActive = true
                 isManagementMode = false
             } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 22))
-                    Text("設定")
-                        .font(.caption2)
-                }
-                .foregroundStyle(isSettingsActive ? Color.green : Color.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .contentShape(Rectangle())
+                circularLabel(
+                    systemImage: "gearshape.fill",
+                    tint: isSettingsActive ? Color.green : Color.secondary
+                )
             }
         }
-        .padding(.vertical, 4)
-        .background(.bar)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
     }
 
     private var managementToggleButton: some View {
@@ -290,16 +279,10 @@ struct MainTabView: View {
             isManagementMode.toggle()
             isSettingsActive = false
         } label: {
-            VStack(spacing: 4) {
-                Image(systemName: isManagementMode ? "person.badge.shield.checkmark.fill" : "person.badge.shield.checkmark")
-                    .font(.system(size: 22))
-                Text("管理")
-                    .font(.caption2)
-            }
-            .foregroundStyle(isManagementMode ? Color.orange : Color.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
+            circularLabel(
+                systemImage: isManagementMode ? "person.badge.shield.checkmark.fill" : "person.badge.shield.checkmark",
+                tint: isManagementMode ? Color.orange : Color.secondary
+            )
         }
     }
 
@@ -314,18 +297,25 @@ struct MainTabView: View {
                 }
             }
         } label: {
-            VStack(spacing: 4) {
-                Image(systemName: managementFeature.icon)
-                    .font(.system(size: 22))
-                Text(managementFeature.title)
-                    .font(.caption2)
-            }
-            .foregroundStyle(isManagementMode && !isSettingsActive ? Color.orange : Color.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
+            circularLabel(
+                systemImage: managementFeature.icon,
+                tint: isManagementMode && !isSettingsActive ? Color.orange : Color.secondary
+            )
         }
         .menuOrder(.fixed)
+    }
+
+    private func circularLabel(systemImage: String, tint: Color) -> some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 22))
+            .foregroundStyle(tint)
+            .frame(width: 52, height: 52)
+            .background(
+                Circle()
+                    .fill(Color(.systemBackground))
+                    .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
+            )
+            .contentShape(Circle())
     }
 
     private var featureMenu: some View {
@@ -336,6 +326,9 @@ struct MainTabView: View {
                         if appMode != mode.rawValue {
                             appMode = mode.rawValue
                         }
+                        expenseFeatureRaw = ExpenseFeature.overview.rawValue
+                        financeFeatureRaw = FinanceFeature.overview.rawValue
+                        lifeFeatureRaw = LifeFeature.overview.rawValue
                         isSettingsActive = false
                     } label: {
                         if appMode == mode.rawValue {
@@ -379,16 +372,10 @@ struct MainTabView: View {
                 }
             }
         } label: {
-            VStack(spacing: 4) {
-                Image(systemName: currentFeatureIcon)
-                    .font(.system(size: 22))
-                Text(currentFeatureTitle)
-                    .font(.caption2)
-            }
-            .foregroundStyle(isSettingsActive ? Color.secondary : Color.green)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
+            circularLabel(
+                systemImage: currentFeatureIcon,
+                tint: isSettingsActive ? Color.secondary : Color.green
+            )
         }
         .menuOrder(.fixed)
     }
