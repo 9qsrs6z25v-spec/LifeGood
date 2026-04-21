@@ -198,6 +198,7 @@ struct Stock: Identifiable, Codable {
     var isSold: Bool
     var soldPrice: Double
     var soldDate: Date?
+    var linkedExpenseId: UUID?
 
     init(
         id: UUID = UUID(),
@@ -210,7 +211,8 @@ struct Stock: Identifiable, Codable {
         note: String = "",
         isSold: Bool = false,
         soldPrice: Double = 0,
-        soldDate: Date? = nil
+        soldDate: Date? = nil,
+        linkedExpenseId: UUID? = nil
     ) {
         self.id = id
         self.name = name
@@ -223,6 +225,7 @@ struct Stock: Identifiable, Codable {
         self.isSold = isSold
         self.soldPrice = soldPrice
         self.soldDate = soldDate
+        self.linkedExpenseId = linkedExpenseId
     }
 
     init(from decoder: Decoder) throws {
@@ -238,6 +241,7 @@ struct Stock: Identifiable, Codable {
         isSold = try c.decodeIfPresent(Bool.self, forKey: .isSold) ?? false
         soldPrice = try c.decodeIfPresent(Double.self, forKey: .soldPrice) ?? 0
         soldDate = try c.decodeIfPresent(Date.self, forKey: .soldDate)
+        linkedExpenseId = try c.decodeIfPresent(UUID.self, forKey: .linkedExpenseId)
     }
 
     /// 投入成本

@@ -163,6 +163,12 @@ struct VariableExpenseView: View {
                 re.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
                 financeStore.update(re)
             }
+            // 同步解除股票連結
+            if let stockId = expense.linkedStockId,
+               var stock = financeStore.stocks.first(where: { $0.id == stockId }) {
+                stock.linkedExpenseId = nil
+                financeStore.update(stock)
+            }
         }
         store.delete(at: offsets, from: list)
     }

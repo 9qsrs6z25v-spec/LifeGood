@@ -165,8 +165,8 @@ struct AddExpenseView: View {
                     if selectedAssetLink == .stock { stockLinkSection }
                     if selectedAssetLink == .insurance { insuranceLinkSection }
                     if selectedAssetLink == .realEstate { realEstateLinkSection }
-                    // 關聯汽車自動歸為「汽車」、房屋價金自動歸為「房地產」，隱藏分類區塊
                     if selectedAssetLink != .vehicle
+                        && selectedAssetLink != .stock
                         && !(selectedAssetLink == .realEstate && selectedRealEstateExpenseCategory == .housePayment) {
                         categorySection
                     }
@@ -219,6 +219,8 @@ struct AddExpenseView: View {
             .onChange(of: selectedAssetLink) { _, newValue in
                 if newValue == .vehicle {
                     selectedVariableCategory = .vehicle
+                } else if newValue == .stock {
+                    selectedVariableCategory = .stock
                 } else if newValue == .realEstate && selectedRealEstateExpenseCategory == .housePayment {
                     selectedVariableCategory = .realEstate
                 }

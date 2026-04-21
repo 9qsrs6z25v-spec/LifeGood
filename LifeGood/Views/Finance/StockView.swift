@@ -2,8 +2,13 @@ import SwiftUI
 
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @State private var showAdd = false
     @State private var editingItem: Stock?
+    @State private var soldExpanded = false
+
+    private var activeStocks: [Stock] { store.stocks.filter { !$0.isSold } }
+    private var soldStocks: [Stock] { store.stocks.filter { $0.isSold } }
 
     var body: some View {
         NavigationStack {
@@ -13,25 +18,26 @@ struct StockView: View {
                 if store.stocks.isEmpty {
                     emptyState
                 } else {
-                    List {
-                        ForEach(store.stocks) { item in
-                            stockCard(item)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                .onTapGesture { editingItem = item }
-                                .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) {
-                                        store.deleteStock(item)
-                                    } label: {
-                                        Label("刪除", systemImage: "trash")
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(activeStocks) { item in
+                                stockCard(item)
+                                    .onTapGesture { editingItem = item }
+                                    .contextMenu {
+                                        Button(role: .destructive) { deleteStock(item) } label: {
+                                            Label("刪除", systemImage: "trash")
+                                        }
                                     }
-                                }
+                            }
+
+                            if !soldStocks.isEmpty {
+                                soldStackSection
+                            }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
-                    .listStyle(.plain)
                     .background(Color(.systemGroupedBackground))
-                    .scrollContentBackground(.hidden)
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -47,6 +53,98 @@ struct StockView: View {
             .sheet(item: $editingItem) { item in AddStockView(editing: item) }
         }
     }
+
+    // MARK: - 已賣出堆疊
+
+    private var soldStackSection: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    soldExpanded.toggle()
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "archivebox.fill")
+                        .foregroundStyle(.orange)
+                    Text("已賣出（\(soldStocks.count) 檔）")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Image(systemName: soldExpanded ? "chevron.down" : "chevron.up")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(.primary)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+
+            if soldExpanded {
+                ForEach(soldStocks) { item in
+                    stockCard(item)
+                        .padding(.top, 8)
+                        .onTapGesture { editingItem = item }
+                        .contextMenu {
+                            Button(role: .destructive) { deleteStock(item) } label: {
+                                Label("刪除", systemImage: "trash")
+                            }
+                        }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            } else {
+                soldStackPreview
+            }
+        }
+    }
+
+    private var soldStackPreview: some View {
+        ZStack(alignment: .bottom) {
+            let count = min(soldStocks.count, 3)
+            ForEach(0..<count, id: \.self) { i in
+                let reverseIndex = count - 1 - i
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color(.systemGray4), lineWidth: 0.5)
+                    )
+                    .frame(height: 36)
+                    .offset(y: CGFloat(reverseIndex) * -8)
+                    .scaleEffect(x: 1.0 - CGFloat(reverseIndex) * 0.04)
+                    .opacity(1.0 - Double(reverseIndex) * 0.2)
+            }
+
+            if let top = soldStocks.first {
+                HStack {
+                    Text(top.name)
+                        .font(.caption.weight(.medium))
+                        .lineLimit(1)
+                    if !top.symbol.isEmpty {
+                        Text(top.symbol).font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    let pl = top.profitLoss
+                    Text(String(format: "%@%.1f%%", pl >= 0 ? "+" : "", top.returnRate))
+                        .font(.caption.bold())
+                        .foregroundStyle(pl >= 0 ? .green : .red)
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 36)
+            }
+        }
+        .padding(.top, CGFloat(min(soldStocks.count, 3) - 1) * 8)
+    }
+
+    // MARK: - 刪除
+
+    private func deleteStock(_ item: Stock) {
+        if let expId = item.linkedExpenseId {
+            expenseStore.expenses.removeAll { $0.id == expId }
+        }
+        store.deleteStock(item)
+    }
+
+    // MARK: - 摘要
 
     private var summaryHeader: some View {
         VStack(spacing: 8) {
@@ -89,6 +187,8 @@ struct StockView: View {
             Spacer()
         }.frame(maxWidth: .infinity)
     }
+
+    // MARK: - 卡片
 
     private func stockCard(_ item: Stock) -> some View {
         VStack(spacing: 10) {

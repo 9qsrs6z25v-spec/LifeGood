@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AddStockView: View {
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: Stock?
@@ -204,20 +205,48 @@ struct AddStockView: View {
               let price = Double(purchasePriceText), price > 0 else {
             showError = true; return
         }
+        let stockId = editing?.id ?? UUID()
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        let sp = isSold ? (Double(soldPriceText) ?? 0) : 0
+        var expId = editing?.linkedExpenseId
+
+        if isSold && sp > 0 {
+            let pl = shares * (sp - price)
+            expId = syncSoldExpense(stockId: stockId, name: trimmedName, profitLoss: pl, date: soldDate, existingExpenseId: expId)
+        } else if let eid = expId {
+            expenseStore.expenses.removeAll { $0.id == eid }
+            expId = nil
+        }
+
         let item = Stock(
-            id: editing?.id ?? UUID(),
-            name: name.trimmingCharacters(in: .whitespaces),
+            id: stockId,
+            name: trimmedName,
             symbol: symbol.trimmingCharacters(in: .whitespaces).uppercased(),
             purchaseDate: purchaseDate,
             shares: shares, purchasePrice: price,
             currentPrice: Double(currentPriceText) ?? price,
             note: note.trimmingCharacters(in: .whitespaces),
             isSold: isSold,
-            soldPrice: isSold ? (Double(soldPriceText) ?? 0) : 0,
-            soldDate: isSold ? soldDate : nil
+            soldPrice: sp,
+            soldDate: isSold ? soldDate : nil,
+            linkedExpenseId: expId
         )
         if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
         dismiss()
+    }
+
+    private func syncSoldExpense(stockId: UUID, name: String, profitLoss: Double, date: Date, existingExpenseId: UUID?) -> UUID {
+        let expId = existingExpenseId ?? UUID()
+        let title = "賣出 \(name)" + (profitLoss >= 0 ? "（獲利）" : "（虧損）")
+        let expense = Expense(
+            id: expId, title: title,
+            amount: abs(profitLoss), date: date,
+            expenseType: .variable, variableCategory: .stock,
+            linkedStockId: stockId, note: note.trimmingCharacters(in: .whitespaces)
+        )
+        if existingExpenseId != nil { expenseStore.update(expense) }
+        else { expenseStore.add(expense) }
+        return expId
     }
 
     // MARK: - 載入編輯
