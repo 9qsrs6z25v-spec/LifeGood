@@ -103,9 +103,22 @@ struct StockView: View {
                                 .background(Color(.systemGray5))
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                         }
+                        if item.isSold {
+                            Text("已賣出")
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.15))
+                                .foregroundStyle(.orange)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
                     }
-                    Text("\(Int(item.shares)) 股 x NT$\(String(format: "%.2f", item.currentPrice))")
-                        .font(.caption).foregroundStyle(.secondary)
+                    if item.isSold {
+                        Text("\(Int(item.shares)) 股 x NT$\(String(format: "%.2f", item.soldPrice))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("\(Int(item.shares)) 股 x NT$\(String(format: "%.2f", item.currentPrice))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {

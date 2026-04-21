@@ -195,6 +195,9 @@ struct Stock: Identifiable, Codable {
     var purchasePrice: Double
     var currentPrice: Double
     var note: String
+    var isSold: Bool
+    var soldPrice: Double
+    var soldDate: Date?
 
     init(
         id: UUID = UUID(),
@@ -204,7 +207,10 @@ struct Stock: Identifiable, Codable {
         shares: Double = 0,
         purchasePrice: Double = 0,
         currentPrice: Double = 0,
-        note: String = ""
+        note: String = "",
+        isSold: Bool = false,
+        soldPrice: Double = 0,
+        soldDate: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -214,12 +220,30 @@ struct Stock: Identifiable, Codable {
         self.purchasePrice = purchasePrice
         self.currentPrice = currentPrice
         self.note = note
+        self.isSold = isSold
+        self.soldPrice = soldPrice
+        self.soldDate = soldDate
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        symbol = try c.decode(String.self, forKey: .symbol)
+        purchaseDate = try c.decode(Date.self, forKey: .purchaseDate)
+        shares = try c.decode(Double.self, forKey: .shares)
+        purchasePrice = try c.decode(Double.self, forKey: .purchasePrice)
+        currentPrice = try c.decode(Double.self, forKey: .currentPrice)
+        note = try c.decode(String.self, forKey: .note)
+        isSold = try c.decodeIfPresent(Bool.self, forKey: .isSold) ?? false
+        soldPrice = try c.decodeIfPresent(Double.self, forKey: .soldPrice) ?? 0
+        soldDate = try c.decodeIfPresent(Date.self, forKey: .soldDate)
     }
 
     /// 投入成本
     var totalCost: Double { shares * purchasePrice }
     /// 目前市值
-    var marketValue: Double { shares * currentPrice }
+    var marketValue: Double { shares * (isSold ? soldPrice : currentPrice) }
     /// 損益
     var profitLoss: Double { marketValue - totalCost }
     /// 報酬率
