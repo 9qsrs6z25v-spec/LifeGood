@@ -35,6 +35,14 @@ struct AddRealEstateView: View {
     @State private var note = ""
     @State private var showError = false
 
+    // MARK: - 功能選別
+    @State private var showRental = false
+    @State private var showMortgage = false
+    @State private var showPaid = false
+    @State private var showVariable = false
+    @State private var showLandDetail = false
+    @State private var showFloor = false
+
     // MARK: - 人生模式欄位
     @State private var buildingType: BuildingType = .townhouse
     @State private var pingCountText = ""
@@ -145,10 +153,10 @@ struct AddRealEstateView: View {
 
                 if editTab == .finance {
                     valueSection
-                    rentalSection
-                    mortgageSection
-                    paidSection
-                    variableExpenseSection
+                    if showRental { rentalSection }
+                    if showMortgage { mortgageSection }
+                    if showPaid { paidSection }
+                    if showVariable { variableExpenseSection }
                     calcSection
 
                     Section("備註") {
@@ -156,8 +164,8 @@ struct AddRealEstateView: View {
                     }
                 } else {
                     propertyDetailSection
-                    landDetailSection
-                    floorSection
+                    if showLandDetail { landDetailSection }
+                    if showFloor { floorSection }
                     utilitiesSection
                     insuranceSection
                     propertyAssetSection
@@ -174,11 +182,34 @@ struct AddRealEstateView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
+                    HStack(spacing: 16) {
+                        featureToggleMenu
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                    }
                 }
             }
             .onAppear { loadEditing() }
+        }
+    }
+
+    // MARK: - 功能選別選單
+
+    private var featureToggleMenu: some View {
+        Menu {
+            Section("理財") {
+                Toggle(isOn: $showRental) { Label("租金收入", systemImage: "dollarsign.circle") }
+                Toggle(isOn: $showMortgage) { Label("貸款項目", systemImage: "building.columns") }
+                Toggle(isOn: $showPaid) { Label("已支出房屋金額", systemImage: "banknote") }
+                Toggle(isOn: $showVariable) { Label("變動支出", systemImage: "cart") }
+            }
+            Section("房屋資料") {
+                Toggle(isOn: $showLandDetail) { Label("詳細", systemImage: "map") }
+                Toggle(isOn: $showFloor) { Label("樓層資訊", systemImage: "building.2") }
+            }
+        } label: {
+            Image(systemName: "checklist")
+                .foregroundStyle(.blue)
         }
     }
 
@@ -938,6 +969,14 @@ struct AddRealEstateView: View {
 
     private func loadEditing() {
         guard let e = editing else { return }
+
+        showRental = e.monthlyRental > 0
+        showMortgage = !e.mortgageItems.isEmpty
+        showPaid = !e.paidItems.isEmpty
+        showVariable = !e.variableExpenses.isEmpty
+        showLandDetail = !e.landSituation.isEmpty || !e.landNumber.isEmpty || e.landArea > 0
+        showFloor = !e.floors.isEmpty
+
         name = e.name; city = e.city; address = e.address
         purchaseDate = e.purchaseDate
         if let sd = e.soldDate {
