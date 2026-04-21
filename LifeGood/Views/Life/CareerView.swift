@@ -265,7 +265,13 @@ struct CareerView: View {
             if let g = item.jobGrade, !g.isEmpty { p.append(g) }
             return p
         }()
-        if item.careerSubCategory == .resign {
+        if item.careerSubCategory == .salaryAdjust,
+           let before = item.salaryBefore, before > 0,
+           let after = item.salaryAfter, after > 0 {
+            let pct = (after - before) / before * 100
+            Text(String(format: "NT$%.0f → NT$%.0f（%@%.1f%%）", before, after, pct >= 0 ? "+" : "", pct))
+                .font(.caption).foregroundStyle(pct >= 0 ? .green : .red).lineLimit(1)
+        } else if item.careerSubCategory == .resign {
             if let m = item.mood, !m.isEmpty {
                 Text("心境：\(m)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -284,6 +290,7 @@ struct CareerView: View {
         switch sub {
         case .join: return .green
         case .promote: return .blue
+        case .salaryAdjust: return .cyan
         case .transfer: return .orange
         case .demote: return .purple
         case .resign: return .red

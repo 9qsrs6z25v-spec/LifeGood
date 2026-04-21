@@ -138,6 +138,7 @@ enum MilestoneCategory: String, Codable, CaseIterable, Identifiable {
 enum CareerSubCategory: String, Codable, CaseIterable, Identifiable {
     case join = "入職"
     case promote = "升職"
+    case salaryAdjust = "調薪"
     case transfer = "轉職"
     case demote = "降職"
     case resign = "離職"
@@ -147,6 +148,7 @@ enum CareerSubCategory: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .join: return "arrow.right.to.line"
         case .promote: return "arrow.up.circle.fill"
+        case .salaryAdjust: return "dollarsign.arrow.circlepath"
         case .transfer: return "arrow.left.arrow.right"
         case .demote: return "arrow.down.circle.fill"
         case .resign: return "arrow.right.square"
@@ -170,6 +172,9 @@ struct LifeMilestone: Identifiable, Codable {
     var mood: String?
     var futurePlan: String?
     var isManagerial: Bool?
+    var salary: Double?
+    var salaryBefore: Double?
+    var salaryAfter: Double?
 
     init(id: UUID = UUID(), title: String, date: Date = Date(),
          category: MilestoneCategory = .other, note: String = "",
@@ -177,7 +182,8 @@ struct LifeMilestone: Identifiable, Codable {
          companyName: String? = nil, department: String? = nil,
          jobTitle: String? = nil, jobGrade: String? = nil,
          mood: String? = nil, futurePlan: String? = nil,
-         isManagerial: Bool? = nil) {
+         isManagerial: Bool? = nil,
+         salary: Double? = nil, salaryBefore: Double? = nil, salaryAfter: Double? = nil) {
         self.id = id; self.title = title; self.date = date
         self.category = category; self.note = note
         self.careerSubCategory = careerSubCategory
@@ -185,6 +191,7 @@ struct LifeMilestone: Identifiable, Codable {
         self.jobTitle = jobTitle; self.jobGrade = jobGrade
         self.mood = mood; self.futurePlan = futurePlan
         self.isManagerial = isManagerial
+        self.salary = salary; self.salaryBefore = salaryBefore; self.salaryAfter = salaryAfter
     }
 
     init(from decoder: Decoder) throws {
@@ -202,12 +209,15 @@ struct LifeMilestone: Identifiable, Codable {
         mood = try? c.decode(String.self, forKey: .mood)
         futurePlan = try? c.decode(String.self, forKey: .futurePlan)
         isManagerial = try? c.decode(Bool.self, forKey: .isManagerial)
+        salary = try? c.decode(Double.self, forKey: .salary)
+        salaryBefore = try? c.decode(Double.self, forKey: .salaryBefore)
+        salaryAfter = try? c.decode(Double.self, forKey: .salaryAfter)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, date, category, note
         case careerSubCategory, companyName, department, jobTitle, jobGrade
-        case mood, futurePlan, isManagerial
+        case mood, futurePlan, isManagerial, salary, salaryBefore, salaryAfter
     }
 }
 

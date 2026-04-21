@@ -509,6 +509,9 @@ struct AddMilestoneView: View {
     @State private var mood = ""
     @State private var futurePlan = ""
     @State private var isManagerial = false
+    @State private var salaryText = ""
+    @State private var salaryBeforeText = ""
+    @State private var salaryAfterText = ""
 
     private var isFamily: Bool { category == .family }
     private var isRealEstate: Bool { category == .realEstate }
@@ -525,6 +528,8 @@ struct AddMilestoneView: View {
             switch careerSub {
             case .join: return !companyName.trimmingCharacters(in: .whitespaces).isEmpty
             case .promote, .demote: return !jobTitle.trimmingCharacters(in: .whitespaces).isEmpty
+            case .salaryAdjust:
+                return (Double(salaryBeforeText) ?? 0) > 0 && (Double(salaryAfterText) ?? 0) > 0
             case .transfer: return !department.trimmingCharacters(in: .whitespaces).isEmpty
             case .resign: return true
             }
@@ -676,30 +681,75 @@ struct AddMilestoneView: View {
             TextField("部門", text: $department)
             TextField("職位名稱", text: $jobTitle)
             TextField("職等編號", text: $jobGrade)
+            salaryField
         case .promote:
             TextField("更新後職位名稱", text: $jobTitle)
             TextField("更新後職等編號", text: $jobGrade)
+            salaryField
+        case .salaryAdjust:
+            EmptyView()
         case .transfer:
             TextField("更新後部門", text: $department)
             TextField("職位名稱", text: $jobTitle)
             TextField("職等編號", text: $jobGrade)
+            salaryField
         case .demote:
             TextField("更新後職位名稱", text: $jobTitle)
             TextField("更新後職等編號", text: $jobGrade)
+            salaryField
         case .resign:
             EmptyView()
         }
 
-        DatePicker("日期", selection: $date, displayedComponents: .date)
+        if careerSub != .salaryAdjust {
+            DatePicker("日期", selection: $date, displayedComponents: .date)
+        }
 
         if careerSub == .join || careerSub == .promote || careerSub == .transfer {
             Toggle("是否為管理職", isOn: $isManagerial)
         }
     }
 
+    private var salaryField: some View {
+        HStack {
+            Text("NT$").foregroundStyle(.secondary)
+            TextField("薪水（選填）", text: $salaryText)
+                .keyboardType(.numberPad)
+        }
+    }
+
     @ViewBuilder
     private var careerExtraSection: some View {
-        if careerSub == .resign {
+        if careerSub == .salaryAdjust {
+            Section("調薪資訊") {
+                HStack {
+                    Text("NT$").foregroundStyle(.secondary)
+                    TextField("調薪前薪水", text: $salaryBeforeText)
+                        .keyboardType(.numberPad)
+                }
+                HStack {
+                    Text("NT$").foregroundStyle(.secondary)
+                    TextField("調薪後薪水", text: $salaryAfterText)
+                        .keyboardType(.numberPad)
+                }
+                HStack {
+                    Text("幅度")
+                    Spacer()
+                    if let before = Double(salaryBeforeText), before > 0,
+                       let after = Double(salaryAfterText), after > 0 {
+                        let pct = (after - before) / before * 100
+                        Text(String(format: "%@%.1f%%", pct >= 0 ? "+" : "", pct))
+                            .foregroundStyle(pct >= 0 ? .green : .red)
+                    } else {
+                        Text("—").foregroundStyle(.secondary)
+                    }
+                }
+                DatePicker("日期", selection: $date, displayedComponents: .date)
+            }
+            Section("備註") {
+                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            }
+        } else if careerSub == .resign {
             Section("心境與規劃") {
                 TextField("心境", text: $mood, axis: .vertical).lineLimit(3)
                 TextField("未來規劃", text: $futurePlan, axis: .vertical).lineLimit(3)
@@ -747,6 +797,11 @@ struct AddMilestoneView: View {
                 default: return nil
                 }
             }()
+            let salaryVal: Double? = {
+                if careerSub == .salaryAdjust { return nil }
+                guard let v = Double(salaryText), v > 0 else { return nil }
+                return v
+            }()
             let item = LifeMilestone(
                 id: editing?.id ?? UUID(),
                 title: autoTitle, date: date, category: .career,
@@ -758,7 +813,10 @@ struct AddMilestoneView: View {
                 jobGrade: jobGrade.trimmingCharacters(in: .whitespaces).isEmpty ? nil : jobGrade.trimmingCharacters(in: .whitespaces),
                 mood: mood.trimmingCharacters(in: .whitespaces).isEmpty ? nil : mood.trimmingCharacters(in: .whitespaces),
                 futurePlan: futurePlan.trimmingCharacters(in: .whitespaces).isEmpty ? nil : futurePlan.trimmingCharacters(in: .whitespaces),
-                isManagerial: managerial
+                isManagerial: managerial,
+                salary: salaryVal,
+                salaryBefore: careerSub == .salaryAdjust ? Double(salaryBeforeText) : nil,
+                salaryAfter: careerSub == .salaryAdjust ? Double(salaryAfterText) : nil
             )
             if editing != nil { store.update(item) } else { store.add(item) }
         } else {
@@ -790,6 +848,13 @@ struct AddMilestoneView: View {
             return "入職 " + parts.joined(separator: " - ")
         case .promote:
             return jt.isEmpty ? "升職" : "升職為 \(jt)"
+        case .salaryAdjust:
+            if let before = Double(salaryBeforeText), before > 0,
+               let after = Double(salaryAfterText), after > 0 {
+                let pct = (after - before) / before * 100
+                return String(format: "調薪 %@%.1f%%", pct >= 0 ? "+" : "", pct)
+            }
+            return "調薪"
         case .transfer:
             let parts = [dp, jt].filter { !$0.isEmpty }
             return "轉職至 " + parts.joined(separator: " - ")
@@ -824,6 +889,9 @@ struct AddMilestoneView: View {
             mood = e.mood ?? ""
             futurePlan = e.futurePlan ?? ""
             isManagerial = e.isManagerial ?? false
+            if let s = e.salary, s > 0 { salaryText = String(format: "%.0f", s) }
+            if let sb = e.salaryBefore, sb > 0 { salaryBeforeText = String(format: "%.0f", sb) }
+            if let sa = e.salaryAfter, sa > 0 { salaryAfterText = String(format: "%.0f", sa) }
             return
         }
         if let f = editingFamily {
