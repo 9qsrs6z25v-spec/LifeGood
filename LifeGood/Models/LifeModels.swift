@@ -411,3 +411,15 @@ struct Subordinate: Identifiable, Codable {
         self.department = department; self.note = note
     }
 }
+
+// MARK: - 職等對應職稱
+
+struct GradeTitle: Identifiable, Codable {
+    let id: UUID
+    var grade: String
+    var title: String
+
+    init(id: UUID = UUID(), grade: String = "", title: String = "") {
+        self.id = id; self.grade = grade; self.title = title
+    }
+}

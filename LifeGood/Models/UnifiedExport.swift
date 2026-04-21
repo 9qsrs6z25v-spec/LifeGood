@@ -30,6 +30,7 @@ struct UnifiedExport: Codable {
         var pets: [Pet]
         var schedules: [Schedule]
         var subordinates: [Subordinate]?
+        var gradeTitles: [GradeTitle]?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> UnifiedExport {
@@ -50,7 +51,8 @@ struct UnifiedExport: Codable {
                 relationships: life.relationships,
                 pets: life.pets,
                 schedules: life.schedules,
-                subordinates: life.subordinates
+                subordinates: life.subordinates,
+                gradeTitles: life.gradeTitles
             )
         )
     }
@@ -308,6 +310,7 @@ enum UnifiedImporter {
             life.pets = payload.life.pets
             life.schedules = payload.life.schedules
             if let subs = payload.life.subordinates { life.subordinates = subs }
+            if let gts = payload.life.gradeTitles { life.gradeTitles = gts }
 
             result.expenses = payload.expense.expenses.count
             result.incomes = payload.expense.incomes.count
@@ -375,6 +378,11 @@ enum UnifiedImporter {
             if let subs = payload.life.subordinates {
                 let newSubs = mergeItems(existing: life.subordinates, incoming: subs)
                 life.subordinates.append(contentsOf: newSubs)
+            }
+
+            if let gts = payload.life.gradeTitles {
+                let newGts = mergeItems(existing: life.gradeTitles, incoming: gts)
+                life.gradeTitles.append(contentsOf: newGts)
             }
         }
 
