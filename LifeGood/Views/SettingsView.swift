@@ -39,6 +39,7 @@ struct SettingsView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var cloudSync: CloudSyncManager
     @AppStorage("appMode") private var appMode: String = AppMode.expense.rawValue
 
     private var currentMode: AppMode {
@@ -71,6 +72,7 @@ struct SettingsView: View {
             List {
                 modeSwitchSection
                 currencyRateSection
+                iCloudSyncSection
                 dataManagementSection
                 dataStatsSection
                 restoreSection
@@ -206,6 +208,107 @@ struct SettingsView: View {
         } footer: {
             Text("輸入幣別代號與對 NT$ 的比值（例：美金 = 32 元）。新增後，記帳的金額輸入欄位左側即可選擇該幣別，輸入金額時將自動換算為 NT$。")
         }
+    }
+
+    // MARK: - iCloud 同步
+
+    private var iCloudSyncSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { cloudSync.isEnabled },
+                set: { cloudSync.isEnabled = $0 }
+            )) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("啟用 iCloud 同步")
+                        Text("相同 Apple ID 裝置間自動同步")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "icloud.fill")
+                        .foregroundStyle(.blue)
+                }
+            }
+            .disabled(!cloudSync.isAccountAvailable)
+
+            HStack {
+                Label("iCloud 帳號", systemImage: cloudSync.isAccountAvailable ? "checkmark.icloud.fill" : "xmark.icloud.fill")
+                    .foregroundStyle(cloudSync.isAccountAvailable ? Color.green : Color.red)
+                Spacer()
+                Text(cloudSync.isAccountAvailable ? "已登入" : "未登入")
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Label("同步狀態", systemImage: syncStatusIcon)
+                    .foregroundStyle(syncStatusColor)
+                Spacer()
+                Text(syncStatusText)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            HStack {
+                Label("最近同步", systemImage: "clock")
+                Spacer()
+                if let date = cloudSync.lastSyncDate {
+                    Text(formatSyncDate(date))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("尚未同步")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if cloudSync.lastChangeReason != .none {
+                HStack {
+                    Label("最近事件", systemImage: "arrow.triangle.2.circlepath")
+                    Spacer()
+                    Text(cloudSync.lastChangeReason.rawValue)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Button {
+                cloudSync.syncNow()
+            } label: {
+                Label("立即同步", systemImage: "arrow.clockwise.icloud")
+                    .foregroundStyle(cloudSync.isAccountAvailable ? Color.blue : Color.secondary)
+            }
+            .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled)
+        } header: {
+            Text("iCloud 同步")
+        } footer: {
+            Text("啟用後，記帳/理財/人生三模式的資料會透過 iCloud 在相同 Apple ID 的裝置間自動同步。資料完全儲存於你的 iCloud，LifeGood 不會收集或上傳任何資料。未登入 iCloud 帳號時無法啟用。")
+        }
+    }
+
+    private var syncStatusIcon: String {
+        if !cloudSync.isAccountAvailable { return "icloud.slash" }
+        if !cloudSync.isEnabled { return "pause.circle" }
+        return "checkmark.circle.fill"
+    }
+
+    private var syncStatusColor: Color {
+        if !cloudSync.isAccountAvailable { return .red }
+        if !cloudSync.isEnabled { return .secondary }
+        return .green
+    }
+
+    private var syncStatusText: String {
+        if !cloudSync.isAccountAvailable { return "iCloud 未登入" }
+        if !cloudSync.isEnabled { return "已關閉" }
+        return "已同步"
+    }
+
+    private func formatSyncDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy/M/d HH:mm"
+        return formatter.string(from: date)
     }
 
     // MARK: - 資料管理
@@ -520,4 +623,5 @@ struct SettingsView: View {
         .environmentObject(ExpenseStore())
         .environmentObject(FinanceStore())
         .environmentObject(LifeStore())
+        .environmentObject(CloudSyncManager.shared)
 }

@@ -11,7 +11,20 @@ class LifeStore: ObservableObject {
 
     private var isLoading = false
 
-    init() { load() }
+    init() {
+        load()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reloadFromCloud),
+            name: .cloudSyncDidPullChanges,
+            object: nil
+        )
+    }
+
+    @objc private func reloadFromCloud() {
+        load()
+        objectWillChange.send()
+    }
 
     // MARK: - 個人檔案
 
@@ -200,6 +213,7 @@ class LifeStore: ObservableObject {
         if let data = try? encoder.encode(subordinates) {
             UserDefaults.standard.set(data, forKey: "life_subordinates")
         }
+        CloudSyncManager.shared.pushAll()
     }
 
     private func load() {

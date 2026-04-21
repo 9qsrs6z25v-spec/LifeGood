@@ -12,7 +12,20 @@ class FinanceStore: ObservableObject {
     private let reKey = "lifegood_realestates"
     private var isLoading = false
 
-    init() { load() }
+    init() {
+        load()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reloadFromCloud),
+            name: .cloudSyncDidPullChanges,
+            object: nil
+        )
+    }
+
+    @objc private func reloadFromCloud() {
+        load()
+        objectWillChange.send()
+    }
 
     // MARK: - 儲蓄險 CRUD
 
@@ -94,6 +107,7 @@ class FinanceStore: ObservableObject {
         if let d = try? encoder.encode(stocks) { UserDefaults.standard.set(d, forKey: stockKey) }
         if let d = try? encoder.encode(vehicles) { UserDefaults.standard.set(d, forKey: vehicleKey) }
         if let d = try? encoder.encode(realEstates) { UserDefaults.standard.set(d, forKey: reKey) }
+        CloudSyncManager.shared.pushAll()
     }
 
     private func load() {

@@ -19,6 +19,17 @@ class ExpenseStore: ObservableObject {
 
     init() {
         load()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reloadFromCloud),
+            name: .cloudSyncDidPullChanges,
+            object: nil
+        )
+    }
+
+    @objc private func reloadFromCloud() {
+        load()
+        objectWillChange.send()
     }
 
     // MARK: - 支出 CRUD
@@ -405,12 +416,14 @@ class ExpenseStore: ObservableObject {
         if let data = try? JSONEncoder().encode(incomes) {
             UserDefaults.standard.set(data, forKey: incomeKey)
         }
+        CloudSyncManager.shared.pushAll()
     }
 
     private func saveCurrencyRates() {
         if let data = try? JSONEncoder().encode(currencyRates) {
             UserDefaults.standard.set(data, forKey: currencyRatesKey)
         }
+        CloudSyncManager.shared.push(key: currencyRatesKey)
     }
 
     private func load() {
