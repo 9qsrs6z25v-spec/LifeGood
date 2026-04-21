@@ -404,11 +404,22 @@ struct Subordinate: Identifiable, Codable {
     var jobTitle: String
     var department: String
     var note: String
+    var gradeTitleId: UUID?
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
-         department: String = "", note: String = "") {
+         department: String = "", note: String = "", gradeTitleId: UUID? = nil) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
-        self.department = department; self.note = note
+        self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        jobTitle = try c.decode(String.self, forKey: .jobTitle)
+        department = try c.decode(String.self, forKey: .department)
+        note = try c.decode(String.self, forKey: .note)
+        gradeTitleId = try c.decodeIfPresent(UUID.self, forKey: .gradeTitleId)
     }
 }
 

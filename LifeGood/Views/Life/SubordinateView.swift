@@ -54,7 +54,10 @@ struct SubordinateView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(sub.name).font(.subheadline.weight(.medium))
-                if !sub.jobTitle.isEmpty {
+                if let gt = lifeStore.gradeTitles.first(where: { $0.id == sub.gradeTitleId }) {
+                    Text("\(gt.grade) — \(gt.title)")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                } else if !sub.jobTitle.isEmpty {
                     Text(sub.jobTitle)
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -80,7 +83,7 @@ struct AddSubordinateView: View {
     var editing: Subordinate?
 
     @State private var name = ""
-    @State private var jobTitle = ""
+    @State private var selectedGradeTitleId: UUID?
     @State private var department = ""
     @State private var note = ""
 
@@ -93,7 +96,7 @@ struct AddSubordinateView: View {
             Form {
                 Section("基本資訊") {
                     TextField("姓名", text: $name)
-                    TextField("職位", text: $jobTitle)
+                    gradeTitlePicker
                     TextField("部門", text: $department)
                 }
                 Section("備註") {
@@ -114,13 +117,43 @@ struct AddSubordinateView: View {
         }
     }
 
+    @ViewBuilder
+    private var gradeTitlePicker: some View {
+        if lifeStore.gradeTitles.isEmpty {
+            HStack {
+                Text("職位")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("請先至「職等職稱」設定")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        } else {
+            Picker("職位", selection: $selectedGradeTitleId) {
+                Text("未選擇").tag(UUID?.none)
+                ForEach(lifeStore.gradeTitles) { gt in
+                    Text("\(gt.grade) — \(gt.title)").tag(UUID?.some(gt.id))
+                }
+            }
+        }
+    }
+
     private func save() {
+        let linkedTitle: String
+        if let gtId = selectedGradeTitleId,
+           let gt = lifeStore.gradeTitles.first(where: { $0.id == gtId }) {
+            linkedTitle = "\(gt.grade) — \(gt.title)"
+        } else {
+            linkedTitle = ""
+        }
+
         let item = Subordinate(
             id: editing?.id ?? UUID(),
             name: name.trimmingCharacters(in: .whitespaces),
-            jobTitle: jobTitle.trimmingCharacters(in: .whitespaces),
+            jobTitle: linkedTitle,
             department: department.trimmingCharacters(in: .whitespaces),
-            note: note.trimmingCharacters(in: .whitespaces)
+            note: note.trimmingCharacters(in: .whitespaces),
+            gradeTitleId: selectedGradeTitleId
         )
         if editing != nil { lifeStore.update(item) } else { lifeStore.add(item) }
         dismiss()
@@ -129,7 +162,7 @@ struct AddSubordinateView: View {
     private func loadEditing() {
         guard let e = editing else { return }
         name = e.name
-        jobTitle = e.jobTitle
+        selectedGradeTitleId = e.gradeTitleId
         department = e.department
         note = e.note
     }
