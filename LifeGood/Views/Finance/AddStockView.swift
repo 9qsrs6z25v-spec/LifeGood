@@ -1,5 +1,26 @@
 import SwiftUI
 
+// MARK: - 台股報價資料
+
+struct StockQuote {
+    var name: String = ""
+    var exchange: String = ""
+    var lastPrice: Double = 0
+    var yesterdayClose: Double = 0
+    var openPrice: Double = 0
+    var highPrice: Double = 0
+    var lowPrice: Double = 0
+    var volume: String = ""
+    var date: String = ""
+    var time: String = ""
+
+    var changeAmount: Double { lastPrice > 0 ? lastPrice - yesterdayClose : 0 }
+    var changePercent: Double { yesterdayClose > 0 ? changeAmount / yesterdayClose * 100 : 0 }
+    var isUp: Bool { changeAmount >= 0 }
+}
+
+// MARK: - 新增/編輯股票
+
 struct AddStockView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -22,14 +43,22 @@ struct AddStockView: View {
 
     @State private var isFetching = false
     @State private var fetchError = ""
+    @State private var quote: StockQuote?
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("股票資訊") {
+                    HStack {
+                        TextField("股票代號（如 2330）", text: $symbol)
+                            .keyboardType(.numberPad)
+                        fetchButton
+                    }
                     TextField("股票名稱", text: $name)
-                    TextField("股票代號（如 2330）", text: $symbol)
-                        .keyboardType(.numberPad)
+                    if !fetchError.isEmpty {
+                        Text(fetchError)
+                            .font(.caption).foregroundStyle(.red)
+                    }
                     DatePicker("買入日期", selection: $purchaseDate, displayedComponents: .date)
 
                     HStack {
@@ -63,16 +92,14 @@ struct AddStockView: View {
                         Text("NT$").foregroundStyle(.secondary)
                         TextField("目前價格（每股）", text: $currentPriceText)
                             .keyboardType(.decimalPad)
-                        Spacer()
-                        fetchButton
-                    }
-                    if !fetchError.isEmpty {
-                        Text(fetchError)
-                            .font(.caption).foregroundStyle(.red)
                     }
                 }
 
                 calcSection
+
+                if let q = quote {
+                    quoteDetailSection(q)
+                }
 
                 Section("備註") {
                     TextField("選填備註", text: $note, axis: .vertical)
@@ -105,7 +132,7 @@ struct AddStockView: View {
 
     private var fetchButton: some View {
         Button {
-            Task { await fetchPrice() }
+            Task { await fetchStockInfo() }
         } label: {
             if isFetching {
                 ProgressView()
@@ -122,7 +149,7 @@ struct AddStockView: View {
 
     // MARK: - 台股即時報價
 
-    private func fetchPrice() async {
+    private func fetchStockInfo() async {
         let trimmed = symbol.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
 
@@ -130,20 +157,32 @@ struct AddStockView: View {
         fetchError = ""
         defer { isFetching = false }
 
-        // 先嘗試上市（tse），失敗再嘗試上櫃（otc）
-        if let price = await fetchTWSE(symbol: trimmed, exchange: "tse") {
-            currentPriceText = String(format: "%.2f", price)
+        if let result = await fetchTWSE(symbol: trimmed, exchange: "tse") {
+            applyQuote(result)
             return
         }
-        if let price = await fetchTWSE(symbol: trimmed, exchange: "otc") {
-            currentPriceText = String(format: "%.2f", price)
+        if let result = await fetchTWSE(symbol: trimmed, exchange: "otc") {
+            applyQuote(result)
             return
         }
 
+        quote = nil
         fetchError = "查無股票代號 \(trimmed) 的報價"
     }
 
-    private func fetchTWSE(symbol: String, exchange: String) async -> Double? {
+    private func applyQuote(_ q: StockQuote) {
+        quote = q
+        if q.lastPrice > 0 {
+            currentPriceText = String(format: "%.2f", q.lastPrice)
+        } else if q.yesterdayClose > 0 {
+            currentPriceText = String(format: "%.2f", q.yesterdayClose)
+        }
+        if !q.name.isEmpty && name.isEmpty {
+            name = q.name
+        }
+    }
+
+    private func fetchTWSE(symbol: String, exchange: String) async -> StockQuote? {
         let urlString = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=\(exchange)_\(symbol).tw"
         guard let url = URL(string: urlString) else { return nil }
 
@@ -151,18 +190,73 @@ struct AddStockView: View {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let msgArray = json["msgArray"] as? [[String: Any]],
-                  let first = msgArray.first else { return nil }
+                  let m = msgArray.first else { return nil }
 
-            // z = 最近成交價, y = 昨收
-            if let z = first["z"] as? String, let price = Double(z), price > 0 {
-                return price
-            }
-            if let y = first["y"] as? String, let price = Double(y), price > 0 {
-                return price
-            }
-            return nil
+            let z = Double(m["z"] as? String ?? "") ?? 0
+            let y = Double(m["y"] as? String ?? "") ?? 0
+            guard z > 0 || y > 0 else { return nil }
+
+            return StockQuote(
+                name: (m["n"] as? String ?? "").trimmingCharacters(in: .whitespaces),
+                exchange: exchange == "tse" ? "上市" : "上櫃",
+                lastPrice: z,
+                yesterdayClose: y,
+                openPrice: Double(m["o"] as? String ?? "") ?? 0,
+                highPrice: Double(m["h"] as? String ?? "") ?? 0,
+                lowPrice: Double(m["l"] as? String ?? "") ?? 0,
+                volume: m["v"] as? String ?? "",
+                date: m["d"] as? String ?? "",
+                time: m["t"] as? String ?? ""
+            )
         } catch {
             return nil
+        }
+    }
+
+    // MARK: - 行情資訊
+
+    private func quoteDetailSection(_ q: StockQuote) -> some View {
+        Section {
+            row("交易所", q.exchange)
+
+            HStack {
+                Text("漲跌")
+                Spacer()
+                let sign = q.isUp ? "+" : ""
+                Text(String(format: "%@%.2f（%@%.2f%%）", sign, q.changeAmount, sign, q.changePercent))
+                    .foregroundStyle(q.isUp ? .red : .green)
+            }
+
+            if q.openPrice > 0 { row("開盤", String(format: "%.2f", q.openPrice)) }
+
+            if q.highPrice > 0 || q.lowPrice > 0 {
+                HStack {
+                    Text("最高 / 最低")
+                    Spacer()
+                    Text(String(format: "%.2f / %.2f", q.highPrice, q.lowPrice))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if q.yesterdayClose > 0 { row("昨收", String(format: "%.2f", q.yesterdayClose)) }
+
+            if !q.volume.isEmpty { row("成交量", "\(q.volume) 張") }
+
+            if !q.date.isEmpty || !q.time.isEmpty {
+                row("更新時間", "\(q.date) \(q.time)")
+            }
+        } header: {
+            Text("即時行情")
+        } footer: {
+            Text("資料來源：臺灣證券交易所。盤中為即時報價，收盤後為收盤價。")
+        }
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value).foregroundStyle(.secondary)
         }
     }
 
