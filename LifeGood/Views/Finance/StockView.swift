@@ -141,6 +141,9 @@ struct StockView: View {
         if let expId = item.linkedExpenseId {
             expenseStore.expenses.removeAll { $0.id == expId }
         }
+        if let incId = item.linkedIncomeId {
+            expenseStore.incomes.removeAll { $0.id == incId }
+        }
         store.deleteStock(item)
     }
 

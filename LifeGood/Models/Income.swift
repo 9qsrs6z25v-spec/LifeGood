@@ -7,6 +7,7 @@ enum IncomeCategory: String, Codable, CaseIterable, Identifiable {
     case bonus = "獎金"
     case gift = "禮金"
     case luck = "確幸"
+    case investment = "投資"
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum IncomeCategory: String, Codable, CaseIterable, Identifiable {
         case .bonus: return "star.fill"
         case .gift: return "gift.fill"
         case .luck: return "sparkles"
+        case .investment: return "chart.line.uptrend.xyaxis"
         }
     }
 
@@ -25,6 +27,7 @@ enum IncomeCategory: String, Codable, CaseIterable, Identifiable {
         case .bonus: return "BonusColor"
         case .gift: return "GiftColor"
         case .luck: return "LuckColor"
+        case .investment: return "InvestmentColor"
         }
     }
 }
@@ -48,8 +51,9 @@ struct Income: Identifiable, Codable {
     var date: Date
     var category: IncomeCategory
     var period: IncomePeriod
-    var isFixedSalary: Bool     // 薪水類別專用：是否為固定薪水（每月重複計算）
+    var isFixedSalary: Bool
     var note: String
+    var linkedStockId: UUID?
 
     init(
         id: UUID = UUID(),
@@ -59,7 +63,8 @@ struct Income: Identifiable, Codable {
         category: IncomeCategory = .salary,
         period: IncomePeriod = .monthly,
         isFixedSalary: Bool = false,
-        note: String = ""
+        note: String = "",
+        linkedStockId: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -69,9 +74,9 @@ struct Income: Identifiable, Codable {
         self.period = period
         self.isFixedSalary = isFixedSalary
         self.note = note
+        self.linkedStockId = linkedStockId
     }
 
-    // MARK: - 向下相容解碼
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -82,9 +87,10 @@ struct Income: Identifiable, Codable {
         period = (try? c.decode(IncomePeriod.self, forKey: .period)) ?? .monthly
         isFixedSalary = (try? c.decode(Bool.self, forKey: .isFixedSalary)) ?? false
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        linkedStockId = try? c.decodeIfPresent(UUID.self, forKey: .linkedStockId)
     }
     private enum CodingKeys: String, CodingKey {
-        case id, title, amount, date, category, period, isFixedSalary, note
+        case id, title, amount, date, category, period, isFixedSalary, note, linkedStockId
     }
 
     /// 換算月收入

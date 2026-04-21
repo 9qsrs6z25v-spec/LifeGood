@@ -2,6 +2,7 @@ import SwiftUI
 
 struct IncomeView: View {
     @EnvironmentObject var store: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
     @State private var showAdd = false
     @State private var editingItem: Income?
     @State private var selectedCategory: IncomeCategory?
@@ -188,6 +189,14 @@ struct IncomeView: View {
                             .onTapGesture { editingItem = income }
                     }
                     .onDelete { offsets in
+                        for index in offsets {
+                            let income = incomes[index]
+                            if let stockId = income.linkedStockId,
+                               var stock = financeStore.stocks.first(where: { $0.id == stockId }) {
+                                stock.linkedIncomeId = nil
+                                financeStore.update(stock)
+                            }
+                        }
                         store.deleteIncome(at: offsets, from: incomes)
                     }
                 }

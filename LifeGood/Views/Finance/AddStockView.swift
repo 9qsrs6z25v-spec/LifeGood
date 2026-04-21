@@ -301,15 +301,23 @@ struct AddStockView: View {
         }
         let stockId = editing?.id ?? UUID()
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let sp = isSold ? (Double(soldPriceText) ?? 0) : 0
         var expId = editing?.linkedExpenseId
+        var incId = editing?.linkedIncomeId
 
         if isSold && sp > 0 {
             let pl = shares * (sp - price)
-            expId = syncSoldExpense(stockId: stockId, name: trimmedName, profitLoss: pl, date: soldDate, existingExpenseId: expId)
-        } else if let eid = expId {
-            expenseStore.expenses.removeAll { $0.id == eid }
-            expId = nil
+            if pl >= 0 {
+                incId = syncSoldIncome(stockId: stockId, name: trimmedName, profit: pl, date: soldDate, note: trimmedNote, existingId: incId)
+                if let eid = expId { expenseStore.expenses.removeAll { $0.id == eid }; expId = nil }
+            } else {
+                expId = syncSoldExpense(stockId: stockId, name: trimmedName, loss: abs(pl), date: soldDate, note: trimmedNote, existingId: expId)
+                if let iid = incId { expenseStore.incomes.removeAll { $0.id == iid }; incId = nil }
+            }
+        } else {
+            if let eid = expId { expenseStore.expenses.removeAll { $0.id == eid }; expId = nil }
+            if let iid = incId { expenseStore.incomes.removeAll { $0.id == iid }; incId = nil }
         }
 
         let item = Stock(
@@ -319,26 +327,39 @@ struct AddStockView: View {
             purchaseDate: purchaseDate,
             shares: shares, purchasePrice: price,
             currentPrice: Double(currentPriceText) ?? price,
-            note: note.trimmingCharacters(in: .whitespaces),
+            note: trimmedNote,
             isSold: isSold,
             soldPrice: sp,
             soldDate: isSold ? soldDate : nil,
-            linkedExpenseId: expId
+            linkedExpenseId: expId,
+            linkedIncomeId: incId
         )
         if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
         dismiss()
     }
 
-    private func syncSoldExpense(stockId: UUID, name: String, profitLoss: Double, date: Date, existingExpenseId: UUID?) -> UUID {
-        let expId = existingExpenseId ?? UUID()
-        let title = "賣出 \(name)" + (profitLoss >= 0 ? "（獲利）" : "（虧損）")
-        let expense = Expense(
-            id: expId, title: title,
-            amount: abs(profitLoss), date: date,
-            expenseType: .variable, variableCategory: .stock,
-            linkedStockId: stockId, note: note.trimmingCharacters(in: .whitespaces)
+    private func syncSoldIncome(stockId: UUID, name: String, profit: Double, date: Date, note: String, existingId: UUID?) -> UUID {
+        let incId = existingId ?? UUID()
+        let income = Income(
+            id: incId, title: "賣出 \(name)（獲利）",
+            amount: profit, date: date,
+            category: .investment, period: .once,
+            note: note, linkedStockId: stockId
         )
-        if existingExpenseId != nil { expenseStore.update(expense) }
+        if existingId != nil { expenseStore.update(income) }
+        else { expenseStore.add(income) }
+        return incId
+    }
+
+    private func syncSoldExpense(stockId: UUID, name: String, loss: Double, date: Date, note: String, existingId: UUID?) -> UUID {
+        let expId = existingId ?? UUID()
+        let expense = Expense(
+            id: expId, title: "賣出 \(name)（虧損）",
+            amount: loss, date: date,
+            expenseType: .variable, variableCategory: .stock,
+            linkedStockId: stockId, note: note
+        )
+        if existingId != nil { expenseStore.update(expense) }
         else { expenseStore.add(expense) }
         return expId
     }
