@@ -438,11 +438,21 @@ struct FloorInfo: Identifiable, Codable {
     let id: UUID
     var floorNumber: String
     var functions: [FloorFunction]
+    var area: Double
 
-    init(id: UUID = UUID(), floorNumber: String = "", functions: [FloorFunction] = []) {
+    init(id: UUID = UUID(), floorNumber: String = "", functions: [FloorFunction] = [], area: Double = 0) {
         self.id = id
         self.floorNumber = floorNumber
         self.functions = functions
+        self.area = area
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        floorNumber = try c.decode(String.self, forKey: .floorNumber)
+        functions = (try? c.decode([FloorFunction].self, forKey: .functions)) ?? []
+        area = (try? c.decode(Double.self, forKey: .area)) ?? 0
     }
 }
 
@@ -519,9 +529,16 @@ struct RealEstate: Identifiable, Codable {
     var buildingType: BuildingType     // 透天/大樓
     var pingCount: Double              // 坪數
     var landOwner: String              // 所有權人
-    var landSituation: String          // 座落
-    var landNumber: String             // 地號
-    var landArea: Double               // 面積
+    var landSituation: String          // 土地權狀：座落
+    var landNumber: String             // 土地權狀：地號
+    var landArea: Double               // 土地權狀：面積
+    var bldgSituation: String          // 建物權狀：坐落
+    var bldgNumber: String             // 建物權狀：建號
+    var bldgAddress: String            // 建物權狀：門牌
+    var bldgCompletionDate: Date?      // 建物權狀：完工日
+    var bldgUsage: String              // 建物權狀：用途
+    var bldgAnnex: String              // 建物權狀：附屬建物
+    var bldgArea: Double               // 建物權狀：面積
     var totalFloors: Int               // 有幾個樓層（向下相容，新版由 floors.count 覆寫）
     var fromFloor: Int                 // 從幾樓（向下相容）
     var toFloor: Int                   // 到幾樓（向下相容）
@@ -556,6 +573,13 @@ struct RealEstate: Identifiable, Codable {
         landSituation: String = "",
         landNumber: String = "",
         landArea: Double = 0,
+        bldgSituation: String = "",
+        bldgNumber: String = "",
+        bldgAddress: String = "",
+        bldgCompletionDate: Date? = nil,
+        bldgUsage: String = "",
+        bldgAnnex: String = "",
+        bldgArea: Double = 0,
         totalFloors: Int = 0,
         fromFloor: Int = 0,
         toFloor: Int = 0,
@@ -589,6 +613,13 @@ struct RealEstate: Identifiable, Codable {
         self.landSituation = landSituation
         self.landNumber = landNumber
         self.landArea = landArea
+        self.bldgSituation = bldgSituation
+        self.bldgNumber = bldgNumber
+        self.bldgAddress = bldgAddress
+        self.bldgCompletionDate = bldgCompletionDate
+        self.bldgUsage = bldgUsage
+        self.bldgAnnex = bldgAnnex
+        self.bldgArea = bldgArea
         self.totalFloors = totalFloors
         self.fromFloor = fromFloor
         self.toFloor = toFloor
@@ -626,6 +657,13 @@ struct RealEstate: Identifiable, Codable {
         landSituation = (try? c.decode(String.self, forKey: .landSituation)) ?? ""
         landNumber = (try? c.decode(String.self, forKey: .landNumber)) ?? ""
         landArea = (try? c.decode(Double.self, forKey: .landArea)) ?? 0
+        bldgSituation = (try? c.decode(String.self, forKey: .bldgSituation)) ?? ""
+        bldgNumber = (try? c.decode(String.self, forKey: .bldgNumber)) ?? ""
+        bldgAddress = (try? c.decode(String.self, forKey: .bldgAddress)) ?? ""
+        bldgCompletionDate = try? c.decode(Date.self, forKey: .bldgCompletionDate)
+        bldgUsage = (try? c.decode(String.self, forKey: .bldgUsage)) ?? ""
+        bldgAnnex = (try? c.decode(String.self, forKey: .bldgAnnex)) ?? ""
+        bldgArea = (try? c.decode(Double.self, forKey: .bldgArea)) ?? 0
         totalFloors = (try? c.decode(Int.self, forKey: .totalFloors)) ?? 0
         fromFloor = (try? c.decode(Int.self, forKey: .fromFloor)) ?? 0
         toFloor = (try? c.decode(Int.self, forKey: .toFloor)) ?? 0
@@ -650,6 +688,7 @@ struct RealEstate: Identifiable, Codable {
         case id, name, city, address, purchaseDate, soldDate, purchasePrice, currentValue, monthlyRental
         case mortgageItems, paidItems, variableExpenses, linkedExpenseId, note
         case buildingType, pingCount, landOwner, landSituation, landNumber, landArea
+        case bldgSituation, bldgNumber, bldgAddress, bldgCompletionDate, bldgUsage, bldgAnnex, bldgArea
         case totalFloors, fromFloor, toFloor, floors
         case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
         case gasMeterNumber, gasMeterOwner, insuranceItems, propertyAssets
@@ -678,6 +717,13 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(landSituation, forKey: .landSituation)
         try c.encode(landNumber, forKey: .landNumber)
         try c.encode(landArea, forKey: .landArea)
+        try c.encode(bldgSituation, forKey: .bldgSituation)
+        try c.encode(bldgNumber, forKey: .bldgNumber)
+        try c.encode(bldgAddress, forKey: .bldgAddress)
+        try c.encodeIfPresent(bldgCompletionDate, forKey: .bldgCompletionDate)
+        try c.encode(bldgUsage, forKey: .bldgUsage)
+        try c.encode(bldgAnnex, forKey: .bldgAnnex)
+        try c.encode(bldgArea, forKey: .bldgArea)
         try c.encode(totalFloors, forKey: .totalFloors)
         try c.encode(fromFloor, forKey: .fromFloor)
         try c.encode(toFloor, forKey: .toFloor)

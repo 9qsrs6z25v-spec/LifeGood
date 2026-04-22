@@ -55,12 +55,23 @@ struct AddRealEstateView: View {
     @State private var landSituation = ""
     @State private var landNumber = ""
     @State private var landAreaText = ""
+    @State private var showLandDeed = false
+    @State private var showBldgDeed = false
+    @State private var bldgSituation = ""
+    @State private var bldgNumber = ""
+    @State private var bldgAddress = ""
+    @State private var bldgCompletionDate = Date()
+    @State private var hasBldgCompletionDate = false
+    @State private var bldgUsage = ""
+    @State private var bldgAnnex = ""
+    @State private var bldgAreaText = ""
     @State private var floorItems: [FloorItemState] = []
 
     struct FloorItemState: Identifiable {
         let id: UUID
         var floorNumber: String
         var functions: Set<FloorFunction>
+        var areaText: String
     }
     @State private var waterMeterNumber = ""
     @State private var waterMeterOwner = ""
@@ -536,13 +547,66 @@ struct AddRealEstateView: View {
         }
     }
 
+    @ViewBuilder
     private var landDetailSection: some View {
-        Section("詳細") {
-            TextField("座落", text: $landSituation)
-            TextField("地號", text: $landNumber)
-            HStack {
-                TextField("面積", text: $landAreaText).keyboardType(.decimalPad)
-                Text("㎡").foregroundStyle(.secondary)
+        if !showLandDeed && !showBldgDeed {
+            Section("詳細") {
+                Menu {
+                    Button { showLandDeed = true } label: { Label("土地權狀", systemImage: "doc.text") }
+                    Button { showBldgDeed = true } label: { Label("建物權狀", systemImage: "building.2") }
+                } label: {
+                    Label("新增權狀資料", systemImage: "plus.circle").foregroundStyle(.green)
+                }
+            }
+        }
+
+        if showLandDeed {
+            Section {
+                TextField("坐落", text: $landSituation)
+                TextField("地號", text: $landNumber)
+                HStack {
+                    TextField("面積", text: $landAreaText).keyboardType(.decimalPad)
+                    Text("㎡").foregroundStyle(.secondary)
+                }
+            } header: {
+                HStack {
+                    Text("土地權狀")
+                    Spacer()
+                    Button { showLandDeed = false; landSituation = ""; landNumber = ""; landAreaText = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+
+        if showBldgDeed {
+            Section {
+                TextField("坐落", text: $bldgSituation)
+                TextField("建號", text: $bldgNumber)
+                TextField("門牌", text: $bldgAddress)
+                Toggle("填入完工日", isOn: $hasBldgCompletionDate)
+                if hasBldgCompletionDate {
+                    DatePicker("完工日", selection: $bldgCompletionDate, displayedComponents: .date)
+                }
+                TextField("用途", text: $bldgUsage)
+                TextField("附屬建物", text: $bldgAnnex)
+                HStack {
+                    TextField("面積", text: $bldgAreaText).keyboardType(.decimalPad)
+                    Text("㎡").foregroundStyle(.secondary)
+                }
+            } header: {
+                HStack {
+                    Text("建物權狀")
+                    Spacer()
+                    Button {
+                        showBldgDeed = false
+                        bldgSituation = ""; bldgNumber = ""; bldgAddress = ""
+                        bldgUsage = ""; bldgAnnex = ""; bldgAreaText = ""
+                        hasBldgCompletionDate = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }
@@ -558,9 +622,16 @@ struct AddRealEstateView: View {
             ForEach(Array(floorItems.enumerated()), id: \.element.id) { index, _ in
                 VStack(spacing: 8) {
                     HStack {
-                        TextField("樓層編號（如 B1、1F）", text: $floorItems[index].floorNumber)
+                        TextField("樓層（如 B1、1F）", text: $floorItems[index].floorNumber)
                             .font(.subheadline.weight(.medium))
-                        Spacer()
+                            .frame(maxWidth: .infinity)
+                        Divider()
+                        HStack {
+                            TextField("面積", text: $floorItems[index].areaText)
+                                .keyboardType(.decimalPad)
+                                .frame(width: 60)
+                            Text("㎡").foregroundStyle(.secondary).font(.caption)
+                        }
                         Button(role: .destructive) {
                             floorItems.remove(at: index)
                         } label: {
@@ -591,7 +662,7 @@ struct AddRealEstateView: View {
             }
 
             Button {
-                floorItems.append(FloorItemState(id: UUID(), floorNumber: "", functions: []))
+                floorItems.append(FloorItemState(id: UUID(), floorNumber: "", functions: [], areaText: ""))
             } label: {
                 Label("新增樓層", systemImage: "plus.circle").foregroundStyle(.green)
             }
@@ -887,10 +958,17 @@ struct AddRealEstateView: View {
             landSituation: landSituation.trimmingCharacters(in: .whitespaces),
             landNumber: landNumber.trimmingCharacters(in: .whitespaces),
             landArea: Double(landAreaText) ?? 0,
+            bldgSituation: bldgSituation.trimmingCharacters(in: .whitespaces),
+            bldgNumber: bldgNumber.trimmingCharacters(in: .whitespaces),
+            bldgAddress: bldgAddress.trimmingCharacters(in: .whitespaces),
+            bldgCompletionDate: hasBldgCompletionDate ? bldgCompletionDate : nil,
+            bldgUsage: bldgUsage.trimmingCharacters(in: .whitespaces),
+            bldgAnnex: bldgAnnex.trimmingCharacters(in: .whitespaces),
+            bldgArea: Double(bldgAreaText) ?? 0,
             totalFloors: floorItems.count,
             fromFloor: 0,
             toFloor: 0,
-            floors: floorItems.map { FloorInfo(id: $0.id, floorNumber: $0.floorNumber, functions: Array($0.functions)) },
+            floors: floorItems.map { FloorInfo(id: $0.id, floorNumber: $0.floorNumber, functions: Array($0.functions), area: Double($0.areaText) ?? 0) },
             waterMeterNumber: waterMeterNumber.trimmingCharacters(in: .whitespaces),
             waterMeterOwner: waterMeterOwner.trimmingCharacters(in: .whitespaces),
             electricityMeterNumber: electricityMeterNumber.trimmingCharacters(in: .whitespaces),
@@ -988,6 +1066,7 @@ struct AddRealEstateView: View {
         showPaid = !e.paidItems.isEmpty
         showVariable = !e.variableExpenses.isEmpty
         showLandDetail = !e.landSituation.isEmpty || !e.landNumber.isEmpty || e.landArea > 0
+            || !e.bldgSituation.isEmpty || !e.bldgNumber.isEmpty || !e.bldgAddress.isEmpty || e.bldgArea > 0
         showFloor = !e.floors.isEmpty
         showUtilities = !e.waterMeterNumber.isEmpty || !e.electricityMeterNumber.isEmpty || !e.gasMeterNumber.isEmpty
         showInsurance = !e.insuranceItems.isEmpty
@@ -1042,8 +1121,17 @@ struct AddRealEstateView: View {
         landSituation = e.landSituation
         landNumber = e.landNumber
         landAreaText = e.landArea > 0 ? String(format: "%g", e.landArea) : ""
+        showLandDeed = !e.landSituation.isEmpty || !e.landNumber.isEmpty || e.landArea > 0
+        bldgSituation = e.bldgSituation
+        bldgNumber = e.bldgNumber
+        bldgAddress = e.bldgAddress
+        if let cd = e.bldgCompletionDate { hasBldgCompletionDate = true; bldgCompletionDate = cd }
+        bldgUsage = e.bldgUsage
+        bldgAnnex = e.bldgAnnex
+        bldgAreaText = e.bldgArea > 0 ? String(format: "%g", e.bldgArea) : ""
+        showBldgDeed = !e.bldgSituation.isEmpty || !e.bldgNumber.isEmpty || !e.bldgAddress.isEmpty || e.bldgArea > 0
         floorItems = e.floors.map { f in
-            FloorItemState(id: f.id, floorNumber: f.floorNumber, functions: Set(f.functions))
+            FloorItemState(id: f.id, floorNumber: f.floorNumber, functions: Set(f.functions), areaText: f.area > 0 ? String(format: "%g", f.area) : "")
         }
         waterMeterNumber = e.waterMeterNumber
         waterMeterOwner = e.waterMeterOwner
