@@ -383,7 +383,8 @@ struct RealEstateDetailView: View {
                 }
             }
 
-            if !hasProperty && !hasDetail && estate.floors.isEmpty && !hasUtilities && estate.insuranceItems.isEmpty && estate.propertyAssets.isEmpty {
+            let hasDeeds = !estate.landDeeds.isEmpty || !estate.buildingDeeds.isEmpty
+            if !hasProperty && !hasDeeds && estate.floors.isEmpty && !hasUtilities && estate.insuranceItems.isEmpty && estate.propertyAssets.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.system(size: 36)).foregroundStyle(.tertiary)
