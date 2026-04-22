@@ -196,6 +196,11 @@ struct MainTabView: View {
         return list
     }
 
+    private var safeAreaBottom: CGFloat {
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?
+            .keyWindow?.safeAreaInsets.bottom ?? 0
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             contentView
@@ -203,6 +208,7 @@ struct MainTabView: View {
 
             bottomBar
         }
+        .ignoresSafeArea(edges: .bottom)
         .tint(.green)
         .onChange(of: appMode) { _, _ in
             isSettingsActive = false
@@ -339,7 +345,7 @@ struct MainTabView: View {
             }
         }
         .padding(.top, 20)
-        .padding(.bottom, 12)
+        .padding(.bottom, 4)
         .frame(maxWidth: .infinity)
         .background(
             LinearGradient(
@@ -349,6 +355,7 @@ struct MainTabView: View {
             )
             .allowsHitTesting(false)
         )
+        .padding(.bottom, safeAreaBottom)
     }
 
     private var managementToggleButton: some View {
