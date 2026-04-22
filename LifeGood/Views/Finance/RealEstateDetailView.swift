@@ -286,18 +286,20 @@ struct RealEstateDetailView: View {
             }
 
             if !estate.landDeeds.isEmpty || !estate.buildingDeeds.isEmpty {
-                for (i, d) in estate.landDeeds.enumerated() {
+                ForEach(Array(estate.landDeeds.enumerated()), id: \.element.id) { i, d in
                     sectionHeader("土地權狀\(estate.landDeeds.count > 1 ? " \(i + 1)" : "")")
                     if !d.situation.isEmpty { infoRow("坐落", d.situation) }
                     if !d.number.isEmpty { infoRow("地號", d.number) }
                     if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
                 }
-                for (i, d) in estate.buildingDeeds.enumerated() {
+                ForEach(Array(estate.buildingDeeds.enumerated()), id: \.element.id) { i, d in
                     sectionHeader("建物權狀\(estate.buildingDeeds.count > 1 ? " \(i + 1)" : "")")
                     if !d.situation.isEmpty { infoRow("坐落", d.situation) }
                     if !d.number.isEmpty { infoRow("建號", d.number) }
                     if !d.address.isEmpty { infoRow("門牌", d.address) }
-                    if let cd = d.completionDate { infoRow("完工日", formatDate(cd)) }
+                    if let cd = d.completionDate {
+                        infoRow("完工日", fmtDate(cd))
+                    }
                     if !d.usage.isEmpty { infoRow("用途", d.usage) }
                     if !d.annex.isEmpty { infoRow("附屬建物", d.annex) }
                     if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
@@ -790,5 +792,9 @@ struct RealEstateDetailView: View {
 
     private func fmtWan(_ v: Double) -> String {
         String(format: "%g", v / 10000)
+    }
+
+    private func fmtDate(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
     }
 }
