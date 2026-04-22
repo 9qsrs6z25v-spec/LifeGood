@@ -90,6 +90,23 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
     }
 }
 
+enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
+    case spouseResume, childrenResume
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .spouseResume: return "配偶履歷"
+        case .childrenResume: return "兒女履歷"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .spouseResume: return "heart.circle.fill"
+        case .childrenResume: return "figure.2.and.child.holdinghands"
+        }
+    }
+}
+
 // MARK: - 主畫面
 
 struct MainTabView: View {
@@ -98,8 +115,10 @@ struct MainTabView: View {
     @AppStorage("finance_feature") private var financeFeatureRaw: String = FinanceFeature.overview.rawValue
     @AppStorage("life_feature") private var lifeFeatureRaw: String = LifeFeature.overview.rawValue
     @AppStorage("management_feature") private var managementFeatureRaw: String = ManagementFeature.subordinates.rawValue
+    @AppStorage("family_mgmt_feature") private var familyMgmtFeatureRaw: String = FamilyMgmtFeature.spouseResume.rawValue
     @State private var isSettingsActive: Bool = false
     @State private var isManagementMode: Bool = false
+    @State private var isFamilyMgmtMode: Bool = false
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -154,6 +173,29 @@ struct MainTabView: View {
         currentMode == .life && lifeFeature == .career && isCurrentlyManagerial && !isSettingsActive
     }
 
+    private var familyMgmtFeature: FamilyMgmtFeature {
+        FamilyMgmtFeature(rawValue: familyMgmtFeatureRaw) ?? .spouseResume
+    }
+
+    private var hasSpouse: Bool {
+        lifeStore.familyMembers.contains { $0.role == .spouse }
+    }
+
+    private var hasChildren: Bool {
+        lifeStore.familyMembers.contains { $0.role == .son || $0.role == .daughter }
+    }
+
+    private var showFamilyMgmtToggle: Bool {
+        currentMode == .life && lifeFeature == .family && !lifeStore.familyMembers.isEmpty && !isSettingsActive
+    }
+
+    private var availableFamilyFeatures: [FamilyMgmtFeature] {
+        var list: [FamilyMgmtFeature] = []
+        if hasSpouse { list.append(.spouseResume) }
+        if hasChildren { list.append(.childrenResume) }
+        return list
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             contentView
@@ -165,9 +207,11 @@ struct MainTabView: View {
         .onChange(of: appMode) { _, _ in
             isSettingsActive = false
             isManagementMode = false
+            isFamilyMgmtMode = false
         }
         .onChange(of: lifeFeatureRaw) { _, _ in
             isManagementMode = false
+            isFamilyMgmtMode = false
         }
     }
 
@@ -179,12 +223,24 @@ struct MainTabView: View {
             SettingsView()
         } else if isManagementMode && showManagementToggle {
             managementContent
+        } else if isFamilyMgmtMode && showFamilyMgmtToggle {
+            familyMgmtContent
         } else {
             switch currentMode {
             case .expense: expenseContent
             case .finance: financeContent
             case .life: lifeContent
             }
+        }
+    }
+
+    @ViewBuilder
+    private var familyMgmtContent: some View {
+        switch familyMgmtFeature {
+        case .spouseResume:
+            if hasSpouse { SpouseResumeView() } else { FamilyView() }
+        case .childrenResume:
+            if hasChildren { ChildrenResumeView() } else { FamilyView() }
         }
     }
 
@@ -263,9 +319,18 @@ struct MainTabView: View {
                 managementMenu
             }
 
+            if showFamilyMgmtToggle {
+                familyMgmtToggleButton
+            }
+
+            if isFamilyMgmtMode && showFamilyMgmtToggle && !availableFamilyFeatures.isEmpty {
+                familyMgmtMenu
+            }
+
             Button {
                 isSettingsActive = true
                 isManagementMode = false
+                isFamilyMgmtMode = false
             } label: {
                 barIcon(
                     systemImage: "gearshape.fill",
@@ -312,6 +377,37 @@ struct MainTabView: View {
             barIcon(
                 systemImage: managementFeature.icon,
                 tint: isManagementMode && !isSettingsActive ? Color.yellow : Color.white.opacity(0.7)
+            )
+        }
+        .menuOrder(.fixed)
+    }
+
+    private var familyMgmtToggleButton: some View {
+        Button {
+            isFamilyMgmtMode.toggle()
+            isSettingsActive = false
+        } label: {
+            barIcon(
+                systemImage: isFamilyMgmtMode ? "figure.2.and.child.holdinghands" : "figure.2.and.child.holdinghands",
+                tint: isFamilyMgmtMode ? Color.yellow : Color.white.opacity(0.7)
+            )
+        }
+    }
+
+    private var familyMgmtMenu: some View {
+        Menu {
+            ForEach(availableFamilyFeatures) { feature in
+                Button {
+                    familyMgmtFeatureRaw = feature.rawValue
+                    isSettingsActive = false
+                } label: {
+                    Label(feature.title, systemImage: feature.icon)
+                }
+            }
+        } label: {
+            barIcon(
+                systemImage: familyMgmtFeature.icon,
+                tint: isFamilyMgmtMode && !isSettingsActive ? Color.yellow : Color.white.opacity(0.7)
             )
         }
         .menuOrder(.fixed)
