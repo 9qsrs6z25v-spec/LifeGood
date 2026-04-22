@@ -951,6 +951,23 @@ struct AddRealEstateView: View {
             }
         }
 
+        // 售出損益同步
+        var saleExpId = editing?.saleLinkedExpenseId
+        var saleIncId = editing?.saleLinkedIncomeId
+        if isSold {
+            let pl = currentVal - price
+            if pl >= 0 {
+                saleIncId = syncSaleIncome(reId: reId, name: trimmedName, profit: pl, date: soldDate, existingId: saleIncId)
+                if let eid = saleExpId { expenseStore.expenses.removeAll { $0.id == eid }; saleExpId = nil }
+            } else {
+                saleExpId = syncSaleExpense(reId: reId, name: trimmedName, loss: abs(pl), date: soldDate, existingId: saleExpId)
+                if let iid = saleIncId { expenseStore.incomes.removeAll { $0.id == iid }; saleIncId = nil }
+            }
+        } else {
+            if let eid = saleExpId { expenseStore.expenses.removeAll { $0.id == eid }; saleExpId = nil }
+            if let iid = saleIncId { expenseStore.incomes.removeAll { $0.id == iid }; saleIncId = nil }
+        }
+
         let re = RealEstate(
             id: reId, name: trimmedName,
             city: city,
@@ -962,6 +979,8 @@ struct AddRealEstateView: View {
             mortgageItems: syncedMortgages,
             paidItems: syncedPaids,
             variableExpenses: syncedVariable,
+            saleLinkedExpenseId: saleExpId,
+            saleLinkedIncomeId: saleIncId,
             note: trimmedNote,
             buildingType: buildingType,
             pingCount: Double(pingCountText) ?? 0,
@@ -1160,6 +1179,34 @@ struct AddRealEstateView: View {
                 linkedExpenseId: a.linkedExpenseId
             )
         }
+    }
+
+    // MARK: - 售出損益同步
+
+    private func syncSaleIncome(reId: UUID, name: String, profit: Double, date: Date, existingId: UUID?) -> UUID {
+        let incId = existingId ?? UUID()
+        let income = Income(
+            id: incId, title: "售出 \(name)（獲利）",
+            amount: profit, date: date,
+            category: .investment, period: .once,
+            linkedStockId: nil
+        )
+        if existingId != nil { expenseStore.update(income) }
+        else { expenseStore.add(income) }
+        return incId
+    }
+
+    private func syncSaleExpense(reId: UUID, name: String, loss: Double, date: Date, existingId: UUID?) -> UUID {
+        let expId = existingId ?? UUID()
+        let expense = Expense(
+            id: expId, title: "售出 \(name)（虧損）",
+            amount: loss, date: date,
+            expenseType: .variable, variableCategory: .realEstate,
+            linkedRealEstateId: reId, note: ""
+        )
+        if existingId != nil { expenseStore.update(expense) }
+        else { expenseStore.add(expense) }
+        return expId
     }
 
     private func formatCurrency(_ value: Double) -> String {

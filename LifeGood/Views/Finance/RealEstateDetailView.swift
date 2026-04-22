@@ -773,6 +773,12 @@ struct RealEstateDetailView: View {
         if let linkedId = estate.linkedExpenseId {
             expenseStore.expenses.removeAll { $0.id == linkedId }
         }
+        if let saleExpId = estate.saleLinkedExpenseId {
+            expenseStore.expenses.removeAll { $0.id == saleExpId }
+        }
+        if let saleIncId = estate.saleLinkedIncomeId {
+            expenseStore.incomes.removeAll { $0.id == saleIncId }
+        }
         store.deleteRealEstate(estate)
     }
 
