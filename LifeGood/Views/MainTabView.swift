@@ -334,7 +334,7 @@ struct MainTabView: View {
             } label: {
                 barIcon(
                     systemImage: "gearshape.fill",
-                    tint: isSettingsActive ? Color.white : Color.white.opacity(0.7)
+                    tint: isSettingsActive ? Color.green : Color.secondary
                 )
             }
         }
@@ -343,7 +343,7 @@ struct MainTabView: View {
         .frame(maxWidth: .infinity)
         .background(
             LinearGradient(
-                colors: [Color.green.opacity(0), Color.green.opacity(0.85), Color.green],
+                colors: [Color(.systemBackground).opacity(0), Color(.systemBackground).opacity(0.85), Color(.systemBackground)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -358,7 +358,7 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: isManagementMode ? "person.badge.shield.checkmark.fill" : "person.badge.shield.checkmark",
-                tint: isManagementMode ? Color.yellow : Color.white.opacity(0.7)
+                tint: isManagementMode ? Color.orange : Color.secondary
             )
         }
     }
@@ -376,7 +376,7 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: managementFeature.icon,
-                tint: isManagementMode && !isSettingsActive ? Color.yellow : Color.white.opacity(0.7)
+                tint: isManagementMode && !isSettingsActive ? Color.orange : Color.secondary
             )
         }
         .menuOrder(.fixed)
@@ -389,7 +389,7 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: isFamilyMgmtMode ? "figure.2.and.child.holdinghands" : "figure.2.and.child.holdinghands",
-                tint: isFamilyMgmtMode ? Color.yellow : Color.white.opacity(0.7)
+                tint: isFamilyMgmtMode ? Color.orange : Color.secondary
             )
         }
     }
@@ -407,7 +407,7 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: familyMgmtFeature.icon,
-                tint: isFamilyMgmtMode && !isSettingsActive ? Color.yellow : Color.white.opacity(0.7)
+                tint: isFamilyMgmtMode && !isSettingsActive ? Color.orange : Color.secondary
             )
         }
         .menuOrder(.fixed)
@@ -477,7 +477,7 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: currentFeatureIcon,
-                tint: isSettingsActive ? Color.white.opacity(0.7) : Color.white
+                tint: isSettingsActive ? Color.secondary : Color.green
             )
         }
         .menuOrder(.fixed)
