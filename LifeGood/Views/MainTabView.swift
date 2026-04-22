@@ -155,7 +155,7 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .bottom) {
             contentView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -267,14 +267,23 @@ struct MainTabView: View {
                 isSettingsActive = true
                 isManagementMode = false
             } label: {
-                circularLabel(
+                barIcon(
                     systemImage: "gearshape.fill",
-                    tint: isSettingsActive ? Color.green : Color.secondary
+                    tint: isSettingsActive ? Color.white : Color.white.opacity(0.7)
                 )
             }
         }
-        .padding(.vertical, 10)
+        .padding(.top, 20)
+        .padding(.bottom, 12)
         .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(
+                colors: [Color.green.opacity(0), Color.green.opacity(0.85), Color.green],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+        )
     }
 
     private var managementToggleButton: some View {
@@ -282,9 +291,9 @@ struct MainTabView: View {
             isManagementMode.toggle()
             isSettingsActive = false
         } label: {
-            circularLabel(
+            barIcon(
                 systemImage: isManagementMode ? "person.badge.shield.checkmark.fill" : "person.badge.shield.checkmark",
-                tint: isManagementMode ? Color.orange : Color.secondary
+                tint: isManagementMode ? Color.yellow : Color.white.opacity(0.7)
             )
         }
     }
@@ -300,24 +309,19 @@ struct MainTabView: View {
                 }
             }
         } label: {
-            circularLabel(
+            barIcon(
                 systemImage: managementFeature.icon,
-                tint: isManagementMode && !isSettingsActive ? Color.orange : Color.secondary
+                tint: isManagementMode && !isSettingsActive ? Color.yellow : Color.white.opacity(0.7)
             )
         }
         .menuOrder(.fixed)
     }
 
-    private func circularLabel(systemImage: String, tint: Color) -> some View {
+    private func barIcon(systemImage: String, tint: Color) -> some View {
         Image(systemName: systemImage)
             .font(.system(size: 22))
             .foregroundStyle(tint)
-            .frame(width: 52, height: 52)
-            .background(
-                Circle()
-                    .fill(Color(.systemBackground))
-                    .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
-            )
+            .frame(width: 48, height: 48)
             .contentShape(Circle())
     }
 
@@ -375,9 +379,9 @@ struct MainTabView: View {
                 }
             }
         } label: {
-            circularLabel(
+            barIcon(
                 systemImage: currentFeatureIcon,
-                tint: isSettingsActive ? Color.secondary : Color.green
+                tint: isSettingsActive ? Color.white.opacity(0.7) : Color.white
             )
         }
         .menuOrder(.fixed)
