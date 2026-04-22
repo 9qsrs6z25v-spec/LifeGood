@@ -456,6 +456,38 @@ struct FloorInfo: Identifiable, Codable {
     }
 }
 
+// MARK: - 土地權狀
+
+struct LandDeed: Identifiable, Codable {
+    let id: UUID
+    var situation: String
+    var number: String
+    var area: Double
+
+    init(id: UUID = UUID(), situation: String = "", number: String = "", area: Double = 0) {
+        self.id = id; self.situation = situation; self.number = number; self.area = area
+    }
+}
+
+// MARK: - 建物權狀
+
+struct BuildingDeed: Identifiable, Codable {
+    let id: UUID
+    var situation: String
+    var number: String
+    var address: String
+    var completionDate: Date?
+    var usage: String
+    var annex: String
+    var area: Double
+
+    init(id: UUID = UUID(), situation: String = "", number: String = "", address: String = "",
+         completionDate: Date? = nil, usage: String = "", annex: String = "", area: Double = 0) {
+        self.id = id; self.situation = situation; self.number = number; self.address = address
+        self.completionDate = completionDate; self.usage = usage; self.annex = annex; self.area = area
+    }
+}
+
 // MARK: - 房地產保險項目
 
 struct RealEstateInsuranceItem: Identifiable, Codable {
@@ -539,6 +571,8 @@ struct RealEstate: Identifiable, Codable {
     var bldgUsage: String              // 建物權狀：用途
     var bldgAnnex: String              // 建物權狀：附屬建物
     var bldgArea: Double               // 建物權狀：面積
+    var landDeeds: [LandDeed]          // 多筆土地權狀
+    var buildingDeeds: [BuildingDeed]   // 多筆建物權狀
     var totalFloors: Int               // 有幾個樓層（向下相容，新版由 floors.count 覆寫）
     var fromFloor: Int                 // 從幾樓（向下相容）
     var toFloor: Int                   // 到幾樓（向下相容）
@@ -580,6 +614,8 @@ struct RealEstate: Identifiable, Codable {
         bldgUsage: String = "",
         bldgAnnex: String = "",
         bldgArea: Double = 0,
+        landDeeds: [LandDeed] = [],
+        buildingDeeds: [BuildingDeed] = [],
         totalFloors: Int = 0,
         fromFloor: Int = 0,
         toFloor: Int = 0,
@@ -620,6 +656,8 @@ struct RealEstate: Identifiable, Codable {
         self.bldgUsage = bldgUsage
         self.bldgAnnex = bldgAnnex
         self.bldgArea = bldgArea
+        self.landDeeds = landDeeds
+        self.buildingDeeds = buildingDeeds
         self.totalFloors = totalFloors
         self.fromFloor = fromFloor
         self.toFloor = toFloor
@@ -664,6 +702,16 @@ struct RealEstate: Identifiable, Codable {
         bldgUsage = (try? c.decode(String.self, forKey: .bldgUsage)) ?? ""
         bldgAnnex = (try? c.decode(String.self, forKey: .bldgAnnex)) ?? ""
         bldgArea = (try? c.decode(Double.self, forKey: .bldgArea)) ?? 0
+        landDeeds = (try? c.decode([LandDeed].self, forKey: .landDeeds)) ?? []
+        buildingDeeds = (try? c.decode([BuildingDeed].self, forKey: .buildingDeeds)) ?? []
+        // 向下相容：舊版單筆資料遷移至陣列
+        if landDeeds.isEmpty && (!landSituation.isEmpty || !landNumber.isEmpty || landArea > 0) {
+            landDeeds = [LandDeed(situation: landSituation, number: landNumber, area: landArea)]
+        }
+        if buildingDeeds.isEmpty && (!bldgSituation.isEmpty || !bldgNumber.isEmpty || bldgArea > 0) {
+            buildingDeeds = [BuildingDeed(situation: bldgSituation, number: bldgNumber, address: bldgAddress,
+                                          completionDate: bldgCompletionDate, usage: bldgUsage, annex: bldgAnnex, area: bldgArea)]
+        }
         totalFloors = (try? c.decode(Int.self, forKey: .totalFloors)) ?? 0
         fromFloor = (try? c.decode(Int.self, forKey: .fromFloor)) ?? 0
         toFloor = (try? c.decode(Int.self, forKey: .toFloor)) ?? 0
@@ -689,6 +737,7 @@ struct RealEstate: Identifiable, Codable {
         case mortgageItems, paidItems, variableExpenses, linkedExpenseId, note
         case buildingType, pingCount, landOwner, landSituation, landNumber, landArea
         case bldgSituation, bldgNumber, bldgAddress, bldgCompletionDate, bldgUsage, bldgAnnex, bldgArea
+        case landDeeds, buildingDeeds
         case totalFloors, fromFloor, toFloor, floors
         case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
         case gasMeterNumber, gasMeterOwner, insuranceItems, propertyAssets
@@ -724,6 +773,8 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(bldgUsage, forKey: .bldgUsage)
         try c.encode(bldgAnnex, forKey: .bldgAnnex)
         try c.encode(bldgArea, forKey: .bldgArea)
+        try c.encode(landDeeds, forKey: .landDeeds)
+        try c.encode(buildingDeeds, forKey: .buildingDeeds)
         try c.encode(totalFloors, forKey: .totalFloors)
         try c.encode(fromFloor, forKey: .fromFloor)
         try c.encode(toFloor, forKey: .toFloor)

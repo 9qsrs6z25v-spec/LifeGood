@@ -55,16 +55,26 @@ struct AddRealEstateView: View {
     @State private var landSituation = ""
     @State private var landNumber = ""
     @State private var landAreaText = ""
-    @State private var showLandDeed = false
-    @State private var showBldgDeed = false
-    @State private var bldgSituation = ""
-    @State private var bldgNumber = ""
-    @State private var bldgAddress = ""
-    @State private var bldgCompletionDate = Date()
-    @State private var hasBldgCompletionDate = false
-    @State private var bldgUsage = ""
-    @State private var bldgAnnex = ""
-    @State private var bldgAreaText = ""
+    @State private var landDeedItems: [LandDeedState] = []
+    @State private var bldgDeedItems: [BuildingDeedState] = []
+
+    struct LandDeedState: Identifiable {
+        let id: UUID
+        var situation: String
+        var number: String
+        var areaText: String
+    }
+    struct BuildingDeedState: Identifiable {
+        let id: UUID
+        var situation: String
+        var number: String
+        var address: String
+        var hasCompletionDate: Bool
+        var completionDate: Date
+        var usage: String
+        var annex: String
+        var areaText: String
+    }
     @State private var floorItems: [FloorItemState] = []
 
     struct FloorItemState: Identifiable {
@@ -549,64 +559,65 @@ struct AddRealEstateView: View {
 
     @ViewBuilder
     private var landDetailSection: some View {
-        if !showLandDeed && !showBldgDeed {
-            Section("詳細") {
-                Menu {
-                    Button { showLandDeed = true } label: { Label("土地權狀", systemImage: "doc.text") }
-                    Button { showBldgDeed = true } label: { Label("建物權狀", systemImage: "building.2") }
-                } label: {
-                    Label("新增權狀資料", systemImage: "plus.circle").foregroundStyle(.green)
-                }
-            }
-        }
-
-        if showLandDeed {
+        ForEach(Array(landDeedItems.enumerated()), id: \.element.id) { index, _ in
             Section {
-                TextField("坐落", text: $landSituation)
-                TextField("地號", text: $landNumber)
+                TextField("坐落", text: $landDeedItems[index].situation)
+                TextField("地號", text: $landDeedItems[index].number)
                 HStack {
-                    TextField("面積", text: $landAreaText).keyboardType(.decimalPad)
+                    TextField("面積", text: $landDeedItems[index].areaText).keyboardType(.decimalPad)
                     Text("㎡").foregroundStyle(.secondary)
                 }
             } header: {
                 HStack {
-                    Text("土地權狀")
+                    Text("土地權狀 \(index + 1)")
                     Spacer()
-                    Button { showLandDeed = false; landSituation = ""; landNumber = ""; landAreaText = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }
+                    Button { landDeedItems.remove(at: index) } label: {
+                        Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                    }.buttonStyle(.plain)
                 }
             }
         }
 
-        if showBldgDeed {
+        ForEach(Array(bldgDeedItems.enumerated()), id: \.element.id) { index, _ in
             Section {
-                TextField("坐落", text: $bldgSituation)
-                TextField("建號", text: $bldgNumber)
-                TextField("門牌", text: $bldgAddress)
-                Toggle("填入完工日", isOn: $hasBldgCompletionDate)
-                if hasBldgCompletionDate {
-                    DatePicker("完工日", selection: $bldgCompletionDate, displayedComponents: .date)
+                TextField("坐落", text: $bldgDeedItems[index].situation)
+                TextField("建號", text: $bldgDeedItems[index].number)
+                TextField("門牌", text: $bldgDeedItems[index].address)
+                Toggle("填入完工日", isOn: $bldgDeedItems[index].hasCompletionDate)
+                if bldgDeedItems[index].hasCompletionDate {
+                    DatePicker("完工日", selection: $bldgDeedItems[index].completionDate, displayedComponents: .date)
                 }
-                TextField("用途", text: $bldgUsage)
-                TextField("附屬建物", text: $bldgAnnex)
+                TextField("用途", text: $bldgDeedItems[index].usage)
+                TextField("附屬建物", text: $bldgDeedItems[index].annex)
                 HStack {
-                    TextField("面積", text: $bldgAreaText).keyboardType(.decimalPad)
+                    TextField("面積", text: $bldgDeedItems[index].areaText).keyboardType(.decimalPad)
                     Text("㎡").foregroundStyle(.secondary)
                 }
             } header: {
                 HStack {
-                    Text("建物權狀")
+                    Text("建物權狀 \(index + 1)")
                     Spacer()
-                    Button {
-                        showBldgDeed = false
-                        bldgSituation = ""; bldgNumber = ""; bldgAddress = ""
-                        bldgUsage = ""; bldgAnnex = ""; bldgAreaText = ""
-                        hasBldgCompletionDate = false
-                    } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }
+                    Button { bldgDeedItems.remove(at: index) } label: {
+                        Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                    }.buttonStyle(.plain)
                 }
+            }
+        }
+
+        Section("詳細") {
+            Menu {
+                Button {
+                    landDeedItems.append(LandDeedState(id: UUID(), situation: "", number: "", areaText: ""))
+                } label: { Label("土地權狀", systemImage: "doc.text") }
+                Button {
+                    bldgDeedItems.append(BuildingDeedState(
+                        id: UUID(), situation: "", number: "", address: "",
+                        hasCompletionDate: false, completionDate: Date(),
+                        usage: "", annex: "", areaText: ""
+                    ))
+                } label: { Label("建物權狀", systemImage: "building.2") }
+            } label: {
+                Label("新增權狀", systemImage: "plus.circle").foregroundStyle(.green)
             }
         }
     }
@@ -958,13 +969,8 @@ struct AddRealEstateView: View {
             landSituation: landSituation.trimmingCharacters(in: .whitespaces),
             landNumber: landNumber.trimmingCharacters(in: .whitespaces),
             landArea: Double(landAreaText) ?? 0,
-            bldgSituation: bldgSituation.trimmingCharacters(in: .whitespaces),
-            bldgNumber: bldgNumber.trimmingCharacters(in: .whitespaces),
-            bldgAddress: bldgAddress.trimmingCharacters(in: .whitespaces),
-            bldgCompletionDate: hasBldgCompletionDate ? bldgCompletionDate : nil,
-            bldgUsage: bldgUsage.trimmingCharacters(in: .whitespaces),
-            bldgAnnex: bldgAnnex.trimmingCharacters(in: .whitespaces),
-            bldgArea: Double(bldgAreaText) ?? 0,
+            landDeeds: landDeedItems.map { LandDeed(id: $0.id, situation: $0.situation.trimmingCharacters(in: .whitespaces), number: $0.number.trimmingCharacters(in: .whitespaces), area: Double($0.areaText) ?? 0) },
+            buildingDeeds: bldgDeedItems.map { BuildingDeed(id: $0.id, situation: $0.situation.trimmingCharacters(in: .whitespaces), number: $0.number.trimmingCharacters(in: .whitespaces), address: $0.address.trimmingCharacters(in: .whitespaces), completionDate: $0.hasCompletionDate ? $0.completionDate : nil, usage: $0.usage.trimmingCharacters(in: .whitespaces), annex: $0.annex.trimmingCharacters(in: .whitespaces), area: Double($0.areaText) ?? 0) },
             totalFloors: floorItems.count,
             fromFloor: 0,
             toFloor: 0,
@@ -1065,8 +1071,7 @@ struct AddRealEstateView: View {
         showMortgage = !e.mortgageItems.isEmpty
         showPaid = !e.paidItems.isEmpty
         showVariable = !e.variableExpenses.isEmpty
-        showLandDetail = !e.landSituation.isEmpty || !e.landNumber.isEmpty || e.landArea > 0
-            || !e.bldgSituation.isEmpty || !e.bldgNumber.isEmpty || !e.bldgAddress.isEmpty || e.bldgArea > 0
+        showLandDetail = !e.landDeeds.isEmpty || !e.buildingDeeds.isEmpty
         showFloor = !e.floors.isEmpty
         showUtilities = !e.waterMeterNumber.isEmpty || !e.electricityMeterNumber.isEmpty || !e.gasMeterNumber.isEmpty
         showInsurance = !e.insuranceItems.isEmpty
@@ -1121,15 +1126,14 @@ struct AddRealEstateView: View {
         landSituation = e.landSituation
         landNumber = e.landNumber
         landAreaText = e.landArea > 0 ? String(format: "%g", e.landArea) : ""
-        showLandDeed = !e.landSituation.isEmpty || !e.landNumber.isEmpty || e.landArea > 0
-        bldgSituation = e.bldgSituation
-        bldgNumber = e.bldgNumber
-        bldgAddress = e.bldgAddress
-        if let cd = e.bldgCompletionDate { hasBldgCompletionDate = true; bldgCompletionDate = cd }
-        bldgUsage = e.bldgUsage
-        bldgAnnex = e.bldgAnnex
-        bldgAreaText = e.bldgArea > 0 ? String(format: "%g", e.bldgArea) : ""
-        showBldgDeed = !e.bldgSituation.isEmpty || !e.bldgNumber.isEmpty || !e.bldgAddress.isEmpty || e.bldgArea > 0
+        landDeedItems = e.landDeeds.map { d in
+            LandDeedState(id: d.id, situation: d.situation, number: d.number, areaText: d.area > 0 ? String(format: "%g", d.area) : "")
+        }
+        bldgDeedItems = e.buildingDeeds.map { d in
+            BuildingDeedState(id: d.id, situation: d.situation, number: d.number, address: d.address,
+                              hasCompletionDate: d.completionDate != nil, completionDate: d.completionDate ?? Date(),
+                              usage: d.usage, annex: d.annex, areaText: d.area > 0 ? String(format: "%g", d.area) : "")
+        }
         floorItems = e.floors.map { f in
             FloorItemState(id: f.id, floorNumber: f.floorNumber, functions: Set(f.functions), areaText: f.area > 0 ? String(format: "%g", f.area) : "")
         }

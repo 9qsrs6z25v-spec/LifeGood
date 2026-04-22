@@ -285,14 +285,23 @@ struct RealEstateDetailView: View {
                 if !estate.landOwner.isEmpty { infoRow("所有權人", estate.landOwner) }
             }
 
-            let hasDetail = !estate.landSituation.isEmpty || !estate.landNumber.isEmpty
-                || estate.landArea > 0
-
-            if hasDetail {
-                sectionHeader("詳細")
-                if !estate.landSituation.isEmpty { infoRow("座落", estate.landSituation) }
-                if !estate.landNumber.isEmpty { infoRow("地號", estate.landNumber) }
-                if estate.landArea > 0 { infoRow("面積", String(format: "%g ㎡", estate.landArea)) }
+            if !estate.landDeeds.isEmpty || !estate.buildingDeeds.isEmpty {
+                for (i, d) in estate.landDeeds.enumerated() {
+                    sectionHeader("土地權狀\(estate.landDeeds.count > 1 ? " \(i + 1)" : "")")
+                    if !d.situation.isEmpty { infoRow("坐落", d.situation) }
+                    if !d.number.isEmpty { infoRow("地號", d.number) }
+                    if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
+                }
+                for (i, d) in estate.buildingDeeds.enumerated() {
+                    sectionHeader("建物權狀\(estate.buildingDeeds.count > 1 ? " \(i + 1)" : "")")
+                    if !d.situation.isEmpty { infoRow("坐落", d.situation) }
+                    if !d.number.isEmpty { infoRow("建號", d.number) }
+                    if !d.address.isEmpty { infoRow("門牌", d.address) }
+                    if let cd = d.completionDate { infoRow("完工日", formatDate(cd)) }
+                    if !d.usage.isEmpty { infoRow("用途", d.usage) }
+                    if !d.annex.isEmpty { infoRow("附屬建物", d.annex) }
+                    if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
+                }
             }
 
             if !estate.floors.isEmpty {
