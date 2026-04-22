@@ -1,11 +1,55 @@
 import SwiftUI
 
+enum RealEstateSortOption: String, CaseIterable, Identifiable {
+    case purchasePrice = "購入價格"
+    case currentValue = "目前估值"
+    case appreciationRate = "增值率"
+    case monthlyRental = "月租金"
+    case purchaseDate = "購入日期"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .purchasePrice: return "tag"
+        case .currentValue: return "chart.line.uptrend.xyaxis"
+        case .appreciationRate: return "arrow.up.right"
+        case .monthlyRental: return "dollarsign.circle"
+        case .purchaseDate: return "calendar"
+        }
+    }
+}
+
 struct RealEstateView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
     @State private var showAdd = false
     @State private var editingItem: RealEstate?
     @State private var viewingItem: RealEstate?
+    @State private var sortOption: RealEstateSortOption = .purchaseDate
+    @State private var sortAscending = false
+
+    private var activeEstates: [RealEstate] {
+        sorted(store.realEstates.filter { !$0.isSold })
+    }
+
+    private var soldEstates: [RealEstate] {
+        sorted(store.realEstates.filter { $0.isSold })
+    }
+
+    private func sorted(_ list: [RealEstate]) -> [RealEstate] {
+        list.sorted { a, b in
+            let result: Bool
+            switch sortOption {
+            case .purchasePrice: result = a.purchasePrice > b.purchasePrice
+            case .currentValue: result = a.currentValue > b.currentValue
+            case .appreciationRate: result = a.appreciationRate > b.appreciationRate
+            case .monthlyRental: result = a.monthlyRental > b.monthlyRental
+            case .purchaseDate: result = a.purchaseDate > b.purchaseDate
+            }
+            return sortAscending ? !result : result
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -16,41 +60,36 @@ struct RealEstateView: View {
                     emptyState
                 } else {
                     List {
-                        ForEach(store.realEstates) { item in
+                        ForEach(activeEstates) { item in
                             estateCard(item)
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                 .onTapGesture { viewingItem = item }
                                 .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) {
-                                        // 刪除連結的貸款固定支出
-                                        for m in item.mortgageItems {
-                                            if let linkedId = m.linkedExpenseId {
-                                                expenseStore.expenses.removeAll { $0.id == linkedId }
-                                            }
-                                        }
-                                        // 刪除連結的已支出項目
-                                        for p in item.paidItems {
-                                            if let linkedId = p.linkedExpenseId {
-                                                expenseStore.expenses.removeAll { $0.id == linkedId }
-                                            }
-                                        }
-                                        // 刪除連結的變動支出
-                                        for ve in item.variableExpenses {
-                                            if let linkedId = ve.linkedExpenseId {
-                                                expenseStore.expenses.removeAll { $0.id == linkedId }
-                                            }
-                                        }
-                                        // 舊版相容
-                                        if let linkedId = item.linkedExpenseId {
-                                            expenseStore.expenses.removeAll { $0.id == linkedId }
-                                        }
-                                        store.deleteRealEstate(item)
-                                    } label: {
+                                    Button(role: .destructive) { deleteEstate(item) } label: {
                                         Label("刪除", systemImage: "trash")
                                     }
                                 }
+                        }
+
+                        if !soldEstates.isEmpty {
+                            Section {
+                                ForEach(soldEstates) { item in
+                                    estateCard(item)
+                                        .listRowBackground(Color.clear)
+                                        .listRowSeparator(.hidden)
+                                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                        .onTapGesture { viewingItem = item }
+                                        .swipeActions(edge: .trailing) {
+                                            Button(role: .destructive) { deleteEstate(item) } label: {
+                                                Label("刪除", systemImage: "trash")
+                                            }
+                                        }
+                                }
+                            } header: {
+                                Text("已售出").font(.caption.weight(.semibold))
+                            }
                         }
                     }
                     .listStyle(.plain)
@@ -62,8 +101,36 @@ struct RealEstateView: View {
             .navigationTitle("房地產")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    HStack(spacing: 12) {
+                        Menu {
+                            ForEach(RealEstateSortOption.allCases) { option in
+                                Button {
+                                    if sortOption == option {
+                                        sortAscending.toggle()
+                                    } else {
+                                        sortOption = option
+                                        sortAscending = false
+                                    }
+                                } label: {
+                                    Label {
+                                        Text(option.rawValue)
+                                    } icon: {
+                                        if sortOption == option {
+                                            Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
+                                        } else {
+                                            Image(systemName: option.icon)
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.arrow.down.circle")
+                                .font(.title3).foregroundStyle(.green)
+                        }
+
+                        Button { showAdd = true } label: {
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
             }
@@ -72,6 +139,30 @@ struct RealEstateView: View {
             .sheet(item: $editingItem) { item in AddRealEstateView(editing: item) }
         }
     }
+
+    private func deleteEstate(_ item: RealEstate) {
+        for m in item.mortgageItems {
+            if let linkedId = m.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
+        for p in item.paidItems {
+            if let linkedId = p.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
+        for ve in item.variableExpenses {
+            if let linkedId = ve.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
+        for ins in item.insuranceItems {
+            if let linkedId = ins.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
+        for asset in item.propertyAssets {
+            if let linkedId = asset.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
+        if let linkedId = item.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        if let saleExpId = item.saleLinkedExpenseId { expenseStore.expenses.removeAll { $0.id == saleExpId } }
+        if let saleIncId = item.saleLinkedIncomeId { expenseStore.incomes.removeAll { $0.id == saleIncId } }
+        store.deleteRealEstate(item)
+    }
+
+    // MARK: - 摘要
 
     private var summaryHeader: some View {
         VStack(spacing: 8) {
@@ -83,8 +174,16 @@ struct RealEstateView: View {
                         .font(.title2.bold())
                 }
                 Spacer()
-                Text("\(store.realEstates.count) 筆物件")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 4) {
+                    let active = store.realEstates.filter { !$0.isSold }.count
+                    let sold = store.realEstates.filter { $0.isSold }.count
+                    Text("\(active) 筆持有")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    if sold > 0 {
+                        Text("\(sold) 筆已售")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
             }
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -113,6 +212,8 @@ struct RealEstateView: View {
         }.frame(maxWidth: .infinity)
     }
 
+    // MARK: - 卡片
+
     private func estateCard(_ item: RealEstate) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -133,7 +234,6 @@ struct RealEstateView: View {
 
             Divider()
 
-            // 貸款明細
             if !item.mortgageItems.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(item.mortgageItems) { m in
@@ -158,7 +258,6 @@ struct RealEstateView: View {
                 }
             }
 
-            // 已支出明細
             if !item.paidItems.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(item.paidItems.suffix(2)) { p in
@@ -180,7 +279,6 @@ struct RealEstateView: View {
                 }
             }
 
-            // 變動支出明細
             if !item.variableExpenses.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(item.variableExpenses.suffix(3)) { ve in
