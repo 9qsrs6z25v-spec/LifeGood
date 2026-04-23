@@ -102,7 +102,7 @@ struct FinanceOverviewView: View {
                             Circle().fill(colorFor(a.type)).frame(width: 10, height: 10)
                             Text(a.type.rawValue).font(.subheadline)
                             Spacer()
-                            Text(fmt(a.value)).font(.subheadline.bold())
+                            Text(fmtShort(a.value)).font(.subheadline.bold())
                             Text(String(format: "%.1f%%", a.percentage))
                                 .font(.caption).foregroundStyle(.secondary).frame(width: 50, alignment: .trailing)
                         }
@@ -127,17 +127,17 @@ struct FinanceOverviewView: View {
             HStack(spacing: 24) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("租金收入").font(.caption).foregroundStyle(.secondary)
-                    Text(fmt(store.monthlyRentalIncome)).font(.subheadline.bold()).foregroundStyle(.green)
+                    Text(fmtShort(store.monthlyRentalIncome)).font(.subheadline.bold()).foregroundStyle(.green)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("房貸支出").font(.caption).foregroundStyle(.secondary)
-                    Text(fmt(store.monthlyMortgagePayment)).font(.subheadline.bold()).foregroundStyle(.red)
+                    Text(fmtShort(store.monthlyMortgagePayment)).font(.subheadline.bold()).foregroundStyle(.red)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("淨現金流").font(.caption).foregroundStyle(.secondary)
                     let flow = store.monthlyCashFlow
-                    Text(fmt(flow)).font(.subheadline.bold()).foregroundStyle(flow >= 0 ? .green : .red)
+                    Text(fmtShort(flow)).font(.subheadline.bold()).foregroundStyle(flow >= 0 ? .green : .red)
                 }
             }
             .padding(.horizontal)
