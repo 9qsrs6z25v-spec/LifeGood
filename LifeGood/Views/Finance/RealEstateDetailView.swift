@@ -168,8 +168,58 @@ struct RealEstateDetailView: View {
 
     // MARK: - 詳細資訊
 
+    @ViewBuilder
+    private var calcSummary: some View {
+        let rental = estate.monthlyRental
+        let mortgageMonthly = estate.monthlyMortgage
+        let mortgageTotal = estate.totalMortgageAmount
+        let mortgagePaidTotal = estate.totalMortgagePaid
+        let paidTotal = estate.totalPaid
+        let varTotal = estate.variableTotal
+        let allPaid = paidTotal + mortgagePaidTotal + varTotal
+
+        if rental > 0 || mortgageMonthly > 0 || paidTotal > 0 || varTotal > 0 {
+            sectionHeader("試算")
+            VStack(spacing: 0) {
+                if rental > 0 || mortgageMonthly > 0 {
+                    calcRow("每月淨現金流", fmt(rental - mortgageMonthly),
+                            color: rental - mortgageMonthly >= 0 ? .green : .red)
+                }
+                if mortgageTotal > 0 {
+                    calcRow("貸款總額", fmt(mortgageTotal), color: .secondary)
+                }
+                if mortgagePaidTotal > 0 {
+                    calcRow("已繳貸款金額", fmt(mortgagePaidTotal), color: .blue)
+                }
+                if paidTotal > 0 {
+                    calcRow("已支出房屋金額", fmt(paidTotal), color: .purple)
+                }
+                if varTotal > 0 {
+                    calcRow("變動支出累計", fmt(varTotal), color: .orange)
+                }
+                HStack {
+                    Text("房屋總已支出").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(fmt(allPaid)).font(.subheadline.bold()).foregroundStyle(.red)
+                }
+                .padding(.horizontal).padding(.vertical, 8)
+            }
+        }
+    }
+
+    private func calcRow(_ label: String, _ value: String, color: Color) -> some View {
+        HStack {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.subheadline.bold()).foregroundStyle(color)
+        }
+        .padding(.horizontal).padding(.vertical, 6)
+    }
+
     private var infoSection: some View {
         VStack(spacing: 0) {
+            calcSummary
+
             if !estate.mortgageItems.isEmpty {
                 sectionHeader("貸款明細")
                 ForEach(estate.mortgageItems) { m in
