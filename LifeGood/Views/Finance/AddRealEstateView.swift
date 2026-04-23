@@ -89,6 +89,7 @@ struct AddRealEstateView: View {
     @State private var electricityMeterOwner = ""
     @State private var gasMeterNumber = ""
     @State private var gasMeterOwner = ""
+    @State private var gasUserNumber = ""
     @State private var insuranceItems: [InsuranceItemState] = []
     @State private var assetItems: [AssetItemState] = []
 
@@ -690,23 +691,42 @@ struct AddRealEstateView: View {
                 Image(systemName: "drop.fill").foregroundStyle(.blue).frame(width: 24)
                 VStack(alignment: .leading, spacing: 6) {
                     TextField("水號", text: $waterMeterNumber)
-                    TextField("所有權人", text: $waterMeterOwner)
-                        .font(.subheadline).foregroundStyle(.secondary)
+                    ownerPicker(selection: $waterMeterOwner, placeholder: "所有權人")
                 }
             }
             HStack {
                 Image(systemName: "bolt.fill").foregroundStyle(.yellow).frame(width: 24)
                 VStack(alignment: .leading, spacing: 6) {
                     TextField("電號", text: $electricityMeterNumber)
-                    TextField("所有權人", text: $electricityMeterOwner)
-                        .font(.subheadline).foregroundStyle(.secondary)
+                    ownerPicker(selection: $electricityMeterOwner, placeholder: "所有權人")
                 }
             }
             HStack {
                 Image(systemName: "flame.fill").foregroundStyle(.orange).frame(width: 24)
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("瓦斯表號", text: $gasMeterNumber)
-                    TextField("所有權人", text: $gasMeterOwner)
+                    TextField("用戶編號", text: $gasUserNumber)
+                    TextField("表號", text: $gasMeterNumber)
+                    ownerPicker(selection: $gasMeterOwner, placeholder: "所有權人")
+                }
+            }
+        }
+    }
+
+    private func ownerPicker(selection: Binding<String>, placeholder: String) -> some View {
+        Group {
+            if ownerCandidates.isEmpty {
+                TextField(placeholder, text: selection)
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                Picker(placeholder, selection: selection) {
+                    Text("手動輸入").tag("")
+                    ForEach(ownerCandidates, id: \.self) { name in
+                        Text(name).tag(name)
+                    }
+                }
+                .font(.subheadline)
+                if selection.wrappedValue.isEmpty {
+                    TextField(placeholder, text: selection)
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             }
@@ -1000,6 +1020,7 @@ struct AddRealEstateView: View {
             electricityMeterOwner: electricityMeterOwner.trimmingCharacters(in: .whitespaces),
             gasMeterNumber: gasMeterNumber.trimmingCharacters(in: .whitespaces),
             gasMeterOwner: gasMeterOwner.trimmingCharacters(in: .whitespaces),
+            gasUserNumber: gasUserNumber.trimmingCharacters(in: .whitespaces),
             insuranceItems: syncedInsurance,
             propertyAssets: syncedAssets
         )
@@ -1092,7 +1113,7 @@ struct AddRealEstateView: View {
         showVariable = !e.variableExpenses.isEmpty
         showLandDetail = !e.landDeeds.isEmpty || !e.buildingDeeds.isEmpty
         showFloor = !e.floors.isEmpty
-        showUtilities = !e.waterMeterNumber.isEmpty || !e.electricityMeterNumber.isEmpty || !e.gasMeterNumber.isEmpty
+        showUtilities = !e.waterMeterNumber.isEmpty || !e.electricityMeterNumber.isEmpty || !e.gasMeterNumber.isEmpty || !e.gasUserNumber.isEmpty
         showInsurance = !e.insuranceItems.isEmpty
         showAsset = !e.propertyAssets.isEmpty
 
@@ -1162,6 +1183,7 @@ struct AddRealEstateView: View {
         electricityMeterOwner = e.electricityMeterOwner
         gasMeterNumber = e.gasMeterNumber
         gasMeterOwner = e.gasMeterOwner
+        gasUserNumber = e.gasUserNumber
 
         insuranceItems = e.insuranceItems.map { ins in
             InsuranceItemState(

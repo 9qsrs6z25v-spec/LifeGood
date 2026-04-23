@@ -585,6 +585,7 @@ struct RealEstate: Identifiable, Codable {
     var electricityMeterOwner: String  // 電 所有權人
     var gasMeterNumber: String         // 瓦斯表號
     var gasMeterOwner: String          // 瓦斯 所有權人
+    var gasUserNumber: String          // 瓦斯用戶編號
     var insuranceItems: [RealEstateInsuranceItem]      // 保險項目
     var propertyAssets: [RealEstatePropertyAsset]       // 房屋附屬資產
 
@@ -630,6 +631,7 @@ struct RealEstate: Identifiable, Codable {
         electricityMeterOwner: String = "",
         gasMeterNumber: String = "",
         gasMeterOwner: String = "",
+        gasUserNumber: String = "",
         insuranceItems: [RealEstateInsuranceItem] = [],
         propertyAssets: [RealEstatePropertyAsset] = []
     ) {
@@ -674,6 +676,7 @@ struct RealEstate: Identifiable, Codable {
         self.electricityMeterOwner = electricityMeterOwner
         self.gasMeterNumber = gasMeterNumber
         self.gasMeterOwner = gasMeterOwner
+        self.gasUserNumber = gasUserNumber
         self.insuranceItems = insuranceItems
         self.propertyAssets = propertyAssets
     }
@@ -730,6 +733,7 @@ struct RealEstate: Identifiable, Codable {
         electricityMeterOwner = (try? c.decode(String.self, forKey: .electricityMeterOwner)) ?? ""
         gasMeterNumber = (try? c.decode(String.self, forKey: .gasMeterNumber)) ?? ""
         gasMeterOwner = (try? c.decode(String.self, forKey: .gasMeterOwner)) ?? ""
+        gasUserNumber = (try? c.decode(String.self, forKey: .gasUserNumber)) ?? ""
         insuranceItems = (try? c.decode([RealEstateInsuranceItem].self, forKey: .insuranceItems)) ?? []
         propertyAssets = (try? c.decode([RealEstatePropertyAsset].self, forKey: .propertyAssets)) ?? []
 
@@ -748,7 +752,7 @@ struct RealEstate: Identifiable, Codable {
         case landDeeds, buildingDeeds
         case totalFloors, fromFloor, toFloor, floors
         case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
-        case gasMeterNumber, gasMeterOwner, insuranceItems, propertyAssets
+        case gasMeterNumber, gasMeterOwner, gasUserNumber, insuranceItems, propertyAssets
         case monthlyMortgage // 舊版欄位，僅用於解碼
     }
 
@@ -794,6 +798,7 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(electricityMeterNumber, forKey: .electricityMeterNumber)
         try c.encode(electricityMeterOwner, forKey: .electricityMeterOwner)
         try c.encode(gasMeterNumber, forKey: .gasMeterNumber)
+        try c.encode(gasUserNumber, forKey: .gasUserNumber)
         try c.encode(gasMeterOwner, forKey: .gasMeterOwner)
         try c.encode(insuranceItems, forKey: .insuranceItems)
         try c.encode(propertyAssets, forKey: .propertyAssets)

@@ -362,7 +362,7 @@ struct RealEstateDetailView: View {
 
             let hasUtilities = !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty
                 || !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty
-                || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty
+                || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty || !estate.gasUserNumber.isEmpty
 
             if hasUtilities {
                 sectionHeader("水電瓦斯")
@@ -376,10 +376,25 @@ struct RealEstateDetailView: View {
                                number: estate.electricityMeterNumber, owner: estate.electricityMeterOwner,
                                numberLabel: "電號")
                 }
-                if !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty {
-                    utilityRow(icon: "flame.fill", color: .orange,
-                               number: estate.gasMeterNumber, owner: estate.gasMeterOwner,
-                               numberLabel: "瓦斯表號")
+                if !estate.gasUserNumber.isEmpty || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "flame.fill").foregroundStyle(.orange).frame(width: 20)
+                            VStack(alignment: .leading, spacing: 2) {
+                                if !estate.gasUserNumber.isEmpty {
+                                    Text("用戶編號 \(estate.gasUserNumber)").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                if !estate.gasMeterNumber.isEmpty {
+                                    Text("表號 \(estate.gasMeterNumber)").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if !estate.gasMeterOwner.isEmpty {
+                                Text(estate.gasMeterOwner).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
                 }
             }
 
