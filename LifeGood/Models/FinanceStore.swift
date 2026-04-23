@@ -66,13 +66,13 @@ class FinanceStore: ObservableObject {
     // MARK: - 統計
 
     var totalInsuranceValue: Double { insurances.reduce(0) { $0 + $1.currentValue } }
-    var totalStockValue: Double { stocks.reduce(0) { $0 + $1.marketValue } }
+    var totalStockValue: Double { stocks.filter { !$0.isSold }.reduce(0) { $0 + $1.marketValue } }
     var totalVehicleValue: Double { vehicles.reduce(0) { $0 + $1.currentValue } }
     var totalRealEstateValue: Double { realEstates.filter { !$0.isSold }.reduce(0) { $0 + $1.currentValue } }
     var totalAssets: Double { totalInsuranceValue + totalStockValue + totalVehicleValue + totalRealEstateValue }
 
     var totalStockCost: Double { stocks.reduce(0) { $0 + $1.totalCost } }
-    var totalStockProfitLoss: Double { totalStockValue - totalStockCost }
+    var totalStockProfitLoss: Double { stocks.reduce(0) { $0 + $1.profitLoss } }
 
     var monthlyRentalIncome: Double { realEstates.filter { !$0.isSold }.reduce(0) { $0 + $1.monthlyRental } }
     var monthlyMortgagePayment: Double { realEstates.filter { !$0.isSold }.reduce(0) { $0 + $1.monthlyMortgage } }

@@ -6,42 +6,74 @@ struct StockView: View {
     @State private var showAdd = false
     @State private var editingItem: Stock?
     @State private var soldExpanded = false
+    @State private var scrollOffset: CGFloat = 0
 
     private var activeStocks: [Stock] { store.stocks.filter { !$0.isSold } }
     private var soldStocks: [Stock] { store.stocks.filter { $0.isSold } }
 
+    private var totalTransactionAmount: Double {
+        store.stocks.reduce(0) { $0 + $1.totalCost }
+        + soldStocks.reduce(0) { $0 + $1.marketValue }
+    }
+
+    private var titleScale: CGFloat {
+        let progress = min(max(scrollOffset / 60, 0), 1)
+        return 1.0 - progress * 0.35
+    }
+
+    private var titleOpacity: Double {
+        let progress = min(max(scrollOffset / 60, 0), 1)
+        return 1.0 - Double(progress) * 0.5
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                summaryHeader
-
+            ZStack(alignment: .top) {
                 if store.stocks.isEmpty {
-                    emptyState
+                    VStack(spacing: 0) {
+                        stickyTitle
+                        emptyState
+                    }
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(activeStocks) { item in
-                                stockCard(item)
-                                    .onTapGesture { editingItem = item }
-                                    .contextMenu {
-                                        Button(role: .destructive) { deleteStock(item) } label: {
-                                            Label("刪除", systemImage: "trash")
-                                        }
+                        LazyVStack(spacing: 0) {
+                            summaryHeader
+                                .background(
+                                    GeometryReader { geo in
+                                        Color.clear.preference(
+                                            key: ScrollOffsetKey.self,
+                                            value: -geo.frame(in: .named("scroll")).minY
+                                        )
                                     }
-                            }
+                                )
 
-                            if !soldStocks.isEmpty {
-                                soldStackSection
+                            LazyVStack(spacing: 12) {
+                                ForEach(activeStocks) { item in
+                                    stockCard(item)
+                                        .onTapGesture { editingItem = item }
+                                        .contextMenu {
+                                            Button(role: .destructive) { deleteStock(item) } label: {
+                                                Label("刪除", systemImage: "trash")
+                                            }
+                                        }
+                                }
+
+                                if !soldStocks.isEmpty {
+                                    soldStackSection
+                                }
                             }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
                     }
+                    .coordinateSpace(name: "scroll")
+                    .onPreferenceChange(ScrollOffsetKey.self) { scrollOffset = $0 }
                     .background(Color(.systemGroupedBackground))
+
+                    stickyTitle
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("股票")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showAdd = true } label: {
@@ -49,9 +81,28 @@ struct StockView: View {
                     }
                 }
             }
+            .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showAdd) { AddStockView() }
             .sheet(item: $editingItem) { item in AddStockView(editing: item) }
         }
+    }
+
+    // MARK: - 黏著標題
+
+    private var stickyTitle: some View {
+        Text("股票")
+            .font(.system(size: 34 * titleScale, weight: .bold))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
+            .padding(.top, 4)
+            .padding(.bottom, 8)
+            .background(
+                LinearGradient(
+                    colors: [Color(.systemBackground), Color(.systemBackground).opacity(titleOpacity)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
     }
 
     // MARK: - 已賣出堆疊
@@ -159,8 +210,12 @@ struct StockView: View {
                         .font(.title2.bold())
                 }
                 Spacer()
-                Text("\(store.stocks.count) 檔")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("\(store.stocks.count) 檔")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Text("交易總額 " + fmtShort(totalTransactionAmount))
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
             }
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -178,6 +233,7 @@ struct StockView: View {
             }
         }
         .padding()
+        .padding(.top, 44)
         .background(Color(.systemBackground))
     }
 
@@ -258,5 +314,19 @@ struct StockView: View {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: v)) ?? "NT$0"
+    }
+
+    private func fmtShort(_ v: Double) -> String {
+        let abs = abs(v)
+        if abs >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
+        if abs >= 10_000 { return String(format: "%.0f萬", v / 10_000) }
+        return fmt(v)
+    }
+}
+
+private struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
