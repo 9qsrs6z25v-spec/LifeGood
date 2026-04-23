@@ -84,6 +84,9 @@ struct AddRealEstateView: View {
         var areaText: String
     }
     @State private var waterMeterNumber = ""
+    @State private var waterStation = ""
+    @State private var waterCode = ""
+    @State private var waterCheck = ""
     @State private var waterMeterOwner = ""
     @State private var electricityMeterNumber = ""
     @State private var electricityMeterOwner = ""
@@ -690,7 +693,27 @@ struct AddRealEstateView: View {
             HStack {
                 Image(systemName: "drop.fill").foregroundStyle(.blue).frame(width: 24)
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("水號", text: $waterMeterNumber)
+                    HStack(spacing: 6) {
+                        VStack(spacing: 2) {
+                            TextField("站所", text: $waterStation)
+                                .multilineTextAlignment(.center)
+                            Text("站所").font(.system(size: 9)).foregroundStyle(.tertiary)
+                        }
+                        .frame(width: 44)
+                        Text("-").foregroundStyle(.secondary)
+                        VStack(spacing: 2) {
+                            TextField("編號", text: $waterCode)
+                                .multilineTextAlignment(.center)
+                            Text("編號").font(.system(size: 9)).foregroundStyle(.tertiary)
+                        }
+                        Text("-").foregroundStyle(.secondary)
+                        VStack(spacing: 2) {
+                            TextField("檢", text: $waterCheck)
+                                .multilineTextAlignment(.center)
+                            Text("檢號").font(.system(size: 9)).foregroundStyle(.tertiary)
+                        }
+                        .frame(width: 32)
+                    }
                     ownerPicker(selection: $waterMeterOwner, placeholder: "所有權人")
                 }
             }
@@ -710,6 +733,13 @@ struct AddRealEstateView: View {
                 }
             }
         }
+    }
+
+    private var combinedWaterNumber: String {
+        let parts = [waterStation, waterCode, waterCheck]
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        if parts.allSatisfy({ $0.isEmpty }) { return "" }
+        return parts.joined(separator: "-")
     }
 
     private func ownerPicker(selection: Binding<String>, placeholder: String) -> some View {
@@ -1014,7 +1044,7 @@ struct AddRealEstateView: View {
             fromFloor: 0,
             toFloor: 0,
             floors: floorItems.map { FloorInfo(id: $0.id, floorNumber: $0.floorNumber, functions: Array($0.functions), area: Double($0.areaText) ?? 0) },
-            waterMeterNumber: waterMeterNumber.trimmingCharacters(in: .whitespaces),
+            waterMeterNumber: combinedWaterNumber,
             waterMeterOwner: waterMeterOwner.trimmingCharacters(in: .whitespaces),
             electricityMeterNumber: electricityMeterNumber.trimmingCharacters(in: .whitespaces),
             electricityMeterOwner: electricityMeterOwner.trimmingCharacters(in: .whitespaces),
@@ -1178,6 +1208,12 @@ struct AddRealEstateView: View {
             FloorItemState(id: f.id, floorNumber: f.floorNumber, functions: Set(f.functions), areaText: f.area > 0 ? String(format: "%g", f.area) : "")
         }
         waterMeterNumber = e.waterMeterNumber
+        let waterParts = e.waterMeterNumber.split(separator: "-").map(String.init)
+        if waterParts.count >= 3 {
+            waterStation = waterParts[0]; waterCode = waterParts[1]; waterCheck = waterParts[2]
+        } else if waterParts.count == 1 && !waterParts[0].isEmpty {
+            waterCode = waterParts[0]
+        }
         waterMeterOwner = e.waterMeterOwner
         electricityMeterNumber = e.electricityMeterNumber
         electricityMeterOwner = e.electricityMeterOwner
