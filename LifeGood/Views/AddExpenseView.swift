@@ -3,6 +3,7 @@ import SwiftUI
 struct AddExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
     let expenseType: ExpenseType
@@ -14,6 +15,7 @@ struct AddExpenseView: View {
     @State private var amountText = ""
     @State private var date = Date()
     @State private var selectedVariableCategory: VariableCategory = .food
+    @State private var selectedDiningMember: String = ""
     @State private var selectedFixedCategory: FixedCategory = .rent
     @State private var selectedRecurrence: Recurrence = .monthly
     @State private var note = ""
@@ -377,12 +379,36 @@ struct AddExpenseView: View {
 
     // MARK: - 分類
 
+    private var familyNames: [String] {
+        var names: [String] = []
+        let myName = lifeStore.profile.chineseName
+        if !myName.isEmpty { names.append(myName) }
+        for m in lifeStore.familyMembers where !m.chineseName.isEmpty {
+            names.append(m.chineseName)
+        }
+        return names
+    }
+
     private var categorySection: some View {
         Section("分類") {
             if expenseType == .variable {
-                Picker("類別", selection: $selectedVariableCategory) {
-                    ForEach(VariableCategory.allCases) { cat in
-                        Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                HStack {
+                    Picker("類別", selection: $selectedVariableCategory) {
+                        ForEach(VariableCategory.allCases) { cat in
+                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    if selectedVariableCategory == .food && !familyNames.isEmpty {
+                        Divider()
+                        Picker("人員", selection: $selectedDiningMember) {
+                            Text("不指定").tag("")
+                            ForEach(familyNames, id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                        .labelsHidden()
                     }
                 }
             } else {
@@ -966,7 +992,8 @@ struct AddExpenseView: View {
             vehicleExpenseCategory: (expenseType == .variable && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil,
             realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
             note: note.trimmingCharacters(in: .whitespaces),
-            currencyCode: savedCurrencyCode
+            currencyCode: savedCurrencyCode,
+            diningMember: (expenseType == .variable && selectedVariableCategory == .food && !selectedDiningMember.isEmpty) ? selectedDiningMember : nil
         )
 
         if isEditing { store.update(expense) } else { store.add(expense) }
@@ -1271,6 +1298,7 @@ struct AddExpenseView: View {
         if let rec = expense.recurrence { selectedRecurrence = rec }
         if let sub = expense.insuranceSubCategory { selectedInsuranceSubCategory = sub }
         if let sub = expense.loanSubCategory { selectedLoanSubCategory = sub }
+        selectedDiningMember = expense.diningMember ?? ""
         note = expense.note
 
         // 載入連結的儲蓄險

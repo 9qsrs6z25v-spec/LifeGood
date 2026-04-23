@@ -7,7 +7,7 @@ enum ExpenseType: String, Codable, CaseIterable {
 }
 
 // MARK: - 變動支出分類
-enum VariableCategory: String, Codable, CaseIterable, Identifiable {
+enum VariableCategory: String, Codable, Identifiable {
     case food = "飲食"
     case transportation = "交通"
     case vehicle = "汽車"
@@ -22,6 +22,10 @@ enum VariableCategory: String, Codable, CaseIterable, Identifiable {
     case other = "其他"
 
     var id: String { rawValue }
+
+    static var allCases: [VariableCategory] {
+        [.food, .vehicle, .stock, .realEstate, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
+    }
 
     var icon: String {
         switch self {
@@ -132,6 +136,7 @@ struct Expense: Identifiable, Codable {
     var realEstateExpenseCategory: RealEstateExpenseCategory?  // 房地產變動支出子分類
     var note: String
     var currencyCode: String
+    var diningMember: String?
 
     init(
         id: UUID = UUID(),
@@ -151,7 +156,8 @@ struct Expense: Identifiable, Codable {
         vehicleExpenseCategory: VehicleVariableCategory? = nil,
         realEstateExpenseCategory: RealEstateExpenseCategory? = nil,
         note: String = "",
-        currencyCode: String = "NT$"
+        currencyCode: String = "NT$",
+        diningMember: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -171,6 +177,7 @@ struct Expense: Identifiable, Codable {
         self.realEstateExpenseCategory = realEstateExpenseCategory
         self.note = note
         self.currencyCode = currencyCode
+        self.diningMember = diningMember
     }
 
     // MARK: - 向下相容解碼
@@ -194,12 +201,13 @@ struct Expense: Identifiable, Codable {
         realEstateExpenseCategory = try? c.decode(RealEstateExpenseCategory.self, forKey: .realEstateExpenseCategory)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         currencyCode = (try? c.decode(String.self, forKey: .currencyCode)) ?? "NT$"
+        diningMember = try? c.decode(String.self, forKey: .diningMember)
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
         case insuranceSubCategory, loanSubCategory
         case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
-        case vehicleExpenseCategory, realEstateExpenseCategory, note, currencyCode
+        case vehicleExpenseCategory, realEstateExpenseCategory, note, currencyCode, diningMember
     }
 
     var categoryName: String {
