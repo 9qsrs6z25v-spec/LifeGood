@@ -7,6 +7,8 @@ struct StockView: View {
     @State private var editingItem: Stock?
     @State private var soldExpanded = false
     @State private var scrollOffset: CGFloat = 0
+    @State private var updateBanner: String?
+    @State private var isUpdating = false
 
     private var activeStocks: [Stock] { store.stocks.filter { !$0.isSold } }
     private var soldStocks: [Stock] { store.stocks.filter { $0.isSold } }
@@ -84,7 +86,78 @@ struct StockView: View {
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showAdd) { AddStockView() }
             .sheet(item: $editingItem) { item in AddStockView(editing: item) }
+            .overlay(alignment: .top) {
+                if let banner = updateBanner {
+                    Text(banner)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(Color.green.opacity(0.9), in: Capsule())
+                        .shadow(radius: 4)
+                        .padding(.top, 50)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if isUpdating {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(.white).controlSize(.small)
+                        Text("更新報價中...").font(.subheadline).foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(Color.blue.opacity(0.85), in: Capsule())
+                    .shadow(radius: 4)
+                    .padding(.top, 50)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .onAppear { Task { await refreshAllPrices() } }
         }
+    }
+
+    // MARK: - 自動更新報價
+
+    private func refreshAllPrices() async {
+        let targets = activeStocks.filter { !$0.symbol.isEmpty }
+        guard !targets.isEmpty else { return }
+
+        withAnimation { isUpdating = true }
+        var success = 0
+        var fail = 0
+
+        for stock in targets {
+            if let price = await fetchPrice(symbol: stock.symbol) {
+                if let idx = store.stocks.firstIndex(where: { $0.id == stock.id }) {
+                    store.stocks[idx].currentPrice = price
+                }
+                success += 1
+            } else {
+                fail += 1
+            }
+        }
+
+        withAnimation { isUpdating = false }
+
+        let msg = fail == 0
+            ? "已更新 \(success) 檔報價"
+            : "更新完成 \(success) 檔，失敗 \(fail) 檔"
+        withAnimation { updateBanner = msg }
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        withAnimation { updateBanner = nil }
+    }
+
+    private func fetchPrice(symbol: String) async -> Double? {
+        for exchange in ["tse", "otc"] {
+            let urlString = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=\(exchange)_\(symbol).tw"
+            guard let url = URL(string: urlString) else { continue }
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let arr = json["msgArray"] as? [[String: Any]],
+                      let m = arr.first else { continue }
+                if let z = m["z"] as? String, let p = Double(z), p > 0 { return p }
+                if let y = m["y"] as? String, let p = Double(y), p > 0 { return p }
+            } catch { continue }
+        }
+        return nil
     }
 
     // MARK: - 黏著標題
