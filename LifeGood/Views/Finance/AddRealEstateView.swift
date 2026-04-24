@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct AddRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -49,6 +50,16 @@ struct AddRealEstateView: View {
 
     // MARK: - 人生模式欄位
     @State private var buildingType: BuildingType = .townhouse
+    @State private var hasElevator = false
+    @State private var elevatorItems: [ElevatorItemState] = []
+    @State private var elevatorPhotoPickerIndex: Int?
+    @State private var showElevatorPhotoPicker = false
+
+    struct ElevatorItemState: Identifiable {
+        let id: UUID
+        var date: Date
+        var photoData: Data?
+    }
     @State private var pingCountText = ""
     @State private var landOwner = ""
     @State private var ownerPickerSelection = ""
@@ -193,6 +204,7 @@ struct AddRealEstateView: View {
                     }
                 } else {
                     propertyDetailSection
+                    if hasElevator && buildingType == .townhouse { elevatorSection }
                     if showLandDetail { landDetailSection }
                     if showFloor { floorSection }
                     if showUtilities { utilitiesSection }
@@ -536,6 +548,10 @@ struct AddRealEstateView: View {
                 }
             }
 
+            if buildingType == .townhouse {
+                Toggle("有電梯", isOn: $hasElevator)
+            }
+
             HStack {
                 TextField("坪數", text: $pingCountText).keyboardType(.decimalPad)
                 Text("坪").foregroundStyle(.secondary)
@@ -623,6 +639,60 @@ struct AddRealEstateView: View {
             } label: {
                 Label("新增權狀", systemImage: "plus.circle").foregroundStyle(.green)
             }
+        }
+    }
+
+    // MARK: - 電梯資料
+
+    private var elevatorSection: some View {
+        Section {
+            ForEach(Array(elevatorItems.enumerated()), id: \.element.id) { index, item in
+                VStack(spacing: 8) {
+                    HStack {
+                        Text("保養 \(index + 1)").font(.subheadline.weight(.medium))
+                        Spacer()
+                        Button(role: .destructive) {
+                            elevatorItems.remove(at: index)
+                        } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                        }.buttonStyle(.plain)
+                    }
+
+                    DatePicker("保養日期", selection: $elevatorItems[index].date, displayedComponents: .date)
+
+                    if let data = item.photoData, let uiImage = UIImage(data: data) {
+                        Image(uiImage: uiImage)
+                            .resizable().scaledToFit()
+                            .frame(maxHeight: 200)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+
+                    PhotosPicker(selection: Binding(
+                        get: { nil },
+                        set: { newItem in
+                            guard let newItem else { return }
+                            Task {
+                                if let data = try? await newItem.loadTransferable(type: Data.self) {
+                                    elevatorItems[index].photoData = data
+                                }
+                            }
+                        }
+                    ), matching: .images) {
+                        Label(item.photoData == nil ? "新增保養照片" : "更換照片", systemImage: "photo.badge.plus")
+                            .font(.subheadline).foregroundStyle(.blue)
+                    }
+
+                    if index < elevatorItems.count - 1 { Divider() }
+                }
+            }
+
+            Button {
+                elevatorItems.append(ElevatorItemState(id: UUID(), date: Date()))
+            } label: {
+                Label("新增保養記錄", systemImage: "plus.circle").foregroundStyle(.green)
+            }
+        } header: {
+            Text("電梯資料")
         }
     }
 
@@ -1033,6 +1103,10 @@ struct AddRealEstateView: View {
             saleLinkedIncomeId: saleIncId,
             note: trimmedNote,
             buildingType: buildingType,
+            hasElevator: buildingType == .townhouse && hasElevator,
+            elevatorMaintenances: (buildingType == .townhouse && hasElevator)
+                ? elevatorItems.map { ElevatorMaintenance(id: $0.id, date: $0.date, photoData: $0.photoData) }
+                : [],
             pingCount: Double(pingCountText) ?? 0,
             landOwner: landOwner.trimmingCharacters(in: .whitespaces),
             landSituation: landSituation.trimmingCharacters(in: .whitespaces),
@@ -1188,6 +1262,10 @@ struct AddRealEstateView: View {
 
         // 人生模式欄位
         buildingType = e.buildingType
+        hasElevator = e.hasElevator
+        elevatorItems = e.elevatorMaintenances.map {
+            ElevatorItemState(id: $0.id, date: $0.date, photoData: $0.photoData)
+        }
         pingCountText = e.pingCount > 0 ? String(format: "%g", e.pingCount) : ""
         landOwner = e.landOwner
         if ownerCandidates.contains(e.landOwner) {
