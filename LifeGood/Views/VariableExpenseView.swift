@@ -262,9 +262,17 @@ struct ExpenseRow: View {
 
             Spacer()
 
-            Text(formatCurrency(expense.amount))
-                .font(.subheadline.bold())
-                .foregroundStyle(.red)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(formatCurrency(expense.amount))
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.red)
+                if expense.variableCategory == .food,
+                   let member = expense.diningMember, !member.isEmpty {
+                    Text(member)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
         }
         .padding(.vertical, 2)
     }
