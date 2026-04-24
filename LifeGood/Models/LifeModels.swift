@@ -415,11 +415,13 @@ struct Subordinate: Identifiable, Codable {
     var department: String
     var note: String
     var gradeTitleId: UUID?
+    var departmentId: UUID?
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
-         department: String = "", note: String = "", gradeTitleId: UUID? = nil) {
+         department: String = "", note: String = "", gradeTitleId: UUID? = nil, departmentId: UUID? = nil) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
+        self.departmentId = departmentId
     }
 
     init(from decoder: Decoder) throws {
@@ -430,6 +432,7 @@ struct Subordinate: Identifiable, Codable {
         department = try c.decode(String.self, forKey: .department)
         note = try c.decode(String.self, forKey: .note)
         gradeTitleId = try c.decodeIfPresent(UUID.self, forKey: .gradeTitleId)
+        departmentId = try c.decodeIfPresent(UUID.self, forKey: .departmentId)
     }
 }
 

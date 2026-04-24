@@ -65,7 +65,10 @@ struct SubordinateView: View {
 
             Spacer()
 
-            if !sub.department.isEmpty {
+            if let dept = lifeStore.departments.first(where: { $0.id == sub.departmentId }) {
+                Text(dept.code.isEmpty ? dept.name : "\(dept.code) — \(dept.name)")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if !sub.department.isEmpty {
                 Text(sub.department)
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -84,6 +87,7 @@ struct AddSubordinateView: View {
 
     @State private var name = ""
     @State private var selectedGradeTitleId: UUID?
+    @State private var selectedDepartmentId: UUID?
     @State private var department = ""
     @State private var note = ""
 
@@ -143,19 +147,11 @@ struct AddSubordinateView: View {
         if lifeStore.departments.isEmpty {
             TextField("部門", text: $department)
         } else {
-            Picker("部門", selection: $department) {
-                Text("手動輸入").tag("")
+            Picker("部門", selection: $selectedDepartmentId) {
+                Text("未選擇").tag(UUID?.none)
                 ForEach(lifeStore.departments) { dept in
                     Text(dept.code.isEmpty ? dept.name : "\(dept.code) — \(dept.name)")
-                        .tag(dept.code.isEmpty ? dept.name : "\(dept.code) — \(dept.name)")
-                }
-            }
-            if department.isEmpty || !lifeStore.departments.contains(where: {
-                let label = $0.code.isEmpty ? $0.name : "\($0.code) — \($0.name)"
-                return label == department
-            }) {
-                if department.isEmpty {
-                    TextField("手動輸入部門", text: $department)
+                        .tag(UUID?.some(dept.id))
                 }
             }
         }
@@ -170,13 +166,22 @@ struct AddSubordinateView: View {
             linkedTitle = ""
         }
 
+        let deptText: String
+        if let dId = selectedDepartmentId,
+           let dept = lifeStore.departments.first(where: { $0.id == dId }) {
+            deptText = dept.code.isEmpty ? dept.name : "\(dept.code) — \(dept.name)"
+        } else {
+            deptText = department.trimmingCharacters(in: .whitespaces)
+        }
+
         let item = Subordinate(
             id: editing?.id ?? UUID(),
             name: name.trimmingCharacters(in: .whitespaces),
             jobTitle: linkedTitle,
-            department: department.trimmingCharacters(in: .whitespaces),
+            department: deptText,
             note: note.trimmingCharacters(in: .whitespaces),
-            gradeTitleId: selectedGradeTitleId
+            gradeTitleId: selectedGradeTitleId,
+            departmentId: selectedDepartmentId
         )
         if editing != nil { lifeStore.update(item) } else { lifeStore.add(item) }
         dismiss()
@@ -186,6 +191,7 @@ struct AddSubordinateView: View {
         guard let e = editing else { return }
         name = e.name
         selectedGradeTitleId = e.gradeTitleId
+        selectedDepartmentId = e.departmentId
         department = e.department
         note = e.note
     }
