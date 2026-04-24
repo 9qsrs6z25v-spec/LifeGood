@@ -8,6 +8,7 @@ struct RealEstateDetailView: View {
     let estateId: UUID
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
+    @State private var viewingPhotoURL: URL?
 
     enum DetailTab: String, CaseIterable {
         case finance = "理財"
@@ -61,6 +62,9 @@ struct RealEstateDetailView: View {
             }
             .sheet(isPresented: $showEdit) {
                 AddRealEstateView(editing: estate)
+            }
+            .sheet(item: $viewingPhotoURL) { url in
+                PhotoViewerSheet(url: url)
             }
             .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
@@ -353,6 +357,39 @@ struct RealEstateDetailView: View {
                     if !d.usage.isEmpty { infoRow("用途", d.usage) }
                     if !d.annex.isEmpty { infoRow("附屬建物", d.annex) }
                     if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
+                }
+            }
+
+            if estate.hasElevator {
+                sectionHeader("電梯資料")
+                if estate.elevatorMaintenances.isEmpty {
+                    HStack {
+                        Text("尚無保養記錄").font(.caption).foregroundStyle(.tertiary)
+                        Spacer()
+                    }
+                    .padding(.horizontal).padding(.vertical, 6)
+                } else {
+                    ForEach(estate.elevatorMaintenances) { m in
+                        HStack {
+                            Image(systemName: "wrench.and.screwdriver")
+                                .font(.caption).foregroundStyle(.blue)
+                            Text(fmtDate(m.date))
+                                .font(.subheadline)
+                            Spacer()
+                            if m.photoFileName != nil {
+                                Button {
+                                    if let url = m.photoURL {
+                                        viewingPhotoURL = url
+                                    }
+                                } label: {
+                                    Image(systemName: "photo.fill")
+                                        .font(.caption).foregroundStyle(.blue)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal).padding(.vertical, 6)
+                    }
                 }
             }
 

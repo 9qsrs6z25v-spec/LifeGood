@@ -52,13 +52,12 @@ struct AddRealEstateView: View {
     @State private var buildingType: BuildingType = .townhouse
     @State private var hasElevator = false
     @State private var elevatorItems: [ElevatorItemState] = []
-    @State private var elevatorPhotoPickerIndex: Int?
-    @State private var showElevatorPhotoPicker = false
+    @State private var viewingPhotoURL: URL?
 
     struct ElevatorItemState: Identifiable {
         let id: UUID
         var date: Date
-        var photoData: Data?
+        var photoFileName: String?
     }
     @State private var pingCountText = ""
     @State private var landOwner = ""
@@ -237,6 +236,9 @@ struct AddRealEstateView: View {
                 }
             }
             .onAppear { loadEditing() }
+            .sheet(item: $viewingPhotoURL) { url in
+                PhotoViewerSheet(url: url)
+            }
         }
     }
 
@@ -647,24 +649,25 @@ struct AddRealEstateView: View {
     private var elevatorSection: some View {
         Section {
             ForEach(Array(elevatorItems.enumerated()), id: \.element.id) { index, item in
-                VStack(spacing: 8) {
-                    HStack {
-                        Text("保養 \(index + 1)").font(.subheadline.weight(.medium))
-                        Spacer()
-                        Button(role: .destructive) {
-                            elevatorItems.remove(at: index)
+                HStack {
+                    Text("保養 \(index + 1)").font(.subheadline.weight(.medium))
+                        .frame(width: 56, alignment: .leading)
+
+                    DatePicker("", selection: $elevatorItems[index].date, displayedComponents: .date)
+                        .labelsHidden()
+
+                    Spacer()
+
+                    if item.photoFileName != nil {
+                        Button {
+                            let url = ElevatorMaintenance.photosDirectory
+                                .appendingPathComponent(item.photoFileName!)
+                            viewingPhotoURL = url
                         } label: {
-                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
-                        }.buttonStyle(.plain)
-                    }
-
-                    DatePicker("保養日期", selection: $elevatorItems[index].date, displayedComponents: .date)
-
-                    if let data = item.photoData, let uiImage = UIImage(data: data) {
-                        Image(uiImage: uiImage)
-                            .resizable().scaledToFit()
-                            .frame(maxHeight: 200)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            Image(systemName: "photo.fill")
+                                .font(.title3).foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
                     }
 
                     PhotosPicker(selection: Binding(
@@ -673,16 +676,26 @@ struct AddRealEstateView: View {
                             guard let newItem else { return }
                             Task {
                                 if let data = try? await newItem.loadTransferable(type: Data.self) {
-                                    elevatorItems[index].photoData = data
+                                    let fileName = ElevatorMaintenance.savePhoto(data, id: item.id)
+                                    elevatorItems[index].photoFileName = fileName
                                 }
                             }
                         }
                     ), matching: .images) {
-                        Label(item.photoData == nil ? "新增保養照片" : "更換照片", systemImage: "photo.badge.plus")
-                            .font(.subheadline).foregroundStyle(.blue)
+                        Image(systemName: item.photoFileName == nil ? "photo.badge.plus" : "arrow.triangle.2.circlepath.camera")
+                            .font(.title3).foregroundStyle(.green)
                     }
+                    .buttonStyle(.plain)
 
-                    if index < elevatorItems.count - 1 { Divider() }
+                    Button(role: .destructive) {
+                        if let fn = elevatorItems[index].photoFileName {
+                            ElevatorMaintenance.deletePhoto(fn)
+                        }
+                        elevatorItems.remove(at: index)
+                    } label: {
+                        Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -1105,7 +1118,7 @@ struct AddRealEstateView: View {
             buildingType: buildingType,
             hasElevator: buildingType == .townhouse && hasElevator,
             elevatorMaintenances: (buildingType == .townhouse && hasElevator)
-                ? elevatorItems.map { ElevatorMaintenance(id: $0.id, date: $0.date, photoData: $0.photoData) }
+                ? elevatorItems.map { ElevatorMaintenance(id: $0.id, date: $0.date, photoFileName: $0.photoFileName) }
                 : [],
             pingCount: Double(pingCountText) ?? 0,
             landOwner: landOwner.trimmingCharacters(in: .whitespaces),
@@ -1264,7 +1277,7 @@ struct AddRealEstateView: View {
         buildingType = e.buildingType
         hasElevator = e.hasElevator
         elevatorItems = e.elevatorMaintenances.map {
-            ElevatorItemState(id: $0.id, date: $0.date, photoData: $0.photoData)
+            ElevatorItemState(id: $0.id, date: $0.date, photoFileName: $0.photoFileName)
         }
         pingCountText = e.pingCount > 0 ? String(format: "%g", e.pingCount) : ""
         landOwner = e.landOwner
@@ -1349,5 +1362,41 @@ struct AddRealEstateView: View {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+}
+
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
+
+struct PhotoViewerSheet: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
+                    Image(uiImage: img)
+                        .resizable().scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding()
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "photo.slash").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("無法載入照片").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
+            .navigationTitle("保養照片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("關閉") { dismiss() }
+                }
+            }
+        }
     }
 }

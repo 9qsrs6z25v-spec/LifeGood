@@ -424,10 +424,34 @@ enum BuildingType: String, Codable, CaseIterable, Identifiable {
 struct ElevatorMaintenance: Identifiable, Codable {
     let id: UUID
     var date: Date
-    var photoData: Data?
+    var photoFileName: String?
 
-    init(id: UUID = UUID(), date: Date = Date(), photoData: Data? = nil) {
-        self.id = id; self.date = date; self.photoData = photoData
+    init(id: UUID = UUID(), date: Date = Date(), photoFileName: String? = nil) {
+        self.id = id; self.date = date; self.photoFileName = photoFileName
+    }
+
+    var photoURL: URL? {
+        guard let name = photoFileName else { return nil }
+        return Self.photosDirectory.appendingPathComponent(name)
+    }
+
+    static var photosDirectory: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ElevatorPhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func savePhoto(_ data: Data, id: UUID) -> String {
+        let name = "\(id.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        try? data.write(to: url)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
     }
 }
 
