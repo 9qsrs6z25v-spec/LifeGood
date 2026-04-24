@@ -27,6 +27,7 @@ final class CloudSyncManager: ObservableObject {
         "life_pets",
         "life_schedules",
         "life_subordinates",
+        "life_departments",
         "life_grade_titles"
     ]
 

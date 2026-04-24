@@ -374,7 +374,7 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: managementFeature.icon,
-                title: managementFeature.title,
+                title: "附屬功能\n\(managementFeature.title)",
                 tint: isManagementMode && !isSettingsActive ? Color.orange : Color.secondary
             )
         }

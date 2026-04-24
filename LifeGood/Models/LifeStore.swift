@@ -8,6 +8,7 @@ class LifeStore: ObservableObject {
     @Published var pets: [Pet] = [] { didSet { if !isLoading { save() } } }
     @Published var schedules: [Schedule] = [] { didSet { if !isLoading { save() } } }
     @Published var subordinates: [Subordinate] = [] { didSet { if !isLoading { save() } } }
+    @Published var departments: [Department] = [] { didSet { if !isLoading { save() } } }
     @Published var gradeTitles: [GradeTitle] = [] { didSet { if !isLoading { save() } } }
 
     private var isLoading = false
@@ -83,6 +84,14 @@ class LifeStore: ObservableObject {
         if let i = subordinates.firstIndex(where: { $0.id == item.id }) { subordinates[i] = item }
     }
     func deleteSubordinate(_ item: Subordinate) { subordinates.removeAll { $0.id == item.id } }
+
+    // MARK: - 部門 CRUD
+
+    func add(_ item: Department) { departments.append(item) }
+    func update(_ item: Department) {
+        if let i = departments.firstIndex(where: { $0.id == item.id }) { departments[i] = item }
+    }
+    func deleteDepartment(_ item: Department) { departments.removeAll { $0.id == item.id } }
 
     // MARK: - 職等對應職稱 CRUD
 
@@ -222,6 +231,9 @@ class LifeStore: ObservableObject {
         if let data = try? encoder.encode(subordinates) {
             UserDefaults.standard.set(data, forKey: "life_subordinates")
         }
+        if let data = try? encoder.encode(departments) {
+            UserDefaults.standard.set(data, forKey: "life_departments")
+        }
         if let data = try? encoder.encode(gradeTitles) {
             UserDefaults.standard.set(data, forKey: "life_grade_titles")
         }
@@ -261,6 +273,10 @@ class LifeStore: ObservableObject {
            let items = try? decoder.decode([Subordinate].self, from: data) {
             subordinates = items
         }
+        if let data = UserDefaults.standard.data(forKey: "life_departments"),
+           let items = try? decoder.decode([Department].self, from: data) {
+            departments = items
+        }
         if let data = UserDefaults.standard.data(forKey: "life_grade_titles"),
            let items = try? decoder.decode([GradeTitle].self, from: data) {
             gradeTitles = items
@@ -277,6 +293,7 @@ class LifeStore: ObservableObject {
         pets.removeAll()
         schedules.removeAll()
         subordinates.removeAll()
+        departments.removeAll()
         gradeTitles.removeAll()
     }
 }

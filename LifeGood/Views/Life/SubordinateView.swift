@@ -97,7 +97,7 @@ struct AddSubordinateView: View {
                 Section("基本資訊") {
                     TextField("姓名", text: $name)
                     gradeTitlePicker
-                    TextField("部門", text: $department)
+                    departmentPicker
                 }
                 Section("備註") {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
@@ -133,6 +133,29 @@ struct AddSubordinateView: View {
                 Text("未選擇").tag(UUID?.none)
                 ForEach(lifeStore.gradeTitles) { gt in
                     Text("\(gt.grade) — \(gt.title)").tag(UUID?.some(gt.id))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var departmentPicker: some View {
+        if lifeStore.departments.isEmpty {
+            TextField("部門", text: $department)
+        } else {
+            Picker("部門", selection: $department) {
+                Text("手動輸入").tag("")
+                ForEach(lifeStore.departments) { dept in
+                    Text(dept.code.isEmpty ? dept.name : "\(dept.code) — \(dept.name)")
+                        .tag(dept.code.isEmpty ? dept.name : "\(dept.code) — \(dept.name)")
+                }
+            }
+            if department.isEmpty || !lifeStore.departments.contains(where: {
+                let label = $0.code.isEmpty ? $0.name : "\($0.code) — \($0.name)"
+                return label == department
+            }) {
+                if department.isEmpty {
+                    TextField("手動輸入部門", text: $department)
                 }
             }
         }
