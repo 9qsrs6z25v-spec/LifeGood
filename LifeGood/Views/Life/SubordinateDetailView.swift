@@ -259,8 +259,6 @@ struct SubordinateDetailView: View {
     }
 }
 
-extension SubordinateRecordType: Identifiable {}
-
 // MARK: - 記錄編輯 Sheet
 
 struct RecordEditorSheet: View {
