@@ -406,6 +406,55 @@ struct Schedule: Identifiable, Codable {
     }
 }
 
+// MARK: - 部屬記錄類型
+
+enum SubordinateRecordType: String, Codable, CaseIterable, Identifiable {
+    case pro = "優點"
+    case con = "缺點"
+    case achievement = "成就"
+    case improvement = "改善"
+    case fault = "缺失"
+    case missOperation = "Miss Operation"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .pro: return "hand.thumbsup.fill"
+        case .con: return "hand.thumbsdown.fill"
+        case .achievement: return "trophy.fill"
+        case .improvement: return "arrow.up.circle.fill"
+        case .fault: return "exclamationmark.triangle.fill"
+        case .missOperation: return "xmark.octagon.fill"
+        }
+    }
+}
+
+enum MissOpSeverity: String, Codable, CaseIterable, Identifiable {
+    case minor = "輕微"
+    case normal = "一般"
+    case severe = "嚴重"
+    var id: String { rawValue }
+}
+
+// MARK: - 部屬記錄
+
+struct SubordinateRecord: Identifiable, Codable {
+    let id: UUID
+    var type: SubordinateRecordType
+    var content: String
+    var date: Date
+    var note: String
+    var severity: MissOpSeverity?
+
+    init(id: UUID = UUID(), type: SubordinateRecordType = .pro,
+         content: String = "", date: Date = Date(), note: String = "",
+         severity: MissOpSeverity? = nil) {
+        self.id = id; self.type = type; self.content = content
+        self.date = date; self.note = note; self.severity = severity
+    }
+}
+
 // MARK: - 部屬
 
 struct Subordinate: Identifiable, Codable {
@@ -416,12 +465,14 @@ struct Subordinate: Identifiable, Codable {
     var note: String
     var gradeTitleId: UUID?
     var departmentId: UUID?
+    var records: [SubordinateRecord]
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
-         department: String = "", note: String = "", gradeTitleId: UUID? = nil, departmentId: UUID? = nil) {
+         department: String = "", note: String = "", gradeTitleId: UUID? = nil,
+         departmentId: UUID? = nil, records: [SubordinateRecord] = []) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
-        self.departmentId = departmentId
+        self.departmentId = departmentId; self.records = records
     }
 
     init(from decoder: Decoder) throws {
@@ -433,6 +484,7 @@ struct Subordinate: Identifiable, Codable {
         note = try c.decode(String.self, forKey: .note)
         gradeTitleId = try c.decodeIfPresent(UUID.self, forKey: .gradeTitleId)
         departmentId = try c.decodeIfPresent(UUID.self, forKey: .departmentId)
+        records = (try? c.decode([SubordinateRecord].self, forKey: .records)) ?? []
     }
 }
 

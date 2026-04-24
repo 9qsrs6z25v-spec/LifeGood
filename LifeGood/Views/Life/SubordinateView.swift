@@ -22,6 +22,7 @@ struct SubordinateView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var showAdd = false
     @State private var editingItem: Subordinate?
+    @State private var viewingItem: Subordinate?
     @State private var sortOption: SubordinateSortOption = .dateAdded
     @State private var sortAscending = false
 
@@ -56,7 +57,7 @@ struct SubordinateView: View {
                 ForEach(sortedSubordinates) { sub in
                     subordinateRow(sub)
                         .contentShape(Rectangle())
-                        .onTapGesture { editingItem = sub }
+                        .onTapGesture { viewingItem = sub }
                 }
                 .onDelete { offsets in
                     let items = offsets.map { sortedSubordinates[$0] }
@@ -114,6 +115,7 @@ struct SubordinateView: View {
             }
             .sheet(isPresented: $showAdd) { AddSubordinateView() }
             .sheet(item: $editingItem) { item in AddSubordinateView(editing: item) }
+            .sheet(item: $viewingItem) { item in SubordinateDetailView(subordinate: item) }
         }
     }
 
