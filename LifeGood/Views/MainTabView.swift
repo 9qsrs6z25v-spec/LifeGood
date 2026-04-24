@@ -334,6 +334,7 @@ struct MainTabView: View {
             } label: {
                 barIcon(
                     systemImage: "gearshape.fill",
+                    title: "設定",
                     tint: isSettingsActive ? Color.green : Color.secondary
                 )
             }
@@ -354,6 +355,7 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: isManagementMode ? "person.badge.shield.checkmark.fill" : "person.badge.shield.checkmark",
+                title: "管理",
                 tint: isManagementMode ? Color.orange : Color.secondary
             )
         }
@@ -372,6 +374,7 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: managementFeature.icon,
+                title: managementFeature.title,
                 tint: isManagementMode && !isSettingsActive ? Color.orange : Color.secondary
             )
         }
@@ -385,6 +388,7 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: isFamilyMgmtMode ? "figure.2.and.child.holdinghands" : "figure.2.and.child.holdinghands",
+                title: "家庭",
                 tint: isFamilyMgmtMode ? Color.orange : Color.secondary
             )
         }
@@ -403,18 +407,25 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: familyMgmtFeature.icon,
+                title: familyMgmtFeature.title,
                 tint: isFamilyMgmtMode && !isSettingsActive ? Color.orange : Color.secondary
             )
         }
         .menuOrder(.fixed)
     }
 
-    private func barIcon(systemImage: String, tint: Color) -> some View {
-        Image(systemName: systemImage)
-            .font(.system(size: 22))
-            .foregroundStyle(tint)
-            .frame(width: 48, height: 48)
-            .contentShape(Circle())
+    private func barIcon(systemImage: String, title: String = "", tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: systemImage)
+                .font(.system(size: 20))
+            if !title.isEmpty {
+                Text(title)
+                    .font(.system(size: 10))
+            }
+        }
+        .foregroundStyle(tint)
+        .frame(width: 56, height: 44)
+        .contentShape(Rectangle())
     }
 
     private var featureMenu: some View {
@@ -473,6 +484,7 @@ struct MainTabView: View {
         } label: {
             barIcon(
                 systemImage: currentFeatureIcon,
+                title: currentFeatureTitle,
                 tint: isSettingsActive ? Color.secondary : Color.green
             )
         }
