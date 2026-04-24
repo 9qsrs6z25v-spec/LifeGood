@@ -167,6 +167,8 @@ struct AddSubordinateView: View {
     var editing: Subordinate?
 
     @State private var name = ""
+    @State private var hasJoinDate = false
+    @State private var joinDate = Date()
     @State private var selectedGradeTitleId: UUID?
     @State private var selectedDepartmentId: UUID?
     @State private var department = ""
@@ -181,6 +183,10 @@ struct AddSubordinateView: View {
             Form {
                 Section("基本資訊") {
                     TextField("姓名", text: $name)
+                    Toggle("填入入職日期", isOn: $hasJoinDate)
+                    if hasJoinDate {
+                        DatePicker("入職日期", selection: $joinDate, displayedComponents: .date)
+                    }
                     gradeTitlePicker
                     departmentPicker
                 }
@@ -255,6 +261,7 @@ struct AddSubordinateView: View {
             deptText = department.trimmingCharacters(in: .whitespaces)
         }
 
+        let existingRecords = editing?.records ?? []
         let item = Subordinate(
             id: editing?.id ?? UUID(),
             name: name.trimmingCharacters(in: .whitespaces),
@@ -262,7 +269,9 @@ struct AddSubordinateView: View {
             department: deptText,
             note: note.trimmingCharacters(in: .whitespaces),
             gradeTitleId: selectedGradeTitleId,
-            departmentId: selectedDepartmentId
+            departmentId: selectedDepartmentId,
+            records: existingRecords,
+            joinDate: hasJoinDate ? joinDate : nil
         )
         if editing != nil { lifeStore.update(item) } else { lifeStore.add(item) }
         dismiss()
@@ -275,5 +284,9 @@ struct AddSubordinateView: View {
         selectedDepartmentId = e.departmentId
         department = e.department
         note = e.note
+        if let jd = e.joinDate {
+            hasJoinDate = true
+            joinDate = jd
+        }
     }
 }

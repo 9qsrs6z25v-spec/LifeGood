@@ -527,13 +527,14 @@ struct Subordinate: Identifiable, Codable {
     var gradeTitleId: UUID?
     var departmentId: UUID?
     var records: [SubordinateRecord]
+    var joinDate: Date?
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
          department: String = "", note: String = "", gradeTitleId: UUID? = nil,
-         departmentId: UUID? = nil, records: [SubordinateRecord] = []) {
+         departmentId: UUID? = nil, records: [SubordinateRecord] = [], joinDate: Date? = nil) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
-        self.departmentId = departmentId; self.records = records
+        self.departmentId = departmentId; self.records = records; self.joinDate = joinDate
     }
 
     init(from decoder: Decoder) throws {
@@ -546,6 +547,7 @@ struct Subordinate: Identifiable, Codable {
         gradeTitleId = try c.decodeIfPresent(UUID.self, forKey: .gradeTitleId)
         departmentId = try c.decodeIfPresent(UUID.self, forKey: .departmentId)
         records = (try? c.decode([SubordinateRecord].self, forKey: .records)) ?? []
+        joinDate = try c.decodeIfPresent(Date.self, forKey: .joinDate)
     }
 }
 

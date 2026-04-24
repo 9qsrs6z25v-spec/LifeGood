@@ -90,6 +90,13 @@ struct SubordinateDetailView: View {
             if !departmentText.isEmpty {
                 Text(departmentText).font(.caption).foregroundStyle(.tertiary)
             }
+            if let jd = subordinate.joinDate {
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar").font(.caption2)
+                    Text("入職 \(formatDate(jd))")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+            }
 
             HStack(spacing: 12) {
                 statBadge(count: countFor([.pro]), label: "優點", color: .green)
