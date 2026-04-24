@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChildrenResumeView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @State private var viewingChild: FamilyMember?
 
     private var children: [FamilyMember] {
         lifeStore.familyMembers
@@ -11,12 +12,16 @@ struct ChildrenResumeView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(children) { child in
-                    childSection(child)
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(children) { child in
+                        childCard(child)
+                            .onTapGesture { viewingChild = child }
+                    }
                 }
+                .padding(16)
             }
-            .listStyle(.insetGrouped)
+            .background(Color(.systemGroupedBackground))
             .overlay {
                 if children.isEmpty {
                     VStack(spacing: 16) {
@@ -27,64 +32,77 @@ struct ChildrenResumeView: View {
                 }
             }
             .navigationTitle("兒女履歷")
+            .sheet(item: $viewingChild) { child in
+                ChildDetailView(child: child)
+            }
         }
     }
 
-    private func childSection(_ child: FamilyMember) -> some View {
-        Section {
-            HStack(spacing: 12) {
-                Image(systemName: child.role == .son ? "figure.child" : "figure.child")
-                    .font(.system(size: 32))
-                    .foregroundStyle(child.role == .son ? .blue : .pink)
-                    .frame(width: 44)
+    private func childCard(_ child: FamilyMember) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: "figure.child.circle.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(child.role == .son ? Color.blue : Color.pink)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        if !child.chineseName.isEmpty {
-                            Text(child.chineseName).font(.headline)
-                        }
-                        Text(child.role.rawValue)
-                            .font(.caption2.weight(.medium))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(child.role == .son ? Color.blue.opacity(0.12) : Color.pink.opacity(0.12))
-                            .foregroundStyle(child.role == .son ? .blue : .pink)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
-                    if !child.englishName.isEmpty {
-                        Text(child.englishName).font(.subheadline).foregroundStyle(.secondary)
-                    }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(childDisplayName(child)).font(.headline)
+                    Text(child.role.rawValue)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background((child.role == .son ? Color.blue : Color.pink).opacity(0.12))
+                        .foregroundStyle(child.role == .son ? Color.blue : Color.pink)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
-            }
-            .padding(.vertical, 4)
-
-            if let bd = child.birthday {
-                HStack {
-                    Label("出生日期", systemImage: "birthday.cake")
-                    Spacer()
-                    Text(formatDate(bd)).foregroundStyle(.secondary)
+                if let bd = child.birthday {
+                    Text("\(formatDate(bd)) · \(ageString(from: bd))")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                HStack {
-                    Label("年齡", systemImage: "clock")
-                    Spacer()
-                    Text(ageString(from: bd)).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    recordBadge(child, .vaccination)
+                    recordBadge(child, .allergy)
+                    recordBadge(child, .growth)
+                    recordBadge(child, .medical)
+                    recordBadge(child, .education)
+                    recordBadge(child, .hobby)
+                    recordBadge(child, .memorable)
                 }
+                .padding(.top, 2)
             }
 
-            let derived = lifeStore.familyDerivedMilestones
-                .filter { $0.title.contains(childDisplayName(child)) }
-            if !derived.isEmpty {
-                ForEach(derived) { m in
-                    HStack {
-                        Image(systemName: "star.fill")
-                            .foregroundStyle(.yellow)
-                            .font(.caption)
-                        Text(m.title)
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption).foregroundStyle(.tertiary)
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+    }
+
+    @ViewBuilder
+    private func recordBadge(_ child: FamilyMember, _ type: ChildRecordType) -> some View {
+        let count = child.childRecords.filter { $0.type == type }.count
+        if count > 0 {
+            HStack(spacing: 2) {
+                Image(systemName: type.icon)
+                Text("\(count)")
             }
-        } header: {
-            Text(childDisplayName(child))
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(colorFor(type))
+        }
+    }
+
+    private func colorFor(_ type: ChildRecordType) -> Color {
+        switch type {
+        case .vaccination: return .blue
+        case .allergy: return .red
+        case .growth: return .green
+        case .medical: return .orange
+        case .education: return .purple
+        case .hobby: return .pink
+        case .memorable: return .yellow
         }
     }
 

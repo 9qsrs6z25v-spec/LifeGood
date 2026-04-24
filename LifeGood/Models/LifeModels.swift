@@ -51,17 +51,20 @@ struct FamilyMember: Identifiable, Codable {
     var marriageDate: Date?
     var isDivorced: Bool
     var divorceDate: Date?
+    var childRecords: [ChildRecord]
 
     init(id: UUID = UUID(), role: FamilyMemberRole = .spouse,
          chineseName: String = "", englishName: String = "",
          birthday: Date? = nil,
-         marriageDate: Date? = nil, isDivorced: Bool = false, divorceDate: Date? = nil) {
+         marriageDate: Date? = nil, isDivorced: Bool = false, divorceDate: Date? = nil,
+         childRecords: [ChildRecord] = []) {
         self.id = id; self.role = role
         self.chineseName = chineseName; self.englishName = englishName
         self.birthday = birthday
         self.marriageDate = marriageDate
         self.isDivorced = isDivorced
         self.divorceDate = divorceDate
+        self.childRecords = childRecords
     }
 
     init(from decoder: Decoder) throws {
@@ -74,6 +77,7 @@ struct FamilyMember: Identifiable, Codable {
         marriageDate = try? c.decode(Date.self, forKey: .marriageDate)
         isDivorced = (try? c.decode(Bool.self, forKey: .isDivorced)) ?? false
         divorceDate = try? c.decode(Date.self, forKey: .divorceDate)
+        childRecords = (try? c.decode([ChildRecord].self, forKey: .childRecords)) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -86,10 +90,67 @@ struct FamilyMember: Identifiable, Codable {
         try c.encodeIfPresent(marriageDate, forKey: .marriageDate)
         try c.encode(isDivorced, forKey: .isDivorced)
         try c.encodeIfPresent(divorceDate, forKey: .divorceDate)
+        try c.encode(childRecords, forKey: .childRecords)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, chineseName, englishName, birthday, marriageDate, isDivorced, divorceDate
+        case id, role, chineseName, englishName, birthday, marriageDate, isDivorced, divorceDate, childRecords
+    }
+}
+
+// MARK: - 兒女記錄
+
+enum ChildRecordType: String, Codable, CaseIterable, Identifiable {
+    case vaccination = "疫苗"
+    case allergy = "過敏"
+    case growth = "成長記錄"
+    case medical = "就醫記錄"
+    case education = "教育里程碑"
+    case hobby = "興趣才藝"
+    case memorable = "紀念時刻"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .vaccination: return "syringe"
+        case .allergy: return "allergens"
+        case .growth: return "figure.child"
+        case .medical: return "cross.case"
+        case .education: return "graduationcap.fill"
+        case .hobby: return "music.note"
+        case .memorable: return "star.fill"
+        }
+    }
+}
+
+enum AllergySeverity: String, Codable, CaseIterable, Identifiable {
+    case mild = "輕度"
+    case moderate = "中度"
+    case severe = "重度"
+    var id: String { rawValue }
+}
+
+struct ChildRecord: Identifiable, Codable {
+    let id: UUID
+    var type: ChildRecordType
+    var date: Date
+    var title: String
+    var detail: String
+    var note: String
+    var heightCm: Double?
+    var weightKg: Double?
+    var dose: String?
+    var severity: AllergySeverity?
+
+    init(id: UUID = UUID(), type: ChildRecordType = .memorable,
+         date: Date = Date(), title: String = "", detail: String = "", note: String = "",
+         heightCm: Double? = nil, weightKg: Double? = nil,
+         dose: String? = nil, severity: AllergySeverity? = nil) {
+        self.id = id; self.type = type; self.date = date
+        self.title = title; self.detail = detail; self.note = note
+        self.heightCm = heightCm; self.weightKg = weightKg
+        self.dose = dose; self.severity = severity
     }
 }
 
