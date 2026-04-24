@@ -2,6 +2,24 @@ import SwiftUI
 
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+
+    private func rateForCode(_ code: String) -> Double {
+        if code == "NT$" { return 1 }
+        return expenseStore.currencyRates.first(where: { $0.code == code })?.rate ?? 1
+    }
+
+    private var insuranceValueNTD: Double {
+        store.insurances.reduce(0) { $0 + $1.currentValue * rateForCode($1.currencyCode) }
+    }
+
+    private var insurancePaidNTD: Double {
+        store.insurances.reduce(0) { $0 + $1.totalPaid * rateForCode($1.currencyCode) }
+    }
+
+    private var insuranceProfitLoss: Double {
+        insuranceValueNTD - insurancePaidNTD
+    }
 
     var body: some View {
         NavigationStack {
@@ -19,12 +37,16 @@ struct FinanceOverviewView: View {
         }
     }
 
+    private var totalAssetsNTD: Double {
+        insuranceValueNTD + store.totalStockValue + store.totalVehicleValue + store.totalRealEstateValue
+    }
+
     // MARK: - 總資產
 
     private var totalAssetsCard: some View {
         VStack(spacing: 8) {
             Text("總資產").font(.subheadline).foregroundStyle(.white.opacity(0.8))
-            Text(fmt(store.totalAssets))
+            Text(fmt(totalAssetsNTD))
                 .font(.system(size: 36, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
         }
@@ -40,33 +62,42 @@ struct FinanceOverviewView: View {
 
     // MARK: - 三大類
 
+    private var stockProfitLoss: Double { store.totalStockProfitLoss }
+
     private var assetCards: some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
-                assetCard(title: "儲蓄險", amount: store.totalInsuranceValue,
+                assetCard(title: "儲蓄險", amount: insuranceValueNTD, profitLoss: insuranceProfitLoss,
                           icon: "shield.fill", color: .blue, count: store.insurances.count)
-                assetCard(title: "股票", amount: store.totalStockValue,
+                assetCard(title: "股票", amount: store.totalStockValue, profitLoss: stockProfitLoss,
                           icon: "chart.line.uptrend.xyaxis", color: .orange, count: store.stocks.count)
             }
             HStack(spacing: 12) {
-                assetCard(title: "汽車", amount: store.totalVehicleValue,
+                assetCard(title: "汽車", amount: store.totalVehicleValue, profitLoss: nil,
                           icon: "car.fill", color: .teal, count: store.vehicles.count)
-                assetCard(title: "房地產", amount: store.totalRealEstateValue,
-                          icon: "building.2.fill", color: .purple, count: store.realEstates.count)
+                assetCard(title: "房地產", amount: store.totalRealEstateValue, profitLoss: nil,
+                          icon: "building.2.fill", color: .purple,
+                          count: store.realEstates.filter { !$0.isSold }.count)
             }
         }
         .padding(.horizontal)
     }
 
-    private func assetCard(title: String, amount: Double, icon: String, color: Color, count: Int) -> some View {
-        VStack(spacing: 6) {
+    private func assetCard(title: String, amount: Double, profitLoss: Double?, icon: String, color: Color, count: Int) -> some View {
+        VStack(spacing: 4) {
             Image(systemName: icon).font(.title3).foregroundStyle(color)
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(fmtShort(amount)).font(.caption.bold()).lineLimit(1).minimumScaleFactor(0.6)
+            if let pl = profitLoss {
+                Text((pl >= 0 ? "+" : "") + fmtShort(pl))
+                    .font(.system(size: 10).bold())
+                    .foregroundStyle(pl >= 0 ? .green : .red)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+            }
             Text("\(count) 筆").font(.caption2).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
@@ -74,11 +105,30 @@ struct FinanceOverviewView: View {
 
     // MARK: - 配置比例
 
+    private var ntdAllocations: [AssetAllocation] {
+        let total = totalAssetsNTD
+        guard total > 0 else { return [] }
+        var result: [AssetAllocation] = []
+        if insuranceValueNTD > 0 {
+            result.append(AssetAllocation(type: .savingsInsurance, value: insuranceValueNTD, percentage: insuranceValueNTD / total * 100))
+        }
+        if store.totalStockValue > 0 {
+            result.append(AssetAllocation(type: .stock, value: store.totalStockValue, percentage: store.totalStockValue / total * 100))
+        }
+        if store.totalVehicleValue > 0 {
+            result.append(AssetAllocation(type: .vehicle, value: store.totalVehicleValue, percentage: store.totalVehicleValue / total * 100))
+        }
+        if store.totalRealEstateValue > 0 {
+            result.append(AssetAllocation(type: .realEstate, value: store.totalRealEstateValue, percentage: store.totalRealEstateValue / total * 100))
+        }
+        return result.sorted { $0.value > $1.value }
+    }
+
     private var allocationSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("資產配置").font(.headline).padding(.horizontal)
 
-            let allocations = store.assetAllocations
+            let allocations = ntdAllocations
             if allocations.isEmpty {
                 Text("尚無資產資料").font(.subheadline).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).padding(.vertical, 20)
