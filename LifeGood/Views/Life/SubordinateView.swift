@@ -1,20 +1,65 @@
 import SwiftUI
 
+enum SubordinateSortOption: String, CaseIterable, Identifiable {
+    case name = "姓名"
+    case department = "部門"
+    case jobTitle = "職位"
+    case dateAdded = "新增順序"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .name: return "person"
+        case .department: return "building.2"
+        case .jobTitle: return "briefcase"
+        case .dateAdded: return "calendar"
+        }
+    }
+}
+
 struct SubordinateView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var showAdd = false
     @State private var editingItem: Subordinate?
+    @State private var sortOption: SubordinateSortOption = .dateAdded
+    @State private var sortAscending = false
+
+    private func deptLabel(_ sub: Subordinate) -> String {
+        if let dept = lifeStore.departments.first(where: { $0.id == sub.departmentId }) {
+            return dept.code.isEmpty ? dept.name : "\(dept.code) \(dept.name)"
+        }
+        return sub.department
+    }
+
+    private var sortedSubordinates: [Subordinate] {
+        let list = lifeStore.subordinates
+        let sorted = list.sorted { a, b in
+            let result: Bool
+            switch sortOption {
+            case .name: result = a.name < b.name
+            case .department: result = deptLabel(a) < deptLabel(b)
+            case .jobTitle: result = a.jobTitle < b.jobTitle
+            case .dateAdded:
+                let ai = list.firstIndex(where: { $0.id == a.id }) ?? 0
+                let bi = list.firstIndex(where: { $0.id == b.id }) ?? 0
+                result = ai < bi
+            }
+            return sortAscending ? result : !result
+        }
+        return sorted
+    }
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(lifeStore.subordinates) { sub in
+                ForEach(sortedSubordinates) { sub in
                     subordinateRow(sub)
                         .contentShape(Rectangle())
                         .onTapGesture { editingItem = sub }
                 }
                 .onDelete { offsets in
-                    let items = offsets.map { lifeStore.subordinates[$0] }
+                    let items = offsets.map { sortedSubordinates[$0] }
                     items.forEach { lifeStore.deleteSubordinate($0) }
                 }
             }
@@ -34,8 +79,36 @@ struct SubordinateView: View {
             .navigationTitle("部屬")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    HStack(spacing: 12) {
+                        Menu {
+                            ForEach(SubordinateSortOption.allCases) { option in
+                                Button {
+                                    if sortOption == option {
+                                        sortAscending.toggle()
+                                    } else {
+                                        sortOption = option
+                                        sortAscending = true
+                                    }
+                                } label: {
+                                    Label {
+                                        Text(option.rawValue)
+                                    } icon: {
+                                        if sortOption == option {
+                                            Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
+                                        } else {
+                                            Image(systemName: option.icon)
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.arrow.down.circle")
+                                .font(.title3).foregroundStyle(.green)
+                        }
+
+                        Button { showAdd = true } label: {
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
             }
@@ -66,8 +139,14 @@ struct SubordinateView: View {
             Spacer()
 
             if let dept = lifeStore.departments.first(where: { $0.id == sub.departmentId }) {
-                Text(dept.code.isEmpty ? dept.name : "\(dept.code) — \(dept.name)")
-                    .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 2) {
+                    if !dept.code.isEmpty {
+                        Text(dept.code).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    if !dept.name.isEmpty {
+                        Text(dept.name).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             } else if !sub.department.isEmpty {
                 Text(sub.department)
                     .font(.caption).foregroundStyle(.secondary)
