@@ -83,7 +83,7 @@ struct VehicleView: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("汽車")
+            .navigationTitle("汽車、機車")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
@@ -163,7 +163,7 @@ struct VehicleView: View {
         VStack(spacing: 16) {
             Spacer()
             Image(systemName: "car").font(.system(size: 48)).foregroundStyle(.secondary)
-            Text("尚無汽車紀錄").font(.headline).foregroundStyle(.secondary)
+            Text("尚無車輛紀錄").font(.headline).foregroundStyle(.secondary)
             Text("點擊右上角 + 新增車輛").font(.subheadline).foregroundStyle(.tertiary)
             Spacer()
         }.frame(maxWidth: .infinity)
