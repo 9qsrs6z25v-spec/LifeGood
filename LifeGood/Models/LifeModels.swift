@@ -52,12 +52,13 @@ struct FamilyMember: Identifiable, Codable {
     var isDivorced: Bool
     var divorceDate: Date?
     var childRecords: [ChildRecord]
+    var dailyRecords: [DailyRecord]
 
     init(id: UUID = UUID(), role: FamilyMemberRole = .spouse,
          chineseName: String = "", englishName: String = "",
          birthday: Date? = nil,
          marriageDate: Date? = nil, isDivorced: Bool = false, divorceDate: Date? = nil,
-         childRecords: [ChildRecord] = []) {
+         childRecords: [ChildRecord] = [], dailyRecords: [DailyRecord] = []) {
         self.id = id; self.role = role
         self.chineseName = chineseName; self.englishName = englishName
         self.birthday = birthday
@@ -65,6 +66,7 @@ struct FamilyMember: Identifiable, Codable {
         self.isDivorced = isDivorced
         self.divorceDate = divorceDate
         self.childRecords = childRecords
+        self.dailyRecords = dailyRecords
     }
 
     init(from decoder: Decoder) throws {
@@ -78,6 +80,7 @@ struct FamilyMember: Identifiable, Codable {
         isDivorced = (try? c.decode(Bool.self, forKey: .isDivorced)) ?? false
         divorceDate = try? c.decode(Date.self, forKey: .divorceDate)
         childRecords = (try? c.decode([ChildRecord].self, forKey: .childRecords)) ?? []
+        dailyRecords = (try? c.decode([DailyRecord].self, forKey: .dailyRecords)) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -91,10 +94,47 @@ struct FamilyMember: Identifiable, Codable {
         try c.encode(isDivorced, forKey: .isDivorced)
         try c.encodeIfPresent(divorceDate, forKey: .divorceDate)
         try c.encode(childRecords, forKey: .childRecords)
+        try c.encode(dailyRecords, forKey: .dailyRecords)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, chineseName, englishName, birthday, marriageDate, isDivorced, divorceDate, childRecords
+        case id, role, chineseName, englishName, birthday, marriageDate, isDivorced, divorceDate, childRecords, dailyRecords
+    }
+}
+
+// MARK: - 兒女日常記錄
+
+enum DailyRecordType: String, Codable, CaseIterable, Identifiable {
+    case milk = "喝奶"
+    case food = "食物"
+    case sleep = "睡眠"
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .milk: return "cup.and.saucer.fill"
+        case .food: return "carrot.fill"
+        case .sleep: return "moon.zzz.fill"
+        }
+    }
+}
+
+struct DailyRecord: Identifiable, Codable {
+    let id: UUID
+    var type: DailyRecordType
+    var date: Date
+    var milkBrand: String?
+    var mlAmount: Double?
+    var foodName: String?
+    var sleepEnd: Date?
+    var note: String
+
+    init(id: UUID = UUID(), type: DailyRecordType = .milk, date: Date = Date(),
+         milkBrand: String? = nil, mlAmount: Double? = nil, foodName: String? = nil,
+         sleepEnd: Date? = nil, note: String = "") {
+        self.id = id; self.type = type; self.date = date
+        self.milkBrand = milkBrand; self.mlAmount = mlAmount
+        self.foodName = foodName; self.sleepEnd = sleepEnd; self.note = note
     }
 }
 
