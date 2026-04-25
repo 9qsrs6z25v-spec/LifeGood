@@ -214,7 +214,7 @@ enum MilestoneCategory: String, Codable, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .marriage: return "配偶"
-        case .achievement: return "理財"
+        case .achievement: return "財富"
         default: return rawValue
         }
     }
