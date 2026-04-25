@@ -140,6 +140,8 @@ struct Expense: Identifiable, Codable {
     var loanTotalAmount: Double?
     var loanYears: Double?
     var loanRate: Double?
+    var linkedBankMilestoneId: UUID?
+    var linkedBankCurrency: String?
 
     init(
         id: UUID = UUID(),
@@ -163,7 +165,9 @@ struct Expense: Identifiable, Codable {
         diningMember: String? = nil,
         loanTotalAmount: Double? = nil,
         loanYears: Double? = nil,
-        loanRate: Double? = nil
+        loanRate: Double? = nil,
+        linkedBankMilestoneId: UUID? = nil,
+        linkedBankCurrency: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -187,6 +191,8 @@ struct Expense: Identifiable, Codable {
         self.loanTotalAmount = loanTotalAmount
         self.loanYears = loanYears
         self.loanRate = loanRate
+        self.linkedBankMilestoneId = linkedBankMilestoneId
+        self.linkedBankCurrency = linkedBankCurrency
     }
 
     // MARK: - 向下相容解碼
@@ -214,6 +220,8 @@ struct Expense: Identifiable, Codable {
         loanTotalAmount = try? c.decode(Double.self, forKey: .loanTotalAmount)
         loanYears = try? c.decode(Double.self, forKey: .loanYears)
         loanRate = try? c.decode(Double.self, forKey: .loanRate)
+        linkedBankMilestoneId = try? c.decode(UUID.self, forKey: .linkedBankMilestoneId)
+        linkedBankCurrency = try? c.decode(String.self, forKey: .linkedBankCurrency)
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
@@ -221,6 +229,7 @@ struct Expense: Identifiable, Codable {
         case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
         case vehicleExpenseCategory, realEstateExpenseCategory, note, currencyCode, diningMember
         case loanTotalAmount, loanYears, loanRate
+        case linkedBankMilestoneId, linkedBankCurrency
     }
 
     var categoryName: String {

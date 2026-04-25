@@ -242,9 +242,28 @@ struct BankDeposit: Identifiable, Codable {
     var date: Date
     var amount: Double
     var currencyCode: String
+    var isWithdrawal: Bool
+    var linkedExpenseId: UUID?
 
-    init(id: UUID = UUID(), date: Date = Date(), amount: Double = 0, currencyCode: String = "NT$") {
-        self.id = id; self.date = date; self.amount = amount; self.currencyCode = currencyCode
+    init(id: UUID = UUID(), date: Date = Date(), amount: Double = 0,
+         currencyCode: String = "NT$", isWithdrawal: Bool = false, linkedExpenseId: UUID? = nil) {
+        self.id = id; self.date = date; self.amount = amount
+        self.currencyCode = currencyCode
+        self.isWithdrawal = isWithdrawal; self.linkedExpenseId = linkedExpenseId
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = try c.decode(Date.self, forKey: .date)
+        amount = try c.decode(Double.self, forKey: .amount)
+        currencyCode = try c.decode(String.self, forKey: .currencyCode)
+        isWithdrawal = (try? c.decode(Bool.self, forKey: .isWithdrawal)) ?? false
+        linkedExpenseId = try? c.decodeIfPresent(UUID.self, forKey: .linkedExpenseId)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, amount, currencyCode, isWithdrawal, linkedExpenseId
     }
 }
 

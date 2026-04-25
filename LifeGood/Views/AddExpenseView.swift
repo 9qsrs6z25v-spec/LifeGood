@@ -31,6 +31,8 @@ struct AddExpenseView: View {
     @State private var loanTotalAmountText = ""
     @State private var loanYearsText = ""
     @State private var loanRateText = ""
+    @State private var selectedBankMilestoneId: UUID?
+    @State private var selectedBankCurrency: String = "NT$"
 
     // MARK: - 儲蓄險欄位
 
@@ -382,6 +384,10 @@ struct AddExpenseView: View {
                 }
             }
 
+            if expenseType == .variable && !bankMilestones.isEmpty {
+                bankPicker
+            }
+
             if !isSavingsInsurance {
                 DatePicker("日期", selection: $date, displayedComponents: .date)
             }
@@ -439,6 +445,68 @@ struct AddExpenseView: View {
     }
 
     // MARK: - 分類
+
+    private var bankMilestones: [LifeMilestone] {
+        lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .bank
+        }
+    }
+
+    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
+        let codes = (ms.bankDeposits ?? [])
+            .filter { !$0.isWithdrawal }
+            .map(\.currencyCode)
+        var unique: [String] = []
+        for c in codes where !unique.contains(c) { unique.append(c) }
+        return unique.isEmpty ? ["NT$"] : unique
+    }
+
+    private var bankPickerLabel: String {
+        if let id = selectedBankMilestoneId,
+           let ms = bankMilestones.first(where: { $0.id == id }) {
+            let name = ms.bankName ?? ms.title
+            return "\(name) · \(selectedBankCurrency)"
+        }
+        return "未選擇"
+    }
+
+    private var bankPicker: some View {
+        HStack {
+            Text("扣款銀行").foregroundStyle(.secondary)
+            Spacer()
+            Menu {
+                Button("不指定") {
+                    selectedBankMilestoneId = nil
+                    selectedBankCurrency = "NT$"
+                }
+                ForEach(bankMilestones) { ms in
+                    let currencies = bankCurrencies(for: ms)
+                    let name = ms.bankName ?? ms.title
+                    if currencies.count > 1 {
+                        Menu(name) {
+                            ForEach(currencies, id: \.self) { code in
+                                Button(code) {
+                                    selectedBankMilestoneId = ms.id
+                                    selectedBankCurrency = code
+                                }
+                            }
+                        }
+                    } else {
+                        Button(name) {
+                            selectedBankMilestoneId = ms.id
+                            selectedBankCurrency = currencies.first ?? "NT$"
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(bankPickerLabel)
+                        .foregroundStyle(selectedBankMilestoneId == nil ? .secondary : .primary)
+                    Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
 
     private var familyNames: [String] {
         var names: [String] = []
@@ -1057,11 +1125,35 @@ struct AddExpenseView: View {
             diningMember: (expenseType == .variable && selectedVariableCategory == .food && !selectedDiningMember.isEmpty) ? selectedDiningMember : nil,
             loanTotalAmount: isCarLoan ? Double(loanTotalAmountText) : nil,
             loanYears: isCarLoan ? Double(loanYearsText) : nil,
-            loanRate: isCarLoan ? Double(loanRateText) : nil
+            loanRate: isCarLoan ? Double(loanRateText) : nil,
+            linkedBankMilestoneId: expenseType == .variable ? selectedBankMilestoneId : nil,
+            linkedBankCurrency: expenseType == .variable && selectedBankMilestoneId != nil ? selectedBankCurrency : nil
         )
 
         if isEditing { store.update(expense) } else { store.add(expense) }
+        syncBankWithdrawal(for: expense, previous: editingExpense)
         dismiss()
+    }
+
+    private func syncBankWithdrawal(for expense: Expense, previous: Expense?) {
+        // 移除舊的連結記錄（若有）
+        if let prevId = previous?.linkedBankMilestoneId,
+           var oldMs = lifeStore.milestones.first(where: { $0.id == prevId }) {
+            oldMs.bankDeposits?.removeAll { $0.linkedExpenseId == expense.id }
+            lifeStore.update(oldMs)
+        }
+        // 寫入新的連結記錄
+        guard let bankId = expense.linkedBankMilestoneId,
+              var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
+        var list = ms.bankDeposits ?? []
+        list.removeAll { $0.linkedExpenseId == expense.id }
+        list.append(BankDeposit(
+            id: UUID(), date: expense.date, amount: expense.amount,
+            currencyCode: expense.linkedBankCurrency ?? "NT$",
+            isWithdrawal: true, linkedExpenseId: expense.id
+        ))
+        ms.bankDeposits = list
+        lifeStore.update(ms)
     }
 
     /// 同步建立股票投資紀錄
@@ -1366,6 +1458,8 @@ struct AddExpenseView: View {
         if let lt = expense.loanTotalAmount, lt > 0 { loanTotalAmountText = String(format: "%.0f", lt) }
         if let ly = expense.loanYears, ly > 0 { loanYearsText = String(format: "%g", ly) }
         if let lr = expense.loanRate, lr > 0 { loanRateText = String(format: "%g", lr) }
+        selectedBankMilestoneId = expense.linkedBankMilestoneId
+        selectedBankCurrency = expense.linkedBankCurrency ?? "NT$"
         note = expense.note
 
         // 載入連結的儲蓄險

@@ -380,14 +380,22 @@ struct FinanceCardView: View {
 
     private func depositRow(_ dep: BankDeposit) -> some View {
         Button {
-            editingDeposit = dep
+            // 連結扣款由變動支出產生，不直接編輯
+            if dep.linkedExpenseId == nil { editingDeposit = dep }
         } label: {
             HStack {
                 Text(fmtDate(dep.date)).font(.caption).foregroundStyle(.tertiary)
+                if dep.isWithdrawal {
+                    Text("扣款").font(.caption2).foregroundStyle(.red)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.red.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
                 Spacer()
-                Text("\(dep.currencyCode) \(fmtNum(dep.amount))")
+                Text("\(dep.isWithdrawal ? "-" : "")\(dep.currencyCode) \(fmtNum(dep.amount))")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(dep.currencyCode == "NT$" ? Color.primary : Color.blue)
+                    .foregroundStyle(dep.isWithdrawal ? Color.red :
+                                     (dep.currencyCode == "NT$" ? Color.primary : Color.blue))
             }
             .padding(.horizontal).padding(.vertical, 6)
             .contentShape(Rectangle())
@@ -404,7 +412,7 @@ struct FinanceCardView: View {
                 ForEach(data, id: \.id) { dep in
                     VStack(spacing: 2) {
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(dep.currencyCode == "NT$" ? Color.blue : Color.orange)
+                            .fill(barColor(for: dep))
                             .frame(
                                 width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(data.count, 1))),
                                 height: max(4, CGFloat(dep.amount / maxAmount) * 120)
@@ -422,6 +430,11 @@ struct FinanceCardView: View {
 
     private func shortDate(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: date)
+    }
+
+    private func barColor(for dep: BankDeposit) -> Color {
+        if dep.isWithdrawal { return .red }
+        return dep.currencyCode == "NT$" ? .blue : .orange
     }
 }
 
