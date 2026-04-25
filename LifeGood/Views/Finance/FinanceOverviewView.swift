@@ -3,6 +3,10 @@ import SwiftUI
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @State private var showAddVariable = false
+    @State private var showAddFixed = false
+    @State private var showAddStock = false
+    @State private var showAddRealEstate = false
 
     private func rateForCode(_ code: String) -> Double {
         if code == "NT$" { return 1 }
@@ -34,6 +38,26 @@ struct FinanceOverviewView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("理財總覽")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    quickAddMenu
+                }
+            }
+            .sheet(isPresented: $showAddVariable) { AddExpenseView(expenseType: .variable) }
+            .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
+            .sheet(isPresented: $showAddStock) { AddStockView() }
+            .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
+        }
+    }
+
+    private var quickAddMenu: some View {
+        Menu {
+            Button { showAddVariable = true } label: { Label("變動支出", systemImage: "arrow.up.arrow.down.circle.fill") }
+            Button { showAddFixed = true } label: { Label("固定支出", systemImage: "pin.circle.fill") }
+            Button { showAddStock = true } label: { Label("股票", systemImage: "chart.line.uptrend.xyaxis") }
+            Button { showAddRealEstate = true } label: { Label("房地產", systemImage: "building.2.fill") }
+        } label: {
+            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
         }
     }
 
