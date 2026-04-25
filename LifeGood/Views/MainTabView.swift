@@ -51,12 +51,13 @@ enum FinanceFeature: String, CaseIterable, Identifiable {
 }
 
 enum LifeFeature: String, CaseIterable, Identifiable {
-    case overview, resume, career, family, realEstate
+    case overview, resume, finance, career, family, realEstate
     var id: String { rawValue }
     var title: String {
         switch self {
         case .overview: return "總覽"
         case .resume: return "履歷"
+        case .finance: return "理財"
         case .career: return "職涯"
         case .family: return "家庭"
         case .realEstate: return "房地產"
@@ -66,6 +67,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         switch self {
         case .overview: return "house.fill"
         case .resume: return "trophy.fill"
+        case .finance: return "banknote.fill"
         case .career: return "briefcase.fill"
         case .family: return "person.3.fill"
         case .realEstate: return "building.2.fill"
@@ -280,6 +282,12 @@ struct MainTabView: View {
         switch lifeFeature {
         case .overview: LifeOverviewView()
         case .resume: ResumeView()
+        case .finance:
+            if hasFinanceMilestones {
+                LifeFinanceView()
+            } else {
+                LifeOverviewView()
+            }
         case .career:
             if hasCareerMilestones {
                 CareerView()
@@ -303,6 +311,10 @@ struct MainTabView: View {
 
     private var hasCareerMilestones: Bool {
         lifeStore.milestones.contains { $0.category == .career }
+    }
+
+    private var hasFinanceMilestones: Bool {
+        lifeStore.milestones.contains { $0.category == .achievement }
     }
 
     // MARK: - 底部導覽列
@@ -493,6 +505,7 @@ struct MainTabView: View {
 
     private var lifeAvailableFeatures: [LifeFeature] {
         var list: [LifeFeature] = [.overview, .resume]
+        if hasFinanceMilestones { list.append(.finance) }
         if hasCareerMilestones { list.append(.career) }
         if !lifeStore.familyMembers.isEmpty { list.append(.family) }
         if !financeStore.realEstates.isEmpty { list.append(.realEstate) }
