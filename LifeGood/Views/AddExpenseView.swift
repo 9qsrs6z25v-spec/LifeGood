@@ -28,6 +28,9 @@ struct AddExpenseView: View {
     // MARK: - 貸款子分類
 
     @State private var selectedLoanSubCategory: LoanSubCategory = .mortgage
+    @State private var loanTotalAmountText = ""
+    @State private var loanYearsText = ""
+    @State private var loanRateText = ""
 
     // MARK: - 儲蓄險欄位
 
@@ -367,14 +370,72 @@ struct AddExpenseView: View {
                         .foregroundStyle(.secondary)
                     }
                 }
-                TextField(isMortgage ? "每月房貸金額" : (isSavingsInsurance ? "保費金額" : "金額"), text: $amountText)
+                TextField(isMortgage ? "每月房貸金額" : (isCarLoan ? "每月車貸金額" : (isSavingsInsurance ? "保費金額" : "金額")), text: $amountText)
                     .keyboardType(.decimalPad)
+            }
+
+            if isCarLoan {
+                HStack {
+                    Text("NT$").foregroundStyle(.secondary)
+                    TextField("總貸款金額", text: $loanTotalAmountText)
+                        .keyboardType(.decimalPad)
+                }
             }
 
             if !isSavingsInsurance {
                 DatePicker("日期", selection: $date, displayedComponents: .date)
             }
+
+            if isCarLoan {
+                HStack {
+                    TextField("貸款年限", text: $loanYearsText)
+                        .keyboardType(.decimalPad)
+                    Text("年").foregroundStyle(.secondary)
+                }
+                HStack {
+                    TextField("貸款利率", text: $loanRateText)
+                        .keyboardType(.decimalPad)
+                    Text("%").foregroundStyle(.secondary)
+                }
+                carLoanCalcRow
+            }
         }
+    }
+
+    @ViewBuilder
+    private var carLoanCalcRow: some View {
+        let monthly = Double(amountText) ?? 0
+        let total = Double(loanTotalAmountText) ?? 0
+        let years = Double(loanYearsText) ?? 0
+        if monthly > 0 && total > 0 && years > 0 {
+            let totalPaid = monthly * 12 * years
+            let totalInterest = totalPaid - total
+            let avgAnnualRate = (totalInterest / total / years) * 100
+            VStack(spacing: 6) {
+                HStack {
+                    Text("貸款總繳").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(fmtCurrency(totalPaid)).font(.caption.bold())
+                }
+                HStack {
+                    Text("利息總額").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(fmtCurrency(totalInterest)).font(.caption.bold()).foregroundStyle(.orange)
+                }
+                HStack {
+                    Text("實際年利率（估算）").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.2f%%", avgAnnualRate)).font(.caption.bold()).foregroundStyle(.blue)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func fmtCurrency(_ v: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     // MARK: - 分類
@@ -993,7 +1054,10 @@ struct AddExpenseView: View {
             realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
             note: note.trimmingCharacters(in: .whitespaces),
             currencyCode: savedCurrencyCode,
-            diningMember: (expenseType == .variable && selectedVariableCategory == .food && !selectedDiningMember.isEmpty) ? selectedDiningMember : nil
+            diningMember: (expenseType == .variable && selectedVariableCategory == .food && !selectedDiningMember.isEmpty) ? selectedDiningMember : nil,
+            loanTotalAmount: isCarLoan ? Double(loanTotalAmountText) : nil,
+            loanYears: isCarLoan ? Double(loanYearsText) : nil,
+            loanRate: isCarLoan ? Double(loanRateText) : nil
         )
 
         if isEditing { store.update(expense) } else { store.add(expense) }
@@ -1299,6 +1363,9 @@ struct AddExpenseView: View {
         if let sub = expense.insuranceSubCategory { selectedInsuranceSubCategory = sub }
         if let sub = expense.loanSubCategory { selectedLoanSubCategory = sub }
         selectedDiningMember = expense.diningMember ?? ""
+        if let lt = expense.loanTotalAmount, lt > 0 { loanTotalAmountText = String(format: "%.0f", lt) }
+        if let ly = expense.loanYears, ly > 0 { loanYearsText = String(format: "%g", ly) }
+        if let lr = expense.loanRate, lr > 0 { loanRateText = String(format: "%g", lr) }
         note = expense.note
 
         // 載入連結的儲蓄險
