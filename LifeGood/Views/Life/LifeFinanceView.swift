@@ -371,7 +371,6 @@ struct FinanceCardView: View {
                 ForEach(deposits, id: \.id) { dep in
                     depositRow(dep)
                 }
-                }
             }
         }
         .background(Color(.systemBackground))
