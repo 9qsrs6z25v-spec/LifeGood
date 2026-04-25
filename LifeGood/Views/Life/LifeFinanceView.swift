@@ -154,9 +154,13 @@ struct FinanceCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
+    @EnvironmentObject var expenseStore: ExpenseStore
     let milestoneId: UUID
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
+    @State private var showAddDeposit = false
+    @State private var addDepositCurrency = "NT$"
+    @State private var editingDeposit: BankDeposit?
 
     private var item: LifeMilestone {
         lifeStore.milestones.first(where: { $0.id == milestoneId })
@@ -178,6 +182,7 @@ struct FinanceCardView: View {
                 VStack(spacing: 16) {
                     headerCard
                     detailCard
+                    if sub == .bank { depositSection }
                     if !item.note.isEmpty { noteCard }
                 }
                 .padding(.vertical)
@@ -195,6 +200,12 @@ struct FinanceCardView: View {
                 }
             }
             .sheet(isPresented: $showEdit) { AddMilestoneView(editing: item) }
+            .sheet(isPresented: $showAddDeposit) {
+                DepositEditorSheet(milestoneId: milestoneId, currency: addDepositCurrency, editing: nil)
+            }
+            .sheet(item: $editingDeposit) { dep in
+                DepositEditorSheet(milestoneId: milestoneId, currency: dep.currencyCode, editing: dep)
+            }
             .alert("確定要刪除嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) { lifeStore.deleteMilestone(item); dismiss() }
                 Button("取消", role: .cancel) {}
@@ -310,5 +321,154 @@ struct FinanceCardView: View {
     private func fmtNum(_ v: Double) -> String {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: v)) ?? "0"
+    }
+
+    // MARK: - 銀行存款章節
+
+    private var deposits: [BankDeposit] {
+        (item.bankDeposits ?? []).sorted { $0.date < $1.date }
+    }
+
+    private var depositSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "dollarsign.circle.fill").foregroundStyle(.blue)
+                Text("銀行存款").font(.headline)
+                Spacer()
+                Menu {
+                    Button { addDepositCurrency = "NT$"; showAddDeposit = true } label: {
+                        Label("台幣", systemImage: "dollarsign")
+                    }
+                    ForEach(expenseStore.currencyRates) { rate in
+                        Button { addDepositCurrency = rate.code; showAddDeposit = true } label: {
+                            Label(rate.code, systemImage: "coloncurrencysign")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "plus.circle.fill").foregroundStyle(.blue)
+                }
+            }
+            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+
+            if deposits.isEmpty {
+                Text("尚無存款記錄").font(.caption).foregroundStyle(.tertiary)
+                    .padding(.horizontal).padding(.bottom, 12)
+            } else {
+                depositChart
+                    .padding(.horizontal).padding(.bottom, 8)
+
+                ForEach(deposits) { dep in
+                    Button { editingDeposit = dep } label: {
+                        HStack {
+                            Text(fmtDate(dep.date)).font(.caption).foregroundStyle(.tertiary)
+                            Spacer()
+                            Text("\(dep.currencyCode) \(fmtNum(dep.amount))")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(dep.currencyCode == "NT$" ? .primary : .blue)
+                        }
+                        .padding(.horizontal).padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private var depositChart: some View {
+        let data = deposits
+        let maxAmount = data.map(\.amount).max() ?? 1
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .bottom, spacing: 4) {
+                ForEach(data) { dep in
+                    VStack(spacing: 2) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(dep.currencyCode == "NT$" ? Color.blue : Color.orange)
+                            .frame(
+                                width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(data.count, 1))),
+                                height: max(4, CGFloat(dep.amount / maxAmount) * 120)
+                            )
+                        Text(shortDate(dep.date))
+                            .font(.system(size: 8))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .frame(height: 140, alignment: .bottom)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: date)
+    }
+}
+
+// MARK: - 存款編輯 Sheet
+
+struct DepositEditorSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let milestoneId: UUID
+    let currency: String
+    var editing: BankDeposit?
+
+    @State private var date = Date()
+    @State private var amountText = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("\(currency) 存款") {
+                    DatePicker("日期", selection: $date, displayedComponents: .date)
+                    HStack {
+                        Text(currency).foregroundStyle(.secondary)
+                        TextField("金額", text: $amountText).keyboardType(.decimalPad)
+                    }
+                }
+                if editing != nil {
+                    Section {
+                        Button(role: .destructive) { delete() } label: { Label("刪除", systemImage: "trash") }
+                    }
+                }
+            }
+            .navigationTitle(editing != nil ? "編輯存款" : "新增存款")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(editing != nil ? "儲存" : "新增") { save() }
+                        .bold().foregroundStyle(.green)
+                        .disabled((Double(amountText) ?? 0) <= 0)
+                }
+            }
+            .onAppear {
+                if let e = editing {
+                    date = e.date
+                    amountText = String(format: "%.0f", e.amount)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        guard var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
+        let dep = BankDeposit(id: editing?.id ?? UUID(), date: date, amount: Double(amountText) ?? 0, currencyCode: currency)
+        var list = ms.bankDeposits ?? []
+        if let idx = list.firstIndex(where: { $0.id == dep.id }) { list[idx] = dep }
+        else { list.append(dep) }
+        ms.bankDeposits = list
+        lifeStore.update(ms); dismiss()
+    }
+
+    private func delete() {
+        guard let e = editing, var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
+        ms.bankDeposits?.removeAll { $0.id == e.id }
+        lifeStore.update(ms); dismiss()
     }
 }

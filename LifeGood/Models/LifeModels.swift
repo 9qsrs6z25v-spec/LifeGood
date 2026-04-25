@@ -235,6 +235,19 @@ enum MilestoneCategory: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - 銀行存款記錄
+
+struct BankDeposit: Identifiable, Codable {
+    let id: UUID
+    var date: Date
+    var amount: Double
+    var currencyCode: String
+
+    init(id: UUID = UUID(), date: Date = Date(), amount: Double = 0, currencyCode: String = "NT$") {
+        self.id = id; self.date = date; self.amount = amount; self.currencyCode = currencyCode
+    }
+}
+
 // MARK: - 理財子分類
 
 enum FinanceSubCategory: String, Codable, CaseIterable, Identifiable {
@@ -338,6 +351,7 @@ struct LifeMilestone: Identifiable, Codable {
     var insuranceType: InsuranceType?
     var premiumAmount: Double?
     var beneficiary: String?
+    var bankDeposits: [BankDeposit]?
 
     init(id: UUID = UUID(), title: String, date: Date = Date(),
          category: MilestoneCategory = .other, note: String = "",
@@ -413,6 +427,7 @@ struct LifeMilestone: Identifiable, Codable {
         insuranceType = try? c.decode(InsuranceType.self, forKey: .insuranceType)
         premiumAmount = try? c.decode(Double.self, forKey: .premiumAmount)
         beneficiary = try? c.decode(String.self, forKey: .beneficiary)
+        bankDeposits = try? c.decode([BankDeposit].self, forKey: .bankDeposits)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -421,7 +436,7 @@ struct LifeMilestone: Identifiable, Codable {
         case mood, futurePlan, isManagerial, salary, salaryBefore, salaryAfter
         case financeSubCategory, bankName, branchName, accountNumber, bankAccountType
         case cardName, cardLastFour, creditLimit, annualFee, billingDay, paymentDay, expiryDate
-        case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary
+        case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary, bankDeposits
     }
 }
 
