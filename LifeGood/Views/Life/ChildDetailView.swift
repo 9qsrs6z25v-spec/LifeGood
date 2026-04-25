@@ -424,3 +424,122 @@ struct DailyRecordEditorSheet: View {
         dismiss()
     }
 }
+
+// MARK: - 兒女記錄編輯 Sheet
+
+struct ChildRecordEditorSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let childId: UUID
+    let type: ChildRecordType
+    var editing: ChildRecord?
+
+    @State private var title = ""
+    @State private var detail = ""
+    @State private var date = Date()
+    @State private var note = ""
+    @State private var heightText = ""
+    @State private var weightText = ""
+    @State private var dose = ""
+    @State private var severity: AllergySeverity = .mild
+
+    private var canSave: Bool {
+        switch type {
+        case .growth: return (Double(heightText) ?? 0) > 0 || (Double(weightText) ?? 0) > 0
+        default: return !title.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                switch type {
+                case .vaccination: vaccinationFields
+                case .allergy: allergyFields
+                case .growth: growthFields
+                case .medical: medicalFields
+                case .education: educationFields
+                case .hobby: hobbyFields
+                case .memorable: memorableFields
+                }
+                Section("日期") { DatePicker("日期", selection: $date, displayedComponents: .date) }
+                Section("備註") { TextField("選填", text: $note, axis: .vertical).lineLimit(2...5) }
+                if editing != nil {
+                    Section { Button(role: .destructive) { delete() } label: { Label("刪除此記錄", systemImage: "trash") } }
+                }
+            }
+            .navigationTitle(editing != nil ? "編輯\(type.rawValue)" : "新增\(type.rawValue)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave)
+                }
+            }
+            .onAppear { loadEditing() }
+        }
+    }
+
+    private var vaccinationFields: some View {
+        Section("疫苗資訊") {
+            TextField("疫苗名稱（如：五合一）", text: $title)
+            TextField("劑次（如：第 1 劑、追加）", text: $dose)
+            TextField("接種院所（選填）", text: $detail)
+        }
+    }
+    private var allergyFields: some View {
+        Section("過敏資訊") {
+            TextField("過敏原（如：花生、牛奶）", text: $title)
+            Picker("嚴重度", selection: $severity) { ForEach(AllergySeverity.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
+            TextField("反應描述（如：紅疹、氣喘）", text: $detail, axis: .vertical).lineLimit(1...3)
+        }
+    }
+    private var growthFields: some View {
+        Section("成長數據") {
+            HStack { TextField("身高", text: $heightText).keyboardType(.decimalPad); Text("cm").foregroundStyle(.secondary) }
+            HStack { TextField("體重", text: $weightText).keyboardType(.decimalPad); Text("kg").foregroundStyle(.secondary) }
+        }
+    }
+    private var medicalFields: some View {
+        Section("就醫資訊") { TextField("症狀/診斷", text: $title); TextField("院所（選填）", text: $detail) }
+    }
+    private var educationFields: some View {
+        Section("教育里程碑") { TextField("事件", text: $title); TextField("學校或單位（選填）", text: $detail) }
+    }
+    private var hobbyFields: some View {
+        Section("興趣才藝") { TextField("項目", text: $title); TextField("描述（選填）", text: $detail, axis: .vertical).lineLimit(1...3) }
+    }
+    private var memorableFields: some View {
+        Section("紀念時刻") { TextField("事件", text: $title); TextField("描述（選填）", text: $detail, axis: .vertical).lineLimit(1...3) }
+    }
+
+    private func loadEditing() {
+        guard let e = editing else { return }
+        title = e.title; detail = e.detail; date = e.date; note = e.note
+        if let h = e.heightCm, h > 0 { heightText = String(format: "%g", h) }
+        if let w = e.weightKg, w > 0 { weightText = String(format: "%g", w) }
+        dose = e.dose ?? ""; severity = e.severity ?? .mild
+    }
+
+    private func save() {
+        guard var member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { dismiss(); return }
+        let rec = ChildRecord(
+            id: editing?.id ?? UUID(), type: type, date: date,
+            title: title.trimmingCharacters(in: .whitespaces), detail: detail.trimmingCharacters(in: .whitespaces),
+            note: note.trimmingCharacters(in: .whitespaces),
+            heightCm: type == .growth ? Double(heightText) : nil, weightKg: type == .growth ? Double(weightText) : nil,
+            dose: type == .vaccination ? dose.trimmingCharacters(in: .whitespaces) : nil,
+            severity: type == .allergy ? severity : nil
+        )
+        if let idx = member.childRecords.firstIndex(where: { $0.id == rec.id }) { member.childRecords[idx] = rec }
+        else { member.childRecords.append(rec) }
+        lifeStore.update(member); dismiss()
+    }
+
+    private func delete() {
+        guard let e = editing, var member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { dismiss(); return }
+        member.childRecords.removeAll { $0.id == e.id }
+        lifeStore.update(member); dismiss()
+    }
+}
