@@ -368,19 +368,9 @@ struct FinanceCardView: View {
                 depositChart
                     .padding(.horizontal).padding(.bottom, 8)
 
-                ForEach(deposits) { dep in
-                    Button { editingDeposit = dep } label: {
-                        HStack {
-                            Text(fmtDate(dep.date)).font(.caption).foregroundStyle(.tertiary)
-                            Spacer()
-                            Text("\(dep.currencyCode) \(fmtNum(dep.amount))")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(dep.currencyCode == "NT$" ? .primary : .blue)
-                        }
-                        .padding(.horizontal).padding(.vertical, 6)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                ForEach(deposits, id: \.id) { dep in
+                    depositRow(dep)
+                }
                 }
             }
         }
@@ -389,13 +379,30 @@ struct FinanceCardView: View {
         .padding(.horizontal)
     }
 
+    private func depositRow(_ dep: BankDeposit) -> some View {
+        Button {
+            editingDeposit = dep
+        } label: {
+            HStack {
+                Text(fmtDate(dep.date)).font(.caption).foregroundStyle(.tertiary)
+                Spacer()
+                Text("\(dep.currencyCode) \(fmtNum(dep.amount))")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(dep.currencyCode == "NT$" ? .primary : .blue)
+            }
+            .padding(.horizontal).padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private var depositChart: some View {
         let data = deposits
         let maxAmount = data.map(\.amount).max() ?? 1
 
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .bottom, spacing: 4) {
-                ForEach(data) { dep in
+                ForEach(data, id: \.id) { dep in
                     VStack(spacing: 2) {
                         RoundedRectangle(cornerRadius: 3)
                             .fill(dep.currencyCode == "NT$" ? Color.blue : Color.orange)
