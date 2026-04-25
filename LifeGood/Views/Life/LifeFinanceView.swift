@@ -4,6 +4,7 @@ struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var selectedSub: FinanceSubCategory?
     @State private var viewingItem: LifeMilestone?
+    @State private var showAdd = false
 
     private var financeMilestones: [LifeMilestone] {
         lifeStore.milestones
@@ -27,6 +28,16 @@ struct LifeFinanceView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("財富")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAdd = true } label: {
+                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    }
+                }
+            }
+            .sheet(isPresented: $showAdd) {
+                AddMilestoneView(initialCategory: .achievement)
+            }
             .sheet(item: $viewingItem) { item in
                 FinanceCardView(milestoneId: item.id)
             }

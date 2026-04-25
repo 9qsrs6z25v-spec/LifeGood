@@ -827,7 +827,7 @@ struct AddMilestoneView: View {
             }
         case .creditCard:
             Section("信用卡資訊") {
-                TextField("發卡銀行", text: $bankName)
+                bankNamePicker
                 TextField("卡別名稱（如：御璽卡）", text: $cardName)
                 TextField("卡號末四碼（選填）", text: $cardLastFour).keyboardType(.numberPad)
                 HStack { Text("NT$").foregroundStyle(.secondary); TextField("額度", text: $creditLimitText).keyboardType(.numberPad) }
@@ -872,6 +872,31 @@ struct AddMilestoneView: View {
             }
             Section("備註") {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            }
+        }
+    }
+
+    private var existingBankNames: [String] {
+        store.milestones
+            .filter { $0.category == .achievement && $0.financeSubCategory == .bank }
+            .compactMap { $0.bankName }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+    }
+
+    @ViewBuilder
+    private var bankNamePicker: some View {
+        if existingBankNames.isEmpty {
+            TextField("發卡銀行", text: $bankName)
+        } else {
+            Picker("發卡銀行", selection: $bankName) {
+                Text("手動輸入").tag("")
+                ForEach(existingBankNames, id: \.self) { name in
+                    Text(name).tag(name)
+                }
+            }
+            if bankName.isEmpty {
+                TextField("手動輸入發卡銀行", text: $bankName)
             }
         }
     }
