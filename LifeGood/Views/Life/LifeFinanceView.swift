@@ -26,7 +26,7 @@ struct LifeFinanceView: View {
                 milestoneList
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("理財")
+            .navigationTitle("財富")
             .sheet(item: $editingItem) { item in
                 AddMilestoneView(editing: item)
             }

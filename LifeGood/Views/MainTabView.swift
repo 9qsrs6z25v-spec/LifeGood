@@ -57,7 +57,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         switch self {
         case .overview: return "總覽"
         case .resume: return "履歷"
-        case .finance: return "理財"
+        case .finance: return "財富"
         case .career: return "職涯"
         case .family: return "家庭"
         case .realEstate: return "房地產"
