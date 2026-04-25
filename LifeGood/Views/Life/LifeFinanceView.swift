@@ -387,7 +387,7 @@ struct FinanceCardView: View {
                 Spacer()
                 Text("\(dep.currencyCode) \(fmtNum(dep.amount))")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(dep.currencyCode == "NT$" ? .primary : .blue)
+                    .foregroundStyle(dep.currencyCode == "NT$" ? Color.primary : Color.blue)
             }
             .padding(.horizontal).padding(.vertical, 6)
             .contentShape(Rectangle())
