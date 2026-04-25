@@ -513,8 +513,30 @@ struct AddMilestoneView: View {
     @State private var salaryBeforeText = ""
     @State private var salaryAfterText = ""
 
+    // 理財專屬
+    @State private var financeSub: FinanceSubCategory = .bank
+    @State private var bankName = ""
+    @State private var branchName = ""
+    @State private var accountNumber = ""
+    @State private var bankAccType: BankAccountType = .savings
+    @State private var cardName = ""
+    @State private var cardLastFour = ""
+    @State private var creditLimitText = ""
+    @State private var annualFeeText = ""
+    @State private var billingDayText = ""
+    @State private var paymentDayText = ""
+    @State private var hasExpiryDate = false
+    @State private var expiryDate = Date()
+    @State private var secAccType: SecuritiesAccountType = .regular
+    @State private var insuranceCompany = ""
+    @State private var policyNumber = ""
+    @State private var insType: InsuranceType = .life
+    @State private var premiumText = ""
+    @State private var beneficiary = ""
+
     private var isFamily: Bool { category == .family }
     private var isRealEstate: Bool { category == .realEstate }
+    private var isFinance: Bool { category == .achievement }
     private var isCareer: Bool { category == .career }
 
     private var canSave: Bool {
@@ -532,6 +554,14 @@ struct AddMilestoneView: View {
                 return (Double(salaryBeforeText) ?? 0) > 0 && (Double(salaryAfterText) ?? 0) > 0
             case .transfer: return !department.trimmingCharacters(in: .whitespaces).isEmpty
             case .resign: return true
+            }
+        }
+        if isFinance {
+            switch financeSub {
+            case .bank: return !bankName.trimmingCharacters(in: .whitespaces).isEmpty
+            case .creditCard: return !bankName.trimmingCharacters(in: .whitespaces).isEmpty
+            case .securities: return !bankName.trimmingCharacters(in: .whitespaces).isEmpty
+            case .insurance: return !insuranceCompany.trimmingCharacters(in: .whitespaces).isEmpty
             }
         }
         return !title.trimmingCharacters(in: .whitespaces).isEmpty
@@ -553,15 +583,20 @@ struct AddMilestoneView: View {
                         realEstateFields
                     } else if isCareer {
                         careerFields
+                    } else if isFinance {
+                        financeSubPicker
                     } else {
                         TextField("標題", text: $title)
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                     }
                 }
+                if isFinance {
+                    financeDetailSection
+                }
                 if isCareer {
                     careerExtraSection
                 }
-                if !isFamily && !isRealEstate && !isCareer {
+                if !isFamily && !isRealEstate && !isCareer && !isFinance {
                     Section("備註") {
                         TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                     }
@@ -763,6 +798,102 @@ struct AddMilestoneView: View {
 
     // MARK: - 導航標題
 
+    // MARK: - 理財欄位
+
+    @ViewBuilder
+    private var financeSubPicker: some View {
+        Picker("子分類", selection: $financeSub) {
+            ForEach(FinanceSubCategory.allCases) { sub in
+                Label(sub.rawValue, systemImage: sub.icon).tag(sub)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var financeDetailSection: some View {
+        switch financeSub {
+        case .bank:
+            Section("銀行資訊") {
+                TextField("銀行名稱", text: $bankName)
+                TextField("分行（選填）", text: $branchName)
+                TextField("帳號（選填）", text: $accountNumber)
+                Picker("帳戶類型", selection: $bankAccType) {
+                    ForEach(BankAccountType.allCases) { t in Text(t.rawValue).tag(t) }
+                }
+                DatePicker("開戶日期", selection: $date, displayedComponents: .date)
+            }
+            Section("備註") {
+                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            }
+        case .creditCard:
+            Section("信用卡資訊") {
+                TextField("發卡銀行", text: $bankName)
+                TextField("卡別名稱（如：御璽卡）", text: $cardName)
+                TextField("卡號末四碼（選填）", text: $cardLastFour).keyboardType(.numberPad)
+                HStack { Text("NT$").foregroundStyle(.secondary); TextField("額度", text: $creditLimitText).keyboardType(.numberPad) }
+                HStack { Text("NT$").foregroundStyle(.secondary); TextField("年費", text: $annualFeeText).keyboardType(.numberPad) }
+                HStack { TextField("帳單日", text: $billingDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
+                HStack { TextField("繳款日", text: $paymentDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
+                DatePicker("核卡日期", selection: $date, displayedComponents: .date)
+                Toggle("填入到期日", isOn: $hasExpiryDate)
+                if hasExpiryDate {
+                    DatePicker("到期日", selection: $expiryDate, displayedComponents: .date)
+                }
+            }
+            Section("備註") {
+                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            }
+        case .securities:
+            Section("證券資訊") {
+                TextField("券商名稱", text: $bankName)
+                TextField("帳號（選填）", text: $accountNumber)
+                Picker("帳戶類型", selection: $secAccType) {
+                    ForEach(SecuritiesAccountType.allCases) { t in Text(t.rawValue).tag(t) }
+                }
+                DatePicker("開戶日期", selection: $date, displayedComponents: .date)
+            }
+            Section("備註") {
+                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            }
+        case .insurance:
+            Section("保險資訊") {
+                TextField("保險公司", text: $insuranceCompany)
+                TextField("保單號碼（選填）", text: $policyNumber)
+                Picker("險種", selection: $insType) {
+                    ForEach(InsuranceType.allCases) { t in Text(t.rawValue).tag(t) }
+                }
+                HStack { Text("NT$").foregroundStyle(.secondary); TextField("保費", text: $premiumText).keyboardType(.numberPad) }
+                DatePicker("生效日", selection: $date, displayedComponents: .date)
+                Toggle("填入到期日", isOn: $hasExpiryDate)
+                if hasExpiryDate {
+                    DatePicker("到期日", selection: $expiryDate, displayedComponents: .date)
+                }
+                TextField("受益人（選填）", text: $beneficiary)
+            }
+            Section("備註") {
+                TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            }
+        }
+    }
+
+    private func generateFinanceTitle() -> String {
+        switch financeSub {
+        case .bank:
+            let name = bankName.trimmingCharacters(in: .whitespaces)
+            let branch = branchName.trimmingCharacters(in: .whitespaces)
+            return branch.isEmpty ? "開戶 \(name)" : "開戶 \(name) \(branch)"
+        case .creditCard:
+            let bank = bankName.trimmingCharacters(in: .whitespaces)
+            let card = cardName.trimmingCharacters(in: .whitespaces)
+            return card.isEmpty ? "\(bank) 信用卡" : "\(bank) \(card)"
+        case .securities:
+            return "開戶 \(bankName.trimmingCharacters(in: .whitespaces))"
+        case .insurance:
+            let co = insuranceCompany.trimmingCharacters(in: .whitespaces)
+            return "\(co) \(insType.rawValue)"
+        }
+    }
+
     private var navTitle: String {
         if editingFamily != nil { return "編輯家庭成員" }
         if editing != nil { return "編輯里程碑" }
@@ -817,6 +948,33 @@ struct AddMilestoneView: View {
                 salary: salaryVal,
                 salaryBefore: careerSub == .salaryAdjust ? Double(salaryBeforeText) : nil,
                 salaryAfter: careerSub == .salaryAdjust ? Double(salaryAfterText) : nil
+            )
+            if editing != nil { store.update(item) } else { store.add(item) }
+        } else if isFinance {
+            let autoTitle = generateFinanceTitle()
+            let t = note.trimmingCharacters(in: .whitespaces)
+            let item = LifeMilestone(
+                id: editing?.id ?? UUID(),
+                title: autoTitle, date: date, category: .achievement,
+                note: t,
+                financeSubCategory: financeSub,
+                bankName: bankName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : bankName.trimmingCharacters(in: .whitespaces),
+                branchName: branchName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : branchName.trimmingCharacters(in: .whitespaces),
+                accountNumber: accountNumber.trimmingCharacters(in: .whitespaces).isEmpty ? nil : accountNumber.trimmingCharacters(in: .whitespaces),
+                bankAccountType: financeSub == .bank ? bankAccType : nil,
+                cardName: cardName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cardName.trimmingCharacters(in: .whitespaces),
+                cardLastFour: cardLastFour.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cardLastFour.trimmingCharacters(in: .whitespaces),
+                creditLimit: Double(creditLimitText),
+                annualFee: Double(annualFeeText),
+                billingDay: Int(billingDayText),
+                paymentDay: Int(paymentDayText),
+                expiryDate: hasExpiryDate ? expiryDate : nil,
+                securitiesAccountType: financeSub == .securities ? secAccType : nil,
+                insuranceCompany: insuranceCompany.trimmingCharacters(in: .whitespaces).isEmpty ? nil : insuranceCompany.trimmingCharacters(in: .whitespaces),
+                policyNumber: policyNumber.trimmingCharacters(in: .whitespaces).isEmpty ? nil : policyNumber.trimmingCharacters(in: .whitespaces),
+                insuranceType: financeSub == .insurance ? insType : nil,
+                premiumAmount: Double(premiumText),
+                beneficiary: beneficiary.trimmingCharacters(in: .whitespaces).isEmpty ? nil : beneficiary.trimmingCharacters(in: .whitespaces)
             )
             if editing != nil { store.update(item) } else { store.add(item) }
         } else {
@@ -892,6 +1050,25 @@ struct AddMilestoneView: View {
             if let s = e.salary, s > 0 { salaryText = String(format: "%.0f", s) }
             if let sb = e.salaryBefore, sb > 0 { salaryBeforeText = String(format: "%.0f", sb) }
             if let sa = e.salaryAfter, sa > 0 { salaryAfterText = String(format: "%.0f", sa) }
+            // 理財欄位
+            if let fs = e.financeSubCategory { financeSub = fs }
+            bankName = e.bankName ?? ""
+            branchName = e.branchName ?? ""
+            accountNumber = e.accountNumber ?? ""
+            if let bat = e.bankAccountType { bankAccType = bat }
+            cardName = e.cardName ?? ""
+            cardLastFour = e.cardLastFour ?? ""
+            if let cl = e.creditLimit, cl > 0 { creditLimitText = String(format: "%.0f", cl) }
+            if let af = e.annualFee, af > 0 { annualFeeText = String(format: "%.0f", af) }
+            if let bd = e.billingDay { billingDayText = "\(bd)" }
+            if let pd = e.paymentDay { paymentDayText = "\(pd)" }
+            if let ed = e.expiryDate { hasExpiryDate = true; expiryDate = ed }
+            if let sat = e.securitiesAccountType { secAccType = sat }
+            insuranceCompany = e.insuranceCompany ?? ""
+            policyNumber = e.policyNumber ?? ""
+            if let it = e.insuranceType { insType = it }
+            if let pa = e.premiumAmount, pa > 0 { premiumText = String(format: "%.0f", pa) }
+            beneficiary = e.beneficiary ?? ""
             return
         }
         if let f = editingFamily {

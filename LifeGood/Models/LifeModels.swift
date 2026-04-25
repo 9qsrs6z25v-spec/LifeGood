@@ -174,6 +174,7 @@ enum MilestoneCategory: String, Codable, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .marriage: return "配偶"
+        case .achievement: return "理財"
         default: return rawValue
         }
     }
@@ -185,13 +186,54 @@ enum MilestoneCategory: String, Codable, CaseIterable, Identifiable {
         case .realEstate: return "building.2.fill"
         case .career: return "briefcase.fill"
         case .education: return "graduationcap.fill"
-        case .achievement: return "trophy.fill"
+        case .achievement: return "banknote.fill"
         case .travel: return "airplane"
         case .pet: return "pawprint.fill"
         case .health: return "cross.fill"
         case .other: return "star.fill"
         }
     }
+}
+
+// MARK: - 理財子分類
+
+enum FinanceSubCategory: String, Codable, CaseIterable, Identifiable {
+    case bank = "銀行"
+    case creditCard = "信用卡"
+    case securities = "證券"
+    case insurance = "保險"
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .bank: return "building.columns.fill"
+        case .creditCard: return "creditcard.fill"
+        case .securities: return "chart.bar.fill"
+        case .insurance: return "shield.fill"
+        }
+    }
+}
+
+enum BankAccountType: String, Codable, CaseIterable, Identifiable {
+    case savings = "活存"
+    case fixed = "定存"
+    case foreign = "外幣"
+    var id: String { rawValue }
+}
+
+enum SecuritiesAccountType: String, Codable, CaseIterable, Identifiable {
+    case regular = "一般"
+    case margin = "融資融券"
+    var id: String { rawValue }
+}
+
+enum InsuranceType: String, Codable, CaseIterable, Identifiable {
+    case life = "壽險"
+    case health = "醫療"
+    case accident = "意外"
+    case travel = "旅平"
+    case car = "車險"
+    var id: String { rawValue }
 }
 
 // MARK: - 職涯子分類
@@ -237,6 +279,26 @@ struct LifeMilestone: Identifiable, Codable {
     var salaryBefore: Double?
     var salaryAfter: Double?
 
+    // 理財專屬欄位
+    var financeSubCategory: FinanceSubCategory?
+    var bankName: String?
+    var branchName: String?
+    var accountNumber: String?
+    var bankAccountType: BankAccountType?
+    var cardName: String?
+    var cardLastFour: String?
+    var creditLimit: Double?
+    var annualFee: Double?
+    var billingDay: Int?
+    var paymentDay: Int?
+    var expiryDate: Date?
+    var securitiesAccountType: SecuritiesAccountType?
+    var insuranceCompany: String?
+    var policyNumber: String?
+    var insuranceType: InsuranceType?
+    var premiumAmount: Double?
+    var beneficiary: String?
+
     init(id: UUID = UUID(), title: String, date: Date = Date(),
          category: MilestoneCategory = .other, note: String = "",
          careerSubCategory: CareerSubCategory? = nil,
@@ -244,7 +306,17 @@ struct LifeMilestone: Identifiable, Codable {
          jobTitle: String? = nil, jobGrade: String? = nil,
          mood: String? = nil, futurePlan: String? = nil,
          isManagerial: Bool? = nil,
-         salary: Double? = nil, salaryBefore: Double? = nil, salaryAfter: Double? = nil) {
+         salary: Double? = nil, salaryBefore: Double? = nil, salaryAfter: Double? = nil,
+         financeSubCategory: FinanceSubCategory? = nil,
+         bankName: String? = nil, branchName: String? = nil, accountNumber: String? = nil,
+         bankAccountType: BankAccountType? = nil,
+         cardName: String? = nil, cardLastFour: String? = nil,
+         creditLimit: Double? = nil, annualFee: Double? = nil,
+         billingDay: Int? = nil, paymentDay: Int? = nil, expiryDate: Date? = nil,
+         securitiesAccountType: SecuritiesAccountType? = nil,
+         insuranceCompany: String? = nil, policyNumber: String? = nil,
+         insuranceType: InsuranceType? = nil, premiumAmount: Double? = nil,
+         beneficiary: String? = nil) {
         self.id = id; self.title = title; self.date = date
         self.category = category; self.note = note
         self.careerSubCategory = careerSubCategory
@@ -253,6 +325,16 @@ struct LifeMilestone: Identifiable, Codable {
         self.mood = mood; self.futurePlan = futurePlan
         self.isManagerial = isManagerial
         self.salary = salary; self.salaryBefore = salaryBefore; self.salaryAfter = salaryAfter
+        self.financeSubCategory = financeSubCategory
+        self.bankName = bankName; self.branchName = branchName; self.accountNumber = accountNumber
+        self.bankAccountType = bankAccountType
+        self.cardName = cardName; self.cardLastFour = cardLastFour
+        self.creditLimit = creditLimit; self.annualFee = annualFee
+        self.billingDay = billingDay; self.paymentDay = paymentDay; self.expiryDate = expiryDate
+        self.securitiesAccountType = securitiesAccountType
+        self.insuranceCompany = insuranceCompany; self.policyNumber = policyNumber
+        self.insuranceType = insuranceType; self.premiumAmount = premiumAmount
+        self.beneficiary = beneficiary
     }
 
     init(from decoder: Decoder) throws {
@@ -273,12 +355,33 @@ struct LifeMilestone: Identifiable, Codable {
         salary = try? c.decode(Double.self, forKey: .salary)
         salaryBefore = try? c.decode(Double.self, forKey: .salaryBefore)
         salaryAfter = try? c.decode(Double.self, forKey: .salaryAfter)
+        financeSubCategory = try? c.decode(FinanceSubCategory.self, forKey: .financeSubCategory)
+        bankName = try? c.decode(String.self, forKey: .bankName)
+        branchName = try? c.decode(String.self, forKey: .branchName)
+        accountNumber = try? c.decode(String.self, forKey: .accountNumber)
+        bankAccountType = try? c.decode(BankAccountType.self, forKey: .bankAccountType)
+        cardName = try? c.decode(String.self, forKey: .cardName)
+        cardLastFour = try? c.decode(String.self, forKey: .cardLastFour)
+        creditLimit = try? c.decode(Double.self, forKey: .creditLimit)
+        annualFee = try? c.decode(Double.self, forKey: .annualFee)
+        billingDay = try? c.decode(Int.self, forKey: .billingDay)
+        paymentDay = try? c.decode(Int.self, forKey: .paymentDay)
+        expiryDate = try? c.decode(Date.self, forKey: .expiryDate)
+        securitiesAccountType = try? c.decode(SecuritiesAccountType.self, forKey: .securitiesAccountType)
+        insuranceCompany = try? c.decode(String.self, forKey: .insuranceCompany)
+        policyNumber = try? c.decode(String.self, forKey: .policyNumber)
+        insuranceType = try? c.decode(InsuranceType.self, forKey: .insuranceType)
+        premiumAmount = try? c.decode(Double.self, forKey: .premiumAmount)
+        beneficiary = try? c.decode(String.self, forKey: .beneficiary)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, date, category, note
         case careerSubCategory, companyName, department, jobTitle, jobGrade
         case mood, futurePlan, isManagerial, salary, salaryBefore, salaryAfter
+        case financeSubCategory, bankName, branchName, accountNumber, bankAccountType
+        case cardName, cardLastFour, creditLimit, annualFee, billingDay, paymentDay, expiryDate
+        case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary
     }
 }
 
