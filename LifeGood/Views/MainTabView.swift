@@ -459,6 +459,7 @@ struct MainTabView: View {
                             Text(mode.rawValue)
                         }
                     }
+                    .menuActionDismissBehavior(.disabled)
                 }
             }
 
