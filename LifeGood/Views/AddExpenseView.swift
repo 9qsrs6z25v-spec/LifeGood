@@ -1189,25 +1189,15 @@ struct AddExpenseView: View {
             oldMs.bankDeposits?.removeAll { $0.linkedExpenseId == expense.id }
             lifeStore.update(oldMs)
         }
-        // 寫入新的連結記錄
+        // 信用卡扣款不寫入 BankDeposit；改在顯示時依月份彙總
+        guard expense.linkedCreditCardMilestoneId == nil else { return }
+        // 寫入新的連結記錄（直接扣款的銀行）
         guard let bankId = expense.linkedBankMilestoneId,
               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
-        // 信用卡扣款日：以結帳日/繳款日推算實際扣款日；否則以消費日為扣款日
-        let withdrawalDate: Date
-        if let cardId = expense.linkedCreditCardMilestoneId,
-           let card = lifeStore.milestones.first(where: { $0.id == cardId }) {
-            withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
-                for: expense.date,
-                billingDay: card.billingDay,
-                paymentDay: card.paymentDay
-            )
-        } else {
-            withdrawalDate = expense.date
-        }
         var list = ms.bankDeposits ?? []
         list.removeAll { $0.linkedExpenseId == expense.id }
         list.append(BankDeposit(
-            id: UUID(), date: withdrawalDate, amount: expense.amount,
+            id: UUID(), date: expense.date, amount: expense.amount,
             currencyCode: expense.linkedBankCurrency ?? "NT$",
             isWithdrawal: true, linkedExpenseId: expense.id
         ))

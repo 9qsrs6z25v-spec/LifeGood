@@ -196,6 +196,7 @@ struct FinanceCardView: View {
                     detailCard
                     if sub == .bank { depositSection }
                     if sub == .bank { linkedCreditCardSection }
+                    if sub == .creditCard { creditCardChartSection }
                     if !item.note.isEmpty { noteCard }
                 }
                 .padding(.vertical)
@@ -341,8 +342,82 @@ struct FinanceCardView: View {
 
     // MARK: - 銀行存款章節
 
+    /// 銀行存款列表：直接扣款的 BankDeposit + 信用卡逐月彙總（虛擬條目）
     private var deposits: [BankDeposit] {
-        (item.bankDeposits ?? []).sorted { $0.date < $1.date }
+        // 過濾：排除舊版本可能殘留、屬於信用卡支出的 BankDeposit（避免重複）
+        let real = (item.bankDeposits ?? []).filter { dep in
+            guard let expId = dep.linkedExpenseId,
+                  let exp = expenseStore.expenses.first(where: { $0.id == expId }) else { return true }
+            return exp.linkedCreditCardMilestoneId == nil
+        }
+        let aggregated = aggregatedCreditCardWithdrawals()
+        return (real + aggregated).sorted { $0.date < $1.date }
+    }
+
+    /// 將連結到本銀行的信用卡支出依月份彙總成虛擬 BankDeposit
+    private func aggregatedCreditCardWithdrawals() -> [BankDeposit] {
+        let cards = lifeStore.milestones.filter {
+            $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == milestoneId
+        }
+        var result: [BankDeposit] = []
+        for card in cards {
+            let cardExpenses = expenseStore.expenses.filter {
+                $0.linkedCreditCardMilestoneId == card.id
+            }
+            let groups = Dictionary(grouping: cardExpenses) { exp -> String in
+                let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
+                    for: exp.date,
+                    billingDay: card.billingDay,
+                    paymentDay: card.paymentDay
+                )
+                let comps = Calendar.current.dateComponents([.year, .month], from: withdrawalDate)
+                return "\(comps.year ?? 0)-\(comps.month ?? 0)"
+            }
+            for (_, exps) in groups {
+                let total = exps.reduce(0.0) { $0 + $1.amount }
+                let firstDate = exps.first?.date ?? Date()
+                let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
+                    for: firstDate,
+                    billingDay: card.billingDay,
+                    paymentDay: card.paymentDay
+                )
+                let stableId = stableUUID(seed: "\(card.id)-\(withdrawalDate.timeIntervalSince1970)")
+                result.append(BankDeposit(
+                    id: stableId,
+                    date: withdrawalDate,
+                    amount: total,
+                    currencyCode: "NT$",
+                    isWithdrawal: true,
+                    linkedExpenseId: nil
+                ))
+            }
+        }
+        return result
+    }
+
+    private func stableUUID(seed: String) -> UUID {
+        var hasher = Hasher()
+        hasher.combine(seed)
+        var x = UInt(bitPattern: hasher.finalize())
+        var bytes: [UInt8] = []
+        for _ in 0..<8 {
+            bytes.append(UInt8(x & 0xFF))
+            x >>= 8
+        }
+        var hasher2 = Hasher()
+        hasher2.combine(seed)
+        hasher2.combine("vc")
+        var y = UInt(bitPattern: hasher2.finalize())
+        for _ in 0..<8 {
+            bytes.append(UInt8(y & 0xFF))
+            y >>= 8
+        }
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
     }
 
     private var depositSection: some View {
@@ -381,6 +456,110 @@ struct FinanceCardView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+    }
+
+    // MARK: - 信用卡圖表章節（顯示於信用卡卡片）
+
+    private struct CreditCardMonthlyTotal: Identifiable {
+        let id: String
+        let date: Date
+        let amount: Double
+    }
+
+    private var creditCardMonthlyTotals: [CreditCardMonthlyTotal] {
+        let exps = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == milestoneId }
+        let groups = Dictionary(grouping: exps) { exp -> String in
+            let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
+                for: exp.date,
+                billingDay: item.billingDay,
+                paymentDay: item.paymentDay
+            )
+            let comps = Calendar.current.dateComponents([.year, .month], from: withdrawalDate)
+            return "\(comps.year ?? 0)-\(comps.month ?? 0)"
+        }
+        return groups.compactMap { (key, exps) -> CreditCardMonthlyTotal? in
+            guard let firstExp = exps.first else { return nil }
+            let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
+                for: firstExp.date,
+                billingDay: item.billingDay,
+                paymentDay: item.paymentDay
+            )
+            let total = exps.reduce(0.0) { $0 + $1.amount }
+            return CreditCardMonthlyTotal(id: key, date: withdrawalDate, amount: total)
+        }
+        .sorted { $0.date < $1.date }
+    }
+
+    private var creditCardChartSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "chart.bar.fill").foregroundStyle(.orange)
+                Text("月扣款金額").font(.headline)
+                Spacer()
+                Text("\(creditCardMonthlyTotals.count) 期").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+
+            if creditCardMonthlyTotals.isEmpty {
+                Text("尚無扣款記錄").font(.caption).foregroundStyle(.tertiary)
+                    .padding(.horizontal).padding(.bottom, 12)
+            } else {
+                creditCardChart
+                    .padding(.horizontal).padding(.bottom, 8)
+                ForEach(creditCardMonthlyTotals) { row in
+                    HStack {
+                        Text(fmtDate(row.date)).font(.caption).foregroundStyle(.tertiary)
+                        Text("扣款").font(.caption2).foregroundStyle(.red)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.red.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                        Spacer()
+                        Text("-NT$ \(fmtNum(row.amount))")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.red)
+                    }
+                    .padding(.horizontal).padding(.vertical, 6)
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private var creditCardChart: some View {
+        let data = creditCardMonthlyTotals
+        let maxAmount = data.map(\.amount).max() ?? 1
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .bottom, spacing: 4) {
+                ForEach(data) { row in
+                    VStack(spacing: 2) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.red)
+                            .frame(
+                                width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(data.count, 1))),
+                                height: max(4, CGFloat(row.amount / max(maxAmount, 1)) * 120)
+                            )
+                        Text(shortDate(row.date))
+                            .font(.system(size: 8))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .frame(height: 140, alignment: .bottom)
+            .frame(maxWidth: .infinity)
+
+            if let last = data.last {
+                HStack {
+                    Text("最近一期").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("NT$ \(fmtNum(last.amount))").font(.caption.bold())
+                        .foregroundStyle(.red)
+                }
+                .padding(.horizontal, 4)
+            }
+        }
     }
 
     // MARK: - 信用卡章節
@@ -431,23 +610,29 @@ struct FinanceCardView: View {
         .padding(.horizontal)
     }
 
+    private func isVirtualCreditCardEntry(_ dep: BankDeposit) -> Bool {
+        !(item.bankDeposits ?? []).contains(where: { $0.id == dep.id })
+    }
+
     private func depositRow(_ dep: BankDeposit) -> some View {
-        Button {
-            // 連結扣款由變動支出產生，不直接編輯
-            if dep.linkedExpenseId == nil { editingDeposit = dep }
+        let isVirtual = isVirtualCreditCardEntry(dep)
+        return Button {
+            // 連結扣款 / 信用卡彙總 不可直接編輯
+            if dep.linkedExpenseId == nil && !isVirtual { editingDeposit = dep }
         } label: {
             HStack {
                 Text(fmtDate(dep.date)).font(.caption).foregroundStyle(.tertiary)
                 if dep.isWithdrawal {
-                    Text("扣款").font(.caption2).foregroundStyle(.red)
+                    Text(isVirtual ? "信用卡" : "扣款").font(.caption2)
+                        .foregroundStyle(isVirtual ? Color.orange : Color.red)
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.red.opacity(0.12))
+                        .background((isVirtual ? Color.orange : Color.red).opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                 }
                 Spacer()
                 Text("\(dep.isWithdrawal ? "-" : "")\(dep.currencyCode) \(fmtNum(dep.amount))")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(dep.isWithdrawal ? Color.red :
+                    .foregroundStyle(dep.isWithdrawal ? (isVirtual ? Color.orange : Color.red) :
                                      (dep.currencyCode == "NT$" ? Color.primary : Color.blue))
             }
             .padding(.horizontal).padding(.vertical, 6)
