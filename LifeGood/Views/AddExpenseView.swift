@@ -483,7 +483,7 @@ struct AddExpenseView: View {
         for dep in ms.bankDeposits ?? [] {
             // 跳過舊版可能殘留的信用卡支出記錄
             if let expId = dep.linkedExpenseId,
-               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
+               let exp = store.expenses.first(where: { $0.id == expId }),
                exp.linkedCreditCardMilestoneId != nil {
                 continue
             }
@@ -493,7 +493,7 @@ struct AddExpenseView: View {
             $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
         }
         for card in cards {
-            let exps = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == card.id }
+            let exps = store.expenses.filter { $0.linkedCreditCardMilestoneId == card.id }
             for exp in exps { total -= exp.amount }
         }
         return total
