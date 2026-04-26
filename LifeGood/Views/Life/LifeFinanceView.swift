@@ -253,6 +253,7 @@ struct FinanceCardView: View {
     @Environment(\.dismiss) private var dismiss
 
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
     let milestoneId: UUID
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
@@ -261,6 +262,9 @@ struct FinanceCardView: View {
     @State private var editingDeposit: BankDeposit?
     @State private var viewingLinkedCard: LifeMilestone?
     @State private var depositsExpanded = false
+    @State private var editingExpense: Expense?
+    @State private var editingIncome: Income?
+    @State private var editingStock: Stock?
 
     private var item: LifeMilestone {
         lifeStore.milestones.first(where: { $0.id == milestoneId })
@@ -310,6 +314,15 @@ struct FinanceCardView: View {
             }
             .sheet(item: $editingDeposit) { dep in
                 DepositEditorSheet(milestoneId: milestoneId, currency: dep.currencyCode, editing: dep)
+            }
+            .sheet(item: $editingExpense) { exp in
+                AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
+            }
+            .sheet(item: $editingIncome) { inc in
+                AddIncomeView(editing: inc)
+            }
+            .sheet(item: $editingStock) { stk in
+                AddStockView(editing: stk)
             }
             .alert("確定要刪除嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) { lifeStore.deleteMilestone(item); dismiss() }
@@ -663,15 +676,22 @@ struct FinanceCardView: View {
                 let items = creditCardExpenseItems
                 let visible = ccExpanded ? items : Array(items.prefix(6))
                 ForEach(visible) { exp in
-                    HStack {
-                        Text(fmtDate(exp.date)).font(.caption).foregroundStyle(.tertiary)
-                        Text(exp.title).font(.caption).lineLimit(1)
-                        Spacer()
-                        Text("-NT$ \(fmtNum(exp.amount))")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.red)
+                    Button { editingExpense = exp } label: {
+                        HStack {
+                            Text(fmtDate(exp.date)).font(.caption).foregroundStyle(.tertiary)
+                            Text(exp.title).font(.caption).lineLimit(1)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("-NT$ \(fmtNum(exp.amount))")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.red)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal).padding(.vertical, 5)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal).padding(.vertical, 5)
+                    .buttonStyle(.plain)
                 }
                 if items.count > 6 {
                     Button {
@@ -838,6 +858,65 @@ struct FinanceCardView: View {
         !(item.bankDeposits ?? []).contains(where: { $0.id == dep.id })
     }
 
+    /// 根據聚合條目 id 比對產生它的信用卡
+    private func matchingAggregatedCard(card: LifeMilestone, depositId: UUID) -> LifeMilestone? {
+        let cardExpenses = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == card.id }
+        let groups = Dictionary(grouping: cardExpenses) { exp -> String in
+            let date = LifeMilestone.creditCardWithdrawalDate(
+                for: exp.date, billingDay: card.billingDay, paymentDay: card.paymentDay
+            )
+            let comps = Calendar.current.dateComponents([.year, .month], from: date)
+            return "\(comps.year ?? 0)-\(comps.month ?? 0)"
+        }
+        for (_, exps) in groups {
+            guard let first = exps.first else { continue }
+            let date = LifeMilestone.creditCardWithdrawalDate(
+                for: first.date, billingDay: card.billingDay, paymentDay: card.paymentDay
+            )
+            if stableUUID(seed: "\(card.id)-\(date.timeIntervalSince1970)") == depositId {
+                return card
+            }
+        }
+        return nil
+    }
+
+    /// 點擊存款列：依連結類型開對應的編輯頁
+    private func handleDepositTap(_ dep: BankDeposit, isVirtual: Bool, isStock: Bool) {
+        // 信用卡彙總：尋找產生此虛擬條目的信用卡並開啟
+        if isVirtual {
+            let cards = lifeStore.milestones.filter {
+                $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == milestoneId
+            }
+            for card in cards {
+                if let matched = matchingAggregatedCard(card: card, depositId: dep.id) {
+                    viewingLinkedCard = matched
+                    return
+                }
+            }
+            if let first = cards.first { viewingLinkedCard = first }
+            return
+        }
+        // 股票交易：開啟股票編輯
+        if let stockId = dep.linkedStockId,
+           let stock = financeStore.stocks.first(where: { $0.id == stockId }) {
+            editingStock = stock
+            return
+        }
+        // 連結支出/收入
+        if let expId = dep.linkedExpenseId {
+            if let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+                editingExpense = exp
+                return
+            }
+            if let inc = expenseStore.incomes.first(where: { $0.id == expId }) {
+                editingIncome = inc
+                return
+            }
+        }
+        // 手動存款記錄：用 DepositEditorSheet
+        editingDeposit = dep
+    }
+
     private func depositRow(_ dep: BankDeposit) -> some View {
         let isVirtual = isVirtualCreditCardEntry(dep)
         let isStock = dep.linkedStockId != nil
@@ -855,8 +934,7 @@ struct FinanceCardView: View {
             return .red
         }()
         return Button {
-            // 連結扣款 / 信用卡彙總 / 股票交易 不可直接編輯
-            if dep.linkedExpenseId == nil && !isVirtual && !isStock { editingDeposit = dep }
+            handleDepositTap(dep, isVirtual: isVirtual, isStock: isStock)
         } label: {
             HStack {
                 Text(fmtDate(dep.date)).font(.caption).foregroundStyle(.tertiary)
