@@ -599,6 +599,28 @@ struct FinanceCardView: View {
         .sorted { $0.date < $1.date }
     }
 
+    /// 消費趨勢：每筆消費一根柱子；同日的合併為一根
+    private struct CreditCardDailyTotal: Identifiable {
+        let id: String
+        let date: Date
+        let amount: Double
+    }
+
+    private var creditCardDailyTotals: [CreditCardDailyTotal] {
+        let exps = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == milestoneId }
+        let calendar = Calendar.current
+        let groups = Dictionary(grouping: exps) { exp -> String in
+            let comps = calendar.dateComponents([.year, .month, .day], from: exp.date)
+            return "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
+        }
+        return groups.compactMap { (key, exps) -> CreditCardDailyTotal? in
+            guard let firstExp = exps.first else { return nil }
+            let total = exps.reduce(0.0) { $0 + $1.amount }
+            return CreditCardDailyTotal(id: key, date: firstExp.date, amount: total)
+        }
+        .sorted { $0.date < $1.date }
+    }
+
     @State private var ccExpanded = false
 
     private var creditCardExpenseItems: [Expense] {
@@ -611,13 +633,13 @@ struct FinanceCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Image(systemName: "chart.bar.fill").foregroundStyle(.orange)
-                Text("月扣款金額").font(.headline)
+                Text("消費趨勢").font(.headline)
                 Spacer()
-                Text("\(creditCardMonthlyTotals.count) 期").font(.caption).foregroundStyle(.tertiary)
+                Text("\(creditCardDailyTotals.count) 筆").font(.caption).foregroundStyle(.tertiary)
             }
             .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
 
-            if creditCardMonthlyTotals.isEmpty {
+            if creditCardDailyTotals.isEmpty {
                 Text("尚無扣款記錄").font(.caption).foregroundStyle(.tertiary)
                     .padding(.horizontal).padding(.bottom, 12)
             } else {
@@ -674,12 +696,23 @@ struct FinanceCardView: View {
         .padding(.horizontal)
     }
 
+    @ViewBuilder
     private var creditCardChart: some View {
-        let data = creditCardMonthlyTotals
-        let maxAmount = data.map(\.amount).max() ?? 1
+        let data = creditCardDailyTotals
+        let useLineChart = data.count > 12
         let labelStride = max(1, data.count / 6)
+        let maxAmount = data.map(\.amount).max() ?? 1
 
-        return HStack(alignment: .bottom, spacing: 4) {
+        if useLineChart {
+            creditCardLineChart(data: data, maxAmount: maxAmount, labelStride: labelStride)
+        } else {
+            creditCardBarChart(data: data, maxAmount: maxAmount, labelStride: labelStride)
+        }
+    }
+
+    @ViewBuilder
+    private func creditCardBarChart(data: [CreditCardDailyTotal], maxAmount: Double, labelStride: Int) -> some View {
+        HStack(alignment: .bottom, spacing: 4) {
             ForEach(Array(data.enumerated()), id: \.element.id) { index, row in
                 VStack(spacing: 2) {
                     RoundedRectangle(cornerRadius: 3)
@@ -696,6 +729,61 @@ struct FinanceCardView: View {
         }
         .frame(height: 140, alignment: .bottom)
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func creditCardLineChart(data: [CreditCardDailyTotal], maxAmount: Double, labelStride: Int) -> some View {
+        let chartHeight: CGFloat = 120
+        GeometryReader { geo in
+            let width = geo.size.width
+            let count = max(data.count, 1)
+            let stepX = count > 1 ? width / CGFloat(count - 1) : 0
+
+            ZStack {
+                // 折線
+                Path { p in
+                    for (i, row) in data.enumerated() {
+                        let x = CGFloat(i) * stepX
+                        let y = chartHeight - CGFloat(row.amount / max(maxAmount, 1)) * chartHeight
+                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
+                        else { p.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                }
+                .stroke(Color.red, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+
+                // 漸層填色
+                Path { p in
+                    for (i, row) in data.enumerated() {
+                        let x = CGFloat(i) * stepX
+                        let y = chartHeight - CGFloat(row.amount / max(maxAmount, 1)) * chartHeight
+                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
+                        else { p.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                    p.addLine(to: CGPoint(x: width, y: chartHeight))
+                    p.addLine(to: CGPoint(x: 0, y: chartHeight))
+                    p.closeSubpath()
+                }
+                .fill(LinearGradient(colors: [Color.red.opacity(0.3), Color.red.opacity(0.0)],
+                                     startPoint: .top, endPoint: .bottom))
+
+                // 數據點
+                ForEach(Array(data.enumerated()), id: \.element.id) { i, row in
+                    let x = CGFloat(i) * stepX
+                    let y = chartHeight - CGFloat(row.amount / max(maxAmount, 1)) * chartHeight
+                    Circle().fill(Color.red).frame(width: 4, height: 4).position(x: x, y: y)
+                }
+            }
+        }
+        .frame(height: chartHeight)
+
+        HStack(spacing: 0) {
+            ForEach(Array(data.enumerated()), id: \.element.id) { i, row in
+                Text(i % labelStride == 0 ? shortDate(row.date) : " ")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
     }
 
     // MARK: - 信用卡章節
