@@ -137,7 +137,6 @@ struct VehicleDetailView: View {
                 VStack(spacing: 24) {
                     flashCard
                     infoSection
-                    expenseSection
                 }
                 .padding(.vertical)
             }
@@ -147,6 +146,16 @@ struct VehicleDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("關閉") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 16) {
+                        Button { showEdit = true } label: {
+                            Text("編輯").foregroundStyle(.green)
+                        }
+                        Button { showDeleteConfirm = true } label: {
+                            Text("刪除").foregroundStyle(.red)
+                        }
+                    }
                 }
             }
             .sheet(isPresented: $showEdit) {
@@ -298,37 +307,6 @@ struct VehicleDetailView: View {
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
-    }
-
-    // MARK: - 操作按鈕
-
-    private var expenseSection: some View {
-        VStack(spacing: 12) {
-            Button {
-                showEdit = true
-            } label: {
-                Label("編輯", systemImage: "pencil")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.green)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-
-            Button {
-                showDeleteConfirm = true
-            } label: {
-                Label("刪除", systemImage: "trash")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.red.opacity(0.1))
-                    .foregroundStyle(.red)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-        }
         .padding(.horizontal)
     }
 

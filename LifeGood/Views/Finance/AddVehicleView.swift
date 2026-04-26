@@ -30,6 +30,16 @@ struct AddVehicleView: View {
 
     @State private var variableItems: [VariableItemState] = []
 
+    // MARK: - 編輯卡片狀態
+
+    @State private var editingFixed: EditingTarget?
+    @State private var editingVariable: EditingTarget?
+
+    struct EditingTarget: Identifiable {
+        let id: UUID
+        let index: Int
+    }
+
     /// 定期支出項目的表單狀態
     struct FixedItemState: Identifiable {
         let id: UUID
@@ -69,7 +79,7 @@ struct AddVehicleView: View {
                     }
                 }
             }
-            .navigationTitle(editing != nil ? "編輯汽車" : "新增汽車")
+            .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -81,7 +91,45 @@ struct AddVehicleView: View {
                 }
             }
             .onAppear { loadEditing() }
+            .sheet(item: $editingFixed) { target in
+                if target.index < fixedItems.count {
+                    VehicleFixedItemEditor(
+                        item: $fixedItems[target.index],
+                        vehicleName: name.trimmingCharacters(in: .whitespaces),
+                        onDelete: {
+                            let item = fixedItems[target.index]
+                            if let linkedId = item.linkedExpenseId {
+                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                            }
+                            fixedItems.remove(at: target.index)
+                        }
+                    )
+                }
+            }
+            .sheet(item: $editingVariable) { target in
+                if target.index < variableItems.count {
+                    VehicleVariableItemEditor(
+                        item: $variableItems[target.index],
+                        vehicleName: name.trimmingCharacters(in: .whitespaces),
+                        powerType: powerType,
+                        onDelete: {
+                            let item = variableItems[target.index]
+                            if let linkedId = item.linkedExpenseId {
+                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                            }
+                            variableItems.remove(at: target.index)
+                        }
+                    )
+                }
+            }
         }
+    }
+
+    private var navTitle: String {
+        let isMotorcycle = powerType == .motorcycle || powerType == .electricMotorcycle
+        let typeLabel = isMotorcycle ? "🛵機車" : "🚗汽車"
+        let action = editing != nil ? "編輯" : "新增"
+        return "\(action) \(typeLabel)"
     }
 
     // MARK: - 車輛資訊
@@ -149,62 +197,42 @@ struct AddVehicleView: View {
 
     private var fixedExpenseSection: some View {
         Section {
-            ForEach(Array(fixedItems.enumerated()), id: \.element.id) { index, _ in
-                VStack(spacing: 10) {
-                    if index > 0 {
-                        Divider()
-                    }
-
+            ForEach(Array(fixedItems.enumerated()), id: \.element.id) { index, item in
+                Button {
+                    editingFixed = EditingTarget(id: item.id, index: index)
+                } label: {
                     HStack {
-                        Text("項目 \(index + 1)")
+                        Text(item.category.rawValue)
                             .font(.subheadline.weight(.medium))
-                        if !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                            Text("\(name.trimmingCharacters(in: .whitespaces))-\(fixedItems[index].category.rawValue)")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.blue.opacity(0.12))
+                            .foregroundStyle(.blue)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Text(item.period == .monthly ? "每月" : "每年")
+                            .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button(role: .destructive) {
-                            let item = fixedItems[index]
-                            if let linkedId = item.linkedExpenseId {
-                                expenseStore.expenses.removeAll { $0.id == linkedId }
-                            }
-                            fixedItems.remove(at: index)
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .foregroundStyle(.red)
-                        }
-                        .buttonStyle(.plain)
+                        Text(item.amount > 0 ? formatCurrency(item.amount) : "未填金額")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(item.amount > 0 ? .primary : .secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }
-
-                    Picker("項目", selection: $fixedItems[index].category) {
-                        ForEach(VehicleFixedCategory.allCases) { cat in
-                            Text(cat.rawValue).tag(cat)
-                        }
-                    }
-
-                    Picker("週期", selection: $fixedItems[index].period) {
-                        ForEach(VehicleExpensePeriod.allCases) { p in
-                            Text(p.rawValue == "月" ? "每月" : "每年").tag(p)
-                        }
-                    }
-
-                    HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("金額", text: $fixedItems[index].amountText)
-                            .keyboardType(.decimalPad)
-                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
 
             Button {
-                fixedItems.append(FixedItemState(
+                let newItem = FixedItemState(
                     id: UUID(),
                     category: .carLoan,
                     period: .monthly,
                     amountText: ""
-                ))
+                )
+                fixedItems.append(newItem)
+                editingFixed = EditingTarget(id: newItem.id, index: fixedItems.count - 1)
             } label: {
-                Label("新增定期支出", systemImage: "plus.circle")
+                Label("新增項目", systemImage: "plus.circle")
                     .foregroundStyle(.green)
             }
         } header: {
@@ -221,55 +249,43 @@ struct AddVehicleView: View {
 
     private var variableExpenseSection: some View {
         Section {
-            ForEach(Array(variableItems.enumerated()), id: \.element.id) { index, _ in
-                VStack(spacing: 10) {
-                    if index > 0 { Divider() }
-
+            ForEach(Array(variableItems.enumerated()), id: \.element.id) { index, item in
+                Button {
+                    editingVariable = EditingTarget(id: item.id, index: index)
+                } label: {
                     HStack {
-                        Text("項目 \(index + 1)")
+                        Label(item.category.rawValue, systemImage: item.category.icon)
                             .font(.subheadline.weight(.medium))
-                        if !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                            Text("\(name.trimmingCharacters(in: .whitespaces))-\(variableItems[index].category.rawValue)")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
+                            .labelStyle(.titleAndIcon)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.12))
+                            .foregroundStyle(.orange)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Text(formatShortDate(item.date))
+                            .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button(role: .destructive) {
-                            let item = variableItems[index]
-                            if let linkedId = item.linkedExpenseId {
-                                expenseStore.expenses.removeAll { $0.id == linkedId }
-                            }
-                            variableItems.remove(at: index)
-                        } label: {
-                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
-                        }
-                        .buttonStyle(.plain)
+                        Text(item.amount > 0 ? formatCurrency(item.amount) : "未填金額")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(item.amount > 0 ? .primary : .secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }
-
-                    Picker("類別", selection: $variableItems[index].category) {
-                        ForEach(VehicleVariableCategory.categories(for: powerType)) { cat in
-                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
-                        }
-                    }
-
-                    DatePicker("日期", selection: $variableItems[index].date, displayedComponents: .date)
-
-                    HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("金額", text: $variableItems[index].amountText)
-                            .keyboardType(.decimalPad)
-                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
 
             Button {
-                variableItems.append(VariableItemState(
+                let newItem = VariableItemState(
                     id: UUID(),
-                    category: .fuel,
+                    category: VehicleVariableCategory.categories(for: powerType).first ?? .fuel,
                     amountText: "",
                     date: Date()
-                ))
+                )
+                variableItems.append(newItem)
+                editingVariable = EditingTarget(id: newItem.id, index: variableItems.count - 1)
             } label: {
-                Label("新增變動支出", systemImage: "plus.circle")
+                Label("新增項目", systemImage: "plus.circle")
                     .foregroundStyle(.green)
             }
         } header: {
@@ -282,6 +298,12 @@ struct AddVehicleView: View {
                 Text("油錢、停車、洗車、臨時維修等支出，每筆單獨記錄。")
             }
         }
+    }
+
+    private func formatShortDate(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "M/d"
+        return f.string(from: date)
     }
 
     // MARK: - 試算
@@ -512,5 +534,134 @@ struct AddVehicleView: View {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+}
+
+// MARK: - 定期支出項目編輯卡
+
+struct VehicleFixedItemEditor: View {
+    @Binding var item: AddVehicleView.FixedItemState
+    let vehicleName: String
+    let onDelete: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("項目") {
+                    Picker("類別", selection: $item.category) {
+                        ForEach(VehicleFixedCategory.allCases) { cat in
+                            Text(cat.rawValue).tag(cat)
+                        }
+                    }
+                    Picker("週期", selection: $item.period) {
+                        ForEach(VehicleExpensePeriod.allCases) { p in
+                            Text(p.rawValue == "月" ? "每月" : "每年").tag(p)
+                        }
+                    }
+                    HStack {
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("金額", text: $item.amountText)
+                            .keyboardType(.decimalPad)
+                    }
+                }
+
+                if !vehicleName.isEmpty {
+                    Section("連結固定支出") {
+                        HStack {
+                            Text("名稱").foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(vehicleName) - \(item.category.rawValue)")
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("編輯項目")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("關閉") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 16) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("完成").foregroundStyle(.green).bold()
+                        }
+                        Button(role: .destructive) {
+                            onDelete()
+                            dismiss()
+                        } label: {
+                            Text("刪除").foregroundStyle(.red)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 變動支出項目編輯卡
+
+struct VehicleVariableItemEditor: View {
+    @Binding var item: AddVehicleView.VariableItemState
+    let vehicleName: String
+    let powerType: VehiclePowerType
+    let onDelete: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("項目") {
+                    Picker("類別", selection: $item.category) {
+                        ForEach(VehicleVariableCategory.categories(for: powerType)) { cat in
+                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                        }
+                    }
+                    DatePicker("日期", selection: $item.date, displayedComponents: .date)
+                    HStack {
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("金額", text: $item.amountText)
+                            .keyboardType(.decimalPad)
+                    }
+                }
+
+                if !vehicleName.isEmpty {
+                    Section("連結變動支出") {
+                        HStack {
+                            Text("名稱").foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(vehicleName) - \(item.category.rawValue)")
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("編輯項目")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("關閉") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 16) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("完成").foregroundStyle(.green).bold()
+                        }
+                        Button(role: .destructive) {
+                            onDelete()
+                            dismiss()
+                        } label: {
+                            Text("刪除").foregroundStyle(.red)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
