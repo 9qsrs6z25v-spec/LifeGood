@@ -516,6 +516,7 @@ struct AddMilestoneView: View {
     // 理財專屬
     @State private var financeSub: FinanceSubCategory = .bank
     @State private var bankName = ""
+    @State private var selectedLinkedBankId: UUID?
     @State private var branchName = ""
     @State private var accountNumber = ""
     @State private var bankAccType: BankAccountType = .savings
@@ -876,26 +877,27 @@ struct AddMilestoneView: View {
         }
     }
 
-    private var existingBankNames: [String] {
-        store.milestones
-            .filter { $0.category == .achievement && $0.financeSubCategory == .bank }
-            .compactMap { $0.bankName }
-            .filter { !$0.isEmpty }
-            .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+    private var bankMilestonesList: [LifeMilestone] {
+        store.milestones.filter { $0.category == .achievement && $0.financeSubCategory == .bank }
     }
 
     @ViewBuilder
     private var bankNamePicker: some View {
-        if existingBankNames.isEmpty {
+        if bankMilestonesList.isEmpty {
             TextField("發卡銀行", text: $bankName)
         } else {
-            Picker("發卡銀行", selection: $bankName) {
-                Text("手動輸入").tag("")
-                ForEach(existingBankNames, id: \.self) { name in
-                    Text(name).tag(name)
+            Picker("發卡銀行", selection: $selectedLinkedBankId) {
+                Text("手動輸入").tag(UUID?.none)
+                ForEach(bankMilestonesList) { ms in
+                    Text(ms.bankName ?? ms.title).tag(UUID?.some(ms.id))
                 }
             }
-            if bankName.isEmpty {
+            .onChange(of: selectedLinkedBankId) { _, newId in
+                if let id = newId, let ms = bankMilestonesList.first(where: { $0.id == id }) {
+                    bankName = ms.bankName ?? ms.title
+                }
+            }
+            if selectedLinkedBankId == nil {
                 TextField("手動輸入發卡銀行", text: $bankName)
             }
         }
@@ -999,7 +1001,8 @@ struct AddMilestoneView: View {
                 policyNumber: policyNumber.trimmingCharacters(in: .whitespaces).isEmpty ? nil : policyNumber.trimmingCharacters(in: .whitespaces),
                 insuranceType: financeSub == .insurance ? insType : nil,
                 premiumAmount: Double(premiumText),
-                beneficiary: beneficiary.trimmingCharacters(in: .whitespaces).isEmpty ? nil : beneficiary.trimmingCharacters(in: .whitespaces)
+                beneficiary: beneficiary.trimmingCharacters(in: .whitespaces).isEmpty ? nil : beneficiary.trimmingCharacters(in: .whitespaces),
+                linkedBankMilestoneId: financeSub == .creditCard ? selectedLinkedBankId : nil
             )
             if editing != nil { store.update(item) } else { store.add(item) }
         } else {
@@ -1094,6 +1097,7 @@ struct AddMilestoneView: View {
             if let it = e.insuranceType { insType = it }
             if let pa = e.premiumAmount, pa > 0 { premiumText = String(format: "%.0f", pa) }
             beneficiary = e.beneficiary ?? ""
+            selectedLinkedBankId = e.linkedBankMilestoneId
             return
         }
         if let f = editingFamily {

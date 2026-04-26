@@ -8,7 +8,7 @@ struct LifeFinanceView: View {
 
     private var financeMilestones: [LifeMilestone] {
         lifeStore.milestones
-            .filter { $0.category == .achievement }
+            .filter { $0.category == .achievement && $0.linkedBankMilestoneId == nil }
             .sorted { $0.date > $1.date }
     }
 
@@ -172,6 +172,7 @@ struct FinanceCardView: View {
     @State private var showAddDeposit = false
     @State private var addDepositCurrency = "NT$"
     @State private var editingDeposit: BankDeposit?
+    @State private var viewingLinkedCard: LifeMilestone?
 
     private var item: LifeMilestone {
         lifeStore.milestones.first(where: { $0.id == milestoneId })
@@ -194,6 +195,7 @@ struct FinanceCardView: View {
                     headerCard
                     detailCard
                     if sub == .bank { depositSection }
+                    if sub == .bank { linkedCreditCardSection }
                     if !item.note.isEmpty { noteCard }
                 }
                 .padding(.vertical)
@@ -211,6 +213,9 @@ struct FinanceCardView: View {
                 }
             }
             .sheet(isPresented: $showEdit) { AddMilestoneView(editing: item) }
+            .sheet(item: $viewingLinkedCard) { card in
+                FinanceCardView(milestoneId: card.id)
+            }
             .sheet(isPresented: $showAddDeposit) {
                 DepositEditorSheet(milestoneId: milestoneId, currency: addDepositCurrency, editing: nil)
             }
@@ -378,6 +383,54 @@ struct FinanceCardView: View {
         .padding(.horizontal)
     }
 
+    // MARK: - 信用卡章節
+
+    private var linkedCreditCards: [LifeMilestone] {
+        lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == milestoneId
+        }
+    }
+
+    private var linkedCreditCardSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "creditcard.fill").foregroundStyle(.orange)
+                Text("信用卡").font(.headline)
+                Spacer()
+                Text("\(linkedCreditCards.count) 張").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+
+            if linkedCreditCards.isEmpty {
+                Text("尚無信用卡").font(.caption).foregroundStyle(.tertiary)
+                    .padding(.horizontal).padding(.bottom, 12)
+            } else {
+                ForEach(linkedCreditCards) { card in
+                    Button { viewingLinkedCard = card } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "creditcard.fill")
+                                .font(.caption).foregroundStyle(.orange).frame(width: 20)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(card.title).font(.subheadline.weight(.medium)).foregroundStyle(Color.primary)
+                                HStack(spacing: 4) {
+                                    if let cn = card.cardName, !cn.isEmpty { Text(cn).font(.caption).foregroundStyle(.secondary) }
+                                    if let lf = card.cardLastFour, !lf.isEmpty { Text("末\(lf)").font(.caption).foregroundStyle(.tertiary) }
+                                }
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal).padding(.vertical, 8).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
     private func depositRow(_ dep: BankDeposit) -> some View {
         Button {
             // 連結扣款由變動支出產生，不直接編輯
@@ -405,19 +458,27 @@ struct FinanceCardView: View {
 
     private var depositChart: some View {
         let data = deposits
-        let maxAmount = data.map(\.amount).max() ?? 1
+        var balances: [(date: Date, balance: Double, id: UUID)] = []
+        var running: Double = 0
+        for dep in data {
+            if dep.isWithdrawal { running -= dep.amount } else { running += dep.amount }
+            balances.append((dep.date, running, dep.id))
+        }
+        let maxBal = balances.map(\.balance).max() ?? 1
+        let minBal = min(0, balances.map(\.balance).min() ?? 0)
+        let range = max(maxBal - minBal, 1)
 
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .bottom, spacing: 4) {
-                ForEach(data, id: \.id) { dep in
+                ForEach(balances, id: \.id) { item in
                     VStack(spacing: 2) {
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(barColor(for: dep))
+                            .fill(item.balance >= 0 ? Color.blue : Color.red)
                             .frame(
-                                width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(data.count, 1))),
-                                height: max(4, CGFloat(dep.amount / maxAmount) * 120)
+                                width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(balances.count, 1))),
+                                height: max(4, CGFloat(abs(item.balance - minBal) / range) * 120)
                             )
-                        Text(shortDate(dep.date))
+                        Text(shortDate(item.date))
                             .font(.system(size: 8))
                             .foregroundStyle(.tertiary)
                     }
@@ -425,6 +486,16 @@ struct FinanceCardView: View {
             }
             .frame(height: 140, alignment: .bottom)
             .frame(maxWidth: .infinity)
+
+            if let last = balances.last {
+                HStack {
+                    Text("目前餘額").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(fmtNum(last.balance))").font(.caption.bold())
+                        .foregroundStyle(last.balance >= 0 ? Color.blue : Color.red)
+                }
+                .padding(.horizontal, 4)
+            }
         }
     }
 

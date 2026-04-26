@@ -371,6 +371,7 @@ struct LifeMilestone: Identifiable, Codable {
     var premiumAmount: Double?
     var beneficiary: String?
     var bankDeposits: [BankDeposit]?
+    var linkedBankMilestoneId: UUID?
 
     init(id: UUID = UUID(), title: String, date: Date = Date(),
          category: MilestoneCategory = .other, note: String = "",
@@ -389,7 +390,8 @@ struct LifeMilestone: Identifiable, Codable {
          securitiesAccountType: SecuritiesAccountType? = nil,
          insuranceCompany: String? = nil, policyNumber: String? = nil,
          insuranceType: InsuranceType? = nil, premiumAmount: Double? = nil,
-         beneficiary: String? = nil) {
+         beneficiary: String? = nil,
+         linkedBankMilestoneId: UUID? = nil) {
         self.id = id; self.title = title; self.date = date
         self.category = category; self.note = note
         self.careerSubCategory = careerSubCategory
@@ -408,6 +410,7 @@ struct LifeMilestone: Identifiable, Codable {
         self.insuranceCompany = insuranceCompany; self.policyNumber = policyNumber
         self.insuranceType = insuranceType; self.premiumAmount = premiumAmount
         self.beneficiary = beneficiary
+        self.linkedBankMilestoneId = linkedBankMilestoneId
     }
 
     init(from decoder: Decoder) throws {
@@ -447,6 +450,7 @@ struct LifeMilestone: Identifiable, Codable {
         premiumAmount = try? c.decode(Double.self, forKey: .premiumAmount)
         beneficiary = try? c.decode(String.self, forKey: .beneficiary)
         bankDeposits = try? c.decode([BankDeposit].self, forKey: .bankDeposits)
+        linkedBankMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedBankMilestoneId)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -455,7 +459,7 @@ struct LifeMilestone: Identifiable, Codable {
         case mood, futurePlan, isManagerial, salary, salaryBefore, salaryAfter
         case financeSubCategory, bankName, branchName, accountNumber, bankAccountType
         case cardName, cardLastFour, creditLimit, annualFee, billingDay, paymentDay, expiryDate
-        case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary, bankDeposits
+        case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary, bankDeposits, linkedBankMilestoneId
     }
 }
 
