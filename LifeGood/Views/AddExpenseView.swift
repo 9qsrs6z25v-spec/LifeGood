@@ -502,7 +502,7 @@ struct AddExpenseView: View {
     private func formatBankBalance(_ value: Double) -> String {
         let wan = value / 10000
         let f = NumberFormatter(); f.numberStyle = .decimal
-        f.maximumFractionDigits = abs(wan) >= 100 ? 0 : 1
+        f.maximumFractionDigits = abs(wan) >= 1 ? 0 : 1
         let str = f.string(from: NSNumber(value: wan)) ?? "0"
         return "NT$ \(str)萬"
     }
