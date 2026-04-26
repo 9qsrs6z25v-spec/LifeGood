@@ -100,15 +100,63 @@ struct LifeFinanceView: View {
 
     // MARK: - 列表
 
+    private func linkedCards(for bankId: UUID) -> [LifeMilestone] {
+        lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == bankId
+        }
+    }
+
     private var milestoneList: some View {
         List {
             ForEach(filteredMilestones) { item in
-                milestoneRow(item)
-                    .contentShape(Rectangle())
-                    .onTapGesture { viewingItem = item }
+                VStack(spacing: 0) {
+                    milestoneRow(item)
+                        .contentShape(Rectangle())
+                        .onTapGesture { viewingItem = item }
+
+                    if item.financeSubCategory == .bank {
+                        let cards = linkedCards(for: item.id)
+                        if !cards.isEmpty {
+                            ForEach(cards) { card in
+                                creditCardSubRow(card)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { viewingItem = card }
+                            }
+                        }
+                    }
+                }
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    private func creditCardSubRow(_ card: LifeMilestone) -> some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(Color.clear).frame(width: 20)
+            Image(systemName: "creditcard.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .frame(width: 24, height: 24)
+                .background(Color.orange.opacity(0.12))
+                .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(card.cardName ?? card.title)
+                    .font(.caption.weight(.medium))
+                HStack(spacing: 4) {
+                    if let lf = card.cardLastFour, !lf.isEmpty {
+                        Text("末\(lf)").font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    if let bd = card.billingDay, let pd = card.paymentDay {
+                        Text("帳單\(bd)日 繳款\(pd)日")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 4)
     }
 
     private func milestoneRow(_ item: LifeMilestone) -> some View {
@@ -551,6 +599,14 @@ struct FinanceCardView: View {
         .sorted { $0.date < $1.date }
     }
 
+    @State private var ccExpanded = false
+
+    private var creditCardExpenseItems: [Expense] {
+        expenseStore.expenses
+            .filter { $0.linkedCreditCardMilestoneId == milestoneId }
+            .sorted { $0.date > $1.date }
+    }
+
     private var creditCardChartSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -567,19 +623,49 @@ struct FinanceCardView: View {
             } else {
                 creditCardChart
                     .padding(.horizontal).padding(.bottom, 8)
-                ForEach(creditCardMonthlyTotals) { row in
+
+                // 最近一期加總
+                if let last = creditCardMonthlyTotals.last {
                     HStack {
-                        Text(fmtDate(row.date)).font(.caption).foregroundStyle(.tertiary)
-                        Text("扣款").font(.caption2).foregroundStyle(.red)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.red.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                        Text("最近一期").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Text("-NT$ \(fmtNum(row.amount))")
+                        Text("-NT$ \(fmtNum(last.amount))").font(.caption.bold())
+                            .foregroundStyle(.red)
+                    }
+                    .padding(.horizontal).padding(.bottom, 6)
+                }
+
+                Divider().padding(.horizontal)
+
+                // 個別項目列表
+                let items = creditCardExpenseItems
+                let visible = ccExpanded ? items : Array(items.prefix(6))
+                ForEach(visible) { exp in
+                    HStack {
+                        Text(fmtDate(exp.date)).font(.caption).foregroundStyle(.tertiary)
+                        Text(exp.title).font(.caption).lineLimit(1)
+                        Spacer()
+                        Text("-NT$ \(fmtNum(exp.amount))")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.red)
                     }
-                    .padding(.horizontal).padding(.vertical, 6)
+                    .padding(.horizontal).padding(.vertical, 5)
+                }
+                if items.count > 6 {
+                    Button {
+                        withAnimation { ccExpanded.toggle() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Text(ccExpanded ? "收起" : "展開全部 (\(items.count) 筆)")
+                                .font(.caption.weight(.medium)).foregroundStyle(.orange)
+                            Image(systemName: ccExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption2).foregroundStyle(.orange)
+                            Spacer()
+                        }
+                        .padding(.vertical, 8).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -591,36 +677,25 @@ struct FinanceCardView: View {
     private var creditCardChart: some View {
         let data = creditCardMonthlyTotals
         let maxAmount = data.map(\.amount).max() ?? 1
+        let labelStride = max(1, data.count / 6)
 
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .bottom, spacing: 4) {
-                ForEach(data) { row in
-                    VStack(spacing: 2) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.red)
-                            .frame(
-                                width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(data.count, 1))),
-                                height: max(4, CGFloat(row.amount / max(maxAmount, 1)) * 120)
-                            )
-                        Text(shortDate(row.date))
-                            .font(.system(size: 8))
-                            .foregroundStyle(.tertiary)
-                    }
+        return HStack(alignment: .bottom, spacing: 4) {
+            ForEach(Array(data.enumerated()), id: \.element.id) { index, row in
+                VStack(spacing: 2) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.red)
+                        .frame(
+                            width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(data.count, 1))),
+                            height: max(4, CGFloat(row.amount / max(maxAmount, 1)) * 120)
+                        )
+                    Text(index % labelStride == 0 ? shortDate(row.date) : " ")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
                 }
-            }
-            .frame(height: 140, alignment: .bottom)
-            .frame(maxWidth: .infinity)
-
-            if let last = data.last {
-                HStack {
-                    Text("最近一期").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text("NT$ \(fmtNum(last.amount))").font(.caption.bold())
-                        .foregroundStyle(.red)
-                }
-                .padding(.horizontal, 4)
             }
         }
+        .frame(height: 140, alignment: .bottom)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 信用卡章節
