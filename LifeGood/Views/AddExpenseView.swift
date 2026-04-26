@@ -8,6 +8,7 @@ struct AddExpenseView: View {
 
     let expenseType: ExpenseType
     var editingExpense: Expense?
+    var preset: AddExpensePreset?
 
     // MARK: - 基本欄位
 
@@ -222,7 +223,10 @@ struct AddExpenseView: View {
                         .bold().foregroundStyle(.green)
                 }
             }
-            .onAppear { loadEditing() }
+            .onAppear {
+                loadEditing()
+                applyPreset()
+            }
             .onChange(of: selectedAssetLink) { _, newValue in
                 if newValue == .vehicle {
                     selectedVariableCategory = .vehicle
@@ -1682,6 +1686,34 @@ struct AddExpenseView: View {
         }
         return 1
     }
+
+    private func applyPreset() {
+        guard editingExpense == nil, let preset else { return }
+        if let fc = preset.fixedCategory { selectedFixedCategory = fc }
+        if let lsc = preset.loanSubCategory { selectedLoanSubCategory = lsc }
+        if let vc = preset.variableCategory { selectedVariableCategory = vc }
+        if let vec = preset.vehicleExpenseCategory { selectedVehicleExpenseCategory = vec }
+        if let rec = preset.recurrence { selectedRecurrence = rec }
+        if let vid = preset.linkedVehicleId {
+            selectedVehicleId = vid
+            fixedLinkVehicleId = vid
+        }
+        if let al = preset.assetLink { selectedAssetLink = al }
+        if let fal = preset.fixedAssetLink { selectedFixedAssetLink = fal }
+    }
+}
+
+// MARK: - 預設值（用於從理財模式建立支出時帶入分類/連結）
+
+struct AddExpensePreset {
+    var fixedCategory: FixedCategory?
+    var loanSubCategory: LoanSubCategory?
+    var variableCategory: VariableCategory?
+    var vehicleExpenseCategory: VehicleVariableCategory?
+    var recurrence: Recurrence?
+    var linkedVehicleId: UUID?
+    var assetLink: AddExpenseView.AssetLinkType?
+    var fixedAssetLink: AddExpenseView.FixedAssetLinkType?
 }
 
 #Preview {
