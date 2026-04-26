@@ -17,10 +17,14 @@ struct FixedExpenseView: View {
     }()
 
     var groupedByCategory: [(key: FixedCategory, value: [Expense])] {
+        let now = Date()
         let grouped = Dictionary(grouping: store.fixedExpenses) { expense in
             expense.fixedCategory ?? .other
         }
-        return grouped.sorted { $0.value.reduce(0) { $0 + $1.amount } > $1.value.reduce(0) { $0 + $1.amount } }
+        return grouped.sorted {
+            $0.value.filter { $0.date <= now }.reduce(0) { $0 + $1.amount }
+            > $1.value.filter { $0.date <= now }.reduce(0) { $0 + $1.amount }
+        }
     }
 
     var body: some View {
@@ -138,13 +142,52 @@ struct FixedExpenseView: View {
     }
 
     private func categoryHeader(category: FixedCategory, expenses: [Expense]) -> some View {
-        HStack {
+        let now = Date()
+        let activeExpenses = expenses.filter { $0.date <= now }
+
+        return HStack {
             Image(systemName: category.icon)
             Text(category.rawValue)
             Spacer()
-            Text(formatCurrency(expenses.reduce(0) { $0 + $1.amount }))
-                .font(.caption.bold())
+            if category == .insurance {
+                insuranceHeaderAmount(activeExpenses)
+            } else {
+                Text(formatCurrency(activeExpenses.reduce(0) { $0 + monthlyEquivalent($1) }))
+                    .font(.caption.bold())
+            }
         }
+    }
+
+    @ViewBuilder
+    private func insuranceHeaderAmount(_ expenses: [Expense]) -> some View {
+        let byCurrency = Dictionary(grouping: expenses) { $0.currencyCode }
+        let parts = byCurrency.sorted(by: { $0.key < $1.key }).map { (code, exps) -> String in
+            let total = exps.reduce(0.0) { $0 + monthlyEquivalent($1) }
+            return formatCurrencyWithCode(total, code: code)
+        }
+        Text(parts.joined(separator: " + "))
+            .font(.caption.bold())
+    }
+
+    private func monthlyEquivalent(_ expense: Expense) -> Double {
+        switch expense.recurrence {
+        case .monthly: return expense.amount
+        case .quarterly: return expense.amount / 3
+        case .yearly: return expense.amount / 12
+        case .none: return expense.amount
+        }
+    }
+
+    private func formatCurrencyWithCode(_ value: Double, code: String) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.maximumFractionDigits = 0
+        if code == "NT$" || code == "TWD" {
+            f.currencySymbol = "NT$"
+        } else {
+            f.currencySymbol = "\(code) "
+        }
+        return f.string(from: NSNumber(value: value)) ?? "\(code) 0"
     }
 
     /// 刪除固定支出時同步刪除理財連結項目
@@ -257,7 +300,7 @@ struct FixedExpenseRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(formatCurrency(expense.amount))
+                Text(formattedAmount)
                     .font(.subheadline.bold())
                     .foregroundStyle(.red)
                 if let label = deductionTargetLabel {
@@ -271,6 +314,18 @@ struct FixedExpenseRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private var formattedAmount: String {
+        let code = expense.currencyCode
+        if code != "NT$" && code != "TWD" && !code.isEmpty {
+            let f = NumberFormatter()
+            f.numberStyle = .currency
+            f.currencySymbol = "\(code) "
+            f.maximumFractionDigits = 0
+            return f.string(from: NSNumber(value: expense.amount)) ?? "\(code) 0"
+        }
+        return formatCurrency(expense.amount)
     }
 
     private var deductionIcon: String {
