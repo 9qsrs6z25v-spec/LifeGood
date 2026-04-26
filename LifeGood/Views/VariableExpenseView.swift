@@ -233,6 +233,7 @@ struct FilterChip: View {
 // MARK: - 支出列
 
 struct ExpenseRow: View {
+    @EnvironmentObject var lifeStore: LifeStore
     let expense: Expense
 
     private let currencyFormatter: NumberFormatter = {
@@ -279,9 +280,35 @@ struct ExpenseRow: View {
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
+                if let label = deductionTargetLabel {
+                    HStack(spacing: 3) {
+                        Image(systemName: deductionIcon)
+                            .font(.caption2)
+                        Text(label).font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private var deductionIcon: String {
+        expense.linkedCreditCardMilestoneId != nil ? "creditcard.fill" : "building.columns.fill"
+    }
+
+    private var deductionTargetLabel: String? {
+        if let cardId = expense.linkedCreditCardMilestoneId,
+           let card = lifeStore.milestones.first(where: { $0.id == cardId }) {
+            return card.cardName ?? card.title
+        }
+        if let bankId = expense.linkedBankMilestoneId,
+           let ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+            let name = ms.bankName ?? ms.title
+            let currency = expense.linkedBankCurrency ?? "NT$"
+            return currency == "NT$" ? name : "\(name) · \(currency)"
+        }
+        return nil
     }
 
     private func formatCurrency(_ value: Double) -> String {

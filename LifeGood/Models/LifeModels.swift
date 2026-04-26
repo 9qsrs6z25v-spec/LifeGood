@@ -461,6 +461,20 @@ struct LifeMilestone: Identifiable, Codable {
         case cardName, cardLastFour, creditLimit, annualFee, billingDay, paymentDay, expiryDate
         case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary, bankDeposits, linkedBankMilestoneId
     }
+
+    /// 信用卡實際扣款日：以消費日推算下個結帳日後的繳款日
+    /// 若消費日 ≤ 結帳日 → 隔月繳款日；若消費日 > 結帳日 → 再下個月繳款日
+    static func creditCardWithdrawalDate(for expenseDate: Date, billingDay: Int?, paymentDay: Int?) -> Date {
+        let calendar = Calendar.current
+        let payDay = paymentDay ?? 15
+        let billDay = billingDay ?? 25
+        let expenseDay = calendar.component(.day, from: expenseDate)
+        var components = calendar.dateComponents([.year, .month], from: expenseDate)
+        let monthOffset = expenseDay > billDay ? 2 : 1
+        components.month = (components.month ?? 1) + monthOffset
+        components.day = payDay
+        return calendar.date(from: components) ?? expenseDate
+    }
 }
 
 // MARK: - 人際關係群組

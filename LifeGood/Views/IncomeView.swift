@@ -239,10 +239,28 @@ struct IncomeView: View {
 
             Spacer()
 
-            Text(fmt(income.amount))
-                .font(.subheadline.bold()).foregroundStyle(.green)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(fmt(income.amount))
+                    .font(.subheadline.bold()).foregroundStyle(.green)
+                if let label = depositBankLabel(for: income) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "building.columns.fill")
+                            .font(.caption2)
+                        Text(label).font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(.vertical, 2)
+    }
+
+    private func depositBankLabel(for income: Income) -> String? {
+        guard let bankId = income.linkedBankMilestoneId,
+              let ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return nil }
+        let name = ms.bankName ?? ms.title
+        let currency = income.linkedBankCurrency ?? "NT$"
+        return currency == "NT$" ? name : "\(name) · \(currency)"
     }
 
     // MARK: - 分組

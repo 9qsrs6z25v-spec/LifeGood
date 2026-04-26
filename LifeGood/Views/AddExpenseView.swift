@@ -32,6 +32,7 @@ struct AddExpenseView: View {
     @State private var loanYearsText = ""
     @State private var selectedBankMilestoneId: UUID?
     @State private var selectedBankCurrency: String = "NT$"
+    @State private var selectedCreditCardMilestoneId: UUID?
 
     // MARK: - 儲蓄險欄位
 
@@ -383,7 +384,7 @@ struct AddExpenseView: View {
                 }
             }
 
-            if !bankMilestones.isEmpty && !isSavingsInsurance {
+            if (!bankMilestones.isEmpty || !creditCardMilestones.isEmpty) && !isSavingsInsurance {
                 bankPicker
             }
 
@@ -456,6 +457,12 @@ struct AddExpenseView: View {
         }
     }
 
+    private var creditCardMilestones: [LifeMilestone] {
+        lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .creditCard
+        }
+    }
+
     private func bankCurrencies(for ms: LifeMilestone) -> [String] {
         let codes = (ms.bankDeposits ?? [])
             .filter { !$0.isWithdrawal }
@@ -466,6 +473,15 @@ struct AddExpenseView: View {
     }
 
     private var bankPickerLabel: String {
+        if let id = selectedCreditCardMilestoneId,
+           let card = creditCardMilestones.first(where: { $0.id == id }) {
+            let cardName = card.cardName ?? card.title
+            if let bankId = card.linkedBankMilestoneId,
+               let bank = bankMilestones.first(where: { $0.id == bankId }) {
+                return "\(cardName) → \(bank.bankName ?? bank.title)"
+            }
+            return cardName
+        }
         if let id = selectedBankMilestoneId,
            let ms = bankMilestones.first(where: { $0.id == id }) {
             let name = ms.bankName ?? ms.title
@@ -476,36 +492,58 @@ struct AddExpenseView: View {
 
     private var bankPicker: some View {
         HStack {
-            Text("扣款銀行").foregroundStyle(.secondary)
+            Text("扣款目標").foregroundStyle(.secondary)
             Spacer()
             Menu {
                 Button("不指定") {
                     selectedBankMilestoneId = nil
                     selectedBankCurrency = "NT$"
+                    selectedCreditCardMilestoneId = nil
                 }
-                ForEach(bankMilestones) { ms in
-                    let currencies = bankCurrencies(for: ms)
-                    let name = ms.bankName ?? ms.title
-                    if currencies.count > 1 {
-                        Menu(name) {
-                            ForEach(currencies, id: \.self) { code in
-                                Button(code) {
+                if !bankMilestones.isEmpty {
+                    Section("銀行") {
+                        ForEach(bankMilestones) { ms in
+                            let currencies = bankCurrencies(for: ms)
+                            let name = ms.bankName ?? ms.title
+                            if currencies.count > 1 {
+                                Menu(name) {
+                                    ForEach(currencies, id: \.self) { code in
+                                        Button(code) {
+                                            selectedBankMilestoneId = ms.id
+                                            selectedBankCurrency = code
+                                            selectedCreditCardMilestoneId = nil
+                                        }
+                                    }
+                                }
+                            } else {
+                                Button(name) {
                                     selectedBankMilestoneId = ms.id
-                                    selectedBankCurrency = code
+                                    selectedBankCurrency = currencies.first ?? "NT$"
+                                    selectedCreditCardMilestoneId = nil
                                 }
                             }
                         }
-                    } else {
-                        Button(name) {
-                            selectedBankMilestoneId = ms.id
-                            selectedBankCurrency = currencies.first ?? "NT$"
+                    }
+                }
+                if !creditCardMilestones.isEmpty {
+                    Section("信用卡") {
+                        ForEach(creditCardMilestones) { card in
+                            let cardName = card.cardName ?? card.title
+                            let bankName = card.linkedBankMilestoneId.flatMap { bankId in
+                                bankMilestones.first(where: { $0.id == bankId })?.bankName
+                            }
+                            Button(bankName.map { "\(cardName) → \($0)" } ?? cardName) {
+                                selectedCreditCardMilestoneId = card.id
+                                selectedBankMilestoneId = card.linkedBankMilestoneId
+                                selectedBankCurrency = "NT$"
+                            }
                         }
                     }
                 }
             } label: {
                 HStack(spacing: 4) {
                     Text(bankPickerLabel)
-                        .foregroundStyle(selectedBankMilestoneId == nil ? .secondary : .primary)
+                        .foregroundStyle((selectedBankMilestoneId == nil && selectedCreditCardMilestoneId == nil) ? .secondary : .primary)
                     Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
                 }
             }
@@ -1131,7 +1169,8 @@ struct AddExpenseView: View {
             loanYears: isCarLoan ? Double(loanYearsText) : nil,
             loanRate: isCarLoan ? computedLoanRate() : nil,
             linkedBankMilestoneId: selectedBankMilestoneId,
-            linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil
+            linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
+            linkedCreditCardMilestoneId: selectedCreditCardMilestoneId
         )
 
         if isEditing { store.update(expense) } else { store.add(expense) }
@@ -1149,10 +1188,22 @@ struct AddExpenseView: View {
         // 寫入新的連結記錄
         guard let bankId = expense.linkedBankMilestoneId,
               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
+        // 信用卡扣款日：以結帳日/繳款日推算實際扣款日；否則以消費日為扣款日
+        let withdrawalDate: Date
+        if let cardId = expense.linkedCreditCardMilestoneId,
+           let card = lifeStore.milestones.first(where: { $0.id == cardId }) {
+            withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
+                for: expense.date,
+                billingDay: card.billingDay,
+                paymentDay: card.paymentDay
+            )
+        } else {
+            withdrawalDate = expense.date
+        }
         var list = ms.bankDeposits ?? []
         list.removeAll { $0.linkedExpenseId == expense.id }
         list.append(BankDeposit(
-            id: UUID(), date: expense.date, amount: expense.amount,
+            id: UUID(), date: withdrawalDate, amount: expense.amount,
             currencyCode: expense.linkedBankCurrency ?? "NT$",
             isWithdrawal: true, linkedExpenseId: expense.id
         ))
@@ -1463,6 +1514,7 @@ struct AddExpenseView: View {
         if let ly = expense.loanYears, ly > 0 { loanYearsText = String(format: "%g", ly) }
         selectedBankMilestoneId = expense.linkedBankMilestoneId
         selectedBankCurrency = expense.linkedBankCurrency ?? "NT$"
+        selectedCreditCardMilestoneId = expense.linkedCreditCardMilestoneId
         note = expense.note
 
         // 載入連結的儲蓄險
