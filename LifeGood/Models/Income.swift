@@ -54,6 +54,8 @@ struct Income: Identifiable, Codable {
     var isFixedSalary: Bool
     var note: String
     var linkedStockId: UUID?
+    var linkedBankMilestoneId: UUID?
+    var linkedBankCurrency: String?
 
     init(
         id: UUID = UUID(),
@@ -64,7 +66,9 @@ struct Income: Identifiable, Codable {
         period: IncomePeriod = .monthly,
         isFixedSalary: Bool = false,
         note: String = "",
-        linkedStockId: UUID? = nil
+        linkedStockId: UUID? = nil,
+        linkedBankMilestoneId: UUID? = nil,
+        linkedBankCurrency: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -75,6 +79,8 @@ struct Income: Identifiable, Codable {
         self.isFixedSalary = isFixedSalary
         self.note = note
         self.linkedStockId = linkedStockId
+        self.linkedBankMilestoneId = linkedBankMilestoneId
+        self.linkedBankCurrency = linkedBankCurrency
     }
 
     init(from decoder: Decoder) throws {
@@ -88,9 +94,11 @@ struct Income: Identifiable, Codable {
         isFixedSalary = (try? c.decode(Bool.self, forKey: .isFixedSalary)) ?? false
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         linkedStockId = try? c.decodeIfPresent(UUID.self, forKey: .linkedStockId)
+        linkedBankMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedBankMilestoneId)
+        linkedBankCurrency = try? c.decodeIfPresent(String.self, forKey: .linkedBankCurrency)
     }
     private enum CodingKeys: String, CodingKey {
-        case id, title, amount, date, category, period, isFixedSalary, note, linkedStockId
+        case id, title, amount, date, category, period, isFixedSalary, note, linkedStockId, linkedBankMilestoneId, linkedBankCurrency
     }
 
     /// 換算月收入

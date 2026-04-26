@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AddIncomeView: View {
     @EnvironmentObject var store: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: Income?
@@ -12,18 +13,82 @@ struct AddIncomeView: View {
     @State private var category: IncomeCategory = .salary
     @State private var period: IncomePeriod = .monthly
     @State private var isFixedSalary = true
-    @State private var salaryLabel = ""   // 薪水自訂文字（如公司名）
+    @State private var salaryLabel = ""
     @State private var note = ""
     @State private var showError = false
+    @State private var selectedBankMilestoneId: UUID?
+    @State private var selectedBankCurrency: String = "NT$"
 
     private var isEditing: Bool { editing != nil }
     private var isSalary: Bool { category == .salary }
 
-    /// 自動產生的薪水標題
     private var autoSalaryTitle: String {
         let code = Income.salaryCode(for: date)
         let label = salaryLabel.trimmingCharacters(in: .whitespaces)
         return label.isEmpty ? "\(code) 薪水" : "\(code) \(label)薪水"
+    }
+
+    private var bankMilestones: [LifeMilestone] {
+        lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .bank
+        }
+    }
+
+    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
+        let codes = (ms.bankDeposits ?? [])
+            .filter { !$0.isWithdrawal }
+            .map(\.currencyCode)
+        var unique: [String] = []
+        for c in codes where !unique.contains(c) { unique.append(c) }
+        return unique.isEmpty ? ["NT$"] : unique
+    }
+
+    private var bankPickerLabel: String {
+        if let id = selectedBankMilestoneId,
+           let ms = bankMilestones.first(where: { $0.id == id }) {
+            let name = ms.bankName ?? ms.title
+            return "\(name) · \(selectedBankCurrency)"
+        }
+        return "未選擇"
+    }
+
+    @ViewBuilder
+    private var bankPicker: some View {
+        HStack {
+            Text("入帳銀行").foregroundStyle(.secondary)
+            Spacer()
+            Menu {
+                Button("不指定") {
+                    selectedBankMilestoneId = nil
+                    selectedBankCurrency = "NT$"
+                }
+                ForEach(bankMilestones) { ms in
+                    let currencies = bankCurrencies(for: ms)
+                    let name = ms.bankName ?? ms.title
+                    if currencies.count > 1 {
+                        Menu(name) {
+                            ForEach(currencies, id: \.self) { code in
+                                Button(code) {
+                                    selectedBankMilestoneId = ms.id
+                                    selectedBankCurrency = code
+                                }
+                            }
+                        }
+                    } else {
+                        Button(name) {
+                            selectedBankMilestoneId = ms.id
+                            selectedBankCurrency = currencies.first ?? "NT$"
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(bankPickerLabel)
+                        .foregroundStyle(selectedBankMilestoneId == nil ? .secondary : .primary)
+                    Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     var body: some View {
@@ -31,7 +96,6 @@ struct AddIncomeView: View {
             Form {
                 Section("基本資訊") {
                     if isSalary {
-                        // 薪水：自訂文字 + 自動產生標題預覽
                         TextField("自訂文字（如公司名）", text: $salaryLabel)
                         HStack {
                             Text("標題").foregroundStyle(.secondary)
@@ -45,6 +109,9 @@ struct AddIncomeView: View {
                     HStack {
                         Text("NT$").foregroundStyle(.secondary)
                         TextField("金額", text: $amountText).keyboardType(.decimalPad)
+                    }
+                    if !bankMilestones.isEmpty {
+                        bankPicker
                     }
                     DatePicker("日期", selection: $date, displayedComponents: .date)
                 }
@@ -140,7 +207,6 @@ struct AddIncomeView: View {
             showError = true; return
         }
 
-        // 決定標題
         let finalTitle: String
         if isSalary {
             finalTitle = autoSalaryTitle
@@ -151,7 +217,6 @@ struct AddIncomeView: View {
             finalTitle = title.trimmingCharacters(in: .whitespaces)
         }
 
-        // 薪水的週期邏輯
         let finalPeriod: IncomePeriod
         if isSalary {
             finalPeriod = isFixedSalary ? .monthly : .once
@@ -167,10 +232,35 @@ struct AddIncomeView: View {
             category: category,
             period: finalPeriod,
             isFixedSalary: isSalary ? isFixedSalary : false,
-            note: note.trimmingCharacters(in: .whitespaces)
+            note: note.trimmingCharacters(in: .whitespaces),
+            linkedStockId: editing?.linkedStockId,
+            linkedBankMilestoneId: selectedBankMilestoneId,
+            linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil
         )
         if isEditing { store.update(income) } else { store.add(income) }
+        syncBankDeposit(for: income, previous: editing)
         dismiss()
+    }
+
+    private func syncBankDeposit(for income: Income, previous: Income?) {
+        // 移除舊的連結記錄
+        if let prevId = previous?.linkedBankMilestoneId,
+           var oldMs = lifeStore.milestones.first(where: { $0.id == prevId }) {
+            oldMs.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
+            lifeStore.update(oldMs)
+        }
+        // 寫入新的存款記錄（收入是 isWithdrawal=false）
+        guard let bankId = income.linkedBankMilestoneId,
+              var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
+        var list = ms.bankDeposits ?? []
+        list.removeAll { $0.linkedExpenseId == income.id }
+        list.append(BankDeposit(
+            id: UUID(), date: income.date, amount: income.amount,
+            currencyCode: income.linkedBankCurrency ?? "NT$",
+            isWithdrawal: false, linkedExpenseId: income.id
+        ))
+        ms.bankDeposits = list
+        lifeStore.update(ms)
     }
 
     private func loadEditing() {
@@ -181,15 +271,14 @@ struct AddIncomeView: View {
         period = e.period
         isFixedSalary = e.isFixedSalary
         note = e.note
+        selectedBankMilestoneId = e.linkedBankMilestoneId
+        selectedBankCurrency = e.linkedBankCurrency ?? "NT$"
 
         if e.category == .salary {
-            // 從標題解析自訂文字：移除 MXXX 前綴和「薪水」後綴
             var label = e.title
-            // 移除 M 代碼前綴（如 "M604 "）
             if let range = label.range(of: #"^M\d{3}\s*"#, options: .regularExpression) {
                 label.removeSubrange(range)
             }
-            // 移除「薪水」後綴
             if label.hasSuffix("薪水") {
                 label = String(label.dropLast(2))
             }

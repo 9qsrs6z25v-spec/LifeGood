@@ -3,6 +3,7 @@ import SwiftUI
 struct IncomeView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var lifeStore: LifeStore
     @State private var showAdd = false
     @State private var editingItem: Income?
     @State private var selectedCategory: IncomeCategory?
@@ -195,6 +196,11 @@ struct IncomeView: View {
                                var stock = financeStore.stocks.first(where: { $0.id == stockId }) {
                                 stock.linkedIncomeId = nil
                                 financeStore.update(stock)
+                            }
+                            if let bankId = income.linkedBankMilestoneId,
+                               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                                ms.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
+                                lifeStore.update(ms)
                             }
                         }
                         store.deleteIncome(at: offsets, from: incomes)
