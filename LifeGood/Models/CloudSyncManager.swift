@@ -119,11 +119,7 @@ final class CloudSyncManager: ObservableObject {
     func push(key: String) {
         guard isEnabled, isAccountAvailable else { return }
         guard Self.syncKeys.contains(key) else { return }
-        if let data = UserDefaults.standard.data(forKey: key) {
-            kvStore.set(data, forKey: key)
-        } else {
-            kvStore.removeObject(forKey: key)
-        }
+        pushOne(key: key)
         kvStore.synchronize()
         markSynced()
     }
@@ -131,11 +127,7 @@ final class CloudSyncManager: ObservableObject {
     /// 任何 Store 的 save() 都會觸發：將所有 sync key 一次推送
     func pushAll() {
         guard isEnabled, isAccountAvailable else { return }
-        for key in Self.syncKeys {
-            if let data = UserDefaults.standard.data(forKey: key) {
-                kvStore.set(data, forKey: key)
-            }
-        }
+        for key in Self.syncKeys { pushOne(key: key) }
         kvStore.synchronize()
         markSynced()
     }
@@ -143,13 +135,45 @@ final class CloudSyncManager: ObservableObject {
     /// 開啟同步時，立即將目前所有本地資料推送至 iCloud
     private func pushAllToCloud() {
         guard isAccountAvailable else { return }
-        for key in Self.syncKeys {
-            if let data = UserDefaults.standard.data(forKey: key) {
-                kvStore.set(data, forKey: key)
-            }
-        }
+        for key in Self.syncKeys { pushOne(key: key) }
         kvStore.synchronize()
         markSynced()
+    }
+
+    /// 單一 key 的實際推送邏輯。對 `lifegood_expenses` 會先 read-modify-write，
+    /// 把雲端可能更新（如 Apple Watch 剛寫入但本機還沒收到 notification）的內容合併進來，
+    /// 避免本機 push 時覆蓋掉手錶剛新增的資料。
+    private func pushOne(key: String) {
+        guard let local = UserDefaults.standard.data(forKey: key) else {
+            kvStore.removeObject(forKey: key)
+            return
+        }
+
+        if key == Self.expensesKey {
+            let decoder = JSONDecoder()
+            let localList = (try? decoder.decode([Expense].self, from: local)) ?? []
+            let cloudList: [Expense] = kvStore.data(forKey: key)
+                .flatMap { try? decoder.decode([Expense].self, from: $0) } ?? []
+
+            let result = ExpenseStore.mergeExpenses(local: localList, remote: cloudList)
+            // 推送前若發現雲端有本機尚未收到的項目（如手錶新增），同步通知 UI
+            WatchSyncCoordinator.shared.record(result: result)
+            // 同時把合併結果寫回本機，讓 iPhone 立即看到手錶新增
+            if let merged = try? JSONEncoder().encode(result.merged) {
+                UserDefaults.standard.set(merged, forKey: key)
+                kvStore.set(merged, forKey: key)
+                if result.hasUserVisibleChange {
+                    // 延後通知避免從 ExpenseStore.didSet → save → pushAll 重入
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
+                    }
+                }
+            } else {
+                kvStore.set(local, forKey: key)
+            }
+        } else {
+            kvStore.set(local, forKey: key)
+        }
     }
 
     /// 手動觸發同步（下拉 iCloud 並推送本地）
@@ -188,7 +212,10 @@ final class CloudSyncManager: ObservableObject {
 
         var pulledAny = false
         for key in changedKeys where Self.syncKeys.contains(key) {
-            if let data = kvStore.data(forKey: key) {
+            if key == Self.expensesKey {
+                // 支出特殊處理：與本地 by-id + by-updatedAt 合併，並蒐集衝突
+                if mergeExpensesFromCloud() { pulledAny = true }
+            } else if let data = kvStore.data(forKey: key) {
                 UserDefaults.standard.set(data, forKey: key)
                 pulledAny = true
             } else {
@@ -202,6 +229,34 @@ final class CloudSyncManager: ObservableObject {
             NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
         }
     }
+
+    /// 處理 `lifegood_expenses` 的雲端→本地合併。
+    /// - Returns: 是否有任何變動寫回 UserDefaults
+    private func mergeExpensesFromCloud() -> Bool {
+        guard let cloudData = kvStore.data(forKey: Self.expensesKey) else {
+            // 雲端被清空，本地維持不動（保守處理；不主動刪本地資料）
+            return false
+        }
+        let decoder = JSONDecoder()
+        guard let remote = try? decoder.decode([Expense].self, from: cloudData) else {
+            return false
+        }
+        let localData = UserDefaults.standard.data(forKey: Self.expensesKey)
+        let local: [Expense] = localData.flatMap { try? decoder.decode([Expense].self, from: $0) } ?? []
+
+        let result = ExpenseStore.mergeExpenses(local: local, remote: remote)
+        // 記錄供 iPhone UI 使用（手錶端不會載入這個檔，但編譯不衝突）
+        WatchSyncCoordinator.shared.record(result: result)
+
+        if let merged = try? JSONEncoder().encode(result.merged) {
+            UserDefaults.standard.set(merged, forKey: Self.expensesKey)
+            return true
+        }
+        return false
+    }
+
+    /// `lifegood_expenses` key 名稱，便於合併路徑識別
+    private static let expensesKey = "lifegood_expenses"
 
     // MARK: - Helpers
 

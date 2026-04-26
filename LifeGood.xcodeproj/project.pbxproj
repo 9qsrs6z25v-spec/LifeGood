@@ -54,6 +54,15 @@
 		A01B00000100003A /* LifeFinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003A /* LifeFinanceView.swift */; };
 		A01B00000100000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000A /* Assets.xcassets */; };
 		A01B00000100000B /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000B /* Preview Assets.xcassets */; };
+		B0B000000001 /* LifeGoodWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A000000001 /* LifeGoodWatchApp.swift */; };
+		B0B000000002 /* WatchExpense.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A000000002 /* WatchExpense.swift */; };
+		B0B000000003 /* WatchExpenseStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A000000003 /* WatchExpenseStore.swift */; };
+		B0B000000004 /* WatchAddExpenseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A000000004 /* WatchAddExpenseView.swift */; };
+		B0B000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B0A000000005 /* Assets.xcassets */; };
+		B0B000000006 /* LifeGoodWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = B0A000000007 /* LifeGoodWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B0B000000010 /* ExpenseSyncTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A000000010 /* ExpenseSyncTypes.swift */; };
+		B0B000000011 /* WatchSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A000000011 /* WatchSyncCoordinator.swift */; };
+		B0B000000012 /* WatchSyncBannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0A000000012 /* WatchSyncBannerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -106,6 +115,16 @@
 		A01A00000100000A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A01A00000100000B /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		A01A00000100000C /* LifeGood.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeGood.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0A000000001 /* LifeGoodWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodWatchApp.swift; sourceTree = "<group>"; };
+		B0A000000002 /* WatchExpense.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchExpense.swift; sourceTree = "<group>"; };
+		B0A000000003 /* WatchExpenseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchExpenseStore.swift; sourceTree = "<group>"; };
+		B0A000000004 /* WatchAddExpenseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAddExpenseView.swift; sourceTree = "<group>"; };
+		B0A000000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B0A000000006 /* LifeGoodWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodWatch.entitlements; sourceTree = "<group>"; };
+		B0A000000007 /* LifeGoodWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeGoodWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0A000000010 /* ExpenseSyncTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseSyncTypes.swift; sourceTree = "<group>"; };
+		B0A000000011 /* WatchSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSyncCoordinator.swift; sourceTree = "<group>"; };
+		B0A000000012 /* WatchSyncBannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSyncBannerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -116,13 +135,35 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B0C000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B0C000000010 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				B0B000000006 /* LifeGoodWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXGroup section */
 		A01D000001000001 /* Root */ = {
 			isa = PBXGroup;
 			children = (
 				A01D000001000002 /* LifeGood */,
+				B0D000000001 /* LifeGoodWatch */,
 				A01D000001000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -145,6 +186,8 @@
 			children = (
 				A01A000001000002 /* Expense.swift */,
 				A01A000001000003 /* ExpenseStore.swift */,
+				B0A000000010 /* ExpenseSyncTypes.swift */,
+				B0A000000011 /* WatchSyncCoordinator.swift */,
 				A01A00000100001B /* Income.swift */,
 				A01A00000100000E /* AppMode.swift */,
 				A01A00000100000F /* FinanceModels.swift */,
@@ -170,6 +213,7 @@
 				A01A00000100001C /* IncomeView.swift */,
 				A01A00000100001D /* AddIncomeView.swift */,
 				A01A00000100000D /* SettingsView.swift */,
+				B0A000000012 /* WatchSyncBannerView.swift */,
 				A01D000001000007 /* Finance */,
 			A01D000001000008 /* Life */,
 			);
@@ -218,8 +262,22 @@
 			isa = PBXGroup;
 			children = (
 				A01A00000100000C /* LifeGood.app */,
+				B0A000000007 /* LifeGoodWatch.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B0D000000001 /* LifeGoodWatch */ = {
+			isa = PBXGroup;
+			children = (
+				B0A000000001 /* LifeGoodWatchApp.swift */,
+				B0A000000002 /* WatchExpense.swift */,
+				B0A000000003 /* WatchExpenseStore.swift */,
+				B0A000000004 /* WatchAddExpenseView.swift */,
+				B0A000000006 /* LifeGoodWatch.entitlements */,
+				B0A000000005 /* Assets.xcassets */,
+			);
+			path = LifeGoodWatch;
 			sourceTree = "<group>";
 		};
 		A01D000001000006 /* Preview Content */ = {
@@ -240,17 +298,54 @@
 				A01C000001000002 /* Sources */,
 				A01C000001000001 /* Frameworks */,
 				A01C000001000003 /* Resources */,
+				B0C000000010 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B0E000000011 /* PBXTargetDependency */,
 			);
 			name = LifeGood;
 			productName = LifeGood;
 			productReference = A01A00000100000C /* LifeGood.app */;
 			productType = "com.apple.product-type.application";
 		};
+		B0E000000001 /* LifeGoodWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B0F000000003 /* Build configuration list for PBXNativeTarget "LifeGoodWatch" */;
+			buildPhases = (
+				B0C000000001 /* Sources */,
+				B0C000000002 /* Frameworks */,
+				B0C000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LifeGoodWatch;
+			productName = LifeGoodWatch;
+			productReference = B0A000000007 /* LifeGoodWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXContainerItemProxy section */
+		B0E000000010 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A01E000001000002 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B0E000000001;
+			remoteInfo = LifeGoodWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		B0E000000011 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B0E000000001 /* LifeGoodWatch */;
+			targetProxy = B0E000000010 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		A01E000001000002 /* Project object */ = {
@@ -261,6 +356,9 @@
 				LastUpgradeCheck = 1540;
 				TargetAttributes = {
 					A01E000001000001 = {
+						CreatedOnToolsVersion = 15.4;
+					};
+					B0E000000001 = {
 						CreatedOnToolsVersion = 15.4;
 					};
 				};
@@ -280,6 +378,7 @@
 			projectRoot = "";
 			targets = (
 				A01E000001000001 /* LifeGood */,
+				B0E000000001 /* LifeGoodWatch */,
 			);
 		};
 /* End PBXProject section */
@@ -291,6 +390,14 @@
 			files = (
 				A01B00000100000B /* Preview Assets.xcassets in Resources */,
 				A01B00000100000A /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B0C000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0B000000005 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -346,6 +453,20 @@
 				A01B000001000038 /* SubordinateDetailView.swift in Sources */,
 				A01B000001000039 /* ChildDetailView.swift in Sources */,
 				A01B00000100003A /* LifeFinanceView.swift in Sources */,
+				B0B000000010 /* ExpenseSyncTypes.swift in Sources */,
+				B0B000000011 /* WatchSyncCoordinator.swift in Sources */,
+				B0B000000012 /* WatchSyncBannerView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B0C000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0B000000001 /* LifeGoodWatchApp.swift in Sources */,
+				B0B000000002 /* WatchExpense.swift in Sources */,
+				B0B000000003 /* WatchExpenseStore.swift in Sources */,
+				B0B000000004 /* WatchAddExpenseView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -531,6 +652,64 @@
 			};
 			name = Release;
 		};
+		B0F000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodWatch/LifeGoodWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.lifegood.app;
+				INFOPLIST_KEY_WKWatchOnly = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		B0F000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodWatch/LifeGoodWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.lifegood.app;
+				INFOPLIST_KEY_WKWatchOnly = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -548,6 +727,15 @@
 			buildConfigurations = (
 				A01F000001000004 /* Debug */,
 				A01F000001000005 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B0F000000003 /* Build configuration list for PBXNativeTarget "LifeGoodWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B0F000000001 /* Debug */,
+				B0F000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

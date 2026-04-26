@@ -35,12 +35,18 @@ class ExpenseStore: ObservableObject {
     // MARK: - 支出 CRUD
 
     func add(_ expense: Expense) {
-        expenses.append(expense)
+        var stamped = expense
+        stamped.updatedAt = Date()
+        if stamped.sourceDevice == nil { stamped.sourceDevice = "iphone" }
+        expenses.append(stamped)
     }
 
     func update(_ expense: Expense) {
         if let index = expenses.firstIndex(where: { $0.id == expense.id }) {
-            expenses[index] = expense
+            var stamped = expense
+            stamped.updatedAt = Date()
+            if stamped.sourceDevice == nil { stamped.sourceDevice = "iphone" }
+            expenses[index] = stamped
         }
     }
 
@@ -405,6 +411,79 @@ class ExpenseStore: ObservableObject {
             ))
         }
         return results
+    }
+
+    // MARK: - 同步合併
+
+    /// 將外部（iCloud）傳來的 expense 陣列與本地合併，依 `updatedAt` 取較新者。
+    /// 回傳值為「衝突 / 變動報告」，供 UI 提示用。
+    /// - Note: 不觸發 push（避免循環），會直接寫入 UserDefaults 並通知本 store reload。
+    @discardableResult
+    static func mergeExpenses(local: [Expense], remote: [Expense]) -> ExpenseMergeResult {
+        var indexed: [UUID: Expense] = [:]
+        for e in local { indexed[e.id] = e }
+
+        var added: [Expense] = []        // 遠端新增（本機未有）
+        var conflicts: [ExpenseConflict] = []  // 兩邊都有但內容/時間不同
+        var unchanged = 0
+
+        for r in remote {
+            if let l = indexed[r.id] {
+                if r.updatedAt > l.updatedAt {
+                    indexed[r.id] = r
+                    if !areEquivalent(l, r) {
+                        conflicts.append(ExpenseConflict(loser: l, winner: r))
+                    }
+                } else if l.updatedAt > r.updatedAt {
+                    // 本機較新，保留本機
+                } else {
+                    unchanged += 1
+                }
+            } else {
+                indexed[r.id] = r
+                added.append(r)
+            }
+        }
+
+        let merged = Array(indexed.values)
+        return ExpenseMergeResult(merged: merged, added: added, conflicts: conflicts, unchanged: unchanged)
+    }
+
+    private static func areEquivalent(_ a: Expense, _ b: Expense) -> Bool {
+        a.title == b.title && a.amount == b.amount && a.date == b.date &&
+        a.variableCategory == b.variableCategory && a.fixedCategory == b.fixedCategory &&
+        a.note == b.note && a.currencyCode == b.currencyCode
+    }
+
+    /// 由 CloudSyncManager 在收到外部變更後呼叫：將 cloud array 與 in-memory expenses 合併。
+    /// 不會觸發 save()（避免再次 push 造成循環）。
+    func applyRemoteMerge(_ remote: [Expense]) -> ExpenseMergeResult {
+        let result = Self.mergeExpenses(local: expenses, remote: remote)
+        isLoading = true
+        expenses = result.merged.sorted { $0.date > $1.date }
+        // 直接寫入 UserDefaults 但不 push 到 cloud
+        if let data = try? JSONEncoder().encode(expenses) {
+            UserDefaults.standard.set(data, forKey: saveKey)
+        }
+        isLoading = false
+        return result
+    }
+
+    /// 移除指定 id 的支出（用於使用者在衝突 UI 撤銷手錶端新增）
+    func removeById(_ id: UUID) {
+        expenses.removeAll { $0.id == id }
+    }
+
+    /// 用指定的 Expense 取代目前的版本（用於使用者在衝突 UI 還原本機版本）
+    func revertTo(_ expense: Expense) {
+        var reverted = expense
+        reverted.updatedAt = Date()
+        reverted.sourceDevice = "iphone"
+        if let i = expenses.firstIndex(where: { $0.id == reverted.id }) {
+            expenses[i] = reverted
+        } else {
+            expenses.append(reverted)
+        }
     }
 
     // MARK: - 持久化

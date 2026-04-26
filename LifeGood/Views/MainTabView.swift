@@ -200,6 +200,7 @@ struct MainTabView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            WatchSyncBannerView()
             contentView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 

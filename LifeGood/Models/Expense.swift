@@ -143,6 +143,10 @@ struct Expense: Identifiable, Codable {
     var linkedBankMilestoneId: UUID?
     var linkedBankCurrency: String?
     var linkedCreditCardMilestoneId: UUID?
+    /// 最後修改時間 — 用於 iCloud 多裝置（含 Apple Watch）同步衝突解決
+    var updatedAt: Date
+    /// 來源裝置標記（"iphone" / "watch"），用於衝突 UI 顯示
+    var sourceDevice: String?
 
     init(
         id: UUID = UUID(),
@@ -169,7 +173,9 @@ struct Expense: Identifiable, Codable {
         loanRate: Double? = nil,
         linkedBankMilestoneId: UUID? = nil,
         linkedBankCurrency: String? = nil,
-        linkedCreditCardMilestoneId: UUID? = nil
+        linkedCreditCardMilestoneId: UUID? = nil,
+        updatedAt: Date = Date(),
+        sourceDevice: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -196,6 +202,8 @@ struct Expense: Identifiable, Codable {
         self.linkedBankMilestoneId = linkedBankMilestoneId
         self.linkedBankCurrency = linkedBankCurrency
         self.linkedCreditCardMilestoneId = linkedCreditCardMilestoneId
+        self.updatedAt = updatedAt
+        self.sourceDevice = sourceDevice
     }
 
     // MARK: - 向下相容解碼
@@ -226,6 +234,9 @@ struct Expense: Identifiable, Codable {
         linkedBankMilestoneId = try? c.decode(UUID.self, forKey: .linkedBankMilestoneId)
         linkedBankCurrency = try? c.decode(String.self, forKey: .linkedBankCurrency)
         linkedCreditCardMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedCreditCardMilestoneId)
+        // 向下相容：舊資料無 updatedAt 時，回退使用 date 作為時間戳
+        updatedAt = (try? c.decodeIfPresent(Date.self, forKey: .updatedAt)) ?? (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        sourceDevice = try? c.decodeIfPresent(String.self, forKey: .sourceDevice)
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
@@ -234,6 +245,7 @@ struct Expense: Identifiable, Codable {
         case vehicleExpenseCategory, realEstateExpenseCategory, note, currencyCode, diningMember
         case loanTotalAmount, loanYears, loanRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
+        case updatedAt, sourceDevice
     }
 
     var categoryName: String {
