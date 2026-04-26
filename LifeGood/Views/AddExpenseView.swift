@@ -116,6 +116,7 @@ struct AddExpenseView: View {
     private var isLoan: Bool { expenseType == .fixed && selectedFixedCategory == .loan }
     private var isMortgage: Bool { isLoan && selectedLoanSubCategory == .mortgage }
     private var isCarLoan: Bool { isLoan && selectedLoanSubCategory == .car }
+    private var showLoanCalcFields: Bool { isCarLoan || isMortgage }
     private var showFixedAssetLink: Bool { expenseType == .fixed && !isInsurance && !isLoan }
 
     // MARK: - 儲蓄險自動計算
@@ -380,7 +381,7 @@ struct AddExpenseView: View {
                     .keyboardType(.decimalPad)
             }
 
-            if isCarLoan {
+            if showLoanCalcFields {
                 HStack {
                     Text("NT$").foregroundStyle(.secondary)
                     TextField("總貸款金額", text: $loanTotalAmountText)
@@ -393,16 +394,16 @@ struct AddExpenseView: View {
             }
 
             if !isSavingsInsurance {
-                DatePicker("日期", selection: $date, displayedComponents: .date)
+                DatePicker(showLoanCalcFields ? "開始日期" : "日期", selection: $date, displayedComponents: .date)
             }
 
-            if isCarLoan {
+            if showLoanCalcFields {
                 HStack {
                     TextField("貸款年限", text: $loanYearsText)
                         .keyboardType(.decimalPad)
                     Text("年").foregroundStyle(.secondary)
                 }
-                carLoanCalcRow
+                loanCalcRow
             }
         }
     }
@@ -418,7 +419,7 @@ struct AddExpenseView: View {
     }
 
     @ViewBuilder
-    private var carLoanCalcRow: some View {
+    private var loanCalcRow: some View {
         let monthly = Double(amountText) ?? 0
         let total = Double(loanTotalAmountText) ?? 0
         let years = Double(loanYearsText) ?? 0
@@ -476,6 +477,34 @@ struct AddExpenseView: View {
         return unique.isEmpty ? ["NT$"] : unique
     }
 
+    /// 計算銀行的目前總額（含信用卡彙總扣款）
+    private func bankBalance(for ms: LifeMilestone) -> Double {
+        var total: Double = 0
+        for dep in ms.bankDeposits ?? [] {
+            // 跳過舊版可能殘留的信用卡支出記錄
+            if let expId = dep.linkedExpenseId,
+               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
+               exp.linkedCreditCardMilestoneId != nil {
+                continue
+            }
+            total += dep.isWithdrawal ? -dep.amount : dep.amount
+        }
+        let cards = lifeStore.milestones.filter {
+            $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
+        }
+        for card in cards {
+            let exps = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == card.id }
+            for exp in exps { total -= exp.amount }
+        }
+        return total
+    }
+
+    private func formatBankBalance(_ value: Double) -> String {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        let str = f.string(from: NSNumber(value: value)) ?? "0"
+        return "NT$ \(str)"
+    }
+
     private var bankPickerLabel: String {
         if let id = selectedCreditCardMilestoneId,
            let card = creditCardMilestones.first(where: { $0.id == id }) {
@@ -509,8 +538,9 @@ struct AddExpenseView: View {
                         ForEach(bankMilestones) { ms in
                             let currencies = bankCurrencies(for: ms)
                             let name = ms.bankName ?? ms.title
+                            let balanceLabel = "\(name)（\(formatBankBalance(bankBalance(for: ms)))）"
                             if currencies.count > 1 {
-                                Menu(name) {
+                                Menu(balanceLabel) {
                                     ForEach(currencies, id: \.self) { code in
                                         Button(code) {
                                             selectedBankMilestoneId = ms.id
@@ -520,7 +550,7 @@ struct AddExpenseView: View {
                                     }
                                 }
                             } else {
-                                Button(name) {
+                                Button(balanceLabel) {
                                     selectedBankMilestoneId = ms.id
                                     selectedBankCurrency = currencies.first ?? "NT$"
                                     selectedCreditCardMilestoneId = nil
@@ -533,10 +563,13 @@ struct AddExpenseView: View {
                     Section("信用卡") {
                         ForEach(creditCardMilestones) { card in
                             let cardName = card.cardName ?? card.title
-                            let bankName = card.linkedBankMilestoneId.flatMap { bankId in
-                                bankMilestones.first(where: { $0.id == bankId })?.bankName
-                            }
-                            Button(bankName.map { "\(cardName) → \($0)" } ?? cardName) {
+                            let bankInfo: String? = {
+                                guard let bankId = card.linkedBankMilestoneId,
+                                      let bank = bankMilestones.first(where: { $0.id == bankId }) else { return nil }
+                                let bankName = bank.bankName ?? bank.title
+                                return "\(bankName)（\(formatBankBalance(bankBalance(for: bank)))）"
+                            }()
+                            Button(bankInfo.map { "\(cardName) → \($0)" } ?? cardName) {
                                 selectedCreditCardMilestoneId = card.id
                                 selectedBankMilestoneId = card.linkedBankMilestoneId
                                 selectedBankCurrency = "NT$"
@@ -1169,9 +1202,9 @@ struct AddExpenseView: View {
             note: note.trimmingCharacters(in: .whitespaces),
             currencyCode: savedCurrencyCode,
             diningMember: (expenseType == .variable && selectedVariableCategory == .food && !selectedDiningMember.isEmpty) ? selectedDiningMember : nil,
-            loanTotalAmount: isCarLoan ? Double(loanTotalAmountText) : nil,
-            loanYears: isCarLoan ? Double(loanYearsText) : nil,
-            loanRate: isCarLoan ? computedLoanRate() : nil,
+            loanTotalAmount: showLoanCalcFields ? Double(loanTotalAmountText) : nil,
+            loanYears: showLoanCalcFields ? Double(loanYearsText) : nil,
+            loanRate: showLoanCalcFields ? computedLoanRate() : nil,
             linkedBankMilestoneId: selectedBankMilestoneId,
             linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
             linkedCreditCardMilestoneId: selectedCreditCardMilestoneId
@@ -1350,11 +1383,13 @@ struct AddExpenseView: View {
         let reId = existingRE?.id ?? UUID()
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let mortgageTitle = trimmedNote.isEmpty ? "房貸" : trimmedNote
+        let years = Double(loanYearsText) ?? 0
+        let computedPeriods = years > 0 ? Int(years * 12) : 240
         let mortgageItem = RealEstateMortgageItem(
             title: mortgageTitle,
             amount: mortgageAmount,
-            totalPeriods: 240,
-            startDate: rePurchaseDate,
+            totalPeriods: computedPeriods,
+            startDate: date,
             linkedExpenseId: expenseId
         )
         let trimmedName = reName.trimmingCharacters(in: .whitespaces)
@@ -1372,12 +1407,13 @@ struct AddExpenseView: View {
             re.currentValue = currentValue
             re.monthlyRental = Double(reMonthlyRentalText) ?? 0
             if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+                let prev = re.mortgageItems[idx]
                 re.mortgageItems[idx] = RealEstateMortgageItem(
-                    id: re.mortgageItems[idx].id,
+                    id: prev.id,
                     title: mortgageTitle,
                     amount: mortgageAmount,
-                    totalPeriods: re.mortgageItems[idx].totalPeriods,
-                    startDate: re.mortgageItems[idx].startDate,
+                    totalPeriods: years > 0 ? computedPeriods : prev.totalPeriods,
+                    startDate: years > 0 ? date : prev.startDate,
                     linkedExpenseId: expenseId
                 )
             } else {
@@ -1408,21 +1444,24 @@ struct AddExpenseView: View {
         guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let mortgageTitle = trimmedNote.isEmpty ? "房貸" : trimmedNote
+        let years = Double(loanYearsText) ?? 0
+        let computedPeriods = years > 0 ? Int(years * 12) : 240
 
         if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+            let prev = re.mortgageItems[idx]
             re.mortgageItems[idx] = RealEstateMortgageItem(
-                id: re.mortgageItems[idx].id,
+                id: prev.id,
                 title: mortgageTitle,
                 amount: amount,
-                totalPeriods: re.mortgageItems[idx].totalPeriods,
-                startDate: re.mortgageItems[idx].startDate,
+                totalPeriods: years > 0 ? computedPeriods : prev.totalPeriods,
+                startDate: years > 0 ? date : prev.startDate,
                 linkedExpenseId: expenseId
             )
         } else {
             let mortgageItem = RealEstateMortgageItem(
                 title: mortgageTitle,
                 amount: amount,
-                totalPeriods: 240,
+                totalPeriods: computedPeriods,
                 startDate: date,
                 linkedExpenseId: expenseId
             )
@@ -1533,6 +1572,13 @@ struct AddExpenseView: View {
                     if !mortgageTitle.isEmpty {
                         note = mortgageTitle
                     }
+                    // 還原貸款年限（從 totalPeriods 換算）
+                    if loanYearsText.isEmpty && item.totalPeriods > 0 {
+                        let years = Double(item.totalPeriods) / 12.0
+                        loanYearsText = String(format: "%g", years)
+                    }
+                    // 開始日期從 mortgageItem.startDate 同步
+                    date = item.startDate
                 }
             }
             reName = linked.name
