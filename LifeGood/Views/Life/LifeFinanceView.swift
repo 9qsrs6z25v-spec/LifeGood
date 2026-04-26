@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @State private var selectedSub: FinanceSubCategory?
     @State private var viewingItem: LifeMilestone?
     @State private var showAdd = false
@@ -123,9 +124,47 @@ struct LifeFinanceView: View {
                 subtitle(for: item)
             }
             Spacer()
-            Text(formatDate(item.date)).font(.caption).foregroundStyle(.tertiary)
+            if item.financeSubCategory == .bank {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("開戶日期：\(formatDate(item.date))")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    Text("存款總額 NT$ \(formatNumber(bankTotalBalance(for: item)))")
+                        .font(.caption.bold())
+                        .foregroundStyle(bankTotalBalance(for: item) >= 0 ? .blue : .red)
+                }
+            } else {
+                Text(formatDate(item.date)).font(.caption).foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 2)
+    }
+
+    /// 計算銀行的目前總額（含信用卡彙總扣款 + 股票交易）
+    private func bankTotalBalance(for ms: LifeMilestone) -> Double {
+        var total: Double = 0
+        // 真實 BankDeposit（過濾舊版可能殘留的信用卡支出記錄）
+        let real = (ms.bankDeposits ?? []).filter { dep in
+            guard let expId = dep.linkedExpenseId,
+                  let exp = expenseStore.expenses.first(where: { $0.id == expId }) else { return true }
+            return exp.linkedCreditCardMilestoneId == nil
+        }
+        for dep in real {
+            total += dep.isWithdrawal ? -dep.amount : dep.amount
+        }
+        // 連結的信用卡支出（依 linkedCreditCardMilestoneId）
+        let cards = lifeStore.milestones.filter {
+            $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
+        }
+        for card in cards {
+            let exps = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == card.id }
+            for exp in exps { total -= exp.amount }
+        }
+        return total
+    }
+
+    private func formatNumber(_ v: Double) -> String {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "0"
     }
 
     @ViewBuilder
@@ -173,6 +212,7 @@ struct FinanceCardView: View {
     @State private var addDepositCurrency = "NT$"
     @State private var editingDeposit: BankDeposit?
     @State private var viewingLinkedCard: LifeMilestone?
+    @State private var depositsExpanded = false
 
     private var item: LifeMilestone {
         lifeStore.milestones.first(where: { $0.id == milestoneId })
@@ -448,8 +488,29 @@ struct FinanceCardView: View {
                 depositChart
                     .padding(.horizontal).padding(.bottom, 8)
 
-                ForEach(deposits, id: \.id) { dep in
+                let sortedDesc = deposits.sorted { $0.date > $1.date }
+                let visible = depositsExpanded ? sortedDesc : Array(sortedDesc.prefix(6))
+                ForEach(visible, id: \.id) { dep in
                     depositRow(dep)
+                }
+                if sortedDesc.count > 6 {
+                    Button {
+                        withAnimation { depositsExpanded.toggle() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Text(depositsExpanded ? "收起" : "展開全部 (\(sortedDesc.count) 筆)")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.blue)
+                            Image(systemName: depositsExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -668,29 +729,19 @@ struct FinanceCardView: View {
         let maxBal = balances.map(\.balance).max() ?? 1
         let minBal = min(0, balances.map(\.balance).min() ?? 0)
         let range = max(maxBal - minBal, 1)
+        let useLineChart = balances.count > 12
+        let labelStride = max(1, balances.count / 6)
 
         return VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .bottom, spacing: 4) {
-                ForEach(balances, id: \.id) { item in
-                    VStack(spacing: 2) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(item.balance >= 0 ? Color.blue : Color.red)
-                            .frame(
-                                width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(balances.count, 1))),
-                                height: max(4, CGFloat(abs(item.balance - minBal) / range) * 120)
-                            )
-                        Text(shortDate(item.date))
-                            .font(.system(size: 8))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
+            if useLineChart {
+                balanceLineChart(balances: balances, minBal: minBal, range: range, labelStride: labelStride)
+            } else {
+                balanceBarChart(balances: balances, minBal: minBal, range: range, labelStride: labelStride)
             }
-            .frame(height: 140, alignment: .bottom)
-            .frame(maxWidth: .infinity)
 
             if let last = balances.last {
                 HStack {
-                    Text("目前餘額").font(.caption).foregroundStyle(.secondary)
+                    Text("目前總額").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Text("\(fmtNum(last.balance))").font(.caption.bold())
                         .foregroundStyle(last.balance >= 0 ? Color.blue : Color.red)
@@ -707,6 +758,106 @@ struct FinanceCardView: View {
     private func barColor(for dep: BankDeposit) -> Color {
         if dep.isWithdrawal { return .red }
         return dep.currencyCode == "NT$" ? .blue : .orange
+    }
+
+    @ViewBuilder
+    private func balanceBarChart(
+        balances: [(date: Date, balance: Double, id: UUID)],
+        minBal: Double,
+        range: Double,
+        labelStride: Int
+    ) -> some View {
+        HStack(alignment: .bottom, spacing: 4) {
+            ForEach(Array(balances.enumerated()), id: \.element.id) { index, item in
+                VStack(spacing: 2) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(item.balance >= 0 ? Color.blue : Color.red)
+                        .frame(
+                            width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(balances.count, 1))),
+                            height: max(4, CGFloat(abs(item.balance - minBal) / range) * 120)
+                        )
+                    Text(index % labelStride == 0 ? shortDate(item.date) : " ")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .frame(height: 140, alignment: .bottom)
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func balanceLineChart(
+        balances: [(date: Date, balance: Double, id: UUID)],
+        minBal: Double,
+        range: Double,
+        labelStride: Int
+    ) -> some View {
+        let chartHeight: CGFloat = 120
+        GeometryReader { geo in
+            let width = geo.size.width
+            let count = max(balances.count, 1)
+            let stepX = count > 1 ? width / CGFloat(count - 1) : 0
+
+            ZStack {
+                // 零線
+                if minBal < 0 {
+                    let zeroY = chartHeight - CGFloat(-minBal / range) * chartHeight
+                    Path { p in
+                        p.move(to: CGPoint(x: 0, y: zeroY))
+                        p.addLine(to: CGPoint(x: width, y: zeroY))
+                    }
+                    .stroke(Color.secondary.opacity(0.3), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                }
+
+                // 折線
+                Path { p in
+                    for (i, item) in balances.enumerated() {
+                        let x = CGFloat(i) * stepX
+                        let y = chartHeight - CGFloat((item.balance - minBal) / range) * chartHeight
+                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
+                        else { p.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                }
+                .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+
+                // 填色
+                Path { p in
+                    for (i, item) in balances.enumerated() {
+                        let x = CGFloat(i) * stepX
+                        let y = chartHeight - CGFloat((item.balance - minBal) / range) * chartHeight
+                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
+                        else { p.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                    p.addLine(to: CGPoint(x: width, y: chartHeight))
+                    p.addLine(to: CGPoint(x: 0, y: chartHeight))
+                    p.closeSubpath()
+                }
+                .fill(LinearGradient(colors: [Color.blue.opacity(0.3), Color.blue.opacity(0.0)],
+                                     startPoint: .top, endPoint: .bottom))
+
+                // 數據點
+                ForEach(Array(balances.enumerated()), id: \.element.id) { i, item in
+                    let x = CGFloat(i) * stepX
+                    let y = chartHeight - CGFloat((item.balance - minBal) / range) * chartHeight
+                    Circle()
+                        .fill(item.balance >= 0 ? Color.blue : Color.red)
+                        .frame(width: 4, height: 4)
+                        .position(x: x, y: y)
+                }
+            }
+        }
+        .frame(height: chartHeight)
+
+        // X 軸日期（依 labelStride 抽樣顯示）
+        HStack(spacing: 0) {
+            ForEach(Array(balances.enumerated()), id: \.element.id) { i, item in
+                Text(i % labelStride == 0 ? shortDate(item.date) : " ")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
     }
 }
 
