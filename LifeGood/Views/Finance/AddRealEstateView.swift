@@ -7,13 +7,35 @@ struct AddRealEstateView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
-    var editing: RealEstate?
+    let editing: RealEstate?
+    private let stableEstateId: UUID
+    @State private var hasAutoSaved: Bool
+
+    init(editing: RealEstate? = nil) {
+        self.editing = editing
+        self.stableEstateId = editing?.id ?? UUID()
+        _hasAutoSaved = State(initialValue: editing != nil)
+    }
 
     enum EditTab: String, CaseIterable {
         case finance = "理財"
         case house = "房屋資料"
     }
     @State private var editTab: EditTab = .finance
+
+    // 編輯/新增項目 sheet 狀態
+    @State private var editingExpense: Expense?
+    @State private var addingMortgage = false
+    @State private var addingPaid = false
+    @State private var addingVariableCategory: RealEstateExpenseCategory?
+    @State private var showVariableCategoryPicker = false
+
+    private var currentEstate: RealEstate? {
+        financeStore.realEstates.first(where: { $0.id == stableEstateId })
+    }
+    private var storeMortgageItems: [RealEstateMortgageItem] { currentEstate?.mortgageItems ?? [] }
+    private var storePaidItems: [RealEstatePaidItem] { currentEstate?.paidItems ?? [] }
+    private var storeVariableItems: [RealEstateVariableExpense] { currentEstate?.variableExpenses ?? [] }
 
     @State private var name = ""
     @State private var city = ""
@@ -125,56 +147,8 @@ struct AddRealEstateView: View {
         var amount: Double { Double(amountText) ?? 0 }
     }
 
-    // MARK: - 貸款項目列表
-
-    @State private var mortgageItems: [MortgageItemState] = []
-
-    struct MortgageItemState: Identifiable {
-        let id: UUID
-        var title: String
-        var amountText: String
-        var periodsText: String
-        var startDate: Date
-        var linkedExpenseId: UUID?
-
-        var amount: Double { Double(amountText) ?? 0 }
-        var periods: Int { Int(periodsText) ?? 0 }
-
-        var elapsedPeriods: Int {
-            let months = Calendar.current.dateComponents([.month], from: startDate, to: Date()).month ?? 0
-            return min(max(0, months), periods)
-        }
-        var paidAmount: Double { amount * Double(elapsedPeriods) }
-    }
-
-    // MARK: - 已支出房屋金額列表
-
-    @State private var paidItems: [PaidItemState] = []
-
-    struct PaidItemState: Identifiable {
-        let id: UUID
-        var title: String
-        var amountText: String
-        var date: Date
-        var linkedExpenseId: UUID?
-
-        var amount: Double { Double(amountText) ?? 0 }
-    }
-
-    // MARK: - 變動支出列表
-
-    @State private var variableItems: [VariableItemState] = []
-
-    struct VariableItemState: Identifiable {
-        let id: UUID
-        var category: RealEstateExpenseCategory
-        var name: String
-        var amountText: String
-        var date: Date
-        var linkedExpenseId: UUID?
-
-        var amount: Double { Double(amountText) ?? 0 }
-    }
+    // 貸款/已支出/變動支出項目改由 financeStore.realEstates[stableEstateId] 持有，
+    // 透過 AddExpenseView 新增/編輯，不再使用本地 @State。
 
     var body: some View {
         NavigationStack {
@@ -217,7 +191,7 @@ struct AddRealEstateView: View {
                     }
                 }
             }
-            .navigationTitle(editing != nil ? "編輯房地產" : "新增房地產")
+            .navigationTitle((editing != nil || hasAutoSaved) ? "編輯房地產" : "新增房地產")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
@@ -230,7 +204,7 @@ struct AddRealEstateView: View {
                         .popover(isPresented: $showFeaturePicker, arrowEdge: .top) {
                             featureToggleList
                         }
-                        Button(editing != nil ? "儲存" : "新增") { save() }
+                        Button((editing != nil || hasAutoSaved) ? "儲存" : "新增") { save() }
                             .bold().foregroundStyle(.green)
                     }
                 }
@@ -238,6 +212,53 @@ struct AddRealEstateView: View {
             .onAppear { loadEditing() }
             .sheet(item: $viewingPhotoURL) { url in
                 PhotoViewerSheet(url: url)
+            }
+            .sheet(item: $editingExpense) { exp in
+                AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
+            }
+            .sheet(isPresented: $addingMortgage) {
+                AddExpenseView(
+                    expenseType: .fixed,
+                    preset: AddExpensePreset(
+                        fixedCategory: .loan,
+                        loanSubCategory: .mortgage,
+                        recurrence: .monthly,
+                        linkedRealEstateId: stableEstateId,
+                        mortgageLinkExisting: true
+                    )
+                )
+            }
+            .sheet(isPresented: $addingPaid) {
+                AddExpenseView(
+                    expenseType: .variable,
+                    preset: AddExpensePreset(
+                        variableCategory: .realEstate,
+                        realEstateExpenseCategory: .housePayment,
+                        linkedRealEstateId: stableEstateId,
+                        assetLink: .realEstate,
+                        realEstateLinkExisting: true
+                    )
+                )
+            }
+            .sheet(item: $addingVariableCategory) { cat in
+                AddExpenseView(
+                    expenseType: .variable,
+                    preset: AddExpensePreset(
+                        variableCategory: .realEstate,
+                        realEstateExpenseCategory: cat,
+                        linkedRealEstateId: stableEstateId,
+                        assetLink: .realEstate,
+                        realEstateLinkExisting: true
+                    )
+                )
+            }
+            .confirmationDialog("選擇變動支出類別", isPresented: $showVariableCategoryPicker, titleVisibility: .visible) {
+                ForEach(RealEstateExpenseCategory.allCases.filter { $0 != .housePayment }) { cat in
+                    Button(cat.rawValue) {
+                        addingVariableCategory = cat
+                    }
+                }
+                Button("取消", role: .cancel) {}
             }
         }
     }
@@ -346,81 +367,55 @@ struct AddRealEstateView: View {
 
     private var mortgageSection: some View {
         Section {
-            ForEach(Array(mortgageItems.enumerated()), id: \.element.id) { index, _ in
-                VStack(spacing: 10) {
-                    if index > 0 { Divider() }
-
+            ForEach(storeMortgageItems) { m in
+                Button {
+                    if let expId = m.linkedExpenseId,
+                       let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+                        editingExpense = exp
+                    }
+                } label: {
                     HStack {
-                        Text("貸款 \(index + 1)")
-                            .font(.subheadline.weight(.medium))
-                        Spacer()
-                        Button(role: .destructive) {
-                            let item = mortgageItems[index]
-                            if let linkedId = item.linkedExpenseId {
-                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                        Image(systemName: "building.columns.fill")
+                            .font(.caption).foregroundStyle(.blue)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(m.title.isEmpty ? "房貸" : m.title)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            HStack(spacing: 6) {
+                                if m.totalPeriods > 0 {
+                                    Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Text(formatCurrency(m.paidAmount))
+                                    .font(.caption2).foregroundStyle(.blue)
                             }
-                            mortgageItems.remove(at: index)
-                        } label: {
-                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                         }
-                        .buttonStyle(.plain)
+                        Spacer()
+                        Text(formatCurrency(m.amount))
+                            .font(.subheadline.bold())
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }
-
-                    TextField("名稱（如 第一順位房貸）", text: $mortgageItems[index].title)
-
-                    HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("每期金額", text: $mortgageItems[index].amountText)
-                            .keyboardType(.decimalPad)
-                    }
-
-                    HStack {
-                        TextField("總期數", text: $mortgageItems[index].periodsText)
-                            .keyboardType(.numberPad)
-                        Text("期").foregroundStyle(.secondary)
-
-                        if mortgageItems[index].periods > 0 {
-                            Text("(\(mortgageItems[index].periods / 12)年\(mortgageItems[index].periods % 12)月)")
-                                .font(.caption).foregroundStyle(.tertiary)
-                        }
-                    }
-
-                    DatePicker("起始日", selection: $mortgageItems[index].startDate, displayedComponents: .date)
-
-                    if mortgageItems[index].amount > 0, mortgageItems[index].periods > 0 {
-                        HStack {
-                            Text("貸款總額")
-                            Spacer()
-                            Text(formatCurrency(mortgageItems[index].amount * Double(mortgageItems[index].periods)))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        HStack {
-                            Text("已繳")
-                            Text("\(mortgageItems[index].elapsedPeriods)/\(mortgageItems[index].periods) 期")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(formatCurrency(mortgageItems[index].paidAmount))
-                                .font(.caption.bold()).foregroundStyle(.blue)
-                        }
-                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
+            .onDelete(perform: deleteMortgageItems)
 
             Button {
-                mortgageItems.append(MortgageItemState(
-                    id: UUID(), title: "", amountText: "", periodsText: "240", startDate: purchaseDate
-                ))
+                guard ensureRealEstateSavedInStore() else { return }
+                addingMortgage = true
             } label: {
                 Label("新增貸款項目", systemImage: "plus.circle").foregroundStyle(.green)
             }
         } header: {
             Text("貸款項目")
         } footer: {
-            if !mortgageItems.isEmpty {
-                let monthlyTotal = mortgageItems.reduce(0.0) { $0 + $1.amount }
-                Text("每月房貸合計 \(formatCurrency(monthlyTotal))，儲存後將自動連動記帳模式的固定支出。")
+            if !storeMortgageItems.isEmpty {
+                let monthlyTotal = storeMortgageItems.reduce(0.0) { $0 + $1.amount }
+                Text("每月房貸合計 \(formatCurrency(monthlyTotal))，與記帳模式的固定支出連動。")
             } else {
-                Text("可新增多筆不同利率或期數的貸款項目。")
+                Text("點擊「新增貸款項目」可建立多筆不同期數的貸款。")
             }
         }
     }
@@ -429,104 +424,110 @@ struct AddRealEstateView: View {
 
     private var paidSection: some View {
         Section {
-            ForEach(Array(paidItems.enumerated()), id: \.element.id) { index, _ in
-                VStack(spacing: 10) {
-                    if index > 0 { Divider() }
-
+            ForEach(storePaidItems) { p in
+                Button {
+                    if let expId = p.linkedExpenseId,
+                       let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+                        editingExpense = exp
+                    }
+                } label: {
                     HStack {
-                        Text("項目 \(index + 1)")
-                            .font(.subheadline.weight(.medium))
-                        Spacer()
-                        Button(role: .destructive) {
-                            let item = paidItems[index]
-                            if let linkedId = item.linkedExpenseId {
-                                expenseStore.expenses.removeAll { $0.id == linkedId }
-                            }
-                            paidItems.remove(at: index)
-                        } label: {
-                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                        Image(systemName: "banknote.fill")
+                            .font(.caption).foregroundStyle(.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(p.title.isEmpty ? "房屋價金" : p.title)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text(fmtDate(p.date))
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
+                        Spacer()
+                        Text(formatCurrency(p.amount))
+                            .font(.subheadline.bold())
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }
-
-                    TextField("名稱（如 頭期款、簽約金）", text: $paidItems[index].title)
-
-                    HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("金額", text: $paidItems[index].amountText)
-                            .keyboardType(.decimalPad)
-                    }
-
-                    DatePicker("日期", selection: $paidItems[index].date, displayedComponents: .date)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
+            .onDelete(perform: deletePaidItems)
 
             Button {
-                paidItems.append(PaidItemState(
-                    id: UUID(), title: "", amountText: "", date: Date()
-                ))
+                guard ensureRealEstateSavedInStore() else { return }
+                addingPaid = true
             } label: {
                 Label("新增已支出項目", systemImage: "plus.circle").foregroundStyle(.green)
             }
         } header: {
             Text("已支出房屋金額")
         } footer: {
-            if !paidItems.isEmpty {
-                let total = paidItems.reduce(0.0) { $0 + $1.amount }
-                Text("已支出合計 \(formatCurrency(total))，儲存後將自動連動記帳模式的變動支出。")
+            if !storePaidItems.isEmpty {
+                let total = storePaidItems.reduce(0.0) { $0 + $1.amount }
+                Text("已支出合計 \(formatCurrency(total))，與記帳模式的變動支出連動。")
             } else {
                 Text("記錄頭期款、簽約金、工程款等已支付的房屋相關金額。")
             }
         }
     }
 
+    private func fmtDate(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
+    }
+
     // MARK: - 變動支出
 
     private var variableExpenseSection: some View {
         Section {
-            ForEach(Array(variableItems.enumerated()), id: \.element.id) { index, _ in
-                VStack(spacing: 10) {
-                    if index > 0 { Divider() }
-
+            ForEach(storeVariableItems) { ve in
+                Button {
+                    if let expId = ve.linkedExpenseId,
+                       let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+                        editingExpense = exp
+                    }
+                } label: {
                     HStack {
-                        Text("項目 \(index + 1)").font(.subheadline.weight(.medium))
-                        TextField("名稱", text: $variableItems[index].name)
-                            .multilineTextAlignment(.trailing)
-                        Button(role: .destructive) {
-                            let item = variableItems[index]
-                            if let linkedId = item.linkedExpenseId {
-                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                        Label(ve.category.rawValue, systemImage: ve.category.icon)
+                            .font(.subheadline.weight(.medium))
+                            .labelStyle(.titleAndIcon)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.12))
+                            .foregroundStyle(.orange)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        VStack(alignment: .leading, spacing: 2) {
+                            if !ve.name.isEmpty {
+                                Text(ve.name).font(.caption).foregroundStyle(.primary)
                             }
-                            variableItems.remove(at: index)
-                        } label: {
-                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
-                        }.buttonStyle(.plain)
-                    }
-
-                    Picker("類別", selection: $variableItems[index].category) {
-                        ForEach(RealEstateExpenseCategory.allCases) { cat in
-                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                            Text(fmtDate(ve.date))
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
+                        Spacer()
+                        Text(formatCurrency(ve.amount))
+                            .font(.subheadline.bold())
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }
-                    DatePicker("日期", selection: $variableItems[index].date, displayedComponents: .date)
-                    HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("金額", text: $variableItems[index].amountText).keyboardType(.decimalPad)
-                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
+            .onDelete(perform: deleteVariableItems)
 
             Button {
-                variableItems.append(VariableItemState(
-                    id: UUID(), category: .renovation, name: "", amountText: "", date: Date()
-                ))
+                guard ensureRealEstateSavedInStore() else { return }
+                showVariableCategoryPicker = true
             } label: {
                 Label("新增變動支出", systemImage: "plus.circle").foregroundStyle(.green)
             }
         } header: {
             Text("變動支出")
         } footer: {
-            Text("裝修、維修、家具、清潔等一次性支出。")
+            if !storeVariableItems.isEmpty {
+                let total = storeVariableItems.reduce(0.0) { $0 + $1.amount }
+                Text("變動支出合計 \(formatCurrency(total))，與記帳模式的變動支出連動。")
+            } else {
+                Text("裝修、維修、家具、清潔等一次性支出。")
+            }
         }
     }
 
@@ -952,11 +953,11 @@ struct AddRealEstateView: View {
     @ViewBuilder
     private var calcSection: some View {
         let rental = Double(monthlyRentalText) ?? 0
-        let mortgageMonthly = mortgageItems.reduce(0.0) { $0 + $1.amount }
-        let mortgagePaidTotal = mortgageItems.reduce(0.0) { $0 + $1.paidAmount }
-        let paidTotal = paidItems.reduce(0.0) { $0 + $1.amount }
-        let varTotal = variableItems.reduce(0.0) { $0 + $1.amount }
-        let mortgageTotal = mortgageItems.reduce(0.0) { $0 + $1.amount * Double($1.periods) }
+        let mortgageMonthly = storeMortgageItems.reduce(0.0) { $0 + $1.amount }
+        let mortgagePaidTotal = storeMortgageItems.reduce(0.0) { $0 + $1.paidAmount }
+        let paidTotal = storePaidItems.reduce(0.0) { $0 + $1.amount }
+        let varTotal = storeVariableItems.reduce(0.0) { $0 + $1.amount }
+        let mortgageTotal = storeMortgageItems.reduce(0.0) { $0 + $1.totalAmount }
         let allPaid = paidTotal + mortgagePaidTotal + varTotal
 
         if rental > 0 || mortgageMonthly > 0 || paidTotal > 0 || varTotal > 0 {
@@ -1013,40 +1014,13 @@ struct AddRealEstateView: View {
         let currentVal = (Double(currentValueText) ?? priceWan) * 10000
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
-        let reId = editing?.id ?? UUID()
+        let reId = stableEstateId
 
-        // 同步貸款項目到固定支出
-        var syncedMortgages: [RealEstateMortgageItem] = []
-        let validMortgages = mortgageItems.filter { $0.amount > 0 }
-        for (idx, item) in validMortgages.enumerated() {
-            let expId = syncMortgageItemExpense(reId: reId, reName: trimmedName, item: item, itemIndex: idx + 1, note: trimmedNote)
-            syncedMortgages.append(RealEstateMortgageItem(
-                id: item.id, title: item.title.trimmingCharacters(in: .whitespaces),
-                amount: item.amount, totalPeriods: item.periods,
-                startDate: item.startDate, linkedExpenseId: expId
-            ))
-        }
-
-        // 同步已支出金額到變動支出
-        var syncedPaids: [RealEstatePaidItem] = []
-        for item in paidItems where item.amount > 0 {
-            let expId = syncPaidItemExpense(reId: reId, reName: trimmedName, item: item)
-            syncedPaids.append(RealEstatePaidItem(
-                id: item.id, title: item.title.trimmingCharacters(in: .whitespaces),
-                amount: item.amount, date: item.date, linkedExpenseId: expId
-            ))
-        }
-
-        // 同步變動支出
-        var syncedVariable: [RealEstateVariableExpense] = []
-        for item in variableItems where item.amount > 0 {
-            let expId = syncVariableExpense(reId: reId, reName: trimmedName, item: item)
-            syncedVariable.append(RealEstateVariableExpense(
-                id: item.id, category: item.category,
-                name: item.name.trimmingCharacters(in: .whitespaces),
-                amount: item.amount, date: item.date, linkedExpenseId: expId
-            ))
-        }
+        // 貸款/已支出/變動支出由 AddExpenseView 直接寫入 financeStore，這裡保留 store 內既有資料
+        let syncedMortgages: [RealEstateMortgageItem] = currentEstate?.mortgageItems ?? []
+        let syncedPaids: [RealEstatePaidItem] = currentEstate?.paidItems ?? []
+        let syncedVariable: [RealEstateVariableExpense] = currentEstate?.variableExpenses ?? []
+        let existingUtilityPayments: [UtilityPayment] = currentEstate?.utilityPayments ?? []
 
         // 同步保險項目到變動支出（有價格才連動）
         var syncedInsurance: [RealEstateInsuranceItem] = []
@@ -1139,56 +1113,87 @@ struct AddRealEstateView: View {
             gasMeterOwner: gasMeterOwner.trimmingCharacters(in: .whitespaces),
             gasUserNumber: gasUserNumber.trimmingCharacters(in: .whitespaces),
             insuranceItems: syncedInsurance,
-            propertyAssets: syncedAssets
+            propertyAssets: syncedAssets,
+            utilityPayments: existingUtilityPayments
         )
-        if editing != nil { financeStore.update(re) } else { financeStore.add(re) }
+        if currentEstate != nil { financeStore.update(re) } else { financeStore.add(re) }
         dismiss()
     }
 
+    /// 自動存檔：在新增項目前確保 estate 已存在於 store
+    @discardableResult
+    private func ensureRealEstateSavedInStore() -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmedName.isEmpty,
+              let priceWan = Double(purchasePriceText), priceWan > 0 else {
+            showError = true
+            return false
+        }
+        showError = false
+
+        let price = priceWan * 10000
+        let currentVal = (Double(currentValueText) ?? priceWan) * 10000
+
+        if currentEstate == nil {
+            let re = RealEstate(
+                id: stableEstateId,
+                name: trimmedName,
+                city: city,
+                address: address.trimmingCharacters(in: .whitespacesAndNewlines),
+                purchaseDate: purchaseDate,
+                purchasePrice: price,
+                currentValue: currentVal,
+                note: note.trimmingCharacters(in: .whitespaces),
+                buildingType: buildingType
+            )
+            financeStore.add(re)
+            hasAutoSaved = true
+        }
+        return true
+    }
+
+    // MARK: - 刪除項目
+
+    private func deleteMortgageItems(at offsets: IndexSet) {
+        guard var re = currentEstate else { return }
+        let items = re.mortgageItems
+        for index in offsets {
+            let item = items[index]
+            if let expId = item.linkedExpenseId {
+                expenseStore.expenses.removeAll { $0.id == expId }
+            }
+            re.mortgageItems.removeAll { $0.id == item.id }
+        }
+        financeStore.update(re)
+    }
+
+    private func deletePaidItems(at offsets: IndexSet) {
+        guard var re = currentEstate else { return }
+        let items = re.paidItems
+        for index in offsets {
+            let item = items[index]
+            if let expId = item.linkedExpenseId {
+                expenseStore.expenses.removeAll { $0.id == expId }
+            }
+            re.paidItems.removeAll { $0.id == item.id }
+        }
+        financeStore.update(re)
+    }
+
+    private func deleteVariableItems(at offsets: IndexSet) {
+        guard var re = currentEstate else { return }
+        let items = re.variableExpenses
+        for index in offsets {
+            let item = items[index]
+            if let expId = item.linkedExpenseId {
+                expenseStore.expenses.removeAll { $0.id == expId }
+            }
+            re.variableExpenses.removeAll { $0.id == item.id }
+        }
+        financeStore.update(re)
+    }
+
     // MARK: - 同步函式
-
-    private func syncMortgageItemExpense(reId: UUID, reName: String, item: MortgageItemState, itemIndex: Int, note: String) -> UUID {
-        let expenseId = item.linkedExpenseId ?? UUID()
-        let mortgageName = item.title.trimmingCharacters(in: .whitespaces).isEmpty ? "房貸" : item.title.trimmingCharacters(in: .whitespaces)
-        let title = "【\(reName)】貸款\(itemIndex)-\(mortgageName)"
-        let expense = Expense(
-            id: expenseId, title: title, amount: item.amount, date: item.startDate,
-            expenseType: .fixed, fixedCategory: .loan, recurrence: .monthly,
-            loanSubCategory: .mortgage, linkedRealEstateId: reId, note: note
-        )
-        if item.linkedExpenseId != nil { expenseStore.update(expense) }
-        else { expenseStore.add(expense) }
-        return expenseId
-    }
-
-    private func syncPaidItemExpense(reId: UUID, reName: String, item: PaidItemState) -> UUID {
-        let expenseId = item.linkedExpenseId ?? UUID()
-        let title = item.title.isEmpty ? "\(reName) - 已付款" : "\(reName) - \(item.title)"
-        let expense = Expense(
-            id: expenseId, title: title, amount: item.amount, date: item.date,
-            expenseType: .variable, variableCategory: .realEstate,
-            linkedRealEstateId: reId,
-            realEstateExpenseCategory: .housePayment, note: ""
-        )
-        if item.linkedExpenseId != nil { expenseStore.update(expense) }
-        else { expenseStore.add(expense) }
-        return expenseId
-    }
-
-    private func syncVariableExpense(reId: UUID, reName: String, item: VariableItemState) -> UUID {
-        let expenseId = item.linkedExpenseId ?? UUID()
-        let trimmedName = item.name.trimmingCharacters(in: .whitespaces)
-        let expense = Expense(
-            id: expenseId, title: "\(reName) - \(item.category.rawValue)",
-            amount: item.amount, date: item.date,
-            expenseType: .variable, variableCategory: .realEstate,
-            linkedRealEstateId: reId,
-            realEstateExpenseCategory: item.category, note: trimmedName
-        )
-        if item.linkedExpenseId != nil { expenseStore.update(expense) }
-        else { expenseStore.add(expense) }
-        return expenseId
-    }
 
     private func syncInsuranceExpense(reId: UUID, reName: String, item: InsuranceItemState) -> UUID {
         let expenseId = item.linkedExpenseId ?? UUID()
@@ -1246,32 +1251,7 @@ struct AddRealEstateView: View {
         monthlyRentalText = e.monthlyRental > 0 ? String(format: "%.0f", e.monthlyRental) : ""
         note = e.note
 
-        mortgageItems = e.mortgageItems.map { m in
-            MortgageItemState(
-                id: m.id, title: m.title,
-                amountText: m.amount > 0 ? String(format: "%.0f", m.amount) : "",
-                periodsText: m.totalPeriods > 0 ? "\(m.totalPeriods)" : "",
-                startDate: m.startDate,
-                linkedExpenseId: m.linkedExpenseId
-            )
-        }
-
-        paidItems = e.paidItems.map { p in
-            PaidItemState(
-                id: p.id, title: p.title,
-                amountText: p.amount > 0 ? String(format: "%.0f", p.amount) : "",
-                date: p.date, linkedExpenseId: p.linkedExpenseId
-            )
-        }
-
-        variableItems = e.variableExpenses.map { ve in
-            VariableItemState(
-                id: ve.id, category: ve.category,
-                name: ve.name,
-                amountText: ve.amount > 0 ? String(format: "%.0f", ve.amount) : "",
-                date: ve.date, linkedExpenseId: ve.linkedExpenseId
-            )
-        }
+        // mortgageItems / paidItems / variableExpenses 已從 store 直接讀取，無須載入到本地 state
 
         // 人生模式欄位
         buildingType = e.buildingType

@@ -1684,12 +1684,20 @@ struct AddExpenseView: View {
         if let vc = preset.variableCategory { selectedVariableCategory = vc }
         if let vec = preset.vehicleExpenseCategory { selectedVehicleExpenseCategory = vec }
         if let rec = preset.recurrence { selectedRecurrence = rec }
+        if let reCat = preset.realEstateExpenseCategory { selectedRealEstateExpenseCategory = reCat }
         if let vid = preset.linkedVehicleId {
             selectedVehicleId = vid
             fixedLinkVehicleId = vid
         }
+        if let reId = preset.linkedRealEstateId {
+            selectedRealEstateLinkId = reId
+            selectedMortgageRealEstateId = reId
+            fixedLinkRealEstateId = reId
+        }
         if let al = preset.assetLink { selectedAssetLink = al }
         if let fal = preset.fixedAssetLink { selectedFixedAssetLink = fal }
+        if let rle = preset.realEstateLinkExisting { realEstateLinkExisting = rle }
+        if let mle = preset.mortgageLinkExisting { mortgageLinkExisting = mle }
     }
 }
 
@@ -1700,10 +1708,14 @@ struct AddExpensePreset {
     var loanSubCategory: LoanSubCategory?
     var variableCategory: VariableCategory?
     var vehicleExpenseCategory: VehicleVariableCategory?
+    var realEstateExpenseCategory: RealEstateExpenseCategory?
     var recurrence: Recurrence?
     var linkedVehicleId: UUID?
+    var linkedRealEstateId: UUID?
     var assetLink: AddExpenseView.AssetLinkType?
     var fixedAssetLink: AddExpenseView.FixedAssetLinkType?
+    var realEstateLinkExisting: Bool?
+    var mortgageLinkExisting: Bool?
 }
 
 #Preview {
