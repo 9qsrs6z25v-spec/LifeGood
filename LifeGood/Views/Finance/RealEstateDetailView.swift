@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -9,6 +10,10 @@ struct RealEstateDetailView: View {
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
     @State private var viewingPhotoURL: URL?
+    @State private var addingElevatorMaintenance = false
+    @State private var editingElevatorMaintenance: ElevatorMaintenance?
+    @State private var addingUtilityPayment = false
+    @State private var editingUtilityPayment: UtilityPayment?
 
     enum DetailTab: String, CaseIterable {
         case finance = "理財"
@@ -65,6 +70,18 @@ struct RealEstateDetailView: View {
             }
             .sheet(item: $viewingPhotoURL) { url in
                 PhotoViewerSheet(url: url)
+            }
+            .sheet(isPresented: $addingElevatorMaintenance) {
+                ElevatorMaintenanceEditor(estateId: estateId, editing: nil)
+            }
+            .sheet(item: $editingElevatorMaintenance) { m in
+                ElevatorMaintenanceEditor(estateId: estateId, editing: m)
+            }
+            .sheet(isPresented: $addingUtilityPayment) {
+                UtilityPaymentEditor(estateId: estateId, editing: nil)
+            }
+            .sheet(item: $editingUtilityPayment) { p in
+                UtilityPaymentEditor(estateId: estateId, editing: p)
             }
             .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
@@ -361,7 +378,7 @@ struct RealEstateDetailView: View {
             }
 
             if estate.hasElevator {
-                sectionHeader("電梯資料")
+                sectionHeaderWithAdd("電梯資料") { addingElevatorMaintenance = true }
                 if estate.elevatorMaintenances.isEmpty {
                     HStack {
                         Text("尚無保養記錄").font(.caption).foregroundStyle(.tertiary)
@@ -370,25 +387,31 @@ struct RealEstateDetailView: View {
                     .padding(.horizontal).padding(.vertical, 6)
                 } else {
                     ForEach(estate.elevatorMaintenances) { m in
-                        HStack {
-                            Image(systemName: "wrench.and.screwdriver")
-                                .font(.caption).foregroundStyle(.blue)
-                            Text(fmtDate(m.date))
-                                .font(.subheadline)
-                            Spacer()
-                            if m.photoFileName != nil {
-                                Button {
-                                    if let url = m.photoURL {
-                                        viewingPhotoURL = url
+                        Button { editingElevatorMaintenance = m } label: {
+                            HStack {
+                                Image(systemName: "wrench.and.screwdriver")
+                                    .font(.caption).foregroundStyle(.blue)
+                                Text(fmtDate(m.date))
+                                    .font(.subheadline).foregroundStyle(.primary)
+                                Spacer()
+                                if m.photoFileName != nil {
+                                    Button {
+                                        if let url = m.photoURL {
+                                            viewingPhotoURL = url
+                                        }
+                                    } label: {
+                                        Image(systemName: "photo.fill")
+                                            .font(.caption).foregroundStyle(.blue)
                                     }
-                                } label: {
-                                    Image(systemName: "photo.fill")
-                                        .font(.caption).foregroundStyle(.blue)
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2).foregroundStyle(.tertiary)
                             }
+                            .padding(.horizontal).padding(.vertical, 6)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.horizontal).padding(.vertical, 6)
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -400,9 +423,10 @@ struct RealEstateDetailView: View {
             let hasUtilities = !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty
                 || !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty
                 || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty || !estate.gasUserNumber.isEmpty
+                || !estate.utilityPayments.isEmpty
 
             if hasUtilities {
-                sectionHeader("水電瓦斯")
+                sectionHeaderWithAdd("水電瓦斯") { addingUtilityPayment = true }
                 if !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty {
                     utilityRow(icon: "drop.fill", color: .blue,
                                number: estate.waterMeterNumber, owner: estate.waterMeterOwner,
@@ -432,6 +456,44 @@ struct RealEstateDetailView: View {
                         }
                     }
                     .padding(.horizontal).padding(.vertical, 8)
+                }
+
+                if !estate.utilityPayments.isEmpty {
+                    Divider().padding(.horizontal)
+                    HStack {
+                        Text("繳費紀錄").font(.caption2).foregroundStyle(.tertiary)
+                        Spacer()
+                    }
+                    .padding(.horizontal).padding(.top, 4)
+                    ForEach(estate.utilityPayments.sorted { $0.date > $1.date }) { p in
+                        Button { editingUtilityPayment = p } label: {
+                            HStack {
+                                Image(systemName: p.type.icon)
+                                    .font(.caption).foregroundStyle(utilityColor(p.type)).frame(width: 16)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(p.type.rawValue).font(.caption.weight(.medium)).foregroundStyle(.primary)
+                                    Text(fmtDate(p.date)).font(.caption2).foregroundStyle(.tertiary)
+                                }
+                                Spacer()
+                                if p.photoFileName != nil {
+                                    Button {
+                                        if let url = p.photoURL { viewingPhotoURL = url }
+                                    } label: {
+                                        Image(systemName: "photo.fill")
+                                            .font(.caption).foregroundStyle(.blue)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                Text(fmt(p.amount))
+                                    .font(.subheadline.bold()).foregroundStyle(.red)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal).padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
 
@@ -841,10 +903,31 @@ struct RealEstateDetailView: View {
 
     // MARK: - 輔助
 
+    private func utilityColor(_ type: UtilityType) -> Color {
+        switch type {
+        case .water: return .blue
+        case .electricity: return .yellow
+        case .gas: return .orange
+        }
+    }
+
     private func sectionHeader(_ title: String) -> some View {
         HStack {
             Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             Spacer()
+        }
+        .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+    }
+
+    private func sectionHeaderWithAdd(_ title: String, action: @escaping () -> Void) -> some View {
+        HStack {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Spacer()
+            Button(action: action) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.subheadline).foregroundStyle(.green)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
     }
@@ -899,5 +982,240 @@ struct RealEstateDetailView: View {
 
     private func fmtDate(_ d: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
+    }
+}
+
+// MARK: - 電梯保養編輯
+
+struct ElevatorMaintenanceEditor: View {
+    @EnvironmentObject var store: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    let estateId: UUID
+    let editing: ElevatorMaintenance?
+
+    @State private var date = Date()
+    @State private var photoFileName: String?
+    @State private var photoItem: PhotosPickerItem?
+    @State private var showDeleteConfirm = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("保養記錄") {
+                    DatePicker("保養日期", selection: $date, displayedComponents: .date)
+
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        HStack {
+                            Image(systemName: "photo")
+                            Text(photoFileName == nil ? "選擇照片" : "更換照片")
+                            Spacer()
+                            if photoFileName != nil {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            }
+                        }
+                    }
+                    if photoFileName != nil {
+                        Button(role: .destructive) {
+                            if let name = photoFileName { ElevatorMaintenance.deletePhoto(name) }
+                            photoFileName = nil
+                        } label: {
+                            Label("移除照片", systemImage: "xmark.circle")
+                        }
+                    }
+                }
+
+                if editing != nil {
+                    Section {
+                        Button(role: .destructive) { showDeleteConfirm = true } label: {
+                            Label("刪除此記錄", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .navigationTitle(editing == nil ? "新增保養記錄" : "編輯保養記錄")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("儲存") { save() }.bold().foregroundStyle(.green)
+                }
+            }
+            .onAppear {
+                if let e = editing {
+                    date = e.date
+                    photoFileName = e.photoFileName
+                }
+            }
+            .onChange(of: photoItem) { _, item in
+                Task {
+                    if let item, let data = try? await item.loadTransferable(type: Data.self) {
+                        let id = editing?.id ?? UUID()
+                        photoFileName = ElevatorMaintenance.savePhoto(data, id: id)
+                    }
+                }
+            }
+            .alert("確定刪除？", isPresented: $showDeleteConfirm) {
+                Button("刪除", role: .destructive) { deleteRecord() }
+                Button("取消", role: .cancel) {}
+            }
+        }
+    }
+
+    private func save() {
+        guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        let recordId = editing?.id ?? UUID()
+        let record = ElevatorMaintenance(id: recordId, date: date, photoFileName: photoFileName)
+        if let idx = estate.elevatorMaintenances.firstIndex(where: { $0.id == recordId }) {
+            estate.elevatorMaintenances[idx] = record
+        } else {
+            estate.elevatorMaintenances.append(record)
+        }
+        store.update(estate)
+        dismiss()
+    }
+
+    private func deleteRecord() {
+        guard var estate = store.realEstates.first(where: { $0.id == estateId }),
+              let e = editing else { return }
+        if let name = e.photoFileName { ElevatorMaintenance.deletePhoto(name) }
+        estate.elevatorMaintenances.removeAll { $0.id == e.id }
+        store.update(estate)
+        dismiss()
+    }
+}
+
+// MARK: - 水電瓦斯繳費編輯
+
+struct UtilityPaymentEditor: View {
+    @EnvironmentObject var store: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    let estateId: UUID
+    let editing: UtilityPayment?
+
+    @State private var type: UtilityType = .water
+    @State private var date = Date()
+    @State private var amountText = ""
+    @State private var note = ""
+    @State private var photoFileName: String?
+    @State private var photoItem: PhotosPickerItem?
+    @State private var showDeleteConfirm = false
+    @State private var showError = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("基本資訊") {
+                    Picker("類型", selection: $type) {
+                        ForEach(UtilityType.allCases) { t in
+                            Label(t.rawValue, systemImage: t.icon).tag(t)
+                        }
+                    }
+                    DatePicker("繳費日期", selection: $date, displayedComponents: .date)
+                    HStack {
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("金額", text: $amountText).keyboardType(.decimalPad)
+                    }
+                }
+
+                Section("收據照片") {
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        HStack {
+                            Image(systemName: "photo")
+                            Text(photoFileName == nil ? "選擇照片" : "更換照片")
+                            Spacer()
+                            if photoFileName != nil {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            }
+                        }
+                    }
+                    if photoFileName != nil {
+                        Button(role: .destructive) {
+                            if let name = photoFileName { UtilityPayment.deletePhoto(name) }
+                            photoFileName = nil
+                        } label: {
+                            Label("移除照片", systemImage: "xmark.circle")
+                        }
+                    }
+                }
+
+                Section("備註") {
+                    TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                }
+
+                if editing != nil {
+                    Section {
+                        Button(role: .destructive) { showDeleteConfirm = true } label: {
+                            Label("刪除此記錄", systemImage: "trash")
+                        }
+                    }
+                }
+
+                if showError {
+                    Section {
+                        Text("請輸入有效金額").foregroundStyle(.red).font(.caption)
+                    }
+                }
+            }
+            .navigationTitle(editing == nil ? "新增繳費紀錄" : "編輯繳費紀錄")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("儲存") { save() }.bold().foregroundStyle(.green)
+                }
+            }
+            .onAppear {
+                if let e = editing {
+                    type = e.type
+                    date = e.date
+                    amountText = e.amount > 0 ? String(format: "%.0f", e.amount) : ""
+                    note = e.note
+                    photoFileName = e.photoFileName
+                }
+            }
+            .onChange(of: photoItem) { _, item in
+                Task {
+                    if let item, let data = try? await item.loadTransferable(type: Data.self) {
+                        let id = editing?.id ?? UUID()
+                        photoFileName = UtilityPayment.savePhoto(data, id: id)
+                    }
+                }
+            }
+            .alert("確定刪除？", isPresented: $showDeleteConfirm) {
+                Button("刪除", role: .destructive) { deleteRecord() }
+                Button("取消", role: .cancel) {}
+            }
+        }
+    }
+
+    private func save() {
+        guard let amount = Double(amountText), amount > 0 else {
+            showError = true; return
+        }
+        guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        let recordId = editing?.id ?? UUID()
+        let record = UtilityPayment(
+            id: recordId, type: type, date: date, amount: amount,
+            photoFileName: photoFileName,
+            note: note.trimmingCharacters(in: .whitespaces)
+        )
+        if let idx = estate.utilityPayments.firstIndex(where: { $0.id == recordId }) {
+            estate.utilityPayments[idx] = record
+        } else {
+            estate.utilityPayments.append(record)
+        }
+        store.update(estate)
+        dismiss()
+    }
+
+    private func deleteRecord() {
+        guard var estate = store.realEstates.first(where: { $0.id == estateId }),
+              let e = editing else { return }
+        if let name = e.photoFileName { UtilityPayment.deletePhoto(name) }
+        estate.utilityPayments.removeAll { $0.id == e.id }
+        store.update(estate)
+        dismiss()
     }
 }

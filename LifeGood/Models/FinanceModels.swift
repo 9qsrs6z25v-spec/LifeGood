@@ -467,6 +467,63 @@ struct ElevatorMaintenance: Identifiable, Codable {
     }
 }
 
+// MARK: - 水電瓦斯繳費紀錄
+
+enum UtilityType: String, Codable, CaseIterable, Identifiable {
+    case water = "水費"
+    case electricity = "電費"
+    case gas = "瓦斯費"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .water: return "drop.fill"
+        case .electricity: return "bolt.fill"
+        case .gas: return "flame.fill"
+        }
+    }
+}
+
+struct UtilityPayment: Identifiable, Codable {
+    let id: UUID
+    var type: UtilityType
+    var date: Date
+    var amount: Double
+    var photoFileName: String?
+    var note: String
+
+    init(id: UUID = UUID(), type: UtilityType = .water, date: Date = Date(),
+         amount: Double = 0, photoFileName: String? = nil, note: String = "") {
+        self.id = id; self.type = type; self.date = date; self.amount = amount
+        self.photoFileName = photoFileName; self.note = note
+    }
+
+    var photoURL: URL? {
+        guard let name = photoFileName else { return nil }
+        return Self.photosDirectory.appendingPathComponent(name)
+    }
+
+    static var photosDirectory: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("UtilityPhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func savePhoto(_ data: Data, id: UUID) -> String {
+        let name = "\(id.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        try? data.write(to: url)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
 // MARK: - 樓層功能
 
 enum FloorFunction: String, Codable, CaseIterable, Identifiable {
@@ -638,6 +695,7 @@ struct RealEstate: Identifiable, Codable {
     var gasUserNumber: String          // 瓦斯用戶編號
     var insuranceItems: [RealEstateInsuranceItem]      // 保險項目
     var propertyAssets: [RealEstatePropertyAsset]       // 房屋附屬資產
+    var utilityPayments: [UtilityPayment]               // 水電瓦斯繳費紀錄
 
     init(
         id: UUID = UUID(),
@@ -685,7 +743,8 @@ struct RealEstate: Identifiable, Codable {
         gasMeterOwner: String = "",
         gasUserNumber: String = "",
         insuranceItems: [RealEstateInsuranceItem] = [],
-        propertyAssets: [RealEstatePropertyAsset] = []
+        propertyAssets: [RealEstatePropertyAsset] = [],
+        utilityPayments: [UtilityPayment] = []
     ) {
         self.id = id
         self.name = name
@@ -733,6 +792,7 @@ struct RealEstate: Identifiable, Codable {
         self.gasUserNumber = gasUserNumber
         self.insuranceItems = insuranceItems
         self.propertyAssets = propertyAssets
+        self.utilityPayments = utilityPayments
     }
 
     // MARK: - 向下相容解碼
@@ -792,6 +852,7 @@ struct RealEstate: Identifiable, Codable {
         gasUserNumber = (try? c.decode(String.self, forKey: .gasUserNumber)) ?? ""
         insuranceItems = (try? c.decode([RealEstateInsuranceItem].self, forKey: .insuranceItems)) ?? []
         propertyAssets = (try? c.decode([RealEstatePropertyAsset].self, forKey: .propertyAssets)) ?? []
+        utilityPayments = (try? c.decode([UtilityPayment].self, forKey: .utilityPayments)) ?? []
 
         // 向下相容：舊版有 monthlyMortgage 欄位，轉為 mortgageItems
         if mortgageItems.isEmpty,
@@ -809,6 +870,7 @@ struct RealEstate: Identifiable, Codable {
         case totalFloors, fromFloor, toFloor, floors
         case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
         case gasMeterNumber, gasMeterOwner, gasUserNumber, insuranceItems, propertyAssets
+        case utilityPayments
         case monthlyMortgage // 舊版欄位，僅用於解碼
     }
 
@@ -860,6 +922,7 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(gasMeterOwner, forKey: .gasMeterOwner)
         try c.encode(insuranceItems, forKey: .insuranceItems)
         try c.encode(propertyAssets, forKey: .propertyAssets)
+        try c.encode(utilityPayments, forKey: .utilityPayments)
     }
 
     /// 顯示用的完整地點（縣市 + 地址）

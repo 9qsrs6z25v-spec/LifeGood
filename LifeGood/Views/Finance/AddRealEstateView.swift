@@ -1373,14 +1373,55 @@ struct PhotoViewerSheet: View {
     let url: URL
     @Environment(\.dismiss) private var dismiss
 
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
     var body: some View {
         NavigationStack {
             Group {
                 if let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
-                    Image(uiImage: img)
-                        .resizable().scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .padding()
+                    GeometryReader { geo in
+                        Image(uiImage: img)
+                            .resizable().scaledToFit()
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .scaleEffect(scale)
+                            .offset(offset)
+                            .gesture(
+                                MagnificationGesture()
+                                    .onChanged { value in
+                                        scale = max(1, min(lastScale * value, 5))
+                                    }
+                                    .onEnded { _ in
+                                        lastScale = scale
+                                        if scale <= 1 { resetView() }
+                                    }
+                            )
+                            .simultaneousGesture(
+                                DragGesture()
+                                    .onChanged { value in
+                                        guard scale > 1 else { return }
+                                        offset = CGSize(
+                                            width: lastOffset.width + value.translation.width,
+                                            height: lastOffset.height + value.translation.height
+                                        )
+                                    }
+                                    .onEnded { _ in
+                                        lastOffset = offset
+                                    }
+                            )
+                            .onTapGesture(count: 2) {
+                                withAnimation(.spring(duration: 0.3)) {
+                                    if scale > 1 {
+                                        resetView()
+                                    } else {
+                                        scale = 2.5
+                                        lastScale = 2.5
+                                    }
+                                }
+                            }
+                    }
                 } else {
                     VStack(spacing: 12) {
                         Image(systemName: "photo.slash").font(.largeTitle).foregroundStyle(.secondary)
@@ -1390,13 +1431,28 @@ struct PhotoViewerSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black)
-            .navigationTitle("保養照片")
+            .navigationTitle("照片瀏覽")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if scale > 1 {
+                        Button {
+                            withAnimation(.spring(duration: 0.3)) { resetView() }
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise.circle")
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("關閉") { dismiss() }
                 }
             }
         }
+    }
+
+    private func resetView() {
+        scale = 1; lastScale = 1
+        offset = .zero; lastOffset = .zero
     }
 }
