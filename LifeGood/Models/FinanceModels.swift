@@ -200,6 +200,9 @@ struct Stock: Identifiable, Codable {
     var soldDate: Date?
     var linkedExpenseId: UUID?
     var linkedIncomeId: UUID?
+    var linkedBankMilestoneId: UUID?
+    var linkedBankCurrency: String?
+    var linkedSecuritiesMilestoneId: UUID?
 
     init(
         id: UUID = UUID(),
@@ -214,7 +217,10 @@ struct Stock: Identifiable, Codable {
         soldPrice: Double = 0,
         soldDate: Date? = nil,
         linkedExpenseId: UUID? = nil,
-        linkedIncomeId: UUID? = nil
+        linkedIncomeId: UUID? = nil,
+        linkedBankMilestoneId: UUID? = nil,
+        linkedBankCurrency: String? = nil,
+        linkedSecuritiesMilestoneId: UUID? = nil
     ) {
         self.id = id
         self.name = name
@@ -229,6 +235,9 @@ struct Stock: Identifiable, Codable {
         self.soldDate = soldDate
         self.linkedExpenseId = linkedExpenseId
         self.linkedIncomeId = linkedIncomeId
+        self.linkedBankMilestoneId = linkedBankMilestoneId
+        self.linkedBankCurrency = linkedBankCurrency
+        self.linkedSecuritiesMilestoneId = linkedSecuritiesMilestoneId
     }
 
     init(from decoder: Decoder) throws {
@@ -246,6 +255,9 @@ struct Stock: Identifiable, Codable {
         soldDate = try c.decodeIfPresent(Date.self, forKey: .soldDate)
         linkedExpenseId = try c.decodeIfPresent(UUID.self, forKey: .linkedExpenseId)
         linkedIncomeId = try c.decodeIfPresent(UUID.self, forKey: .linkedIncomeId)
+        linkedBankMilestoneId = try c.decodeIfPresent(UUID.self, forKey: .linkedBankMilestoneId)
+        linkedBankCurrency = try c.decodeIfPresent(String.self, forKey: .linkedBankCurrency)
+        linkedSecuritiesMilestoneId = try c.decodeIfPresent(UUID.self, forKey: .linkedSecuritiesMilestoneId)
     }
 
     /// 投入成本

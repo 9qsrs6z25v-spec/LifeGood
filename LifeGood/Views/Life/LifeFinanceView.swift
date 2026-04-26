@@ -194,7 +194,7 @@ struct FinanceCardView: View {
                 VStack(spacing: 16) {
                     headerCard
                     detailCard
-                    if sub == .bank { depositSection }
+                    if sub == .bank || sub == .securities { depositSection }
                     if sub == .bank { linkedCreditCardSection }
                     if sub == .creditCard { creditCardChartSection }
                     if !item.note.isEmpty { noteCard }
@@ -424,7 +424,7 @@ struct FinanceCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Image(systemName: "dollarsign.circle.fill").foregroundStyle(.blue)
-                Text("銀行存款").font(.headline)
+                Text(sub == .securities ? "證券交易" : "銀行存款").font(.headline)
                 Spacer()
                 Menu {
                     Button { addDepositCurrency = "NT$"; showAddDeposit = true } label: {
@@ -616,24 +616,40 @@ struct FinanceCardView: View {
 
     private func depositRow(_ dep: BankDeposit) -> some View {
         let isVirtual = isVirtualCreditCardEntry(dep)
+        let isStock = dep.linkedStockId != nil
+        let badgeText: String? = {
+            if isStock {
+                if dep.isWithdrawal { return "買入/虧損" }
+                return "賣出獲利"
+            }
+            if dep.isWithdrawal { return isVirtual ? "信用卡" : "扣款" }
+            return nil
+        }()
+        let badgeColor: Color = {
+            if isStock { return .purple }
+            if isVirtual { return .orange }
+            return .red
+        }()
         return Button {
-            // 連結扣款 / 信用卡彙總 不可直接編輯
-            if dep.linkedExpenseId == nil && !isVirtual { editingDeposit = dep }
+            // 連結扣款 / 信用卡彙總 / 股票交易 不可直接編輯
+            if dep.linkedExpenseId == nil && !isVirtual && !isStock { editingDeposit = dep }
         } label: {
             HStack {
                 Text(fmtDate(dep.date)).font(.caption).foregroundStyle(.tertiary)
-                if dep.isWithdrawal {
-                    Text(isVirtual ? "信用卡" : "扣款").font(.caption2)
-                        .foregroundStyle(isVirtual ? Color.orange : Color.red)
+                if let txt = badgeText {
+                    Text(txt).font(.caption2).foregroundStyle(badgeColor)
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background((isVirtual ? Color.orange : Color.red).opacity(0.12))
+                        .background(badgeColor.opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                 }
                 Spacer()
                 Text("\(dep.isWithdrawal ? "-" : "")\(dep.currencyCode) \(fmtNum(dep.amount))")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(dep.isWithdrawal ? (isVirtual ? Color.orange : Color.red) :
-                                     (dep.currencyCode == "NT$" ? Color.primary : Color.blue))
+                    .foregroundStyle(
+                        isStock ? (dep.isWithdrawal ? Color.red : Color.green) :
+                        (dep.isWithdrawal ? (isVirtual ? Color.orange : Color.red) :
+                         (dep.currencyCode == "NT$" ? Color.primary : Color.blue))
+                    )
             }
             .padding(.horizontal).padding(.vertical, 6)
             .contentShape(Rectangle())

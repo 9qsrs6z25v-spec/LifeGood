@@ -244,12 +244,16 @@ struct BankDeposit: Identifiable, Codable {
     var currencyCode: String
     var isWithdrawal: Bool
     var linkedExpenseId: UUID?
+    var linkedStockId: UUID?
 
     init(id: UUID = UUID(), date: Date = Date(), amount: Double = 0,
-         currencyCode: String = "NT$", isWithdrawal: Bool = false, linkedExpenseId: UUID? = nil) {
+         currencyCode: String = "NT$", isWithdrawal: Bool = false,
+         linkedExpenseId: UUID? = nil, linkedStockId: UUID? = nil) {
         self.id = id; self.date = date; self.amount = amount
         self.currencyCode = currencyCode
-        self.isWithdrawal = isWithdrawal; self.linkedExpenseId = linkedExpenseId
+        self.isWithdrawal = isWithdrawal
+        self.linkedExpenseId = linkedExpenseId
+        self.linkedStockId = linkedStockId
     }
 
     init(from decoder: Decoder) throws {
@@ -260,10 +264,11 @@ struct BankDeposit: Identifiable, Codable {
         currencyCode = try c.decode(String.self, forKey: .currencyCode)
         isWithdrawal = (try? c.decode(Bool.self, forKey: .isWithdrawal)) ?? false
         linkedExpenseId = try? c.decodeIfPresent(UUID.self, forKey: .linkedExpenseId)
+        linkedStockId = try? c.decodeIfPresent(UUID.self, forKey: .linkedStockId)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, date, amount, currencyCode, isWithdrawal, linkedExpenseId
+        case id, date, amount, currencyCode, isWithdrawal, linkedExpenseId, linkedStockId
     }
 }
 

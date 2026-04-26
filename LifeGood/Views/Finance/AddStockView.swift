@@ -24,6 +24,7 @@ struct StockQuote {
 struct AddStockView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: Stock?
@@ -40,6 +41,10 @@ struct AddStockView: View {
     @State private var isSold = false
     @State private var soldPriceText = ""
     @State private var soldDate = Date()
+
+    @State private var selectedBankMilestoneId: UUID?
+    @State private var selectedBankCurrency: String = "NT$"
+    @State private var selectedSecuritiesMilestoneId: UUID?
 
     @State private var isFetching = false
     @State private var fetchError = ""
@@ -58,6 +63,9 @@ struct AddStockView: View {
                     if !fetchError.isEmpty {
                         Text(fetchError)
                             .font(.caption).foregroundStyle(.red)
+                    }
+                    if !bankMilestones.isEmpty || !securitiesMilestones.isEmpty {
+                        accountPicker
                     }
                     DatePicker("買入日期", selection: $purchaseDate, displayedComponents: .date)
 
@@ -125,6 +133,98 @@ struct AddStockView: View {
                 }
             }
             .onAppear { loadEditing() }
+        }
+    }
+
+    // MARK: - 帳戶選擇器（銀行 / 證券）
+
+    private var bankMilestones: [LifeMilestone] {
+        lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .bank
+        }
+    }
+
+    private var securitiesMilestones: [LifeMilestone] {
+        lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .securities
+        }
+    }
+
+    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
+        let codes = (ms.bankDeposits ?? [])
+            .filter { !$0.isWithdrawal }
+            .map(\.currencyCode)
+        var unique: [String] = []
+        for c in codes where !unique.contains(c) { unique.append(c) }
+        return unique.isEmpty ? ["NT$"] : unique
+    }
+
+    private var accountPickerLabel: String {
+        if let id = selectedSecuritiesMilestoneId,
+           let ms = securitiesMilestones.first(where: { $0.id == id }) {
+            return ms.title
+        }
+        if let id = selectedBankMilestoneId,
+           let ms = bankMilestones.first(where: { $0.id == id }) {
+            let name = ms.bankName ?? ms.title
+            return "\(name) · \(selectedBankCurrency)"
+        }
+        return "未選擇"
+    }
+
+    private var accountPicker: some View {
+        HStack {
+            Text("扣款帳戶").foregroundStyle(.secondary)
+            Spacer()
+            Menu {
+                Button("不指定") {
+                    selectedBankMilestoneId = nil
+                    selectedSecuritiesMilestoneId = nil
+                    selectedBankCurrency = "NT$"
+                }
+                if !bankMilestones.isEmpty {
+                    Section("銀行") {
+                        ForEach(bankMilestones) { ms in
+                            let currencies = bankCurrencies(for: ms)
+                            let name = ms.bankName ?? ms.title
+                            if currencies.count > 1 {
+                                Menu(name) {
+                                    ForEach(currencies, id: \.self) { code in
+                                        Button(code) {
+                                            selectedBankMilestoneId = ms.id
+                                            selectedBankCurrency = code
+                                            selectedSecuritiesMilestoneId = nil
+                                        }
+                                    }
+                                }
+                            } else {
+                                Button(name) {
+                                    selectedBankMilestoneId = ms.id
+                                    selectedBankCurrency = currencies.first ?? "NT$"
+                                    selectedSecuritiesMilestoneId = nil
+                                }
+                            }
+                        }
+                    }
+                }
+                if !securitiesMilestones.isEmpty {
+                    Section("證券") {
+                        ForEach(securitiesMilestones) { ms in
+                            Button(ms.title) {
+                                selectedSecuritiesMilestoneId = ms.id
+                                selectedBankMilestoneId = nil
+                                selectedBankCurrency = "NT$"
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(accountPickerLabel)
+                        .foregroundStyle((selectedBankMilestoneId == nil && selectedSecuritiesMilestoneId == nil) ? .secondary : .primary)
+                    Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
@@ -332,10 +432,61 @@ struct AddStockView: View {
             soldPrice: sp,
             soldDate: isSold ? soldDate : nil,
             linkedExpenseId: expId,
-            linkedIncomeId: incId
+            linkedIncomeId: incId,
+            linkedBankMilestoneId: selectedBankMilestoneId,
+            linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
+            linkedSecuritiesMilestoneId: selectedSecuritiesMilestoneId
         )
         if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
+        syncAccountTransactions(for: item, previous: editing)
         dismiss()
+    }
+
+    /// 同步股票買賣到所選銀行/證券帳戶的存款記錄
+    private func syncAccountTransactions(for stock: Stock, previous: Stock?) {
+        // 移除舊帳戶中本股票的記錄
+        let prevAccountIds = [previous?.linkedBankMilestoneId, previous?.linkedSecuritiesMilestoneId].compactMap { $0 }
+        for prevId in prevAccountIds {
+            if var oldMs = lifeStore.milestones.first(where: { $0.id == prevId }) {
+                oldMs.bankDeposits?.removeAll { $0.linkedStockId == stock.id }
+                lifeStore.update(oldMs)
+            }
+        }
+
+        // 取得目標帳戶
+        let targetId = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId
+        guard let accId = targetId,
+              var ms = lifeStore.milestones.first(where: { $0.id == accId }) else { return }
+
+        var list = ms.bankDeposits ?? []
+        list.removeAll { $0.linkedStockId == stock.id }
+
+        let currency = stock.linkedBankCurrency ?? "NT$"
+
+        // 買入：扣款（投入成本）
+        let cost = stock.shares * stock.purchasePrice
+        if cost > 0 {
+            list.append(BankDeposit(
+                id: UUID(), date: stock.purchaseDate, amount: cost,
+                currencyCode: currency, isWithdrawal: true,
+                linkedExpenseId: nil, linkedStockId: stock.id
+            ))
+        }
+
+        // 賣出：損益
+        if stock.isSold, stock.soldPrice > 0, let sd = stock.soldDate {
+            let pl = stock.shares * (stock.soldPrice - stock.purchasePrice)
+            if pl != 0 {
+                list.append(BankDeposit(
+                    id: UUID(), date: sd, amount: abs(pl),
+                    currencyCode: currency, isWithdrawal: pl < 0,
+                    linkedExpenseId: nil, linkedStockId: stock.id
+                ))
+            }
+        }
+
+        ms.bankDeposits = list
+        lifeStore.update(ms)
     }
 
     private func syncSoldIncome(stockId: UUID, name: String, profit: Double, date: Date, note: String, existingId: UUID?) -> UUID {
@@ -377,6 +528,9 @@ struct AddStockView: View {
         isSold = e.isSold
         soldPriceText = e.soldPrice > 0 ? String(format: "%.2f", e.soldPrice) : ""
         soldDate = e.soldDate ?? Date()
+        selectedBankMilestoneId = e.linkedBankMilestoneId
+        selectedBankCurrency = e.linkedBankCurrency ?? "NT$"
+        selectedSecuritiesMilestoneId = e.linkedSecuritiesMilestoneId
     }
 
     private func formatCurrency(_ value: Double) -> String {

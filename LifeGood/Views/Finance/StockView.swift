@@ -3,6 +3,7 @@ import SwiftUI
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
     @State private var showAdd = false
     @State private var editingItem: Stock?
     @State private var soldExpanded = false
@@ -267,6 +268,13 @@ struct StockView: View {
         }
         if let incId = item.linkedIncomeId {
             expenseStore.incomes.removeAll { $0.id == incId }
+        }
+        // 同步移除連結帳戶（銀行/證券）的存款記錄
+        for accId in [item.linkedBankMilestoneId, item.linkedSecuritiesMilestoneId].compactMap({ $0 }) {
+            if var ms = lifeStore.milestones.first(where: { $0.id == accId }) {
+                ms.bankDeposits?.removeAll { $0.linkedStockId == item.id }
+                lifeStore.update(ms)
+            }
         }
         store.deleteStock(item)
     }
