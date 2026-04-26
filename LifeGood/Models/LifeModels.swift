@@ -23,6 +23,8 @@ struct UserProfile: Codable {
 
 enum FamilyMemberRole: String, Codable, CaseIterable, Identifiable {
     case spouse = "配偶"
+    case father = "爸爸"
+    case mother = "媽媽"
     case son = "兒子"
     case daughter = "女兒"
     case elderBrother = "哥哥"
@@ -35,6 +37,8 @@ enum FamilyMemberRole: String, Codable, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .spouse: return "heart.circle.fill"
+        case .father: return "figure.stand"
+        case .mother: return "figure.stand.dress"
         case .son, .daughter: return "figure.child"
         case .elderBrother, .youngerBrother: return "figure.stand"
         case .elderSister, .youngerSister: return "figure.stand.dress"
