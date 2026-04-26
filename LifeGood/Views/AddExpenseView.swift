@@ -30,7 +30,6 @@ struct AddExpenseView: View {
     @State private var selectedLoanSubCategory: LoanSubCategory = .mortgage
     @State private var loanTotalAmountText = ""
     @State private var loanYearsText = ""
-    @State private var loanRateText = ""
     @State private var selectedBankMilestoneId: UUID?
     @State private var selectedBankCurrency: String = "NT$"
 
@@ -384,7 +383,7 @@ struct AddExpenseView: View {
                 }
             }
 
-            if expenseType == .variable && !bankMilestones.isEmpty {
+            if !bankMilestones.isEmpty && !isSavingsInsurance {
                 bankPicker
             }
 
@@ -398,14 +397,19 @@ struct AddExpenseView: View {
                         .keyboardType(.decimalPad)
                     Text("年").foregroundStyle(.secondary)
                 }
-                HStack {
-                    TextField("貸款利率", text: $loanRateText)
-                        .keyboardType(.decimalPad)
-                    Text("%").foregroundStyle(.secondary)
-                }
                 carLoanCalcRow
             }
         }
+    }
+
+    private func computedLoanRate() -> Double? {
+        let monthly = Double(amountText) ?? 0
+        let total = Double(loanTotalAmountText) ?? 0
+        let years = Double(loanYearsText) ?? 0
+        guard monthly > 0, total > 0, years > 0 else { return nil }
+        let totalPaid = monthly * 12 * years
+        let totalInterest = totalPaid - total
+        return (totalInterest / total / years) * 100
     }
 
     @ViewBuilder
@@ -1125,9 +1129,9 @@ struct AddExpenseView: View {
             diningMember: (expenseType == .variable && selectedVariableCategory == .food && !selectedDiningMember.isEmpty) ? selectedDiningMember : nil,
             loanTotalAmount: isCarLoan ? Double(loanTotalAmountText) : nil,
             loanYears: isCarLoan ? Double(loanYearsText) : nil,
-            loanRate: isCarLoan ? Double(loanRateText) : nil,
-            linkedBankMilestoneId: expenseType == .variable ? selectedBankMilestoneId : nil,
-            linkedBankCurrency: expenseType == .variable && selectedBankMilestoneId != nil ? selectedBankCurrency : nil
+            loanRate: isCarLoan ? computedLoanRate() : nil,
+            linkedBankMilestoneId: selectedBankMilestoneId,
+            linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil
         )
 
         if isEditing { store.update(expense) } else { store.add(expense) }
@@ -1457,7 +1461,6 @@ struct AddExpenseView: View {
         selectedDiningMember = expense.diningMember ?? ""
         if let lt = expense.loanTotalAmount, lt > 0 { loanTotalAmountText = String(format: "%.0f", lt) }
         if let ly = expense.loanYears, ly > 0 { loanYearsText = String(format: "%g", ly) }
-        if let lr = expense.loanRate, lr > 0 { loanRateText = String(format: "%g", lr) }
         selectedBankMilestoneId = expense.linkedBankMilestoneId
         selectedBankCurrency = expense.linkedBankCurrency ?? "NT$"
         note = expense.note

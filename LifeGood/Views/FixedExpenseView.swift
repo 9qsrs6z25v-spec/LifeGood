@@ -3,6 +3,7 @@ import SwiftUI
 struct FixedExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var lifeStore: LifeStore
     @State private var showingAddSheet = false
     @State private var expenseToEdit: Expense?
 
@@ -173,6 +174,12 @@ struct FixedExpenseView: View {
                var vehicle = financeStore.vehicles.first(where: { $0.id == linkedId }) {
                 vehicle.fixedExpenses.removeAll { $0.linkedExpenseId == expense.id }
                 financeStore.update(vehicle)
+            }
+            // 同步刪除銀行扣款記錄
+            if let bankId = expense.linkedBankMilestoneId,
+               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                ms.bankDeposits?.removeAll { $0.linkedExpenseId == expense.id }
+                lifeStore.update(ms)
             }
         }
         store.delete(at: offsets, from: list)
