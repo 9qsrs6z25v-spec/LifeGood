@@ -253,13 +253,43 @@ struct OverviewView: View {
 
     // MARK: - 最近交易
 
+    /// 收支統一條目（避免未來日期的固定支出/貸款佔據此區）
+    private enum RecentItem: Identifiable {
+        case expense(Expense)
+        case income(Income)
+
+        var id: UUID {
+            switch self {
+            case .expense(let e): return e.id
+            case .income(let i): return i.id
+            }
+        }
+        var date: Date {
+            switch self {
+            case .expense(let e): return e.date
+            case .income(let i): return i.date
+            }
+        }
+    }
+
+    private var recentItems: [RecentItem] {
+        let now = Date()
+        let exp = store.expenses
+            .filter { $0.date <= now }
+            .map { RecentItem.expense($0) }
+        let inc = store.incomes
+            .filter { $0.date <= now }
+            .map { RecentItem.income($0) }
+        return Array((exp + inc).sorted { $0.date > $1.date }.prefix(5))
+    }
+
     private var recentTransactionsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("最近交易")
                 .font(.headline)
                 .padding(.horizontal)
 
-            let recent = Array(store.expenses.sorted { $0.date > $1.date }.prefix(5))
+            let recent = recentItems
 
             if recent.isEmpty {
                 Text("尚無交易紀錄")
@@ -269,34 +299,12 @@ struct OverviewView: View {
                     .padding(.vertical, 20)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(recent) { expense in
-                        HStack {
-                            Image(systemName: expense.categoryIcon)
-                                .frame(width: 30)
-                                .foregroundStyle(.green)
+                    ForEach(recent) { item in
+                        recentRow(item)
+                            .padding(.horizontal)
+                            .padding(.vertical, 10)
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(expense.title)
-                                    .font(.subheadline)
-                                Text(expense.categoryName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Spacer()
-
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(smartCurrency(expense.amount))
-                                    .font(.subheadline.bold())
-                                Text(formatDate(expense.date))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.vertical, 10)
-
-                        if expense.id != recent.last?.id {
+                        if item.id != recent.last?.id {
                             Divider().padding(.leading, 50)
                         }
                     }
@@ -305,6 +313,46 @@ struct OverviewView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
                 .padding(.horizontal)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func recentRow(_ item: RecentItem) -> some View {
+        switch item {
+        case .expense(let e):
+            HStack {
+                Image(systemName: e.categoryIcon)
+                    .frame(width: 30)
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(e.title).font(.subheadline)
+                    Text(e.categoryName).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("-\(smartCurrency(e.amount))")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.primary)
+                    Text(formatDate(e.date)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        case .income(let i):
+            HStack {
+                Image(systemName: i.category.icon)
+                    .frame(width: 30)
+                    .foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(i.title).font(.subheadline)
+                    Text(i.category.rawValue).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("+\(smartCurrency(i.amount))")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.blue)
+                    Text(formatDate(i.date)).font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
     }
