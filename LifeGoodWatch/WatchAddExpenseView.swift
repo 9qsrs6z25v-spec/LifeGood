@@ -201,7 +201,6 @@ struct WatchAddExpenseView: View {
                     displayedComponents: [.date, .hourAndMinute]
                 )
                 .labelsHidden()
-                .datePickerStyle(.compact)
 
                 Button {
                     date = Date()
