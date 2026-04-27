@@ -33,13 +33,14 @@ struct WatchAddExpenseView: View {
 
     var body: some View {
         TabView(selection: $pageIndex) {
-            amountPage.tag(0)
-            categoryPage.tag(1)
-            diningMemberPage.tag(2)
-            titlePage.tag(3)
-            datePage.tag(4)
-            notePage.tag(5)
-            savePage.tag(6)
+            currencyPage.tag(0)
+            amountPage.tag(1)
+            categoryPage.tag(2)
+            diningMemberPage.tag(3)
+            titlePage.tag(4)
+            datePage.tag(5)
+            notePage.tag(6)
+            savePage.tag(7)
         }
         .tabViewStyle(.verticalPage)
         .alert("已儲存", isPresented: $showSavedToast) {
@@ -54,31 +55,61 @@ struct WatchAddExpenseView: View {
         }
     }
 
-    // MARK: - Page 1：金額 + 幣別
+    // MARK: - Page 1：幣別
 
-    private var amountPage: some View {
+    private var currencyPage: some View {
         ScrollView {
-            VStack(spacing: 8) {
-                pageHeader("金額", page: 1)
-
-                // 幣別選擇
-                Picker("幣別", selection: $currencyCode) {
-                    ForEach(currencies, id: \.self) { code in
-                        Text(code).tag(code)
+            VStack(spacing: 6) {
+                pageHeader("幣別", page: 1)
+                ForEach(currencies, id: \.self) { code in
+                    Button {
+                        currencyCode = code
+                        // 選完直接跳到下一頁（金額）
+                        withAnimation { pageIndex = 1 }
+                    } label: {
+                        HStack {
+                            Text(code).font(.body)
+                            Spacer()
+                            if currencyCode == code {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.green)
+                            }
+                        }
                     }
+                    .buttonStyle(.bordered)
                 }
-                .pickerStyle(.navigationLink)
-
-                // 金額顯示
-                Text(amountText.isEmpty ? "0" : amountText)
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .foregroundStyle(amountText.isEmpty ? .secondary : .primary)
-                    .frame(maxWidth: .infinity)
-
-                // 數字鍵盤
-                numberPad
             }
             .padding(.horizontal, 4)
+        }
+    }
+
+    // MARK: - Page 2：金額（數字鍵盤填滿頁面）
+
+    private var amountPage: some View {
+        VStack(spacing: 4) {
+            // 簡短頁首（金額顯示同行）
+            HStack(spacing: 4) {
+                Text("金額")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(currencyCode)
+                    .font(.caption2.bold())
+                    .foregroundStyle(.green)
+                Spacer()
+                Text(amountText.isEmpty ? "0" : amountText)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(amountText.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text("2/8")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 4)
+
+            // 數字鍵盤 — 縮小尺寸 + 右下角下一頁
+            numberPad
+                .padding(.horizontal, 2)
         }
     }
 
@@ -87,35 +118,50 @@ struct WatchAddExpenseView: View {
             ["1", "2", "3"],
             ["4", "5", "6"],
             ["7", "8", "9"],
-            ["⌫", "0", "C"]
+            ["⌫", "0", "▶"]
         ]
-        return VStack(spacing: 4) {
+        return VStack(spacing: 3) {
             ForEach(rows, id: \.self) { row in
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     ForEach(row, id: \.self) { key in
-                        Button {
-                            handleKey(key)
-                        } label: {
-                            Text(key)
-                                .font(.title3.weight(.medium))
-                                .frame(maxWidth: .infinity, minHeight: 30)
-                        }
-                        .buttonStyle(.bordered)
+                        numberPadKey(key)
                     }
                 }
             }
         }
     }
 
+    @ViewBuilder
+    private func numberPadKey(_ key: String) -> some View {
+        Button {
+            handleKey(key)
+        } label: {
+            Group {
+                if key == "▶" {
+                    Image(systemName: "chevron.down")
+                } else if key == "⌫" {
+                    Image(systemName: "delete.left")
+                } else {
+                    Text(key)
+                }
+            }
+            .font(.body.weight(.medium))
+            .frame(maxWidth: .infinity, minHeight: 24)
+        }
+        .buttonStyle(.bordered)
+        .tint(key == "▶" ? .green : .accentColor)
+        .disabled(key == "▶" && amountValue <= 0)
+    }
+
     private func handleKey(_ key: String) {
         switch key {
         case "⌫":
             if !amountText.isEmpty { amountText.removeLast() }
-        case "C":
-            amountText = ""
+        case "▶":
+            guard amountValue > 0 else { return }
+            withAnimation { pageIndex = 2 }
         default:
             guard amountText.count < 9 else { return }
-            // 防止多個 0 開頭
             if amountText == "0" && key != "0" {
                 amountText = key
             } else if amountText == "0" && key == "0" {
@@ -126,12 +172,12 @@ struct WatchAddExpenseView: View {
         }
     }
 
-    // MARK: - Page 2：分類
+    // MARK: - Page 3：分類
 
     private var categoryPage: some View {
         ScrollView {
             VStack(spacing: 8) {
-                pageHeader("分類", page: 2)
+                pageHeader("分類", page: 3)
                 ForEach(WatchVariableCategory.allCases) { cat in
                     Button {
                         category = cat
@@ -154,12 +200,12 @@ struct WatchAddExpenseView: View {
         }
     }
 
-    // MARK: - Page 3：用餐成員 / 同行人
+    // MARK: - Page 4：用餐成員 / 同行人
 
     private var diningMemberPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                pageHeader(category == .food ? "用餐成員" : "同行人", page: 3)
+                pageHeader(category == .food ? "用餐成員" : "同行人", page: 4)
 
                 TextField("選填", text: $diningMember)
 
@@ -171,12 +217,12 @@ struct WatchAddExpenseView: View {
         }
     }
 
-    // MARK: - Page 4：標題
+    // MARK: - Page 5：標題
 
     private var titlePage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                pageHeader("標題", page: 4)
+                pageHeader("標題", page: 5)
 
                 TextField(category.rawValue, text: $title)
 
@@ -188,12 +234,12 @@ struct WatchAddExpenseView: View {
         }
     }
 
-    // MARK: - Page 5：日期
+    // MARK: - Page 6：日期
 
     private var datePage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                pageHeader("日期", page: 5)
+                pageHeader("日期", page: 6)
 
                 DatePicker(
                     "日期",
@@ -214,12 +260,12 @@ struct WatchAddExpenseView: View {
         }
     }
 
-    // MARK: - Page 6：備註
+    // MARK: - Page 7：備註
 
     private var notePage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                pageHeader("備註", page: 6)
+                pageHeader("備註", page: 7)
                 TextField("選填", text: $note, axis: .vertical)
                     .lineLimit(1...4)
             }
@@ -227,12 +273,12 @@ struct WatchAddExpenseView: View {
         }
     }
 
-    // MARK: - Page 7：儲存（含摘要）
+    // MARK: - Page 8：儲存（含摘要）
 
     private var savePage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                pageHeader("確認", page: 7)
+                pageHeader("確認", page: 8)
 
                 summaryRow("金額", value: "\(currencyCode) \(amountText.isEmpty ? "0" : amountText)")
                 summaryRow("分類", value: category.rawValue)
@@ -272,7 +318,7 @@ struct WatchAddExpenseView: View {
             Text(title)
                 .font(.headline)
             Spacer()
-            Text("\(page)/7")
+            Text("\(page)/8")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
