@@ -529,9 +529,9 @@ struct ChildRecordEditorSheet: View {
                 }
             }
             .onAppear { loadEditing() }
-            .onChange(of: photoItem) { _, item in
+            .onChange(of: photoItem) { _ in
                 Task {
-                    guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+                    guard let photoItem, let data = try? await photoItem.loadTransferable(type: Data.self) else { return }
                     let recordId = editing?.id ?? UUID()
                     // 原圖永遠保留一份
                     photoFileName = ChildRecord.savePhoto(data, id: recordId)

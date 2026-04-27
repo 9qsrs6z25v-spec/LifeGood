@@ -178,7 +178,7 @@ struct LifeFinanceView: View {
                         .font(.caption2).foregroundStyle(.tertiary)
                     Text("存款總額 NT$ \(formatNumber(bankTotalBalance(for: item)))")
                         .font(.caption.bold())
-                        .foregroundStyle(bankTotalBalance(for: item) >= 0 ? .blue : .red)
+                        .foregroundStyle(bankTotalBalance(for: item) >= 0 ? Color.blue : Color.red)
                 }
             } else {
                 Text(formatDate(item.date)).font(.caption).foregroundStyle(.tertiary)
