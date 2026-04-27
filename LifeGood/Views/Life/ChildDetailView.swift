@@ -276,12 +276,16 @@ struct ChildDetailView: View {
                             Text(rec.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
-                    if rec.photoFileName != nil, let url = rec.photoURL,
-                       let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
-                        Image(uiImage: img)
-                            .resizable().scaledToFill()
-                            .frame(height: 80)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    if rec.photoFileName != nil {
+                        let displayURL = rec.sketchURL ?? rec.photoURL
+                        if let url = displayURL,
+                           let data = try? Data(contentsOf: url),
+                           let img = UIImage(data: data) {
+                            Image(uiImage: img)
+                                .resizable().scaledToFill()
+                                .frame(height: 80)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
                     }
                 }
             }
@@ -529,31 +533,46 @@ struct ChildRecordEditorSheet: View {
                 Task {
                     guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
                     let recordId = editing?.id ?? UUID()
+                    // 原圖永遠保留一份
+                    photoFileName = ChildRecord.savePhoto(data, id: recordId)
                     let origImage = UIImage(data: data)
-                    if sketchMode, let orig = origImage, let sketched = ChildRecord.applySketchEffect(orig),
+                    // 素描版另存一份
+                    if let orig = origImage, let sketched = ChildRecord.applySketchEffect(orig),
                        let sketchData = sketched.jpegData(compressionQuality: 0.85) {
-                        photoFileName = ChildRecord.savePhoto(sketchData, id: recordId)
-                        previewImage = sketched
-                    } else {
-                        photoFileName = ChildRecord.savePhoto(data, id: recordId)
-                        previewImage = origImage
+                        _ = ChildRecord.saveSketch(sketchData, id: recordId)
                     }
+                    previewImage = sketchMode ? loadSketchOrOrig(recordId) : origImage
                 }
             }
         }
     }
 
-    private func regeneratePreview() {
+    private func loadSketchOrOrig(_ recordId: UUID) -> UIImage? {
+        let sketchPath = ChildRecord.photosDirectory.appendingPathComponent("\(recordId.uuidString)_sketch.jpg")
+        if let data = try? Data(contentsOf: sketchPath), let img = UIImage(data: data) { return img }
         guard let name = photoFileName,
               let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)),
-              let img = UIImage(data: data) else { return }
-        if sketchMode, let sketched = ChildRecord.applySketchEffect(img) {
-            if let sketchData = sketched.jpegData(compressionQuality: 0.85) {
-                photoFileName = ChildRecord.savePhoto(sketchData, id: editing?.id ?? UUID())
+              let img = UIImage(data: data) else { return nil }
+        return img
+    }
+
+    private func regeneratePreview() {
+        guard let name = photoFileName else { return }
+        let recordId = editing?.id ?? UUID()
+        let origPath = ChildRecord.photosDirectory.appendingPathComponent(name)
+        guard let data = try? Data(contentsOf: origPath), let origImage = UIImage(data: data) else { return }
+
+        if sketchMode {
+            // 如果素描版不存在就產生
+            let sketchPath = ChildRecord.photosDirectory.appendingPathComponent("\(recordId.uuidString)_sketch.jpg")
+            if !FileManager.default.fileExists(atPath: sketchPath.path),
+               let sketched = ChildRecord.applySketchEffect(origImage),
+               let sketchData = sketched.jpegData(compressionQuality: 0.85) {
+                _ = ChildRecord.saveSketch(sketchData, id: recordId)
             }
-            previewImage = sketched
+            previewImage = loadSketchOrOrig(recordId)
         } else {
-            previewImage = img
+            previewImage = origImage
         }
     }
 
@@ -597,10 +616,12 @@ struct ChildRecordEditorSheet: View {
         if let w = e.weightKg, w > 0 { weightText = String(format: "%g", w) }
         dose = e.dose ?? ""; severity = e.severity ?? .mild
         photoFileName = e.photoFileName
-        if let name = e.photoFileName,
-           let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)),
-           let img = UIImage(data: data) {
-            previewImage = img
+        if e.photoFileName != nil {
+            previewImage = sketchMode ? loadSketchOrOrig(e.id) : {
+                guard let name = e.photoFileName,
+                      let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)) else { return nil }
+                return UIImage(data: data)
+            }()
         }
     }
 

@@ -205,6 +205,13 @@ struct ChildRecord: Identifiable, Codable {
         return Self.photosDirectory.appendingPathComponent(name)
     }
 
+    var sketchURL: URL? {
+        guard let name = photoFileName else { return nil }
+        let sketchName = name.replacingOccurrences(of: ".jpg", with: "_sketch.jpg")
+        let url = Self.photosDirectory.appendingPathComponent(sketchName)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     static var photosDirectory: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ChildRecordPhotos", isDirectory: true)
@@ -218,8 +225,16 @@ struct ChildRecord: Identifiable, Codable {
         return name
     }
 
+    static func saveSketch(_ data: Data, id: UUID) -> String {
+        let name = "\(id.uuidString)_sketch.jpg"
+        try? data.write(to: photosDirectory.appendingPathComponent(name))
+        return name
+    }
+
     static func deletePhoto(_ fileName: String) {
         try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(fileName))
+        let sketchName = fileName.replacingOccurrences(of: ".jpg", with: "_sketch.jpg")
+        try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(sketchName))
     }
 
     /// 將照片轉為素描風格（鉛筆畫效果）
