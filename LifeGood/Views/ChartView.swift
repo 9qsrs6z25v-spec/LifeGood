@@ -43,9 +43,6 @@ struct ChartView: View {
 
                     // 支出類型比例
                     expenseTypeBreakdown
-
-                    // 期間明細
-                    periodDetails
                 }
                 .padding(.vertical)
             }
@@ -280,59 +277,6 @@ struct ChartView: View {
     }
 
     // MARK: - 期間明細
-
-    private var periodDetails: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("期間明細")
-                .font(.headline)
-                .padding(.horizontal)
-
-            let nonZeroData = chartData.filter { $0.amount > 0 }
-
-            if nonZeroData.isEmpty {
-                Text("尚無資料")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(nonZeroData.reversed()) { dataPoint in
-                        HStack {
-                            Text(dataPoint.label)
-                                .font(.subheadline)
-                                .frame(width: 80, alignment: .leading)
-
-                            GeometryReader { geo in
-                                let maxAmount = nonZeroData.map(\.amount).max() ?? 1
-                                let width = CGFloat(dataPoint.amount / maxAmount) * geo.size.width
-
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.green.opacity(0.3))
-                                    .frame(width: max(4, width), height: 20)
-                            }
-                            .frame(height: 20)
-
-                            Text(formatCurrency(dataPoint.amount))
-                                .font(.caption.bold())
-                                .frame(width: 80, alignment: .trailing)
-                        }
-                        .padding(.horizontal)
-                        .padding(.vertical, 6)
-
-                        if dataPoint.id != nonZeroData.reversed().last?.id {
-                            Divider().padding(.leading, 80)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.vertical)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
-        .padding(.horizontal)
-    }
 
     // MARK: - Helpers
 
