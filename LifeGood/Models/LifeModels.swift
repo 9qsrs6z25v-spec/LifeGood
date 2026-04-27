@@ -237,10 +237,13 @@ struct ChildRecord: Identifiable, Codable {
         try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(sketchName))
     }
 
-    /// 將照片轉為素描風格（鉛筆畫效果）
+    /// 將照片轉為素描風格（鉛筆畫效果 + 四周高斯模糊暈散）
     static func applySketchEffect(_ image: UIImage) -> UIImage? {
         guard let ciImage = CIImage(image: image) else { return nil }
         let context = CIContext()
+        let extent = ciImage.extent
+
+        // 素描效果
         let gray = ciImage.applyingFilter("CIColorControls", parameters: [
             kCIInputSaturationKey: 0
         ])
@@ -248,10 +251,33 @@ struct ChildRecord: Identifiable, Codable {
         let blurred = inverted.applyingFilter("CIGaussianBlur", parameters: [
             kCIInputRadiusKey: 15
         ])
-        let result = blurred.applyingFilter("CIColorDodgeBlendMode", parameters: [
+        let sketch = blurred.applyingFilter("CIColorDodgeBlendMode", parameters: [
             kCIInputBackgroundImageKey: gray
         ])
-        guard let cgImage = context.createCGImage(result, from: ciImage.extent) else { return nil }
+
+        // 四周高斯模糊的素描版
+        let edgeBlurred = sketch.applyingFilter("CIGaussianBlur", parameters: [
+            kCIInputRadiusKey: 25
+        ])
+
+        // 橢圓漸層遮罩：中心清晰、四周漸層到模糊
+        let cx = extent.midX, cy = extent.midY
+        let rx = extent.width * 0.38, ry = extent.height * 0.38
+        let gradientMask = CIFilter(name: "CIRadialGradient", parameters: [
+            "inputCenter": CIVector(x: cx, y: cy),
+            "inputRadius0": min(rx, ry),
+            "inputRadius1": max(extent.width, extent.height) * 0.55,
+            "inputColor0": CIColor.white,
+            "inputColor1": CIColor.black
+        ])!.outputImage!.cropped(to: extent)
+
+        // 混合：遮罩白色區域顯示清晰素描，黑色區域顯示模糊素描
+        let blended = sketch.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: edgeBlurred,
+            kCIInputMaskImageKey: gradientMask
+        ])
+
+        guard let cgImage = context.createCGImage(blended, from: extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }
 }
