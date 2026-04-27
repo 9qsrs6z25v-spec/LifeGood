@@ -186,15 +186,58 @@ struct ChildRecord: Identifiable, Codable {
     var weightKg: Double?
     var dose: String?
     var severity: AllergySeverity?
+    var photoFileName: String?
 
     init(id: UUID = UUID(), type: ChildRecordType = .memorable,
          date: Date = Date(), title: String = "", detail: String = "", note: String = "",
          heightCm: Double? = nil, weightKg: Double? = nil,
-         dose: String? = nil, severity: AllergySeverity? = nil) {
+         dose: String? = nil, severity: AllergySeverity? = nil,
+         photoFileName: String? = nil) {
         self.id = id; self.type = type; self.date = date
         self.title = title; self.detail = detail; self.note = note
         self.heightCm = heightCm; self.weightKg = weightKg
         self.dose = dose; self.severity = severity
+        self.photoFileName = photoFileName
+    }
+
+    var photoURL: URL? {
+        guard let name = photoFileName else { return nil }
+        return Self.photosDirectory.appendingPathComponent(name)
+    }
+
+    static var photosDirectory: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ChildRecordPhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func savePhoto(_ data: Data, id: UUID) -> String {
+        let name = "\(id.uuidString).jpg"
+        try? data.write(to: photosDirectory.appendingPathComponent(name))
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(fileName))
+    }
+
+    /// 將照片轉為素描風格（鉛筆畫效果）
+    static func applySketchEffect(_ image: UIImage) -> UIImage? {
+        guard let ciImage = CIImage(image: image) else { return nil }
+        let context = CIContext()
+        let gray = ciImage.applyingFilter("CIColorControls", parameters: [
+            kCIInputSaturationKey: 0
+        ])
+        let inverted = gray.applyingFilter("CIColorInvert")
+        let blurred = inverted.applyingFilter("CIGaussianBlur", parameters: [
+            kCIInputRadiusKey: 15
+        ])
+        let result = blurred.applyingFilter("CIColorDodgeBlendMode", parameters: [
+            kCIInputBackgroundImageKey: gray
+        ])
+        guard let cgImage = context.createCGImage(result, from: ciImage.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -275,6 +276,13 @@ struct ChildDetailView: View {
                             Text(rec.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
+                    if rec.photoFileName != nil, let url = rec.photoURL,
+                       let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
+                        Image(uiImage: img)
+                            .resizable().scaledToFill()
+                            .frame(height: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
                 }
             }
             .padding(.horizontal).padding(.vertical, 8).contentShape(Rectangle())
@@ -443,6 +451,10 @@ struct ChildRecordEditorSheet: View {
     @State private var weightText = ""
     @State private var dose = ""
     @State private var severity: AllergySeverity = .mild
+    @State private var photoFileName: String?
+    @State private var photoItem: PhotosPickerItem?
+    @State private var sketchMode = true
+    @State private var previewImage: UIImage?
 
     private var canSave: Bool {
         switch type {
@@ -465,6 +477,41 @@ struct ChildRecordEditorSheet: View {
                 }
                 Section("日期") { DatePicker("日期", selection: $date, displayedComponents: .date) }
                 Section("備註") { TextField("選填", text: $note, axis: .vertical).lineLimit(2...5) }
+
+                Section("插入圖片") {
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        HStack {
+                            Image(systemName: "photo")
+                            Text(photoFileName == nil ? "選擇圖片" : "更換圖片")
+                            Spacer()
+                            if photoFileName != nil {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            }
+                        }
+                    }
+
+                    if photoFileName != nil {
+                        Toggle("轉為素描畫", isOn: $sketchMode)
+                            .onChange(of: sketchMode) { _, _ in regeneratePreview() }
+                    }
+
+                    if let img = previewImage {
+                        Image(uiImage: img)
+                            .resizable().scaledToFit()
+                            .frame(maxHeight: 200)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+
+                    if photoFileName != nil {
+                        Button(role: .destructive) {
+                            if let name = photoFileName { ChildRecord.deletePhoto(name) }
+                            photoFileName = nil; previewImage = nil
+                        } label: {
+                            Label("移除圖片", systemImage: "xmark.circle")
+                        }
+                    }
+                }
+
                 if editing != nil {
                     Section { Button(role: .destructive) { delete() } label: { Label("刪除此記錄", systemImage: "trash") } }
                 }
@@ -478,6 +525,35 @@ struct ChildRecordEditorSheet: View {
                 }
             }
             .onAppear { loadEditing() }
+            .onChange(of: photoItem) { _, item in
+                Task {
+                    guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+                    let recordId = editing?.id ?? UUID()
+                    let origImage = UIImage(data: data)
+                    if sketchMode, let orig = origImage, let sketched = ChildRecord.applySketchEffect(orig),
+                       let sketchData = sketched.jpegData(compressionQuality: 0.85) {
+                        photoFileName = ChildRecord.savePhoto(sketchData, id: recordId)
+                        previewImage = sketched
+                    } else {
+                        photoFileName = ChildRecord.savePhoto(data, id: recordId)
+                        previewImage = origImage
+                    }
+                }
+            }
+        }
+    }
+
+    private func regeneratePreview() {
+        guard let name = photoFileName,
+              let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)),
+              let img = UIImage(data: data) else { return }
+        if sketchMode, let sketched = ChildRecord.applySketchEffect(img) {
+            if let sketchData = sketched.jpegData(compressionQuality: 0.85) {
+                photoFileName = ChildRecord.savePhoto(sketchData, id: editing?.id ?? UUID())
+            }
+            previewImage = sketched
+        } else {
+            previewImage = img
         }
     }
 
@@ -520,6 +596,12 @@ struct ChildRecordEditorSheet: View {
         if let h = e.heightCm, h > 0 { heightText = String(format: "%g", h) }
         if let w = e.weightKg, w > 0 { weightText = String(format: "%g", w) }
         dose = e.dose ?? ""; severity = e.severity ?? .mild
+        photoFileName = e.photoFileName
+        if let name = e.photoFileName,
+           let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)),
+           let img = UIImage(data: data) {
+            previewImage = img
+        }
     }
 
     private func save() {
@@ -530,7 +612,8 @@ struct ChildRecordEditorSheet: View {
             note: note.trimmingCharacters(in: .whitespaces),
             heightCm: type == .growth ? Double(heightText) : nil, weightKg: type == .growth ? Double(weightText) : nil,
             dose: type == .vaccination ? dose.trimmingCharacters(in: .whitespaces) : nil,
-            severity: type == .allergy ? severity : nil
+            severity: type == .allergy ? severity : nil,
+            photoFileName: photoFileName
         )
         if let idx = member.childRecords.firstIndex(where: { $0.id == rec.id }) { member.childRecords[idx] = rec }
         else { member.childRecords.append(rec) }
