@@ -159,6 +159,39 @@ struct AddStockView: View {
         return unique.isEmpty ? ["NT$"] : unique
     }
 
+    /// 計算銀行的目前總額（含信用卡彙總扣款）— 與變動支出之 bankBalance 邏輯相同
+    private func bankBalance(for ms: LifeMilestone) -> Double {
+        var total: Double = 0
+        for dep in ms.bankDeposits ?? [] {
+            if let expId = dep.linkedExpenseId,
+               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
+               exp.linkedCreditCardMilestoneId != nil {
+                continue
+            }
+            total += dep.isWithdrawal ? -dep.amount : dep.amount
+        }
+        let cards = lifeStore.milestones.filter {
+            $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
+        }
+        for card in cards {
+            let exps = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == card.id }
+            for exp in exps { total -= exp.amount }
+        }
+        return total
+    }
+
+    private func formatBankBalance(_ value: Double) -> String {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        if abs(value) >= 10000 {
+            let wan = value / 10000
+            let str = f.string(from: NSNumber(value: wan)) ?? "0"
+            return "NT$ \(str)萬"
+        } else {
+            let str = f.string(from: NSNumber(value: value)) ?? "0"
+            return "NT$ \(str)"
+        }
+    }
+
     private var accountPickerLabel: String {
         if let id = selectedSecuritiesMilestoneId,
            let ms = securitiesMilestones.first(where: { $0.id == id }) {
@@ -187,8 +220,9 @@ struct AddStockView: View {
                         ForEach(bankMilestones) { ms in
                             let currencies = bankCurrencies(for: ms)
                             let name = ms.bankName ?? ms.title
+                            let balanceLabel = "\(name)（\(formatBankBalance(bankBalance(for: ms)))）"
                             if currencies.count > 1 {
-                                Menu(name) {
+                                Menu(balanceLabel) {
                                     ForEach(currencies, id: \.self) { code in
                                         Button(code) {
                                             selectedBankMilestoneId = ms.id
@@ -198,7 +232,7 @@ struct AddStockView: View {
                                     }
                                 }
                             } else {
-                                Button(name) {
+                                Button(balanceLabel) {
                                     selectedBankMilestoneId = ms.id
                                     selectedBankCurrency = currencies.first ?? "NT$"
                                     selectedSecuritiesMilestoneId = nil
