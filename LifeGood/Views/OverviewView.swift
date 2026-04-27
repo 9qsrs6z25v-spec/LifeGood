@@ -253,15 +253,36 @@ struct OverviewView: View {
 
     // MARK: - 最近交易
 
+    private struct RecentItem: Identifiable {
+        let id: UUID
+        let title: String
+        let icon: String
+        let category: String
+        let amount: Double
+        let date: Date
+        let isIncome: Bool
+    }
+
+    private var recentItems: [RecentItem] {
+        let expItems = store.expenses.map { e in
+            RecentItem(id: e.id, title: e.title, icon: e.categoryIcon,
+                       category: e.categoryName, amount: e.amount, date: e.date, isIncome: false)
+        }
+        let incItems = store.incomes.map { i in
+            RecentItem(id: i.id, title: i.title, icon: i.category.icon,
+                       category: i.category.rawValue, amount: i.amount, date: i.date, isIncome: true)
+        }
+        let all = expItems + incItems
+        return Array(all.suffix(5).reversed())
+    }
+
     private var recentTransactionsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("最近交易")
                 .font(.headline)
                 .padding(.horizontal)
 
-            let recent = Array(store.expenses.sorted { $0.date > $1.date }.prefix(5))
-
-            if recent.isEmpty {
+            if recentItems.isEmpty {
                 Text("尚無交易紀錄")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -269,16 +290,16 @@ struct OverviewView: View {
                     .padding(.vertical, 20)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(recent) { expense in
+                    ForEach(recentItems) { item in
                         HStack {
-                            Image(systemName: expense.categoryIcon)
+                            Image(systemName: item.icon)
                                 .frame(width: 30)
-                                .foregroundStyle(.green)
+                                .foregroundStyle(item.isIncome ? .green : .red)
 
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(expense.title)
+                                Text(item.title)
                                     .font(.subheadline)
-                                Text(expense.categoryName)
+                                Text(item.category)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -286,9 +307,10 @@ struct OverviewView: View {
                             Spacer()
 
                             VStack(alignment: .trailing, spacing: 2) {
-                                Text(smartCurrency(expense.amount))
+                                Text("\(item.isIncome ? "+" : "-")\(smartCurrency(item.amount))")
                                     .font(.subheadline.bold())
-                                Text(formatDate(expense.date))
+                                    .foregroundStyle(item.isIncome ? .green : .red)
+                                Text(formatDate(item.date))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -296,7 +318,7 @@ struct OverviewView: View {
                         .padding(.horizontal)
                         .padding(.vertical, 10)
 
-                        if expense.id != recent.last?.id {
+                        if item.id != recentItems.last?.id {
                             Divider().padding(.leading, 50)
                         }
                     }
