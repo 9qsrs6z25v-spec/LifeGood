@@ -7,6 +7,7 @@ struct VariableExpenseView: View {
     @State private var showingAddSheet = false
     @State private var selectedCategory: VariableCategory?
     @State private var expenseToEdit: Expense?
+    @State private var showOlderWeeks = false
 
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -129,18 +130,60 @@ struct VariableExpenseView: View {
     // MARK: - 支出列表
 
     private var expenseList: some View {
-        List {
-            ForEach(groupedByDate(), id: \.key) { dateString, expenses in
+        let allGroups = groupedByDate()
+        let oneWeekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let recentGroups = allGroups.filter { group in
+            guard let d = group.value.first?.date else { return false }
+            return d >= oneWeekAgo
+        }
+        let olderGroups = allGroups.filter { group in
+            guard let d = group.value.first?.date else { return true }
+            return d < oneWeekAgo
+        }
+
+        return List {
+            ForEach(recentGroups, id: \.key) { dateString, expenses in
                 Section(header: Text(dateString)) {
                     ForEach(expenses) { expense in
                         ExpenseRow(expense: expense)
                             .contentShape(Rectangle())
-                            .onTapGesture {
-                                expenseToEdit = expense
-                            }
+                            .onTapGesture { expenseToEdit = expense }
                     }
                     .onDelete { offsets in
                         deleteWithSync(offsets: offsets, from: expenses)
+                    }
+                }
+            }
+
+            if !olderGroups.isEmpty {
+                if showOlderWeeks {
+                    ForEach(olderGroups, id: \.key) { dateString, expenses in
+                        Section(header: Text(dateString)) {
+                            ForEach(expenses) { expense in
+                                ExpenseRow(expense: expense)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { expenseToEdit = expense }
+                            }
+                            .onDelete { offsets in
+                                deleteWithSync(offsets: offsets, from: expenses)
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    Button {
+                        withAnimation { showOlderWeeks.toggle() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Image(systemName: showOlderWeeks ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                            Text(showOlderWeeks ? "收起舊紀錄" : "展開更早紀錄（\(olderGroups.reduce(0) { $0 + $1.value.count }) 筆）")
+                                .font(.caption.weight(.medium))
+                            Spacer()
+                        }
+                        .foregroundStyle(.green)
                     }
                 }
             }
