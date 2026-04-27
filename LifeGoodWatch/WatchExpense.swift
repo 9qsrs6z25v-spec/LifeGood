@@ -13,6 +13,7 @@ struct WatchExpense: Codable, Identifiable {
     var variableCategory: String?    // 例：飲食、交通、娛樂…
     var note: String
     var currencyCode: String
+    var diningMember: String?        // 用餐成員（飲食類別時用）
     var updatedAt: Date
     var sourceDevice: String         // 固定為 "watch"
 
@@ -21,15 +22,17 @@ struct WatchExpense: Codable, Identifiable {
          title: String? = nil,
          note: String = "",
          currencyCode: String = "NT$",
+         diningMember: String? = nil,
          date: Date = Date()) {
         self.id = UUID()
         self.amount = amount
-        self.title = title?.isEmpty == false ? title! : category.rawValue
+        self.title = (title?.isEmpty == false) ? title! : category.rawValue
         self.date = date
         self.expenseType = "變動支出"
         self.variableCategory = category.rawValue
         self.note = note
         self.currencyCode = currencyCode
+        self.diningMember = (diningMember?.isEmpty == false) ? diningMember : nil
         self.updatedAt = Date()
         self.sourceDevice = "watch"
     }
@@ -45,13 +48,14 @@ struct WatchExpense: Codable, Identifiable {
         variableCategory = try? c.decodeIfPresent(String.self, forKey: .variableCategory)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         currencyCode = (try? c.decode(String.self, forKey: .currencyCode)) ?? "NT$"
+        diningMember = try? c.decodeIfPresent(String.self, forKey: .diningMember)
         updatedAt = (try? c.decodeIfPresent(Date.self, forKey: .updatedAt)) ?? date
         sourceDevice = (try? c.decodeIfPresent(String.self, forKey: .sourceDevice)) ?? "unknown"
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory
-        case note, currencyCode, updatedAt, sourceDevice
+        case note, currencyCode, diningMember, updatedAt, sourceDevice
     }
 }
 
