@@ -161,8 +161,10 @@ struct AddStockView: View {
 
     /// 計算帳戶餘額
     private func accountBalance(for ms: LifeMilestone) -> Double {
+        let now = Date()
         var total: Double = 0
         for dep in ms.bankDeposits ?? [] {
+            guard dep.date <= now else { continue }
             if let expId = dep.linkedExpenseId,
                let exp = expenseStore.expenses.first(where: { $0.id == expId }),
                exp.linkedCreditCardMilestoneId != nil {
@@ -175,7 +177,9 @@ struct AddStockView: View {
                 $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
             }
             for card in cards {
-                let exps = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == card.id }
+                let exps = expenseStore.expenses.filter {
+                    $0.linkedCreditCardMilestoneId == card.id && $0.date <= now
+                }
                 for exp in exps { total -= exp.amount }
             }
         }

@@ -479,9 +479,10 @@ struct AddExpenseView: View {
 
     /// 計算銀行的目前總額（含信用卡彙總扣款）
     private func bankBalance(for ms: LifeMilestone) -> Double {
+        let now = Date()
         var total: Double = 0
         for dep in ms.bankDeposits ?? [] {
-            // 跳過舊版可能殘留的信用卡支出記錄
+            guard dep.date <= now else { continue }
             if let expId = dep.linkedExpenseId,
                let exp = store.expenses.first(where: { $0.id == expId }),
                exp.linkedCreditCardMilestoneId != nil {
@@ -493,7 +494,9 @@ struct AddExpenseView: View {
             $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
         }
         for card in cards {
-            let exps = store.expenses.filter { $0.linkedCreditCardMilestoneId == card.id }
+            let exps = store.expenses.filter {
+                $0.linkedCreditCardMilestoneId == card.id && $0.date <= now
+            }
             for exp in exps { total -= exp.amount }
         }
         return total

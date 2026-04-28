@@ -189,9 +189,10 @@ struct LifeFinanceView: View {
 
     /// 計算銀行的目前總額（含信用卡彙總扣款 + 股票交易）
     private func bankTotalBalance(for ms: LifeMilestone) -> Double {
+        let now = Date()
         var total: Double = 0
-        // 真實 BankDeposit（過濾舊版可能殘留的信用卡支出記錄）
         let real = (ms.bankDeposits ?? []).filter { dep in
+            guard dep.date <= now else { return false }
             guard let expId = dep.linkedExpenseId,
                   let exp = expenseStore.expenses.first(where: { $0.id == expId }) else { return true }
             return exp.linkedCreditCardMilestoneId == nil
@@ -199,12 +200,13 @@ struct LifeFinanceView: View {
         for dep in real {
             total += dep.isWithdrawal ? -dep.amount : dep.amount
         }
-        // 連結的信用卡支出（依 linkedCreditCardMilestoneId）
         let cards = lifeStore.milestones.filter {
             $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
         }
         for card in cards {
-            let exps = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == card.id }
+            let exps = expenseStore.expenses.filter {
+                $0.linkedCreditCardMilestoneId == card.id && $0.date <= now
+            }
             for exp in exps { total -= exp.amount }
         }
         return total
@@ -445,8 +447,9 @@ struct FinanceCardView: View {
 
     /// 銀行存款列表：直接扣款的 BankDeposit + 信用卡逐月彙總（虛擬條目）
     private var deposits: [BankDeposit] {
-        // 過濾：排除舊版本可能殘留、屬於信用卡支出的 BankDeposit（避免重複）
+        let now = Date()
         let real = (item.bankDeposits ?? []).filter { dep in
+            guard dep.date <= now else { return false }
             guard let expId = dep.linkedExpenseId,
                   let exp = expenseStore.expenses.first(where: { $0.id == expId }) else { return true }
             return exp.linkedCreditCardMilestoneId == nil
@@ -457,13 +460,14 @@ struct FinanceCardView: View {
 
     /// 將連結到本銀行的信用卡支出依月份彙總成虛擬 BankDeposit
     private func aggregatedCreditCardWithdrawals() -> [BankDeposit] {
+        let now = Date()
         let cards = lifeStore.milestones.filter {
             $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == milestoneId
         }
         var result: [BankDeposit] = []
         for card in cards {
             let cardExpenses = expenseStore.expenses.filter {
-                $0.linkedCreditCardMilestoneId == card.id
+                $0.linkedCreditCardMilestoneId == card.id && $0.date <= now
             }
             let groups = Dictionary(grouping: cardExpenses) { exp -> String in
                 let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
