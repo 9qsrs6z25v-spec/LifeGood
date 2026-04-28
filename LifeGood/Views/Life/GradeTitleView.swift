@@ -11,9 +11,12 @@ struct GradeTitleView: View {
                         HStack(spacing: 12) {
                             TextField("部門編號", text: $lifeStore.departments[index].code)
                                 .textFieldStyle(.roundedBorder)
-                                .frame(width: 80)
+                                .font(.caption)
+                                .frame(maxWidth: .infinity)
                             TextField("部門名稱", text: $lifeStore.departments[index].name)
                                 .textFieldStyle(.roundedBorder)
+                                .font(.caption)
+                                .frame(maxWidth: .infinity)
                             Button(role: .destructive) {
                                 lifeStore.deleteDepartment(lifeStore.departments[index])
                             } label: {
