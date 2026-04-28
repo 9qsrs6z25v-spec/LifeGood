@@ -769,6 +769,7 @@ enum SubordinateRecordType: String, Codable, CaseIterable, Identifiable {
     case improvement = "改善"
     case fault = "缺失"
     case missOperation = "Miss Operation"
+    case leave = "請假"
 
     var id: String { rawValue }
 
@@ -780,6 +781,7 @@ enum SubordinateRecordType: String, Codable, CaseIterable, Identifiable {
         case .improvement: return "arrow.up.circle.fill"
         case .fault: return "exclamationmark.triangle.fill"
         case .missOperation: return "xmark.octagon.fill"
+        case .leave: return "calendar.badge.minus"
         }
     }
 }
@@ -788,6 +790,20 @@ enum MissOpSeverity: String, Codable, CaseIterable, Identifiable {
     case minor = "輕微"
     case normal = "一般"
     case severe = "嚴重"
+    var id: String { rawValue }
+}
+
+enum LeaveType: String, Codable, CaseIterable, Identifiable {
+    case personal = "事假"
+    case sick = "病假"
+    case annual = "特休"
+    case marriage = "婚假"
+    case funeral = "喪假"
+    case maternity = "產假"
+    case paternity = "陪產假"
+    case official = "公假"
+    case workInjury = "公傷假"
+
     var id: String { rawValue }
 }
 
@@ -800,12 +816,16 @@ struct SubordinateRecord: Identifiable, Codable {
     var date: Date
     var note: String
     var severity: MissOpSeverity?
+    var leaveType: LeaveType?
+    var leaveHours: Double?
 
     init(id: UUID = UUID(), type: SubordinateRecordType = .pro,
          content: String = "", date: Date = Date(), note: String = "",
-         severity: MissOpSeverity? = nil) {
+         severity: MissOpSeverity? = nil,
+         leaveType: LeaveType? = nil, leaveHours: Double? = nil) {
         self.id = id; self.type = type; self.content = content
         self.date = date; self.note = note; self.severity = severity
+        self.leaveType = leaveType; self.leaveHours = leaveHours
     }
 }
 

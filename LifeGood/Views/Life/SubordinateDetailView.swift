@@ -42,6 +42,7 @@ struct SubordinateDetailView: View {
                     recordSection(.improvement)
                     recordSection(.fault)
                     recordSection(.missOperation)
+                    recordSection(.leave)
                 }
                 .padding(.vertical)
             }
@@ -98,11 +99,12 @@ struct SubordinateDetailView: View {
                 }
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 statBadge(count: countFor([.pro]), label: "優點", color: .green)
                 statBadge(count: countFor([.con]), label: "缺點", color: .red)
                 statBadge(count: countFor([.achievement]), label: "成就", color: .orange)
                 statBadge(count: countFor([.missOperation]), label: "Miss", color: .purple)
+                statBadge(count: countFor([.leave]), label: "請假", color: .teal)
             }
             .padding(.top, 4)
         }
@@ -216,6 +218,21 @@ struct SubordinateDetailView: View {
                                 .foregroundStyle(severityColor(sev))
                                 .clipShape(RoundedRectangle(cornerRadius: 3))
                         }
+                        if rec.type == .leave {
+                            if let lt = rec.leaveType {
+                                Text(lt.rawValue)
+                                    .font(.caption2.weight(.medium))
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.teal.opacity(0.15))
+                                    .foregroundStyle(.teal)
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                            }
+                            if let h = rec.leaveHours, h > 0 {
+                                Text(h.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(h))h" : String(format: "%.1fh", h))
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         Spacer()
                     }
                     HStack(spacing: 6) {
@@ -250,6 +267,7 @@ struct SubordinateDetailView: View {
         case .improvement: return .blue
         case .fault: return .pink
         case .missOperation: return .purple
+        case .leave: return .teal
         }
     }
 
@@ -280,6 +298,8 @@ struct RecordEditorSheet: View {
     @State private var date = Date()
     @State private var note = ""
     @State private var severity: MissOpSeverity = .normal
+    @State private var leaveType: LeaveType = .personal
+    @State private var leaveHoursText: String = "8"
 
     private var canSave: Bool {
         !content.trimmingCharacters(in: .whitespaces).isEmpty
@@ -302,6 +322,20 @@ struct RecordEditorSheet: View {
                             }
                         }
                         .pickerStyle(.segmented)
+                    }
+                }
+                if type == .leave {
+                    Section("請假資訊") {
+                        Picker("假別", selection: $leaveType) {
+                            ForEach(LeaveType.allCases) { t in
+                                Text(t.rawValue).tag(t)
+                            }
+                        }
+                        HStack {
+                            TextField("時數", text: $leaveHoursText)
+                                .keyboardType(.decimalPad)
+                            Text("小時").foregroundStyle(.secondary)
+                        }
                     }
                 }
                 Section("備註") {
@@ -339,6 +373,7 @@ struct RecordEditorSheet: View {
         case .improvement: return "描述改善（如：文件撰寫變得清晰）"
         case .fault: return "描述缺失（如：忘記交付報告）"
         case .missOperation: return "描述事件（如：誤刪正式資料）"
+        case .leave: return "請假事由（如：身體不適）"
         }
     }
 
@@ -348,6 +383,10 @@ struct RecordEditorSheet: View {
         date = e.date
         note = e.note
         severity = e.severity ?? .normal
+        leaveType = e.leaveType ?? .personal
+        if let h = e.leaveHours, h > 0 {
+            leaveHoursText = h.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(h))" : String(format: "%.1f", h)
+        }
     }
 
     private func save() {
@@ -360,7 +399,9 @@ struct RecordEditorSheet: View {
             content: content.trimmingCharacters(in: .whitespaces),
             date: date,
             note: note.trimmingCharacters(in: .whitespaces),
-            severity: type == .missOperation ? severity : nil
+            severity: type == .missOperation ? severity : nil,
+            leaveType: type == .leave ? leaveType : nil,
+            leaveHours: type == .leave ? Double(leaveHoursText) : nil
         )
         if let idx = sub.records.firstIndex(where: { $0.id == rec.id }) {
             sub.records[idx] = rec
