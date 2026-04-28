@@ -13,6 +13,11 @@ struct LifeFinanceView: View {
             .sorted { $0.date > $1.date }
     }
 
+    /// 所有理財里程碑（含銀行下的信用卡），用於總覽計數
+    private var allFinanceMilestones: [LifeMilestone] {
+        lifeStore.milestones.filter { $0.category == .achievement }
+    }
+
     private var filteredMilestones: [LifeMilestone] {
         if let sub = selectedSub {
             return financeMilestones.filter { $0.financeSubCategory == sub }
@@ -52,11 +57,11 @@ struct LifeFinanceView: View {
             HStack {
                 Text("理財帳戶總覽").font(.subheadline).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(financeMilestones.count) 筆").font(.subheadline).foregroundStyle(.secondary)
+                Text("\(allFinanceMilestones.count) 筆").font(.subheadline).foregroundStyle(.secondary)
             }
             HStack(spacing: 16) {
                 ForEach(FinanceSubCategory.allCases) { sub in
-                    let count = financeMilestones.filter { $0.financeSubCategory == sub }.count
+                    let count = allFinanceMilestones.filter { $0.financeSubCategory == sub }.count
                     VStack(spacing: 2) {
                         Image(systemName: sub.icon).font(.title3).foregroundStyle(colorFor(sub))
                         Text("\(count)").font(.caption.bold())
@@ -176,9 +181,10 @@ struct LifeFinanceView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("開戶日期：\(formatDate(item.date))")
                         .font(.caption2).foregroundStyle(.tertiary)
-                    Text("存款總額 NT$ \(formatNumber(bankTotalBalance(for: item)))")
+                    let bal = bankTotalBalance(for: item)
+                    Text("NT$ \(formatNumber(bal))")
                         .font(.caption.bold())
-                        .foregroundStyle(bankTotalBalance(for: item) >= 0 ? Color.blue : Color.red)
+                        .foregroundStyle(bal >= 0 ? Color.blue : Color.red)
                 }
             } else {
                 Text(formatDate(item.date)).font(.caption).foregroundStyle(.tertiary)
