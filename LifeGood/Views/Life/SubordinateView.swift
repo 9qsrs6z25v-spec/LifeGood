@@ -27,8 +27,20 @@ struct SubordinateView: View {
     @State private var showAdd = false
     @State private var editingItem: Subordinate?
     @State private var viewingItem: Subordinate?
-    @State private var sortOption: SubordinateSortOption = .dateAdded
-    @State private var sortAscending = false
+    @AppStorage("subordinateSortOption") private var sortOptionRaw = SubordinateSortOption.dateAdded.rawValue
+    @AppStorage("subordinateSortAscending") private var sortAscending = false
+
+    private var sortOption: SubordinateSortOption {
+        get { SubordinateSortOption(rawValue: sortOptionRaw) ?? .dateAdded }
+        set { sortOptionRaw = newValue.rawValue }
+    }
+
+    private var sortOptionBinding: Binding<SubordinateSortOption> {
+        Binding(
+            get: { sortOption },
+            set: { sortOptionRaw = $0.rawValue }
+        )
+    }
 
     private func deptLabel(_ sub: Subordinate) -> String {
         if let dept = lifeStore.departments.first(where: { $0.id == sub.departmentId }) {
@@ -103,7 +115,7 @@ struct SubordinateView: View {
                                     if sortOption == option {
                                         sortAscending.toggle()
                                     } else {
-                                        sortOption = option
+                                        sortOptionRaw = option.rawValue
                                         sortAscending = true
                                     }
                                 } label: {
