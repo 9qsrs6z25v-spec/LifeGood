@@ -34,6 +34,7 @@ enum FamilyMemberRole: String, Codable, CaseIterable, Identifiable {
     case elderSister = "姐姐"
     case youngerBrother = "弟弟"
     case youngerSister = "妹妹"
+    case otherRelative = "其他親屬"
 
     var id: String { rawValue }
 
@@ -45,6 +46,7 @@ enum FamilyMemberRole: String, Codable, CaseIterable, Identifiable {
         case .son, .daughter: return "figure.child"
         case .elderBrother, .youngerBrother: return "figure.stand"
         case .elderSister, .youngerSister: return "figure.stand.dress"
+        case .otherRelative: return "person.2.fill"
         }
     }
 }
@@ -60,12 +62,16 @@ struct FamilyMember: Identifiable, Codable {
     var divorceDate: Date?
     var childRecords: [ChildRecord]
     var dailyRecords: [DailyRecord]
+    var birthYear: Int?
+    var idNumber: String?
+    var relativeNote: String?
 
     init(id: UUID = UUID(), role: FamilyMemberRole = .spouse,
          chineseName: String = "", englishName: String = "",
          birthday: Date? = nil,
          marriageDate: Date? = nil, isDivorced: Bool = false, divorceDate: Date? = nil,
-         childRecords: [ChildRecord] = [], dailyRecords: [DailyRecord] = []) {
+         childRecords: [ChildRecord] = [], dailyRecords: [DailyRecord] = [],
+         birthYear: Int? = nil, idNumber: String? = nil, relativeNote: String? = nil) {
         self.id = id; self.role = role
         self.chineseName = chineseName; self.englishName = englishName
         self.birthday = birthday
@@ -74,6 +80,9 @@ struct FamilyMember: Identifiable, Codable {
         self.divorceDate = divorceDate
         self.childRecords = childRecords
         self.dailyRecords = dailyRecords
+        self.birthYear = birthYear
+        self.idNumber = idNumber
+        self.relativeNote = relativeNote
     }
 
     init(from decoder: Decoder) throws {
@@ -88,6 +97,9 @@ struct FamilyMember: Identifiable, Codable {
         divorceDate = try? c.decode(Date.self, forKey: .divorceDate)
         childRecords = (try? c.decode([ChildRecord].self, forKey: .childRecords)) ?? []
         dailyRecords = (try? c.decode([DailyRecord].self, forKey: .dailyRecords)) ?? []
+        birthYear = try? c.decodeIfPresent(Int.self, forKey: .birthYear)
+        idNumber = try? c.decodeIfPresent(String.self, forKey: .idNumber)
+        relativeNote = try? c.decodeIfPresent(String.self, forKey: .relativeNote)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -102,10 +114,14 @@ struct FamilyMember: Identifiable, Codable {
         try c.encodeIfPresent(divorceDate, forKey: .divorceDate)
         try c.encode(childRecords, forKey: .childRecords)
         try c.encode(dailyRecords, forKey: .dailyRecords)
+        try c.encodeIfPresent(birthYear, forKey: .birthYear)
+        try c.encodeIfPresent(idNumber, forKey: .idNumber)
+        try c.encodeIfPresent(relativeNote, forKey: .relativeNote)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, role, chineseName, englishName, birthday, marriageDate, isDivorced, divorceDate, childRecords, dailyRecords
+        case birthYear, idNumber, relativeNote
     }
 }
 

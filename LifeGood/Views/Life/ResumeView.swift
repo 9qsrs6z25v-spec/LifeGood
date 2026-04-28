@@ -490,6 +490,9 @@ struct AddMilestoneView: View {
     @State private var isDivorced = false
     @State private var divorceDate = Date()
     @State private var familyBirthday = Date()
+    @State private var birthYearText = ""
+    @State private var idNumber = ""
+    @State private var relativeNote = ""
 
     enum RealEstateMode: String, CaseIterable, Identifiable {
         case existing = "連結既有"
@@ -649,6 +652,16 @@ struct AddMilestoneView: View {
                            in: (hasMarriageDate ? marriageDate : Date.distantPast)...,
                            displayedComponents: .date)
             }
+        } else if familyRole == .otherRelative {
+            HStack {
+                Text("出生年").foregroundStyle(.secondary)
+                TextField("如 1965", text: $birthYearText)
+                    .keyboardType(.numberPad)
+            }
+            TextField("身分證字號", text: $idNumber)
+                .autocapitalization(.allCharacters)
+            TextField("備註（如 關係說明）", text: $relativeNote, axis: .vertical)
+                .lineLimit(2...4)
         } else {
             DatePicker("出生日期", selection: $familyBirthday, displayedComponents: .date)
         }
@@ -933,15 +946,19 @@ struct AddMilestoneView: View {
     private func save() {
         if isFamily {
             let isSpouse = familyRole == .spouse
+            let isOther = familyRole == .otherRelative
             let member = FamilyMember(
                 id: editingFamily?.id ?? UUID(),
                 role: familyRole,
                 chineseName: familyChineseName.trimmingCharacters(in: .whitespaces),
                 englishName: familyEnglishName.trimmingCharacters(in: .whitespaces),
-                birthday: isSpouse ? nil : familyBirthday,
+                birthday: (isSpouse || isOther) ? nil : familyBirthday,
                 marriageDate: isSpouse && hasMarriageDate ? marriageDate : nil,
                 isDivorced: isSpouse && isDivorced,
-                divorceDate: isSpouse && isDivorced ? divorceDate : nil
+                divorceDate: isSpouse && isDivorced ? divorceDate : nil,
+                birthYear: isOther ? Int(birthYearText) : nil,
+                idNumber: isOther ? idNumber.trimmingCharacters(in: .whitespaces) : nil,
+                relativeNote: isOther ? relativeNote.trimmingCharacters(in: .whitespaces) : nil
             )
             if editingFamily != nil { store.update(member) } else { store.add(member) }
         } else if isRealEstate {
@@ -1109,6 +1126,9 @@ struct AddMilestoneView: View {
             }
             isDivorced = f.isDivorced
             if let dd = f.divorceDate { divorceDate = dd }
+            if let by = f.birthYear { birthYearText = "\(by)" }
+            idNumber = f.idNumber ?? ""
+            relativeNote = f.relativeNote ?? ""
             return
         }
         category = initialCategory
