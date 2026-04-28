@@ -54,6 +54,8 @@ struct SubordinateView: View {
                 let ai = list.firstIndex(where: { $0.id == a.id }) ?? 0
                 let bi = list.firstIndex(where: { $0.id == b.id }) ?? 0
                 result = ai < bi
+            case .manual:
+                result = false
             }
             return sortAscending ? result : !result
         }
