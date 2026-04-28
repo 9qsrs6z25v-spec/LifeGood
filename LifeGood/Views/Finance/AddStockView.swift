@@ -525,13 +525,19 @@ struct AddStockView: View {
         lifeStore.update(ms)
     }
 
+    private var soldAccountId: UUID? {
+        selectedBankMilestoneId ?? selectedSecuritiesMilestoneId
+    }
+
     private func syncSoldIncome(stockId: UUID, name: String, profit: Double, date: Date, note: String, existingId: UUID?) -> UUID {
         let incId = existingId ?? UUID()
         let income = Income(
             id: incId, title: "賣出 \(name)（獲利）",
             amount: profit, date: date,
             category: .investment, period: .once,
-            note: note, linkedStockId: stockId
+            note: note, linkedStockId: stockId,
+            linkedBankMilestoneId: soldAccountId,
+            linkedBankCurrency: soldAccountId != nil ? selectedBankCurrency : nil
         )
         if existingId != nil { expenseStore.update(income) }
         else { expenseStore.add(income) }
@@ -544,7 +550,9 @@ struct AddStockView: View {
             id: expId, title: "賣出 \(name)（虧損）",
             amount: loss, date: date,
             expenseType: .variable, variableCategory: .stock,
-            linkedStockId: stockId, note: note
+            linkedStockId: stockId, note: note,
+            linkedBankMilestoneId: soldAccountId,
+            linkedBankCurrency: soldAccountId != nil ? selectedBankCurrency : nil
         )
         if existingId != nil { expenseStore.update(expense) }
         else { expenseStore.add(expense) }
