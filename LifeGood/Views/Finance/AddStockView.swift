@@ -509,13 +509,13 @@ struct AddStockView: View {
             ))
         }
 
-        // 賣出：損益
+        // 賣出：回收全部賣出金額（本金＋損益）
         if stock.isSold, stock.soldPrice > 0, let sd = stock.soldDate {
-            let pl = stock.shares * (stock.soldPrice - stock.purchasePrice)
-            if pl != 0 {
+            let saleAmount = stock.shares * stock.soldPrice
+            if saleAmount > 0 {
                 list.append(BankDeposit(
-                    id: UUID(), date: sd, amount: abs(pl),
-                    currencyCode: currency, isWithdrawal: pl < 0,
+                    id: UUID(), date: sd, amount: saleAmount,
+                    currencyCode: currency, isWithdrawal: false,
                     linkedExpenseId: nil, linkedStockId: stock.id
                 ))
             }
