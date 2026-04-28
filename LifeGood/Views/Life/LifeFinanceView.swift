@@ -1116,13 +1116,22 @@ struct DepositEditorSheet: View {
     let currency: String
     var editing: BankDeposit?
 
+    @State private var isWithdrawal = false
     @State private var date = Date()
     @State private var amountText = ""
+
+    private var typeLabel: String { isWithdrawal ? "提款" : "存款" }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("\(currency) 存款") {
+                Section("\(currency) \(typeLabel)") {
+                    Picker("類型", selection: $isWithdrawal) {
+                        Text("存款").tag(false)
+                        Text("提款").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+
                     DatePicker("日期", selection: $date, displayedComponents: .date)
                     HStack {
                         Text(currency).foregroundStyle(.secondary)
@@ -1135,7 +1144,7 @@ struct DepositEditorSheet: View {
                     }
                 }
             }
-            .navigationTitle(editing != nil ? "編輯存款" : "新增存款")
+            .navigationTitle(editing != nil ? "編輯\(typeLabel)" : "新增存款或提款")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
@@ -1147,6 +1156,7 @@ struct DepositEditorSheet: View {
             }
             .onAppear {
                 if let e = editing {
+                    isWithdrawal = e.isWithdrawal
                     date = e.date
                     amountText = String(format: "%.0f", e.amount)
                 }
@@ -1156,7 +1166,8 @@ struct DepositEditorSheet: View {
 
     private func save() {
         guard var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
-        let dep = BankDeposit(id: editing?.id ?? UUID(), date: date, amount: Double(amountText) ?? 0, currencyCode: currency)
+        let dep = BankDeposit(id: editing?.id ?? UUID(), date: date, amount: Double(amountText) ?? 0,
+                              currencyCode: currency, isWithdrawal: isWithdrawal)
         var list = ms.bankDeposits ?? []
         if let idx = list.firstIndex(where: { $0.id == dep.id }) { list[idx] = dep }
         else { list.append(dep) }
