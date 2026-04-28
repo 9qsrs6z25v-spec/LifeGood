@@ -6,6 +6,7 @@ enum SubordinateSortOption: String, CaseIterable, Identifiable {
     case jobTitle = "職位"
     case joinDate = "到職日期"
     case dateAdded = "新增順序"
+    case manual = "手動排序"
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum SubordinateSortOption: String, CaseIterable, Identifiable {
         case .jobTitle: return "briefcase"
         case .joinDate: return "calendar.badge.clock"
         case .dateAdded: return "calendar"
+        case .manual: return "hand.draw"
         }
     }
 }
@@ -37,6 +39,7 @@ struct SubordinateView: View {
 
     private var sortedSubordinates: [Subordinate] {
         let list = lifeStore.subordinates
+        if sortOption == .manual { return list }
         let sorted = list.sorted { a, b in
             let result: Bool
             switch sortOption {
@@ -69,7 +72,12 @@ struct SubordinateView: View {
                     let items = offsets.map { sortedSubordinates[$0] }
                     items.forEach { lifeStore.deleteSubordinate($0) }
                 }
+                .onMove { from, to in
+                    guard sortOption == .manual else { return }
+                    lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
+                }
             }
+            .environment(\.editMode, sortOption == .manual ? .constant(.active) : .constant(.inactive))
             .listStyle(.insetGrouped)
             .overlay {
                 if lifeStore.subordinates.isEmpty {
@@ -142,6 +150,10 @@ struct SubordinateView: View {
                     Text(sub.jobTitle)
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
+                if let jd = sub.joinDate {
+                    Text("到職 \(formatDate(jd))")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
             }
 
             Spacer()
@@ -161,6 +173,10 @@ struct SubordinateView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
     }
 }
 
