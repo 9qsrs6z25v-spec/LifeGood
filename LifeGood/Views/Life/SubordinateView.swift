@@ -134,12 +134,20 @@ struct SubordinateView: View {
     }
 
     private func subordinateRow(_ sub: Subordinate) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "person.fill")
-                .font(.title3).foregroundStyle(.blue)
-                .frame(width: 36, height: 36)
-                .background(Color.blue.opacity(0.12))
-                .clipShape(Circle())
+        let score = subordinateScore(sub)
+        let scoreColor = scoreColor(score)
+        return HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(scoreColor.opacity(0.15))
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .stroke(scoreColor, lineWidth: 2)
+                    .frame(width: 36, height: 36)
+                Text("\(score)")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(scoreColor)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(sub.name).font(.subheadline.weight(.medium))
@@ -177,6 +185,40 @@ struct SubordinateView: View {
 
     private func formatDate(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+    }
+
+    /// 自動評分：基礎 80，依記錄加減，範圍 0~100
+    private func subordinateScore(_ sub: Subordinate) -> Int {
+        var score: Double = 80
+        for rec in sub.records {
+            switch rec.type {
+            case .pro:           score += 2
+            case .con:           score -= 2
+            case .achievement:   score += 3
+            case .improvement:   score += 1
+            case .fault:         score -= 3
+            case .missOperation:
+                switch rec.severity {
+                case .minor:  score -= 1
+                case .normal: score -= 2
+                case .severe: score -= 4
+                case .none:   score -= 2
+                }
+            case .leave:
+                let hours = rec.leaveHours ?? 8
+                score -= hours / 16
+            }
+        }
+        return max(0, min(100, Int(score.rounded())))
+    }
+
+    private func scoreColor(_ score: Int) -> Color {
+        switch score {
+        case 90...:  return .green
+        case 80...:  return .blue
+        case 70...:  return .orange
+        default:     return .red
+        }
     }
 }
 
