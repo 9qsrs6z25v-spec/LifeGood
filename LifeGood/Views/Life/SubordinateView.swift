@@ -4,6 +4,7 @@ enum SubordinateSortOption: String, CaseIterable, Identifiable {
     case name = "姓名"
     case department = "部門"
     case jobTitle = "職位"
+    case joinDate = "到職日期"
     case dateAdded = "新增順序"
 
     var id: String { rawValue }
@@ -13,6 +14,7 @@ enum SubordinateSortOption: String, CaseIterable, Identifiable {
         case .name: return "person"
         case .department: return "building.2"
         case .jobTitle: return "briefcase"
+        case .joinDate: return "calendar.badge.clock"
         case .dateAdded: return "calendar"
         }
     }
@@ -41,6 +43,10 @@ struct SubordinateView: View {
             case .name: result = a.name < b.name
             case .department: result = deptLabel(a) < deptLabel(b)
             case .jobTitle: result = a.jobTitle < b.jobTitle
+            case .joinDate:
+                let ad = a.joinDate ?? Date.distantFuture
+                let bd = b.joinDate ?? Date.distantFuture
+                result = ad < bd
             case .dateAdded:
                 let ai = list.firstIndex(where: { $0.id == a.id }) ?? 0
                 let bi = list.firstIndex(where: { $0.id == b.id }) ?? 0
