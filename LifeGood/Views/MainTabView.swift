@@ -76,16 +76,18 @@ enum LifeFeature: String, CaseIterable, Identifiable {
 }
 
 enum ManagementFeature: String, CaseIterable, Identifiable {
-    case gradeTitle, subordinates
+    case overview, gradeTitle, subordinates
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .overview: return "部屬總覽"
         case .gradeTitle: return "職等職稱"
         case .subordinates: return "部屬"
         }
     }
     var icon: String {
         switch self {
+        case .overview: return "chart.bar.doc.horizontal"
         case .gradeTitle: return "list.number"
         case .subordinates: return "person.2.fill"
         }
@@ -249,6 +251,7 @@ struct MainTabView: View {
     @ViewBuilder
     private var managementContent: some View {
         switch managementFeature {
+        case .overview: SubordinateOverviewView()
         case .gradeTitle: GradeTitleView()
         case .subordinates: SubordinateView()
         }
