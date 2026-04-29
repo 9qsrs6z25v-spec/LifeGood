@@ -264,16 +264,15 @@ struct OverviewView: View {
     }
 
     private var recentItems: [RecentItem] {
-        let expItems = store.expenses.map { e in
+        let recentExp = store.expenses.suffix(5).map { e in
             RecentItem(id: e.id, title: e.title, icon: e.categoryIcon,
                        category: e.categoryName, amount: e.amount, date: e.date, isIncome: false)
         }
-        let incItems = store.incomes.map { i in
+        let recentInc = store.incomes.suffix(5).map { i in
             RecentItem(id: i.id, title: i.title, icon: i.category.icon,
                        category: i.category.rawValue, amount: i.amount, date: i.date, isIncome: true)
         }
-        let all = expItems + incItems
-        return Array(all.suffix(5).reversed())
+        return Array((recentExp + recentInc).sorted { $0.date > $1.date }.prefix(5))
     }
 
     private var recentTransactionsSection: some View {
