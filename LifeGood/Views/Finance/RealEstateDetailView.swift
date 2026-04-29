@@ -378,6 +378,10 @@ struct RealEstateDetailView: View {
                 }
             }
 
+            if !estate.floors.isEmpty {
+                buildingVisualization
+            }
+
             if estate.hasElevator {
                 sectionHeaderWithAdd("電梯資料") { addingElevatorMaintenance = true }
                 if estate.elevatorMaintenances.isEmpty {
@@ -415,10 +419,6 @@ struct RealEstateDetailView: View {
                         .buttonStyle(.plain)
                     }
                 }
-            }
-
-            if !estate.floors.isEmpty {
-                buildingVisualization
             }
 
             let hasUtilities = !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty
