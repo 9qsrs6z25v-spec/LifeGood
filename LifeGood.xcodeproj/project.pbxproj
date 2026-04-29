@@ -45,6 +45,7 @@
 		A01B000001000029 /* LifeRealEstateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000029 /* LifeRealEstateView.swift */; };
 		A01B000001000031 /* CareerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000031 /* CareerView.swift */; };
 		A01B000001000032 /* SubordinateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000032 /* SubordinateView.swift */; };
+		A01B000001000099 /* SubordinateOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000099 /* SubordinateOverviewView.swift */; };
 		A01B000001000033 /* CloudSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000033 /* CloudSyncManager.swift */; };
 		A01B000001000035 /* GradeTitleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000035 /* GradeTitleView.swift */; };
 		A01B000001000036 /* SpouseResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000036 /* SpouseResumeView.swift */; };
@@ -95,6 +96,7 @@
 		A01A000001000029 /* LifeRealEstateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeRealEstateView.swift; sourceTree = "<group>"; };
 		A01A000001000031 /* CareerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CareerView.swift; sourceTree = "<group>"; };
 		A01A000001000032 /* SubordinateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateView.swift; sourceTree = "<group>"; };
+		A01A000001000099 /* SubordinateOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000033 /* CloudSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncManager.swift; sourceTree = "<group>"; };
 		A01A000001000034 /* LifeGood.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGood.entitlements; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
@@ -204,6 +206,7 @@
 				A01A000001000029 /* LifeRealEstateView.swift */,
 				A01A000001000031 /* CareerView.swift */,
 				A01A000001000032 /* SubordinateView.swift */,
+				A01A000001000099 /* SubordinateOverviewView.swift */,
 				A01A000001000035 /* GradeTitleView.swift */,
 				A01A000001000036 /* SpouseResumeView.swift */,
 				A01A000001000037 /* ChildrenResumeView.swift */,
@@ -337,6 +340,7 @@
 				A01B000001000029 /* LifeRealEstateView.swift in Sources */,
 				A01B000001000031 /* CareerView.swift in Sources */,
 				A01B000001000032 /* SubordinateView.swift in Sources */,
+				A01B000001000099 /* SubordinateOverviewView.swift in Sources */,
 				A01B000001000027 /* UnifiedExport.swift in Sources */,
 				A01B000001000030 /* BackupManager.swift in Sources */,
 				A01B000001000033 /* CloudSyncManager.swift in Sources */,
