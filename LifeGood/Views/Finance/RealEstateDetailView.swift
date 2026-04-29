@@ -14,6 +14,7 @@ struct RealEstateDetailView: View {
     @State private var editingElevatorMaintenance: ElevatorMaintenance?
     @State private var addingUtilityPayment = false
     @State private var editingUtilityPayment: UtilityPayment?
+    @State private var utilityExpanded = false
 
     enum DetailTab: String, CaseIterable {
         case finance = "理財"
@@ -427,16 +428,24 @@ struct RealEstateDetailView: View {
 
             if hasUtilities {
                 sectionHeaderWithAdd("水電瓦斯") { addingUtilityPayment = true }
+
+                // 水
                 if !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty {
                     utilityRow(icon: "drop.fill", color: .blue,
                                number: estate.waterMeterNumber, owner: estate.waterMeterOwner,
                                numberLabel: "水號")
                 }
+                latestPaymentRow(type: .water)
+
+                // 電
                 if !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty {
                     utilityRow(icon: "bolt.fill", color: .yellow,
                                number: estate.electricityMeterNumber, owner: estate.electricityMeterOwner,
                                numberLabel: "電號")
                 }
+                latestPaymentRow(type: .electricity)
+
+                // 瓦斯
                 if !estate.gasUserNumber.isEmpty || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
@@ -457,43 +466,38 @@ struct RealEstateDetailView: View {
                     }
                     .padding(.horizontal).padding(.vertical, 8)
                 }
+                latestPaymentRow(type: .gas)
 
-                if !estate.utilityPayments.isEmpty {
-                    Divider().padding(.horizontal)
-                    HStack {
-                        Text("繳費紀錄").font(.caption2).foregroundStyle(.tertiary)
-                        Spacer()
-                    }
-                    .padding(.horizontal).padding(.top, 4)
-                    ForEach(estate.utilityPayments.sorted { $0.date > $1.date }) { p in
-                        Button { editingUtilityPayment = p } label: {
-                            HStack {
-                                Image(systemName: p.type.icon)
-                                    .font(.caption).foregroundStyle(utilityColor(p.type)).frame(width: 16)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(p.type.rawValue).font(.caption.weight(.medium)).foregroundStyle(.primary)
-                                    Text(fmtDate(p.date)).font(.caption2).foregroundStyle(.tertiary)
-                                }
-                                Spacer()
-                                if p.photoFileName != nil {
-                                    Button {
-                                        if let url = p.photoURL { viewingPhotoURL = url }
-                                    } label: {
-                                        Image(systemName: "photo.fill")
-                                            .font(.caption).foregroundStyle(.blue)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                Text(fmt(p.amount))
-                                    .font(.subheadline.bold()).foregroundStyle(.red)
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2).foregroundStyle(.tertiary)
-                            }
-                            .padding(.horizontal).padding(.vertical, 6)
-                            .contentShape(Rectangle())
+                // 展開：顯示所有歷史繳費紀錄
+                let allPayments = estate.utilityPayments.sorted { $0.date > $1.date }
+                let olderPayments = allPayments.filter { p in
+                    !isLatestPayment(p)
+                }
+                if utilityExpanded {
+                    if !olderPayments.isEmpty {
+                        Divider().padding(.horizontal)
+                        ForEach(olderPayments) { p in
+                            paymentRow(p)
                         }
-                        .buttonStyle(.plain)
                     }
+                }
+                if !olderPayments.isEmpty {
+                    Button {
+                        withAnimation { utilityExpanded.toggle() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Image(systemName: utilityExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                            Text(utilityExpanded ? "收起歷史紀錄" : "展開歷史紀錄（\(olderPayments.count) 筆）")
+                                .font(.caption.weight(.medium))
+                            Spacer()
+                        }
+                        .foregroundStyle(.green)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -902,6 +906,78 @@ struct RealEstateDetailView: View {
     }
 
     // MARK: - 輔助
+
+    /// 該類型最新一筆繳費
+    private func latestPayment(for type: UtilityType) -> UtilityPayment? {
+        estate.utilityPayments
+            .filter { $0.type == type }
+            .sorted { $0.date > $1.date }
+            .first
+    }
+
+    private func isLatestPayment(_ p: UtilityPayment) -> Bool {
+        for t in UtilityType.allCases {
+            if let latest = latestPayment(for: t), latest.id == p.id { return true }
+        }
+        return false
+    }
+
+    @ViewBuilder
+    private func latestPaymentRow(type: UtilityType) -> some View {
+        if let p = latestPayment(for: type) {
+            Button { editingUtilityPayment = p } label: {
+                HStack(spacing: 8) {
+                    Rectangle().fill(Color.clear).frame(width: 20)
+                    Text(fmtDate(p.date)).font(.caption2).foregroundStyle(.tertiary)
+                    if p.photoFileName != nil {
+                        Button {
+                            if let url = p.photoURL { viewingPhotoURL = url }
+                        } label: {
+                            Image(systemName: "photo.fill").font(.caption2).foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer()
+                    Text(fmt(p.amount))
+                        .font(.caption.bold()).foregroundStyle(.red)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal).padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func paymentRow(_ p: UtilityPayment) -> some View {
+        Button { editingUtilityPayment = p } label: {
+            HStack {
+                Image(systemName: p.type.icon)
+                    .font(.caption).foregroundStyle(utilityColor(p.type)).frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(p.type.rawValue).font(.caption.weight(.medium)).foregroundStyle(.primary)
+                    Text(fmtDate(p.date)).font(.caption2).foregroundStyle(.tertiary)
+                }
+                Spacer()
+                if p.photoFileName != nil {
+                    Button {
+                        if let url = p.photoURL { viewingPhotoURL = url }
+                    } label: {
+                        Image(systemName: "photo.fill").font(.caption).foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text(fmt(p.amount))
+                    .font(.subheadline.bold()).foregroundStyle(.red)
+                Image(systemName: "chevron.right")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal).padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
 
     private func utilityColor(_ type: UtilityType) -> Color {
         switch type {
