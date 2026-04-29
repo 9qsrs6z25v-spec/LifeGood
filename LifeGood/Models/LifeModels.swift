@@ -830,18 +830,76 @@ struct SubordinateRecord: Identifiable, Codable {
     var type: SubordinateRecordType
     var content: String
     var date: Date
+    var endDate: Date?
     var note: String
     var severity: MissOpSeverity?
     var leaveType: LeaveType?
     var leaveHours: Double?
 
     init(id: UUID = UUID(), type: SubordinateRecordType = .pro,
-         content: String = "", date: Date = Date(), note: String = "",
+         content: String = "", date: Date = Date(), endDate: Date? = nil, note: String = "",
          severity: MissOpSeverity? = nil,
          leaveType: LeaveType? = nil, leaveHours: Double? = nil) {
         self.id = id; self.type = type; self.content = content
-        self.date = date; self.note = note; self.severity = severity
+        self.date = date; self.endDate = endDate; self.note = note
+        self.severity = severity
         self.leaveType = leaveType; self.leaveHours = leaveHours
+    }
+}
+
+// MARK: - 會議
+
+enum MeetingRecurrence: String, Codable, CaseIterable, Identifiable {
+    case daily = "每日"
+    case weekly = "每週"
+    case biweekly = "隔週"
+    case monthly = "每月"
+    var id: String { rawValue }
+}
+
+struct MeetingItem: Identifiable, Codable {
+    let id: UUID
+    var content: String
+    var assigneeId: UUID?
+    var dueDate: Date?
+
+    init(id: UUID = UUID(), content: String = "", assigneeId: UUID? = nil, dueDate: Date? = nil) {
+        self.id = id; self.content = content; self.assigneeId = assigneeId; self.dueDate = dueDate
+    }
+}
+
+struct SubordinateMeeting: Identifiable, Codable {
+    let id: UUID
+    var topic: String
+    var date: Date
+    var durationMinutes: Int
+    var recurrence: MeetingRecurrence?
+    var items: [MeetingItem]
+    var note: String
+
+    init(id: UUID = UUID(), topic: String = "", date: Date = Date(),
+         durationMinutes: Int = 60, recurrence: MeetingRecurrence? = nil,
+         items: [MeetingItem] = [], note: String = "") {
+        self.id = id; self.topic = topic; self.date = date
+        self.durationMinutes = durationMinutes; self.recurrence = recurrence
+        self.items = items; self.note = note
+    }
+}
+
+// MARK: - 任務
+
+struct SubordinateTask: Identifiable, Codable {
+    let id: UUID
+    var topic: String
+    var content: String
+    var date: Date
+    var dueDate: Date?
+    var note: String
+
+    init(id: UUID = UUID(), topic: String = "", content: String = "",
+         date: Date = Date(), dueDate: Date? = nil, note: String = "") {
+        self.id = id; self.topic = topic; self.content = content
+        self.date = date; self.dueDate = dueDate; self.note = note
     }
 }
 
@@ -857,13 +915,17 @@ struct Subordinate: Identifiable, Codable {
     var departmentId: UUID?
     var records: [SubordinateRecord]
     var joinDate: Date?
+    var meetings: [SubordinateMeeting]
+    var tasks: [SubordinateTask]
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
          department: String = "", note: String = "", gradeTitleId: UUID? = nil,
-         departmentId: UUID? = nil, records: [SubordinateRecord] = [], joinDate: Date? = nil) {
+         departmentId: UUID? = nil, records: [SubordinateRecord] = [], joinDate: Date? = nil,
+         meetings: [SubordinateMeeting] = [], tasks: [SubordinateTask] = []) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
         self.departmentId = departmentId; self.records = records; self.joinDate = joinDate
+        self.meetings = meetings; self.tasks = tasks
     }
 
     init(from decoder: Decoder) throws {
@@ -877,6 +939,8 @@ struct Subordinate: Identifiable, Codable {
         departmentId = try c.decodeIfPresent(UUID.self, forKey: .departmentId)
         records = (try? c.decode([SubordinateRecord].self, forKey: .records)) ?? []
         joinDate = try c.decodeIfPresent(Date.self, forKey: .joinDate)
+        meetings = (try? c.decode([SubordinateMeeting].self, forKey: .meetings)) ?? []
+        tasks = (try? c.decode([SubordinateTask].self, forKey: .tasks)) ?? []
     }
 }
 
