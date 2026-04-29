@@ -1116,53 +1116,110 @@ struct FinanceCardView: View {
 
 struct DepositEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
     let milestoneId: UUID
     let currency: String
     var editing: BankDeposit?
 
-    @State private var isWithdrawal = false
+    enum TransactionType: String, CaseIterable {
+        case deposit = "存款"
+        case withdrawal = "提款"
+        case transfer = "轉帳"
+    }
+
+    @State private var txType: TransactionType = .deposit
     @State private var date = Date()
     @State private var amountText = ""
+    @State private var transferTargetId: UUID?
 
-    private var typeLabel: String { isWithdrawal ? "提款" : "存款" }
+    private var bankMilestones: [LifeMilestone] {
+        lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .bank && $0.id != milestoneId
+        }
+    }
+
+    private func bankBalance(for ms: LifeMilestone) -> Double {
+        let now = Date()
+        var total: Double = 0
+        for dep in ms.bankDeposits ?? [] {
+            guard dep.date <= now else { continue }
+            if let expId = dep.linkedExpenseId,
+               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
+               exp.linkedCreditCardMilestoneId != nil { continue }
+            total += dep.isWithdrawal ? -dep.amount : dep.amount
+        }
+        return total
+    }
+
+    private func fmtBal(_ v: Double) -> String {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        if abs(v) >= 10000 {
+            return "NT$ \(f.string(from: NSNumber(value: v / 10000)) ?? "0")萬"
+        }
+        return "NT$ \(f.string(from: NSNumber(value: v)) ?? "0")"
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("\(currency) \(typeLabel)") {
-                    Picker("類型", selection: $isWithdrawal) {
-                        Text("存款").tag(false)
-                        Text("提款").tag(true)
+                Section {
+                    Picker("類型", selection: $txType) {
+                        ForEach(TransactionType.allCases, id: \.self) { t in
+                            Text(t.rawValue).tag(t)
+                        }
                     }
                     .pickerStyle(.segmented)
+                }
 
-                    DatePicker("日期", selection: $date, displayedComponents: .date)
-                    HStack {
-                        Text(currency).foregroundStyle(.secondary)
-                        TextField("金額", text: $amountText).keyboardType(.decimalPad)
+                if txType == .transfer {
+                    Section("轉帳資訊") {
+                        Picker("轉入帳戶", selection: $transferTargetId) {
+                            Text("請選擇").tag(nil as UUID?)
+                            ForEach(bankMilestones) { ms in
+                                let name = ms.bankName ?? ms.title
+                                Text("\(name)（\(fmtBal(bankBalance(for: ms)))）")
+                                    .tag(ms.id as UUID?)
+                            }
+                        }
+                        DatePicker("日期", selection: $date, displayedComponents: .date)
+                        HStack {
+                            Text(currency).foregroundStyle(.secondary)
+                            TextField("金額", text: $amountText).keyboardType(.decimalPad)
+                        }
+                    }
+                } else {
+                    Section("\(currency) \(txType.rawValue)") {
+                        DatePicker("日期", selection: $date, displayedComponents: .date)
+                        HStack {
+                            Text(currency).foregroundStyle(.secondary)
+                            TextField("金額", text: $amountText).keyboardType(.decimalPad)
+                        }
                     }
                 }
+
                 if editing != nil {
                     Section {
                         Button(role: .destructive) { delete() } label: { Label("刪除", systemImage: "trash") }
                     }
                 }
             }
-            .navigationTitle(editing != nil ? "編輯\(typeLabel)" : "新增存款或提款")
+            .navigationTitle(editing != nil ? "編輯" : "新增存款 / 提款 / 轉帳")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled((Double(amountText) ?? 0) <= 0)
+                    Button(editing != nil ? "儲存" : "新增") {
+                        if txType == .transfer { saveTransfer() } else { save() }
+                    }
+                    .bold().foregroundStyle(.green)
+                    .disabled((Double(amountText) ?? 0) <= 0 || (txType == .transfer && transferTargetId == nil))
                 }
             }
             .onAppear {
                 if let e = editing {
-                    isWithdrawal = e.isWithdrawal
+                    txType = e.isWithdrawal ? .withdrawal : .deposit
                     date = e.date
                     amountText = String(format: "%.0f", e.amount)
                 }
@@ -1173,12 +1230,41 @@ struct DepositEditorSheet: View {
     private func save() {
         guard var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
         let dep = BankDeposit(id: editing?.id ?? UUID(), date: date, amount: Double(amountText) ?? 0,
-                              currencyCode: currency, isWithdrawal: isWithdrawal)
+                              currencyCode: currency, isWithdrawal: txType == .withdrawal)
         var list = ms.bankDeposits ?? []
         if let idx = list.firstIndex(where: { $0.id == dep.id }) { list[idx] = dep }
         else { list.append(dep) }
         ms.bankDeposits = list
         lifeStore.update(ms); dismiss()
+    }
+
+    private func saveTransfer() {
+        let amount = Double(amountText) ?? 0
+        guard amount > 0, let targetId = transferTargetId else { return }
+
+        // 從本帳戶扣款
+        if var fromMs = lifeStore.milestones.first(where: { $0.id == milestoneId }) {
+            var fromList = fromMs.bankDeposits ?? []
+            fromList.append(BankDeposit(
+                id: UUID(), date: date, amount: amount,
+                currencyCode: currency, isWithdrawal: true
+            ))
+            fromMs.bankDeposits = fromList
+            lifeStore.update(fromMs)
+        }
+
+        // 轉入目標帳戶
+        if var toMs = lifeStore.milestones.first(where: { $0.id == targetId }) {
+            var toList = toMs.bankDeposits ?? []
+            toList.append(BankDeposit(
+                id: UUID(), date: date, amount: amount,
+                currencyCode: currency, isWithdrawal: false
+            ))
+            toMs.bankDeposits = toList
+            lifeStore.update(toMs)
+        }
+
+        dismiss()
     }
 
     private func delete() {
