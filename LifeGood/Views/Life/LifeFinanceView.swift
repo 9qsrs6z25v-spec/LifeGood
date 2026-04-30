@@ -1127,12 +1127,14 @@ struct DepositEditorSheet: View {
         case deposit = "存款"
         case withdrawal = "提款"
         case transfer = "轉帳"
+        case adjust = "沖正"
     }
 
     @State private var txType: TransactionType = .deposit
     @State private var date = Date()
     @State private var amountText = ""
     @State private var transferTargetId: UUID?
+    @State private var adjustNote = ""
 
     private var bankMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
@@ -1151,6 +1153,16 @@ struct DepositEditorSheet: View {
             total += dep.isWithdrawal ? -dep.amount : dep.amount
         }
         return total
+    }
+
+    private var currentBalance: Double {
+        guard let ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { return 0 }
+        return bankBalance(for: ms)
+    }
+
+    private func fmtNum(_ v: Double) -> String {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "0"
     }
 
     private func fmtBal(_ v: Double) -> String {
@@ -1189,6 +1201,30 @@ struct DepositEditorSheet: View {
                             TextField("金額", text: $amountText).keyboardType(.decimalPad)
                         }
                     }
+                } else if txType == .adjust {
+                    Section("沖正") {
+                        HStack {
+                            Text("目前總額").foregroundStyle(.secondary)
+                            Spacer()
+                            Text(fmtBal(currentBalance)).foregroundStyle(.blue)
+                        }
+                        DatePicker("日期", selection: $date, displayedComponents: .date)
+                        HStack {
+                            Text(currency).foregroundStyle(.secondary)
+                            TextField("調整後金額", text: $amountText).keyboardType(.decimalPad)
+                        }
+                        if let target = Double(amountText) {
+                            let diff = target - currentBalance
+                            HStack {
+                                Text("差額").foregroundStyle(.secondary)
+                                Spacer()
+                                Text("\(diff >= 0 ? "+" : "")\(fmtNum(diff))")
+                                    .foregroundStyle(diff >= 0 ? Color.green : Color.red)
+                                    .bold()
+                            }
+                        }
+                        TextField("備註（如：對帳調整）", text: $adjustNote, axis: .vertical).lineLimit(2...3)
+                    }
                 } else {
                     Section("\(currency) \(txType.rawValue)") {
                         DatePicker("日期", selection: $date, displayedComponents: .date)
@@ -1211,10 +1247,14 @@ struct DepositEditorSheet: View {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") {
-                        if txType == .transfer { saveTransfer() } else { save() }
+                        switch txType {
+                        case .transfer: saveTransfer()
+                        case .adjust: saveAdjust()
+                        default: save()
+                        }
                     }
                     .bold().foregroundStyle(.green)
-                    .disabled((Double(amountText) ?? 0) <= 0 || (txType == .transfer && transferTargetId == nil))
+                    .disabled(saveDisabled)
                 }
             }
             .onAppear {
@@ -1224,6 +1264,14 @@ struct DepositEditorSheet: View {
                     amountText = String(format: "%.0f", e.amount)
                 }
             }
+        }
+    }
+
+    private var saveDisabled: Bool {
+        switch txType {
+        case .deposit, .withdrawal: return (Double(amountText) ?? 0) <= 0
+        case .transfer: return (Double(amountText) ?? 0) <= 0 || transferTargetId == nil
+        case .adjust: return Double(amountText) == nil
         }
     }
 
@@ -1265,6 +1313,21 @@ struct DepositEditorSheet: View {
         }
 
         dismiss()
+    }
+
+    private func saveAdjust() {
+        guard let targetAmount = Double(amountText),
+              var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
+        let diff = targetAmount - currentBalance
+        guard diff != 0 else { dismiss(); return }
+        var list = ms.bankDeposits ?? []
+        let note = adjustNote.trimmingCharacters(in: .whitespaces)
+        list.append(BankDeposit(
+            id: UUID(), date: date, amount: abs(diff),
+            currencyCode: currency, isWithdrawal: diff < 0
+        ))
+        ms.bankDeposits = list
+        lifeStore.update(ms); dismiss()
     }
 
     private func delete() {
