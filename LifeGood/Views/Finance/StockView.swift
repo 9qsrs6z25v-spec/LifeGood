@@ -10,6 +10,7 @@ struct StockView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var updateBanner: String?
     @State private var isUpdating = false
+    @State private var fetchStatus: [UUID: Bool] = [:]
 
     private var activeStocks: [Stock] { store.stocks.filter { !$0.isSold } }
     private var soldStocks: [Stock] { store.stocks.filter { $0.isSold } }
@@ -120,7 +121,7 @@ struct StockView: View {
         let targets = activeStocks.filter { !$0.symbol.isEmpty }
         guard !targets.isEmpty else { return }
 
-        withAnimation { isUpdating = true }
+        withAnimation { isUpdating = true; fetchStatus = [:] }
         var success = 0
         var fail = 0
 
@@ -129,8 +130,10 @@ struct StockView: View {
                 if let idx = store.stocks.firstIndex(where: { $0.id == stock.id }) {
                     store.stocks[idx].currentPrice = price
                 }
+                fetchStatus[stock.id] = true
                 success += 1
             } else {
+                fetchStatus[stock.id] = false
                 fail += 1
             }
         }
@@ -335,6 +338,10 @@ struct StockView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
+                        if let ok = fetchStatus[item.id] {
+                            Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .font(.caption).foregroundStyle(ok ? .green : .red)
+                        }
                         Text(item.name).font(.subheadline.weight(.semibold))
                         if !item.symbol.isEmpty {
                             Text(item.symbol)
