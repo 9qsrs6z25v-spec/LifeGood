@@ -754,6 +754,7 @@ struct FinanceCardView: View {
                     Text(index % labelStride == 0 ? shortDate(row.date) : " ")
                         .font(.system(size: 8))
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
             }
         }
@@ -811,6 +812,7 @@ struct FinanceCardView: View {
                 Text(i % labelStride == 0 ? shortDate(row.date) : " ")
                     .font(.system(size: 8))
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity)
             }
         }
@@ -1032,6 +1034,7 @@ struct FinanceCardView: View {
                     Text(index % labelStride == 0 ? shortDate(item.date) : " ")
                         .font(.system(size: 8))
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
             }
         }
@@ -1108,6 +1111,7 @@ struct FinanceCardView: View {
                 Text(i % labelStride == 0 ? shortDate(item.date) : " ")
                     .font(.system(size: 8))
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity)
             }
         }
