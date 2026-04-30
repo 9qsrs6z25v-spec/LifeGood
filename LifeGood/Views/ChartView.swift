@@ -5,6 +5,8 @@ struct ChartView: View {
     @EnvironmentObject var store: ExpenseStore
     @State private var selectedPeriod: TimePeriod = .daily
     @State private var selectedDataPoint: ChartDataPoint?
+    @State private var chartData: [ChartDataPoint] = []
+    @State private var isLoading = true
 
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -14,10 +16,6 @@ struct ChartView: View {
         f.maximumFractionDigits = 0
         return f
     }()
-
-    var chartData: [ChartDataPoint] {
-        store.chartData(for: selectedPeriod)
-    }
 
     var totalForPeriod: Double {
         chartData.reduce(0) { $0 + $1.amount }
@@ -32,22 +30,36 @@ struct ChartView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    // 時間區間選擇
                     periodPicker
 
-                    // 統計摘要
-                    statisticsSummary
-
-                    // 趨勢圖表
-                    trendChart
-
-                    // 支出類型比例
-                    expenseTypeBreakdown
+                    if isLoading {
+                        ProgressView().padding(.vertical, 40)
+                    } else {
+                        statisticsSummary
+                        trendChart
+                        expenseTypeBreakdown
+                    }
                 }
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("圖表")
+            .task(id: selectedPeriod) {
+                await loadChartData()
+            }
+            .onChange(of: store.expenses.count) { _, _ in
+                Task { await loadChartData() }
+            }
+        }
+    }
+
+    private func loadChartData() async {
+        isLoading = true
+        let period = selectedPeriod
+        let data = store.chartData(for: period)
+        await MainActor.run {
+            chartData = data
+            isLoading = false
         }
     }
 
