@@ -935,13 +935,15 @@ struct FinanceCardView: View {
                 if dep.isWithdrawal { return "買入/虧損" }
                 return "賣出獲利"
             }
-            if dep.isWithdrawal { return isVirtual ? "信用卡" : "扣款" }
-            return nil
+            if isVirtual { return "信用卡" }
+            if dep.linkedExpenseId != nil { return dep.isWithdrawal ? "扣款" : "收入" }
+            return dep.isWithdrawal ? "提款" : "存款"
         }()
         let badgeColor: Color = {
             if isStock { return .purple }
             if isVirtual { return .orange }
-            return .red
+            if dep.isWithdrawal { return .red }
+            return .green
         }()
         return Button {
             handleDepositTap(dep, isVirtual: isVirtual, isStock: isStock)
