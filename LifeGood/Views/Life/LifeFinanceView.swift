@@ -807,12 +807,21 @@ struct FinanceCardView: View {
         }
         .frame(height: chartHeight)
 
-        HStack(spacing: 0) {
-            ForEach(Array(data.enumerated()), id: \.element.id) { i, row in
-                Text(i % labelStride == 0 ? shortDate(row.date) : " ")
+        let visibleLabels: [(index: Int, label: String)] = {
+            var result: [(Int, String)] = []
+            for i in stride(from: 0, to: data.count, by: labelStride) {
+                result.append((i, shortDate(data[i].date)))
+            }
+            if let last = data.last, (result.last?.0 ?? -1) != data.count - 1 {
+                result.append((data.count - 1, shortDate(last.date)))
+            }
+            return result
+        }()
+        HStack {
+            ForEach(visibleLabels, id: \.index) { item in
+                Text(item.label)
                     .font(.system(size: 8))
                     .foregroundStyle(.tertiary)
-                    .lineLimit(1)
                     .frame(maxWidth: .infinity)
             }
         }
@@ -1105,13 +1114,22 @@ struct FinanceCardView: View {
         }
         .frame(height: chartHeight)
 
-        // X 軸日期（依 labelStride 抽樣顯示）
-        HStack(spacing: 0) {
-            ForEach(Array(balances.enumerated()), id: \.element.id) { i, item in
-                Text(i % labelStride == 0 ? shortDate(item.date) : " ")
+        // X 軸日期（只渲染要顯示的標籤，平均分佈）
+        let visibleLabels: [(index: Int, label: String)] = {
+            var result: [(Int, String)] = []
+            for i in stride(from: 0, to: balances.count, by: labelStride) {
+                result.append((i, shortDate(balances[i].date)))
+            }
+            if let last = balances.last, (result.last?.0 ?? -1) != balances.count - 1 {
+                result.append((balances.count - 1, shortDate(last.date)))
+            }
+            return result
+        }()
+        HStack {
+            ForEach(visibleLabels, id: \.index) { item in
+                Text(item.label)
                     .font(.system(size: 8))
                     .foregroundStyle(.tertiary)
-                    .lineLimit(1)
                     .frame(maxWidth: .infinity)
             }
         }
