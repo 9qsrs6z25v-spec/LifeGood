@@ -28,6 +28,7 @@ struct VehicleView: View {
     @State private var viewingItem: Vehicle?
     @State private var sortOption: VehicleSortOption = .purchasePrice
     @State private var sortAscending = false
+    @State private var depreciationEnabled = false
 
     private var sortedVehicles: [Vehicle] {
         store.vehicles.sorted { a, b in
@@ -126,6 +127,34 @@ struct VehicleView: View {
             .sheet(isPresented: $showAdd) { AddVehicleView() }
             .sheet(item: $viewingItem) { item in VehicleDetailView(vehicle: item) }
             .sheet(item: $editingItem) { item in AddVehicleView(editing: item) }
+            .toolbar {
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        depreciationEnabled.toggle()
+                        if depreciationEnabled { applyDepreciation() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: depreciationEnabled ? "arrow.down.right.circle.fill" : "arrow.down.right.circle")
+                                .foregroundStyle(depreciationEnabled ? .orange : .secondary)
+                            Text("折舊開關")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(depreciationEnabled ? .orange : .secondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 自動計算折舊後估值：每年折舊 15%（定率遞減法）
+    private func applyDepreciation() {
+        for i in store.vehicles.indices {
+            let v = store.vehicles[i]
+            guard !v.isSold, v.purchasePrice > 0 else { continue }
+            let years = v.yearsOwned
+            let rate = 0.15
+            let depreciated = v.purchasePrice * pow(1 - rate, years)
+            store.vehicles[i].currentValue = max(0, (depreciated / 10000).rounded() * 10000)
         }
     }
 
