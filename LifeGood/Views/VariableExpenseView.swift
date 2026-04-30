@@ -149,9 +149,18 @@ struct VariableExpenseView: View {
                         ExpenseRow(expense: expense)
                             .contentShape(Rectangle())
                             .onTapGesture { expenseToEdit = expense }
-                    }
-                    .onDelete { offsets in
-                        deleteWithSync(offsets: offsets, from: expenses)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    if let idx = expenses.firstIndex(where: { $0.id == expense.id }) {
+                                        deleteWithSync(offsets: IndexSet(integer: idx), from: expenses)
+                                    }
+                                } label: { Label("刪除", systemImage: "trash") }
+
+                                Button {
+                                    duplicateExpense(expense)
+                                } label: { Label("複製", systemImage: "doc.on.doc") }
+                                .tint(.blue)
+                            }
                     }
                 }
             }
@@ -206,6 +215,29 @@ struct VariableExpenseView: View {
             }
         }
         store.delete(at: offsets, from: list)
+    }
+
+    /// 複製支出：全部欄位複製，日期改為現在
+    private func duplicateExpense(_ expense: Expense) {
+        let copy = Expense(
+            id: UUID(),
+            title: expense.title,
+            amount: expense.amount,
+            date: Date(),
+            expenseType: expense.expenseType,
+            variableCategory: expense.variableCategory,
+            fixedCategory: expense.fixedCategory,
+            recurrence: expense.recurrence,
+            insuranceSubCategory: expense.insuranceSubCategory,
+            loanSubCategory: expense.loanSubCategory,
+            note: expense.note,
+            currencyCode: expense.currencyCode,
+            diningMember: expense.diningMember,
+            linkedBankMilestoneId: expense.linkedBankMilestoneId,
+            linkedBankCurrency: expense.linkedBankCurrency,
+            linkedCreditCardMilestoneId: expense.linkedCreditCardMilestoneId
+        )
+        store.add(copy)
     }
 
     // MARK: - 依日期分組
