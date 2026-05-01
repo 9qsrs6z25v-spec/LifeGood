@@ -51,7 +51,7 @@ enum FinanceFeature: String, CaseIterable, Identifiable {
 }
 
 enum LifeFeature: String, CaseIterable, Identifiable {
-    case overview, resume, finance, career, family, realEstate
+    case overview, resume, finance, career, family, realEstate, tax
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -61,6 +61,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         case .career: return "職涯"
         case .family: return "家庭"
         case .realEstate: return "房地產"
+        case .tax: return "稅務"
         }
     }
     var icon: String {
@@ -71,6 +72,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         case .career: return "briefcase.fill"
         case .family: return "person.3.fill"
         case .realEstate: return "building.2.fill"
+        case .tax: return "doc.text.fill"
         }
     }
 }
@@ -312,6 +314,8 @@ struct MainTabView: View {
             } else {
                 LifeOverviewView()
             }
+        case .tax:
+            TaxOverviewView()
         }
     }
 
