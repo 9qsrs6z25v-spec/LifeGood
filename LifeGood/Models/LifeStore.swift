@@ -10,6 +10,7 @@ class LifeStore: ObservableObject {
     @Published var subordinates: [Subordinate] = [] { didSet { if !isLoading { save() } } }
     @Published var departments: [Department] = [] { didSet { if !isLoading { save() } } }
     @Published var gradeTitles: [GradeTitle] = [] { didSet { if !isLoading { save() } } }
+    @Published var businessCards: [BusinessCard] = [] { didSet { if !isLoading { save() } } }
 
     private var isLoading = false
 
@@ -100,6 +101,12 @@ class LifeStore: ObservableObject {
         if let i = gradeTitles.firstIndex(where: { $0.id == item.id }) { gradeTitles[i] = item }
     }
     func deleteGradeTitle(_ item: GradeTitle) { gradeTitles.removeAll { $0.id == item.id } }
+
+    func add(_ item: BusinessCard) { businessCards.append(item) }
+    func update(_ item: BusinessCard) {
+        if let i = businessCards.firstIndex(where: { $0.id == item.id }) { businessCards[i] = item }
+    }
+    func deleteBusinessCard(_ item: BusinessCard) { businessCards.removeAll { $0.id == item.id } }
 
     // MARK: - 家庭衍生里程碑
 
@@ -237,6 +244,9 @@ class LifeStore: ObservableObject {
         if let data = try? encoder.encode(gradeTitles) {
             UserDefaults.standard.set(data, forKey: "life_grade_titles")
         }
+        if let data = try? encoder.encode(businessCards) {
+            UserDefaults.standard.set(data, forKey: "life_business_cards")
+        }
         CloudSyncManager.shared.pushAll()
     }
 
@@ -280,6 +290,10 @@ class LifeStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "life_grade_titles"),
            let items = try? decoder.decode([GradeTitle].self, from: data) {
             gradeTitles = items
+        }
+        if let data = UserDefaults.standard.data(forKey: "life_business_cards"),
+           let items = try? decoder.decode([BusinessCard].self, from: data) {
+            businessCards = items
         }
     }
 

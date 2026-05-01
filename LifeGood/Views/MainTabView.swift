@@ -76,20 +76,22 @@ enum LifeFeature: String, CaseIterable, Identifiable {
 }
 
 enum ManagementFeature: String, CaseIterable, Identifiable {
-    case overview, gradeTitle, subordinates
+    case overview, subordinates, businessCard, gradeTitle
     var id: String { rawValue }
     var title: String {
         switch self {
         case .overview: return "部屬總覽"
-        case .gradeTitle: return "職等職稱"
         case .subordinates: return "部屬"
+        case .businessCard: return "名片"
+        case .gradeTitle: return "職等職稱"
         }
     }
     var icon: String {
         switch self {
         case .overview: return "chart.bar.doc.horizontal"
-        case .gradeTitle: return "list.number"
         case .subordinates: return "person.2.fill"
+        case .businessCard: return "person.crop.rectangle.stack"
+        case .gradeTitle: return "list.number"
         }
     }
 }
@@ -254,6 +256,7 @@ struct MainTabView: View {
         case .overview: SubordinateOverviewView()
         case .gradeTitle: GradeTitleView()
         case .subordinates: SubordinateView()
+        case .businessCard: BusinessCardView()
         }
     }
 
@@ -378,13 +381,20 @@ struct MainTabView: View {
 
     private var managementMenu: some View {
         Menu {
-            ForEach(ManagementFeature.allCases) { feature in
+            ForEach(ManagementFeature.allCases.filter { $0 != .gradeTitle }) { feature in
                 Button {
                     managementFeatureRaw = feature.rawValue
                     isSettingsActive = false
                 } label: {
                     Label(feature.title, systemImage: feature.icon)
                 }
+            }
+            Divider()
+            Button {
+                managementFeatureRaw = ManagementFeature.gradeTitle.rawValue
+                isSettingsActive = false
+            } label: {
+                Label(ManagementFeature.gradeTitle.title, systemImage: ManagementFeature.gradeTitle.icon)
             }
         } label: {
             barIcon(

@@ -46,6 +46,7 @@
 		A01B000001000031 /* CareerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000031 /* CareerView.swift */; };
 		A01B000001000032 /* SubordinateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000032 /* SubordinateView.swift */; };
 		A01B000001000099 /* SubordinateOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000099 /* SubordinateOverviewView.swift */; };
+		A01B00000100009A /* BusinessCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100009A /* BusinessCardView.swift */; };
 		A01B000001000033 /* CloudSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000033 /* CloudSyncManager.swift */; };
 		A01B000001000035 /* GradeTitleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000035 /* GradeTitleView.swift */; };
 		A01B000001000036 /* SpouseResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000036 /* SpouseResumeView.swift */; };
@@ -97,6 +98,7 @@
 		A01A000001000031 /* CareerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CareerView.swift; sourceTree = "<group>"; };
 		A01A000001000032 /* SubordinateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateView.swift; sourceTree = "<group>"; };
 		A01A000001000099 /* SubordinateOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateOverviewView.swift; sourceTree = "<group>"; };
+		A01A00000100009A /* BusinessCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusinessCardView.swift; sourceTree = "<group>"; };
 		A01A000001000033 /* CloudSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncManager.swift; sourceTree = "<group>"; };
 		A01A000001000034 /* LifeGood.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGood.entitlements; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
@@ -207,6 +209,7 @@
 				A01A000001000031 /* CareerView.swift */,
 				A01A000001000032 /* SubordinateView.swift */,
 				A01A000001000099 /* SubordinateOverviewView.swift */,
+				A01A00000100009A /* BusinessCardView.swift */,
 				A01A000001000035 /* GradeTitleView.swift */,
 				A01A000001000036 /* SpouseResumeView.swift */,
 				A01A000001000037 /* ChildrenResumeView.swift */,
@@ -341,6 +344,7 @@
 				A01B000001000031 /* CareerView.swift in Sources */,
 				A01B000001000032 /* SubordinateView.swift in Sources */,
 				A01B000001000099 /* SubordinateOverviewView.swift in Sources */,
+				A01B00000100009A /* BusinessCardView.swift in Sources */,
 				A01B000001000027 /* UnifiedExport.swift in Sources */,
 				A01B000001000030 /* BackupManager.swift in Sources */,
 				A01B000001000033 /* CloudSyncManager.swift in Sources */,
@@ -363,7 +367,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 161;
+				CURRENT_PROJECT_VERSION = 162;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -377,7 +381,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 14.7;
+				MARKETING_VERSION = 14.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -393,7 +397,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 161;
+				CURRENT_PROJECT_VERSION = 162;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -407,7 +411,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 14.7;
+				MARKETING_VERSION = 14.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

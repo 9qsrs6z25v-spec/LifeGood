@@ -944,6 +944,31 @@ struct Subordinate: Identifiable, Codable {
     }
 }
 
+// MARK: - 名片
+
+struct BusinessCard: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    var company: String
+    var department: String
+    var jobTitle: String
+    var phone: String
+    var email: String
+    var address: String
+    var note: String
+    var date: Date
+
+    init(id: UUID = UUID(), name: String = "", company: String = "",
+         department: String = "", jobTitle: String = "",
+         phone: String = "", email: String = "", address: String = "",
+         note: String = "", date: Date = Date()) {
+        self.id = id; self.name = name; self.company = company
+        self.department = department; self.jobTitle = jobTitle
+        self.phone = phone; self.email = email
+        self.address = address; self.note = note; self.date = date
+    }
+}
+
 // MARK: - 部門名稱
 
 struct Department: Identifiable, Codable {
