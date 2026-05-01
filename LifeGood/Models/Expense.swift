@@ -13,6 +13,7 @@ enum VariableCategory: String, Codable, Identifiable {
     case vehicle = "汽車"
     case stock = "股票"
     case realEstate = "房地產"
+    case tax = "稅費"
     case entertainment = "娛樂"
     case shopping = "購物"
     case dailyNecessities = "日用品"
@@ -24,7 +25,7 @@ enum VariableCategory: String, Codable, Identifiable {
     var id: String { rawValue }
 
     static var allCases: [VariableCategory] {
-        [.food, .vehicle, .stock, .realEstate, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
+        [.food, .vehicle, .stock, .realEstate, .tax, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
     }
 
     var icon: String {
@@ -34,6 +35,7 @@ enum VariableCategory: String, Codable, Identifiable {
         case .vehicle: return "car.circle.fill"
         case .stock: return "chart.line.uptrend.xyaxis"
         case .realEstate: return "building.2.fill"
+        case .tax: return "doc.text.fill"
         case .entertainment: return "gamecontroller.fill"
         case .shopping: return "bag.fill"
         case .dailyNecessities: return "house.fill"
@@ -57,6 +59,7 @@ enum VariableCategory: String, Codable, Identifiable {
         case .vehicle: return "VehicleColor"
         case .stock: return "StockColor"
         case .realEstate: return "RealEstateColor"
+        case .tax: return "OtherColor"
         case .other: return "OtherColor"
         }
     }
