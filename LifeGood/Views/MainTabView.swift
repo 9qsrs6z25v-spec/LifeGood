@@ -404,78 +404,109 @@ struct MainTabView: View {
     // MARK: - 浮動新增按鈕
 
     private var floatingActionButton: some View {
-        VStack {
-            Spacer()
-            HStack {
+        GeometryReader { geo in
+            // 基本佈局常數
+            let fabSize: CGFloat = 52
+            let hPad: CGFloat = 20    // 距左/右邊距
+            let bottomPad: CGFloat = 80 // 距下緣（避開底部 Tab Bar）
+            let topMargin: CGFloat = 120 // 不可拖至此線以上（避開頂部子功能列）
+
+            // 拖曳上下界（offset 相對於 bottom-right 自然錨點）
+            let leftLimit  = -(geo.size.width  - fabSize - 2 * hPad)
+            let topLimit   = -(geo.size.height - fabSize - bottomPad - topMargin)
+
+            let liveX = clamp(fabOffset.width  + fabDragOffset.width,  leftLimit, 0)
+            let liveY = clamp(fabOffset.height + fabDragOffset.height, topLimit,  0)
+
+            VStack {
                 Spacer()
-                ZStack(alignment: .bottom) {
-                    if showQuickAdd {
-                        VStack(spacing: 10) {
-                            Button {
-                                showQuickAdd = false
-                                showAddIncome = true
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "plus.circle.fill")
-                                    Text("新增收入")
+                HStack {
+                    Spacer()
+                    fabStack
+                        .offset(x: liveX, y: liveY)
+                        .gesture(
+                            DragGesture()
+                                .onChanged { v in
+                                    if showQuickAdd { showQuickAdd = false } // 拖曳時自動收起選單
+                                    fabDragOffset = v.translation
                                 }
-                                .font(.subheadline.weight(.medium))
-                                .padding(.horizontal, 16).padding(.vertical, 10)
-                                .background(Color.green)
-                                .foregroundStyle(.white)
-                                .clipShape(Capsule())
-                                .shadow(color: .green.opacity(0.3), radius: 6, y: 3)
-                            }
-
-                            Button {
-                                showQuickAdd = false
-                                showAddExpense = true
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "minus.circle.fill")
-                                    Text("新增支出")
+                                .onEnded { v in
+                                    let finalX = clamp(fabOffset.width  + v.translation.width,  leftLimit, 0)
+                                    let finalY = clamp(fabOffset.height + v.translation.height, topLimit,  0)
+                                    // 水平吸邊：靠近哪邊就吸過去
+                                    let snappedX: CGFloat = finalX < (leftLimit / 2) ? leftLimit : 0
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
+                                        fabOffset = CGSize(width: snappedX, height: finalY)
+                                        fabDragOffset = .zero
+                                    }
                                 }
-                                .font(.subheadline.weight(.medium))
-                                .padding(.horizontal, 16).padding(.vertical, 10)
-                                .background(Color.red)
-                                .foregroundStyle(.white)
-                                .clipShape(Capsule())
-                                .shadow(color: .red.opacity(0.3), radius: 6, y: 3)
-                            }
-                        }
-                        .transition(.scale.combined(with: .opacity))
-                        .padding(.bottom, 64)
-                    }
-
-                    Button {
-                        withAnimation(.spring(duration: 0.3)) { showQuickAdd.toggle() }
-                    } label: {
-                        Image(systemName: showQuickAdd ? "xmark" : "plus")
-                            .font(.title2.weight(.bold))
-                            .frame(width: 52, height: 52)
-                            .background(showQuickAdd ? Color.secondary : Color.green)
-                            .foregroundStyle(.white)
-                            .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
-                            .rotationEffect(.degrees(showQuickAdd ? 45 : 0))
-                    }
+                        )
+                        .padding(.trailing, hPad)
+                        .padding(.bottom, bottomPad)
                 }
-                .offset(x: fabOffset.width + fabDragOffset.width,
-                        y: fabOffset.height + fabDragOffset.height)
-                .gesture(
-                    DragGesture()
-                        .onChanged { v in fabDragOffset = v.translation }
-                        .onEnded { v in
-                            fabOffset.width += v.translation.width
-                            fabOffset.height += v.translation.height
-                            fabDragOffset = .zero
-                        }
-                )
-                .padding(.trailing, 20)
-                .padding(.bottom, 80)
             }
         }
         .ignoresSafeArea(.keyboard)
+    }
+
+    /// FAB + 彈出選單，獨立出來方便閱讀
+    private var fabStack: some View {
+        ZStack(alignment: .bottom) {
+            if showQuickAdd {
+                VStack(spacing: 10) {
+                    Button {
+                        showQuickAdd = false
+                        showAddIncome = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                            Text("新增收入")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(Color.green)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                        .shadow(color: .green.opacity(0.3), radius: 6, y: 3)
+                    }
+
+                    Button {
+                        showQuickAdd = false
+                        showAddExpense = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "minus.circle.fill")
+                            Text("新增支出")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(Color.red)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                        .shadow(color: .red.opacity(0.3), radius: 6, y: 3)
+                    }
+                }
+                .transition(.scale.combined(with: .opacity))
+                .padding(.bottom, 64)
+            }
+
+            Button {
+                withAnimation(.spring(duration: 0.3)) { showQuickAdd.toggle() }
+            } label: {
+                Image(systemName: showQuickAdd ? "xmark" : "plus")
+                    .font(.title2.weight(.bold))
+                    .frame(width: 52, height: 52)
+                    .background(showQuickAdd ? Color.secondary : Color.green)
+                    .foregroundStyle(.white)
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                    .rotationEffect(.degrees(showQuickAdd ? 45 : 0))
+            }
+        }
+    }
+
+    private func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
+        min(upper, max(lower, value))
     }
 
     // MARK: - 內容區
