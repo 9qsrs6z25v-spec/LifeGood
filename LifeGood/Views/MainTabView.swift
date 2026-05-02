@@ -408,7 +408,7 @@ struct MainTabView: View {
             Spacer()
             HStack {
                 Spacer()
-                ZStack {
+                ZStack(alignment: .bottom) {
                     if showQuickAdd {
                         VStack(spacing: 10) {
                             Button {
@@ -444,7 +444,7 @@ struct MainTabView: View {
                             }
                         }
                         .transition(.scale.combined(with: .opacity))
-                        .padding(.bottom, 60)
+                        .padding(.bottom, 64)
                     }
 
                     Button {
