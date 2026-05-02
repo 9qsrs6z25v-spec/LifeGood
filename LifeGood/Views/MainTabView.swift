@@ -204,23 +204,242 @@ struct MainTabView: View {
         return list
     }
 
-    var body: some View {
-        VStack(spacing: 0) {
-            contentView
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+    @State private var showQuickAdd = false
+    @State private var showAddIncome = false
+    @State private var showAddExpense = false
+    @State private var fabOffset: CGSize = .zero
+    @State private var fabDragOffset: CGSize = .zero
 
-            bottomBar
+    var body: some View {
+        ZStack {
+            VStack(spacing: 0) {
+                if !isSettingsActive {
+                    topSubFeatureBar
+                }
+                contentView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                bottomTabBar
+            }
+            .tint(.green)
+            .onChange(of: appMode) { _, _ in
+                isSettingsActive = false
+                isManagementMode = false
+                isFamilyMgmtMode = false
+            }
+            .onChange(of: lifeFeatureRaw) { _, _ in
+                isManagementMode = false
+                isFamilyMgmtMode = false
+            }
+
+            floatingActionButton
         }
-        .tint(.green)
-        .onChange(of: appMode) { _, _ in
+        .sheet(isPresented: $showAddIncome) { AddIncomeView() }
+        .sheet(isPresented: $showAddExpense) { AddExpenseView(expenseType: .variable) }
+    }
+
+    // MARK: - 頂部子功能列
+
+    private var topSubFeatureBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if isManagementMode && showManagementToggle {
+                    ForEach(ManagementFeature.allCases.filter { $0 != .gradeTitle }) { f in
+                        subFeaturePill(f.title, icon: f.icon, isSelected: managementFeatureRaw == f.rawValue) {
+                            managementFeatureRaw = f.rawValue
+                        }
+                    }
+                    subFeaturePill(ManagementFeature.gradeTitle.title, icon: ManagementFeature.gradeTitle.icon,
+                                   isSelected: managementFeatureRaw == ManagementFeature.gradeTitle.rawValue) {
+                        managementFeatureRaw = ManagementFeature.gradeTitle.rawValue
+                    }
+                } else if isFamilyMgmtMode && showFamilyMgmtToggle {
+                    ForEach(availableFamilyFeatures) { f in
+                        subFeaturePill(f.title, icon: f.icon, isSelected: familyMgmtFeatureRaw == f.rawValue) {
+                            familyMgmtFeatureRaw = f.rawValue
+                        }
+                    }
+                } else {
+                    switch currentMode {
+                    case .expense:
+                        ForEach(ExpenseFeature.allCases) { f in
+                            subFeaturePill(f.title, icon: f.icon, isSelected: expenseFeatureRaw == f.rawValue) {
+                                expenseFeatureRaw = f.rawValue
+                            }
+                        }
+                    case .finance:
+                        ForEach(FinanceFeature.allCases) { f in
+                            subFeaturePill(f.title, icon: f.icon, isSelected: financeFeatureRaw == f.rawValue) {
+                                financeFeatureRaw = f.rawValue
+                            }
+                        }
+                    case .life:
+                        ForEach(lifeAvailableFeatures) { f in
+                            subFeaturePill(f.title, icon: f.icon, isSelected: lifeFeatureRaw == f.rawValue && !isManagementMode && !isFamilyMgmtMode) {
+                                lifeFeatureRaw = f.rawValue
+                                isManagementMode = false
+                                isFamilyMgmtMode = false
+                            }
+                        }
+                        if showManagementToggle {
+                            subFeaturePill("管理", icon: "person.badge.shield.checkmark.fill",
+                                           isSelected: isManagementMode, tint: .orange) {
+                                isManagementMode.toggle()
+                                isFamilyMgmtMode = false
+                            }
+                        }
+                        if showFamilyMgmtToggle {
+                            subFeaturePill("子女", icon: "figure.2.and.child.holdinghands",
+                                           isSelected: isFamilyMgmtMode, tint: .orange) {
+                                isFamilyMgmtMode.toggle()
+                                isManagementMode = false
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .background(Color(.systemBackground))
+    }
+
+    private func subFeaturePill(_ title: String, icon: String, isSelected: Bool, tint: Color = .green, action: @escaping () -> Void) -> some View {
+        Button(action: {
             isSettingsActive = false
-            isManagementMode = false
-            isFamilyMgmtMode = false
+            action()
+        }) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.caption2)
+                Text(title).font(.caption.weight(.medium))
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(isSelected ? tint : Color(.tertiarySystemFill))
+            .foregroundStyle(isSelected ? .white : .primary)
+            .clipShape(Capsule())
         }
-        .onChange(of: lifeFeatureRaw) { _, _ in
-            isManagementMode = false
-            isFamilyMgmtMode = false
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 底部四按鈕
+
+    private var bottomTabBar: some View {
+        HStack {
+            tabButton(mode: .expense, icon: "dollarsign.circle.fill", label: "收支")
+            tabButton(mode: .finance, icon: "chart.pie.fill", label: "理財")
+            tabButton(mode: .life, icon: "person.fill", label: "人生")
+            Button {
+                isSettingsActive = true
+                isManagementMode = false
+                isFamilyMgmtMode = false
+            } label: {
+                VStack(spacing: 2) {
+                    Image(systemName: "gearshape.fill").font(.system(size: 20))
+                    Text("設定").font(.system(size: 10))
+                }
+                .foregroundStyle(isSettingsActive ? Color.green : Color.secondary)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
+        .padding(.top, 8).padding(.bottom, 6)
+        .background(
+            Color(.systemBackground).shadow(color: .black.opacity(0.08), radius: 4, y: -2)
+                .ignoresSafeArea(edges: .bottom)
+        )
+    }
+
+    private func tabButton(mode: AppMode, icon: String, label: String) -> some View {
+        Button {
+            appMode = mode.rawValue
+            isSettingsActive = false
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.system(size: 20))
+                Text(label).font(.system(size: 10))
+            }
+            .foregroundStyle(currentMode == mode && !isSettingsActive ? Color.green : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 浮動新增按鈕
+
+    private var floatingActionButton: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                ZStack {
+                    if showQuickAdd {
+                        VStack(spacing: 10) {
+                            Button {
+                                showQuickAdd = false
+                                showAddIncome = true
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "plus.circle.fill")
+                                    Text("新增收入")
+                                }
+                                .font(.subheadline.weight(.medium))
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(Color.green)
+                                .foregroundStyle(.white)
+                                .clipShape(Capsule())
+                                .shadow(color: .green.opacity(0.3), radius: 6, y: 3)
+                            }
+
+                            Button {
+                                showQuickAdd = false
+                                showAddExpense = true
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "minus.circle.fill")
+                                    Text("新增支出")
+                                }
+                                .font(.subheadline.weight(.medium))
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(Color.red)
+                                .foregroundStyle(.white)
+                                .clipShape(Capsule())
+                                .shadow(color: .red.opacity(0.3), radius: 6, y: 3)
+                            }
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                        .padding(.bottom, 60)
+                    }
+
+                    Button {
+                        withAnimation(.spring(duration: 0.3)) { showQuickAdd.toggle() }
+                    } label: {
+                        Image(systemName: showQuickAdd ? "xmark" : "plus")
+                            .font(.title2.weight(.bold))
+                            .frame(width: 52, height: 52)
+                            .background(showQuickAdd ? Color.secondary : Color.green)
+                            .foregroundStyle(.white)
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                            .rotationEffect(.degrees(showQuickAdd ? 45 : 0))
+                    }
+                }
+                .offset(x: fabOffset.width + fabDragOffset.width,
+                        y: fabOffset.height + fabDragOffset.height)
+                .gesture(
+                    DragGesture()
+                        .onChanged { v in fabDragOffset = v.translation }
+                        .onEnded { v in
+                            fabOffset.width += v.translation.width
+                            fabOffset.height += v.translation.height
+                            fabDragOffset = .zero
+                        }
+                )
+                .padding(.trailing, 20)
+                .padding(.bottom, 80)
+            }
+        }
+        .ignoresSafeArea(.keyboard)
     }
 
     // MARK: - 內容區
@@ -327,198 +546,18 @@ struct MainTabView: View {
         lifeStore.milestones.contains { $0.category == .achievement }
     }
 
-    // MARK: - 底部導覽列
+    // MARK: - 管理/家庭子功能切換（頂部列中觸發）
 
-    private var bottomBar: some View {
-        HStack(spacing: 24) {
-            featureMenu
-
-            if showManagementToggle {
-                managementToggleButton
-            }
-
-            if isManagementMode && showManagementToggle {
-                managementMenu
-            }
-
-            if showFamilyMgmtToggle {
-                familyMgmtToggleButton
-            }
-
-            if isFamilyMgmtMode && showFamilyMgmtToggle && !availableFamilyFeatures.isEmpty {
-                familyMgmtMenu
-            }
-
-            Button {
-                isSettingsActive = true
-                isManagementMode = false
-                isFamilyMgmtMode = false
-            } label: {
-                barIcon(
-                    systemImage: "gearshape.fill",
-                    title: "設定",
-                    tint: isSettingsActive ? Color.green : Color.secondary
-                )
-            }
+    private func handleLifeFeatureTap(_ feature: LifeFeature) {
+        lifeFeatureRaw = feature.rawValue
+        // 職涯頁面且有管理權限，顯示管理子功能入口
+        if feature == .career && isCurrentlyManagerial {
+            isManagementMode = true
         }
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-        .frame(maxWidth: .infinity)
-        .background(
-            Color(.systemBackground)
-                .ignoresSafeArea(edges: .bottom)
-        )
-    }
-
-    private var managementToggleButton: some View {
-        Button {
-            isManagementMode.toggle()
-            isSettingsActive = false
-        } label: {
-            barIcon(
-                systemImage: isManagementMode ? "person.badge.shield.checkmark.fill" : "person.badge.shield.checkmark",
-                title: "管理",
-                tint: isManagementMode ? Color.orange : Color.secondary
-            )
+        // 家庭頁面且有成員，顯示家庭子功能入口
+        if feature == .family && !lifeStore.familyMembers.isEmpty {
+            isFamilyMgmtMode = true
         }
-    }
-
-    private var managementMenu: some View {
-        Menu {
-            ForEach(ManagementFeature.allCases.filter { $0 != .gradeTitle }) { feature in
-                Button {
-                    managementFeatureRaw = feature.rawValue
-                    isSettingsActive = false
-                } label: {
-                    Label(feature.title, systemImage: feature.icon)
-                }
-            }
-            Divider()
-            Button {
-                managementFeatureRaw = ManagementFeature.gradeTitle.rawValue
-                isSettingsActive = false
-            } label: {
-                Label(ManagementFeature.gradeTitle.title, systemImage: ManagementFeature.gradeTitle.icon)
-            }
-        } label: {
-            barIcon(
-                systemImage: managementFeature.icon,
-                title: managementFeature.title,
-                tint: isManagementMode && !isSettingsActive ? Color.orange : Color.secondary
-            )
-        }
-        .menuOrder(.fixed)
-    }
-
-    private var familyMgmtToggleButton: some View {
-        Button {
-            isFamilyMgmtMode.toggle()
-            isSettingsActive = false
-        } label: {
-            barIcon(
-                systemImage: isFamilyMgmtMode ? "figure.2.and.child.holdinghands" : "figure.2.and.child.holdinghands",
-                title: "家庭",
-                tint: isFamilyMgmtMode ? Color.orange : Color.secondary
-            )
-        }
-    }
-
-    private var familyMgmtMenu: some View {
-        Menu {
-            ForEach(availableFamilyFeatures) { feature in
-                Button {
-                    familyMgmtFeatureRaw = feature.rawValue
-                    isSettingsActive = false
-                } label: {
-                    Label(feature.title, systemImage: feature.icon)
-                }
-            }
-        } label: {
-            barIcon(
-                systemImage: familyMgmtFeature.icon,
-                title: familyMgmtFeature.title,
-                tint: isFamilyMgmtMode && !isSettingsActive ? Color.orange : Color.secondary
-            )
-        }
-        .menuOrder(.fixed)
-    }
-
-    private func barIcon(systemImage: String, title: String = "", tint: Color) -> some View {
-        VStack(spacing: 2) {
-            Image(systemName: systemImage)
-                .font(.system(size: 20))
-            if !title.isEmpty {
-                Text(title)
-                    .font(.system(size: 10))
-            }
-        }
-        .foregroundStyle(tint)
-        .frame(width: 56, height: 44)
-        .contentShape(Rectangle())
-    }
-
-    private var featureMenu: some View {
-        Menu {
-            Section("切換模式") {
-                ForEach(AppMode.allCases, id: \.self) { mode in
-                    Button {
-                        if appMode != mode.rawValue {
-                            appMode = mode.rawValue
-                        }
-                        expenseFeatureRaw = ExpenseFeature.overview.rawValue
-                        financeFeatureRaw = FinanceFeature.overview.rawValue
-                        lifeFeatureRaw = LifeFeature.overview.rawValue
-                        isSettingsActive = false
-                    } label: {
-                        if appMode == mode.rawValue {
-                            Label(mode.rawValue, systemImage: "checkmark")
-                        } else {
-                            Text(mode.rawValue)
-                        }
-                    }
-                    .menuActionDismissBehavior(.disabled)
-                }
-            }
-
-            Section("功能頁面") {
-                switch currentMode {
-                case .expense:
-                    ForEach(ExpenseFeature.allCases) { feature in
-                        Button {
-                            expenseFeatureRaw = feature.rawValue
-                            isSettingsActive = false
-                        } label: {
-                            Label(feature.title, systemImage: feature.icon)
-                        }
-                    }
-                case .finance:
-                    ForEach(FinanceFeature.allCases) { feature in
-                        Button {
-                            financeFeatureRaw = feature.rawValue
-                            isSettingsActive = false
-                        } label: {
-                            Label(feature.title, systemImage: feature.icon)
-                        }
-                    }
-                case .life:
-                    ForEach(lifeAvailableFeatures) { feature in
-                        Button {
-                            lifeFeatureRaw = feature.rawValue
-                            isSettingsActive = false
-                        } label: {
-                            Label(feature.title, systemImage: feature.icon)
-                        }
-                    }
-                }
-            }
-        } label: {
-            barIcon(
-                systemImage: currentFeatureIcon,
-                title: currentFeatureTitle,
-                tint: isSettingsActive ? Color.secondary : Color.green
-            )
-        }
-        .menuOrder(.fixed)
     }
 
     private var lifeAvailableFeatures: [LifeFeature] {
@@ -527,6 +566,8 @@ struct MainTabView: View {
         if hasCareerMilestones { list.append(.career) }
         if !lifeStore.familyMembers.isEmpty { list.append(.family) }
         if !financeStore.realEstates.isEmpty { list.append(.realEstate) }
+        let hasTaxExpenses = true
+        if hasTaxExpenses { list.append(.tax) }
         return list
     }
 }
