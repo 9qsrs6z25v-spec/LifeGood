@@ -41,6 +41,7 @@ struct SettingsView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var cloudSync: CloudSyncManager
     @EnvironmentObject var subscription: SubscriptionManager
+    @EnvironmentObject var einvoiceSync: EInvoiceSyncManager
     @AppStorage("appMode") private var appMode: String = AppMode.expense.rawValue
     @State private var showPaywall: Bool = false
 
@@ -73,6 +74,7 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 subscriptionSection
+                einvoiceSection
                 modeSwitchSection
                 currencyRateSection
                 iCloudSyncSection
@@ -213,6 +215,39 @@ struct SettingsView: View {
             Text("訂閱")
         } footer: {
             Text("免費版可使用記帳全部功能與理財模式的「股票」管理。訂閱後解鎖儲蓄險、載具、房地產、人生履歷、家庭、管理等完整功能。\(FeatureGate.viewOnlyMessage)：未訂閱時其他功能仍可閱覽，但無法新增 / 編輯 / 刪除。")
+        }
+    }
+
+    // MARK: - 電子發票自動匯入
+
+    private var einvoiceSection: some View {
+        Section {
+            NavigationLink(destination: EInvoiceSetupView()) {
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("電子發票自動匯入")
+                            Text(einvoiceSync.isLinked
+                                 ? "已連結 \(einvoiceSync.carrier?.cardNo ?? "")"
+                                 : "連結手機條碼自動讀取消費")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: einvoiceSync.isLinked
+                              ? "checkmark.seal.fill" : "qrcode")
+                            .foregroundStyle(einvoiceSync.isLinked ? .green : .blue)
+                    }
+                    Spacer()
+                    if einvoiceSync.isLinked {
+                        Text("\(einvoiceSync.importHistory.count) 筆")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } header: {
+            Text("電子發票")
+        } footer: {
+            Text("透過財政部電子發票 API 自動匯入消費紀錄到變動支出，並依商家自動分類。資料只存在本機，LifeGood 不會上傳任何資料到自有伺服器。")
         }
     }
 
@@ -694,4 +729,5 @@ struct SettingsView: View {
         .environmentObject(LifeStore())
         .environmentObject(CloudSyncManager.shared)
         .environmentObject(SubscriptionManager.shared)
+        .environmentObject(EInvoiceSyncManager.shared)
 }

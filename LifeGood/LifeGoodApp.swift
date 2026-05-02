@@ -7,6 +7,7 @@ struct LifeGoodApp: App {
     @StateObject private var lifeStore = LifeStore()
     @StateObject private var cloudSync = CloudSyncManager.shared
     @StateObject private var subscription = SubscriptionManager.shared
+    @StateObject private var einvoiceSync = EInvoiceSyncManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -17,9 +18,11 @@ struct LifeGoodApp: App {
                 .environmentObject(lifeStore)
                 .environmentObject(cloudSync)
                 .environmentObject(subscription)
+                .environmentObject(einvoiceSync)
                 .task {
                     await subscription.refreshStatus()
                     await subscription.loadProducts()
+                    await einvoiceSync.syncIfDue(expenseStore: expenseStore)
                 }
                 .onAppear {
                     BackupManager.shared.createSnapshotIfNeeded(
@@ -34,7 +37,10 @@ struct LifeGoodApp: App {
                         )
                     } else if phase == .active {
                         cloudSync.syncNow()
-                        Task { await subscription.refreshStatus() }
+                        Task {
+                            await subscription.refreshStatus()
+                            await einvoiceSync.syncIfDue(expenseStore: expenseStore)
+                        }
                     }
                 }
         }

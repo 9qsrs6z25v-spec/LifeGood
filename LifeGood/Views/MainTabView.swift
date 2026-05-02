@@ -645,4 +645,5 @@ struct MainTabView: View {
         .environmentObject(FinanceStore())
         .environmentObject(LifeStore())
         .environmentObject(SubscriptionManager.shared)
+        .environmentObject(EInvoiceSyncManager.shared)
 }
