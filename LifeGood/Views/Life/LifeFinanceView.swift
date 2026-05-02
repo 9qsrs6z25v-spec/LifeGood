@@ -3,9 +3,11 @@ import SwiftUI
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var selectedSub: FinanceSubCategory?
     @State private var viewingItem: LifeMilestone?
     @State private var showAdd = false
+    @State private var showPremiumAlert = false
 
     private var financeMilestones: [LifeMilestone] {
         lifeStore.milestones
@@ -36,7 +38,10 @@ struct LifeFinanceView: View {
             .navigationTitle("財富")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
+                    Button {
+                        if subscription.isPremium { showAdd = true }
+                        else { showPremiumAlert = true }
+                    } label: {
                         Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                     }
                 }
@@ -47,6 +52,7 @@ struct LifeFinanceView: View {
             .sheet(item: $viewingItem) { item in
                 FinanceCardView(milestoneId: item.id)
             }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 
@@ -262,6 +268,7 @@ struct FinanceCardView: View {
 
     @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var subscription: SubscriptionManager
     let milestoneId: UUID
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
@@ -273,6 +280,7 @@ struct FinanceCardView: View {
     @State private var editingExpense: Expense?
     @State private var editingIncome: Income?
     @State private var editingStock: Stock?
+    @State private var showPremiumAlert = false
 
     private var item: LifeMilestone {
         lifeStore.milestones.first(where: { $0.id == milestoneId })
@@ -308,12 +316,19 @@ struct FinanceCardView: View {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
-                        Button { showEdit = true } label: { Text("編輯").foregroundStyle(.green) }
-                        Button { showDeleteConfirm = true } label: { Text("刪除").foregroundStyle(.red) }
+                        Button {
+                            if subscription.isPremium { showEdit = true }
+                            else { showPremiumAlert = true }
+                        } label: { Text("編輯").foregroundStyle(.green) }
+                        Button {
+                            if subscription.isPremium { showDeleteConfirm = true }
+                            else { showPremiumAlert = true }
+                        } label: { Text("刪除").foregroundStyle(.red) }
                     }
                 }
             }
             .sheet(isPresented: $showEdit) { AddMilestoneView(editing: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $viewingLinkedCard) { card in
                 FinanceCardView(milestoneId: card.id)
             }

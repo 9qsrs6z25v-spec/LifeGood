@@ -130,6 +130,8 @@ struct MainTabView: View {
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @State private var showPaywall: Bool = false
 
     private var currentMode: AppMode {
         AppMode(rawValue: appMode) ?? .expense
@@ -210,11 +212,27 @@ struct MainTabView: View {
     @State private var fabOffset: CGSize = .zero
     @State private var fabDragOffset: CGSize = .zero
 
+    /// 目前所在頁面是否屬於付費功能（且尚未訂閱）。
+    private var isCurrentViewPremiumLocked: Bool {
+        if subscription.isPremium { return false }
+        if isSettingsActive { return false }
+        if isManagementMode && showManagementToggle { return !FeatureGate.isFree(managementFeature) }
+        if isFamilyMgmtMode && showFamilyMgmtToggle { return !FeatureGate.isFree(familyMgmtFeature) }
+        switch currentMode {
+        case .expense: return !FeatureGate.isFree(expenseFeature)
+        case .finance: return !FeatureGate.isFree(financeFeature)
+        case .life:    return !FeatureGate.isFree(lifeFeature)
+        }
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
                 if !isSettingsActive {
                     topSubFeatureBar
+                }
+                if isCurrentViewPremiumLocked {
+                    PremiumBanner(showPaywall: $showPaywall)
                 }
                 contentView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -235,6 +253,10 @@ struct MainTabView: View {
         }
         .sheet(isPresented: $showAddIncome) { AddIncomeView() }
         .sheet(isPresented: $showAddExpense) { AddExpenseView(expenseType: .variable) }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
+                .environmentObject(subscription)
+        }
     }
 
     // MARK: - 頂部子功能列
@@ -244,17 +266,22 @@ struct MainTabView: View {
             HStack(spacing: 8) {
                 if isManagementMode && showManagementToggle {
                     ForEach(ManagementFeature.allCases.filter { $0 != .gradeTitle }) { f in
-                        subFeaturePill(f.title, icon: f.icon, isSelected: managementFeatureRaw == f.rawValue) {
+                        subFeaturePill(f.title, icon: f.icon,
+                                       isSelected: managementFeatureRaw == f.rawValue,
+                                       locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
                             managementFeatureRaw = f.rawValue
                         }
                     }
                     subFeaturePill(ManagementFeature.gradeTitle.title, icon: ManagementFeature.gradeTitle.icon,
-                                   isSelected: managementFeatureRaw == ManagementFeature.gradeTitle.rawValue) {
+                                   isSelected: managementFeatureRaw == ManagementFeature.gradeTitle.rawValue,
+                                   locked: !FeatureGate.isFree(ManagementFeature.gradeTitle) && !subscription.isPremium) {
                         managementFeatureRaw = ManagementFeature.gradeTitle.rawValue
                     }
                 } else if isFamilyMgmtMode && showFamilyMgmtToggle {
                     ForEach(availableFamilyFeatures) { f in
-                        subFeaturePill(f.title, icon: f.icon, isSelected: familyMgmtFeatureRaw == f.rawValue) {
+                        subFeaturePill(f.title, icon: f.icon,
+                                       isSelected: familyMgmtFeatureRaw == f.rawValue,
+                                       locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
                             familyMgmtFeatureRaw = f.rawValue
                         }
                     }
@@ -262,19 +289,25 @@ struct MainTabView: View {
                     switch currentMode {
                     case .expense:
                         ForEach(ExpenseFeature.allCases) { f in
-                            subFeaturePill(f.title, icon: f.icon, isSelected: expenseFeatureRaw == f.rawValue) {
+                            subFeaturePill(f.title, icon: f.icon,
+                                           isSelected: expenseFeatureRaw == f.rawValue,
+                                           locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
                                 expenseFeatureRaw = f.rawValue
                             }
                         }
                     case .finance:
                         ForEach(FinanceFeature.allCases) { f in
-                            subFeaturePill(f.title, icon: f.icon, isSelected: financeFeatureRaw == f.rawValue) {
+                            subFeaturePill(f.title, icon: f.icon,
+                                           isSelected: financeFeatureRaw == f.rawValue,
+                                           locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
                                 financeFeatureRaw = f.rawValue
                             }
                         }
                     case .life:
                         ForEach(lifeAvailableFeatures) { f in
-                            subFeaturePill(f.title, icon: f.icon, isSelected: lifeFeatureRaw == f.rawValue && !isManagementMode && !isFamilyMgmtMode) {
+                            subFeaturePill(f.title, icon: f.icon,
+                                           isSelected: lifeFeatureRaw == f.rawValue && !isManagementMode && !isFamilyMgmtMode,
+                                           locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
                                 lifeFeatureRaw = f.rawValue
                                 isManagementMode = false
                                 isFamilyMgmtMode = false
@@ -303,7 +336,7 @@ struct MainTabView: View {
         .background(Color(.systemBackground))
     }
 
-    private func subFeaturePill(_ title: String, icon: String, isSelected: Bool, tint: Color = .green, action: @escaping () -> Void) -> some View {
+    private func subFeaturePill(_ title: String, icon: String, isSelected: Bool, tint: Color = .green, locked: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: {
             isSettingsActive = false
             action()
@@ -311,6 +344,9 @@ struct MainTabView: View {
             HStack(spacing: 4) {
                 Image(systemName: icon).font(.caption2)
                 Text(title).font(.caption.weight(.medium))
+                if locked {
+                    Image(systemName: "lock.fill").font(.system(size: 9))
+                }
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
             .background(isSelected ? tint : Color(.tertiarySystemFill))
@@ -577,4 +613,5 @@ struct MainTabView: View {
         .environmentObject(ExpenseStore())
         .environmentObject(FinanceStore())
         .environmentObject(LifeStore())
+        .environmentObject(SubscriptionManager.shared)
 }

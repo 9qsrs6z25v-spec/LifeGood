@@ -40,7 +40,9 @@ struct SettingsView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var cloudSync: CloudSyncManager
+    @EnvironmentObject var subscription: SubscriptionManager
     @AppStorage("appMode") private var appMode: String = AppMode.expense.rawValue
+    @State private var showPaywall: Bool = false
 
     private var currentMode: AppMode {
         get { AppMode(rawValue: appMode) ?? .expense }
@@ -70,6 +72,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                subscriptionSection
                 modeSwitchSection
                 currencyRateSection
                 iCloudSyncSection
@@ -80,6 +83,10 @@ struct SettingsView: View {
                 aboutSection
             }
             .navigationTitle("設定")
+            .sheet(isPresented: $showPaywall) {
+                PaywallView()
+                    .environmentObject(subscription)
+            }
             // 匯出分享
             .sheet(item: $activeShareItem) { item in
                 ShareSheet(items: [item.url])
@@ -144,6 +151,68 @@ struct SettingsView: View {
             } message: {
                 Text(restoreResultMessage)
             }
+        }
+    }
+
+    // MARK: - 訂閱
+
+    private var subscriptionSection: some View {
+        Section {
+            HStack {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("方案")
+                        Text(subscription.currentPlanText)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: subscription.isPremium ? "checkmark.seal.fill" : "sparkles")
+                        .foregroundStyle(subscription.isPremium ? .green : .orange)
+                }
+                Spacer()
+                if subscription.isPremium {
+                    Text("已訂閱").font(.caption).foregroundStyle(.green)
+                } else {
+                    Button("升級") { showPaywall = true }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.green)
+                }
+            }
+
+            if let exp = subscription.expirationText {
+                HStack {
+                    Label(exp, systemImage: "calendar")
+                    Spacer()
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Button {
+                Task { await subscription.restorePurchases() }
+            } label: {
+                Label("還原購買", systemImage: "arrow.clockwise")
+            }
+
+            if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
+                Link(destination: url) {
+                    Label("管理訂閱（App Store）", systemImage: "creditcard")
+                }
+            }
+
+            #if DEBUG
+            Toggle(isOn: Binding(
+                get: { subscription.devOverride },
+                set: { subscription.devOverride = $0 }
+            )) {
+                Label("開發者模式（強制解鎖）", systemImage: "hammer.fill")
+                    .foregroundStyle(.orange)
+            }
+            #endif
+        } header: {
+            Text("訂閱")
+        } footer: {
+            Text("免費版可使用記帳全部功能與理財模式的「股票」管理。訂閱後解鎖儲蓄險、載具、房地產、人生履歷、家庭、管理等完整功能。\(FeatureGate.viewOnlyMessage)：未訂閱時其他功能仍可閱覽，但無法新增 / 編輯 / 刪除。")
         }
     }
 
@@ -624,4 +693,5 @@ struct SettingsView: View {
         .environmentObject(FinanceStore())
         .environmentObject(LifeStore())
         .environmentObject(CloudSyncManager.shared)
+        .environmentObject(SubscriptionManager.shared)
 }

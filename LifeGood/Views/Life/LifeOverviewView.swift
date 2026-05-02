@@ -3,11 +3,13 @@ import SwiftUI
 struct LifeOverviewView: View {
     @EnvironmentObject var store: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showEditProfile = false
     @State private var showAddVariable = false
     @State private var showAddFixed = false
     @State private var showAddStock = false
     @State private var showAddRealEstate = false
+    @State private var showPremiumAlert = false
 
     var body: some View {
         NavigationStack {
@@ -16,7 +18,10 @@ struct LifeOverviewView: View {
                     profile: store.profile,
                     totalAssets: financeStore.totalAssets,
                     spouse: store.spouse,
-                    onEdit: { showEditProfile = true }
+                    onEdit: {
+                        if subscription.isPremium { showEditProfile = true }
+                        else { showPremiumAlert = true }
+                    }
                 )
                 .padding(.bottom, 8)
 
@@ -41,15 +46,21 @@ struct LifeOverviewView: View {
             .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
             .sheet(isPresented: $showAddStock) { AddStockView() }
             .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 
     private var quickAddMenu: some View {
         Menu {
+            // 記帳與股票為免費功能
             Button { showAddVariable = true } label: { Label("變動支出", systemImage: "arrow.up.arrow.down.circle.fill") }
             Button { showAddFixed = true } label: { Label("固定支出", systemImage: "pin.circle.fill") }
             Button { showAddStock = true } label: { Label("股票", systemImage: "chart.line.uptrend.xyaxis") }
-            Button { showAddRealEstate = true } label: { Label("房地產", systemImage: "building.2.fill") }
+            // 房地產需訂閱
+            Button {
+                if subscription.isPremium { showAddRealEstate = true }
+                else { showPremiumAlert = true }
+            } label: { Label("房地產", systemImage: "building.2.fill") }
         } label: {
             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
         }

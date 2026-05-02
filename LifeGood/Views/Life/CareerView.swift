@@ -2,9 +2,11 @@ import SwiftUI
 
 struct CareerView: View {
     @EnvironmentObject var store: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var editingItem: LifeMilestone?
     @State private var showAdd = false
     @State private var selectedSub: CareerSubCategory?
+    @State private var showPremiumAlert = false
 
     private var careerMilestones: [LifeMilestone] {
         store.milestones
@@ -77,13 +79,17 @@ struct CareerView: View {
             .navigationTitle("職涯")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
+                    Button {
+                        if subscription.isPremium { showAdd = true }
+                        else { showPremiumAlert = true }
+                    } label: {
                         Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                     }
                 }
             }
             .sheet(isPresented: $showAdd) { AddMilestoneView(initialCategory: .career) }
             .sheet(item: $editingItem) { item in AddMilestoneView(editing: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 
@@ -194,7 +200,10 @@ struct CareerView: View {
                     ForEach(filtered) { item in
                         careerRow(item)
                             .contentShape(Rectangle())
-                            .onTapGesture { editingItem = item }
+                            .onTapGesture {
+                                if subscription.isPremium { editingItem = item }
+                                else { showPremiumAlert = true }
+                            }
                         if item.id != filtered.last?.id {
                             Divider().padding(.leading, 60)
                         }

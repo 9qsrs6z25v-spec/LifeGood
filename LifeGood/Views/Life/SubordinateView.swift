@@ -24,9 +24,11 @@ enum SubordinateSortOption: String, CaseIterable, Identifiable {
 
 struct SubordinateView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingItem: Subordinate?
     @State private var viewingItem: Subordinate?
+    @State private var showPremiumAlert = false
     @AppStorage("subordinateSortOption") private var sortOptionRaw = SubordinateSortOption.dateAdded.rawValue
     @AppStorage("subordinateSortAscending") private var sortAscending = false
 
@@ -83,10 +85,12 @@ struct SubordinateView: View {
                         .onTapGesture { viewingItem = sub }
                 }
                 .onDelete { offsets in
+                    guard subscription.isPremium else { showPremiumAlert = true; return }
                     let items = offsets.map { sortedSubordinates[$0] }
                     items.forEach { lifeStore.deleteSubordinate($0) }
                 }
                 .onMove { from, to in
+                    guard subscription.isPremium else { showPremiumAlert = true; return }
                     guard sortOption == .manual else { return }
                     lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
                 }
@@ -135,7 +139,10 @@ struct SubordinateView: View {
                                 .font(.title3).foregroundStyle(.green)
                         }
 
-                        Button { showAdd = true } label: {
+                        Button {
+                            if subscription.isPremium { showAdd = true }
+                            else { showPremiumAlert = true }
+                        } label: {
                             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                         }
                     }
@@ -144,6 +151,7 @@ struct SubordinateView: View {
             .sheet(isPresented: $showAdd) { AddSubordinateView() }
             .sheet(item: $editingItem) { item in AddSubordinateView(editing: item) }
             .sheet(item: $viewingItem) { item in SubordinateDetailView(subordinate: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 

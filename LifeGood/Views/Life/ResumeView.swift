@@ -236,9 +236,11 @@ struct EditProfileView: View {
 struct ResumeView: View {
     @EnvironmentObject var store: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingItem: LifeMilestone?
     @State private var selectedCategory: MilestoneCategory?
+    @State private var showPremiumAlert = false
 
     private var realMilestoneIDs: Set<UUID> { Set(store.milestones.map(\.id)) }
 
@@ -288,13 +290,17 @@ struct ResumeView: View {
             .navigationTitle("我的履歷")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
+                    Button {
+                        if subscription.isPremium { showAdd = true }
+                        else { showPremiumAlert = true }
+                    } label: {
                         Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                     }
                 }
             }
             .sheet(isPresented: $showAdd) { AddMilestoneView() }
             .sheet(item: $editingItem) { item in AddMilestoneView(editing: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 
@@ -308,10 +314,12 @@ struct ResumeView: View {
                         milestoneRow(item)
                             .contentShape(Rectangle())
                             .onTapGesture {
+                                guard subscription.isPremium else { showPremiumAlert = true; return }
                                 if realMilestoneIDs.contains(item.id) { editingItem = item }
                             }
                     }
                     .onDelete { offsets in
+                        guard subscription.isPremium else { showPremiumAlert = true; return }
                         let items = offsets.map { section.items[$0] }
                             .filter { realMilestoneIDs.contains($0.id) }
                         items.forEach { store.deleteMilestone($0) }
@@ -336,10 +344,12 @@ struct ResumeView: View {
                         milestoneRow(item)
                             .contentShape(Rectangle())
                             .onTapGesture {
+                                guard subscription.isPremium else { showPremiumAlert = true; return }
                                 if realMilestoneIDs.contains(item.id) { editingItem = item }
                             }
                     }
                     .onDelete { offsets in
+                        guard subscription.isPremium else { showPremiumAlert = true; return }
                         let toDelete = offsets.map { items[$0] }
                             .filter { realMilestoneIDs.contains($0.id) }
                         toDelete.forEach { store.deleteMilestone($0) }

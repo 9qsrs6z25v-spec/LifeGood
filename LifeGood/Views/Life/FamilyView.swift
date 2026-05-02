@@ -2,8 +2,10 @@ import SwiftUI
 
 struct FamilyView: View {
     @EnvironmentObject var store: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingMember: FamilyMember?
+    @State private var showPremiumAlert = false
 
     var body: some View {
         NavigationStack {
@@ -11,9 +13,13 @@ struct FamilyView: View {
                 ForEach(store.familyMembers) { member in
                     memberRow(member)
                         .contentShape(Rectangle())
-                        .onTapGesture { editingMember = member }
+                        .onTapGesture {
+                            if subscription.isPremium { editingMember = member }
+                            else { showPremiumAlert = true }
+                        }
                 }
                 .onDelete { offsets in
+                    guard subscription.isPremium else { showPremiumAlert = true; return }
                     let items = offsets.map { store.familyMembers[$0] }
                     items.forEach { store.deleteFamilyMember($0) }
                 }
@@ -34,13 +40,17 @@ struct FamilyView: View {
             .navigationTitle("家庭")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
+                    Button {
+                        if subscription.isPremium { showAdd = true }
+                        else { showPremiumAlert = true }
+                    } label: {
                         Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                     }
                 }
             }
             .sheet(isPresented: $showAdd) { AddMilestoneView(initialCategory: .family) }
             .sheet(item: $editingMember) { member in AddMilestoneView(editingFamily: member) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 

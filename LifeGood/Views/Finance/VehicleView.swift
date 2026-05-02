@@ -23,12 +23,14 @@ enum VehicleSortOption: String, CaseIterable, Identifiable {
 struct VehicleView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingItem: Vehicle?
     @State private var viewingItem: Vehicle?
     @State private var sortOption: VehicleSortOption = .purchasePrice
     @State private var sortAscending = false
     @State private var depreciationEnabled = false
+    @State private var showPremiumAlert = false
 
     private var sortedVehicles: [Vehicle] {
         store.vehicles.sorted { a, b in
@@ -61,6 +63,10 @@ struct VehicleView: View {
                                 .onTapGesture { viewingItem = item }
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
+                                        guard subscription.isPremium else {
+                                            showPremiumAlert = true
+                                            return
+                                        }
                                         for fe in item.fixedExpenses {
                                             if let linkedId = fe.linkedExpenseId {
                                                 expenseStore.expenses.removeAll { $0.id == linkedId }
@@ -118,7 +124,10 @@ struct VehicleView: View {
                             .foregroundStyle(.secondary)
                         }
 
-                        Button { showAdd = true } label: {
+                        Button {
+                            if subscription.isPremium { showAdd = true }
+                            else { showPremiumAlert = true }
+                        } label: {
                             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                         }
                     }
@@ -127,6 +136,7 @@ struct VehicleView: View {
             .sheet(isPresented: $showAdd) { AddVehicleView() }
             .sheet(item: $viewingItem) { item in VehicleDetailView(vehicle: item) }
             .sheet(item: $editingItem) { item in AddVehicleView(editing: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
             .toolbar {
                 ToolbarItem(placement: .bottomBar) {
                     Button {

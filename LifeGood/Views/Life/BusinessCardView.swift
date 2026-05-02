@@ -2,9 +2,11 @@ import SwiftUI
 
 struct BusinessCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingCard: BusinessCard?
     @State private var searchText = ""
+    @State private var showPremiumAlert = false
 
     private var filteredCards: [BusinessCard] {
         let sorted = lifeStore.businessCards.sorted { $0.date > $1.date }
@@ -54,10 +56,14 @@ struct BusinessCardView: View {
                                 ForEach(cards) { card in
                                     cardRow(card)
                                         .contentShape(Rectangle())
-                                        .onTapGesture { editingCard = card }
+                                        .onTapGesture {
+                                            if subscription.isPremium { editingCard = card }
+                                            else { showPremiumAlert = true }
+                                        }
                                         .swipeActions(edge: .trailing) {
                                             Button(role: .destructive) {
-                                                lifeStore.deleteBusinessCard(card)
+                                                if subscription.isPremium { lifeStore.deleteBusinessCard(card) }
+                                                else { showPremiumAlert = true }
                                             } label: { Label("刪除", systemImage: "trash") }
                                         }
                                 }
@@ -71,7 +77,10 @@ struct BusinessCardView: View {
             .navigationTitle("名片")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
+                    Button {
+                        if subscription.isPremium { showAdd = true }
+                        else { showPremiumAlert = true }
+                    } label: {
                         Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                     }
                 }
@@ -82,6 +91,7 @@ struct BusinessCardView: View {
             .sheet(item: $editingCard) { card in
                 BusinessCardEditor(editing: card)
             }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 

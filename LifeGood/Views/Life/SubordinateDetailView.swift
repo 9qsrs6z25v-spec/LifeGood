@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SubordinateDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
     let subordinateId: UUID
@@ -12,6 +13,7 @@ struct SubordinateDetailView: View {
     @State private var editingMeeting: SubordinateMeeting?
     @State private var addingTask = false
     @State private var editingTask: SubordinateTask?
+    @State private var showPremiumAlert = false
 
     enum DetailTab: String, CaseIterable { case daily = "日常"; case rating = "評分系統" }
     @State private var detailTab: DetailTab = .daily
@@ -68,10 +70,14 @@ struct SubordinateDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("編輯") { showEdit = true }.foregroundStyle(.green)
+                    Button("編輯") {
+                        if subscription.isPremium { showEdit = true }
+                        else { showPremiumAlert = true }
+                    }.foregroundStyle(.green)
                 }
             }
             .sheet(isPresented: $showEdit) { AddSubordinateView(editing: subordinate) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $addingType) { type in
                 RecordEditorSheet(subordinateId: subordinateId, type: type, editing: nil)
             }
@@ -143,7 +149,10 @@ struct SubordinateDetailView: View {
     private var meetingSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("會議", icon: "person.3.fill", color: .indigo) {
-                Button { addingMeeting = true } label: {
+                Button {
+                    if subscription.isPremium { addingMeeting = true }
+                    else { showPremiumAlert = true }
+                } label: {
                     Image(systemName: "plus.circle.fill").foregroundStyle(.indigo)
                 }
             }
@@ -152,7 +161,10 @@ struct SubordinateDetailView: View {
                 emptyHint
             } else {
                 ForEach(items) { m in
-                    Button { editingMeeting = m } label: {
+                    Button {
+                        if subscription.isPremium { editingMeeting = m }
+                        else { showPremiumAlert = true }
+                    } label: {
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: "person.3.fill").font(.caption).foregroundStyle(.indigo).frame(width: 20)
                             VStack(alignment: .leading, spacing: 4) {
@@ -191,7 +203,10 @@ struct SubordinateDetailView: View {
     private var taskSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("任務", icon: "checklist", color: .cyan) {
-                Button { addingTask = true } label: {
+                Button {
+                    if subscription.isPremium { addingTask = true }
+                    else { showPremiumAlert = true }
+                } label: {
                     Image(systemName: "plus.circle.fill").foregroundStyle(.cyan)
                 }
             }
@@ -200,7 +215,10 @@ struct SubordinateDetailView: View {
                 emptyHint
             } else {
                 ForEach(items) { t in
-                    Button { editingTask = t } label: {
+                    Button {
+                        if subscription.isPremium { editingTask = t }
+                        else { showPremiumAlert = true }
+                    } label: {
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: "checklist").font(.caption).foregroundStyle(.cyan).frame(width: 20)
                             VStack(alignment: .leading, spacing: 4) {
@@ -237,8 +255,14 @@ struct SubordinateDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("優缺點", icon: "hand.thumbsup.fill", color: .green) {
                 Menu {
-                    Button { addingType = .pro } label: { Label("優點", systemImage: "hand.thumbsup.fill") }
-                    Button { addingType = .con } label: { Label("缺點", systemImage: "hand.thumbsdown.fill") }
+                    Button {
+                        if subscription.isPremium { addingType = .pro }
+                        else { showPremiumAlert = true }
+                    } label: { Label("優點", systemImage: "hand.thumbsup.fill") }
+                    Button {
+                        if subscription.isPremium { addingType = .con }
+                        else { showPremiumAlert = true }
+                    } label: { Label("缺點", systemImage: "hand.thumbsdown.fill") }
                 } label: {
                     Image(systemName: "plus.circle.fill").foregroundStyle(.green)
                 }
@@ -256,7 +280,10 @@ struct SubordinateDetailView: View {
     private func recordSection(_ type: SubordinateRecordType) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader(type.rawValue, icon: type.icon, color: colorFor(type)) {
-                Button { addingType = type } label: {
+                Button {
+                    if subscription.isPremium { addingType = type }
+                    else { showPremiumAlert = true }
+                } label: {
                     Image(systemName: "plus.circle.fill").foregroundStyle(colorFor(type))
                 }
             }
@@ -279,7 +306,10 @@ struct SubordinateDetailView: View {
     }
 
     private func recordRow(_ rec: SubordinateRecord) -> some View {
-        Button { editingRecord = rec } label: {
+        Button {
+            if subscription.isPremium { editingRecord = rec }
+            else { showPremiumAlert = true }
+        } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: rec.type.icon).font(.caption).foregroundStyle(colorFor(rec.type)).frame(width: 20)
                 VStack(alignment: .leading, spacing: 4) {

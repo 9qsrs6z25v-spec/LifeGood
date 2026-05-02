@@ -3,10 +3,12 @@ import MapKit
 
 struct LifeRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var viewingItem: RealEstate?
     @State private var selectedCity: String?
     @State private var cameraPosition: MapCameraPosition = .region(Self.taiwanRegion)
+    @State private var showPremiumAlert = false
 
     private static let taiwanRegion = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 23.75, longitude: 121.0),
@@ -78,13 +80,17 @@ struct LifeRealEstateView: View {
             .navigationTitle("房地產")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
+                    Button {
+                        if subscription.isPremium { showAdd = true }
+                        else { showPremiumAlert = true }
+                    } label: {
                         Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                     }
                 }
             }
             .sheet(isPresented: $showAdd) { AddRealEstateView() }
             .sheet(item: $viewingItem) { item in RealEstateDetailView(estate: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 

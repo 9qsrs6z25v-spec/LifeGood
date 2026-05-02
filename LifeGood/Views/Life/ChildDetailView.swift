@@ -3,6 +3,7 @@ import PhotosUI
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
     let childId: UUID
@@ -10,6 +11,7 @@ struct ChildDetailView: View {
     @State private var editingRecord: ChildRecord?
     @State private var addingDailyType: DailyRecordType?
     @State private var editingDaily: DailyRecord?
+    @State private var showPremiumAlert = false
 
     enum DetailTab: String, CaseIterable {
         case daily = "日常"
@@ -81,6 +83,7 @@ struct ChildDetailView: View {
             .sheet(item: $editingDaily) { rec in
                 DailyRecordEditorSheet(childId: childId, type: rec.type, editing: rec)
             }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 
@@ -130,7 +133,10 @@ struct ChildDetailView: View {
                 Image(systemName: type.icon).foregroundStyle(dailyColor(type))
                 Text(type.rawValue).font(.headline)
                 Spacer()
-                Button { addingDailyType = type } label: {
+                Button {
+                    if subscription.isPremium { addingDailyType = type }
+                    else { showPremiumAlert = true }
+                } label: {
                     Image(systemName: "plus.circle.fill").foregroundStyle(dailyColor(type))
                 }
             }
@@ -143,7 +149,10 @@ struct ChildDetailView: View {
                     .padding(.horizontal).padding(.bottom, 12)
             } else {
                 ForEach(items.prefix(20)) { rec in
-                    Button { editingDaily = rec } label: {
+                    Button {
+                        if subscription.isPremium { editingDaily = rec }
+                        else { showPremiumAlert = true }
+                    } label: {
                         dailyRow(rec)
                     }
                     .buttonStyle(.plain)
@@ -217,7 +226,10 @@ struct ChildDetailView: View {
                 Image(systemName: type.icon).foregroundStyle(colorFor(type))
                 Text(type.rawValue).font(.headline)
                 Spacer()
-                Button { addingType = type } label: {
+                Button {
+                    if subscription.isPremium { addingType = type }
+                    else { showPremiumAlert = true }
+                } label: {
                     Image(systemName: "plus.circle.fill").foregroundStyle(colorFor(type))
                 }
             }
@@ -241,7 +253,10 @@ struct ChildDetailView: View {
 
     @ViewBuilder
     private func recordRow(_ rec: ChildRecord) -> some View {
-        Button { editingRecord = rec } label: {
+        Button {
+            if subscription.isPremium { editingRecord = rec }
+            else { showPremiumAlert = true }
+        } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: rec.type.icon)
                     .font(.caption).foregroundStyle(colorFor(rec.type)).frame(width: 20)

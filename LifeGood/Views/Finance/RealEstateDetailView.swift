@@ -4,6 +4,7 @@ import PhotosUI
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
     let estateId: UUID
@@ -15,6 +16,7 @@ struct RealEstateDetailView: View {
     @State private var addingUtilityPayment = false
     @State private var editingUtilityPayment: UtilityPayment?
     @State private var utilityExpanded = false
+    @State private var showPremiumAlert = false
 
     enum DetailTab: String, CaseIterable {
         case finance = "理財"
@@ -57,10 +59,16 @@ struct RealEstateDetailView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
-                        Button { showEdit = true } label: {
+                        Button {
+                            if subscription.isPremium { showEdit = true }
+                            else { showPremiumAlert = true }
+                        } label: {
                             Text("編輯").foregroundStyle(.green)
                         }
-                        Button { showDeleteConfirm = true } label: {
+                        Button {
+                            if subscription.isPremium { showDeleteConfirm = true }
+                            else { showPremiumAlert = true }
+                        } label: {
                             Text("刪除").foregroundStyle(.red)
                         }
                     }
@@ -69,6 +77,7 @@ struct RealEstateDetailView: View {
             .sheet(isPresented: $showEdit) {
                 AddRealEstateView(editing: estate)
             }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $viewingPhotoURL) { url in
                 PhotoViewerSheet(url: url)
             }
@@ -999,7 +1008,10 @@ struct RealEstateDetailView: View {
         HStack {
             Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             Spacer()
-            Button(action: action) {
+            Button {
+                if subscription.isPremium { action() }
+                else { showPremiumAlert = true }
+            } label: {
                 Image(systemName: "plus.circle.fill")
                     .font(.subheadline).foregroundStyle(.green)
             }

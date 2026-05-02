@@ -123,11 +123,13 @@ struct SoldStamp: View {
 struct VehicleDetailView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
     let vehicle: Vehicle
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
+    @State private var showPremiumAlert = false
 
     private var rarity: CardRarity { CardRarity(price: vehicle.purchasePrice) }
 
@@ -149,10 +151,16 @@ struct VehicleDetailView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
-                        Button { showEdit = true } label: {
+                        Button {
+                            if subscription.isPremium { showEdit = true }
+                            else { showPremiumAlert = true }
+                        } label: {
                             Text("編輯").foregroundStyle(.green)
                         }
-                        Button { showDeleteConfirm = true } label: {
+                        Button {
+                            if subscription.isPremium { showDeleteConfirm = true }
+                            else { showPremiumAlert = true }
+                        } label: {
                             Text("刪除").foregroundStyle(.red)
                         }
                     }
@@ -161,6 +169,7 @@ struct VehicleDetailView: View {
             .sheet(isPresented: $showEdit) {
                 AddVehicleView(editing: vehicle)
             }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
             .alert("確定要刪除這輛車嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
                     deleteVehicle()

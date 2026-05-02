@@ -23,11 +23,13 @@ enum RealEstateSortOption: String, CaseIterable, Identifiable {
 struct RealEstateView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingItem: RealEstate?
     @State private var viewingItem: RealEstate?
     @State private var sortOption: RealEstateSortOption = .purchaseDate
     @State private var sortAscending = false
+    @State private var showPremiumAlert = false
 
     private var activeEstates: [RealEstate] {
         sorted(store.realEstates.filter { !$0.isSold })
@@ -67,7 +69,10 @@ struct RealEstateView: View {
                                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                 .onTapGesture { viewingItem = item }
                                 .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) { deleteEstate(item) } label: {
+                                    Button(role: .destructive) {
+                                        if subscription.isPremium { deleteEstate(item) }
+                                        else { showPremiumAlert = true }
+                                    } label: {
                                         Label("刪除", systemImage: "trash")
                                     }
                                 }
@@ -128,7 +133,10 @@ struct RealEstateView: View {
                                 .font(.title3).foregroundStyle(.green)
                         }
 
-                        Button { showAdd = true } label: {
+                        Button {
+                            if subscription.isPremium { showAdd = true }
+                            else { showPremiumAlert = true }
+                        } label: {
                             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                         }
                     }
@@ -137,6 +145,7 @@ struct RealEstateView: View {
             .sheet(isPresented: $showAdd) { AddRealEstateView() }
             .sheet(item: $viewingItem) { item in RealEstateDetailView(estate: item) }
             .sheet(item: $editingItem) { item in AddRealEstateView(editing: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 

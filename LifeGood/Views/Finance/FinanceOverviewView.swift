@@ -3,10 +3,12 @@ import SwiftUI
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAddVariable = false
     @State private var showAddFixed = false
     @State private var showAddStock = false
     @State private var showAddRealEstate = false
+    @State private var showPremiumAlert = false
 
     private func rateForCode(_ code: String) -> Double {
         if code == "NT$" { return 1 }
@@ -47,15 +49,25 @@ struct FinanceOverviewView: View {
             .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
             .sheet(isPresented: $showAddStock) { AddStockView() }
             .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
+    }
+
+    private func gated(_ action: () -> Void) {
+        if subscription.isPremium { action() } else { showPremiumAlert = true }
     }
 
     private var quickAddMenu: some View {
         Menu {
+            // 記帳模式為免費功能，不需要訂閱檢查
             Button { showAddVariable = true } label: { Label("變動支出", systemImage: "arrow.up.arrow.down.circle.fill") }
             Button { showAddFixed = true } label: { Label("固定支出", systemImage: "pin.circle.fill") }
+            // 股票為免費功能
             Button { showAddStock = true } label: { Label("股票", systemImage: "chart.line.uptrend.xyaxis") }
-            Button { showAddRealEstate = true } label: { Label("房地產", systemImage: "building.2.fill") }
+            // 房地產需訂閱
+            Button {
+                gated { showAddRealEstate = true }
+            } label: { Label("房地產", systemImage: "building.2.fill") }
         } label: {
             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
         }

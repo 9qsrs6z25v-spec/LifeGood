@@ -2,6 +2,8 @@ import SwiftUI
 
 struct GradeTitleView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @State private var showPremiumAlert = false
 
     var body: some View {
         NavigationStack {
@@ -70,6 +72,11 @@ struct GradeTitleView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("職等對應職稱")
+            .disabled(!subscription.isPremium)
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+            .onAppear {
+                if !subscription.isPremium { showPremiumAlert = true }
+            }
         }
     }
 }

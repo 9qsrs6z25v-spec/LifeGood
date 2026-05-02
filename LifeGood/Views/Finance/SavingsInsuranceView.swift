@@ -3,8 +3,10 @@ import SwiftUI
 struct SavingsInsuranceView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingItem: SavingsInsurance?
+    @State private var showPremiumAlert = false
 
     var body: some View {
         NavigationStack {
@@ -20,13 +22,20 @@ struct SavingsInsuranceView: View {
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                .onTapGesture { editingItem = item }
+                                .onTapGesture {
+                                    if subscription.isPremium { editingItem = item }
+                                    else { showPremiumAlert = true }
+                                }
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
-                                        if let linkedId = item.linkedExpenseId {
-                                            expenseStore.expenses.removeAll { $0.id == linkedId }
+                                        if subscription.isPremium {
+                                            if let linkedId = item.linkedExpenseId {
+                                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                                            }
+                                            store.deleteInsurance(item)
+                                        } else {
+                                            showPremiumAlert = true
                                         }
-                                        store.deleteInsurance(item)
                                     } label: {
                                         Label("刪除", systemImage: "trash")
                                     }
@@ -42,13 +51,17 @@ struct SavingsInsuranceView: View {
             .navigationTitle("儲蓄險")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
+                    Button {
+                        if subscription.isPremium { showAdd = true }
+                        else { showPremiumAlert = true }
+                    } label: {
                         Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                     }
                 }
             }
             .sheet(isPresented: $showAdd) { AddSavingsInsuranceView() }
             .sheet(item: $editingItem) { item in AddSavingsInsuranceView(editing: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 
