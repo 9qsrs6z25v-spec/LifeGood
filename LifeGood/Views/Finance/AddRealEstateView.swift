@@ -773,6 +773,7 @@ struct AddRealEstateView: View {
 
     // MARK: - 水電瓦斯（人生）
 
+    @ViewBuilder
     private var utilitiesSection: some View {
         Section {
             HStack {
@@ -1163,16 +1164,16 @@ struct AddRealEstateView: View {
             gasMeterNumber: gasMeterNumber.trimmingCharacters(in: .whitespaces),
             gasMeterOwner: gasMeterOwner.trimmingCharacters(in: .whitespaces),
             gasUserNumber: gasUserNumber.trimmingCharacters(in: .whitespaces),
+            insuranceItems: syncedInsurance,
+            propertyAssets: syncedAssets,
+            utilityPayments: existingUtilityPayments,
             extraMeters: extraMeters.map { m in
                 UtilityMeter(id: m.id, type: m.type,
                              label: m.label.trimmingCharacters(in: .whitespaces),
                              meterNumber: m.meterNumber.trimmingCharacters(in: .whitespaces),
                              owner: m.owner.trimmingCharacters(in: .whitespaces),
                              userNumber: m.userNumber.trimmingCharacters(in: .whitespaces))
-            }.filter { !$0.meterNumber.isEmpty || !$0.label.isEmpty },
-            insuranceItems: syncedInsurance,
-            propertyAssets: syncedAssets,
-            utilityPayments: existingUtilityPayments
+            }.filter { !$0.meterNumber.isEmpty || !$0.label.isEmpty }
         )
         if currentEstate != nil { financeStore.update(re) } else { financeStore.add(re) }
         dismiss()
