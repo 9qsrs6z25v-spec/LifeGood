@@ -450,14 +450,15 @@ struct MainTabView: View {
     private var floatingActionButton: some View {
         GeometryReader { geo in
             // 基本佈局常數
-            let fabSize: CGFloat = 52
-            let hPad: CGFloat = 20    // 距左/右邊距
-            let bottomPad: CGFloat = 80 // 距下緣（避開底部 Tab Bar）
-            let topMargin: CGFloat = 120 // 不可拖至此線以上（避開頂部子功能列）
+            let fabWidth: CGFloat = 130   // 顯示「新增收支」時的膠囊寬度（用於拖曳邊界）
+            let fabHeight: CGFloat = 52
+            let hPad: CGFloat = 20         // 距左/右邊距
+            let bottomPad: CGFloat = 80    // 距下緣（避開底部 Tab Bar）
+            let topMargin: CGFloat = 120   // 不可拖至此線以上（避開頂部子功能列）
 
             // 拖曳上下界（offset 相對於 bottom-right 自然錨點）
-            let leftLimit  = -(geo.size.width  - fabSize - 2 * hPad)
-            let topLimit   = -(geo.size.height - fabSize - bottomPad - topMargin)
+            let leftLimit  = -(geo.size.width  - fabWidth  - 2 * hPad)
+            let topLimit   = -(geo.size.height - fabHeight - bottomPad - topMargin)
 
             let liveX = clamp(fabOffset.width  + fabDragOffset.width,  leftLimit, 0)
             let liveY = clamp(fabOffset.height + fabDragOffset.height, topLimit,  0)
@@ -537,14 +538,21 @@ struct MainTabView: View {
             Button {
                 withAnimation(.spring(duration: 0.3)) { showQuickAdd.toggle() }
             } label: {
-                Image(systemName: showQuickAdd ? "xmark" : "plus")
-                    .font(.title2.weight(.bold))
-                    .frame(width: 52, height: 52)
-                    .background(showQuickAdd ? Color.secondary : Color.green)
-                    .foregroundStyle(.white)
-                    .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
-                    .rotationEffect(.degrees(showQuickAdd ? 45 : 0))
+                HStack(spacing: 6) {
+                    Image(systemName: showQuickAdd ? "xmark" : "plus")
+                        .font(.title3.weight(.bold))
+                        .rotationEffect(.degrees(showQuickAdd ? 45 : 0))
+                    if !showQuickAdd {
+                        Text("新增收支")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, showQuickAdd ? 0 : 14)
+                .frame(minWidth: 52, minHeight: 52)
+                .background(showQuickAdd ? Color.secondary : Color.green)
+                .clipShape(Capsule())
+                .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
             }
         }
     }
