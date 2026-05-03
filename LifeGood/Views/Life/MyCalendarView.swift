@@ -166,16 +166,20 @@ struct MyCalendarView: View {
             ))
         }
 
-        // 個人行事曆事件（事務 / 會議）
-        for pe in lifeStore.personalEvents where calendar.isDate(pe.date, inSameDayAs: day) {
+        // 個人行事曆事件（事務 / 會議，含重複展開）
+        for pe in lifeStore.personalEvents where pe.occurs(on: day, calendar: calendar) {
+            let occTime = pe.occurrenceDate(on: day, calendar: calendar)
+            let recurrenceLabel = pe.recurrence == .none ? "" : "🔁 "
+            let baseDetail: String = pe.durationMinutes > 0
+                ? "\(recurrenceLabel)\(pe.durationMinutes) 分鐘"
+                : "\(recurrenceLabel)全日"
+            let withNote = pe.note.isEmpty ? baseDetail : "\(baseDetail) · \(pe.note)"
             events.append(CalendarEvent(
-                id: "pe-\(pe.id.uuidString)",
+                id: "pe-\(pe.id.uuidString)-\(calendar.startOfDay(for: day).timeIntervalSince1970)",
                 type: pe.kind == .meeting ? .meeting : .task,
                 title: pe.title.isEmpty ? pe.kind.rawValue : pe.title,
-                time: pe.date,
-                detail: pe.durationMinutes > 0
-                    ? "\(pe.durationMinutes) 分鐘\(pe.note.isEmpty ? "" : " · \(pe.note)")"
-                    : (pe.note.isEmpty ? "全日" : "全日 · \(pe.note)"),
+                time: pe.durationMinutes > 0 ? occTime : nil,
+                detail: withNote,
                 personalEventId: pe.id
             ))
         }
@@ -416,7 +420,12 @@ struct PersonalEventEditor: View {
     @State private var date: Date = Date()
     @State private var durationMinutes: Int = 30
     @State private var note: String = ""
+    @State private var recurrence: EventRecurrence = .none
+    @State private var hasRecurrenceEnd: Bool = false
+    @State private var recurrenceEndDate: Date = Date().addingTimeInterval(60 * 60 * 24 * 90)
+    @State private var reminder: EventReminder = .none
     @State private var showDeleteConfirm = false
+    @State private var permissionDeniedAlert = false
 
     /// 常用長度選項（分鐘），0 = 全日
     private let durationOptions: [(label: String, minutes: Int)] = [
@@ -461,6 +470,32 @@ struct PersonalEventEditor: View {
                     }
                 }
 
+                Section("重複") {
+                    Picker("頻率", selection: $recurrence) {
+                        ForEach(EventRecurrence.allCases) { r in
+                            Text(r.rawValue).tag(r)
+                        }
+                    }
+                    if recurrence != .none {
+                        Toggle("設定結束日", isOn: $hasRecurrenceEnd)
+                        if hasRecurrenceEnd {
+                            DatePicker("結束於", selection: $recurrenceEndDate, in: date..., displayedComponents: .date)
+                        }
+                    }
+                }
+
+                Section("提醒") {
+                    Picker("提前提醒", selection: $reminder) {
+                        ForEach(EventReminder.allCases) { r in
+                            Text(r.displayName).tag(r)
+                        }
+                    }
+                    if reminder != .none {
+                        Text(reminderHint)
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("備註") {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                 }
@@ -489,6 +524,11 @@ struct PersonalEventEditor: View {
                 Button("刪除", role: .destructive) { delete() }
                 Button("取消", role: .cancel) {}
             }
+            .alert("通知權限被拒", isPresented: $permissionDeniedAlert) {
+                Button("好") {}
+            } message: {
+                Text("請至 iOS 設定 → LifeGood → 通知 開啟，否則無法收到提醒。")
+            }
             .onAppear {
                 if let e = editing {
                     title = e.title
@@ -496,6 +536,12 @@ struct PersonalEventEditor: View {
                     date = e.date
                     durationMinutes = e.durationMinutes
                     note = e.note
+                    recurrence = e.recurrence
+                    if let endDate = e.recurrenceEndDate {
+                        hasRecurrenceEnd = true
+                        recurrenceEndDate = endDate
+                    }
+                    reminder = EventReminder(rawValue: e.reminderMinutes) ?? .none
                 } else {
                     // 預設將時間設為使用者選的日期 + 當下時間
                     let now = Date()
@@ -510,6 +556,20 @@ struct PersonalEventEditor: View {
         }
     }
 
+    /// 提醒提示文字
+    private var reminderHint: String {
+        guard reminder != .none else { return "" }
+        let cal = Calendar.current
+        let fire = cal.date(byAdding: .minute, value: -reminder.rawValue, to: date) ?? date
+        let f = DateFormatter()
+        f.dateFormat = "M/d HH:mm"
+        if recurrence == .none {
+            return "首次提醒：\(f.string(from: fire))"
+        } else {
+            return "首次提醒：\(f.string(from: fire))，之後依「\(recurrence.rawValue)」重複"
+        }
+    }
+
     private func save() {
         let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
         guard !trimmedTitle.isEmpty else { return }
@@ -519,18 +579,33 @@ struct PersonalEventEditor: View {
             kind: kind,
             date: date,
             durationMinutes: durationMinutes,
-            note: note.trimmingCharacters(in: .whitespaces)
+            note: note.trimmingCharacters(in: .whitespaces),
+            recurrence: recurrence,
+            recurrenceEndDate: (recurrence != .none && hasRecurrenceEnd) ? recurrenceEndDate : nil,
+            reminderMinutes: reminder.rawValue
         )
         if let idx = lifeStore.personalEvents.firstIndex(where: { $0.id == event.id }) {
             lifeStore.personalEvents[idx] = event
         } else {
             lifeStore.personalEvents.append(event)
         }
+
+        // 排程通知（會自動覆蓋舊的）
+        Task {
+            if reminder != .none {
+                let granted = await NotificationManager.shared.requestAuthorization()
+                if !granted {
+                    await MainActor.run { permissionDeniedAlert = true }
+                }
+            }
+            await NotificationManager.shared.schedule(event)
+        }
         dismiss()
     }
 
     private func delete() {
         guard let e = editing else { return }
+        NotificationManager.shared.cancel(eventId: e.id)
         lifeStore.personalEvents.removeAll { $0.id == e.id }
         dismiss()
     }

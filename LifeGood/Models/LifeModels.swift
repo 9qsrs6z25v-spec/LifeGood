@@ -1009,6 +1009,41 @@ enum PersonalEventKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// 重複規則
+enum EventRecurrence: String, Codable, CaseIterable, Identifiable {
+    case none = "不重複"
+    case daily = "每天"
+    case weekly = "每週"
+    case monthly = "每月"
+    case yearly = "每年"
+
+    var id: String { rawValue }
+}
+
+/// 事前提醒（單位：分鐘）
+enum EventReminder: Int, Codable, CaseIterable, Identifiable {
+    case none = -1
+    case atTime = 0
+    case minutes5 = 5
+    case minutes15 = 15
+    case minutes30 = 30
+    case hour1 = 60
+    case day1 = 1440
+
+    var id: Int { rawValue }
+    var displayName: String {
+        switch self {
+        case .none:      return "不提醒"
+        case .atTime:    return "事件當下"
+        case .minutes5:  return "5 分鐘前"
+        case .minutes15: return "15 分鐘前"
+        case .minutes30: return "30 分鐘前"
+        case .hour1:     return "1 小時前"
+        case .day1:      return "1 天前"
+        }
+    }
+}
+
 struct PersonalEvent: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String
@@ -1016,23 +1051,88 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
     var date: Date              // 開始日期時間
     var durationMinutes: Int    // 長度（分鐘），0 = 全日
     var note: String
+    var recurrence: EventRecurrence
+    var recurrenceEndDate: Date?    // 可選：重複結束日（含當天為最後一次）
+    var reminderMinutes: Int        // -1 = 不提醒；0 = 事件當下；正整數 = N 分鐘前
 
     init(id: UUID = UUID(),
          title: String = "",
          kind: PersonalEventKind = .meeting,
          date: Date = Date(),
          durationMinutes: Int = 30,
-         note: String = "") {
+         note: String = "",
+         recurrence: EventRecurrence = .none,
+         recurrenceEndDate: Date? = nil,
+         reminderMinutes: Int = EventReminder.none.rawValue) {
         self.id = id
         self.title = title
         self.kind = kind
         self.date = date
         self.durationMinutes = durationMinutes
         self.note = note
+        self.recurrence = recurrence
+        self.recurrenceEndDate = recurrenceEndDate
+        self.reminderMinutes = reminderMinutes
+    }
+
+    /// 向下相容：舊版 JSON 沒有 recurrence / reminder 欄位
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        kind = try c.decode(PersonalEventKind.self, forKey: .kind)
+        date = try c.decode(Date.self, forKey: .date)
+        durationMinutes = try c.decode(Int.self, forKey: .durationMinutes)
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        recurrence = (try? c.decode(EventRecurrence.self, forKey: .recurrence)) ?? .none
+        recurrenceEndDate = try? c.decode(Date.self, forKey: .recurrenceEndDate)
+        reminderMinutes = (try? c.decode(Int.self, forKey: .reminderMinutes)) ?? EventReminder.none.rawValue
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, kind, date, durationMinutes, note, recurrence, recurrenceEndDate, reminderMinutes
     }
 
     /// 結束時間
     var endDate: Date {
         Calendar.current.date(byAdding: .minute, value: durationMinutes, to: date) ?? date
+    }
+
+    /// 此事件是否在指定日期發生（含重複展開）
+    func occurs(on day: Date, calendar: Calendar = .current) -> Bool {
+        let target = calendar.startOfDay(for: day)
+        let start  = calendar.startOfDay(for: date)
+        // 早於原始日期 → 不發生
+        if target < start { return false }
+        // 已過重複結束日 → 不發生
+        if let endRec = recurrenceEndDate,
+           target > calendar.startOfDay(for: endRec) { return false }
+
+        switch recurrence {
+        case .none:
+            return calendar.isDate(target, inSameDayAs: start)
+        case .daily:
+            return true
+        case .weekly:
+            let comps = calendar.dateComponents([.day], from: start, to: target)
+            return (comps.day ?? 0) % 7 == 0
+        case .monthly:
+            let dayOfMonth = calendar.component(.day, from: start)
+            return calendar.component(.day, from: target) == dayOfMonth
+        case .yearly:
+            let m = calendar.component(.month, from: start)
+            let d = calendar.component(.day, from: start)
+            return calendar.component(.month, from: target) == m
+                && calendar.component(.day, from: target) == d
+        }
+    }
+
+    /// 計算指定日期的「實際」事件 datetime（保留時、分）
+    func occurrenceDate(on day: Date, calendar: Calendar = .current) -> Date {
+        let timeComp = calendar.dateComponents([.hour, .minute], from: date)
+        var dayComp = calendar.dateComponents([.year, .month, .day], from: day)
+        dayComp.hour = timeComp.hour
+        dayComp.minute = timeComp.minute
+        return calendar.date(from: dayComp) ?? date
     }
 }
