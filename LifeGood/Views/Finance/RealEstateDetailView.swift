@@ -1249,6 +1249,7 @@ struct ElevatorMaintenanceEditor: View {
 struct UtilityPaymentEditor: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
     let estateId: UUID
@@ -1262,6 +1263,70 @@ struct UtilityPaymentEditor: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var showDeleteConfirm = false
     @State private var showError = false
+    @State private var selectedBankMilestoneId: UUID?
+    @State private var selectedBankCurrency: String = "NT$"
+    @State private var selectedCreditCardMilestoneId: UUID?
+
+    private var bankMilestones: [LifeMilestone] {
+        lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .bank
+        }
+    }
+
+    private var creditCardMilestones: [LifeMilestone] {
+        lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .creditCard
+        }
+    }
+
+    private var hasPaymentTargets: Bool {
+        !bankMilestones.isEmpty || !creditCardMilestones.isEmpty
+    }
+
+    private var bankPickerLabel: String {
+        if let id = selectedCreditCardMilestoneId,
+           let card = creditCardMilestones.first(where: { $0.id == id }) {
+            return card.cardName ?? card.title
+        }
+        if let id = selectedBankMilestoneId,
+           let ms = bankMilestones.first(where: { $0.id == id }) {
+            let name = ms.bankName ?? ms.title
+            return "\(name) · \(selectedBankCurrency)"
+        }
+        return "未選擇"
+    }
+
+    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
+        let codes = (ms.bankDeposits ?? [])
+            .filter { !$0.isWithdrawal }
+            .map(\.currencyCode)
+        var unique: [String] = []
+        for c in codes where !unique.contains(c) { unique.append(c) }
+        return unique.isEmpty ? ["NT$"] : unique
+    }
+
+    @ViewBuilder
+    private func bankSubMenu(for ms: LifeMilestone) -> some View {
+        let name = ms.bankName ?? ms.title
+        let currencies = bankCurrencies(for: ms)
+        if currencies.count > 1 {
+            Menu(name) {
+                ForEach(currencies, id: \.self) { code in
+                    Button(code) {
+                        selectedBankMilestoneId = ms.id
+                        selectedBankCurrency = code
+                        selectedCreditCardMilestoneId = nil
+                    }
+                }
+            }
+        } else {
+            Button(name) {
+                selectedBankMilestoneId = ms.id
+                selectedBankCurrency = currencies.first ?? "NT$"
+                selectedCreditCardMilestoneId = nil
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -1276,6 +1341,48 @@ struct UtilityPaymentEditor: View {
                     HStack {
                         Text("NT$").foregroundStyle(.secondary)
                         TextField("金額", text: $amountText).keyboardType(.decimalPad)
+                    }
+                }
+
+                if hasPaymentTargets {
+                    Section {
+                        HStack {
+                            Text("扣款目標").foregroundStyle(.secondary)
+                            Spacer()
+                            Menu {
+                                Button("不指定") {
+                                    selectedBankMilestoneId = nil
+                                    selectedBankCurrency = "NT$"
+                                    selectedCreditCardMilestoneId = nil
+                                }
+                                if !bankMilestones.isEmpty {
+                                    Section("銀行") {
+                                        ForEach(bankMilestones) { ms in
+                                            bankSubMenu(for: ms)
+                                        }
+                                    }
+                                }
+                                if !creditCardMilestones.isEmpty {
+                                    Section("信用卡") {
+                                        ForEach(creditCardMilestones) { card in
+                                            Button(card.cardName ?? card.title) {
+                                                selectedCreditCardMilestoneId = card.id
+                                                selectedBankMilestoneId = card.linkedBankMilestoneId
+                                                selectedBankCurrency = "NT$"
+                                            }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(bankPickerLabel)
+                                        .foregroundStyle((selectedBankMilestoneId == nil && selectedCreditCardMilestoneId == nil) ? .secondary : .primary)
+                                    Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    } footer: {
+                        Text("選擇扣款銀行或信用卡，繳費會自動連動該帳戶圖表。")
                     }
                 }
 
@@ -1333,6 +1440,13 @@ struct UtilityPaymentEditor: View {
                     amountText = e.amount > 0 ? String(format: "%.0f", e.amount) : ""
                     note = e.note
                     photoFileName = e.photoFileName
+                    // 載入既有的扣款目標（從連結的 Expense 讀回）
+                    if let expId = e.linkedExpenseId,
+                       let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+                        selectedBankMilestoneId = exp.linkedBankMilestoneId
+                        selectedBankCurrency = exp.linkedBankCurrency ?? "NT$"
+                        selectedCreditCardMilestoneId = exp.linkedCreditCardMilestoneId
+                    }
                 }
             }
             .onChange(of: photoItem) { _, item in
@@ -1357,7 +1471,13 @@ struct UtilityPaymentEditor: View {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
         let recordId = editing?.id ?? UUID()
 
-        // 同步建立 / 更新對應的變動支出
+        // 取得舊的支出（用於同步銀行扣款時還原舊紀錄）
+        let previousExpense: Expense? = {
+            guard let id = editing?.linkedExpenseId else { return nil }
+            return expenseStore.expenses.first(where: { $0.id == id })
+        }()
+
+        // 同步建立 / 更新對應的變動支出（含扣款目標）
         let expenseId = editing?.linkedExpenseId ?? UUID()
         let expenseTitle = "\(estate.name) - \(type.rawValue)"
         let expense = Expense(
@@ -1369,13 +1489,17 @@ struct UtilityPaymentEditor: View {
             variableCategory: .realEstate,
             linkedRealEstateId: estate.id,
             realEstateExpenseCategory: .utility,
-            note: note.trimmingCharacters(in: .whitespaces)
+            note: note.trimmingCharacters(in: .whitespaces),
+            linkedBankMilestoneId: selectedBankMilestoneId,
+            linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
+            linkedCreditCardMilestoneId: selectedCreditCardMilestoneId
         )
         if editing?.linkedExpenseId != nil {
             expenseStore.update(expense)
         } else {
             expenseStore.add(expense)
         }
+        syncBankWithdrawal(for: expense, previous: previousExpense)
 
         let record = UtilityPayment(
             id: recordId, type: type, date: date, amount: amount,
@@ -1396,12 +1520,42 @@ struct UtilityPaymentEditor: View {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let e = editing else { return }
         if let name = e.photoFileName { UtilityPayment.deletePhoto(name) }
-        // 同步移除對應的變動支出
+        // 同步移除對應的變動支出與銀行扣款紀錄
         if let linkedId = e.linkedExpenseId {
+            if let exp = expenseStore.expenses.first(where: { $0.id == linkedId }),
+               let bankId = exp.linkedBankMilestoneId,
+               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                ms.bankDeposits?.removeAll { $0.linkedExpenseId == linkedId }
+                lifeStore.update(ms)
+            }
             expenseStore.expenses.removeAll { $0.id == linkedId }
         }
         estate.utilityPayments.removeAll { $0.id == e.id }
         store.update(estate)
         dismiss()
+    }
+
+    /// 同步銀行扣款紀錄（與 AddExpenseView 同邏輯）
+    private func syncBankWithdrawal(for expense: Expense, previous: Expense?) {
+        // 移除舊的銀行扣款紀錄
+        if let prevBankId = previous?.linkedBankMilestoneId,
+           var oldMs = lifeStore.milestones.first(where: { $0.id == prevBankId }) {
+            oldMs.bankDeposits?.removeAll { $0.linkedExpenseId == expense.id }
+            lifeStore.update(oldMs)
+        }
+        // 信用卡扣款不寫入 BankDeposit；改在顯示時依月份彙總
+        guard expense.linkedCreditCardMilestoneId == nil else { return }
+        // 寫入新的銀行扣款紀錄
+        guard let bankId = expense.linkedBankMilestoneId,
+              var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
+        var list = ms.bankDeposits ?? []
+        list.removeAll { $0.linkedExpenseId == expense.id }
+        list.append(BankDeposit(
+            id: UUID(), date: expense.date, amount: expense.amount,
+            currencyCode: expense.linkedBankCurrency ?? "NT$",
+            isWithdrawal: true, linkedExpenseId: expense.id
+        ))
+        ms.bankDeposits = list
+        lifeStore.update(ms)
     }
 }
