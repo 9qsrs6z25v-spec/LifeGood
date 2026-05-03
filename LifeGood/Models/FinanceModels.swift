@@ -368,6 +368,7 @@ enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
     case repair = "維修"
     case furniture = "家具"
     case cleaning = "清潔"
+    case utility = "水電瓦斯"
     case tax = "稅費"
     case insurance = "保險"
     case other = "其他"
@@ -381,6 +382,7 @@ enum RealEstateExpenseCategory: String, Codable, CaseIterable, Identifiable {
         case .repair: return "wrench"
         case .furniture: return "sofa"
         case .cleaning: return "sparkles"
+        case .utility: return "bolt.fill"
         case .tax: return "doc.text"
         case .insurance: return "shield.fill"
         case .other: return "ellipsis.circle"
@@ -492,11 +494,15 @@ struct UtilityPayment: Identifiable, Codable {
     var amount: Double
     var photoFileName: String?
     var note: String
+    /// 連結到記帳模式變動支出的 ID（雙向同步用）
+    var linkedExpenseId: UUID?
 
     init(id: UUID = UUID(), type: UtilityType = .water, date: Date = Date(),
-         amount: Double = 0, photoFileName: String? = nil, note: String = "") {
+         amount: Double = 0, photoFileName: String? = nil, note: String = "",
+         linkedExpenseId: UUID? = nil) {
         self.id = id; self.type = type; self.date = date; self.amount = amount
         self.photoFileName = photoFileName; self.note = note
+        self.linkedExpenseId = linkedExpenseId
     }
 
     var photoURL: URL? {

@@ -195,10 +195,11 @@ struct VariableExpenseView: View {
                 vehicle.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
                 financeStore.update(vehicle)
             }
-            // 同步刪除房地產變動支出
+            // 同步刪除房地產變動支出與水電瓦斯繳費紀錄
             if let reId = expense.linkedRealEstateId,
                var re = financeStore.realEstates.first(where: { $0.id == reId }) {
                 re.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
+                re.utilityPayments.removeAll { $0.linkedExpenseId == expense.id }
                 financeStore.update(re)
             }
             // 同步解除股票連結

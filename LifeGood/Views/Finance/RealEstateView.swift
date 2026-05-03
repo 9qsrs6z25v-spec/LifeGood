@@ -165,6 +165,9 @@ struct RealEstateView: View {
         for asset in item.propertyAssets {
             if let linkedId = asset.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
         }
+        for up in item.utilityPayments {
+            if let linkedId = up.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
         if let linkedId = item.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
         if let saleExpId = item.saleLinkedExpenseId { expenseStore.expenses.removeAll { $0.id == saleExpId } }
         if let saleIncId = item.saleLinkedIncomeId { expenseStore.incomes.removeAll { $0.id == saleIncId } }

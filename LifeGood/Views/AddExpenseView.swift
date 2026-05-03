@@ -1296,6 +1296,34 @@ struct AddExpenseView: View {
             } else {
                 re.paidItems.append(newPaid)
             }
+        } else if selectedRealEstateExpenseCategory == .utility {
+            // 水電瓦斯 → utilityPayments（與房地產卡片水電瓦斯章節雙向同步）
+            re.paidItems.removeAll { $0.linkedExpenseId == expenseId }
+            re.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
+
+            let inferredType: UtilityType = {
+                let lower = title.lowercased()
+                if title.contains("水") { return .water }
+                if title.contains("電") || lower.contains("electric") { return .electricity }
+                if title.contains("瓦斯") || lower.contains("gas") { return .gas }
+                return .electricity
+            }()
+
+            if let idx = re.utilityPayments.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+                let old = re.utilityPayments[idx]
+                re.utilityPayments[idx] = UtilityPayment(
+                    id: old.id, type: old.type, date: date, amount: amount,
+                    photoFileName: old.photoFileName,
+                    note: note.trimmingCharacters(in: .whitespaces),
+                    linkedExpenseId: expenseId
+                )
+            } else {
+                re.utilityPayments.append(UtilityPayment(
+                    type: inferredType, date: date, amount: amount,
+                    note: note.trimmingCharacters(in: .whitespaces),
+                    linkedExpenseId: expenseId
+                ))
+            }
         } else {
             // 其餘類別 → variableExpenses（變動支出）
             let trimmedNote = note.trimmingCharacters(in: .whitespaces)
@@ -1307,8 +1335,9 @@ struct AddExpenseView: View {
                 date: date,
                 linkedExpenseId: expenseId
             )
-            // 編輯時先從 paidItems 移除（修正類別切換時的歸屬）
+            // 編輯時先從 paidItems / utilityPayments 移除（修正類別切換時的歸屬）
             re.paidItems.removeAll { $0.linkedExpenseId == expenseId }
+            re.utilityPayments.removeAll { $0.linkedExpenseId == expenseId }
 
             if let idx = re.variableExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
                 re.variableExpenses[idx] = RealEstateVariableExpense(

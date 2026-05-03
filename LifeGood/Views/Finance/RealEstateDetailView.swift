@@ -1112,6 +1112,11 @@ struct RealEstateDetailView: View {
                 expenseStore.expenses.removeAll { $0.id == linkedId }
             }
         }
+        for up in estate.utilityPayments {
+            if let linkedId = up.linkedExpenseId {
+                expenseStore.expenses.removeAll { $0.id == linkedId }
+            }
+        }
         if let linkedId = estate.linkedExpenseId {
             expenseStore.expenses.removeAll { $0.id == linkedId }
         }
@@ -1243,6 +1248,7 @@ struct ElevatorMaintenanceEditor: View {
 
 struct UtilityPaymentEditor: View {
     @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @Environment(\.dismiss) private var dismiss
 
     let estateId: UUID
@@ -1350,10 +1356,32 @@ struct UtilityPaymentEditor: View {
         }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
         let recordId = editing?.id ?? UUID()
+
+        // 同步建立 / 更新對應的變動支出
+        let expenseId = editing?.linkedExpenseId ?? UUID()
+        let expenseTitle = "\(estate.name) - \(type.rawValue)"
+        let expense = Expense(
+            id: expenseId,
+            title: expenseTitle,
+            amount: amount,
+            date: date,
+            expenseType: .variable,
+            variableCategory: .realEstate,
+            linkedRealEstateId: estate.id,
+            realEstateExpenseCategory: .utility,
+            note: note.trimmingCharacters(in: .whitespaces)
+        )
+        if editing?.linkedExpenseId != nil {
+            expenseStore.update(expense)
+        } else {
+            expenseStore.add(expense)
+        }
+
         let record = UtilityPayment(
             id: recordId, type: type, date: date, amount: amount,
             photoFileName: photoFileName,
-            note: note.trimmingCharacters(in: .whitespaces)
+            note: note.trimmingCharacters(in: .whitespaces),
+            linkedExpenseId: expenseId
         )
         if let idx = estate.utilityPayments.firstIndex(where: { $0.id == recordId }) {
             estate.utilityPayments[idx] = record
@@ -1368,6 +1396,10 @@ struct UtilityPaymentEditor: View {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let e = editing else { return }
         if let name = e.photoFileName { UtilityPayment.deletePhoto(name) }
+        // 同步移除對應的變動支出
+        if let linkedId = e.linkedExpenseId {
+            expenseStore.expenses.removeAll { $0.id == linkedId }
+        }
         estate.utilityPayments.removeAll { $0.id == e.id }
         store.update(estate)
         dismiss()
