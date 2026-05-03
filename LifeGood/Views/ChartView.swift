@@ -1,12 +1,21 @@
 import SwiftUI
 import Charts
 
+enum ChartMode: String, CaseIterable, Identifiable {
+    case trend = "支出趨勢"
+    case variablePie = "變動支出比例"
+    case fixedPie = "固定支出比例"
+
+    var id: String { rawValue }
+}
+
 struct ChartView: View {
     @EnvironmentObject var store: ExpenseStore
     @State private var selectedPeriod: TimePeriod = .daily
     @State private var selectedDataPoint: ChartDataPoint?
     @State private var chartData: [ChartDataPoint] = []
     @State private var isLoading = true
+    @State private var chartMode: ChartMode = .trend
 
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -36,7 +45,7 @@ struct ChartView: View {
                         ProgressView().padding(.vertical, 40)
                     } else {
                         statisticsSummary
-                        trendChart
+                        chartCarousel
                         expenseTypeBreakdown
                     }
                 }
@@ -99,6 +108,42 @@ struct ChartView: View {
             )
         }
         .padding(.horizontal)
+    }
+
+    // MARK: - 圖表輪播（左右滑動切換）
+
+    private var chartCarousel: some View {
+        VStack(spacing: 8) {
+            TabView(selection: $chartMode) {
+                trendChart.tag(ChartMode.trend)
+                variablePieChart.tag(ChartMode.variablePie)
+                fixedPieChart.tag(ChartMode.fixedPie)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: 380)
+
+            // 自訂指示器：模式名稱 + 圓點
+            HStack(spacing: 8) {
+                ForEach(ChartMode.allCases) { mode in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) { chartMode = mode }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(chartMode == mode ? Color.green : Color(.tertiaryLabel))
+                                .frame(width: 6, height: 6)
+                            if chartMode == mode {
+                                Text(mode.rawValue)
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.green)
+                                    .transition(.opacity.combined(with: .scale))
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 
     // MARK: - 趨勢圖
@@ -209,6 +254,148 @@ struct ChartView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
         .padding(.horizontal)
+    }
+
+    // MARK: - 變動支出圓餅圖
+
+    private var variablePieChart: some View {
+        let entries = store.variableBreakdown(for: selectedPeriod)
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(periodPieTitle(prefix: "變動支出"))
+                .font(.headline)
+                .padding(.horizontal)
+
+            if entries.isEmpty {
+                Text("尚無資料")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 200)
+            } else {
+                let total = entries.reduce(0) { $0 + $1.amount }
+                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(variable: $0.category), $0.amount) }, total: total)
+            }
+        }
+        .padding(.vertical)
+        .frame(maxWidth: .infinity)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        .padding(.horizontal)
+    }
+
+    // MARK: - 固定支出圓餅圖
+
+    private var fixedPieChart: some View {
+        let entries = store.fixedBreakdown(for: selectedPeriod)
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(periodPieTitle(prefix: "固定支出"))
+                .font(.headline)
+                .padding(.horizontal)
+
+            if entries.isEmpty {
+                Text("尚無資料")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 200)
+            } else {
+                let total = entries.reduce(0) { $0 + $1.amount }
+                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(fixed: $0.category), $0.amount) }, total: total)
+            }
+        }
+        .padding(.vertical)
+        .frame(maxWidth: .infinity)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        .padding(.horizontal)
+    }
+
+    /// 共用的圓餅圖 body
+    private func pieChartBody(entries: [(name: String, icon: String, color: Color, amount: Double)],
+                              total: Double) -> some View {
+        VStack(spacing: 14) {
+            Chart(entries.indices, id: \.self) { i in
+                let e = entries[i]
+                SectorMark(
+                    angle: .value("金額", e.amount),
+                    innerRadius: .ratio(0.55),
+                    angularInset: 1.5
+                )
+                .foregroundStyle(e.color)
+                .cornerRadius(4)
+            }
+            .frame(height: 180)
+            .padding(.horizontal)
+
+            // 圖例
+            VStack(spacing: 6) {
+                ForEach(entries.prefix(6).indices, id: \.self) { i in
+                    let e = entries[i]
+                    let pct = total > 0 ? e.amount / total * 100 : 0
+                    HStack(spacing: 8) {
+                        Image(systemName: e.icon)
+                            .font(.caption)
+                            .foregroundStyle(e.color)
+                            .frame(width: 18)
+                        Text(e.name).font(.caption)
+                        Spacer()
+                        Text(formatCurrency(e.amount))
+                            .font(.caption.bold())
+                        Text(String(format: "%.1f%%", pct))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 50, alignment: .trailing)
+                    }
+                }
+                if entries.count > 6 {
+                    Text("還有 \(entries.count - 6) 個分類...")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private func colorFor(variable cat: VariableCategory) -> Color {
+        switch cat {
+        case .food:              return .orange
+        case .transportation:    return .blue
+        case .vehicle:           return .teal
+        case .stock:             return .purple
+        case .realEstate:        return .indigo
+        case .tax:               return .brown
+        case .entertainment:     return .pink
+        case .shopping:          return .cyan
+        case .dailyNecessities:  return .green
+        case .medical:           return .red
+        case .education:         return .yellow
+        case .social:            return .mint
+        case .other:             return .gray
+        }
+    }
+
+    private func colorFor(fixed cat: FixedCategory) -> Color {
+        switch cat {
+        case .rent:         return .blue
+        case .utilities:    return .yellow
+        case .insurance:    return .indigo
+        case .subscription: return .pink
+        case .loan:         return .red
+        case .telecom:      return .cyan
+        case .management:   return .teal
+        case .other:        return .gray
+        }
+    }
+
+    private func periodPieTitle(prefix: String) -> String {
+        switch selectedPeriod {
+        case .daily:     return "\(prefix)分類比例（近30天）"
+        case .weekly:    return "\(prefix)分類比例（近12週）"
+        case .monthly:   return "\(prefix)分類比例（近12個月）"
+        case .quarterly: return "\(prefix)分類比例（近8季）"
+        case .yearly:    return "\(prefix)分類比例（近5年）"
+        }
     }
 
     // MARK: - 支出類型比例

@@ -287,6 +287,49 @@ class ExpenseStore: ObservableObject {
         }
     }
 
+    /// 取得指定時間區間的起始日期（與 chartData 視窗一致）
+    func periodStart(for period: TimePeriod, now: Date = Date(), calendar: Calendar = .current) -> Date {
+        let today = calendar.startOfDay(for: now)
+        switch period {
+        case .daily:
+            return calendar.date(byAdding: .day, value: -29, to: today) ?? today
+        case .weekly:
+            return calendar.date(byAdding: .weekOfYear, value: -11, to: today) ?? today
+        case .monthly:
+            return calendar.date(byAdding: .month, value: -11, to: today) ?? today
+        case .quarterly:
+            return calendar.date(byAdding: .month, value: -7 * 3, to: today) ?? today
+        case .yearly:
+            return calendar.date(byAdding: .year, value: -4, to: today) ?? today
+        }
+    }
+
+    /// 變動支出依分類加總（時間範圍與趨勢圖一致）
+    func variableBreakdown(for period: TimePeriod) -> [(category: VariableCategory, amount: Double)] {
+        let calendar = Calendar.current
+        let now = Date()
+        let start = periodStart(for: period, now: now, calendar: calendar)
+        var dict: [VariableCategory: Double] = [:]
+        for e in expenses where e.expenseType == .variable && e.date >= start && e.date <= now {
+            guard let cat = e.variableCategory else { continue }
+            dict[cat, default: 0] += e.amount
+        }
+        return dict.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
+    }
+
+    /// 固定支出依分類加總（用 projectedAmount 投射至所選時間單位，所以比例不受區間影響）
+    func fixedBreakdown(for period: TimePeriod) -> [(category: FixedCategory, amount: Double)] {
+        let calendar = Calendar.current
+        let now = Date()
+        var dict: [FixedCategory: Double] = [:]
+        for e in expenses where e.expenseType == .fixed && e.recurrence != nil
+            && calendar.startOfDay(for: e.date) <= calendar.startOfDay(for: now) {
+            guard let cat = e.fixedCategory else { continue }
+            dict[cat, default: 0] += projectedAmount(for: e, in: period)
+        }
+        return dict.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
+    }
+
     private func dailyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
         let formatter = DateFormatter()
         formatter.dateFormat = "M/d"
