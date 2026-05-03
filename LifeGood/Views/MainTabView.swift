@@ -122,11 +122,11 @@ struct MainTabView: View {
     @AppStorage("expense_feature") private var expenseFeatureRaw: String = ExpenseFeature.overview.rawValue
     @AppStorage("finance_feature") private var financeFeatureRaw: String = FinanceFeature.overview.rawValue
     @AppStorage("life_feature") private var lifeFeatureRaw: String = LifeFeature.overview.rawValue
-    @AppStorage("management_feature") private var managementFeatureRaw: String = ManagementFeature.subordinates.rawValue
-    @AppStorage("family_mgmt_feature") private var familyMgmtFeatureRaw: String = FamilyMgmtFeature.spouseResume.rawValue
+    /// 職涯子功能；空字串代表選的是「職涯」本身
+    @AppStorage("management_feature") private var managementFeatureRaw: String = ""
+    /// 家庭子功能；空字串代表選的是「家庭」本身
+    @AppStorage("family_mgmt_feature") private var familyMgmtFeatureRaw: String = ""
     @State private var isSettingsActive: Bool = false
-    @State private var isManagementMode: Bool = false
-    @State private var isFamilyMgmtMode: Bool = false
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -149,15 +149,18 @@ struct MainTabView: View {
         LifeFeature(rawValue: lifeFeatureRaw) ?? .overview
     }
 
-    private var managementFeature: ManagementFeature {
-        ManagementFeature(rawValue: managementFeatureRaw) ?? .subordinates
+    private var managementFeature: ManagementFeature? {
+        ManagementFeature(rawValue: managementFeatureRaw)
     }
 
     private var currentFeatureTitle: String {
         switch currentMode {
         case .expense: return expenseFeature.title
         case .finance: return financeFeature.title
-        case .life: return lifeFeature.title
+        case .life:
+            if lifeFeature == .career, let m = managementFeature { return m.title }
+            if lifeFeature == .family, let f = familyMgmtFeature { return f.title }
+            return lifeFeature.title
         }
     }
 
@@ -165,7 +168,10 @@ struct MainTabView: View {
         switch currentMode {
         case .expense: return expenseFeature.icon
         case .finance: return financeFeature.icon
-        case .life: return lifeFeature.icon
+        case .life:
+            if lifeFeature == .career, let m = managementFeature { return m.icon }
+            if lifeFeature == .family, let f = familyMgmtFeature { return f.icon }
+            return lifeFeature.icon
         }
     }
 
@@ -179,12 +185,8 @@ struct MainTabView: View {
             })?.isManagerial == true
     }
 
-    private var showManagementToggle: Bool {
-        currentMode == .life && lifeFeature == .career && isCurrentlyManagerial && !isSettingsActive
-    }
-
-    private var familyMgmtFeature: FamilyMgmtFeature {
-        FamilyMgmtFeature(rawValue: familyMgmtFeatureRaw) ?? .spouseResume
+    private var familyMgmtFeature: FamilyMgmtFeature? {
+        FamilyMgmtFeature(rawValue: familyMgmtFeatureRaw)
     }
 
     private var hasSpouse: Bool {
@@ -195,7 +197,13 @@ struct MainTabView: View {
         lifeStore.familyMembers.contains { $0.role == .son || $0.role == .daughter }
     }
 
-    private var showFamilyMgmtToggle: Bool {
+    /// 職涯子功能列在「職涯」被選取且使用者目前為主管時展開
+    private var shouldExpandManagement: Bool {
+        currentMode == .life && lifeFeature == .career && isCurrentlyManagerial && !isSettingsActive
+    }
+
+    /// 家庭子功能列在「家庭」被選取且有家庭成員時展開
+    private var shouldExpandFamily: Bool {
         currentMode == .life && lifeFeature == .family && !lifeStore.familyMembers.isEmpty && !isSettingsActive
     }
 
@@ -216,12 +224,13 @@ struct MainTabView: View {
     private var isCurrentViewPremiumLocked: Bool {
         if subscription.isPremium { return false }
         if isSettingsActive { return false }
-        if isManagementMode && showManagementToggle { return !FeatureGate.isFree(managementFeature) }
-        if isFamilyMgmtMode && showFamilyMgmtToggle { return !FeatureGate.isFree(familyMgmtFeature) }
         switch currentMode {
         case .expense: return !FeatureGate.isFree(expenseFeature)
         case .finance: return !FeatureGate.isFree(financeFeature)
-        case .life:    return !FeatureGate.isFree(lifeFeature)
+        case .life:
+            if lifeFeature == .career, let m = managementFeature { return !FeatureGate.isFree(m) }
+            if lifeFeature == .family, let f = familyMgmtFeature { return !FeatureGate.isFree(f) }
+            return !FeatureGate.isFree(lifeFeature)
         }
     }
 
@@ -241,12 +250,11 @@ struct MainTabView: View {
             .tint(.green)
             .onChange(of: appMode) { _, _ in
                 isSettingsActive = false
-                isManagementMode = false
-                isFamilyMgmtMode = false
             }
-            .onChange(of: lifeFeatureRaw) { _, _ in
-                isManagementMode = false
-                isFamilyMgmtMode = false
+            .onChange(of: lifeFeatureRaw) { _, newValue in
+                // 切到別的人生子功能時，清除非當前父功能的 sub 選擇
+                if newValue != LifeFeature.career.rawValue { managementFeatureRaw = "" }
+                if newValue != LifeFeature.family.rawValue { familyMgmtFeatureRaw = "" }
             }
 
             floatingActionButton
@@ -264,67 +272,58 @@ struct MainTabView: View {
     private var topSubFeatureBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                if isManagementMode && showManagementToggle {
-                    ForEach(ManagementFeature.allCases.filter { $0 != .gradeTitle }) { f in
+                switch currentMode {
+                case .expense:
+                    ForEach(ExpenseFeature.allCases) { f in
                         subFeaturePill(f.title, icon: f.icon,
-                                       isSelected: managementFeatureRaw == f.rawValue,
+                                       isSelected: expenseFeatureRaw == f.rawValue,
                                        locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
-                            managementFeatureRaw = f.rawValue
+                            expenseFeatureRaw = f.rawValue
                         }
                     }
-                    subFeaturePill(ManagementFeature.gradeTitle.title, icon: ManagementFeature.gradeTitle.icon,
-                                   isSelected: managementFeatureRaw == ManagementFeature.gradeTitle.rawValue,
-                                   locked: !FeatureGate.isFree(ManagementFeature.gradeTitle) && !subscription.isPremium) {
-                        managementFeatureRaw = ManagementFeature.gradeTitle.rawValue
-                    }
-                } else if isFamilyMgmtMode && showFamilyMgmtToggle {
-                    ForEach(availableFamilyFeatures) { f in
+                case .finance:
+                    ForEach(FinanceFeature.allCases) { f in
                         subFeaturePill(f.title, icon: f.icon,
-                                       isSelected: familyMgmtFeatureRaw == f.rawValue,
+                                       isSelected: financeFeatureRaw == f.rawValue,
                                        locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
-                            familyMgmtFeatureRaw = f.rawValue
+                            financeFeatureRaw = f.rawValue
                         }
                     }
-                } else {
-                    switch currentMode {
-                    case .expense:
-                        ForEach(ExpenseFeature.allCases) { f in
-                            subFeaturePill(f.title, icon: f.icon,
-                                           isSelected: expenseFeatureRaw == f.rawValue,
-                                           locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
-                                expenseFeatureRaw = f.rawValue
+                case .life:
+                    ForEach(lifeAvailableFeatures) { f in
+                        // 父分類本身的 pill（職涯、家庭等與其他平起）
+                        subFeaturePill(f.title, icon: f.icon,
+                                       isSelected: isLifeParentSelected(f),
+                                       locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
+                            lifeFeatureRaw = f.rawValue
+                            // 重新點擊父分類 → 清除子功能選擇，回到父功能畫面
+                            if f == .career { managementFeatureRaw = "" }
+                            if f == .family { familyMgmtFeatureRaw = "" }
+                        }
+
+                        // 「職涯」展開：橘色子功能依序排在右邊
+                        if f == .career && shouldExpandManagement {
+                            ForEach(ManagementFeature.allCases) { m in
+                                subFeaturePill(m.title, icon: m.icon,
+                                               isSelected: managementFeatureRaw == m.rawValue,
+                                               tint: .orange,
+                                               locked: !FeatureGate.isFree(m) && !subscription.isPremium) {
+                                    lifeFeatureRaw = LifeFeature.career.rawValue
+                                    managementFeatureRaw = m.rawValue
+                                }
                             }
                         }
-                    case .finance:
-                        ForEach(FinanceFeature.allCases) { f in
-                            subFeaturePill(f.title, icon: f.icon,
-                                           isSelected: financeFeatureRaw == f.rawValue,
-                                           locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
-                                financeFeatureRaw = f.rawValue
-                            }
-                        }
-                    case .life:
-                        ForEach(lifeAvailableFeatures) { f in
-                            subFeaturePill(f.title, icon: f.icon,
-                                           isSelected: lifeFeatureRaw == f.rawValue && !isManagementMode && !isFamilyMgmtMode,
-                                           locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
-                                lifeFeatureRaw = f.rawValue
-                                isManagementMode = false
-                                isFamilyMgmtMode = false
-                            }
-                        }
-                        if showManagementToggle {
-                            subFeaturePill("管理", icon: "person.badge.shield.checkmark.fill",
-                                           isSelected: isManagementMode, tint: .orange) {
-                                isManagementMode.toggle()
-                                isFamilyMgmtMode = false
-                            }
-                        }
-                        if showFamilyMgmtToggle {
-                            subFeaturePill("子女", icon: "figure.2.and.child.holdinghands",
-                                           isSelected: isFamilyMgmtMode, tint: .orange) {
-                                isFamilyMgmtMode.toggle()
-                                isManagementMode = false
+
+                        // 「家庭」展開：粉色子功能依序排在右邊
+                        if f == .family && shouldExpandFamily {
+                            ForEach(availableFamilyFeatures) { fm in
+                                subFeaturePill(fm.title, icon: fm.icon,
+                                               isSelected: familyMgmtFeatureRaw == fm.rawValue,
+                                               tint: .pink,
+                                               locked: !FeatureGate.isFree(fm) && !subscription.isPremium) {
+                                    lifeFeatureRaw = LifeFeature.family.rawValue
+                                    familyMgmtFeatureRaw = fm.rawValue
+                                }
                             }
                         }
                     }
@@ -334,6 +333,14 @@ struct MainTabView: View {
             .padding(.vertical, 8)
         }
         .background(Color(.systemBackground))
+    }
+
+    /// 父功能是否處於「自身被選取」狀態（沒有任何子功能被選中）
+    private func isLifeParentSelected(_ f: LifeFeature) -> Bool {
+        guard lifeFeatureRaw == f.rawValue else { return false }
+        if f == .career { return managementFeature == nil }
+        if f == .family { return familyMgmtFeature == nil }
+        return true
     }
 
     private func subFeaturePill(_ title: String, icon: String, isSelected: Bool, tint: Color = .green, locked: Bool = false, action: @escaping () -> Void) -> some View {
@@ -365,8 +372,6 @@ struct MainTabView: View {
             tabButton(mode: .life, icon: "person.fill", label: "人生")
             Button {
                 isSettingsActive = true
-                isManagementMode = false
-                isFamilyMgmtMode = false
             } label: {
                 VStack(spacing: 2) {
                     Image(systemName: "gearshape.fill").font(.system(size: 20))
@@ -515,36 +520,12 @@ struct MainTabView: View {
     private var contentView: some View {
         if isSettingsActive {
             SettingsView()
-        } else if isManagementMode && showManagementToggle {
-            managementContent
-        } else if isFamilyMgmtMode && showFamilyMgmtToggle {
-            familyMgmtContent
         } else {
             switch currentMode {
             case .expense: expenseContent
             case .finance: financeContent
             case .life: lifeContent
             }
-        }
-    }
-
-    @ViewBuilder
-    private var familyMgmtContent: some View {
-        switch familyMgmtFeature {
-        case .spouseResume:
-            if hasSpouse { SpouseResumeView() } else { FamilyView() }
-        case .childrenResume:
-            if hasChildren { ChildrenResumeView() } else { FamilyView() }
-        }
-    }
-
-    @ViewBuilder
-    private var managementContent: some View {
-        switch managementFeature {
-        case .overview: SubordinateOverviewView()
-        case .gradeTitle: GradeTitleView()
-        case .subordinates: SubordinateView()
-        case .businessCard: BusinessCardView()
         }
     }
 
@@ -583,13 +564,29 @@ struct MainTabView: View {
                 LifeOverviewView()
             }
         case .career:
-            if hasCareerMilestones {
+            // 有選子功能 → 顯示對應的管理 view；否則回到 CareerView
+            if let m = managementFeature {
+                switch m {
+                case .overview:     SubordinateOverviewView()
+                case .subordinates: SubordinateView()
+                case .businessCard: BusinessCardView()
+                case .gradeTitle:   GradeTitleView()
+                }
+            } else if hasCareerMilestones {
                 CareerView()
             } else {
                 LifeOverviewView()
             }
         case .family:
-            if !lifeStore.familyMembers.isEmpty {
+            // 有選子功能 → 顯示配偶 / 兒女履歷；否則回到 FamilyView
+            if let f = familyMgmtFeature {
+                switch f {
+                case .spouseResume:
+                    if hasSpouse { SpouseResumeView() } else { FamilyView() }
+                case .childrenResume:
+                    if hasChildren { ChildrenResumeView() } else { FamilyView() }
+                }
+            } else if !lifeStore.familyMembers.isEmpty {
                 FamilyView()
             } else {
                 LifeOverviewView()
@@ -611,20 +608,6 @@ struct MainTabView: View {
 
     private var hasFinanceMilestones: Bool {
         lifeStore.milestones.contains { $0.category == .achievement }
-    }
-
-    // MARK: - 管理/家庭子功能切換（頂部列中觸發）
-
-    private func handleLifeFeatureTap(_ feature: LifeFeature) {
-        lifeFeatureRaw = feature.rawValue
-        // 職涯頁面且有管理權限，顯示管理子功能入口
-        if feature == .career && isCurrentlyManagerial {
-            isManagementMode = true
-        }
-        // 家庭頁面且有成員，顯示家庭子功能入口
-        if feature == .family && !lifeStore.familyMembers.isEmpty {
-            isFamilyMgmtMode = true
-        }
     }
 
     private var lifeAvailableFeatures: [LifeFeature] {
