@@ -125,6 +125,7 @@ struct AddRealEstateView: View {
     @State private var gasMeterNumber = ""
     @State private var gasMeterOwner = ""
     @State private var gasUserNumber = ""
+    @State private var extraMeters: [UtilityMeter] = []
     @State private var insuranceItems: [InsuranceItemState] = []
     @State private var assetItems: [AssetItemState] = []
 
@@ -773,7 +774,7 @@ struct AddRealEstateView: View {
     // MARK: - 水電瓦斯（人生）
 
     private var utilitiesSection: some View {
-        Section("水電瓦斯") {
+        Section {
             HStack {
                 Image(systemName: "drop.fill").foregroundStyle(.blue).frame(width: 24)
                 VStack(alignment: .leading, spacing: 6) {
@@ -816,6 +817,56 @@ struct AddRealEstateView: View {
                     ownerPicker(selection: $gasMeterOwner, placeholder: "所有權人")
                 }
             }
+        } header: {
+            Text("水電瓦斯（主表）")
+        } footer: {
+            Text("以上為主表。如有第二、第三個水/電/瓦斯表（例如客廳一個電表、廚房一個電表），請在下方「額外的表」新增。")
+        }
+
+        Section {
+            ForEach($extraMeters) { $meter in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Picker("類型", selection: $meter.type) {
+                            ForEach(UtilityType.allCases) { t in
+                                Label(t.rawValue, systemImage: t.icon).tag(t)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        Spacer()
+                        Button(role: .destructive) {
+                            extraMeters.removeAll { $0.id == meter.id }
+                        } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    TextField("名稱（例：客廳、廚房、二樓）", text: $meter.label)
+                    if meter.type == .gas {
+                        TextField("用戶編號", text: $meter.userNumber)
+                    }
+                    TextField(meterNumberLabel(for: meter.type), text: $meter.meterNumber)
+                    ownerPicker(selection: $meter.owner, placeholder: "所有權人")
+                }
+                .padding(.vertical, 4)
+            }
+            Button {
+                extraMeters.append(UtilityMeter(type: .electricity))
+            } label: {
+                Label("新增表（多個水／電／瓦斯）", systemImage: "plus.circle")
+                    .foregroundStyle(.green)
+            }
+        } header: {
+            Text("額外的表")
+        }
+    }
+
+    private func meterNumberLabel(for type: UtilityType) -> String {
+        switch type {
+        case .water: return "水號"
+        case .electricity: return "電號"
+        case .gas: return "表號"
         }
     }
 
@@ -1112,6 +1163,13 @@ struct AddRealEstateView: View {
             gasMeterNumber: gasMeterNumber.trimmingCharacters(in: .whitespaces),
             gasMeterOwner: gasMeterOwner.trimmingCharacters(in: .whitespaces),
             gasUserNumber: gasUserNumber.trimmingCharacters(in: .whitespaces),
+            extraMeters: extraMeters.map { m in
+                UtilityMeter(id: m.id, type: m.type,
+                             label: m.label.trimmingCharacters(in: .whitespaces),
+                             meterNumber: m.meterNumber.trimmingCharacters(in: .whitespaces),
+                             owner: m.owner.trimmingCharacters(in: .whitespaces),
+                             userNumber: m.userNumber.trimmingCharacters(in: .whitespaces))
+            }.filter { !$0.meterNumber.isEmpty || !$0.label.isEmpty },
             insuranceItems: syncedInsurance,
             propertyAssets: syncedAssets,
             utilityPayments: existingUtilityPayments
@@ -1291,6 +1349,7 @@ struct AddRealEstateView: View {
         gasMeterNumber = e.gasMeterNumber
         gasMeterOwner = e.gasMeterOwner
         gasUserNumber = e.gasUserNumber
+        extraMeters = e.extraMeters
 
         insuranceItems = e.insuranceItems.map { ins in
             InsuranceItemState(

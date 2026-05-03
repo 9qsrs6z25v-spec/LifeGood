@@ -291,39 +291,22 @@ struct MainTabView: View {
                     }
                 case .life:
                     ForEach(lifeAvailableFeatures) { f in
-                        // 父分類本身的 pill（職涯、家庭等與其他平起）
-                        subFeaturePill(f.title, icon: f.icon,
-                                       isSelected: isLifeParentSelected(f),
-                                       locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
-                            lifeFeatureRaw = f.rawValue
-                            // 重新點擊父分類 → 清除子功能選擇，回到父功能畫面
-                            if f == .career { managementFeatureRaw = "" }
-                            if f == .family { familyMgmtFeatureRaw = "" }
-                        }
-
-                        // 「職涯」展開：橘色子功能依序排在右邊
+                        // 「職涯」展開：父功能 + 橘色子功能 包在淡橘背景框
                         if f == .career && shouldExpandManagement {
-                            ForEach(ManagementFeature.allCases) { m in
-                                subFeaturePill(m.title, icon: m.icon,
-                                               isSelected: managementFeatureRaw == m.rawValue,
-                                               tint: .orange,
-                                               locked: !FeatureGate.isFree(m) && !subscription.isPremium) {
-                                    lifeFeatureRaw = LifeFeature.career.rawValue
-                                    managementFeatureRaw = m.rawValue
-                                }
-                            }
+                            careerGroupedPills
                         }
-
-                        // 「家庭」展開：粉色子功能依序排在右邊
-                        if f == .family && shouldExpandFamily {
-                            ForEach(availableFamilyFeatures) { fm in
-                                subFeaturePill(fm.title, icon: fm.icon,
-                                               isSelected: familyMgmtFeatureRaw == fm.rawValue,
-                                               tint: .pink,
-                                               locked: !FeatureGate.isFree(fm) && !subscription.isPremium) {
-                                    lifeFeatureRaw = LifeFeature.family.rawValue
-                                    familyMgmtFeatureRaw = fm.rawValue
-                                }
+                        // 「家庭」展開：父功能 + 粉色子功能 包在淡粉背景框
+                        else if f == .family && shouldExpandFamily {
+                            familyGroupedPills
+                        }
+                        // 一般父分類 pill
+                        else {
+                            subFeaturePill(f.title, icon: f.icon,
+                                           isSelected: isLifeParentSelected(f),
+                                           locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
+                                lifeFeatureRaw = f.rawValue
+                                if f == .career { managementFeatureRaw = "" }
+                                if f == .family { familyMgmtFeatureRaw = "" }
                             }
                         }
                     }
@@ -341,6 +324,62 @@ struct MainTabView: View {
         if f == .career { return managementFeature == nil }
         if f == .family { return familyMgmtFeature == nil }
         return true
+    }
+
+    /// 職涯父功能 + 橘色管理子功能，包在淡橘背景框
+    private var careerGroupedPills: some View {
+        HStack(spacing: 6) {
+            subFeaturePill(LifeFeature.career.title, icon: LifeFeature.career.icon,
+                           isSelected: isLifeParentSelected(.career),
+                           locked: !FeatureGate.isFree(LifeFeature.career) && !subscription.isPremium) {
+                lifeFeatureRaw = LifeFeature.career.rawValue
+                managementFeatureRaw = ""
+            }
+            ForEach(ManagementFeature.allCases) { m in
+                subFeaturePill(m.title, icon: m.icon,
+                               isSelected: managementFeatureRaw == m.rawValue,
+                               tint: .orange,
+                               locked: !FeatureGate.isFree(m) && !subscription.isPremium) {
+                    lifeFeatureRaw = LifeFeature.career.rawValue
+                    managementFeatureRaw = m.rawValue
+                }
+            }
+        }
+        .padding(.horizontal, 6).padding(.vertical, 4)
+        .background(Color.orange.opacity(0.10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(Color.orange.opacity(0.25), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+    }
+
+    /// 家庭父功能 + 粉色子功能，包在淡粉背景框
+    private var familyGroupedPills: some View {
+        HStack(spacing: 6) {
+            subFeaturePill(LifeFeature.family.title, icon: LifeFeature.family.icon,
+                           isSelected: isLifeParentSelected(.family),
+                           locked: !FeatureGate.isFree(LifeFeature.family) && !subscription.isPremium) {
+                lifeFeatureRaw = LifeFeature.family.rawValue
+                familyMgmtFeatureRaw = ""
+            }
+            ForEach(availableFamilyFeatures) { fm in
+                subFeaturePill(fm.title, icon: fm.icon,
+                               isSelected: familyMgmtFeatureRaw == fm.rawValue,
+                               tint: .pink,
+                               locked: !FeatureGate.isFree(fm) && !subscription.isPremium) {
+                    lifeFeatureRaw = LifeFeature.family.rawValue
+                    familyMgmtFeatureRaw = fm.rawValue
+                }
+            }
+        }
+        .padding(.horizontal, 6).padding(.vertical, 4)
+        .background(Color.pink.opacity(0.10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(Color.pink.opacity(0.25), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22))
     }
 
     private func subFeaturePill(_ title: String, icon: String, isSelected: Bool, tint: Color = .green, locked: Bool = false, action: @escaping () -> Void) -> some View {

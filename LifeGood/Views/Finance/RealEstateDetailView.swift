@@ -17,6 +17,8 @@ struct RealEstateDetailView: View {
     @State private var editingUtilityPayment: UtilityPayment?
     @State private var utilityExpanded = false
     @State private var showPremiumAlert = false
+    /// 用於在子 sheet 關閉後強制刷新水電瓦斯區塊（解決 SwiftUI 巢狀 sheet 偶爾不更新的問題）
+    @State private var dataRefreshID = UUID()
 
     enum DetailTab: String, CaseIterable {
         case finance = "理財"
@@ -81,16 +83,20 @@ struct RealEstateDetailView: View {
             .sheet(item: $viewingPhotoURL) { url in
                 PhotoViewerSheet(url: url)
             }
-            .sheet(isPresented: $addingElevatorMaintenance) {
+            .sheet(isPresented: $addingElevatorMaintenance,
+                   onDismiss: { dataRefreshID = UUID() }) {
                 ElevatorMaintenanceEditor(estateId: estateId, editing: nil)
             }
-            .sheet(item: $editingElevatorMaintenance) { m in
+            .sheet(item: $editingElevatorMaintenance,
+                   onDismiss: { dataRefreshID = UUID() }) { m in
                 ElevatorMaintenanceEditor(estateId: estateId, editing: m)
             }
-            .sheet(isPresented: $addingUtilityPayment) {
+            .sheet(isPresented: $addingUtilityPayment,
+                   onDismiss: { dataRefreshID = UUID() }) {
                 UtilityPaymentEditor(estateId: estateId, editing: nil)
             }
-            .sheet(item: $editingUtilityPayment) { p in
+            .sheet(item: $editingUtilityPayment,
+                   onDismiss: { dataRefreshID = UUID() }) { p in
                 UtilityPaymentEditor(estateId: estateId, editing: p)
             }
             .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
@@ -434,80 +440,11 @@ struct RealEstateDetailView: View {
                 || !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty
                 || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty || !estate.gasUserNumber.isEmpty
                 || !estate.utilityPayments.isEmpty
+                || !estate.extraMeters.isEmpty
 
             if hasUtilities {
-                sectionHeaderWithAdd("水電瓦斯") { addingUtilityPayment = true }
-
-                // 水
-                if !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty {
-                    utilityRow(icon: "drop.fill", color: .blue,
-                               number: estate.waterMeterNumber, owner: estate.waterMeterOwner,
-                               numberLabel: "水號")
-                }
-                latestPaymentRow(type: .water)
-
-                // 電
-                if !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty {
-                    utilityRow(icon: "bolt.fill", color: .yellow,
-                               number: estate.electricityMeterNumber, owner: estate.electricityMeterOwner,
-                               numberLabel: "電號")
-                }
-                latestPaymentRow(type: .electricity)
-
-                // 瓦斯
-                if !estate.gasUserNumber.isEmpty || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "flame.fill").foregroundStyle(.orange).frame(width: 20)
-                            VStack(alignment: .leading, spacing: 2) {
-                                if !estate.gasUserNumber.isEmpty {
-                                    Text("用戶編號 \(estate.gasUserNumber)").font(.caption2).foregroundStyle(.secondary)
-                                }
-                                if !estate.gasMeterNumber.isEmpty {
-                                    Text("表號 \(estate.gasMeterNumber)").font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            if !estate.gasMeterOwner.isEmpty {
-                                Text(estate.gasMeterOwner).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.horizontal).padding(.vertical, 8)
-                }
-                latestPaymentRow(type: .gas)
-
-                // 展開：顯示所有歷史繳費紀錄
-                let allPayments = estate.utilityPayments.sorted { $0.date > $1.date }
-                let olderPayments = allPayments.filter { p in
-                    !isLatestPayment(p)
-                }
-                if utilityExpanded {
-                    if !olderPayments.isEmpty {
-                        Divider().padding(.horizontal)
-                        ForEach(olderPayments) { p in
-                            paymentRow(p)
-                        }
-                    }
-                }
-                if !olderPayments.isEmpty {
-                    Button {
-                        withAnimation { utilityExpanded.toggle() }
-                    } label: {
-                        HStack {
-                            Spacer()
-                            Image(systemName: utilityExpanded ? "chevron.up" : "chevron.down")
-                                .font(.caption2)
-                            Text(utilityExpanded ? "收起歷史紀錄" : "展開歷史紀錄（\(olderPayments.count) 筆）")
-                                .font(.caption.weight(.medium))
-                            Spacer()
-                        }
-                        .foregroundStyle(.green)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
+                utilitiesContent
+                    .id(dataRefreshID)
             }
 
             if !estate.insuranceItems.isEmpty {
@@ -895,6 +832,135 @@ struct RealEstateDetailView: View {
             Text(value).font(.subheadline.weight(.medium))
         }
         .padding(.horizontal).padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var utilitiesContent: some View {
+        sectionHeaderWithAdd("水電瓦斯") { addingUtilityPayment = true }
+
+        // 水（主表）
+        if !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty {
+            utilityRow(icon: "drop.fill", color: .blue,
+                       number: estate.waterMeterNumber, owner: estate.waterMeterOwner,
+                       numberLabel: "水號")
+        }
+        // 額外的水表
+        ForEach(estate.extraMeters.filter { $0.type == .water }) { m in
+            extraMeterRow(m)
+        }
+        latestPaymentRow(type: .water)
+
+        // 電（主表）
+        if !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty {
+            utilityRow(icon: "bolt.fill", color: .yellow,
+                       number: estate.electricityMeterNumber, owner: estate.electricityMeterOwner,
+                       numberLabel: "電號")
+        }
+        ForEach(estate.extraMeters.filter { $0.type == .electricity }) { m in
+            extraMeterRow(m)
+        }
+        latestPaymentRow(type: .electricity)
+
+        // 瓦斯（主表）
+        if !estate.gasUserNumber.isEmpty || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Image(systemName: "flame.fill").foregroundStyle(.orange).frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !estate.gasUserNumber.isEmpty {
+                            Text("用戶編號 \(estate.gasUserNumber)").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        if !estate.gasMeterNumber.isEmpty {
+                            Text("表號 \(estate.gasMeterNumber)").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if !estate.gasMeterOwner.isEmpty {
+                        Text(estate.gasMeterOwner).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal).padding(.vertical, 8)
+        }
+        ForEach(estate.extraMeters.filter { $0.type == .gas }) { m in
+            extraMeterRow(m)
+        }
+        latestPaymentRow(type: .gas)
+
+        // 展開：顯示所有歷史繳費紀錄
+        let allPayments = estate.utilityPayments.sorted { $0.date > $1.date }
+        let olderPayments = allPayments.filter { p in
+            !isLatestPayment(p)
+        }
+        if utilityExpanded {
+            if !olderPayments.isEmpty {
+                Divider().padding(.horizontal)
+                ForEach(olderPayments) { p in
+                    paymentRow(p)
+                }
+            }
+        }
+        if !olderPayments.isEmpty {
+            Button {
+                withAnimation { utilityExpanded.toggle() }
+            } label: {
+                HStack {
+                    Spacer()
+                    Image(systemName: utilityExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                    Text(utilityExpanded ? "收起歷史紀錄" : "展開歷史紀錄（\(olderPayments.count) 筆）")
+                        .font(.caption.weight(.medium))
+                    Spacer()
+                }
+                .foregroundStyle(.green)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func extraMeterRow(_ m: UtilityMeter) -> some View {
+        let color: Color = {
+            switch m.type {
+            case .water: return .blue
+            case .electricity: return .yellow
+            case .gas: return .orange
+            }
+        }()
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: m.type.icon).foregroundStyle(color).frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    if !m.label.isEmpty {
+                        Text(m.label)
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(color.opacity(0.12))
+                            .foregroundStyle(color)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    if !m.userNumber.isEmpty {
+                        Text("用戶編號 \(m.userNumber)").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                if !m.meterNumber.isEmpty {
+                    let label: String = {
+                        switch m.type {
+                        case .water: return "水號"
+                        case .electricity: return "電號"
+                        case .gas: return "表號"
+                        }
+                    }()
+                    Text("\(label) \(m.meterNumber)").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if !m.owner.isEmpty {
+                Text(m.owner).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal).padding(.vertical, 6)
     }
 
     private func utilityRow(icon: String, color: Color, number: String, owner: String, numberLabel: String) -> some View {

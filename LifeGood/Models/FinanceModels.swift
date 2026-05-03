@@ -524,6 +524,29 @@ struct UtilityPayment: Identifiable, Codable {
     }
 }
 
+// MARK: - 額外的水電瓦斯表
+
+/// 用於支援同一房地產有多個水/電/瓦斯表（例如客廳一個電表、廚房一個電表）。
+struct UtilityMeter: Identifiable, Codable, Equatable {
+    let id: UUID
+    var type: UtilityType
+    var label: String          // 使用者自訂名稱（例：客廳、廚房、二樓）
+    var meterNumber: String    // 水號／電號／表號
+    var owner: String          // 所有權人
+    var userNumber: String     // 用戶編號（瓦斯通常需要）
+
+    init(id: UUID = UUID(), type: UtilityType = .electricity,
+         label: String = "", meterNumber: String = "",
+         owner: String = "", userNumber: String = "") {
+        self.id = id
+        self.type = type
+        self.label = label
+        self.meterNumber = meterNumber
+        self.owner = owner
+        self.userNumber = userNumber
+    }
+}
+
 // MARK: - 樓層功能
 
 enum FloorFunction: String, Codable, CaseIterable, Identifiable {
@@ -696,6 +719,7 @@ struct RealEstate: Identifiable, Codable {
     var insuranceItems: [RealEstateInsuranceItem]      // 保險項目
     var propertyAssets: [RealEstatePropertyAsset]       // 房屋附屬資產
     var utilityPayments: [UtilityPayment]               // 水電瓦斯繳費紀錄
+    var extraMeters: [UtilityMeter]                     // 額外的水/電/瓦斯表（主表以單一欄位存放）
 
     init(
         id: UUID = UUID(),
@@ -744,7 +768,8 @@ struct RealEstate: Identifiable, Codable {
         gasUserNumber: String = "",
         insuranceItems: [RealEstateInsuranceItem] = [],
         propertyAssets: [RealEstatePropertyAsset] = [],
-        utilityPayments: [UtilityPayment] = []
+        utilityPayments: [UtilityPayment] = [],
+        extraMeters: [UtilityMeter] = []
     ) {
         self.id = id
         self.name = name
@@ -793,6 +818,7 @@ struct RealEstate: Identifiable, Codable {
         self.insuranceItems = insuranceItems
         self.propertyAssets = propertyAssets
         self.utilityPayments = utilityPayments
+        self.extraMeters = extraMeters
     }
 
     // MARK: - 向下相容解碼
@@ -853,6 +879,7 @@ struct RealEstate: Identifiable, Codable {
         insuranceItems = (try? c.decode([RealEstateInsuranceItem].self, forKey: .insuranceItems)) ?? []
         propertyAssets = (try? c.decode([RealEstatePropertyAsset].self, forKey: .propertyAssets)) ?? []
         utilityPayments = (try? c.decode([UtilityPayment].self, forKey: .utilityPayments)) ?? []
+        extraMeters = (try? c.decode([UtilityMeter].self, forKey: .extraMeters)) ?? []
 
         // 向下相容：舊版有 monthlyMortgage 欄位，轉為 mortgageItems
         if mortgageItems.isEmpty,
@@ -870,7 +897,7 @@ struct RealEstate: Identifiable, Codable {
         case totalFloors, fromFloor, toFloor, floors
         case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
         case gasMeterNumber, gasMeterOwner, gasUserNumber, insuranceItems, propertyAssets
-        case utilityPayments
+        case utilityPayments, extraMeters
         case monthlyMortgage // 舊版欄位，僅用於解碼
     }
 
@@ -923,6 +950,7 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(insuranceItems, forKey: .insuranceItems)
         try c.encode(propertyAssets, forKey: .propertyAssets)
         try c.encode(utilityPayments, forKey: .utilityPayments)
+        try c.encode(extraMeters, forKey: .extraMeters)
     }
 
     /// 顯示用的完整地點（縣市 + 地址）
