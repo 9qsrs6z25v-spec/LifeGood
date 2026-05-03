@@ -78,10 +78,11 @@ enum LifeFeature: String, CaseIterable, Identifiable {
 }
 
 enum ManagementFeature: String, CaseIterable, Identifiable {
-    case overview, subordinates, businessCard, gradeTitle
+    case calendar, overview, subordinates, businessCard, gradeTitle
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .calendar: return "我的行事曆"
         case .overview: return "部屬總覽"
         case .subordinates: return "部屬"
         case .businessCard: return "名片"
@@ -90,6 +91,7 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
     }
     var icon: String {
         switch self {
+        case .calendar: return "calendar.badge.clock"
         case .overview: return "chart.bar.doc.horizontal"
         case .subordinates: return "person.2.fill"
         case .businessCard: return "person.crop.rectangle.stack"
@@ -614,6 +616,7 @@ struct MainTabView: View {
             // 有選子功能 → 顯示對應的管理 view；否則回到 CareerView
             if let m = managementFeature {
                 switch m {
+                case .calendar:     MyCalendarView()
                 case .overview:     SubordinateOverviewView()
                 case .subordinates: SubordinateView()
                 case .businessCard: BusinessCardView()

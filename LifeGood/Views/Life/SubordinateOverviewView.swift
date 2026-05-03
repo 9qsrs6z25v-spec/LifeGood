@@ -56,7 +56,7 @@ struct SubordinateOverviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    datePicker
+                    MacaronDatePicker(selectedDate: $selectedDate)
                     leaveSection
                     meetingSection
                     taskSection
@@ -66,19 +66,6 @@ struct SubordinateOverviewView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("部屬總覽")
         }
-    }
-
-    // MARK: - 日期選擇
-
-    private var datePicker: some View {
-        VStack(spacing: 8) {
-            DatePicker("選擇日期", selection: $selectedDate, displayedComponents: .date)
-                .datePickerStyle(.graphical)
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal)
     }
 
     // MARK: - 請假
