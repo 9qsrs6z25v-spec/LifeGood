@@ -11,6 +11,7 @@ class LifeStore: ObservableObject {
     @Published var departments: [Department] = [] { didSet { if !isLoading { save() } } }
     @Published var gradeTitles: [GradeTitle] = [] { didSet { if !isLoading { save() } } }
     @Published var businessCards: [BusinessCard] = [] { didSet { if !isLoading { save() } } }
+    @Published var personalEvents: [PersonalEvent] = [] { didSet { if !isLoading { save() } } }
 
     private var isLoading = false
 
@@ -247,6 +248,9 @@ class LifeStore: ObservableObject {
         if let data = try? encoder.encode(businessCards) {
             UserDefaults.standard.set(data, forKey: "life_business_cards")
         }
+        if let data = try? encoder.encode(personalEvents) {
+            UserDefaults.standard.set(data, forKey: "life_personal_events")
+        }
         CloudSyncManager.shared.pushAll()
     }
 
@@ -294,6 +298,10 @@ class LifeStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "life_business_cards"),
            let items = try? decoder.decode([BusinessCard].self, from: data) {
             businessCards = items
+        }
+        if let data = UserDefaults.standard.data(forKey: "life_personal_events"),
+           let items = try? decoder.decode([PersonalEvent].self, from: data) {
+            personalEvents = items
         }
     }
 

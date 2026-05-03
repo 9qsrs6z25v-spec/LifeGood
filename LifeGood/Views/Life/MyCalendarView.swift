@@ -6,6 +6,8 @@ struct MyCalendarView: View {
     @EnvironmentObject var financeStore: FinanceStore
 
     @State private var selectedDate = Date()
+    @State private var showAdd = false
+    @State private var editingEvent: PersonalEvent?
 
     private let calendar = Calendar.current
 
@@ -22,6 +24,20 @@ struct MyCalendarView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("我的行事曆")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAdd = true } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3).foregroundStyle(.green)
+                    }
+                }
+            }
+            .sheet(isPresented: $showAdd) {
+                PersonalEventEditor(initialDate: selectedDate, editing: nil)
+            }
+            .sheet(item: $editingEvent) { ev in
+                PersonalEventEditor(initialDate: ev.date, editing: ev)
+            }
         }
     }
 
@@ -34,6 +50,7 @@ struct MyCalendarView: View {
         let title: String
         let time: Date?
         let detail: String
+        var personalEventId: UUID? = nil
 
         enum EventType {
             case birthday, anniversary, meeting, task, milestone
@@ -149,6 +166,20 @@ struct MyCalendarView: View {
             ))
         }
 
+        // 個人行事曆事件（事務 / 會議）
+        for pe in lifeStore.personalEvents where calendar.isDate(pe.date, inSameDayAs: day) {
+            events.append(CalendarEvent(
+                id: "pe-\(pe.id.uuidString)",
+                type: pe.kind == .meeting ? .meeting : .task,
+                title: pe.title.isEmpty ? pe.kind.rawValue : pe.title,
+                time: pe.date,
+                detail: pe.durationMinutes > 0
+                    ? "\(pe.durationMinutes) 分鐘\(pe.note.isEmpty ? "" : " · \(pe.note)")"
+                    : (pe.note.isEmpty ? "全日" : "全日 · \(pe.note)"),
+                personalEventId: pe.id
+            ))
+        }
+
         return events.sorted { (a, b) in
             switch (a.time, b.time) {
             case let (la?, lb?): return la < lb
@@ -172,7 +203,13 @@ struct MyCalendarView: View {
                 emptyHint("這天沒有特別事件")
             } else {
                 ForEach(todayEvents) { ev in
-                    eventRow(ev)
+                    if let pid = ev.personalEventId,
+                       let pe = lifeStore.personalEvents.first(where: { $0.id == pid }) {
+                        Button { editingEvent = pe } label: { eventRow(ev) }
+                            .buttonStyle(.plain)
+                    } else {
+                        eventRow(ev)
+                    }
                 }
             }
         }
@@ -362,6 +399,152 @@ struct MyCalendarView: View {
         if days == 0 { return "今天" }
         if days == 1 { return "明天" }
         return "\(days) 天後"
+    }
+}
+
+// MARK: - 個人行事曆事件編輯器
+
+struct PersonalEventEditor: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let initialDate: Date
+    let editing: PersonalEvent?
+
+    @State private var title: String = ""
+    @State private var kind: PersonalEventKind = .meeting
+    @State private var date: Date = Date()
+    @State private var durationMinutes: Int = 30
+    @State private var note: String = ""
+    @State private var showDeleteConfirm = false
+
+    /// 常用長度選項（分鐘），0 = 全日
+    private let durationOptions: [(label: String, minutes: Int)] = [
+        ("全日", 0),
+        ("15 分鐘", 15),
+        ("30 分鐘", 30),
+        ("1 小時", 60),
+        ("90 分鐘", 90),
+        ("2 小時", 120),
+        ("半天 (4h)", 240),
+        ("一天 (8h)", 480)
+    ]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("基本資訊") {
+                    Picker("類型", selection: $kind) {
+                        ForEach(PersonalEventKind.allCases) { k in
+                            Label(k.rawValue, systemImage: k.icon).tag(k)
+                        }
+                    }
+                    TextField("標題", text: $title)
+                }
+
+                Section("時間") {
+                    DatePicker("開始", selection: $date,
+                               displayedComponents: durationMinutes == 0 ? [.date] : [.date, .hourAndMinute])
+                    Picker("長度", selection: $durationMinutes) {
+                        ForEach(durationOptions, id: \.minutes) { opt in
+                            Text(opt.label).tag(opt.minutes)
+                        }
+                    }
+                    if durationMinutes > 0 {
+                        HStack {
+                            Text("結束").foregroundStyle(.secondary)
+                            Spacer()
+                            Text(formatEnd(date: date, minutes: durationMinutes))
+                                .font(.subheadline)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+
+                Section("備註") {
+                    TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                }
+
+                if editing != nil {
+                    Section {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("刪除事件", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .navigationTitle(editing == nil ? "新增事件" : "編輯事件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(editing == nil ? "新增" : "儲存") { save() }
+                        .bold().foregroundStyle(.green)
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .alert("確定刪除？", isPresented: $showDeleteConfirm) {
+                Button("刪除", role: .destructive) { delete() }
+                Button("取消", role: .cancel) {}
+            }
+            .onAppear {
+                if let e = editing {
+                    title = e.title
+                    kind = e.kind
+                    date = e.date
+                    durationMinutes = e.durationMinutes
+                    note = e.note
+                } else {
+                    // 預設將時間設為使用者選的日期 + 當下時間
+                    let now = Date()
+                    let cal = Calendar.current
+                    let timeComp = cal.dateComponents([.hour, .minute], from: now)
+                    var dayComp = cal.dateComponents([.year, .month, .day], from: initialDate)
+                    dayComp.hour = timeComp.hour
+                    dayComp.minute = timeComp.minute
+                    date = cal.date(from: dayComp) ?? initialDate
+                }
+            }
+        }
+    }
+
+    private func save() {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
+        guard !trimmedTitle.isEmpty else { return }
+        let event = PersonalEvent(
+            id: editing?.id ?? UUID(),
+            title: trimmedTitle,
+            kind: kind,
+            date: date,
+            durationMinutes: durationMinutes,
+            note: note.trimmingCharacters(in: .whitespaces)
+        )
+        if let idx = lifeStore.personalEvents.firstIndex(where: { $0.id == event.id }) {
+            lifeStore.personalEvents[idx] = event
+        } else {
+            lifeStore.personalEvents.append(event)
+        }
+        dismiss()
+    }
+
+    private func delete() {
+        guard let e = editing else { return }
+        lifeStore.personalEvents.removeAll { $0.id == e.id }
+        dismiss()
+    }
+
+    private func formatEnd(date: Date, minutes: Int) -> String {
+        let end = Calendar.current.date(byAdding: .minute, value: minutes, to: date) ?? date
+        let f = DateFormatter()
+        let cal = Calendar.current
+        if cal.isDate(end, inSameDayAs: date) {
+            f.dateFormat = "HH:mm"
+        } else {
+            f.dateFormat = "M/d HH:mm"
+        }
+        return f.string(from: end)
     }
 }
 

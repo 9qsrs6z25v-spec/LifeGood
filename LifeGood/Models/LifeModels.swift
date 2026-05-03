@@ -992,3 +992,47 @@ struct GradeTitle: Identifiable, Codable {
         self.id = id; self.grade = grade; self.title = title
     }
 }
+
+
+// MARK: - 個人行事曆事件
+
+enum PersonalEventKind: String, Codable, CaseIterable, Identifiable {
+    case task = "事務"
+    case meeting = "會議"
+
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .task: return "checklist"
+        case .meeting: return "person.3.fill"
+        }
+    }
+}
+
+struct PersonalEvent: Identifiable, Codable, Equatable {
+    let id: UUID
+    var title: String
+    var kind: PersonalEventKind
+    var date: Date              // 開始日期時間
+    var durationMinutes: Int    // 長度（分鐘），0 = 全日
+    var note: String
+
+    init(id: UUID = UUID(),
+         title: String = "",
+         kind: PersonalEventKind = .meeting,
+         date: Date = Date(),
+         durationMinutes: Int = 30,
+         note: String = "") {
+        self.id = id
+        self.title = title
+        self.kind = kind
+        self.date = date
+        self.durationMinutes = durationMinutes
+        self.note = note
+    }
+
+    /// 結束時間
+    var endDate: Date {
+        Calendar.current.date(byAdding: .minute, value: durationMinutes, to: date) ?? date
+    }
+}
