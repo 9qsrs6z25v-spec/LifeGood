@@ -174,9 +174,10 @@ struct AddExpenseView: View {
                     if selectedAssetLink == .stock { stockLinkSection }
                     if selectedAssetLink == .insurance { insuranceLinkSection }
                     if selectedAssetLink == .realEstate { realEstateLinkSection }
+                    // 已連結 汽車 / 股票 / 房地產 時，分類由連結自動決定，隱藏分類區塊
                     if selectedAssetLink != .vehicle
                         && selectedAssetLink != .stock
-                        && !(selectedAssetLink == .realEstate && selectedRealEstateExpenseCategory == .housePayment) {
+                        && selectedAssetLink != .realEstate {
                         categorySection
                     }
                 } else {
@@ -233,7 +234,7 @@ struct AddExpenseView: View {
                     selectedVariableCategory = .vehicle
                 } else if newValue == .stock {
                     selectedVariableCategory = .stock
-                } else if newValue == .realEstate && selectedRealEstateExpenseCategory == .housePayment {
+                } else if newValue == .realEstate {
                     selectedVariableCategory = .realEstate
                 }
                 applyAutoTitleIfLinked()
@@ -242,10 +243,7 @@ struct AddExpenseView: View {
             .onChange(of: selectedVehicleExpenseCategory) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: selectedRealEstateLinkId) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: realEstateLinkExisting) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedRealEstateExpenseCategory) { _, newValue in
-                if selectedAssetLink == .realEstate && newValue == .housePayment {
-                    selectedVariableCategory = .realEstate
-                }
+            .onChange(of: selectedRealEstateExpenseCategory) { _, _ in
                 applyAutoTitleIfLinked()
             }
             .onChange(of: selectedMortgageRealEstateId) { _, _ in applyAutoTitleIfLinked() }
