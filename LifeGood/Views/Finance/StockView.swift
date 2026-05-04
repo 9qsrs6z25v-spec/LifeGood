@@ -6,6 +6,7 @@ struct StockView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var showAdd = false
     @State private var editingItem: Stock?
+    @State private var viewingItem: Stock?
     @State private var soldExpanded = false
     @State private var scrollOffset: CGFloat = 0
     @State private var updateBanner: String?
@@ -54,8 +55,11 @@ struct StockView: View {
                             LazyVStack(spacing: 12) {
                                 ForEach(activeStocks) { item in
                                     stockCard(item)
-                                        .onTapGesture { editingItem = item }
+                                        .onTapGesture { viewingItem = item }
                                         .contextMenu {
+                                            Button { editingItem = item } label: {
+                                                Label("編輯", systemImage: "pencil")
+                                            }
                                             Button(role: .destructive) { deleteStock(item) } label: {
                                                 Label("刪除", systemImage: "trash")
                                             }
@@ -88,6 +92,7 @@ struct StockView: View {
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showAdd) { AddStockView() }
             .sheet(item: $editingItem) { item in AddStockView(editing: item) }
+            .sheet(item: $viewingItem) { item in StockDetailView(stock: item) }
             .overlay(alignment: .top) {
                 if let banner = updateBanner {
                     Text(banner)
@@ -210,8 +215,11 @@ struct StockView: View {
                 ForEach(soldStocks) { item in
                     stockCard(item)
                         .padding(.top, 8)
-                        .onTapGesture { editingItem = item }
+                        .onTapGesture { viewingItem = item }
                         .contextMenu {
+                            Button { editingItem = item } label: {
+                                Label("編輯", systemImage: "pencil")
+                            }
                             Button(role: .destructive) { deleteStock(item) } label: {
                                 Label("刪除", systemImage: "trash")
                             }

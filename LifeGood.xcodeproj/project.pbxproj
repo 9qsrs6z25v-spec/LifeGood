@@ -67,6 +67,7 @@
 		A01B000001000044 /* MacaronDatePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000044 /* MacaronDatePicker.swift */; };
 		A01B000001000045 /* MyCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000045 /* MyCalendarView.swift */; };
 		A01B000001000046 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000046 /* NotificationManager.swift */; };
+		A01B000001000047 /* StockDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000047 /* StockDetailView.swift */; };
 		A01B00000100000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000A /* Assets.xcassets */; };
 		A01B00000100000B /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000B /* Preview Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -133,6 +134,7 @@
 		A01A000001000044 /* MacaronDatePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacaronDatePicker.swift; sourceTree = "<group>"; };
 		A01A000001000045 /* MyCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyCalendarView.swift; sourceTree = "<group>"; };
 		A01A000001000046 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		A01A000001000047 /* StockDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockDetailView.swift; sourceTree = "<group>"; };
 		A01A00000100000A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A01A00000100000B /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		A01A00000100000C /* LifeGood.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeGood.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -226,6 +228,7 @@
 				A01A000001000015 /* FinanceChartView.swift */,
 				A01A000001000016 /* AddSavingsInsuranceView.swift */,
 				A01A000001000017 /* AddStockView.swift */,
+				A01A000001000047 /* StockDetailView.swift */,
 				A01A000001000019 /* VehicleView.swift */,
 				A01A00000100001A /* AddVehicleView.swift */,
 				A01A00000100001E /* VehicleDetailView.swift */,
@@ -406,6 +409,7 @@
 				A01B000001000044 /* MacaronDatePicker.swift in Sources */,
 				A01B000001000045 /* MyCalendarView.swift in Sources */,
 				A01B000001000046 /* NotificationManager.swift in Sources */,
+				A01B000001000047 /* StockDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -419,7 +423,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 180;
+				CURRENT_PROJECT_VERSION = 181;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -433,7 +437,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 15.16;
+				MARKETING_VERSION = 15.17;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -449,7 +453,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 180;
+				CURRENT_PROJECT_VERSION = 181;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -463,7 +467,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 15.16;
+				MARKETING_VERSION = 15.17;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

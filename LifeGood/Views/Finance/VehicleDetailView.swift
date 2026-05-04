@@ -32,6 +32,19 @@ enum CardRarity {
         }
     }
 
+    /// 股票分級：以市值或成本（萬元）分級
+    /// 0~10萬 / 11~50萬 / 51~100萬 / 101~300萬 / 301萬以上
+    static func stock(value: Double) -> CardRarity {
+        let wan = value / 10000
+        switch wan {
+        case ..<11:  return .common
+        case ..<51:  return .uncommon
+        case ..<101: return .rare
+        case ..<301: return .epic
+        default:     return .legendary
+        }
+    }
+
     var label: String {
         switch self {
         case .common: return "COMMON"
