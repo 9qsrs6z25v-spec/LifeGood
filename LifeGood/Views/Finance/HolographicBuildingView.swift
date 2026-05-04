@@ -274,11 +274,11 @@ struct BuildingSceneView: UIViewRepresentable {
         func makeScene(floors: [FloorInfo], isApartment: Bool) -> SCNScene {
             let scene = SCNScene()
 
-            // 相機
+            // 相機（拉遠一點讓建築看起來小一些 + 留給地板呼吸空間）
             let camNode = SCNNode()
             camNode.camera = SCNCamera()
-            camNode.camera?.fieldOfView = 38
-            camNode.position = SCNVector3(0, 0, 12)
+            camNode.camera?.fieldOfView = 32
+            camNode.position = SCNVector3(0, 1.0, 18)
             scene.rootNode.addChildNode(camNode)
 
             // 環境光（暗一點讓 emission 突出）
@@ -374,10 +374,65 @@ struct BuildingSceneView: UIViewRepresentable {
             buildingRoot.runAction(auto, forKey: "auto-rotate")
             self.rotationAction = auto
 
-            // 微微傾斜，視覺更有立體感
-            buildingRoot.eulerAngles = SCNVector3(-0.18, 0.6, 0)
+            // 微微傾斜，視覺更有立體感（傾斜縮小）
+            buildingRoot.eulerAngles = SCNVector3(-0.08, 0.6, 0)
+
+            // 全息地板：放在建築底部，浮空略低於最低層
+            let groundY = Float(baseY) - Float(floorHeight) / 2 - 0.15
+            let ground = makeHologramGround(buildingWidth: floorWidth,
+                                            buildingDepth: floorDepth,
+                                            groundY: groundY)
+            buildingRoot.addChildNode(ground)
 
             return scene
+        }
+
+        /// 全息地板：圓形漸層 + 同心發光環 + 向外輻射的網格線
+        private func makeHologramGround(buildingWidth: CGFloat,
+                                        buildingDepth: CGFloat,
+                                        groundY: Float) -> SCNNode {
+            let group = SCNNode()
+            group.position = SCNVector3(0, groundY, 0)
+
+            let groundRadius = max(buildingWidth, buildingDepth) * 1.3
+
+            // 主地板：暗藍盤
+            let disc = SCNCylinder(radius: groundRadius, height: 0.04)
+            disc.firstMaterial?.diffuse.contents = UIColor(red: 0.04, green: 0.08, blue: 0.14, alpha: 0.9)
+            disc.firstMaterial?.emission.contents = HoloPalette.cyan.withAlphaComponent(0.06)
+            disc.firstMaterial?.specular.contents = HoloPalette.cyan
+            disc.firstMaterial?.lightingModel = .physicallyBased
+            let discNode = SCNNode(geometry: disc)
+            group.addChildNode(discNode)
+
+            // 三圈同心霓虹環
+            for (idx, ratio) in [0.45, 0.75, 1.0].enumerated() {
+                let r = groundRadius * CGFloat(ratio)
+                let ring = SCNTorus(ringRadius: r, pipeRadius: 0.018)
+                let alpha: CGFloat = idx == 2 ? 1.0 : (idx == 1 ? 0.7 : 0.45)
+                ring.firstMaterial?.emission.contents = HoloPalette.cyanGlow.withAlphaComponent(alpha)
+                ring.firstMaterial?.diffuse.contents = HoloPalette.cyanGlow.withAlphaComponent(alpha)
+                ring.firstMaterial?.lightingModel = .constant
+                let ringNode = SCNNode(geometry: ring)
+                ringNode.position = SCNVector3(0, 0.025, 0)
+                group.addChildNode(ringNode)
+            }
+
+            // 輻射狀的格子細線（8 條）
+            for i in 0..<8 {
+                let angle = Float(i) * Float.pi / 4
+                let line = SCNCylinder(radius: 0.008, height: groundRadius * 2)
+                line.firstMaterial?.emission.contents = HoloPalette.cyanSoft
+                line.firstMaterial?.diffuse.contents = HoloPalette.cyanSoft
+                line.firstMaterial?.lightingModel = .constant
+                let lineNode = SCNNode(geometry: line)
+                lineNode.position = SCNVector3(0, 0.022, 0)
+                lineNode.eulerAngles = SCNVector3(0, angle, Float.pi / 2)
+                lineNode.opacity = 0.3
+                group.addChildNode(lineNode)
+            }
+
+            return group
         }
 
         /// 用 12 條 cylinder 做出方塊邊框
