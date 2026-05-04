@@ -78,6 +78,9 @@ struct AddExpenseView: View {
     /// 變動支出進階模式：關閉時隱藏關聯資產 / 扣款目標 / 名稱欄位（首次預設關閉）
     @AppStorage("addExpense_advanced_mode") private var advancedMode: Bool = false
 
+    /// Sheet 的尺寸：基本模式僅佔半屏左右；進階模式佔滿
+    @State private var sheetDetent: PresentationDetent = .large
+
     // 汽車
     @State private var selectedVehicleId: UUID?
     @State private var selectedVehicleExpenseCategory: VehicleVariableCategory = .fuel
@@ -220,6 +223,16 @@ struct AddExpenseView: View {
             }
             .navigationTitle(isEditing ? "編輯\(expenseType.rawValue)" : "新增\(expenseType.rawValue)")
             .navigationBarTitleDisplayMode(.inline)
+            .presentationDetents(
+                expenseType == .variable ? [.height(440), .large] : [.large],
+                selection: $sheetDetent
+            )
+            .presentationDragIndicator(.visible)
+            .onChange(of: advancedMode) { _, newValue in
+                if expenseType == .variable {
+                    sheetDetent = newValue ? .large : .height(440)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("取消") { dismiss() }
@@ -232,6 +245,10 @@ struct AddExpenseView: View {
             .onAppear {
                 loadEditing()
                 applyPreset()
+                // 依進階開關決定初始 sheet 高度（須在 loadEditing 後再算，因為它可能會打開進階模式）
+                if expenseType == .variable {
+                    sheetDetent = advancedMode ? .large : .height(440)
+                }
             }
             .onChange(of: selectedAssetLink) { _, newValue in
                 if newValue == .vehicle {
@@ -414,8 +431,10 @@ struct AddExpenseView: View {
                 loanCalcRow
             }
 
-            // 備註（從獨立 section 移到此處最下方，永遠顯示）
-            TextField("備註", text: $note, axis: .vertical).lineLimit(3)
+            // 備註（移到基本資訊最下方；變動支出基本模式時隱藏）
+            if expenseType == .fixed || advancedMode {
+                TextField("備註", text: $note, axis: .vertical).lineLimit(3)
+            }
         } header: {
             HStack {
                 Text("基本資訊")
@@ -652,7 +671,8 @@ struct AddExpenseView: View {
                     }
                     .frame(maxWidth: .infinity)
 
-                    if selectedVariableCategory == .food && !familyNames.isEmpty {
+                    // 人員選擇（飲食類）只在進階模式才顯示
+                    if advancedMode && selectedVariableCategory == .food && !familyNames.isEmpty {
                         Divider()
                         Picker("人員", selection: $selectedDiningMember) {
                             Text("不指定").tag("")
