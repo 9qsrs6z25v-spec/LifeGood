@@ -75,6 +75,9 @@ struct AddExpenseView: View {
 
     @State private var selectedAssetLink: AssetLinkType = .none
 
+    /// 變動支出進階模式：關閉時隱藏關聯資產 / 扣款目標 / 名稱欄位（首次預設關閉）
+    @AppStorage("addExpense_advanced_mode") private var advancedMode: Bool = false
+
     // 汽車
     @State private var selectedVehicleId: UUID?
     @State private var selectedVehicleExpenseCategory: VehicleVariableCategory = .fuel
@@ -167,17 +170,22 @@ struct AddExpenseView: View {
             Form {
                 basicInfoSection
 
-                // 變動支出：先選關聯資產，再選分類
+                // 變動支出：先選關聯資產，再選分類（基本模式隱藏關聯資產選擇）
                 if expenseType == .variable {
-                    assetLinkSection
-                    if selectedAssetLink == .vehicle { vehicleLinkSection }
-                    if selectedAssetLink == .stock { stockLinkSection }
-                    if selectedAssetLink == .insurance { insuranceLinkSection }
-                    if selectedAssetLink == .realEstate { realEstateLinkSection }
-                    // 已連結 汽車 / 股票 / 房地產 時，分類由連結自動決定，隱藏分類區塊
-                    if selectedAssetLink != .vehicle
-                        && selectedAssetLink != .stock
-                        && selectedAssetLink != .realEstate {
+                    if advancedMode {
+                        assetLinkSection
+                        if selectedAssetLink == .vehicle { vehicleLinkSection }
+                        if selectedAssetLink == .stock { stockLinkSection }
+                        if selectedAssetLink == .insurance { insuranceLinkSection }
+                        if selectedAssetLink == .realEstate { realEstateLinkSection }
+                    }
+                    // 基本模式一律顯示分類；進階模式時若連結汽車/股票/房地產則隱藏分類
+                    let suppressCategory = advancedMode && (
+                        selectedAssetLink == .vehicle
+                        || selectedAssetLink == .stock
+                        || selectedAssetLink == .realEstate
+                    )
+                    if !suppressCategory {
                         categorySection
                     }
                 } else {
@@ -202,10 +210,6 @@ struct AddExpenseView: View {
                     mortgageRealEstateSection
                 } else if isCarLoan {
                     carLoanVehicleSection
-                }
-
-                Section("備註") {
-                    TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                 }
 
                 if showValidationError {
@@ -328,20 +332,8 @@ struct AddExpenseView: View {
     // MARK: - 基本資訊
 
     private var basicInfoSection: some View {
-        Section("基本資訊") {
-            if linkedAssetTitle != nil {
-                HStack {
-                    Text("名稱")
-                    Spacer()
-                    Text(title)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                        .lineLimit(2)
-                }
-            } else {
-                TextField("名稱", text: $title)
-            }
-
+        Section {
+            // 金額（永遠顯示）
             HStack {
                 if isSavingsInsurance {
                     Text(insCurrencySymbol).foregroundStyle(.secondary)
@@ -387,12 +379,30 @@ struct AddExpenseView: View {
                 }
             }
 
-            if (!bankMilestones.isEmpty || !creditCardMilestones.isEmpty) && !isSavingsInsurance {
-                bankPicker
-            }
-
+            // 日期（永遠顯示，儲蓄險除外）
             if !isSavingsInsurance {
                 DatePicker(showLoanCalcFields ? "開始日期" : "日期", selection: $date, displayedComponents: .date)
+            }
+
+            // 名稱（進階模式或固定支出才顯示，移到日期下方）
+            if showNameField {
+                if linkedAssetTitle != nil {
+                    HStack {
+                        Text("名稱")
+                        Spacer()
+                        Text(title)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                            .lineLimit(2)
+                    }
+                } else {
+                    TextField(expenseType == .variable ? "名稱（留空自動以分類為名）" : "名稱", text: $title)
+                }
+            }
+
+            // 扣款目標（進階模式或固定支出才顯示）
+            if showBankPicker && !isSavingsInsurance {
+                bankPicker
             }
 
             if showLoanCalcFields {
@@ -403,7 +413,34 @@ struct AddExpenseView: View {
                 }
                 loanCalcRow
             }
+
+            // 備註（從獨立 section 移到此處最下方，永遠顯示）
+            TextField("備註", text: $note, axis: .vertical).lineLimit(3)
+        } header: {
+            HStack {
+                Text("基本資訊")
+                Spacer()
+                if expenseType == .variable {
+                    Toggle("進階", isOn: $advancedMode.animation())
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .font(.caption2)
+                }
+            }
+            .textCase(.none)
         }
+    }
+
+    /// 是否顯示名稱欄位：進階模式 / 固定支出 / 已連結資產（讓使用者看到自動帶入的名稱）都顯示
+    private var showNameField: Bool {
+        expenseType == .fixed || advancedMode || linkedAssetTitle != nil
+    }
+
+    /// 是否顯示扣款目標選單
+    private var showBankPicker: Bool {
+        let hasAccounts = !bankMilestones.isEmpty || !creditCardMilestones.isEmpty
+        guard hasAccounts else { return false }
+        return expenseType == .fixed || advancedMode
     }
 
     private func computedLoanRate() -> Double? {
@@ -1092,6 +1129,12 @@ struct AddExpenseView: View {
     private func saveExpense() {
         var trimmedTitle = title.trimmingCharacters(in: .whitespaces)
 
+        // 變動支出：名稱留空時以分類名稱當預設（讓基本模式更省事）
+        if expenseType == .variable && trimmedTitle.isEmpty {
+            trimmedTitle = selectedVariableCategory.rawValue
+            title = trimmedTitle
+        }
+
         // 股票連動時自動計算金額
         var finalAmountText = amountText
         if expenseType == .variable && selectedAssetLink == .stock {
@@ -1562,6 +1605,18 @@ struct AddExpenseView: View {
 
     private func loadEditing() {
         guard let expense = editingExpense else { return }
+
+        // 編輯既有的變動支出且包含進階欄位時，自動展開進階模式讓使用者看到完整資訊
+        if expense.expenseType == .variable {
+            let hasAdvancedFields = expense.linkedRealEstateId != nil
+                || expense.linkedVehicleId != nil
+                || expense.linkedStockId != nil
+                || expense.linkedInsuranceId != nil
+                || expense.linkedBankMilestoneId != nil
+                || expense.linkedCreditCardMilestoneId != nil
+            if hasAdvancedFields { advancedMode = true }
+        }
+
         title = expense.title
         selectedCurrencyCode = expense.currencyCode
         // 還原為原始幣別金額顯示
