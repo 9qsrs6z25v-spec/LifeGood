@@ -16,7 +16,7 @@ struct AddExpenseView: View {
     @State private var amountText = ""
     @State private var date = Date()
     @State private var selectedVariableCategory: VariableCategory = .food
-    @State private var selectedDiningMember: String = ""
+    @State private var selectedDiningMembers: Set<String> = []
     @State private var selectedFixedCategory: FixedCategory = .rent
     @State private var selectedRecurrence: Recurrence = .monthly
     @State private var note = ""
@@ -650,6 +650,21 @@ struct AddExpenseView: View {
         }
     }
 
+    /// 多選人員的顯示文字：未選 / 1 人 / N 人
+    private var diningMembersLabel: String {
+        if selectedDiningMembers.isEmpty { return "不指定" }
+        let ordered = familyNames.filter { selectedDiningMembers.contains($0) }
+        if ordered.count == 1 { return ordered[0] }
+        return "\(ordered.count) 人"
+    }
+
+    /// 將多選人員 Set 序列化為 `、` 分隔字串（向下相容單名格式）
+    private var diningMembersString: String {
+        guard !selectedDiningMembers.isEmpty else { return "" }
+        return familyNames.filter { selectedDiningMembers.contains($0) }
+            .joined(separator: "、")
+    }
+
     private var familyNames: [String] {
         var names: [String] = []
         let myName = lifeStore.profile.chineseName
@@ -671,16 +686,42 @@ struct AddExpenseView: View {
                     }
                     .frame(maxWidth: .infinity)
 
-                    // 人員選擇（飲食類）只在進階模式才顯示
+                    // 人員選擇（飲食類）只在進階模式才顯示，支援多選
                     if advancedMode && selectedVariableCategory == .food && !familyNames.isEmpty {
                         Divider()
-                        Picker("人員", selection: $selectedDiningMember) {
-                            Text("不指定").tag("")
-                            ForEach(familyNames, id: \.self) { name in
-                                Text(name).tag(name)
+                        Menu {
+                            Button {
+                                selectedDiningMembers.removeAll()
+                            } label: {
+                                if selectedDiningMembers.isEmpty {
+                                    Label("不指定", systemImage: "checkmark")
+                                } else {
+                                    Text("不指定")
+                                }
                             }
+                            ForEach(familyNames, id: \.self) { name in
+                                Button {
+                                    if selectedDiningMembers.contains(name) {
+                                        selectedDiningMembers.remove(name)
+                                    } else {
+                                        selectedDiningMembers.insert(name)
+                                    }
+                                } label: {
+                                    if selectedDiningMembers.contains(name) {
+                                        Label(name, systemImage: "checkmark")
+                                    } else {
+                                        Text(name)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 2) {
+                                Image(systemName: "person.2.fill").font(.caption)
+                                Text(diningMembersLabel).lineLimit(1)
+                                Image(systemName: "chevron.down").font(.caption2)
+                            }
+                            .foregroundStyle(.secondary)
                         }
-                        .labelsHidden()
                     }
                 }
             } else {
@@ -1271,7 +1312,7 @@ struct AddExpenseView: View {
             realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
             note: note.trimmingCharacters(in: .whitespaces),
             currencyCode: savedCurrencyCode,
-            diningMember: (expenseType == .variable && selectedVariableCategory == .food && !selectedDiningMember.isEmpty) ? selectedDiningMember : nil,
+            diningMember: (expenseType == .variable && selectedVariableCategory == .food && !selectedDiningMembers.isEmpty) ? diningMembersString : nil,
             loanTotalAmount: showLoanCalcFields ? Double(loanTotalAmountText) : nil,
             loanYears: showLoanCalcFields ? Double(loanYearsText) : nil,
             loanRate: showLoanCalcFields ? computedLoanRate() : nil,
@@ -1653,7 +1694,13 @@ struct AddExpenseView: View {
         if let rec = expense.recurrence { selectedRecurrence = rec }
         if let sub = expense.insuranceSubCategory { selectedInsuranceSubCategory = sub }
         if let sub = expense.loanSubCategory { selectedLoanSubCategory = sub }
-        selectedDiningMember = expense.diningMember ?? ""
+        // 多選人員：以「、」分隔；向下相容單名格式（split 仍會回傳一個元素）
+        if let raw = expense.diningMember, !raw.isEmpty {
+            let parts = raw.split(separator: "、").map { $0.trimmingCharacters(in: .whitespaces) }
+            selectedDiningMembers = Set(parts.filter { !$0.isEmpty })
+        } else {
+            selectedDiningMembers = []
+        }
         if let lt = expense.loanTotalAmount, lt > 0 { loanTotalAmountText = String(format: "%.0f", lt) }
         if let ly = expense.loanYears, ly > 0 { loanYearsText = String(format: "%g", ly) }
         selectedBankMilestoneId = expense.linkedBankMilestoneId
