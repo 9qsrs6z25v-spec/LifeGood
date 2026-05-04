@@ -396,7 +396,7 @@ struct BuildingSceneView: UIViewRepresentable {
             ]
             for c in xCorners {
                 let cyl = makeEdgeCylinder(length: width, radius: radius, color: color)
-                cyl.eulerAngles = SCNVector3(0, 0, .pi / 2)
+                cyl.eulerAngles = SCNVector3(0, 0, Float.pi / 2)
                 cyl.position = SCNVector3(0, Float(c.y), Float(c.z))
                 group.addChildNode(cyl)
             }
@@ -406,7 +406,7 @@ struct BuildingSceneView: UIViewRepresentable {
             ]
             for c in zCorners {
                 let cyl = makeEdgeCylinder(length: depth, radius: radius, color: color)
-                cyl.eulerAngles = SCNVector3(.pi / 2, 0, 0)
+                cyl.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
                 cyl.position = SCNVector3(Float(c.x), Float(c.y), 0)
                 group.addChildNode(cyl)
             }
