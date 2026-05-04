@@ -590,6 +590,49 @@ struct FloorInfo: Identifiable, Codable {
     }
 }
 
+// MARK: - 裝潢照片
+
+struct RenovationPhoto: Identifiable, Codable {
+    let id: UUID
+    var date: Date
+    var title: String
+    var photoFileName: String?
+    var note: String
+
+    init(id: UUID = UUID(), date: Date = Date(), title: String = "",
+         photoFileName: String? = nil, note: String = "") {
+        self.id = id
+        self.date = date
+        self.title = title
+        self.photoFileName = photoFileName
+        self.note = note
+    }
+
+    var photoURL: URL? {
+        guard let name = photoFileName else { return nil }
+        return Self.photosDirectory.appendingPathComponent(name)
+    }
+
+    static var photosDirectory: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("RenovationPhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func savePhoto(_ data: Data, id: UUID) -> String {
+        let name = "\(id.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        try? data.write(to: url)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
 // MARK: - 土地權狀
 
 struct LandDeed: Identifiable, Codable {
@@ -726,6 +769,7 @@ struct RealEstate: Identifiable, Codable {
     var propertyAssets: [RealEstatePropertyAsset]       // 房屋附屬資產
     var utilityPayments: [UtilityPayment]               // 水電瓦斯繳費紀錄
     var extraMeters: [UtilityMeter]                     // 額外的水/電/瓦斯表（主表以單一欄位存放）
+    var renovationPhotos: [RenovationPhoto]             // 裝潢照片（接在樓層資訊章節下）
 
     init(
         id: UUID = UUID(),
@@ -775,7 +819,8 @@ struct RealEstate: Identifiable, Codable {
         insuranceItems: [RealEstateInsuranceItem] = [],
         propertyAssets: [RealEstatePropertyAsset] = [],
         utilityPayments: [UtilityPayment] = [],
-        extraMeters: [UtilityMeter] = []
+        extraMeters: [UtilityMeter] = [],
+        renovationPhotos: [RenovationPhoto] = []
     ) {
         self.id = id
         self.name = name
@@ -825,6 +870,7 @@ struct RealEstate: Identifiable, Codable {
         self.propertyAssets = propertyAssets
         self.utilityPayments = utilityPayments
         self.extraMeters = extraMeters
+        self.renovationPhotos = renovationPhotos
     }
 
     // MARK: - 向下相容解碼
@@ -886,6 +932,7 @@ struct RealEstate: Identifiable, Codable {
         propertyAssets = (try? c.decode([RealEstatePropertyAsset].self, forKey: .propertyAssets)) ?? []
         utilityPayments = (try? c.decode([UtilityPayment].self, forKey: .utilityPayments)) ?? []
         extraMeters = (try? c.decode([UtilityMeter].self, forKey: .extraMeters)) ?? []
+        renovationPhotos = (try? c.decode([RenovationPhoto].self, forKey: .renovationPhotos)) ?? []
 
         // 向下相容：舊版有 monthlyMortgage 欄位，轉為 mortgageItems
         if mortgageItems.isEmpty,
@@ -903,7 +950,7 @@ struct RealEstate: Identifiable, Codable {
         case totalFloors, fromFloor, toFloor, floors
         case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
         case gasMeterNumber, gasMeterOwner, gasUserNumber, insuranceItems, propertyAssets
-        case utilityPayments, extraMeters
+        case utilityPayments, extraMeters, renovationPhotos
         case monthlyMortgage // 舊版欄位，僅用於解碼
     }
 
@@ -957,6 +1004,7 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(propertyAssets, forKey: .propertyAssets)
         try c.encode(utilityPayments, forKey: .utilityPayments)
         try c.encode(extraMeters, forKey: .extraMeters)
+        try c.encode(renovationPhotos, forKey: .renovationPhotos)
     }
 
     /// 顯示用的完整地點（縣市 + 地址）

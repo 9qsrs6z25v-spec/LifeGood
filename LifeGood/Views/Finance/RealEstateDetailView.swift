@@ -16,6 +16,8 @@ struct RealEstateDetailView: View {
     @State private var addingUtilityPayment = false
     @State private var editingUtilityPayment: UtilityPayment?
     @State private var utilityExpanded = false
+    @State private var addingRenovationPhoto = false
+    @State private var editingRenovationPhoto: RenovationPhoto?
     @State private var showPremiumAlert = false
     /// 用於在子 sheet 關閉後強制刷新水電瓦斯區塊（解決 SwiftUI 巢狀 sheet 偶爾不更新的問題）
     @State private var dataRefreshID = UUID()
@@ -98,6 +100,14 @@ struct RealEstateDetailView: View {
             .sheet(item: $editingUtilityPayment,
                    onDismiss: { dataRefreshID = UUID() }) { p in
                 UtilityPaymentEditor(estateId: estateId, editing: p)
+            }
+            .sheet(isPresented: $addingRenovationPhoto,
+                   onDismiss: { dataRefreshID = UUID() }) {
+                RenovationPhotoEditor(estateId: estateId, editing: nil)
+            }
+            .sheet(item: $editingRenovationPhoto,
+                   onDismiss: { dataRefreshID = UUID() }) { p in
+                RenovationPhotoEditor(estateId: estateId, editing: p)
             }
             .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
@@ -396,6 +406,9 @@ struct RealEstateDetailView: View {
             if !estate.floors.isEmpty {
                 buildingVisualization
             }
+
+            // 樓層下方：裝潢照片
+            renovationPhotosContent
 
             if estate.hasElevator {
                 sectionHeaderWithAdd("電梯資料") { addingElevatorMaintenance = true }
@@ -834,6 +847,71 @@ struct RealEstateDetailView: View {
         .padding(.horizontal).padding(.vertical, 8)
     }
 
+    // MARK: - 裝潢照片
+
+    @ViewBuilder
+    private var renovationPhotosContent: some View {
+        sectionHeaderWithAdd("裝潢照片") { addingRenovationPhoto = true }
+
+        if estate.renovationPhotos.isEmpty {
+            HStack {
+                Text("尚無裝潢照片").font(.caption).foregroundStyle(.tertiary)
+                Spacer()
+            }
+            .padding(.horizontal).padding(.vertical, 6)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(estate.renovationPhotos.sorted { $0.date > $1.date }) { p in
+                        Button {
+                            editingRenovationPhoto = p
+                        } label: {
+                            renovationPhotoCard(p)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+            }
+        }
+    }
+
+    private func renovationPhotoCard(_ p: RenovationPhoto) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack {
+                if let url = p.photoURL, let img = UIImage(contentsOfFile: url.path) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 130, height: 100)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .onTapGesture { viewingPhotoURL = url }
+                } else {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(.tertiarySystemFill))
+                        .frame(width: 130, height: 100)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .font(.title2)
+                                .foregroundStyle(.tertiary)
+                        )
+                }
+            }
+            Text(p.title.isEmpty ? "未命名" : p.title)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .frame(width: 130, alignment: .leading)
+            Text(fmtDate(p.date))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(8)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
     @ViewBuilder
     private var utilitiesContent: some View {
         sectionHeaderWithAdd("水電瓦斯") { addingUtilityPayment = true }
@@ -1116,6 +1194,11 @@ struct RealEstateDetailView: View {
             if let linkedId = up.linkedExpenseId {
                 expenseStore.expenses.removeAll { $0.id == linkedId }
             }
+            if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+        }
+        // 清除裝潢照片檔案
+        for rp in estate.renovationPhotos {
+            if let name = rp.photoFileName { RenovationPhoto.deletePhoto(name) }
         }
         if let linkedId = estate.linkedExpenseId {
             expenseStore.expenses.removeAll { $0.id == linkedId }

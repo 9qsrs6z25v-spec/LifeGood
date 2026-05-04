@@ -167,6 +167,10 @@ struct RealEstateView: View {
         }
         for up in item.utilityPayments {
             if let linkedId = up.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+            if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+        }
+        for rp in item.renovationPhotos {
+            if let name = rp.photoFileName { RenovationPhoto.deletePhoto(name) }
         }
         if let linkedId = item.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
         if let saleExpId = item.saleLinkedExpenseId { expenseStore.expenses.removeAll { $0.id == saleExpId } }
