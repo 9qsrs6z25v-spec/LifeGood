@@ -9,30 +9,40 @@ struct FamilyView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(store.familyMembers) { member in
-                    memberRow(member)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if subscription.isPremium { editingMember = member }
-                            else { showPremiumAlert = true }
+            VStack(spacing: 0) {
+                // 上方：街道式總覽（永遠顯示，即使空也保留高度）
+                FamilyOverviewMap(
+                    myName: store.profile.chineseName,
+                    members: store.familyMembers
+                )
+                .frame(height: 320)
+
+                // 下方：成員列表（可點擊編輯、滑動刪除）
+                List {
+                    ForEach(store.familyMembers) { member in
+                        memberRow(member)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if subscription.isPremium { editingMember = member }
+                                else { showPremiumAlert = true }
+                            }
+                    }
+                    .onDelete { offsets in
+                        guard subscription.isPremium else { showPremiumAlert = true; return }
+                        let items = offsets.map { store.familyMembers[$0] }
+                        items.forEach { store.deleteFamilyMember($0) }
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .overlay {
+                    if store.familyMembers.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "person.3.fill")
+                                .font(.system(size: 36)).foregroundStyle(.secondary)
+                            Text("尚無家庭成員").font(.subheadline).foregroundStyle(.secondary)
+                            Text("點右上角 + 或在履歷頁面新增")
+                                .font(.caption).foregroundStyle(.tertiary)
                         }
-                }
-                .onDelete { offsets in
-                    guard subscription.isPremium else { showPremiumAlert = true; return }
-                    let items = offsets.map { store.familyMembers[$0] }
-                    items.forEach { store.deleteFamilyMember($0) }
-                }
-            }
-            .listStyle(.insetGrouped)
-            .overlay {
-                if store.familyMembers.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.3.fill")
-                            .font(.system(size: 48)).foregroundStyle(.secondary)
-                        Text("尚無家庭成員").font(.headline).foregroundStyle(.secondary)
-                        Text("在履歷頁面新增家庭分類即可加入")
-                            .font(.subheadline).foregroundStyle(.tertiary)
                     }
                 }
             }
