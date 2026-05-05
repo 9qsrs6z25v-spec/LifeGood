@@ -676,8 +676,6 @@ struct AddExpenseView: View {
                 }
             }
         }
-        .frame(width: 220)
-        .frame(maxHeight: 320)
     }
 
     private func diningMemberRow(name: String?, label: String) -> some View {
@@ -760,11 +758,10 @@ struct AddExpenseView: View {
                             .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .popover(isPresented: $showDiningMemberPopover,
-                                 attachmentAnchor: .point(.bottom),
-                                 arrowEdge: .top) {
+                        .sheet(isPresented: $showDiningMemberPopover) {
                             diningMemberSelectorList
-                                .presentationCompactAdaptation(.popover)
+                                .presentationDetents([.height(380), .medium])
+                                .presentationDragIndicator(.visible)
                         }
                     }
                 }
