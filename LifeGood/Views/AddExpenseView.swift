@@ -17,6 +17,7 @@ struct AddExpenseView: View {
     @State private var date = Date()
     @State private var selectedVariableCategory: VariableCategory = .food
     @State private var selectedDiningMembers: Set<String> = []
+    @State private var showDiningMemberPopover: Bool = false
     @State private var selectedFixedCategory: FixedCategory = .rent
     @State private var selectedRecurrence: Recurrence = .monthly
     @State private var note = ""
@@ -650,6 +651,65 @@ struct AddExpenseView: View {
         }
     }
 
+    /// 飲食人員多選清單（popover 內容，可連續勾選不會關閉）
+    private var diningMemberSelectorList: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("選擇人員")
+                    .font(.headline)
+                Spacer()
+                Button("完成") { showDiningMemberPopover = false }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.green)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(Color(.secondarySystemBackground))
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    diningMemberRow(name: nil, label: "不指定")
+                    Divider()
+                    ForEach(familyNames, id: \.self) { name in
+                        diningMemberRow(name: name, label: name)
+                        if name != familyNames.last { Divider() }
+                    }
+                }
+            }
+        }
+        .frame(width: 220)
+        .frame(maxHeight: 320)
+    }
+
+    private func diningMemberRow(name: String?, label: String) -> some View {
+        // name == nil 代表「不指定」
+        let isSelected: Bool = {
+            if let n = name { return selectedDiningMembers.contains(n) }
+            return selectedDiningMembers.isEmpty
+        }()
+        return Button {
+            if let n = name {
+                if selectedDiningMembers.contains(n) {
+                    selectedDiningMembers.remove(n)
+                } else {
+                    selectedDiningMembers.insert(n)
+                }
+            } else {
+                selectedDiningMembers.removeAll()
+            }
+        } label: {
+            HStack {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? .green : .secondary)
+                Text(label)
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     /// 多選人員的顯示文字：未選 / 1 人 / N 人
     private var diningMembersLabel: String {
         if selectedDiningMembers.isEmpty { return "不指定" }
@@ -686,34 +746,11 @@ struct AddExpenseView: View {
                     }
                     .frame(maxWidth: .infinity)
 
-                    // 人員選擇（飲食類）只在進階模式才顯示，支援多選
+                    // 人員選擇（飲食類）只在進階模式才顯示，支援多選 + 點外部才關閉
                     if advancedMode && selectedVariableCategory == .food && !familyNames.isEmpty {
                         Divider()
-                        Menu {
-                            Button {
-                                selectedDiningMembers.removeAll()
-                            } label: {
-                                if selectedDiningMembers.isEmpty {
-                                    Label("不指定", systemImage: "checkmark")
-                                } else {
-                                    Text("不指定")
-                                }
-                            }
-                            ForEach(familyNames, id: \.self) { name in
-                                Button {
-                                    if selectedDiningMembers.contains(name) {
-                                        selectedDiningMembers.remove(name)
-                                    } else {
-                                        selectedDiningMembers.insert(name)
-                                    }
-                                } label: {
-                                    if selectedDiningMembers.contains(name) {
-                                        Label(name, systemImage: "checkmark")
-                                    } else {
-                                        Text(name)
-                                    }
-                                }
-                            }
+                        Button {
+                            showDiningMemberPopover = true
                         } label: {
                             HStack(spacing: 2) {
                                 Image(systemName: "person.2.fill").font(.caption)
@@ -721,6 +758,13 @@ struct AddExpenseView: View {
                                 Image(systemName: "chevron.down").font(.caption2)
                             }
                             .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showDiningMemberPopover,
+                                 attachmentAnchor: .point(.bottom),
+                                 arrowEdge: .top) {
+                            diningMemberSelectorList
+                                .presentationCompactAdaptation(.popover)
                         }
                     }
                 }
