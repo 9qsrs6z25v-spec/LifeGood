@@ -18,6 +18,12 @@ struct AddExpenseView: View {
     @State private var selectedVariableCategory: VariableCategory = .food
     @State private var selectedDiningMembers: Set<String> = []
     @State private var showDiningMemberPopover: Bool = false
+
+    /// 支援「人員多選」的變動支出分類
+    private static let memberCategories: Set<VariableCategory> = [
+        .food, .entertainment, .shopping, .dailyNecessities,
+        .medical, .education, .social, .other
+    ]
     @State private var selectedFixedCategory: FixedCategory = .rent
     @State private var selectedRecurrence: Recurrence = .monthly
     @State private var note = ""
@@ -744,8 +750,8 @@ struct AddExpenseView: View {
                     }
                     .frame(maxWidth: .infinity)
 
-                    // 人員選擇（飲食類）只在進階模式才顯示，支援多選 + 點外部才關閉
-                    if advancedMode && selectedVariableCategory == .food && !familyNames.isEmpty {
+                    // 人員選擇（飲食 / 娛樂 / 購物 / 日用 / 醫療 / 教育 / 社交 / 其他）只在進階模式才顯示，支援多選 + 點外部才關閉
+                    if advancedMode && Self.memberCategories.contains(selectedVariableCategory) && !familyNames.isEmpty {
                         Divider()
                         Button {
                             showDiningMemberPopover = true
@@ -1353,7 +1359,7 @@ struct AddExpenseView: View {
             realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
             note: note.trimmingCharacters(in: .whitespaces),
             currencyCode: savedCurrencyCode,
-            diningMember: (expenseType == .variable && selectedVariableCategory == .food && !selectedDiningMembers.isEmpty) ? diningMembersString : nil,
+            diningMember: (expenseType == .variable && Self.memberCategories.contains(selectedVariableCategory) && !selectedDiningMembers.isEmpty) ? diningMembersString : nil,
             loanTotalAmount: showLoanCalcFields ? Double(loanTotalAmountText) : nil,
             loanYears: showLoanCalcFields ? Double(loanYearsText) : nil,
             loanRate: showLoanCalcFields ? computedLoanRate() : nil,

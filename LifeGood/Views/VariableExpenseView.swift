@@ -335,8 +335,7 @@ struct ExpenseRow: View {
                 Text(formatCurrency(expense.amount))
                     .font(.subheadline.bold())
                     .foregroundStyle(.red)
-                if expense.variableCategory == .food,
-                   let member = expense.diningMember, !member.isEmpty {
+                if let member = expense.diningMember, !member.isEmpty {
                     Text(member)
                         .font(.caption2)
                         .foregroundStyle(.orange)
