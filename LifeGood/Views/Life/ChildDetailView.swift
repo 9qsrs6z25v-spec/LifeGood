@@ -3,6 +3,7 @@ import PhotosUI
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
@@ -125,6 +126,8 @@ struct ChildDetailView: View {
         ForEach(DailyRecordType.allCases) { type in
             dailySection(type)
         }
+        // 睡眠章節下方：消費（依本人名字連動到變動支出）
+        consumptionSection
     }
 
     private func dailySection(_ type: DailyRecordType) -> some View {
@@ -207,6 +210,111 @@ struct ChildDetailView: View {
         case .food: return .green
         case .sleep: return .indigo
         }
+    }
+
+    // MARK: - 消費（與兒女連動的變動支出）
+
+    private var consumptionExpenses: [Expense] {
+        let name = child.chineseName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return [] }
+        return expenseStore.expenses
+            .filter { $0.expenseType == .variable }
+            .filter { e in
+                guard let raw = e.diningMember, !raw.isEmpty else { return false }
+                let names = raw.split(separator: "、").map { String($0).trimmingCharacters(in: .whitespaces) }
+                return names.contains(name)
+            }
+            .sorted { $0.date > $1.date }
+    }
+
+    @ViewBuilder
+    private var consumptionSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "creditcard.fill").foregroundStyle(.red)
+                Text("消費").font(.headline)
+                Spacer()
+                Text("\(consumptionExpenses.count) 筆")
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+
+            if consumptionExpenses.isEmpty {
+                Text(child.chineseName.isEmpty
+                     ? "尚未設定姓名，請先填寫家庭成員的中文名字"
+                     : "尚無連動的消費紀錄")
+                    .font(.caption).foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal).padding(.bottom, 12)
+            } else {
+                let total = consumptionExpenses.reduce(0) { $0 + $1.amount }
+                HStack {
+                    Label("總計", systemImage: "sum")
+                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatCurrency(total))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.red)
+                }
+                .padding(.horizontal).padding(.vertical, 6)
+                Divider().padding(.horizontal)
+                ForEach(consumptionExpenses.prefix(20)) { e in
+                    consumptionRow(e)
+                    if e.id != consumptionExpenses.prefix(20).last?.id {
+                        Divider().padding(.leading, 50)
+                    }
+                }
+                if consumptionExpenses.count > 20 {
+                    Text("還有 \(consumptionExpenses.count - 20) 筆…")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .padding(.horizontal).padding(.bottom, 8)
+                }
+            }
+            if !child.chineseName.isEmpty {
+                Text("變動支出中將「\(child.chineseName)」加入人員會自動同步到此")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .padding(.horizontal).padding(.bottom, 12)
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private func consumptionRow(_ e: Expense) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: e.variableCategory?.icon ?? "questionmark.circle")
+                .font(.caption).foregroundStyle(.orange).frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(formatExpenseDate(e.date)).font(.caption2).foregroundStyle(.tertiary)
+                    if let cat = e.variableCategory {
+                        Text(cat.rawValue).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if let raw = e.diningMember, !raw.isEmpty {
+                        Text(raw).font(.caption2).foregroundStyle(.orange).lineLimit(1)
+                    }
+                }
+            }
+            Spacer()
+            Text(formatCurrency(e.amount))
+                .font(.subheadline.bold())
+                .foregroundStyle(.red)
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+    }
+
+    private func formatCurrency(_ v: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+    }
+
+    private func formatExpenseDate(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: d)
     }
 
     // MARK: - 生涯頁面
