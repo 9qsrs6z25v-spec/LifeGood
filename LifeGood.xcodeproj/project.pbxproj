@@ -49,6 +49,7 @@
 		A01B00000100009A /* BusinessCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100009A /* BusinessCardView.swift */; };
 		A01B00000100009B /* TaxOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100009B /* TaxOverviewView.swift */; };
 		A01B000001000033 /* CloudSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000033 /* CloudSyncManager.swift */; };
+		A01B000001000100 /* CloudKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000100 /* CloudKitManager.swift */; };
 		A01B000001000035 /* GradeTitleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000035 /* GradeTitleView.swift */; };
 		A01B000001000036 /* SpouseResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000036 /* SpouseResumeView.swift */; };
 		A01B000001000037 /* ChildrenResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000037 /* ChildrenResumeView.swift */; };
@@ -119,6 +120,7 @@
 		A01A00000100009A /* BusinessCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusinessCardView.swift; sourceTree = "<group>"; };
 		A01A00000100009B /* TaxOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaxOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000033 /* CloudSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncManager.swift; sourceTree = "<group>"; };
+		A01A000001000100 /* CloudKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitManager.swift; sourceTree = "<group>"; };
 		A01A000001000034 /* LifeGood.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGood.entitlements; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
@@ -194,6 +196,7 @@
 				A01A000001000027 /* UnifiedExport.swift */,
 				A01A000001000030 /* BackupManager.swift */,
 				A01A000001000033 /* CloudSyncManager.swift */,
+				A01A000001000100 /* CloudKitManager.swift */,
 				A01A00000100003B /* SubscriptionManager.swift */,
 				A01A00000100003C /* FeatureGate.swift */,
 				A01A00000100003E /* EInvoice.swift */,
@@ -403,6 +406,7 @@
 				A01B000001000027 /* UnifiedExport.swift in Sources */,
 				A01B000001000030 /* BackupManager.swift in Sources */,
 				A01B000001000033 /* CloudSyncManager.swift in Sources */,
+				A01B000001000100 /* CloudKitManager.swift in Sources */,
 				A01B000001000035 /* GradeTitleView.swift in Sources */,
 				A01B000001000036 /* SpouseResumeView.swift in Sources */,
 				A01B000001000037 /* ChildrenResumeView.swift in Sources */,
@@ -449,6 +453,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -481,6 +486,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (

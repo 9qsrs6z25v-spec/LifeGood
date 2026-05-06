@@ -176,12 +176,14 @@ struct FamilyAlbumPhoto: Identifiable, Codable, Equatable {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         try? data.write(to: url)
+        PhotoCloudSync.upload(directory: "FamilyAlbumPhotos", fileName: name)
         return name
     }
 
     static func deletePhoto(_ fileName: String) {
         let url = photosDirectory.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "FamilyAlbumPhotos", fileName: fileName)
     }
 }
 
@@ -301,19 +303,23 @@ struct ChildRecord: Identifiable, Codable {
     static func savePhoto(_ data: Data, id: UUID) -> String {
         let name = "\(id.uuidString).jpg"
         try? data.write(to: photosDirectory.appendingPathComponent(name))
+        PhotoCloudSync.upload(directory: "ChildRecordPhotos", fileName: name)
         return name
     }
 
     static func saveSketch(_ data: Data, id: UUID) -> String {
         let name = "\(id.uuidString)_sketch.jpg"
         try? data.write(to: photosDirectory.appendingPathComponent(name))
+        PhotoCloudSync.upload(directory: "ChildRecordPhotos", fileName: name)
         return name
     }
 
     static func deletePhoto(_ fileName: String) {
         try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(fileName))
+        PhotoCloudSync.delete(directory: "ChildRecordPhotos", fileName: fileName)
         let sketchName = fileName.replacingOccurrences(of: ".jpg", with: "_sketch.jpg")
         try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(sketchName))
+        PhotoCloudSync.delete(directory: "ChildRecordPhotos", fileName: sketchName)
     }
 
     /// 將照片轉為素描風格（鉛筆畫效果 + 四周高斯模糊暈散）

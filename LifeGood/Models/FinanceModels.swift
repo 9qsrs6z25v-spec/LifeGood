@@ -460,12 +460,14 @@ struct ElevatorMaintenance: Identifiable, Codable {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         try? data.write(to: url)
+        PhotoCloudSync.upload(directory: "ElevatorPhotos", fileName: name)
         return name
     }
 
     static func deletePhoto(_ fileName: String) {
         let url = photosDirectory.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "ElevatorPhotos", fileName: fileName)
     }
 }
 
@@ -521,12 +523,14 @@ struct UtilityPayment: Identifiable, Codable {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         try? data.write(to: url)
+        PhotoCloudSync.upload(directory: "UtilityPhotos", fileName: name)
         return name
     }
 
     static func deletePhoto(_ fileName: String) {
         let url = photosDirectory.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "UtilityPhotos", fileName: fileName)
     }
 }
 
@@ -624,12 +628,14 @@ struct RenovationPhoto: Identifiable, Codable {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         try? data.write(to: url)
+        PhotoCloudSync.upload(directory: "RenovationPhotos", fileName: name)
         return name
     }
 
     static func deletePhoto(_ fileName: String) {
         let url = photosDirectory.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "RenovationPhotos", fileName: fileName)
     }
 }
 

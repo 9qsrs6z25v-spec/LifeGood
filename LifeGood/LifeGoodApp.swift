@@ -1,7 +1,35 @@
 import SwiftUI
+import UIKit
+import CloudKit
+
+/// 處理 CloudKit silent remote notification 與 APNs 註冊。
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // 註冊靜默推播以接收 CKRecordZoneSubscription 變更
+        application.registerForRemoteNotifications()
+        return true
+    }
+
+    func application(_ application: UIApplication,
+                     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        // 只有使用者啟用同步時才處理推播，避免覆蓋本地資料
+        guard CloudSyncManager.shared.isEnabled else {
+            completionHandler(.noData); return
+        }
+        CloudKitManager.shared.handleRemoteNotification(userInfo: userInfo, completion: completionHandler)
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        // CloudKit 仍可使用 foreground polling，這裡僅靜默忽略
+    }
+}
 
 @main
 struct LifeGoodApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var expenseStore = ExpenseStore()
     @StateObject private var financeStore = FinanceStore()
     @StateObject private var lifeStore = LifeStore()

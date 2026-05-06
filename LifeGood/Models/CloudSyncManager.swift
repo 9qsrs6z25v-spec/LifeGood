@@ -1,14 +1,17 @@
 import Foundation
+import CloudKit
 import Combine
 
-/// 管理 NSUbiquitousKeyValueStore（iCloud KV Store）與本地 UserDefaults 的雙向同步。
-/// 同一 Apple ID 的裝置間，啟用後資料會自動推送/拉取。
+/// 對外的同步開關 / 狀態 ObservableObject。
+///
+/// 介面與舊版 NSUbiquitousKeyValueStore 版本相容（`pushAll`、`push(key:)`、
+/// `syncNow`、`isEnabled`、`isAccountAvailable`、`lastSyncDate`、`lastChangeReason`），
+/// 底層改由 `CloudKitManager` 走 CloudKit Private Database。
 final class CloudSyncManager: ObservableObject {
     static let shared = CloudSyncManager()
 
-    // MARK: - Keys
+    // MARK: - 同步的 UserDefaults keys（含照片無法走 KV 的所有結構化資料）
 
-    /// 需要同步至 iCloud 的所有儲存 key（對應三個 Store 的 UserDefaults key）
     static let syncKeys: [String] = [
         // ExpenseStore
         "lifegood_expenses",
@@ -28,7 +31,9 @@ final class CloudSyncManager: ObservableObject {
         "life_schedules",
         "life_subordinates",
         "life_departments",
-        "life_grade_titles"
+        "life_grade_titles",
+        "life_business_cards",
+        "life_personal_events"
     ]
 
     private static let enabledKey = "icloud_sync_enabled"
@@ -36,23 +41,17 @@ final class CloudSyncManager: ObservableObject {
 
     // MARK: - Published State
 
-    /// 是否開啟 iCloud 同步
     @Published var isEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
             if isEnabled {
-                pushAllToCloud()
+                bootstrapAndPushAll()
             }
         }
     }
 
-    /// iCloud 帳號是否可用（使用者已登入）
     @Published private(set) var isAccountAvailable: Bool = false
-
-    /// 最近一次成功同步的時間
     @Published private(set) var lastSyncDate: Date?
-
-    /// 最近一次外部變更原因（顯示用）
     @Published private(set) var lastChangeReason: ChangeReason = .none
 
     enum ChangeReason: String {
@@ -63,11 +62,6 @@ final class CloudSyncManager: ObservableObject {
         case accountChange = "iCloud 帳號已變更"
     }
 
-    // MARK: - Private
-
-    private let kvStore = NSUbiquitousKeyValueStore.default
-    private var observer: NSObjectProtocol?
-
     // MARK: - Init
 
     private init() {
@@ -76,143 +70,147 @@ final class CloudSyncManager: ObservableObject {
             self.lastSyncDate = date
         }
 
-        updateAccountStatus()
-
-        observer = NotificationCenter.default.addObserver(
-            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
-            object: kvStore,
-            queue: .main
-        ) { [weak self] note in
-            self?.handleExternalChange(note)
-        }
-
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(ubiquityIdentityDidChange),
-            name: .NSUbiquityIdentityDidChange,
+            selector: #selector(handleAccountStatusChanged),
+            name: CloudKitManager.accountStatusDidChangeNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleKVChanges(_:)),
+            name: CloudKitManager.didPullKVChangesNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePhotoChanges(_:)),
+            name: CloudKitManager.didPullPhotoChangesNotification,
             object: nil
         )
 
-        kvStore.synchronize()
-    }
-
-    deinit {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-    }
-
-    // MARK: - Status
-
-    func updateAccountStatus() {
-        isAccountAvailable = FileManager.default.ubiquityIdentityToken != nil
-    }
-
-    @objc private func ubiquityIdentityDidChange() {
-        DispatchQueue.main.async { [weak self] in
-            self?.updateAccountStatus()
-            self?.lastChangeReason = .accountChange
+        // 啟動時取一次帳號狀態
+        CloudKitManager.shared.refreshAccountStatus { [weak self] status in
+            self?.updateAccountStatus(status)
         }
     }
 
-    // MARK: - Push
+    // MARK: - Account
 
-    /// 單一 key 的變更推送至 iCloud（Store save() 後呼叫）
+    func updateAccountStatus() {
+        CloudKitManager.shared.refreshAccountStatus { [weak self] status in
+            self?.updateAccountStatus(status)
+        }
+    }
+
+    private func updateAccountStatus(_ status: CKAccountStatus) {
+        let avail = (status == .available)
+        DispatchQueue.main.async {
+            self.isAccountAvailable = avail
+        }
+    }
+
+    @objc private func handleAccountStatusChanged() {
+        let status = CloudKitManager.shared.accountStatus
+        updateAccountStatus(status)
+        DispatchQueue.main.async {
+            self.lastChangeReason = .accountChange
+        }
+    }
+
+    // MARK: - Push（給 Stores 呼叫）
+
+    /// 單一 key 的變更推送至 iCloud（Store save() 後可呼叫）
     func push(key: String) {
         guard isEnabled, isAccountAvailable else { return }
         guard Self.syncKeys.contains(key) else { return }
         if let data = UserDefaults.standard.data(forKey: key) {
-            kvStore.set(data, forKey: key)
-        } else {
-            kvStore.removeObject(forKey: key)
+            CloudKitManager.shared.pushKV(key: key, data: data) { [weak self] _ in
+                self?.markSynced()
+            }
         }
-        kvStore.synchronize()
-        markSynced()
     }
 
-    /// 任何 Store 的 save() 都會觸發：將所有 sync key 一次推送
+    /// 任何 Store 的 save() 都會觸發：將所有 sync key 一次推送（增量 — CloudKit 內部會 dedupe）
     func pushAll() {
         guard isEnabled, isAccountAvailable else { return }
-        for key in Self.syncKeys {
+        let keys = Self.syncKeys
+        let group = DispatchGroup()
+        for key in keys {
             if let data = UserDefaults.standard.data(forKey: key) {
-                kvStore.set(data, forKey: key)
+                group.enter()
+                CloudKitManager.shared.pushKV(key: key, data: data) { _ in group.leave() }
             }
         }
-        kvStore.synchronize()
-        markSynced()
+        group.notify(queue: .main) { [weak self] in
+            self?.markSynced()
+        }
     }
 
-    /// 開啟同步時，立即將目前所有本地資料推送至 iCloud
-    private func pushAllToCloud() {
-        guard isAccountAvailable else { return }
-        for key in Self.syncKeys {
-            if let data = UserDefaults.standard.data(forKey: key) {
-                kvStore.set(data, forKey: key)
+    /// 開啟同步時：建立 zone/subscription、把本地全推上去、首次拉取
+    private func bootstrapAndPushAll() {
+        CloudKitManager.shared.bootstrap { [weak self] ok in
+            guard let self = self, ok else { return }
+            CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
+            CloudKitManager.shared.uploadAllLocalPhotos()
+            self.markSynced()
+            DispatchQueue.main.async {
+                self.lastChangeReason = .initialSync
             }
         }
-        kvStore.synchronize()
-        markSynced()
     }
 
-    /// 手動觸發同步（下拉 iCloud 並推送本地）
+    /// 手動觸發同步：刷新帳號狀態 → 拉取 → 推送
     func syncNow() {
-        updateAccountStatus()
-        guard isAccountAvailable else { return }
-        kvStore.synchronize()
-        if isEnabled {
-            pushAllToCloud()
+        CloudKitManager.shared.refreshAccountStatus { [weak self] status in
+            guard let self = self else { return }
+            self.updateAccountStatus(status)
+            guard status == .available, self.isEnabled else { return }
+            CloudKitManager.shared.bootstrap { ok in
+                guard ok else { return }
+                CloudKitManager.shared.fetchChanges { _ in
+                    CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
+                    CloudKitManager.shared.uploadAllLocalPhotos()
+                    self.markSynced()
+                }
+            }
         }
     }
 
-    // MARK: - Pull
+    // MARK: - Pull（被 CloudKitManager 通知）
 
-    private func handleExternalChange(_ note: Notification) {
-        guard let userInfo = note.userInfo else { return }
-
-        if let reasonRaw = userInfo[NSUbiquitousKeyValueStoreChangeReasonKey] as? Int {
-            switch reasonRaw {
-            case NSUbiquitousKeyValueStoreServerChange:
-                lastChangeReason = .serverChange
-            case NSUbiquitousKeyValueStoreInitialSyncChange:
-                lastChangeReason = .initialSync
-            case NSUbiquitousKeyValueStoreQuotaViolationChange:
-                lastChangeReason = .quotaViolation
-            case NSUbiquitousKeyValueStoreAccountChange:
-                lastChangeReason = .accountChange
-            default:
-                break
-            }
+    @objc private func handleKVChanges(_ note: Notification) {
+        DispatchQueue.main.async {
+            self.lastChangeReason = .serverChange
         }
+        markSynced()
+        // 重發舊版同名通知，所有 Store 都已監聽
+        NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
+    }
 
-        guard isEnabled,
-              let changedKeys = userInfo[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String]
-        else { return }
-
-        var pulledAny = false
-        for key in changedKeys where Self.syncKeys.contains(key) {
-            if let data = kvStore.data(forKey: key) {
-                UserDefaults.standard.set(data, forKey: key)
-                pulledAny = true
-            } else {
-                UserDefaults.standard.removeObject(forKey: key)
-                pulledAny = true
-            }
+    @objc private func handlePhotoChanges(_ note: Notification) {
+        DispatchQueue.main.async {
+            self.lastChangeReason = .serverChange
+            // 通知 UI 重新載入照片
+            NotificationCenter.default.post(name: .cloudSyncPhotosDidUpdate, object: nil)
         }
-
-        if pulledAny {
-            markSynced()
-            NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
-        }
+        markSynced()
     }
 
     // MARK: - Helpers
 
     private func markSynced() {
         let now = Date()
-        lastSyncDate = now
+        DispatchQueue.main.async {
+            self.lastSyncDate = now
+        }
         UserDefaults.standard.set(now, forKey: Self.lastSyncKey)
     }
 }
 
 extension Notification.Name {
-    /// iCloud 拉到外部變更後發送，Store 收到應重新從 UserDefaults 載入
+    /// iCloud 拉到結構化資料變更後發送，Store 收到應重新從 UserDefaults 載入
     static let cloudSyncDidPullChanges = Notification.Name("cloudSyncDidPullChanges")
+    /// iCloud 拉到照片變更後發送，UI 需重新載入圖片
+    static let cloudSyncPhotosDidUpdate = Notification.Name("cloudSyncPhotosDidUpdate")
 }
