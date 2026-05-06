@@ -236,6 +236,7 @@ struct EditProfileView: View {
 struct ResumeView: View {
     @EnvironmentObject var store: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingItem: LifeMilestone?
@@ -328,6 +329,7 @@ struct ResumeView: View {
                     sectionHeader(section.category, count: section.items.count)
                 }
             }
+            mySpendingSection
         }
         .listStyle(.insetGrouped)
     }
@@ -360,6 +362,99 @@ struct ResumeView: View {
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    // MARK: - 我的消費（變動支出 diningMember 含本人名字）
+
+    private var mySpendingExpenses: [Expense] {
+        let myName = store.profile.chineseName.trimmingCharacters(in: .whitespaces)
+        guard !myName.isEmpty else { return [] }
+        return expenseStore.expenses
+            .filter { $0.expenseType == .variable }
+            .filter { e in
+                guard let raw = e.diningMember, !raw.isEmpty else { return false }
+                let names = raw.split(separator: "、").map { String($0).trimmingCharacters(in: .whitespaces) }
+                return names.contains(myName)
+            }
+            .sorted { $0.date > $1.date }
+    }
+
+    @ViewBuilder
+    private var mySpendingSection: some View {
+        let items = mySpendingExpenses
+        if !items.isEmpty {
+            Section {
+                HStack {
+                    Label("總計", systemImage: "sum")
+                    Spacer()
+                    Text(formatCurrency(items.reduce(0) { $0 + $1.amount }))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.red)
+                }
+                ForEach(items.prefix(20)) { e in
+                    spendingRow(e)
+                }
+                if items.count > 20 {
+                    Text("還有 \(items.count - 20) 筆…")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            } header: {
+                HStack(spacing: 8) {
+                    Image(systemName: "creditcard.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.red)
+                    Text("消費")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("\(items.count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.red, in: Capsule())
+                }
+                .textCase(.none)
+            } footer: {
+                Text("變動支出中將「\(store.profile.chineseName)」加入人員的紀錄會自動出現在此。")
+            }
+        }
+    }
+
+    private func spendingRow(_ e: Expense) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: e.variableCategory?.icon ?? "questionmark.circle")
+                .foregroundStyle(.orange)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(formatExpenseDate(e.date)).font(.caption2).foregroundStyle(.tertiary)
+                    if let cat = e.variableCategory {
+                        Text(cat.rawValue).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if let raw = e.diningMember, !raw.isEmpty {
+                        Text(raw).font(.caption2).foregroundStyle(.orange).lineLimit(1)
+                    }
+                }
+            }
+            Spacer()
+            Text(formatCurrency(e.amount))
+                .font(.subheadline.bold())
+                .foregroundStyle(.red)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func formatCurrency(_ v: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+    }
+
+    private func formatExpenseDate(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: d)
     }
 
     private func sectionHeader(_ cat: MilestoneCategory, count: Int) -> some View {
