@@ -19,6 +19,8 @@ struct RealEstateDetailView: View {
     @State private var addingRenovationPhoto = false
     @State private var editingRenovationPhoto: RenovationPhoto?
     @State private var showPremiumAlert = false
+    /// 已展開備註的變動支出項目 IDs
+    @State private var expandedVariableExpenseIds: Set<UUID> = []
     /// 用於在子 sheet 關閉後強制刷新水電瓦斯區塊（解決 SwiftUI 巢狀 sheet 偶爾不更新的問題）
     @State private var dataRefreshID = UUID()
 
@@ -313,22 +315,47 @@ struct RealEstateDetailView: View {
             if !estate.variableExpenses.isEmpty {
                 sectionHeader("變動支出")
                 ForEach(estate.variableExpenses) { ve in
-                    HStack {
-                        Text(ve.category.rawValue)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.1))
-                            .foregroundStyle(.orange)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                        if !ve.name.isEmpty {
-                            Text(ve.name)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    let isExpanded = expandedVariableExpenseIds.contains(ve.id)
+                    let isLong = ve.name.count > 18
+                    Button {
+                        if isLong {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if isExpanded { expandedVariableExpenseIds.remove(ve.id) }
+                                else { expandedVariableExpenseIds.insert(ve.id) }
+                            }
                         }
-                        Spacer()
-                        Text(fmt(ve.amount)).font(.subheadline.bold())
+                    } label: {
+                        HStack(alignment: .top) {
+                            Text(ve.category.rawValue)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.1))
+                                .foregroundStyle(.orange)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            if !ve.name.isEmpty {
+                                Text(ve.name)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(isExpanded ? nil : 1)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                Spacer()
+                            }
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(fmt(ve.amount)).font(.subheadline.bold())
+                                if isLong {
+                                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .padding(.horizontal).padding(.vertical, 8)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal).padding(.vertical, 8)
+                    .buttonStyle(.plain)
+                    .disabled(!isLong)
                 }
             }
 
