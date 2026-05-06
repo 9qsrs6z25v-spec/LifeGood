@@ -65,13 +65,16 @@ struct FamilyMember: Identifiable, Codable {
     var birthYear: Int?
     var idNumber: String?
     var relativeNote: String?
+    var familyEvents: [FamilyEvent]
+    var familyPhotos: [FamilyAlbumPhoto]
 
     init(id: UUID = UUID(), role: FamilyMemberRole = .spouse,
          chineseName: String = "", englishName: String = "",
          birthday: Date? = nil,
          marriageDate: Date? = nil, isDivorced: Bool = false, divorceDate: Date? = nil,
          childRecords: [ChildRecord] = [], dailyRecords: [DailyRecord] = [],
-         birthYear: Int? = nil, idNumber: String? = nil, relativeNote: String? = nil) {
+         birthYear: Int? = nil, idNumber: String? = nil, relativeNote: String? = nil,
+         familyEvents: [FamilyEvent] = [], familyPhotos: [FamilyAlbumPhoto] = []) {
         self.id = id; self.role = role
         self.chineseName = chineseName; self.englishName = englishName
         self.birthday = birthday
@@ -83,6 +86,8 @@ struct FamilyMember: Identifiable, Codable {
         self.birthYear = birthYear
         self.idNumber = idNumber
         self.relativeNote = relativeNote
+        self.familyEvents = familyEvents
+        self.familyPhotos = familyPhotos
     }
 
     init(from decoder: Decoder) throws {
@@ -100,6 +105,8 @@ struct FamilyMember: Identifiable, Codable {
         birthYear = try? c.decodeIfPresent(Int.self, forKey: .birthYear)
         idNumber = try? c.decodeIfPresent(String.self, forKey: .idNumber)
         relativeNote = try? c.decodeIfPresent(String.self, forKey: .relativeNote)
+        familyEvents = (try? c.decode([FamilyEvent].self, forKey: .familyEvents)) ?? []
+        familyPhotos = (try? c.decode([FamilyAlbumPhoto].self, forKey: .familyPhotos)) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -117,11 +124,64 @@ struct FamilyMember: Identifiable, Codable {
         try c.encodeIfPresent(birthYear, forKey: .birthYear)
         try c.encodeIfPresent(idNumber, forKey: .idNumber)
         try c.encodeIfPresent(relativeNote, forKey: .relativeNote)
+        try c.encode(familyEvents, forKey: .familyEvents)
+        try c.encode(familyPhotos, forKey: .familyPhotos)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, role, chineseName, englishName, birthday, marriageDate, isDivorced, divorceDate, childRecords, dailyRecords
-        case birthYear, idNumber, relativeNote
+        case birthYear, idNumber, relativeNote, familyEvents, familyPhotos
+    }
+}
+
+// MARK: - 家人履歷紀錄 / 相簿照片
+
+struct FamilyEvent: Identifiable, Codable, Equatable {
+    let id: UUID
+    var date: Date
+    var title: String
+    var content: String
+
+    init(id: UUID = UUID(), date: Date = Date(), title: String = "", content: String = "") {
+        self.id = id; self.date = date; self.title = title; self.content = content
+    }
+}
+
+struct FamilyAlbumPhoto: Identifiable, Codable, Equatable {
+    let id: UUID
+    var date: Date
+    var title: String
+    var photoFileName: String?
+    var note: String
+
+    init(id: UUID = UUID(), date: Date = Date(), title: String = "",
+         photoFileName: String? = nil, note: String = "") {
+        self.id = id; self.date = date; self.title = title
+        self.photoFileName = photoFileName; self.note = note
+    }
+
+    var photoURL: URL? {
+        guard let name = photoFileName else { return nil }
+        return Self.photosDirectory.appendingPathComponent(name)
+    }
+
+    static var photosDirectory: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FamilyAlbumPhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func savePhoto(_ data: Data, id: UUID) -> String {
+        let name = "\(id.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        try? data.write(to: url)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
     }
 }
 

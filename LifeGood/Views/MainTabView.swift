@@ -101,18 +101,20 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
 }
 
 enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
-    case spouseResume, childrenResume
+    case spouseResume, childrenResume, relativeResume
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .spouseResume: return "配偶履歷"
+        case .spouseResume:   return "配偶履歷"
         case .childrenResume: return "兒女履歷"
+        case .relativeResume: return "家人履歷"
         }
     }
     var icon: String {
         switch self {
-        case .spouseResume: return "heart.circle.fill"
+        case .spouseResume:   return "heart.circle.fill"
         case .childrenResume: return "figure.2.and.child.holdinghands"
+        case .relativeResume: return "person.3.sequence.fill"
         }
     }
 }
@@ -199,6 +201,14 @@ struct MainTabView: View {
         lifeStore.familyMembers.contains { $0.role == .son || $0.role == .daughter }
     }
 
+    /// 是否有「直系（爸媽）+ 二等親屬（兄弟姐妹 / 其他親屬）」可進入家人履歷
+    private var hasExtendedFamily: Bool {
+        lifeStore.familyMembers.contains {
+            [.father, .mother, .elderBrother, .elderSister,
+             .youngerBrother, .youngerSister, .otherRelative].contains($0.role)
+        }
+    }
+
     /// 職涯子功能列在「職涯」被選取且使用者目前為主管時展開
     private var shouldExpandManagement: Bool {
         currentMode == .life && lifeFeature == .career && isCurrentlyManagerial && !isSettingsActive
@@ -213,6 +223,7 @@ struct MainTabView: View {
         var list: [FamilyMgmtFeature] = []
         if hasSpouse { list.append(.spouseResume) }
         if hasChildren { list.append(.childrenResume) }
+        if hasExtendedFamily { list.append(.relativeResume) }
         return list
     }
 
@@ -635,6 +646,8 @@ struct MainTabView: View {
                     if hasSpouse { SpouseResumeView() } else { FamilyView() }
                 case .childrenResume:
                     if hasChildren { ChildrenResumeView() } else { FamilyView() }
+                case .relativeResume:
+                    if hasExtendedFamily { FamilyMembersResumeView() } else { FamilyView() }
                 }
             } else if !lifeStore.familyMembers.isEmpty {
                 FamilyView()
