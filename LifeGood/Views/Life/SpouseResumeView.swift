@@ -2,9 +2,28 @@ import SwiftUI
 
 struct SpouseResumeView: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
 
     private var spouse: FamilyMember? {
         lifeStore.familyMembers.first { $0.role == .spouse }
+    }
+
+    /// 變動支出中，diningMember 含有配偶名字的紀錄
+    private var spouseExpenses: [Expense] {
+        guard let s = spouse, !s.chineseName.isEmpty else { return [] }
+        let target = s.chineseName
+        return expenseStore.expenses
+            .filter { $0.expenseType == .variable }
+            .filter { e in
+                guard let raw = e.diningMember, !raw.isEmpty else { return false }
+                let names = raw.split(separator: "、").map { String($0).trimmingCharacters(in: .whitespaces) }
+                return names.contains(target)
+            }
+            .sorted { $0.date > $1.date }
+    }
+
+    private var spouseExpenseTotal: Double {
+        spouseExpenses.reduce(0) { $0 + $1.amount }
     }
 
     var body: some View {
@@ -14,6 +33,7 @@ struct SpouseResumeView: View {
                     profileSection(s)
                     marriageSection(s)
                     milestoneSection
+                    expenseSection
                 }
             }
             .listStyle(.insetGrouped)
@@ -94,6 +114,72 @@ struct SpouseResumeView: View {
                 }
             }
         }
+    }
+
+    // MARK: - 消費
+
+    @ViewBuilder
+    private var expenseSection: some View {
+        Section {
+            if spouseExpenses.isEmpty {
+                Text("尚無共同消費紀錄")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+            } else {
+                HStack {
+                    Label("總計", systemImage: "sum")
+                    Spacer()
+                    Text(formatCurrency(spouseExpenseTotal))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.red)
+                }
+                ForEach(spouseExpenses.prefix(20)) { e in
+                    expenseRow(e)
+                }
+                if spouseExpenses.count > 20 {
+                    Text("還有 \(spouseExpenses.count - 20) 筆…")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        } header: {
+            Text("消費")
+        } footer: {
+            Text("變動支出中將「\(spouse?.chineseName ?? "配偶")」加入人員的紀錄會自動同步到此。")
+        }
+    }
+
+    private func expenseRow(_ e: Expense) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: e.variableCategory?.icon ?? "questionmark.circle")
+                .foregroundStyle(.orange)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(formatDate(e.date)).font(.caption2).foregroundStyle(.tertiary)
+                    if let cat = e.variableCategory {
+                        Text(cat.rawValue).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if let raw = e.diningMember, !raw.isEmpty {
+                        Text(raw).font(.caption2).foregroundStyle(.orange)
+                    }
+                }
+            }
+            Spacer()
+            Text(formatCurrency(e.amount))
+                .font(.subheadline.bold())
+                .foregroundStyle(.red)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func formatCurrency(_ v: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     private func formatDate(_ d: Date) -> String {
