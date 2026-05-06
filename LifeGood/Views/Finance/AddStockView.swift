@@ -32,7 +32,7 @@ struct AddStockView: View {
     @State private var name = ""
     @State private var symbol = ""
     @State private var purchaseDate = Date()
-    @State private var sharesText = ""
+    @State private var lotsText = ""
     @State private var purchasePriceText = ""
     @State private var currentPriceText = ""
     @State private var note = ""
@@ -88,9 +88,20 @@ struct AddStockView: View {
                     }
                 }
 
-                Section("持股資訊") {
-                    TextField("持有股數", text: $sharesText)
-                        .keyboardType(.decimalPad)
+                Section {
+                    HStack {
+                        TextField("持有張數", text: $lotsText)
+                            .keyboardType(.decimalPad)
+                        Text("張").foregroundStyle(.secondary)
+                    }
+                    if let lots = Double(lotsText), lots > 0 {
+                        HStack {
+                            Text("約合").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(formatShares(lots * 1000) + " 股")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     HStack {
                         Text("NT$").foregroundStyle(.secondary)
                         TextField("買入價格（每股）", text: $purchasePriceText)
@@ -101,6 +112,10 @@ struct AddStockView: View {
                         TextField("目前價格（每股）", text: $currentPriceText)
                             .keyboardType(.decimalPad)
                     }
+                } header: {
+                    Text("持股資訊")
+                } footer: {
+                    Text("台股 1 張 = 1000 股，可輸入小數（例：0.5 = 500 股零股）")
                 }
 
                 calcSection
@@ -116,7 +131,7 @@ struct AddStockView: View {
 
                 if showError {
                     Section {
-                        Text("請輸入股票名稱、股數和買入價格")
+                        Text("請輸入股票名稱、張數和買入價格")
                             .foregroundStyle(.red).font(.caption)
                     }
                 }
@@ -404,8 +419,9 @@ struct AddStockView: View {
 
     @ViewBuilder
     private var calcSection: some View {
-        if let shares = Double(sharesText), let cost = Double(purchasePriceText),
-           let current = Double(currentPriceText), shares > 0, cost > 0 {
+        if let lots = Double(lotsText), let cost = Double(purchasePriceText),
+           let current = Double(currentPriceText), lots > 0, cost > 0 {
+            let shares = lots * 1000
             Section("試算") {
                 HStack {
                     Text("投入成本"); Spacer()
@@ -435,10 +451,11 @@ struct AddStockView: View {
 
     private func save() {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
-              let shares = Double(sharesText), shares > 0,
+              let lots = Double(lotsText), lots > 0,
               let price = Double(purchasePriceText), price > 0 else {
             showError = true; return
         }
+        let shares = lots * 1000
         let stockId = editing?.id ?? UUID()
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
@@ -569,7 +586,13 @@ struct AddStockView: View {
         guard let e = editing else { return }
         name = e.name; symbol = e.symbol
         purchaseDate = e.purchaseDate
-        sharesText = String(format: "%.0f", e.shares)
+        // 從股數轉換回張數顯示（1 張 = 1000 股）
+        let lots = e.shares / 1000
+        if lots == lots.rounded() {
+            lotsText = String(format: "%.0f", lots)
+        } else {
+            lotsText = String(format: "%g", lots)
+        }
         purchasePriceText = String(format: "%.2f", e.purchasePrice)
         currentPriceText = String(format: "%.2f", e.currentPrice)
         note = e.note
@@ -585,5 +608,11 @@ struct AddStockView: View {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+
+    private func formatShares(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: value)) ?? "0"
     }
 }
