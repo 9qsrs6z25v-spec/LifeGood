@@ -146,6 +146,12 @@ struct Expense: Identifiable, Codable {
     var linkedBankMilestoneId: UUID?
     var linkedBankCurrency: String?
     var linkedCreditCardMilestoneId: UUID?
+    /// 飲食記錄附帶的店家地址（MKLocalSearch 解析）
+    var placeAddress: String?
+    /// 飲食記錄附帶的店家緯度
+    var placeLatitude: Double?
+    /// 飲食記錄附帶的店家經度
+    var placeLongitude: Double?
 
     init(
         id: UUID = UUID(),
@@ -172,7 +178,10 @@ struct Expense: Identifiable, Codable {
         loanRate: Double? = nil,
         linkedBankMilestoneId: UUID? = nil,
         linkedBankCurrency: String? = nil,
-        linkedCreditCardMilestoneId: UUID? = nil
+        linkedCreditCardMilestoneId: UUID? = nil,
+        placeAddress: String? = nil,
+        placeLatitude: Double? = nil,
+        placeLongitude: Double? = nil
     ) {
         self.id = id
         self.title = title
@@ -199,6 +208,9 @@ struct Expense: Identifiable, Codable {
         self.linkedBankMilestoneId = linkedBankMilestoneId
         self.linkedBankCurrency = linkedBankCurrency
         self.linkedCreditCardMilestoneId = linkedCreditCardMilestoneId
+        self.placeAddress = placeAddress
+        self.placeLatitude = placeLatitude
+        self.placeLongitude = placeLongitude
     }
 
     // MARK: - 向下相容解碼
@@ -229,6 +241,9 @@ struct Expense: Identifiable, Codable {
         linkedBankMilestoneId = try? c.decode(UUID.self, forKey: .linkedBankMilestoneId)
         linkedBankCurrency = try? c.decode(String.self, forKey: .linkedBankCurrency)
         linkedCreditCardMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedCreditCardMilestoneId)
+        placeAddress = try? c.decodeIfPresent(String.self, forKey: .placeAddress)
+        placeLatitude = try? c.decodeIfPresent(Double.self, forKey: .placeLatitude)
+        placeLongitude = try? c.decodeIfPresent(Double.self, forKey: .placeLongitude)
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
@@ -237,6 +252,7 @@ struct Expense: Identifiable, Codable {
         case vehicleExpenseCategory, realEstateExpenseCategory, note, currencyCode, diningMember
         case loanTotalAmount, loanYears, loanRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
+        case placeAddress, placeLatitude, placeLongitude
     }
 
     var categoryName: String {

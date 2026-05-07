@@ -1,4 +1,5 @@
 import SwiftUI
+import MapKit
 
 struct AddExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -121,6 +122,16 @@ struct AddExpenseView: View {
     @State private var fixedLinkRealEstateId: UUID?
     @State private var fixedLinkInsuranceId: UUID?
 
+    // MARK: - 飲食店家自動完成
+
+    @StateObject private var restaurantCompleter = RestaurantSearchCompleter()
+    @ObservedObject private var locationProvider = LocationProvider.shared
+    @State private var placeAddress: String?
+    @State private var placeLatitude: Double?
+    @State private var placeLongitude: Double?
+    @FocusState private var titleFieldFocused: Bool
+    @State private var suppressNextCompleterUpdate = false
+
     // MARK: - 條件判斷
 
     private var isEditing: Bool { editingExpense != nil }
@@ -131,6 +142,10 @@ struct AddExpenseView: View {
     private var isCarLoan: Bool { isLoan && selectedLoanSubCategory == .car }
     private var showLoanCalcFields: Bool { isCarLoan || isMortgage }
     private var showFixedAssetLink: Bool { expenseType == .fixed && !isInsurance && !isLoan }
+    /// 是否為飲食類變動支出（決定要不要顯示餐廳自動完成）
+    private var isFoodVariable: Bool {
+        expenseType == .variable && selectedVariableCategory == .food
+    }
 
     // MARK: - 儲蓄險自動計算
 
@@ -408,7 +423,7 @@ struct AddExpenseView: View {
                 DatePicker(showLoanCalcFields ? "開始日期" : "日期", selection: $date, displayedComponents: .date)
             }
 
-            // 名稱（進階模式或固定支出才顯示，移到日期下方）
+            // 名稱（進階模式或固定支出或飲食類才顯示，移到日期下方）
             if showNameField {
                 if linkedAssetTitle != nil {
                     HStack {
@@ -419,6 +434,8 @@ struct AddExpenseView: View {
                             .multilineTextAlignment(.trailing)
                             .lineLimit(2)
                     }
+                } else if isFoodVariable {
+                    foodNameAutocomplete
                 } else {
                     TextField(expenseType == .variable ? "名稱（留空自動以分類為名）" : "名稱", text: $title)
                 }
@@ -457,9 +474,9 @@ struct AddExpenseView: View {
         }
     }
 
-    /// 是否顯示名稱欄位：進階模式 / 固定支出 / 已連結資產（讓使用者看到自動帶入的名稱）都顯示
+    /// 是否顯示名稱欄位：進階模式 / 固定支出 / 已連結資產 / 飲食類別（要選店家）都顯示
     private var showNameField: Bool {
-        expenseType == .fixed || advancedMode || linkedAssetTitle != nil
+        expenseType == .fixed || advancedMode || linkedAssetTitle != nil || isFoodVariable
     }
 
     /// 是否顯示扣款目標選單
@@ -513,6 +530,109 @@ struct AddExpenseView: View {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: v)) ?? "NT$0"
+    }
+
+    // MARK: - 飲食店家自動完成 UI
+
+    @ViewBuilder
+    private var foodNameAutocomplete: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: "fork.knife.circle.fill")
+                    .foregroundStyle(Color("FoodColor"))
+                TextField("店名（從附近餐廳選擇或自由輸入）", text: $title)
+                    .focused($titleFieldFocused)
+                    .submitLabel(.done)
+                    .onChange(of: title) { _, newValue in
+                        // 使用者編輯後若改字，原本帶入的座標就清掉
+                        if !suppressNextCompleterUpdate {
+                            placeAddress = nil
+                            placeLatitude = nil
+                            placeLongitude = nil
+                            restaurantCompleter.queryFragment = newValue
+                        }
+                        suppressNextCompleterUpdate = false
+                    }
+                    .onAppear {
+                        LocationProvider.shared.requestIfNeeded()
+                        restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
+                    }
+                if placeAddress != nil {
+                    Image(systemName: "mappin.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
+                }
+            }
+
+            if let addr = placeAddress, !addr.isEmpty {
+                Text(addr)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            // 建議列表（只在輸入中且有結果時顯示）
+            if titleFieldFocused && !restaurantCompleter.results.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(restaurantCompleter.results.prefix(6).enumerated()), id: \.offset) { _, completion in
+                        Button {
+                            selectRestaurant(completion)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "mappin")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(completion.title)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                    if !completion.subtitle.isEmpty {
+                                        Text(completion.subtitle)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                    }
+
+                    // 權限狀態提示
+                    if locationProvider.authorization == .denied || locationProvider.authorization == .restricted {
+                        Text("提示：開啟「定位」權限可優先顯示附近餐廳")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .padding(.vertical, 4)
+                    }
+                }
+            }
+        }
+    }
+
+    private func selectRestaurant(_ completion: MKLocalSearchCompletion) {
+        suppressNextCompleterUpdate = true
+        title = completion.title
+        // 先用 completion 的 subtitle 當地址（避免解析期間空白）
+        if !completion.subtitle.isEmpty {
+            placeAddress = completion.subtitle
+        }
+        restaurantCompleter.resolve(completion) { mapItem in
+            guard let item = mapItem else { return }
+            self.placeAddress = item.formattedAddress.isEmpty ? completion.subtitle : item.formattedAddress
+            self.placeLatitude = item.placemark.coordinate.latitude
+            self.placeLongitude = item.placemark.coordinate.longitude
+        }
+        // 收起鍵盤與建議列表
+        titleFieldFocused = false
+        restaurantCompleter.clear()
     }
 
     // MARK: - 分類
@@ -1365,7 +1485,10 @@ struct AddExpenseView: View {
             loanRate: showLoanCalcFields ? computedLoanRate() : nil,
             linkedBankMilestoneId: selectedBankMilestoneId,
             linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
-            linkedCreditCardMilestoneId: selectedCreditCardMilestoneId
+            linkedCreditCardMilestoneId: selectedCreditCardMilestoneId,
+            placeAddress: isFoodVariable ? placeAddress : nil,
+            placeLatitude: isFoodVariable ? placeLatitude : nil,
+            placeLongitude: isFoodVariable ? placeLongitude : nil
         )
 
         if isEditing { store.update(expense) } else { store.add(expense) }
@@ -1726,6 +1849,11 @@ struct AddExpenseView: View {
         }
 
         title = expense.title
+        // 編輯飲食支出時，還原店家位置資訊但不要觸發完成器
+        if let addr = expense.placeAddress { placeAddress = addr }
+        if let lat = expense.placeLatitude { placeLatitude = lat }
+        if let lon = expense.placeLongitude { placeLongitude = lon }
+        suppressNextCompleterUpdate = true
         selectedCurrencyCode = expense.currencyCode
         // 還原為原始幣別金額顯示
         if expense.currencyCode != "NT$",
