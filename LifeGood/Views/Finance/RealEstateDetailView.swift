@@ -18,6 +18,8 @@ struct RealEstateDetailView: View {
     @State private var utilityExpanded = false
     @State private var addingRenovationPhoto = false
     @State private var editingRenovationPhoto: RenovationPhoto?
+    @State private var bulkRenovationPickerItems: [PhotosPickerItem] = []
+    @State private var showBulkRenovationPicker = false
     @State private var showPremiumAlert = false
     /// 已展開備註的變動支出項目 IDs
     @State private var expandedVariableExpenseIds: Set<UUID> = []
@@ -593,9 +595,63 @@ struct RealEstateDetailView: View {
 
     // MARK: - 裝潢照片
 
+    /// 裝潢區塊的 header：含「+」Menu（單張詳細 / 批次多選）
+    private var renovationSectionHeader: some View {
+        HStack {
+            Text("裝潢照片").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Spacer()
+            Menu {
+                Button {
+                    if subscription.isPremium { addingRenovationPhoto = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Label("新增單張（含描述）", systemImage: "photo")
+                }
+                Button {
+                    if subscription.isPremium { showBulkRenovationPicker = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Label("批次匯入多張", systemImage: "photo.on.rectangle.angled")
+                }
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.subheadline).foregroundStyle(.green)
+            }
+        }
+        .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+        .photosPicker(isPresented: $showBulkRenovationPicker,
+                      selection: $bulkRenovationPickerItems,
+                      maxSelectionCount: 0,
+                      matching: .images)
+        .onChange(of: bulkRenovationPickerItems) { _, items in
+            guard !items.isEmpty else { return }
+            Task { await importBulkRenovationPhotos(items) }
+        }
+    }
+
+    /// 把多選相片一次匯入成多筆 RenovationPhoto（無描述）
+    @MainActor
+    private func importBulkRenovationPhotos(_ items: [PhotosPickerItem]) async {
+        guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        var added: [RenovationPhoto] = []
+        let now = Date()
+        for item in items {
+            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+            let recordId = UUID()
+            let fileName = RenovationPhoto.savePhoto(data, id: recordId)
+            added.append(RenovationPhoto(
+                id: recordId, date: now, title: "",
+                photoFileName: fileName, note: ""
+            ))
+        }
+        estate.renovationPhotos.append(contentsOf: added)
+        store.update(estate)
+        bulkRenovationPickerItems = []
+    }
+
     @ViewBuilder
     private var renovationPhotosContent: some View {
-        sectionHeaderWithAdd("裝潢照片") { addingRenovationPhoto = true }
+        renovationSectionHeader
 
         if estate.renovationPhotos.isEmpty {
             HStack {

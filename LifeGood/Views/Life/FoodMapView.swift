@@ -425,6 +425,10 @@ struct RestaurantDetailSheet: View {
 
                     headerCard
 
+                    if !aggregatePhotos.isEmpty {
+                        photoGallerySection
+                    }
+
                     visitsSection
 
                     if let companion = aggregate.topCompanion {
@@ -493,6 +497,62 @@ struct RestaurantDetailSheet: View {
             Text(label).font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// 此餐廳所有造訪所累積的照片檔名
+    private var aggregatePhotos: [String] {
+        aggregate.visits.flatMap { $0.photoFileNames }
+    }
+
+    @State private var viewingPhotoURL: IdentifiableURL?
+
+    private var photoGallerySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "photo.stack").foregroundStyle(.orange)
+                Text("照片（\(aggregatePhotos.count)）")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(aggregatePhotos, id: \.self) { name in
+                        let url = Expense.photoURL(for: name)
+                        Button {
+                            viewingPhotoURL = IdentifiableURL(url: url)
+                        } label: {
+                            if let img = UIImage(contentsOfFile: url.path) {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 110, height: 90)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            } else {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color(.tertiarySystemFill))
+                                    .frame(width: 110, height: 90)
+                                    .overlay(
+                                        Image(systemName: "icloud.and.arrow.down")
+                                            .foregroundStyle(.tertiary)
+                                    )
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+        .padding(.vertical, 8)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+        .sheet(item: $viewingPhotoURL) { wrapper in
+            PhotoLightbox(url: wrapper.url)
+        }
     }
 
     private var visitsSection: some View {

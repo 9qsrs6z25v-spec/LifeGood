@@ -152,6 +152,8 @@ struct Expense: Identifiable, Codable {
     var placeLatitude: Double?
     /// 飲食記錄附帶的店家經度
     var placeLongitude: Double?
+    /// 此筆支出附帶的照片檔名（多張）
+    var photoFileNames: [String]
 
     init(
         id: UUID = UUID(),
@@ -181,7 +183,8 @@ struct Expense: Identifiable, Codable {
         linkedCreditCardMilestoneId: UUID? = nil,
         placeAddress: String? = nil,
         placeLatitude: Double? = nil,
-        placeLongitude: Double? = nil
+        placeLongitude: Double? = nil,
+        photoFileNames: [String] = []
     ) {
         self.id = id
         self.title = title
@@ -211,6 +214,7 @@ struct Expense: Identifiable, Codable {
         self.placeAddress = placeAddress
         self.placeLatitude = placeLatitude
         self.placeLongitude = placeLongitude
+        self.photoFileNames = photoFileNames
     }
 
     // MARK: - 向下相容解碼
@@ -244,6 +248,7 @@ struct Expense: Identifiable, Codable {
         placeAddress = try? c.decodeIfPresent(String.self, forKey: .placeAddress)
         placeLatitude = try? c.decodeIfPresent(Double.self, forKey: .placeLatitude)
         placeLongitude = try? c.decodeIfPresent(Double.self, forKey: .placeLongitude)
+        photoFileNames = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
@@ -252,7 +257,7 @@ struct Expense: Identifiable, Codable {
         case vehicleExpenseCategory, realEstateExpenseCategory, note, currencyCode, diningMember
         case loanTotalAmount, loanYears, loanRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
-        case placeAddress, placeLatitude, placeLongitude
+        case placeAddress, placeLatitude, placeLongitude, photoFileNames
     }
 
     var categoryName: String {
@@ -283,6 +288,36 @@ struct Expense: Identifiable, Codable {
         case .fixed:
             return fixedCategory?.icon ?? "questionmark.circle"
         }
+    }
+}
+
+// MARK: - 支出照片儲存（多張）
+
+extension Expense {
+    static var photosDirectory: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ExpensePhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// 將 jpeg 資料寫入並回傳檔名（同時推送 CloudKit）
+    static func savePhoto(_ data: Data, expenseId: UUID, photoId: UUID = UUID()) -> String {
+        let name = "\(expenseId.uuidString)_\(photoId.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        try? data.write(to: url)
+        PhotoCloudSync.upload(directory: "ExpensePhotos", fileName: name)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "ExpensePhotos", fileName: fileName)
+    }
+
+    static func photoURL(for fileName: String) -> URL {
+        photosDirectory.appendingPathComponent(fileName)
     }
 }
 

@@ -26,13 +26,14 @@ final class CloudKitManager {
     static let didPullPhotoChangesNotification = Notification.Name("CloudKitManager.didPullPhotoChanges")
     static let accountStatusDidChangeNotification = Notification.Name("CloudKitManager.accountStatusDidChange")
 
-    /// 已知的本地照片資料夾（與 LifeModels / FinanceModels 中 photosDirectory 對應）
+    /// 已知的本地照片資料夾（與 LifeModels / FinanceModels / Expense 中 photosDirectory 對應）
     static let photoDirectories: [String] = [
         "FamilyAlbumPhotos",
         "ChildRecordPhotos",
         "RenovationPhotos",
         "ElevatorPhotos",
-        "UtilityPhotos"
+        "UtilityPhotos",
+        "ExpensePhotos"
     ]
 
     private let container: CKContainer

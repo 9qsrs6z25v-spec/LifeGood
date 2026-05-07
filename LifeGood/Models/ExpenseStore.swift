@@ -45,11 +45,15 @@ class ExpenseStore: ObservableObject {
     }
 
     func delete(_ expense: Expense) {
+        for name in expense.photoFileNames { Expense.deletePhoto(name) }
         expenses.removeAll { $0.id == expense.id }
     }
 
     func delete(at offsets: IndexSet, from list: [Expense]) {
         let idsToDelete = offsets.map { list[$0].id }
+        for exp in expenses where idsToDelete.contains(exp.id) {
+            for name in exp.photoFileNames { Expense.deletePhoto(name) }
+        }
         expenses.removeAll { idsToDelete.contains($0.id) }
     }
 

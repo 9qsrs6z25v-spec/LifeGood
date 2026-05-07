@@ -122,6 +122,9 @@ struct AddExpenseView: View {
     @State private var fixedLinkRealEstateId: UUID?
     @State private var fixedLinkInsuranceId: UUID?
 
+    // MARK: - 多張照片
+    @State private var photoFileNames: [String] = []
+
     // MARK: - 飲食店家自動完成
 
     @StateObject private var restaurantCompleter = RestaurantSearchCompleter()
@@ -212,6 +215,10 @@ struct AddExpenseView: View {
                     )
                     if !suppressCategory {
                         categorySection
+                    }
+                    // 進階模式：分類區塊下方加照片廊
+                    if advancedMode {
+                        photoGallerySection
                     }
                 } else {
                     // 固定支出：先選關聯資產（若適用），再選分類
@@ -531,6 +538,34 @@ struct AddExpenseView: View {
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: v)) ?? "NT$0"
     }
+
+    // MARK: - 多張照片 Section
+
+    /// 在進階模式分類下方顯示照片廊：拍照 / 相簿多選 / 看大圖 / 刪除
+    private var photoGallerySection: some View {
+        let expenseId = editingExpense?.id ?? generatedNewExpenseId
+        return Section {
+            MultiPhotoGallery(
+                fileNames: $photoFileNames,
+                urlFor: { Expense.photoURL(for: $0) },
+                onSaveImage: { data in
+                    Expense.savePhoto(data, expenseId: expenseId, photoId: UUID())
+                },
+                onDeleteFile: { name in
+                    Expense.deletePhoto(name)
+                },
+                title: "照片"
+            )
+            .padding(.vertical, 4)
+        } header: {
+            Text("照片")
+        } footer: {
+            Text("可拍照或從相簿一次選多張，會跟著本筆支出儲存。儲存後會在美食地圖等頁面顯示。")
+        }
+    }
+
+    /// 為新增模式提供穩定的 expenseId（避免每次 body 重建時產生新 UUID）
+    @State private var generatedNewExpenseId: UUID = UUID()
 
     // MARK: - 飲食店家自動完成 UI
 
@@ -1380,7 +1415,7 @@ struct AddExpenseView: View {
         // 自訂幣別換算為 NT$（儲蓄險不適用，使用其自身幣別欄位）
         let amount = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
 
-        let expenseId = editingExpense?.id ?? UUID()
+        let expenseId = editingExpense?.id ?? generatedNewExpenseId
         var linkedInsId = editingExpense?.linkedInsuranceId
         var linkedStkId = editingExpense?.linkedStockId
         var linkedREId = editingExpense?.linkedRealEstateId
@@ -1488,7 +1523,8 @@ struct AddExpenseView: View {
             linkedCreditCardMilestoneId: selectedCreditCardMilestoneId,
             placeAddress: isFoodVariable ? placeAddress : nil,
             placeLatitude: isFoodVariable ? placeLatitude : nil,
-            placeLongitude: isFoodVariable ? placeLongitude : nil
+            placeLongitude: isFoodVariable ? placeLongitude : nil,
+            photoFileNames: photoFileNames
         )
 
         if isEditing { store.update(expense) } else { store.add(expense) }
@@ -1854,6 +1890,7 @@ struct AddExpenseView: View {
         if let lat = expense.placeLatitude { placeLatitude = lat }
         if let lon = expense.placeLongitude { placeLongitude = lon }
         suppressNextCompleterUpdate = true
+        photoFileNames = expense.photoFileNames
         selectedCurrencyCode = expense.currencyCode
         // 還原為原始幣別金額顯示
         if expense.currencyCode != "NT$",

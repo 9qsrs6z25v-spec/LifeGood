@@ -52,6 +52,7 @@
 		A01B000001000100 /* CloudKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000100 /* CloudKitManager.swift */; };
 		A01B000001000101 /* RestaurantSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000101 /* RestaurantSearch.swift */; };
 		A01B000001000102 /* FoodMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000102 /* FoodMapView.swift */; };
+		A01B000001000103 /* MultiPhotoGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000103 /* MultiPhotoGallery.swift */; };
 		A01B000001000035 /* GradeTitleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000035 /* GradeTitleView.swift */; };
 		A01B000001000036 /* SpouseResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000036 /* SpouseResumeView.swift */; };
 		A01B000001000037 /* ChildrenResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000037 /* ChildrenResumeView.swift */; };
@@ -125,6 +126,7 @@
 		A01A000001000100 /* CloudKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitManager.swift; sourceTree = "<group>"; };
 		A01A000001000101 /* RestaurantSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestaurantSearch.swift; sourceTree = "<group>"; };
 		A01A000001000102 /* FoodMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodMapView.swift; sourceTree = "<group>"; };
+		A01A000001000103 /* MultiPhotoGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiPhotoGallery.swift; sourceTree = "<group>"; };
 		A01A000001000034 /* LifeGood.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGood.entitlements; sourceTree = "<group>"; };
 		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
@@ -228,6 +230,7 @@
 				A01A00000100000D /* SettingsView.swift */,
 				A01A00000100003D /* PaywallView.swift */,
 				A01A000001000043 /* EInvoiceSetupView.swift */,
+				A01A000001000103 /* MultiPhotoGallery.swift */,
 				A01D000001000007 /* Finance */,
 			A01D000001000008 /* Life */,
 			);
@@ -415,6 +418,7 @@
 				A01B000001000100 /* CloudKitManager.swift in Sources */,
 				A01B000001000101 /* RestaurantSearch.swift in Sources */,
 				A01B000001000102 /* FoodMapView.swift in Sources */,
+				A01B000001000103 /* MultiPhotoGallery.swift in Sources */,
 				A01B000001000035 /* GradeTitleView.swift in Sources */,
 				A01B000001000036 /* SpouseResumeView.swift in Sources */,
 				A01B000001000037 /* ChildrenResumeView.swift in Sources */,
@@ -451,7 +455,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 200;
+				CURRENT_PROJECT_VERSION = 201;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -469,7 +473,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 15.36;
+				MARKETING_VERSION = 15.37;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -485,7 +489,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 200;
+				CURRENT_PROJECT_VERSION = 201;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -503,7 +507,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 15.36;
+				MARKETING_VERSION = 15.37;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
