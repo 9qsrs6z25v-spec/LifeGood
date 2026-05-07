@@ -36,17 +36,14 @@ final class LocationProvider: NSObject, ObservableObject, CLLocationManagerDeleg
         }
     }
 
-    /// 估算的搜尋區域：以當前位置為中心 5 公里半徑；無位置時退回台北市中心。
-    var searchRegion: MKCoordinateRegion {
+    /// 估算的搜尋區域：以當前位置為中心 30 公里半徑（涵蓋鄰近縣市）；
+    /// 無位置時回傳 nil，讓 completer 不偏向特定區域，避免錯誤地釘在台北。
+    var searchRegion: MKCoordinateRegion? {
         if let loc = lastLocation {
             return MKCoordinateRegion(center: loc.coordinate,
-                                      latitudinalMeters: 5000, longitudinalMeters: 5000)
+                                      latitudinalMeters: 30000, longitudinalMeters: 30000)
         }
-        // Fallback: 台北 101
-        return MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 25.0330, longitude: 121.5654),
-            latitudinalMeters: 5000, longitudinalMeters: 5000
-        )
+        return nil
     }
 
     // MARK: - CLLocationManagerDelegate
@@ -99,9 +96,9 @@ final class RestaurantSearchCompleter: NSObject, ObservableObject, MKLocalSearch
         completer.resultTypes = [.pointOfInterest, .address]
     }
 
-    /// 設定搜尋偏向區域（使用使用者位置）
-    func setRegion(_ region: MKCoordinateRegion) {
-        completer.region = region
+    /// 設定搜尋偏向區域（使用使用者位置）；nil 代表清除偏向（用全球範圍）。
+    func setRegion(_ region: MKCoordinateRegion?) {
+        completer.region = region ?? MKCoordinateRegion(MKMapRect.world)
     }
 
     /// 解析選擇的 completion，取得詳細的 MKMapItem（含座標、地址）。

@@ -592,6 +592,13 @@ struct AddExpenseView: View {
                         LocationProvider.shared.requestIfNeeded()
                         restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
                     }
+                    // 定位回來後再更新一次搜尋區域；同時若使用者已輸入字，重新觸發搜尋
+                    .onChange(of: locationProvider.lastLocation) { _, _ in
+                        restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
+                        if !title.isEmpty {
+                            restaurantCompleter.queryFragment = title
+                        }
+                    }
                 if placeAddress != nil {
                     Image(systemName: "mappin.circle.fill")
                         .foregroundStyle(.green)
