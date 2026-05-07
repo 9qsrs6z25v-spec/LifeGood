@@ -94,10 +94,9 @@ final class RestaurantSearchCompleter: NSObject, ObservableObject, MKLocalSearch
     override init() {
         super.init()
         completer.delegate = self
-        completer.resultTypes = .pointOfInterest
-        completer.pointOfInterestFilter = MKPointOfInterestFilter(
-            including: [.restaurant, .cafe, .bakery, .nightlife, .foodMarket, .winery, .brewery]
-        )
+        // 不限餐飲 POI：Apple Maps 對台灣便當店、小吃店歸類不一定正確，
+        // 開放所有 POI 類型，讓使用者用店名直接搜尋。
+        completer.resultTypes = [.pointOfInterest, .address]
     }
 
     /// 設定搜尋偏向區域（使用使用者位置）
