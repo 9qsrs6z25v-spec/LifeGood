@@ -69,87 +69,59 @@ enum FoodMapSort: String, CaseIterable, Identifiable {
 
 struct FoodMapView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
+    @ObservedObject private var locationProvider = LocationProvider.shared
 
     @State private var range: FoodMapRange = .all
     @State private var sort: FoodMapSort = .visits
     @State private var selectedCompanion: String? = nil  // nil = 全部
     @State private var selectedAggregate: RestaurantAggregate?
     @State private var cameraPosition: MapCameraPosition = .automatic
+    @State private var hasCenteredInitially = false
+    @State private var showListSheet = false
+    @State private var photoOnly = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                filterBar
+            ZStack(alignment: .topLeading) {
+                mapLayer
+
+                topOverlay
+                    .padding(.top, 8)
+                    .padding(.horizontal, 10)
+
+                bottomOverlay
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+
                 if aggregates.isEmpty {
-                    emptyState
-                } else {
-                    mapView
-                        .frame(height: 320)
-                    statsCard
-                    restaurantList
+                    emptyOverlay
                 }
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("美食地圖")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
+            .onAppear {
+                LocationProvider.shared.requestIfNeeded()
+                tryInitialCenter()
+            }
+            .onChange(of: locationProvider.lastLocation) { _, _ in
+                tryInitialCenter()
+            }
+            .onChange(of: aggregates.count) { _, _ in
+                tryInitialCenter()
+            }
             .sheet(item: $selectedAggregate) { agg in
                 RestaurantDetailSheet(aggregate: agg)
                     .environmentObject(expenseStore)
             }
-        }
-    }
-
-    // MARK: - 篩選列
-
-    private var filterBar: some View {
-        VStack(spacing: 6) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(FoodMapRange.allCases) { r in
-                        chip(r.rawValue, isSelected: range == r) { range = r }
-                    }
-                    Divider().frame(height: 16)
-                    ForEach(FoodMapSort.allCases) { s in
-                        chip(s.rawValue, isSelected: sort == s, tint: .orange) { sort = s }
-                    }
-                }
-                .padding(.horizontal, 12)
-            }
-            if !companionOptions.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        chip("全部家人", isSelected: selectedCompanion == nil, tint: .pink) {
-                            selectedCompanion = nil
-                        }
-                        ForEach(companionOptions, id: \.self) { name in
-                            chip(name, isSelected: selectedCompanion == name, tint: .pink) {
-                                selectedCompanion = name
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                }
+            .sheet(isPresented: $showListSheet) {
+                listSheet
             }
         }
-        .padding(.vertical, 8)
-        .background(Color(.systemBackground))
     }
 
-    private func chip(_ label: String, isSelected: Bool, tint: Color = .green, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.caption.weight(.medium))
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(isSelected ? tint : Color(.tertiarySystemFill))
-                .foregroundStyle(isSelected ? .white : .primary)
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
+    // MARK: - 地圖底層
 
-    // MARK: - 地圖
-
-    private var mapView: some View {
+    private var mapLayer: some View {
         Map(position: $cameraPosition) {
             ForEach(aggregates) { agg in
                 Annotation(agg.name, coordinate: agg.coordinate) {
@@ -171,13 +143,175 @@ struct FoodMapView: View {
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
-        .onAppear {
-            fitToAnnotations()
-        }
-        .onChange(of: aggregates.count) { _, _ in
-            fitToAnnotations()
+        .ignoresSafeArea(edges: .bottom)
+    }
+
+    // MARK: - 上層 overlay：標題 + 篩選
+
+    private var topOverlay: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("美食地圖")
+                .font(.subheadline.weight(.bold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+
+            VStack(alignment: .leading, spacing: 4) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(FoodMapRange.allCases) { r in
+                            chip(r.rawValue, isSelected: range == r) { range = r }
+                        }
+                    }
+                }
+                if !companionOptions.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            chip("全部家人", isSelected: selectedCompanion == nil, tint: .pink) {
+                                selectedCompanion = nil
+                            }
+                            ForEach(companionOptions, id: \.self) { name in
+                                chip(name, isSelected: selectedCompanion == name, tint: .pink) {
+                                    selectedCompanion = name
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
+
+    // MARK: - 下層 overlay：清單按鈕 + 照片開關
+
+    private var bottomOverlay: some View {
+        HStack {
+            Button {
+                showListSheet = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "list.bullet.rectangle")
+                    Text("餐廳清單")
+                        .font(.caption.weight(.semibold))
+                    Text("\(sortedAggregates.count)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.green)
+                        .clipShape(Capsule())
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Button {
+                photoOnly.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: photoOnly ? "photo.fill" : "photo")
+                    Text("照片")
+                        .font(.caption.weight(.semibold))
+                    // 開關指示
+                    Image(systemName: photoOnly ? "checkmark.circle.fill" : "circle")
+                        .font(.caption2)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(photoOnly ? Color.orange : .ultraThinMaterial)
+                .foregroundStyle(photoOnly ? .white : .primary)
+                .clipShape(Capsule())
+                .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - 空狀態 overlay
+
+    private var emptyOverlay: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "map")
+                .font(.system(size: 56))
+                .foregroundStyle(.tertiary)
+            Text("還沒有任何餐廳記錄")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text(photoOnly ? "目前沒有附照片的餐廳，請關閉「照片」開關。"
+                 : "在「變動支出」分類選「飲食」並選擇店家後，這裡會顯示地圖。")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
+        .padding(.vertical, 24).padding(.horizontal, 16)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - 清單 sheet
+
+    private var listSheet: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                statsCard
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(FoodMapSort.allCases) { s in
+                            chip(s.rawValue, isSelected: sort == s, tint: .orange) { sort = s }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                }
+                .padding(.vertical, 8)
+                List {
+                    ForEach(sortedAggregates) { agg in
+                        Button {
+                            showListSheet = false
+                            // 等 sheet 關閉再開另一張詳細 sheet
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                selectedAggregate = agg
+                            }
+                        } label: {
+                            restaurantRow(agg)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .listStyle(.insetGrouped)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("餐廳清單（\(sortedAggregates.count)）")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("關閉") { showListSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    // MARK: - 篩選 chip 共用
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(isSelected ? tint : Color(.tertiarySystemFill))
+                .foregroundStyle(isSelected ? .white : .primary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 地圖
 
     /// 依造訪次數決定 pin 大小（22~44）
     private func pinSize(for agg: RestaurantAggregate) -> CGFloat {
@@ -194,7 +328,19 @@ struct FoodMapView: View {
         return .blue
     }
 
-    private func fitToAnnotations() {
+    /// 第一次顯示地圖時：有定位 → 以使用者為中心 10 公里範圍；
+    /// 沒定位時若有餐廳資料 → 自動框出全部餐廳。
+    private func tryInitialCenter() {
+        guard !hasCenteredInitially else { return }
+        if let loc = locationProvider.lastLocation {
+            cameraPosition = .region(MKCoordinateRegion(
+                center: loc.coordinate,
+                latitudinalMeters: 10000, longitudinalMeters: 10000
+            ))
+            hasCenteredInitially = true
+            return
+        }
+        // 沒定位 → 如果有餐廳資料就框全部
         guard !aggregates.isEmpty else { return }
         let lats = aggregates.map(\.coordinate.latitude)
         let lons = aggregates.map(\.coordinate.longitude)
@@ -209,6 +355,7 @@ struct FoodMapView: View {
             longitudeDelta: max(0.01, (maxLon - minLon) * 1.4)
         )
         cameraPosition = .region(MKCoordinateRegion(center: center, span: span))
+        hasCenteredInitially = true
     }
 
     // MARK: - 統計卡
@@ -249,23 +396,7 @@ struct FoodMapView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 餐廳清單
-
-    private var restaurantList: some View {
-        List {
-            Section {
-                ForEach(sortedAggregates) { agg in
-                    Button { selectedAggregate = agg } label: {
-                        restaurantRow(agg)
-                    }
-                    .buttonStyle(.plain)
-                }
-            } header: {
-                Text("餐廳清單（\(sortedAggregates.count)）")
-            }
-        }
-        .listStyle(.insetGrouped)
-    }
+    // MARK: - 餐廳列
 
     private func restaurantRow(_ agg: RestaurantAggregate) -> some View {
         HStack(spacing: 12) {
@@ -299,26 +430,6 @@ struct FoodMapView: View {
         .padding(.vertical, 2)
     }
 
-    // MARK: - 空狀態
-
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "map")
-                .font(.system(size: 56))
-                .foregroundStyle(.tertiary)
-            Text("還沒有任何餐廳記錄")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text("在「變動支出」分類選「飲食」並選擇店家後，這裡會顯示地圖。")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
-    }
-
     // MARK: - 資料聚合
 
     private var foodExpensesWithLocation: [Expense] {
@@ -339,7 +450,7 @@ struct FoodMapView: View {
         let groups = Dictionary(grouping: foodExpensesWithLocation) { exp -> String in
             "\(exp.title)|\(exp.placeAddress ?? "")"
         }
-        return groups.compactMap { (key, exps) -> RestaurantAggregate? in
+        let all: [RestaurantAggregate] = groups.compactMap { (key, exps) -> RestaurantAggregate? in
             guard let first = exps.first,
                   let lat = first.placeLatitude,
                   let lon = first.placeLongitude else { return nil }
@@ -351,6 +462,10 @@ struct FoodMapView: View {
                 visits: exps
             )
         }
+        if photoOnly {
+            return all.filter { agg in agg.visits.contains { !$0.photoFileNames.isEmpty } }
+        }
+        return all
     }
 
     private var sortedAggregates: [RestaurantAggregate] {
