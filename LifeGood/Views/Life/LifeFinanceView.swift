@@ -38,11 +38,18 @@ struct LifeFinanceView: View {
             .navigationTitle("財富")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        if subscription.isPremium { showAdd = true }
-                        else { showPremiumAlert = true }
-                    } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    HStack(spacing: 8) {
+                        Text(formatTwdShort(allBankBalanceInTWD))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(allBankBalanceInTWD >= 0 ? Color.blue : Color.red)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Button {
+                            if subscription.isPremium { showAdd = true }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
             }
@@ -187,10 +194,11 @@ struct LifeFinanceView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("開戶日期：\(formatDate(item.date))")
                         .font(.caption2).foregroundStyle(.tertiary)
-                    let bal = bankTotalBalance(for: item)
-                    Text("NT$ \(formatNumber(bal))")
+                    let balances = bankBalances(for: item)
+                    let display = bankBalanceDisplay(balances: balances)
+                    Text(display.text)
                         .font(.caption.bold())
-                        .foregroundStyle(bal >= 0 ? Color.blue : Color.red)
+                        .foregroundStyle(display.amount >= 0 ? Color.blue : Color.red)
                 }
             } else {
                 Text(formatDate(item.date)).font(.caption).foregroundStyle(.tertiary)
@@ -199,19 +207,18 @@ struct LifeFinanceView: View {
         .padding(.vertical, 2)
     }
 
-    /// 計算銀行的目前總額（含信用卡彙總扣款 + 股票交易）
-    private func bankTotalBalance(for ms: LifeMilestone) -> Double {
+    /// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 股票交易）
+    private func bankBalances(for ms: LifeMilestone) -> [String: Double] {
         let now = Date()
-        var total: Double = 0
-        let real = (ms.bankDeposits ?? []).filter { dep in
-            guard dep.date <= now else { return false }
-            guard let expId = dep.linkedExpenseId,
-                  let exp = expenseStore.expenses.first(where: { $0.id == expId }) else { return true }
-            return exp.linkedCreditCardMilestoneId == nil
+        var totals: [String: Double] = [:]
+        for dep in ms.bankDeposits ?? [] where dep.date <= now {
+            // 跳過已連結到信用卡支出的存款（用信用卡彙總取代）
+            if let expId = dep.linkedExpenseId,
+               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
+               exp.linkedCreditCardMilestoneId != nil { continue }
+            totals[dep.currencyCode, default: 0] += dep.isWithdrawal ? -dep.amount : dep.amount
         }
-        for dep in real {
-            total += dep.isWithdrawal ? -dep.amount : dep.amount
-        }
+        // 信用卡彙總扣款一律以 NT$ 計
         let cards = lifeStore.milestones.filter {
             $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
         }
@@ -219,14 +226,63 @@ struct LifeFinanceView: View {
             let exps = expenseStore.expenses.filter {
                 $0.linkedCreditCardMilestoneId == card.id && $0.date <= now
             }
-            for exp in exps { total -= exp.amount }
+            for exp in exps { totals["NT$", default: 0] -= exp.amount }
+        }
+        // 過濾掉淨額為 0 的幣別（避免單一幣別帳戶被誤判為混幣）
+        let nonZero = totals.filter { $0.value != 0 }
+        return nonZero.isEmpty ? totals : nonZero
+    }
+
+    /// 將某帳戶的所有幣別餘額換算成 TWD 加總
+    private func balanceInTWD(_ balances: [String: Double]) -> Double {
+        var total: Double = 0
+        for (code, amount) in balances {
+            if code == "NT$" {
+                total += amount
+            } else if let rate = expenseStore.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+                total += amount * rate.rate
+            } else {
+                total += amount  // 找不到匯率時不換算，至少不丟失資料
+            }
         }
         return total
+    }
+
+    /// 帳戶餘額顯示：單幣別→該幣別；多幣別→換算 TWD 等值
+    private func bankBalanceDisplay(balances: [String: Double]) -> (text: String, amount: Double) {
+        if balances.count <= 1 {
+            let entry = balances.first ?? ("NT$", 0)
+            return ("\(entry.0) \(formatNumber(entry.1))", entry.1)
+        }
+        let twd = balanceInTWD(balances)
+        return ("≈ NT$ \(formatNumber(twd))", twd)
+    }
+
+    /// 所有銀行帳戶的台幣等值總和
+    private var allBankBalanceInTWD: Double {
+        let banks = lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .bank
+        }
+        return banks.reduce(0) { $0 + balanceInTWD(bankBalances(for: $1)) }
     }
 
     private func formatNumber(_ v: Double) -> String {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: v)) ?? "0"
+    }
+
+    private func formatTwdShort(_ v: Double) -> String {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        if abs(v) >= 100_000_000 {
+            let s = f.string(from: NSNumber(value: v / 100_000_000)) ?? "0"
+            return "NT$ \(s) 億"
+        }
+        if abs(v) >= 10_000 {
+            let s = f.string(from: NSNumber(value: v / 10_000)) ?? "0"
+            return "NT$ \(s) 萬"
+        }
+        let s = f.string(from: NSNumber(value: v)) ?? "0"
+        return "NT$ \(s)"
     }
 
     @ViewBuilder
