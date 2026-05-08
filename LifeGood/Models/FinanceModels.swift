@@ -600,20 +600,61 @@ struct RenovationPhoto: Identifiable, Codable {
     let id: UUID
     var date: Date
     var title: String
+    /// 舊版（v15.36 之前）每筆只一張照片時用的欄位；保留作向下相容讀寫。
     var photoFileName: String?
+    /// v15.40+：一筆紀錄可承載多張照片（堆疊呈現）。新版只寫這個欄位，
+    /// 載入時會自動把 legacy `photoFileName` 併入。
+    var photoFileNames: [String]
     var note: String
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "",
-         photoFileName: String? = nil, note: String = "") {
+         photoFileName: String? = nil,
+         photoFileNames: [String] = [],
+         note: String = "") {
         self.id = id
         self.date = date
         self.title = title
         self.photoFileName = photoFileName
+        self.photoFileNames = photoFileNames
         self.note = note
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = try c.decode(Date.self, forKey: .date)
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        photoFileName = try? c.decodeIfPresent(String.self, forKey: .photoFileName)
+        let arr = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
+        // 把 legacy 單張 photoFileName 併入 photoFileNames（避免重複）
+        if !arr.isEmpty {
+            photoFileNames = arr
+        } else if let single = photoFileName, !single.isEmpty {
+            photoFileNames = [single]
+        } else {
+            photoFileNames = []
+        }
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(date, forKey: .date)
+        try c.encode(title, forKey: .title)
+        try c.encode(photoFileNames, forKey: .photoFileNames)
+        // 寫入 legacy 欄位（取陣列第一張）以便舊版本仍能至少看到第一張
+        try c.encodeIfPresent(photoFileNames.first ?? photoFileName, forKey: .photoFileName)
+        try c.encode(note, forKey: .note)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, title, photoFileName, photoFileNames, note
+    }
+
+    /// 第一張照片的 URL（給縮圖封面用）
     var photoURL: URL? {
-        guard let name = photoFileName else { return nil }
+        guard let name = photoFileNames.first else { return nil }
         return Self.photosDirectory.appendingPathComponent(name)
     }
 
@@ -624,7 +665,7 @@ struct RenovationPhoto: Identifiable, Codable {
         return dir
     }
 
-    static func savePhoto(_ data: Data, id: UUID) -> String {
+    static func savePhoto(_ data: Data, id: UUID = UUID()) -> String {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         try? data.write(to: url)
@@ -636,6 +677,10 @@ struct RenovationPhoto: Identifiable, Codable {
         let url = photosDirectory.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)
         PhotoCloudSync.delete(directory: "RenovationPhotos", fileName: fileName)
+    }
+
+    static func photoURL(for fileName: String) -> URL {
+        photosDirectory.appendingPathComponent(fileName)
     }
 }
 

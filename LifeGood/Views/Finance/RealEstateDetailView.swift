@@ -20,6 +20,10 @@ struct RealEstateDetailView: View {
     @State private var editingRenovationPhoto: RenovationPhoto?
     @State private var bulkRenovationPickerItems: [PhotosPickerItem] = []
     @State private var showBulkRenovationPicker = false
+    /// 批次匯入後等待輸入日期/標題的暫存檔名（傳給 RenovationPhotoEditor）
+    @State private var pendingBulkPhotoNames: [String]? = nil
+    /// 點開哪一張裝潢紀錄展開大圖瀏覽
+    @State private var expandingRenovationStack: RenovationPhoto?
     @State private var showPremiumAlert = false
     /// 已展開備註的變動支出項目 IDs
     @State private var expandedVariableExpenseIds: Set<UUID> = []
@@ -112,6 +116,17 @@ struct RealEstateDetailView: View {
             .sheet(item: $editingRenovationPhoto,
                    onDismiss: { dataRefreshID = UUID() }) { p in
                 RenovationPhotoEditor(estateId: estateId, editing: p)
+            }
+            .sheet(isPresented: Binding(
+                get: { pendingBulkPhotoNames != nil },
+                set: { if !$0 { pendingBulkPhotoNames = nil } }
+            ), onDismiss: { dataRefreshID = UUID() }) {
+                if let names = pendingBulkPhotoNames {
+                    RenovationPhotoEditor(estateId: estateId, editing: nil, preloadedFileNames: names)
+                }
+            }
+            .sheet(item: $expandingRenovationStack) { p in
+                RenovationStackViewer(record: p)
             }
             .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
@@ -629,24 +644,18 @@ struct RealEstateDetailView: View {
         }
     }
 
-    /// 把多選相片一次匯入成多筆 RenovationPhoto（無描述）
+    /// 把多選相片寫入磁碟後，開 RenovationPhotoEditor 讓使用者輸入日期/標題/備註，
+    /// 一次匯入成「一筆」RenovationPhoto，這些照片會以堆疊方式顯示。
     @MainActor
     private func importBulkRenovationPhotos(_ items: [PhotosPickerItem]) async {
-        guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
-        var added: [RenovationPhoto] = []
-        let now = Date()
+        var fileNames: [String] = []
         for item in items {
             guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-            let recordId = UUID()
-            let fileName = RenovationPhoto.savePhoto(data, id: recordId)
-            added.append(RenovationPhoto(
-                id: recordId, date: now, title: "",
-                photoFileName: fileName, note: ""
-            ))
+            fileNames.append(RenovationPhoto.savePhoto(data, id: UUID()))
         }
-        estate.renovationPhotos.append(contentsOf: added)
-        store.update(estate)
         bulkRenovationPickerItems = []
+        guard !fileNames.isEmpty else { return }
+        pendingBulkPhotoNames = fileNames
     }
 
     @ViewBuilder
@@ -661,14 +670,25 @@ struct RealEstateDetailView: View {
             .padding(.horizontal).padding(.vertical, 6)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
+                HStack(spacing: 14) {
                     ForEach(estate.renovationPhotos.sorted { $0.date > $1.date }) { p in
                         Button {
-                            editingRenovationPhoto = p
+                            if p.photoFileNames.count >= 2 {
+                                expandingRenovationStack = p
+                            } else {
+                                editingRenovationPhoto = p
+                            }
                         } label: {
                             renovationPhotoCard(p)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button {
+                                editingRenovationPhoto = p
+                            } label: {
+                                Label("編輯資訊", systemImage: "pencil")
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 14)
@@ -679,27 +699,12 @@ struct RealEstateDetailView: View {
 
     private func renovationPhotoCard(_ p: RenovationPhoto) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            ZStack {
-                if let url = p.photoURL, let img = UIImage(contentsOfFile: url.path) {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 130, height: 100)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .onTapGesture { viewingPhotoURL = url }
-                } else {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(.tertiarySystemFill))
-                        .frame(width: 130, height: 100)
-                        .overlay(
-                            Image(systemName: "photo")
-                                .font(.title2)
-                                .foregroundStyle(.tertiary)
-                        )
-                }
+            if p.photoFileNames.count >= 2 {
+                renovationStackedPhotos(for: p.photoFileNames)
+            } else {
+                renovationSinglePhoto(url: p.photoURL)
             }
-            Text(p.title.isEmpty ? "未命名" : p.title)
+            Text(displayTitle(for: p))
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
                 .frame(width: 130, alignment: .leading)
@@ -708,8 +713,102 @@ struct RealEstateDetailView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(8)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// 顯示用標題：使用者填的 title 優先；多張時 fallback 到「N 張照片」
+    private func displayTitle(for p: RenovationPhoto) -> String {
+        if !p.title.isEmpty { return p.title }
+        if p.photoFileNames.count >= 2 { return "\(p.photoFileNames.count) 張照片" }
+        return "未命名"
+    }
+
+    /// 單張照片卡片（同舊版）
+    @ViewBuilder
+    private func renovationSinglePhoto(url: URL?) -> some View {
+        if let url = url, let img = UIImage(contentsOfFile: url.path) {
+            Image(uiImage: img)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 130, height: 100)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .onTapGesture { viewingPhotoURL = url }
+        } else {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.tertiarySystemFill))
+                .frame(width: 130, height: 100)
+                .overlay(
+                    Image(systemName: "photo")
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                )
+        }
+    }
+
+    /// 多張照片堆疊卡片：3 張往後遞減旋轉位移，最上層放第一張，右上角徽章顯示總張數
+    private func renovationStackedPhotos(for fileNames: [String]) -> some View {
+        let visible = Array(fileNames.prefix(3))
+        return ZStack {
+            // 最後一張（背景）
+            if visible.count >= 3 {
+                stackedPhotoLayer(visible[2])
+                    .rotationEffect(.degrees(7))
+                    .offset(x: 7, y: 4)
+                    .opacity(0.85)
+            }
+            // 中間
+            if visible.count >= 2 {
+                stackedPhotoLayer(visible[1])
+                    .rotationEffect(.degrees(-5))
+                    .offset(x: -4, y: 2)
+                    .opacity(0.92)
+            }
+            // 最上層封面
+            stackedPhotoLayer(visible[0])
+
+            // 數量徽章
+            VStack {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 3) {
+                        Image(systemName: "square.stack.3d.up.fill")
+                            .font(.system(size: 10))
+                        Text("\(fileNames.count)")
+                            .font(.caption2.weight(.bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color.black.opacity(0.65))
+                    .clipShape(Capsule())
+                    .padding(6)
+                }
+                Spacer()
+            }
+            .frame(width: 130, height: 100)
+        }
+        .frame(width: 140, height: 110)
+    }
+
+    @ViewBuilder
+    private func stackedPhotoLayer(_ name: String) -> some View {
+        let url = RenovationPhoto.photoURL(for: name)
+        Group {
+            if let img = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill))
+            }
+        }
+        .frame(width: 130, height: 100)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white, lineWidth: 2)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
     }
 
     @ViewBuilder
@@ -996,9 +1095,9 @@ struct RealEstateDetailView: View {
             }
             if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
         }
-        // 清除裝潢照片檔案
+        // 清除裝潢照片檔案（多張）
         for rp in estate.renovationPhotos {
-            if let name = rp.photoFileName { RenovationPhoto.deletePhoto(name) }
+            for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
         }
         if let linkedId = estate.linkedExpenseId {
             expenseStore.expenses.removeAll { $0.id == linkedId }

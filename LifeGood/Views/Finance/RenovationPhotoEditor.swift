@@ -43,7 +43,7 @@ struct CameraPicker: UIViewControllerRepresentable {
     }
 }
 
-// MARK: - 裝潢照片編輯器
+// MARK: - 裝潢照片編輯器（支援多張照片）
 
 struct RenovationPhotoEditor: View {
     @EnvironmentObject var store: FinanceStore
@@ -51,15 +51,20 @@ struct RenovationPhotoEditor: View {
 
     let estateId: UUID
     let editing: RenovationPhoto?
+    /// 預先帶入的檔名清單（批次匯入時由 RealEstateDetailView 提供）
+    let preloadedFileNames: [String]
 
     @State private var date: Date = Date()
     @State private var title: String = ""
     @State private var note: String = ""
-    @State private var photoFileName: String?
-    @State private var pendingImageData: Data?
-    @State private var photoItem: PhotosPickerItem?
-    @State private var showCamera: Bool = false
+    @State private var photoFileNames: [String] = []
     @State private var showDeleteConfirm: Bool = false
+
+    init(estateId: UUID, editing: RenovationPhoto?, preloadedFileNames: [String] = []) {
+        self.estateId = estateId
+        self.editing = editing
+        self.preloadedFileNames = preloadedFileNames
+    }
 
     var body: some View {
         NavigationStack {
@@ -70,54 +75,22 @@ struct RenovationPhotoEditor: View {
                 }
 
                 Section {
-                    if let data = pendingImageData, let img = UIImage(data: data) {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: 240)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    } else if let url = currentPhotoURL, let img = UIImage(contentsOfFile: url.path) {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: 240)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-
-                    Menu {
-                        Button {
-                            showCamera = true
-                        } label: {
-                            Label("拍照", systemImage: "camera.fill")
-                        }
-                        // PhotosPicker 不能直接放在 Menu 裡（無 sheet 環境），改用 state 觸發
-                        Button {
-                            isPresentingPhotoPicker = true
-                        } label: {
-                            Label("從相簿選取", systemImage: "photo.on.rectangle")
-                        }
-                    } label: {
-                        HStack {
-                            Image(systemName: "camera.viewfinder")
-                            Text(pendingImageData != nil || photoFileName != nil ? "更換照片" : "新增照片")
-                            Spacer()
-                            if pendingImageData != nil || photoFileName != nil {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                            }
-                        }
-                    }
-
-                    if pendingImageData != nil || photoFileName != nil {
-                        Button(role: .destructive) {
-                            pendingImageData = nil
-                            if let name = photoFileName { RenovationPhoto.deletePhoto(name) }
-                            photoFileName = nil
-                        } label: {
-                            Label("移除照片", systemImage: "xmark.circle")
-                        }
-                    }
+                    MultiPhotoGallery(
+                        fileNames: $photoFileNames,
+                        urlFor: { RenovationPhoto.photoURL(for: $0) },
+                        onSaveImage: { data in
+                            RenovationPhoto.savePhoto(data, id: UUID())
+                        },
+                        onDeleteFile: { name in
+                            RenovationPhoto.deletePhoto(name)
+                        },
+                        title: "照片"
+                    )
+                    .padding(.vertical, 4)
                 } header: {
-                    Text("照片")
+                    Text("照片（\(photoFileNames.count) 張）")
+                } footer: {
+                    Text("可拍照或從相簿一次選多張，會以堆疊方式顯示在裝潢照片廊中。")
                 }
 
                 Section("備註") {
@@ -137,46 +110,32 @@ struct RenovationPhotoEditor: View {
             .navigationTitle(editing == nil ? "新增裝潢照片" : "編輯裝潢照片")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { cancel() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("儲存") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(photoFileNames.isEmpty)
                 }
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) { deleteRecord() }
                 Button("取消", role: .cancel) {}
             }
-            .sheet(isPresented: $showCamera) {
-                CameraPicker { image in
-                    pendingImageData = image.jpegData(compressionQuality: 0.85)
-                }
-                .ignoresSafeArea()
-            }
-            .photosPicker(isPresented: $isPresentingPhotoPicker, selection: $photoItem, matching: .images)
-            .onChange(of: photoItem) { _, item in
-                Task {
-                    guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
-                    await MainActor.run { pendingImageData = data }
-                }
-            }
-            .onAppear {
-                if let e = editing {
-                    date = e.date
-                    title = e.title
-                    note = e.note
-                    photoFileName = e.photoFileName
-                }
-            }
+            .onAppear { setupInitial() }
         }
     }
 
-    @State private var isPresentingPhotoPicker: Bool = false
+    // MARK: - 初始化
 
-    private var currentPhotoURL: URL? {
-        guard let name = photoFileName else { return nil }
-        return RenovationPhoto.photosDirectory.appendingPathComponent(name)
+    private func setupInitial() {
+        if let e = editing {
+            date = e.date
+            title = e.title
+            note = e.note
+            photoFileNames = e.photoFileNames
+        } else if !preloadedFileNames.isEmpty {
+            photoFileNames = preloadedFileNames
+        }
     }
 
     // MARK: - 動作
@@ -185,18 +144,12 @@ struct RenovationPhotoEditor: View {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
         let recordId = editing?.id ?? UUID()
 
-        // 若有新拍照 / 新選的照片，存檔並更新 fileName
-        if let data = pendingImageData {
-            // 先刪舊檔（避免孤兒）
-            if let oldName = photoFileName { RenovationPhoto.deletePhoto(oldName) }
-            photoFileName = RenovationPhoto.savePhoto(data, id: recordId)
-        }
-
         let record = RenovationPhoto(
             id: recordId,
             date: date,
             title: title.trimmingCharacters(in: .whitespaces),
-            photoFileName: photoFileName,
+            photoFileName: nil,
+            photoFileNames: photoFileNames,
             note: note.trimmingCharacters(in: .whitespaces)
         )
         if let idx = estate.renovationPhotos.firstIndex(where: { $0.id == recordId }) {
@@ -208,12 +161,108 @@ struct RenovationPhotoEditor: View {
         dismiss()
     }
 
+    /// 取消時若是新增模式，把已寫入的檔案清掉避免變孤兒
+    private func cancel() {
+        if editing == nil {
+            // 編輯既有時不清，因為原本就在硬碟上
+            for name in photoFileNames {
+                RenovationPhoto.deletePhoto(name)
+            }
+        }
+        dismiss()
+    }
+
     private func deleteRecord() {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let e = editing else { return }
-        if let name = e.photoFileName { RenovationPhoto.deletePhoto(name) }
+        for name in e.photoFileNames {
+            RenovationPhoto.deletePhoto(name)
+        }
         estate.renovationPhotos.removeAll { $0.id == e.id }
         store.update(estate)
         dismiss()
+    }
+}
+
+// MARK: - 堆疊展開瀏覽器
+
+/// 把一筆 RenovationPhoto 中所有照片以左右滑動的方式逐張展開。
+/// 黑底全螢幕，下方半透明面板顯示日期 / 標題 / 備註。
+struct RenovationStackViewer: View {
+    let record: RenovationPhoto
+    @Environment(\.dismiss) private var dismiss
+    @State private var currentIndex: Int = 0
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                if record.photoFileNames.isEmpty {
+                    Text("沒有照片")
+                        .foregroundStyle(.white.opacity(0.7))
+                } else {
+                    TabView(selection: $currentIndex) {
+                        ForEach(Array(record.photoFileNames.enumerated()), id: \.offset) { idx, name in
+                            let url = RenovationPhoto.photoURL(for: name)
+                            ZStack {
+                                if let img = UIImage(contentsOfFile: url.path) {
+                                    Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFit()
+                                } else {
+                                    ProgressView().tint(.white)
+                                }
+                            }
+                            .tag(idx)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .always))
+                    .indexViewStyle(.page(backgroundDisplayMode: .always))
+                }
+
+                VStack {
+                    Spacer()
+                    if !record.title.isEmpty || !record.note.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(record.title.isEmpty ? "未命名" : record.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                Spacer()
+                                Text("\(currentIndex + 1) / \(record.photoFileNames.count)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.white.opacity(0.7))
+                            }
+                            if !record.note.isEmpty {
+                                Text(record.note)
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.85))
+                                    .lineLimit(3)
+                            }
+                            Text(fmtDate(record.date))
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.65))
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.ultraThinMaterial)
+                        .padding(.bottom, 32)
+                    }
+                }
+            }
+            .navigationTitle(record.title.isEmpty ? "裝潢照片" : record.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("關閉") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func fmtDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
     }
 }
