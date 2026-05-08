@@ -14,6 +14,7 @@ enum VariableCategory: String, Codable, Identifiable {
     case stock = "股票"
     case realEstate = "房地產"
     case tax = "稅費"
+    case taxSaving = "節稅"
     case entertainment = "娛樂"
     case shopping = "購物"
     case dailyNecessities = "日用品"
@@ -25,7 +26,7 @@ enum VariableCategory: String, Codable, Identifiable {
     var id: String { rawValue }
 
     static var allCases: [VariableCategory] {
-        [.food, .vehicle, .stock, .realEstate, .tax, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
+        [.food, .vehicle, .stock, .realEstate, .tax, .taxSaving, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
     }
 
     var icon: String {
@@ -36,6 +37,7 @@ enum VariableCategory: String, Codable, Identifiable {
         case .stock: return "chart.line.uptrend.xyaxis"
         case .realEstate: return "building.2.fill"
         case .tax: return "doc.text.fill"
+        case .taxSaving: return "lightbulb.fill"
         case .entertainment: return "gamecontroller.fill"
         case .shopping: return "bag.fill"
         case .dailyNecessities: return "house.fill"
@@ -60,7 +62,74 @@ enum VariableCategory: String, Codable, Identifiable {
         case .stock: return "StockColor"
         case .realEstate: return "RealEstateColor"
         case .tax: return "OtherColor"
+        case .taxSaving: return "OtherColor"
         case .other: return "OtherColor"
+        }
+    }
+}
+
+// MARK: - 節稅子分類
+
+/// 變動支出分類為「節稅」時可細分的子分類，
+/// 與台灣個人綜合所得稅可列舉/特別扣除額對應，提供累積金額追蹤。
+enum TaxSavingSubCategory: String, Codable, CaseIterable, Identifiable {
+    case donation = "捐贈"
+    case insurance = "保險費"
+    case medical = "醫療"
+    case mortgage = "房貸利息"
+    case rent = "房租"
+    case education = "教育學費"
+    case childcare = "幼兒學前"
+    case longCare = "長期照顧"
+    case disability = "身心障礙"
+    case other = "其他"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .donation: return "gift.fill"
+        case .insurance: return "shield.fill"
+        case .medical: return "cross.case.fill"
+        case .mortgage: return "house.fill"
+        case .rent: return "building.2.fill"
+        case .education: return "graduationcap.fill"
+        case .childcare: return "figure.child"
+        case .longCare: return "heart.text.square.fill"
+        case .disability: return "figure.roll"
+        case .other: return "ellipsis.circle.fill"
+        }
+    }
+
+    /// 年度扣除上限（NT$）；nil 代表「核實認列、無單一上限或依比例」。
+    var annualLimit: Double? {
+        switch self {
+        case .donation: return nil          // 對政府/教育機構：所得 20% 以內，無固定數字上限
+        case .insurance: return 24_000      // 每人 2.4 萬人身保險（健保不計入此上限）
+        case .medical: return nil           // 核實認列無上限
+        case .mortgage: return 300_000      // 自用住宅貸款利息每年最高 30 萬
+        case .rent: return 180_000          // 無自有住宅每年最高 18 萬
+        case .education: return 25_000      // 大專以上子女學費每人每年 2.5 萬
+        case .childcare: return 120_000     // 5 歲以下子女每人每年 12 萬
+        case .longCare: return 120_000      // 每人每年 12 萬
+        case .disability: return 207_000    // 每人每年 20.7 萬
+        case .other: return nil
+        }
+    }
+
+    /// 限額說明文字（顯示在進度條下方）
+    var limitNote: String {
+        switch self {
+        case .donation: return "對政府或教育機構無上限；其他公益依綜合所得 20% 內"
+        case .insurance: return "人身保險每人每年最高 2.4 萬（全民健保另計、無上限）"
+        case .medical: return "醫療生育費用核實認列、無上限"
+        case .mortgage: return "自用住宅貸款利息，每年最高 30 萬"
+        case .rent: return "無自有住宅者，每年最高 18 萬"
+        case .education: return "大專以上子女學費，每人每年最高 2.5 萬"
+        case .childcare: return "5 歲以下子女，每人每年 12 萬"
+        case .longCare: return "每人每年 12 萬"
+        case .disability: return "每人每年 20.7 萬"
+        case .other: return "其他可抵稅項目，請依實際扣除規範認列"
         }
     }
 }
@@ -137,6 +206,7 @@ struct Expense: Identifiable, Codable {
     var linkedVehicleId: UUID?        // 連結理財模式的汽車 ID
     var vehicleExpenseCategory: VehicleVariableCategory?  // 汽車變動支出子分類
     var realEstateExpenseCategory: RealEstateExpenseCategory?  // 房地產變動支出子分類
+    var taxSavingSubCategory: TaxSavingSubCategory?  // 節稅變動支出子分類
     var note: String
     var currencyCode: String
     var diningMember: String?
@@ -172,6 +242,7 @@ struct Expense: Identifiable, Codable {
         linkedVehicleId: UUID? = nil,
         vehicleExpenseCategory: VehicleVariableCategory? = nil,
         realEstateExpenseCategory: RealEstateExpenseCategory? = nil,
+        taxSavingSubCategory: TaxSavingSubCategory? = nil,
         note: String = "",
         currencyCode: String = "NT$",
         diningMember: String? = nil,
@@ -202,6 +273,7 @@ struct Expense: Identifiable, Codable {
         self.linkedVehicleId = linkedVehicleId
         self.vehicleExpenseCategory = vehicleExpenseCategory
         self.realEstateExpenseCategory = realEstateExpenseCategory
+        self.taxSavingSubCategory = taxSavingSubCategory
         self.note = note
         self.currencyCode = currencyCode
         self.diningMember = diningMember
@@ -236,6 +308,7 @@ struct Expense: Identifiable, Codable {
         linkedVehicleId = try? c.decode(UUID.self, forKey: .linkedVehicleId)
         vehicleExpenseCategory = try? c.decode(VehicleVariableCategory.self, forKey: .vehicleExpenseCategory)
         realEstateExpenseCategory = try? c.decode(RealEstateExpenseCategory.self, forKey: .realEstateExpenseCategory)
+        taxSavingSubCategory = try? c.decodeIfPresent(TaxSavingSubCategory.self, forKey: .taxSavingSubCategory)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         currencyCode = (try? c.decode(String.self, forKey: .currencyCode)) ?? "NT$"
         diningMember = try? c.decode(String.self, forKey: .diningMember)
@@ -254,7 +327,7 @@ struct Expense: Identifiable, Codable {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
         case insuranceSubCategory, loanSubCategory
         case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
-        case vehicleExpenseCategory, realEstateExpenseCategory, note, currencyCode, diningMember
+        case vehicleExpenseCategory, realEstateExpenseCategory, taxSavingSubCategory, note, currencyCode, diningMember
         case loanTotalAmount, loanYears, loanRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
         case placeAddress, placeLatitude, placeLongitude, photoFileNames
@@ -268,6 +341,9 @@ struct Expense: Identifiable, Codable {
             }
             if linkedRealEstateId != nil, let sub = realEstateExpenseCategory {
                 return "房地產 - \(sub.rawValue)"
+            }
+            if variableCategory == .taxSaving, let sub = taxSavingSubCategory {
+                return "節稅 - \(sub.rawValue)"
             }
             return variableCategory?.rawValue ?? "未分類"
         case .fixed:

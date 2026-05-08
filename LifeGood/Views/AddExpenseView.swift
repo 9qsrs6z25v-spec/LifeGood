@@ -17,6 +17,7 @@ struct AddExpenseView: View {
     @State private var amountText = ""
     @State private var date = Date()
     @State private var selectedVariableCategory: VariableCategory = .food
+    @State private var selectedTaxSavingSubCategory: TaxSavingSubCategory = .donation
     @State private var selectedDiningMembers: Set<String> = []
     @State private var showDiningMemberPopover: Bool = false
 
@@ -933,6 +934,18 @@ struct AddExpenseView: View {
                         }
                     }
                 }
+
+                // 節稅子分類（連動到稅務頁）
+                if selectedVariableCategory == .taxSaving {
+                    Picker("節稅項目", selection: $selectedTaxSavingSubCategory) {
+                        ForEach(TaxSavingSubCategory.allCases) { sub in
+                            Label(sub.rawValue, systemImage: sub.icon).tag(sub)
+                        }
+                    }
+                    Text(selectedTaxSavingSubCategory.limitNote)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 Picker("類別", selection: $selectedFixedCategory) {
                     ForEach(FixedCategory.allCases) { cat in
@@ -1519,6 +1532,7 @@ struct AddExpenseView: View {
             linkedVehicleId: linkedVehId,
             vehicleExpenseCategory: (expenseType == .variable && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil,
             realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
+            taxSavingSubCategory: (expenseType == .variable && selectedVariableCategory == .taxSaving) ? selectedTaxSavingSubCategory : nil,
             note: note.trimmingCharacters(in: .whitespaces),
             currencyCode: savedCurrencyCode,
             diningMember: (expenseType == .variable && Self.memberCategories.contains(selectedVariableCategory) && !selectedDiningMembers.isEmpty) ? diningMembersString : nil,
@@ -1909,6 +1923,7 @@ struct AddExpenseView: View {
         }
         date = expense.date
         if let vc = expense.variableCategory { selectedVariableCategory = vc }
+        if let ts = expense.taxSavingSubCategory { selectedTaxSavingSubCategory = ts }
         if let fc = expense.fixedCategory { selectedFixedCategory = fc }
         if let rec = expense.recurrence { selectedRecurrence = rec }
         if let sub = expense.insuranceSubCategory { selectedInsuranceSubCategory = sub }

@@ -18,6 +18,27 @@ struct TaxOverviewView: View {
         taxExpenses.reduce(0) { $0 + $1.amount }
     }
 
+    // MARK: - 節稅紀錄
+
+    private var taxSavingExpenses: [Expense] {
+        expenseStore.expenses.filter {
+            $0.variableCategory == .taxSaving &&
+            Calendar.current.component(.year, from: $0.date) == selectedYear
+        }
+        .sorted { $0.date > $1.date }
+    }
+
+    private var totalTaxSaving: Double {
+        taxSavingExpenses.reduce(0) { $0 + $1.amount }
+    }
+
+    /// 各節稅子分類年度累積金額
+    private func taxSavingTotal(for sub: TaxSavingSubCategory) -> Double {
+        taxSavingExpenses
+            .filter { $0.taxSavingSubCategory == sub }
+            .reduce(0) { $0 + $1.amount }
+    }
+
     private var taxByMonth: [(month: Int, amount: Double)] {
         var result: [(Int, Double)] = []
         for m in 1...12 {
@@ -58,6 +79,7 @@ struct TaxOverviewView: View {
                     annualSummaryCard
                     taxRecordsSection
                     monthlyBreakdown
+                    taxSavingSection
                     taxChecklistSection
                     deductionTipsSection
                 }
@@ -111,6 +133,7 @@ struct TaxOverviewView: View {
                 taxStat(icon: "building.2.fill", label: "持有房產", value: "\(realEstateCount) 筆", color: .blue)
                 taxStat(icon: "car.fill", label: "持有車輛", value: "\(vehicleCount) 台", color: .orange)
                 taxStat(icon: "doc.text.fill", label: "稅費筆數", value: "\(taxExpenses.count) 筆", color: .red)
+                taxStat(icon: "lightbulb.fill", label: "節稅累積", value: fmt(totalTaxSaving), color: .green)
             }
 
             if estimatedAnnualIncome > 0 {
@@ -134,7 +157,11 @@ struct TaxOverviewView: View {
         VStack(spacing: 4) {
             Image(systemName: icon).font(.title3).foregroundStyle(color)
             Text(value).font(.caption.bold())
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(label).font(.caption2).foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
     }
@@ -238,34 +265,111 @@ struct TaxOverviewView: View {
         .padding(.horizontal)
     }
 
-    // MARK: - 節稅建議
+    // MARK: - 節稅累積（與變動支出 .taxSaving 連動）
+
+    private var taxSavingSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("節稅累積", icon: "lightbulb.fill", color: .green)
+
+            if taxSavingExpenses.isEmpty {
+                Text("本年度尚無節稅紀錄。可在「變動支出」分類選「節稅」新增（例：捐贈、保險費、房貸利息）。")
+                    .font(.caption).foregroundStyle(.tertiary)
+                    .padding(.horizontal).padding(.bottom, 12)
+            } else {
+                HStack {
+                    Text("年度節稅總額")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(fmt(totalTaxSaving))
+                        .font(.title3.bold())
+                        .foregroundStyle(.green)
+                }
+                .padding(.horizontal).padding(.vertical, 6)
+                Divider()
+                ForEach(TaxSavingSubCategory.allCases) { sub in
+                    let total = taxSavingTotal(for: sub)
+                    if total > 0 {
+                        taxSavingRow(sub: sub, total: total)
+                        Divider().padding(.leading, 44)
+                    }
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private func taxSavingRow(sub: TaxSavingSubCategory, total: Double) -> some View {
+        let limit = sub.annualLimit
+        let progress: Double = {
+            guard let limit = limit, limit > 0 else { return 0 }
+            return min(1, total / limit)
+        }()
+        let reachedCap = limit != nil && total >= (limit ?? 0)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(systemName: sub.icon)
+                    .font(.subheadline).foregroundStyle(.green)
+                    .frame(width: 22)
+                Text(sub.rawValue).font(.subheadline.weight(.medium))
+                Spacer()
+                Text(fmt(total))
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(reachedCap ? .orange : .green)
+            }
+            if let limit = limit {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color(.tertiarySystemFill))
+                            .frame(height: 5)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(reachedCap ? Color.orange : Color.green)
+                            .frame(width: geo.size.width * CGFloat(progress), height: 5)
+                    }
+                }
+                .frame(height: 5)
+                HStack {
+                    Text("上限 \(fmt(limit))")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    Spacer()
+                    Text(reachedCap ? "已達上限" : String(format: "%.0f%%", progress * 100))
+                        .font(.caption2)
+                        .foregroundStyle(reachedCap ? .orange : .secondary)
+                }
+            } else {
+                Text(sub.limitNote).font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+    }
+
+    // MARK: - 節稅建議（含已累積金額）
 
     private var deductionTipsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("節稅項目提醒", icon: "lightbulb.fill", color: .yellow)
 
-            let tips: [(icon: String, title: String, detail: String)] = [
-                ("heart.text.square", "保險費扣除額", "每人每年最高 2.4 萬（人身保險），全民健保無上限"),
-                ("house.fill", "房貸利息扣除額", "自用住宅貸款利息，每年最高扣除 30 萬"),
-                ("cross.case.fill", "醫藥費扣除額", "全家醫療及生育費用，核實認列無上限"),
-                ("gift.fill", "捐贈扣除額", "對政府或教育機構捐贈，所得 20% 以內可扣"),
-                ("graduationcap.fill", "教育學費扣除額", "大專以上子女學費，每人每年最高 2.5 萬"),
-                ("figure.child", "幼兒學前扣除額", "5 歲以下子女，每人每年 12 萬"),
-                ("building.2.fill", "房租支出扣除額", "無自有住宅者，每年最高扣除 18 萬"),
-                ("banknote.fill", "薪資所得特別扣除額", "每人每年 20.7 萬"),
-                ("person.fill", "身心障礙扣除額", "每人每年 20.7 萬"),
-                ("dollarsign.circle", "長期照顧扣除額", "每人每年 12 萬"),
-            ]
-
-            ForEach(tips.indices, id: \.self) { i in
-                let tip = tips[i]
+            ForEach(TaxSavingSubCategory.allCases) { sub in
+                let acc = taxSavingTotal(for: sub)
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: tip.icon)
-                        .font(.caption).foregroundStyle(.blue)
+                    Image(systemName: sub.icon)
+                        .font(.caption).foregroundStyle(acc > 0 ? .green : .blue)
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(tip.title).font(.subheadline.weight(.medium))
-                        Text(tip.detail).font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Text("\(sub.rawValue)扣除額").font(.subheadline.weight(.medium))
+                            if acc > 0 {
+                                Text("已累積 \(fmt(acc))")
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 6).padding(.vertical, 1)
+                                    .background(Color.green.opacity(0.15))
+                                    .foregroundStyle(.green)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        Text(sub.limitNote).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                 }
