@@ -223,7 +223,7 @@ struct FoodMapView: View {
                         .font(.caption2)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(photoOnly ? Color.orange : .ultraThinMaterial)
+                .background(photoOnly ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.ultraThinMaterial))
                 .foregroundStyle(photoOnly ? .white : .primary)
                 .clipShape(Capsule())
                 .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
