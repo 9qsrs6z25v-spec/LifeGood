@@ -18,6 +18,8 @@ struct AddExpenseView: View {
     @State private var date = Date()
     @State private var selectedVariableCategory: VariableCategory = .food
     @State private var selectedTaxSavingSubCategory: TaxSavingSubCategory = .donation
+    /// 固定支出：列入節稅追蹤；nil 採自動推斷
+    @State private var taxDeductibleOverride: Bool? = nil
     @State private var selectedDiningMembers: Set<String> = []
     @State private var showDiningMemberPopover: Bool = false
 
@@ -235,6 +237,11 @@ struct AddExpenseView: View {
                 // 固定支出：保險/貸款子分類
                 if isInsurance { insuranceSubCategorySection }
                 if isLoan { loanSubCategorySection }
+
+                // 固定支出：節稅追蹤 toggle（保險 / 房貸 / 房租 才出現）
+                if showTaxDeductibleToggle {
+                    taxDeductibleToggleSection
+                }
 
                 if isSavingsInsurance {
                     savingsInsuranceSection
@@ -1158,6 +1165,65 @@ struct AddExpenseView: View {
         }
     }
 
+    // MARK: - 節稅追蹤（固定支出 toggle）
+
+    /// 此筆固定支出是否會顯示節稅 toggle
+    private var showTaxDeductibleToggle: Bool {
+        guard expenseType == .fixed else { return false }
+        if selectedFixedCategory == .insurance { return true }
+        if selectedFixedCategory == .loan && selectedLoanSubCategory == .mortgage { return true }
+        if selectedFixedCategory == .rent { return true }
+        return false
+    }
+
+    /// 自動推斷預設值（與 Expense.autoTaxDeductible 同邏輯）
+    private var autoTaxDeductibleDefault: Bool {
+        if selectedFixedCategory == .insurance { return selectedInsuranceSubCategory != .savings }
+        if selectedFixedCategory == .loan && selectedLoanSubCategory == .mortgage { return true }
+        if selectedFixedCategory == .rent { return true }
+        return false
+    }
+
+    private var inferredTaxSavingSubLabel: String {
+        if selectedFixedCategory == .insurance { return TaxSavingSubCategory.insurance.rawValue }
+        if selectedFixedCategory == .loan && selectedLoanSubCategory == .mortgage { return TaxSavingSubCategory.mortgage.rawValue }
+        if selectedFixedCategory == .rent { return TaxSavingSubCategory.rent.rawValue }
+        return ""
+    }
+
+    private var inferredTaxSavingLimitNote: String {
+        if selectedFixedCategory == .insurance { return TaxSavingSubCategory.insurance.limitNote }
+        if selectedFixedCategory == .loan && selectedLoanSubCategory == .mortgage { return TaxSavingSubCategory.mortgage.limitNote }
+        if selectedFixedCategory == .rent { return TaxSavingSubCategory.rent.limitNote }
+        return ""
+    }
+
+    private var taxDeductibleToggleSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { taxDeductibleOverride ?? autoTaxDeductibleDefault },
+                set: { taxDeductibleOverride = $0 }
+            )) {
+                Label("列入節稅追蹤", systemImage: "lightbulb.fill")
+                    .foregroundStyle(.green)
+            }
+        } header: {
+            Text("稅務")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("開啟後本筆固定支出會以「\(inferredTaxSavingSubLabel)」計入稅務頁節稅累積。")
+                if !inferredTaxSavingLimitNote.isEmpty {
+                    Text(inferredTaxSavingLimitNote)
+                        .foregroundStyle(.tertiary)
+                }
+                if isSavingsInsurance {
+                    Text("注意：儲蓄險預設不列入扣除額；若你的方案含人身保險成分，可手動開啟。")
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
     // MARK: - 車貸連動汽車
 
     private var carLoanVehicleSection: some View {
@@ -1533,6 +1599,7 @@ struct AddExpenseView: View {
             vehicleExpenseCategory: (expenseType == .variable && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil,
             realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
             taxSavingSubCategory: (expenseType == .variable && selectedVariableCategory == .taxSaving) ? selectedTaxSavingSubCategory : nil,
+            taxDeductibleOverride: (expenseType == .fixed && showTaxDeductibleToggle) ? taxDeductibleOverride : nil,
             note: note.trimmingCharacters(in: .whitespaces),
             currencyCode: savedCurrencyCode,
             diningMember: (expenseType == .variable && Self.memberCategories.contains(selectedVariableCategory) && !selectedDiningMembers.isEmpty) ? diningMembersString : nil,
@@ -1924,6 +1991,7 @@ struct AddExpenseView: View {
         date = expense.date
         if let vc = expense.variableCategory { selectedVariableCategory = vc }
         if let ts = expense.taxSavingSubCategory { selectedTaxSavingSubCategory = ts }
+        taxDeductibleOverride = expense.taxDeductibleOverride
         if let fc = expense.fixedCategory { selectedFixedCategory = fc }
         if let rec = expense.recurrence { selectedRecurrence = rec }
         if let sub = expense.insuranceSubCategory { selectedInsuranceSubCategory = sub }

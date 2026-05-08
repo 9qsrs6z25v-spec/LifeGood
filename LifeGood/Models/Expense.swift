@@ -207,6 +207,9 @@ struct Expense: Identifiable, Codable {
     var vehicleExpenseCategory: VehicleVariableCategory?  // 汽車變動支出子分類
     var realEstateExpenseCategory: RealEstateExpenseCategory?  // 房地產變動支出子分類
     var taxSavingSubCategory: TaxSavingSubCategory?  // 節稅變動支出子分類
+    /// 固定支出是否列入稅務頁節稅追蹤；nil 採自動推斷（見 TaxOverviewView）。
+    /// true / false 是使用者明確覆寫。
+    var taxDeductibleOverride: Bool?
     var note: String
     var currencyCode: String
     var diningMember: String?
@@ -243,6 +246,7 @@ struct Expense: Identifiable, Codable {
         vehicleExpenseCategory: VehicleVariableCategory? = nil,
         realEstateExpenseCategory: RealEstateExpenseCategory? = nil,
         taxSavingSubCategory: TaxSavingSubCategory? = nil,
+        taxDeductibleOverride: Bool? = nil,
         note: String = "",
         currencyCode: String = "NT$",
         diningMember: String? = nil,
@@ -274,6 +278,7 @@ struct Expense: Identifiable, Codable {
         self.vehicleExpenseCategory = vehicleExpenseCategory
         self.realEstateExpenseCategory = realEstateExpenseCategory
         self.taxSavingSubCategory = taxSavingSubCategory
+        self.taxDeductibleOverride = taxDeductibleOverride
         self.note = note
         self.currencyCode = currencyCode
         self.diningMember = diningMember
@@ -309,6 +314,7 @@ struct Expense: Identifiable, Codable {
         vehicleExpenseCategory = try? c.decode(VehicleVariableCategory.self, forKey: .vehicleExpenseCategory)
         realEstateExpenseCategory = try? c.decode(RealEstateExpenseCategory.self, forKey: .realEstateExpenseCategory)
         taxSavingSubCategory = try? c.decodeIfPresent(TaxSavingSubCategory.self, forKey: .taxSavingSubCategory)
+        taxDeductibleOverride = try? c.decodeIfPresent(Bool.self, forKey: .taxDeductibleOverride)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         currencyCode = (try? c.decode(String.self, forKey: .currencyCode)) ?? "NT$"
         diningMember = try? c.decode(String.self, forKey: .diningMember)
@@ -327,7 +333,7 @@ struct Expense: Identifiable, Codable {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
         case insuranceSubCategory, loanSubCategory
         case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
-        case vehicleExpenseCategory, realEstateExpenseCategory, taxSavingSubCategory, note, currencyCode, diningMember
+        case vehicleExpenseCategory, realEstateExpenseCategory, taxSavingSubCategory, taxDeductibleOverride, note, currencyCode, diningMember
         case loanTotalAmount, loanYears, loanRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
         case placeAddress, placeLatitude, placeLongitude, photoFileNames
@@ -355,6 +361,39 @@ struct Expense: Identifiable, Codable {
             }
             return fixedCategory?.rawValue ?? "未分類"
         }
+    }
+
+    // MARK: - 節稅推斷（固定支出）
+
+    /// 若此筆固定支出可被視為節稅項目，回傳對應的子分類；否則 nil。
+    /// 規則：壽險 / 意外 / 綜合險 / 強制險 → 保險費；房貸 → 房貸利息；房租 → 房租。
+    /// 儲蓄險不自動納入（使用者可在編輯時手動勾選 taxDeductibleOverride = true）。
+    var inferredTaxSavingSubCategory: TaxSavingSubCategory? {
+        guard expenseType == .fixed else { return nil }
+        switch fixedCategory {
+        case .insurance: return .insurance
+        case .loan: return loanSubCategory == .mortgage ? .mortgage : nil
+        case .rent: return .rent
+        default: return nil
+        }
+    }
+
+    /// 自動推斷此筆固定支出是否預設列入節稅。
+    /// 儲蓄險預設不算（使用者可手動覆寫）。
+    var autoTaxDeductible: Bool {
+        guard expenseType == .fixed else { return false }
+        switch fixedCategory {
+        case .insurance: return insuranceSubCategory != .savings
+        case .loan: return loanSubCategory == .mortgage
+        case .rent: return true
+        default: return false
+        }
+    }
+
+    /// 此筆固定支出在稅務頁是否實際被視為節稅項目（覆寫優先於自動推斷）。
+    var effectivelyTaxDeductible: Bool {
+        if let override = taxDeductibleOverride { return override }
+        return autoTaxDeductible
     }
 
     var categoryIcon: String {

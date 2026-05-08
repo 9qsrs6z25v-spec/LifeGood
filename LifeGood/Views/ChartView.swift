@@ -365,6 +365,7 @@ struct ChartView: View {
         case .stock:             return .purple
         case .realEstate:        return .indigo
         case .tax:               return .brown
+        case .taxSaving:         return .green
         case .entertainment:     return .pink
         case .shopping:          return .cyan
         case .dailyNecessities:  return .green

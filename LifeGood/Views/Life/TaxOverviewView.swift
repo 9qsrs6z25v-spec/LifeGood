@@ -29,14 +29,56 @@ struct TaxOverviewView: View {
     }
 
     private var totalTaxSaving: Double {
-        taxSavingExpenses.reduce(0) { $0 + $1.amount }
+        TaxSavingSubCategory.allCases.reduce(0) { $0 + taxSavingTotal(for: $1) }
     }
 
-    /// 各節稅子分類年度累積金額
-    private func taxSavingTotal(for sub: TaxSavingSubCategory) -> Double {
+    /// 直接以「節稅」變動支出記錄的金額
+    private func taxSavingDirectTotal(for sub: TaxSavingSubCategory) -> Double {
         taxSavingExpenses
             .filter { $0.taxSavingSubCategory == sub }
             .reduce(0) { $0 + $1.amount }
+    }
+
+    /// 從固定支出（保險 / 房貸 / 房租）依年度推斷出的累積金額
+    private func taxSavingFromFixedTotal(for sub: TaxSavingSubCategory) -> Double {
+        expenseStore.expenses
+            .filter {
+                $0.expenseType == .fixed &&
+                $0.effectivelyTaxDeductible &&
+                $0.inferredTaxSavingSubCategory == sub
+            }
+            .reduce(0) { $0 + yearEquivalentAmount($1, year: selectedYear) }
+    }
+
+    /// 該子分類年度合計（直接記錄 + 固定支出推斷）
+    private func taxSavingTotal(for sub: TaxSavingSubCategory) -> Double {
+        taxSavingDirectTotal(for: sub) + taxSavingFromFixedTotal(for: sub)
+    }
+
+    /// 將固定支出依 recurrence 換算成「在 selectedYear 內」的累積金額。
+    /// 規則：
+    /// - 起始日 > selectedYear 12/31：0（還沒開始）
+    /// - 起始日 < selectedYear 1/1：整年（每月 *12 / 每季 *4 / 每年 *1）
+    /// - 起始日同年：從起始月起算
+    private func yearEquivalentAmount(_ exp: Expense, year: Int) -> Double {
+        let cal = Calendar.current
+        let createYear = cal.component(.year, from: exp.date)
+        guard createYear <= year else { return 0 }
+
+        let monthsActive: Int
+        if createYear < year {
+            monthsActive = 12
+        } else {
+            let createMonth = cal.component(.month, from: exp.date)
+            monthsActive = max(0, 12 - createMonth + 1)
+        }
+
+        switch exp.recurrence {
+        case .monthly:   return exp.amount * Double(monthsActive)
+        case .quarterly: return exp.amount * (Double(monthsActive) / 3.0)
+        case .yearly:    return exp.amount  // 整年算一次
+        case .none:      return 0
+        }
     }
 
     private var taxByMonth: [(month: Int, amount: Double)] {
@@ -271,8 +313,8 @@ struct TaxOverviewView: View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("節稅累積", icon: "lightbulb.fill", color: .green)
 
-            if taxSavingExpenses.isEmpty {
-                Text("本年度尚無節稅紀錄。可在「變動支出」分類選「節稅」新增（例：捐贈、保險費、房貸利息）。")
+            if totalTaxSaving == 0 {
+                Text("本年度尚無節稅紀錄。可在「變動支出」分類選「節稅」新增；既有的保險、房貸、房租固定支出也會自動納入。")
                     .font(.caption).foregroundStyle(.tertiary)
                     .padding(.horizontal).padding(.bottom, 12)
             } else {
@@ -307,6 +349,8 @@ struct TaxOverviewView: View {
             return min(1, total / limit)
         }()
         let reachedCap = limit != nil && total >= (limit ?? 0)
+        let direct = taxSavingDirectTotal(for: sub)
+        let fromFixed = taxSavingFromFixedTotal(for: sub)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
                 Image(systemName: sub.icon)
@@ -341,8 +385,32 @@ struct TaxOverviewView: View {
             } else {
                 Text(sub.limitNote).font(.caption2).foregroundStyle(.tertiary)
             }
+            // 來源拆解：直接記錄 / 來自固定支出
+            if direct > 0 && fromFixed > 0 {
+                HStack(spacing: 6) {
+                    sourceTag("直接記錄", value: fmt(direct), color: .green)
+                    sourceTag("固定支出", value: fmt(fromFixed), color: .blue)
+                    Spacer()
+                }
+            } else if fromFixed > 0 && direct == 0 {
+                HStack {
+                    sourceTag("來自固定支出", value: fmt(fromFixed), color: .blue)
+                    Spacer()
+                }
+            }
         }
         .padding(.horizontal).padding(.vertical, 8)
+    }
+
+    private func sourceTag(_ label: String, value: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(label).font(.caption2.weight(.medium))
+            Text(value).font(.caption2)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(color.opacity(0.12))
+        .foregroundStyle(color)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     // MARK: - 節稅建議（含已累積金額）
