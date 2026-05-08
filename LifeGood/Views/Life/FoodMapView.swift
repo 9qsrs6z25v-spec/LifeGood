@@ -300,6 +300,8 @@ struct FoodMapView: View {
     }
 
     // MARK: - 篩選 chip 共用
+
+    private func chip(_ label: String, isSelected: Bool, tint: Color = .green, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
                 .font(.caption.weight(.medium))

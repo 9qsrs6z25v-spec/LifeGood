@@ -263,6 +263,7 @@ struct FixedExpenseView: View {
 
 struct FixedExpenseRow: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var store: ExpenseStore
     let expense: Expense
 
     private let currencyFormatter: NumberFormatter = {
@@ -319,11 +320,18 @@ struct FixedExpenseRow: View {
     private var formattedAmount: String {
         let code = expense.currencyCode
         if code != "NT$" && code != "TWD" && !code.isEmpty {
+            // 儲存值為「換算後的台幣金額」，顯示原幣別時要除以匯率還原
+            let displayAmount: Double
+            if let rate = store.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+                displayAmount = expense.amount / rate.rate
+            } else {
+                displayAmount = expense.amount
+            }
             let f = NumberFormatter()
-            f.numberStyle = .currency
-            f.currencySymbol = "\(code) "
+            f.numberStyle = .decimal
             f.maximumFractionDigits = 0
-            return f.string(from: NSNumber(value: expense.amount)) ?? "\(code) 0"
+            let str = f.string(from: NSNumber(value: displayAmount)) ?? "0"
+            return "\(code) \(str)"
         }
         return formatCurrency(expense.amount)
     }

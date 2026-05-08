@@ -295,6 +295,7 @@ struct FilterChip: View {
 
 struct ExpenseRow: View {
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var store: ExpenseStore
     let expense: Expense
 
     private let currencyFormatter: NumberFormatter = {
@@ -332,7 +333,7 @@ struct ExpenseRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(formatCurrency(expense.amount))
+                Text(formattedAmount)
                     .font(.subheadline.bold())
                     .foregroundStyle(.red)
                 if let member = expense.diningMember, !member.isEmpty {
@@ -373,6 +374,25 @@ struct ExpenseRow: View {
 
     private func formatCurrency(_ value: Double) -> String {
         currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+
+    /// 顯示用金額：外幣時將儲存的台幣等值除以匯率還原原幣金額
+    private var formattedAmount: String {
+        let code = expense.currencyCode
+        if code != "NT$" && code != "TWD" && !code.isEmpty {
+            let displayAmount: Double
+            if let rate = store.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+                displayAmount = expense.amount / rate.rate
+            } else {
+                displayAmount = expense.amount
+            }
+            let f = NumberFormatter()
+            f.numberStyle = .decimal
+            f.maximumFractionDigits = 0
+            let str = f.string(from: NSNumber(value: displayAmount)) ?? "0"
+            return "\(code) \(str)"
+        }
+        return formatCurrency(expense.amount)
     }
 }
 
