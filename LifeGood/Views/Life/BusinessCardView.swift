@@ -4,7 +4,7 @@ struct BusinessCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
-    @State private var editingCard: BusinessCard?
+    @State private var viewingCardId: UUID?
     @State private var searchText = ""
     @State private var showPremiumAlert = false
 
@@ -57,7 +57,7 @@ struct BusinessCardView: View {
                                     cardRow(card)
                                         .contentShape(Rectangle())
                                         .onTapGesture {
-                                            if subscription.isPremium { editingCard = card }
+                                            if subscription.isPremium { viewingCardId = card.id }
                                             else { showPremiumAlert = true }
                                         }
                                         .swipeActions(edge: .trailing) {
@@ -88,47 +88,355 @@ struct BusinessCardView: View {
             .sheet(isPresented: $showAdd) {
                 BusinessCardEditor(editing: nil)
             }
-            .sheet(item: $editingCard) { card in
-                BusinessCardEditor(editing: card)
+            .sheet(item: Binding(
+                get: { viewingCardId.map { IdentifiableUUID(id: $0) } },
+                set: { viewingCardId = $0?.id }
+            )) { wrapper in
+                BusinessCardDetailView(cardId: wrapper.id)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 
+    /// 列表 row：頭像 + 姓名/職稱 + 公司/部門 + 聯絡方式列 + 日期
     private func cardRow(_ card: BusinessCard) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.orange.opacity(0.12))
-                    .frame(width: 40, height: 40)
-                Text(String(card.name.prefix(1)))
-                    .font(.headline).foregroundStyle(.orange)
-            }
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .top, spacing: 12) {
+            avatarView(card)
+
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(card.name).font(.subheadline.weight(.medium))
+                    Text(card.name.isEmpty ? "未命名" : card.name)
+                        .font(.subheadline.weight(.semibold))
                     if !card.jobTitle.isEmpty {
-                        Text(card.jobTitle).font(.caption2)
+                        Text(card.jobTitle)
+                            .font(.caption2)
                             .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.1))
+                            .background(Color.blue.opacity(0.12))
                             .foregroundStyle(.blue)
                             .clipShape(RoundedRectangle(cornerRadius: 3))
                     }
                 }
-                HStack(spacing: 6) {
-                    if !card.department.isEmpty {
-                        Text(card.department).font(.caption).foregroundStyle(.secondary)
+                if !card.company.isEmpty || !card.department.isEmpty {
+                    HStack(spacing: 4) {
+                        if !card.company.isEmpty {
+                            Text(card.company).font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        if !card.company.isEmpty && !card.department.isEmpty {
+                            Text("·").foregroundStyle(.tertiary)
+                        }
+                        if !card.department.isEmpty {
+                            Text(card.department).font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
-                    if !card.phone.isEmpty {
-                        Text(card.phone).font(.caption).foregroundStyle(.tertiary)
+                }
+                if !card.phone.isEmpty || !card.email.isEmpty {
+                    HStack(spacing: 10) {
+                        if !card.phone.isEmpty {
+                            HStack(spacing: 3) {
+                                Image(systemName: "phone.fill")
+                                    .font(.system(size: 9))
+                                Text(card.phone).font(.caption2)
+                            }
+                            .foregroundStyle(.green)
+                        }
+                        if !card.email.isEmpty {
+                            HStack(spacing: 3) {
+                                Image(systemName: "envelope.fill")
+                                    .font(.system(size: 9))
+                                Text(card.email).font(.caption2).lineLimit(1)
+                            }
+                            .foregroundStyle(.indigo)
+                        }
+                    }
+                }
+                if !card.address.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 9))
+                        Text(card.address).font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
                     }
                 }
             }
             Spacer()
-            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(fmtDate(card.date))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
+
+    private func avatarView(_ card: BusinessCard) -> some View {
+        let initial = String((card.name.isEmpty ? card.company : card.name).prefix(1))
+        return ZStack {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(LinearGradient(
+                    colors: [.orange, .pink.opacity(0.8)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+                .frame(width: 48, height: 48)
+            Text(initial)
+                .font(.title3.bold())
+                .foregroundStyle(.white)
+        }
+    }
+
+    private func fmtDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+    }
+}
+
+// MARK: - 名片詳細頁（點 row 開啟）
+
+struct BusinessCardDetailView: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    let cardId: UUID
+    @State private var showEdit = false
+    @State private var showDeleteConfirm = false
+    @State private var showPremiumAlert = false
+
+    private var card: BusinessCard {
+        lifeStore.businessCards.first(where: { $0.id == cardId })
+            ?? BusinessCard(id: cardId)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    heroCard
+                    if hasContact {
+                        contactCard
+                    }
+                    metaCard
+                    if !card.note.isEmpty {
+                        noteCard
+                    }
+                }
+                .padding(.vertical)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("名片卡片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("關閉") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 16) {
+                        Button {
+                            if subscription.isPremium { showEdit = true }
+                            else { showPremiumAlert = true }
+                        } label: { Text("編輯").foregroundStyle(.green) }
+                        Button {
+                            if subscription.isPremium { showDeleteConfirm = true }
+                            else { showPremiumAlert = true }
+                        } label: { Text("刪除").foregroundStyle(.red) }
+                    }
+                }
+            }
+            .sheet(isPresented: $showEdit) {
+                BusinessCardEditor(editing: card)
+            }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+            .alert("確定要刪除這張名片嗎？", isPresented: $showDeleteConfirm) {
+                Button("刪除", role: .destructive) {
+                    lifeStore.deleteBusinessCard(card)
+                    dismiss()
+                }
+                Button("取消", role: .cancel) {}
+            }
+        }
+    }
+
+    // MARK: - Hero 名片卡
+
+    private var heroCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(card.name.isEmpty ? "未命名" : card.name)
+                        .font(.largeTitle.bold())
+                        .foregroundStyle(.white)
+                    if !card.jobTitle.isEmpty {
+                        Text(card.jobTitle)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                }
+                Spacer()
+                Image(systemName: "person.crop.rectangle.fill")
+                    .font(.system(size: 38))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            Spacer().frame(height: 8)
+            VStack(alignment: .leading, spacing: 3) {
+                if !card.company.isEmpty {
+                    Text(card.company)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                }
+                if !card.department.isEmpty {
+                    Text(card.department)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 180)
+        .background(
+            LinearGradient(
+                colors: [Color.orange, Color.pink.opacity(0.85), Color.purple.opacity(0.7)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+        .padding(.horizontal)
+    }
+
+    // MARK: - 聯絡方式
+
+    private var hasContact: Bool {
+        !card.phone.isEmpty || !card.email.isEmpty || !card.address.isEmpty
+    }
+
+    private var contactCard: some View {
+        VStack(spacing: 0) {
+            if !card.phone.isEmpty {
+                contactRow(icon: "phone.fill", label: "電話", value: card.phone, color: .green) {
+                    callPhone(card.phone)
+                }
+                Divider().padding(.leading, 48)
+            }
+            if !card.email.isEmpty {
+                contactRow(icon: "envelope.fill", label: "Email", value: card.email, color: .indigo) {
+                    sendEmail(card.email)
+                }
+                Divider().padding(.leading, 48)
+            }
+            if !card.address.isEmpty {
+                contactRow(icon: "mappin.and.ellipse", label: "地址", value: card.address, color: .red) {
+                    openInMaps(card.address)
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private func contactRow(icon: String, label: String, value: String,
+                            color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(color.opacity(0.14)).frame(width: 32, height: 32)
+                    Image(systemName: icon).font(.subheadline).foregroundStyle(color)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label).font(.caption2).foregroundStyle(.secondary)
+                    Text(value).font(.subheadline).foregroundStyle(.primary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal).padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 中介資料（收集日期）
+
+    private var metaCard: some View {
+        VStack(spacing: 0) {
+            metaRow(icon: "calendar", label: "收集日期", value: fmtDate(card.date), color: .gray)
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private func metaRow(icon: String, label: String, value: String, color: Color) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(color.opacity(0.14)).frame(width: 32, height: 32)
+                Image(systemName: icon).font(.subheadline).foregroundStyle(color)
+            }
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.subheadline)
+        }
+        .padding(.horizontal).padding(.vertical, 10)
+    }
+
+    // MARK: - 備註
+
+    private var noteCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("備註")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(card.note)
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    // MARK: - 動作
+
+    private func callPhone(_ phone: String) {
+        let cleaned = phone.filter { $0.isNumber || $0 == "+" }
+        guard !cleaned.isEmpty,
+              let url = URL(string: "tel://\(cleaned)") else { return }
+        openURL(url)
+    }
+
+    private func sendEmail(_ email: String) {
+        guard let url = URL(string: "mailto:\(email)") else { return }
+        openURL(url)
+    }
+
+    private func openInMaps(_ address: String) {
+        guard let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "http://maps.apple.com/?q=\(encoded)") else { return }
+        openURL(url)
+    }
+
+    private func fmtDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+    }
+}
+
+// MARK: - UUID Identifiable wrapper（給 .sheet(item:) 用）
+
+private struct IdentifiableUUID: Identifiable {
+    let id: UUID
 }
 
 // MARK: - 名片編輯
