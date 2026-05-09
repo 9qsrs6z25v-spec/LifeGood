@@ -460,16 +460,19 @@ struct ChildDetailView: View {
                             Text(rec.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
-                    if rec.photoFileName != nil {
-                        let displayURL = rec.sketchURL ?? rec.photoURL
-                        if let url = displayURL,
-                           let data = try? Data(contentsOf: url),
-                           let img = UIImage(data: data) {
-                            Image(uiImage: img)
-                                .resizable().scaledToFill()
-                                .frame(height: 80)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
+                }
+
+                // 照片放在 row 右側，依原比例顯示（最大 80×80）
+                if rec.photoFileName != nil {
+                    let displayURL = rec.sketchURL ?? rec.photoURL
+                    if let url = displayURL,
+                       let data = try? Data(contentsOf: url),
+                       let img = UIImage(data: data) {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: 80, maxHeight: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
             }
