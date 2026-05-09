@@ -1013,6 +1013,7 @@ struct FinanceCardView: View {
         let isVirtual = isVirtualCreditCardEntry(dep)
         let isStock = dep.linkedStockId != nil
         let badgeText: String? = {
+            if dep.isAdjust { return "沖正" }
             if isStock {
                 if dep.isWithdrawal { return "買入/虧損" }
                 return "賣出獲利"
@@ -1022,6 +1023,7 @@ struct FinanceCardView: View {
             return dep.isWithdrawal ? "提款" : "存款"
         }()
         let badgeColor: Color = {
+            if dep.isAdjust { return .indigo }
             if isStock { return .purple }
             if isVirtual { return .orange }
             if dep.isWithdrawal { return .red }
@@ -1416,10 +1418,12 @@ struct DepositEditorSheet: View {
         let diff = targetAmount - currentBalance
         guard diff != 0 else { dismiss(); return }
         var list = ms.bankDeposits ?? []
-        let note = adjustNote.trimmingCharacters(in: .whitespaces)
+        let trimmedNote = adjustNote.trimmingCharacters(in: .whitespaces)
         list.append(BankDeposit(
             id: UUID(), date: date, amount: abs(diff),
-            currencyCode: currency, isWithdrawal: diff < 0
+            currencyCode: currency, isWithdrawal: diff < 0,
+            isAdjust: true,
+            note: trimmedNote.isEmpty ? nil : trimmedNote
         ))
         ms.bankDeposits = list
         lifeStore.update(ms); dismiss()

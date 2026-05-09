@@ -418,15 +418,22 @@ struct BankDeposit: Identifiable, Codable {
     var isWithdrawal: Bool
     var linkedExpenseId: UUID?
     var linkedStockId: UUID?
+    /// 由「沖正」功能建立的調整紀錄；用來在列表上顯示「沖正」徽章
+    var isAdjust: Bool
+    /// 備註（沖正調整原因等）
+    var note: String?
 
     init(id: UUID = UUID(), date: Date = Date(), amount: Double = 0,
          currencyCode: String = "NT$", isWithdrawal: Bool = false,
-         linkedExpenseId: UUID? = nil, linkedStockId: UUID? = nil) {
+         linkedExpenseId: UUID? = nil, linkedStockId: UUID? = nil,
+         isAdjust: Bool = false, note: String? = nil) {
         self.id = id; self.date = date; self.amount = amount
         self.currencyCode = currencyCode
         self.isWithdrawal = isWithdrawal
         self.linkedExpenseId = linkedExpenseId
         self.linkedStockId = linkedStockId
+        self.isAdjust = isAdjust
+        self.note = note
     }
 
     init(from decoder: Decoder) throws {
@@ -438,10 +445,12 @@ struct BankDeposit: Identifiable, Codable {
         isWithdrawal = (try? c.decode(Bool.self, forKey: .isWithdrawal)) ?? false
         linkedExpenseId = try? c.decodeIfPresent(UUID.self, forKey: .linkedExpenseId)
         linkedStockId = try? c.decodeIfPresent(UUID.self, forKey: .linkedStockId)
+        isAdjust = (try? c.decode(Bool.self, forKey: .isAdjust)) ?? false
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, date, amount, currencyCode, isWithdrawal, linkedExpenseId, linkedStockId
+        case id, date, amount, currencyCode, isWithdrawal, linkedExpenseId, linkedStockId, isAdjust, note
     }
 }
 
