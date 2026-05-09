@@ -2,6 +2,117 @@ import SwiftUI
 import PhotosUI
 import CoreImage.CIFilterBuiltins
 import UIKit
+import Contacts
+import ContactsUI
+
+// MARK: - 聯絡人挑選器（包 CNContactPickerViewController）
+
+struct ContactPickerView: UIViewControllerRepresentable {
+    var onPicked: (CNContact) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> CNContactPickerViewController {
+        let picker = CNContactPickerViewController()
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: CNContactPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, CNContactPickerDelegate {
+        let parent: ContactPickerView
+        init(_ parent: ContactPickerView) { self.parent = parent }
+
+        func contactPicker(_ picker: CNContactPickerViewController, didSelect contact: CNContact) {
+            parent.onPicked(contact)
+            parent.dismiss()
+        }
+
+        func contactPickerDidCancel(_ picker: CNContactPickerViewController) {
+            parent.dismiss()
+        }
+    }
+}
+
+// MARK: - CNContact → BusinessCard 預設資料
+
+extension BusinessCard {
+    /// 把系統聯絡人轉成預填的 BusinessCard，由編輯器再讓使用者確認
+    init(fromContact c: CNContact, id: UUID = UUID(), photoFileNameHolder: String? = nil) {
+        // 姓名（中文順序：姓 + 名）
+        let nameParts = [c.familyName, c.givenName]
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let fullName = nameParts.isEmpty
+            ? "\(c.givenName) \(c.familyName)".trimmingCharacters(in: .whitespaces)
+            : nameParts.joined()
+        // 公司 / 部門 / 職稱
+        let company = c.organizationName.trimmingCharacters(in: .whitespaces)
+        let department = c.departmentName.trimmingCharacters(in: .whitespaces)
+        let jobTitle = c.jobTitle.trimmingCharacters(in: .whitespaces)
+        // 電話：優先 mobile，再 work，再第一筆
+        let phone: String = {
+            let labelOrder: [String] = [
+                CNLabelPhoneNumberMobile, CNLabelPhoneNumberiPhone,
+                CNLabelWork, CNLabelHome, CNLabelPhoneNumberMain
+            ]
+            for label in labelOrder {
+                if let match = c.phoneNumbers.first(where: { $0.label == label }) {
+                    return match.value.stringValue
+                }
+            }
+            return c.phoneNumbers.first?.value.stringValue ?? ""
+        }()
+        // Email：優先 work
+        let email: String = {
+            if let work = c.emailAddresses.first(where: { $0.label == CNLabelWork }) {
+                return work.value as String
+            }
+            return (c.emailAddresses.first?.value as String?) ?? ""
+        }()
+        // 地址：優先 work
+        let address: String = {
+            let labelOrder = [CNLabelWork, CNLabelHome]
+            let chosen: CNPostalAddress? = {
+                for label in labelOrder {
+                    if let match = c.postalAddresses.first(where: { $0.label == label }) {
+                        return match.value
+                    }
+                }
+                return c.postalAddresses.first?.value
+            }()
+            guard let p = chosen else { return "" }
+            let parts = [p.country, p.postalCode, p.state,
+                         p.city, p.subLocality, p.street]
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            return parts.joined(separator: " ")
+        }()
+        // CNContactNoteKey 自 iOS 13 起需特殊 entitlement；沒拿到就跳過
+        let note: String = {
+            if c.isKeyAvailable(CNContactNoteKey) {
+                return c.note.trimmingCharacters(in: .whitespaces)
+            }
+            return ""
+        }()
+
+        self.init(
+            id: id,
+            name: fullName,
+            company: company,
+            department: department,
+            jobTitle: jobTitle,
+            phone: phone,
+            email: email,
+            address: address,
+            note: note,
+            date: Date(),
+            photoFileName: photoFileNameHolder
+        )
+    }
+}
 
 struct BusinessCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -10,6 +121,7 @@ struct BusinessCardView: View {
     @State private var viewingCardId: UUID?
     @State private var searchText = ""
     @State private var showPremiumAlert = false
+    @State private var showContactPicker = false
 
     private var filteredCards: [BusinessCard] {
         let sorted = lifeStore.businessCards.sorted { $0.date > $1.date }
@@ -80,11 +192,22 @@ struct BusinessCardView: View {
             .navigationTitle("名片")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        if subscription.isPremium { showAdd = true }
-                        else { showPremiumAlert = true }
+                    Menu {
+                        Button {
+                            if subscription.isPremium { showAdd = true }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Label("新增空白名片", systemImage: "square.and.pencil")
+                        }
+                        Button {
+                            if subscription.isPremium { showContactPicker = true }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Label("從聯絡人匯入", systemImage: "person.crop.circle.badge.plus")
+                        }
                     } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3).foregroundStyle(.green)
                     }
                 }
             }
@@ -96,6 +219,12 @@ struct BusinessCardView: View {
                 set: { viewingCardId = $0?.id }
             )) { wrapper in
                 BusinessCardDetailView(cardId: wrapper.id)
+            }
+            .sheet(isPresented: $showContactPicker) {
+                ContactPickerView { contact in
+                    importContact(contact)
+                }
+                .ignoresSafeArea()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
@@ -207,6 +336,28 @@ struct BusinessCardView: View {
 
     private func fmtDate(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+    }
+
+    // MARK: - 從系統聯絡人匯入
+
+    /// 把 CNContact 轉成 BusinessCard 並加進 lifeStore，匯入完直接打開詳細頁。
+    /// 若聯絡人有大頭照，一併存進 BusinessCardPhotos 並設為名片頭像。
+    private func importContact(_ c: CNContact) {
+        let id = UUID()
+        var photoFileName: String? = nil
+        if let imgData = c.imageData ?? c.thumbnailImageData {
+            photoFileName = BusinessCard.savePhoto(imgData, id: id)
+        }
+        let card = BusinessCard(fromContact: c, id: id, photoFileNameHolder: photoFileName)
+        // 沒有任何欄位就略過
+        let isEmpty = card.name.isEmpty && card.company.isEmpty && card.phone.isEmpty
+            && card.email.isEmpty && card.address.isEmpty
+        guard !isEmpty else { return }
+        lifeStore.add(card)
+        // 系統 picker 收起後，延遲一點再開詳細頁，避免 sheet 衝突
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            viewingCardId = card.id
+        }
     }
 }
 
