@@ -1,5 +1,77 @@
 import SwiftUI
 
+// MARK: - 固定支出週期展開（共用）
+
+/// 把連結到指定銀行 milestone 的「直接扣款 + 週期性」固定支出，
+/// 從建立日依 recurrence 一路展開成每期一筆 BankDeposit（虛擬條目，
+/// 用於顯示與餘額計算）。已截至「今天」為止。
+fileprivate func expandedFixedExpenseWithdrawals(
+    for bankMilestoneId: UUID,
+    expenses: [Expense]
+) -> [BankDeposit] {
+    let now = Date()
+    let cal = Calendar.current
+    let candidates = expenses.filter { exp in
+        exp.expenseType == .fixed
+        && exp.recurrence != nil
+        && exp.linkedBankMilestoneId == bankMilestoneId
+        && exp.linkedCreditCardMilestoneId == nil
+    }
+    var result: [BankDeposit] = []
+    for exp in candidates {
+        guard let recurrence = exp.recurrence else { continue }
+        var current = exp.date
+        var idx = 0
+        while current <= now && idx < 1200 {
+            let stableId = stableDepositUUID(seed: "\(exp.id.uuidString)-\(idx)")
+            result.append(BankDeposit(
+                id: stableId,
+                date: current,
+                amount: exp.amount,
+                currencyCode: exp.linkedBankCurrency ?? exp.currencyCode,
+                isWithdrawal: true,
+                linkedExpenseId: exp.id
+            ))
+            idx += 1
+            switch recurrence {
+            case .monthly:
+                current = cal.date(byAdding: .month, value: 1, to: current) ?? current
+            case .quarterly:
+                current = cal.date(byAdding: .month, value: 3, to: current) ?? current
+            case .yearly:
+                current = cal.date(byAdding: .year, value: 1, to: current) ?? current
+            }
+        }
+    }
+    return result
+}
+
+/// 從種子字串產生穩定 UUID，給虛擬 BankDeposit 用
+fileprivate func stableDepositUUID(seed: String) -> UUID {
+    var hasher = Hasher()
+    hasher.combine(seed)
+    var x = UInt(bitPattern: hasher.finalize())
+    var bytes: [UInt8] = []
+    for _ in 0..<8 {
+        bytes.append(UInt8(x & 0xFF))
+        x >>= 8
+    }
+    var hasher2 = Hasher()
+    hasher2.combine(seed)
+    hasher2.combine("fix")
+    var y = UInt(bitPattern: hasher2.finalize())
+    for _ in 0..<8 {
+        bytes.append(UInt8(y & 0xFF))
+        y >>= 8
+    }
+    return UUID(uuid: (
+        bytes[0], bytes[1], bytes[2], bytes[3],
+        bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11],
+        bytes[12], bytes[13], bytes[14], bytes[15]
+    ))
+}
+
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -207,7 +279,7 @@ struct LifeFinanceView: View {
         .padding(.vertical, 2)
     }
 
-    /// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 股票交易）
+    /// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 股票交易 + 固定支出週期展開）
     private func bankBalances(for ms: LifeMilestone) -> [String: Double] {
         let now = Date()
         var totals: [String: Double] = [:]
@@ -216,7 +288,15 @@ struct LifeFinanceView: View {
             if let expId = dep.linkedExpenseId,
                let exp = expenseStore.expenses.first(where: { $0.id == expId }),
                exp.linkedCreditCardMilestoneId != nil { continue }
+            // 跳過已連結到固定支出（含週期）的存款 — 改用展開的虛擬條目取代，避免漏算或重算
+            if let expId = dep.linkedExpenseId,
+               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
+               exp.expenseType == .fixed, exp.recurrence != nil { continue }
             totals[dep.currencyCode, default: 0] += dep.isWithdrawal ? -dep.amount : dep.amount
+        }
+        // 固定支出（直接扣銀行）依週期展開為每期扣款
+        for dep in expandedFixedExpenseWithdrawals(for: ms.id, expenses: expenseStore.expenses) {
+            totals[dep.currencyCode, default: 0] -= dep.amount
         }
         // 信用卡彙總扣款一律以 NT$ 計
         let cards = lifeStore.milestones.filter {
@@ -522,17 +602,25 @@ struct FinanceCardView: View {
 
     // MARK: - 銀行存款章節
 
-    /// 銀行存款列表：直接扣款的 BankDeposit + 信用卡逐月彙總（虛擬條目）
+    /// 銀行存款列表：直接扣款的 BankDeposit + 信用卡逐月彙總 + 固定支出週期展開（虛擬條目）
     private var deposits: [BankDeposit] {
         let now = Date()
         let real = (item.bankDeposits ?? []).filter { dep in
             guard dep.date <= now else { return false }
             guard let expId = dep.linkedExpenseId,
                   let exp = expenseStore.expenses.first(where: { $0.id == expId }) else { return true }
-            return exp.linkedCreditCardMilestoneId == nil
+            // 信用卡支出：用每月彙總取代
+            if exp.linkedCreditCardMilestoneId != nil { return false }
+            // 固定支出（週期）：用展開虛擬條目取代
+            if exp.expenseType == .fixed && exp.recurrence != nil { return false }
+            return true
         }
         let aggregated = aggregatedCreditCardWithdrawals()
-        return (real + aggregated).sorted { $0.date < $1.date }
+        let fixedExpanded = expandedFixedExpenseWithdrawals(
+            for: milestoneId,
+            expenses: expenseStore.expenses
+        )
+        return (real + aggregated + fixedExpanded).sorted { $0.date < $1.date }
     }
 
     /// 將連結到本銀行的信用卡支出依月份彙總成虛擬 BankDeposit

@@ -1755,6 +1755,16 @@ struct AddExpenseView: View {
         }
         // 信用卡扣款不寫入 BankDeposit；改在顯示時依月份彙總
         guard expense.linkedCreditCardMilestoneId == nil else { return }
+        // 週期性固定支出也不寫入單筆 BankDeposit；顯示時依 recurrence 從建立日展開到今天
+        if expense.expenseType == .fixed, expense.recurrence != nil {
+            // 同時清掉同一帳戶下舊版本可能殘留的單筆紀錄
+            if let bankId = expense.linkedBankMilestoneId,
+               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                ms.bankDeposits?.removeAll { $0.linkedExpenseId == expense.id }
+                lifeStore.update(ms)
+            }
+            return
+        }
         // 寫入新的連結記錄（直接扣款的銀行）
         guard let bankId = expense.linkedBankMilestoneId,
               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
