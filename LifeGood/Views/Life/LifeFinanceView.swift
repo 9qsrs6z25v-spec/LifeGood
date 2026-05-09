@@ -46,6 +46,47 @@ fileprivate func expandedFixedExpenseWithdrawals(
     return result
 }
 
+/// 把連結到指定銀行 milestone 的「週期性」收入（月薪 / 年薪），
+/// 從建立日依 period 一路展開成每期一筆 BankDeposit（虛擬條目，
+/// 用於顯示與餘額計算）。已截至「今天」為止。
+fileprivate func expandedIncomeDeposits(
+    for bankMilestoneId: UUID,
+    incomes: [Income]
+) -> [BankDeposit] {
+    let now = Date()
+    let cal = Calendar.current
+    let candidates = incomes.filter {
+        $0.period != .once
+        && $0.linkedBankMilestoneId == bankMilestoneId
+    }
+    var result: [BankDeposit] = []
+    for inc in candidates {
+        var current = inc.date
+        var idx = 0
+        while current <= now && idx < 1200 {
+            let stableId = stableDepositUUID(seed: "inc-\(inc.id.uuidString)-\(idx)")
+            result.append(BankDeposit(
+                id: stableId,
+                date: current,
+                amount: inc.amount,
+                currencyCode: inc.linkedBankCurrency ?? "NT$",
+                isWithdrawal: false,
+                linkedExpenseId: inc.id
+            ))
+            idx += 1
+            switch inc.period {
+            case .monthly:
+                current = cal.date(byAdding: .month, value: 1, to: current) ?? current
+            case .yearly:
+                current = cal.date(byAdding: .year, value: 1, to: current) ?? current
+            case .once:
+                break
+            }
+        }
+    }
+    return result
+}
+
 /// 從種子字串產生穩定 UUID，給虛擬 BankDeposit 用
 fileprivate func stableDepositUUID(seed: String) -> UUID {
     var hasher = Hasher()
@@ -292,11 +333,19 @@ struct LifeFinanceView: View {
             if let expId = dep.linkedExpenseId,
                let exp = expenseStore.expenses.first(where: { $0.id == expId }),
                exp.expenseType == .fixed, exp.recurrence != nil { continue }
+            // 跳過已連結到週期性收入的存款 — 改用展開的虛擬條目取代
+            if let incId = dep.linkedExpenseId,
+               let inc = expenseStore.incomes.first(where: { $0.id == incId }),
+               inc.period != .once { continue }
             totals[dep.currencyCode, default: 0] += dep.isWithdrawal ? -dep.amount : dep.amount
         }
         // 固定支出（直接扣銀行）依週期展開為每期扣款
         for dep in expandedFixedExpenseWithdrawals(for: ms.id, expenses: expenseStore.expenses) {
             totals[dep.currencyCode, default: 0] -= dep.amount
+        }
+        // 週期性收入依 period 展開為每期入帳
+        for dep in expandedIncomeDeposits(for: ms.id, incomes: expenseStore.incomes) {
+            totals[dep.currencyCode, default: 0] += dep.amount
         }
         // 信用卡彙總扣款一律以 NT$ 計
         let cards = lifeStore.milestones.filter {
@@ -602,17 +651,24 @@ struct FinanceCardView: View {
 
     // MARK: - 銀行存款章節
 
-    /// 銀行存款列表：直接扣款的 BankDeposit + 信用卡逐月彙總 + 固定支出週期展開（虛擬條目）
+    /// 銀行存款列表：真實 BankDeposit + 信用卡逐月彙總 + 固定支出週期展開 + 週期性收入展開
     private var deposits: [BankDeposit] {
         let now = Date()
         let real = (item.bankDeposits ?? []).filter { dep in
             guard dep.date <= now else { return false }
-            guard let expId = dep.linkedExpenseId,
-                  let exp = expenseStore.expenses.first(where: { $0.id == expId }) else { return true }
-            // 信用卡支出：用每月彙總取代
-            if exp.linkedCreditCardMilestoneId != nil { return false }
-            // 固定支出（週期）：用展開虛擬條目取代
-            if exp.expenseType == .fixed && exp.recurrence != nil { return false }
+            guard let linkedId = dep.linkedExpenseId else { return true }
+            // 連結到 Expense
+            if let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
+                // 信用卡支出：用每月彙總取代
+                if exp.linkedCreditCardMilestoneId != nil { return false }
+                // 固定支出（週期）：用展開虛擬條目取代
+                if exp.expenseType == .fixed && exp.recurrence != nil { return false }
+                return true
+            }
+            // 連結到 Income（週期性 → 用展開取代）
+            if let inc = expenseStore.incomes.first(where: { $0.id == linkedId }) {
+                if inc.period != .once { return false }
+            }
             return true
         }
         let aggregated = aggregatedCreditCardWithdrawals()
@@ -620,7 +676,11 @@ struct FinanceCardView: View {
             for: milestoneId,
             expenses: expenseStore.expenses
         )
-        return (real + aggregated + fixedExpanded).sorted { $0.date < $1.date }
+        let incomeExpanded = expandedIncomeDeposits(
+            for: milestoneId,
+            incomes: expenseStore.incomes
+        )
+        return (real + aggregated + fixedExpanded + incomeExpanded).sorted { $0.date < $1.date }
     }
 
     /// 將連結到本銀行的信用卡支出依月份彙總成虛擬 BankDeposit

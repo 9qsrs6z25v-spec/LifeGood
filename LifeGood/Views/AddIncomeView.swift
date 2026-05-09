@@ -249,6 +249,17 @@ struct AddIncomeView: View {
             oldMs.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
             lifeStore.update(oldMs)
         }
+        // 週期性收入（月薪 / 年薪）不寫入單筆 BankDeposit；
+        // 顯示時會依 period 從建立日展開到今天，每期一筆虛擬條目。
+        if income.period != .once {
+            // 同時清掉同一帳戶下舊版本可能殘留的單筆紀錄
+            if let bankId = income.linkedBankMilestoneId,
+               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                ms.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
+                lifeStore.update(ms)
+            }
+            return
+        }
         // 寫入新的存款記錄（收入是 isWithdrawal=false）
         guard let bankId = income.linkedBankMilestoneId,
               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
