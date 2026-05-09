@@ -9,33 +9,22 @@ struct FamilyView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // 上方：街道式總覽（永遠顯示，即使空也保留高度）
-                FamilyOverviewMap(
-                    myName: store.profile.chineseName,
-                    members: store.familyMembers
-                )
-                .frame(height: 320)
-
-                // 下方：成員列表（可點擊編輯、滑動刪除）
-                List {
-                    ForEach(store.familyMembers) { member in
-                        memberRow(member)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if subscription.isPremium { editingMember = member }
-                                else { showPremiumAlert = true }
-                            }
-                    }
-                    .onDelete { offsets in
-                        guard subscription.isPremium else { showPremiumAlert = true; return }
-                        let items = offsets.map { store.familyMembers[$0] }
-                        items.forEach { store.deleteFamilyMember($0) }
-                    }
+            // 用同一個 List 把街道圖跟成員清單放在一起；
+            // 列表上滑時，街道圖會自然跟著被推上去，給下方項目更多空間。
+            List {
+                Section {
+                    FamilyOverviewMap(
+                        myName: store.profile.chineseName,
+                        members: store.familyMembers
+                    )
+                    .frame(height: 320)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
-                .listStyle(.insetGrouped)
-                .overlay {
-                    if store.familyMembers.isEmpty {
+
+                if store.familyMembers.isEmpty {
+                    Section {
                         VStack(spacing: 12) {
                             Image(systemName: "person.3.fill")
                                 .font(.system(size: 36)).foregroundStyle(.secondary)
@@ -43,9 +32,29 @@ struct FamilyView: View {
                             Text("點右上角 + 或在履歷頁面新增")
                                 .font(.caption).foregroundStyle(.tertiary)
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                        .listRowBackground(Color.clear)
+                    }
+                } else {
+                    Section("家庭成員") {
+                        ForEach(store.familyMembers) { member in
+                            memberRow(member)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    if subscription.isPremium { editingMember = member }
+                                    else { showPremiumAlert = true }
+                                }
+                        }
+                        .onDelete { offsets in
+                            guard subscription.isPremium else { showPremiumAlert = true; return }
+                            let items = offsets.map { store.familyMembers[$0] }
+                            items.forEach { store.deleteFamilyMember($0) }
+                        }
                     }
                 }
             }
+            .listStyle(.insetGrouped)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("家庭")
             .toolbar {

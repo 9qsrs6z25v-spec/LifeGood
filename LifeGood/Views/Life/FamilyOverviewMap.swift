@@ -108,26 +108,29 @@ struct FamilyOverviewMap: View {
                             if h.kind == .parents {
                                 Rectangle()
                                     .fill(Color.green.opacity(0.6))
-                                    .frame(width: 2, height: 18)
+                                    .frame(width: 2, height: 14)
                             } else {
                                 Rectangle()
                                     .fill(Color.clear)
-                                    .frame(width: 2, height: 18)
+                                    .frame(width: 2, height: 14)
                             }
                         }
                         .frame(width: HouseView.fixedWidth)
                     }
                     if topHouses.isEmpty {
-                        // 占位：若沒有任何上方房子，仍保留高度讓街道置中
+                        // 占位：沒有上排房子時保留高度，街道仍會在中間
                         Color.clear.frame(height: 130)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 24)
+                .frame(minWidth: scrollMinWidth, alignment: .center)
 
-                // 中央街道
+                // 中央街道（加厚）
                 streetLine
+                    .frame(minWidth: scrollMinWidth)
 
                 // 下排（我家 + 兄弟姐妹 + 部分親屬）
+                // 上方負 padding 讓房子腰部疊到街道上
                 HStack(alignment: .top, spacing: 24) {
                     ForEach(bottomHouses) { h in
                         VStack(spacing: 4) {
@@ -135,18 +138,20 @@ struct FamilyOverviewMap: View {
                             if h.kind == .myFamily && !parents.isEmpty {
                                 Rectangle()
                                     .fill(Color.green.opacity(0.6))
-                                    .frame(width: 2, height: 18)
+                                    .frame(width: 2, height: 14)
                             } else {
                                 Rectangle()
                                     .fill(Color.clear)
-                                    .frame(width: 2, height: 18)
+                                    .frame(width: 2, height: 14)
                             }
                             HouseView(house: h)
                         }
                         .frame(width: HouseView.fixedWidth)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 24)
+                .padding(.top, -32)
+                .frame(minWidth: scrollMinWidth, alignment: .center)
             }
             .padding(.vertical, 12)
         }
@@ -158,23 +163,48 @@ struct FamilyOverviewMap: View {
         )
     }
 
+    /// 估算 ScrollView 視覺最小寬度（以屋子數量決定，含 padding）
+    private var scrollMinWidth: CGFloat {
+        let topCount = max(topHouses.count, 1)
+        let bottomCount = max(bottomHouses.count, 1)
+        let count = max(topCount, bottomCount)
+        return CGFloat(count) * (HouseView.fixedWidth + 24) + 48
+    }
+
     // MARK: - 街道
 
     private var streetLine: some View {
         ZStack {
+            // 路面（深綠灰）
             Rectangle()
                 .fill(Color(red: 0.55, green: 0.62, blue: 0.50))
-                .frame(height: 12)
-            // 中線虛線
-            HStack(spacing: 6) {
-                ForEach(0..<60, id: \.self) { _ in
-                    Rectangle()
-                        .fill(Color.yellow.opacity(0.85))
-                        .frame(width: 16, height: 2)
+                .frame(height: 32)
+            // 雙黃線
+            VStack(spacing: 4) {
+                HStack(spacing: 8) {
+                    ForEach(0..<80, id: \.self) { _ in
+                        Rectangle()
+                            .fill(Color.yellow.opacity(0.85))
+                            .frame(width: 18, height: 2)
+                    }
+                }
+                HStack(spacing: 8) {
+                    ForEach(0..<80, id: \.self) { _ in
+                        Rectangle()
+                            .fill(Color.yellow.opacity(0.85))
+                            .frame(width: 18, height: 2)
+                    }
                 }
             }
+            // 路肩白邊
+            VStack {
+                Rectangle().fill(Color.white.opacity(0.55)).frame(height: 1.5)
+                Spacer()
+                Rectangle().fill(Color.white.opacity(0.55)).frame(height: 1.5)
+            }
+            .frame(height: 32)
         }
-        .frame(height: 14)
+        .frame(height: 32)
     }
 }
 
