@@ -18,6 +18,11 @@ struct AddExpenseView: View {
     @State private var date = Date()
     @State private var selectedVariableCategory: VariableCategory = .food
     @State private var selectedTaxSavingSubCategory: TaxSavingSubCategory = .donation
+    /// 社交子分類：禮金 / 紅包 / 白包 等
+    @State private var selectedSocialSubCategory: SocialSubCategory = .birthdayGift
+    /// 社交禮金收受人（家人 + 人際關係多選）
+    @State private var selectedSocialRecipients: Set<String> = []
+    @State private var showSocialRecipientPopover: Bool = false
     /// 固定支出：列入節稅追蹤；nil 採自動推斷
     @State private var taxDeductibleOverride: Bool? = nil
     @State private var selectedDiningMembers: Set<String> = []
@@ -909,6 +914,93 @@ struct AddExpenseView: View {
         return names
     }
 
+    // MARK: - 社交禮金收受人選單
+
+    /// 候選人來源：家人 + 人際關係（朋友 / 同事 / 客戶）
+    private var socialRecipientCandidates: [(group: String, names: [String])] {
+        var groups: [(String, [String])] = []
+        let famNames = lifeStore.familyMembers
+            .map { $0.chineseName }
+            .filter { !$0.isEmpty }
+        if !famNames.isEmpty { groups.append(("家人", famNames)) }
+        let relGroups = Dictionary(grouping: lifeStore.relationships) { $0.group.rawValue }
+        for key in ["朋友", "同事", "客戶", "家人", "其他"] {
+            let names = (relGroups[key] ?? [])
+                .map { $0.name }
+                .filter { !$0.isEmpty }
+            if !names.isEmpty { groups.append((key, names)) }
+        }
+        // 去重（保留首次出現順序）
+        return groups.map { (g, list) in
+            var seen = Set<String>(); var unique: [String] = []
+            for n in list where !seen.contains(n) { seen.insert(n); unique.append(n) }
+            return (g, unique)
+        }
+    }
+
+    private var socialRecipientLabel: String {
+        if selectedSocialRecipients.isEmpty { return "選擇收受人" }
+        return selectedSocialRecipients.sorted().joined(separator: "、")
+    }
+
+    private var socialRecipientString: String {
+        guard !selectedSocialRecipients.isEmpty else { return "" }
+        return selectedSocialRecipients.sorted().joined(separator: "、")
+    }
+
+    private var socialRecipientSelectorList: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        selectedSocialRecipients.removeAll()
+                    } label: {
+                        HStack {
+                            Image(systemName: selectedSocialRecipients.isEmpty
+                                  ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selectedSocialRecipients.isEmpty ? Color.green : Color.secondary)
+                            Text("不指定")
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                ForEach(socialRecipientCandidates, id: \.group) { group in
+                    Section(group.group) {
+                        ForEach(group.names, id: \.self) { name in
+                            Button {
+                                if selectedSocialRecipients.contains(name) {
+                                    selectedSocialRecipients.remove(name)
+                                } else {
+                                    selectedSocialRecipients.insert(name)
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: selectedSocialRecipients.contains(name)
+                                          ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedSocialRecipients.contains(name) ? Color.green : Color.secondary)
+                                    Text(name)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("收受人")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showSocialRecipientPopover = false }
+                        .bold().foregroundStyle(.green)
+                }
+            }
+        }
+    }
+
     private var categorySection: some View {
         Section("分類") {
             if expenseType == .variable {
@@ -952,6 +1044,38 @@ struct AddExpenseView: View {
                     Text(selectedTaxSavingSubCategory.limitNote)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+
+                // 社交子分類 + 收受人（連動家人履歷）
+                if selectedVariableCategory == .social && advancedMode {
+                    HStack {
+                        Picker("禮金種類", selection: $selectedSocialSubCategory) {
+                            ForEach(SocialSubCategory.allCases) { sub in
+                                Label(sub.rawValue, systemImage: sub.icon).tag(sub)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        if !socialRecipientCandidates.isEmpty {
+                            Divider()
+                            Button {
+                                showSocialRecipientPopover = true
+                            } label: {
+                                HStack(spacing: 2) {
+                                    Image(systemName: "gift.fill").font(.caption)
+                                    Text(socialRecipientLabel).lineLimit(1)
+                                    Image(systemName: "chevron.down").font(.caption2)
+                                }
+                                .foregroundStyle(.pink)
+                            }
+                            .buttonStyle(.plain)
+                            .sheet(isPresented: $showSocialRecipientPopover) {
+                                socialRecipientSelectorList
+                                    .presentationDetents([.height(420), .medium])
+                                    .presentationDragIndicator(.visible)
+                            }
+                        }
+                    }
                 }
             } else {
                 Picker("類別", selection: $selectedFixedCategory) {
@@ -1599,6 +1723,8 @@ struct AddExpenseView: View {
             vehicleExpenseCategory: (expenseType == .variable && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil,
             realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
             taxSavingSubCategory: (expenseType == .variable && selectedVariableCategory == .taxSaving) ? selectedTaxSavingSubCategory : nil,
+            socialSubCategory: (expenseType == .variable && selectedVariableCategory == .social) ? selectedSocialSubCategory : nil,
+            socialRecipient: (expenseType == .variable && selectedVariableCategory == .social && !selectedSocialRecipients.isEmpty) ? socialRecipientString : nil,
             taxDeductibleOverride: (expenseType == .fixed && showTaxDeductibleToggle) ? taxDeductibleOverride : nil,
             note: note.trimmingCharacters(in: .whitespaces),
             currencyCode: savedCurrencyCode,
@@ -1991,6 +2117,13 @@ struct AddExpenseView: View {
         date = expense.date
         if let vc = expense.variableCategory { selectedVariableCategory = vc }
         if let ts = expense.taxSavingSubCategory { selectedTaxSavingSubCategory = ts }
+        if let ss = expense.socialSubCategory { selectedSocialSubCategory = ss }
+        if let raw = expense.socialRecipient, !raw.isEmpty {
+            let names = raw.components(separatedBy: CharacterSet(charactersIn: ",、，"))
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            selectedSocialRecipients = Set(names)
+        }
         taxDeductibleOverride = expense.taxDeductibleOverride
         if let fc = expense.fixedCategory { selectedFixedCategory = fc }
         if let rec = expense.recurrence { selectedRecurrence = rec }

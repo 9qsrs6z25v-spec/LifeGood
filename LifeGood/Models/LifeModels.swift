@@ -49,6 +49,34 @@ enum FamilyMemberRole: String, Codable, CaseIterable, Identifiable {
         case .otherRelative: return "person.2.fill"
         }
     }
+
+    /// 適用「家族側」（我的家人 / 配偶家人）的角色
+    var supportsFamilySide: Bool {
+        switch self {
+        case .father, .mother, .elderBrother, .elderSister,
+             .youngerBrother, .youngerSister, .otherRelative:
+            return true
+        case .spouse, .son, .daughter:
+            return false
+        }
+    }
+
+    /// 父母 role 對應的「另一半」候選 role
+    var spouseCandidateRole: FamilyMemberRole? {
+        switch self {
+        case .father: return .mother
+        case .mother: return .father
+        default: return nil
+        }
+    }
+}
+
+// MARK: - 家族側
+
+enum FamilySide: String, Codable, CaseIterable, Identifiable {
+    case mine = "我的"
+    case spouse = "配偶的"
+    var id: String { rawValue }
 }
 
 struct FamilyMember: Identifiable, Codable {
@@ -67,6 +95,10 @@ struct FamilyMember: Identifiable, Codable {
     var relativeNote: String?
     var familyEvents: [FamilyEvent]
     var familyPhotos: [FamilyAlbumPhoto]
+    /// 家族側：我的 / 配偶的（僅父母 / 兄姊弟妹 / 其他親屬適用）
+    var familySide: FamilySide?
+    /// 父母配對：媽媽指向爸爸（或反向），自由不選
+    var spouseId: UUID?
 
     init(id: UUID = UUID(), role: FamilyMemberRole = .spouse,
          chineseName: String = "", englishName: String = "",
@@ -74,7 +106,8 @@ struct FamilyMember: Identifiable, Codable {
          marriageDate: Date? = nil, isDivorced: Bool = false, divorceDate: Date? = nil,
          childRecords: [ChildRecord] = [], dailyRecords: [DailyRecord] = [],
          birthYear: Int? = nil, idNumber: String? = nil, relativeNote: String? = nil,
-         familyEvents: [FamilyEvent] = [], familyPhotos: [FamilyAlbumPhoto] = []) {
+         familyEvents: [FamilyEvent] = [], familyPhotos: [FamilyAlbumPhoto] = [],
+         familySide: FamilySide? = nil, spouseId: UUID? = nil) {
         self.id = id; self.role = role
         self.chineseName = chineseName; self.englishName = englishName
         self.birthday = birthday
@@ -88,6 +121,8 @@ struct FamilyMember: Identifiable, Codable {
         self.relativeNote = relativeNote
         self.familyEvents = familyEvents
         self.familyPhotos = familyPhotos
+        self.familySide = familySide
+        self.spouseId = spouseId
     }
 
     init(from decoder: Decoder) throws {
@@ -107,6 +142,8 @@ struct FamilyMember: Identifiable, Codable {
         relativeNote = try? c.decodeIfPresent(String.self, forKey: .relativeNote)
         familyEvents = (try? c.decode([FamilyEvent].self, forKey: .familyEvents)) ?? []
         familyPhotos = (try? c.decode([FamilyAlbumPhoto].self, forKey: .familyPhotos)) ?? []
+        familySide = try? c.decodeIfPresent(FamilySide.self, forKey: .familySide)
+        spouseId = try? c.decodeIfPresent(UUID.self, forKey: .spouseId)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -126,11 +163,31 @@ struct FamilyMember: Identifiable, Codable {
         try c.encodeIfPresent(relativeNote, forKey: .relativeNote)
         try c.encode(familyEvents, forKey: .familyEvents)
         try c.encode(familyPhotos, forKey: .familyPhotos)
+        try c.encodeIfPresent(familySide, forKey: .familySide)
+        try c.encodeIfPresent(spouseId, forKey: .spouseId)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, role, chineseName, englishName, birthday, marriageDate, isDivorced, divorceDate, childRecords, dailyRecords
         case birthYear, idNumber, relativeNote, familyEvents, familyPhotos
+        case familySide, spouseId
+    }
+
+    /// 顯示用稱謂：依 familySide 與 role 自動套用「我的」或「配偶的」前綴
+    var displayRoleLabel: String {
+        guard let side = familySide, side == .spouse, role.supportsFamilySide else {
+            return role.rawValue
+        }
+        switch role {
+        case .father: return "配偶的父親"
+        case .mother: return "配偶的母親"
+        case .elderBrother: return "配偶的哥哥"
+        case .elderSister: return "配偶的姐姐"
+        case .youngerBrother: return "配偶的弟弟"
+        case .youngerSister: return "配偶的妹妹"
+        case .otherRelative: return "配偶的親屬"
+        default: return role.rawValue
+        }
     }
 }
 

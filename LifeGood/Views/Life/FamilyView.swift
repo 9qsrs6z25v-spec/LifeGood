@@ -75,9 +75,15 @@ struct FamilyView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(member.chineseName).font(.subheadline.weight(.medium))
                 HStack(spacing: 4) {
-                    Text(member.role.rawValue)
+                    Text(member.displayRoleLabel)
                     if !member.englishName.isEmpty {
                         Text("- \(member.englishName)")
+                    }
+                    if let spouse = spouseDisplayName(for: member) {
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                        Text("配偶 \(spouse)")
+                            .foregroundStyle(.tertiary)
                     }
                 }
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -101,5 +107,13 @@ struct FamilyView: View {
 
     private func formatDate(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+    }
+
+    /// 取得 member 配偶的顯示名稱（依 spouseId 解析）
+    private func spouseDisplayName(for member: FamilyMember) -> String? {
+        guard let id = member.spouseId,
+              let spouse = store.familyMembers.first(where: { $0.id == id }) else { return nil }
+        let name = spouse.chineseName.isEmpty ? spouse.englishName : spouse.chineseName
+        return name.isEmpty ? nil : name
     }
 }

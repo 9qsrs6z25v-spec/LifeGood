@@ -116,10 +116,67 @@ struct FamilyMemberDetailView: View {
     @State private var addingPhoto = false
     @State private var editingPhoto: FamilyAlbumPhoto?
     @State private var viewingPhotoURL: URL?
+    @EnvironmentObject var expenseStore: ExpenseStore
 
     private var member: FamilyMember {
         lifeStore.familyMembers.first(where: { $0.id == memberId })
             ?? FamilyMember(role: .otherRelative)
+    }
+
+    /// 變動支出 .social 中將此家人列為收受人的紀錄
+    private var memberGifts: [Expense] {
+        let target = member.chineseName
+        guard !target.isEmpty else { return [] }
+        return expenseStore.expenses
+            .filter { $0.expenseType == .variable && $0.variableCategory == .social }
+            .filter { e in
+                guard let raw = e.socialRecipient, !raw.isEmpty else { return false }
+                let names = raw.components(separatedBy: CharacterSet(charactersIn: ",、，"))
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                return names.contains(target)
+            }
+            .sorted { $0.date > $1.date }
+    }
+
+    private var memberGiftsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "gift.fill").foregroundStyle(.pink)
+                Text("收到的禮金").font(.headline)
+                Spacer()
+                Text(formatGiftTotal(memberGifts.reduce(0) { $0 + $1.amount }))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.pink)
+            }
+            .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+
+            ForEach(SocialSubCategory.allCases) { sub in
+                let items = memberGifts.filter { $0.socialSubCategory == sub }
+                if !items.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: sub.icon).foregroundStyle(.pink).frame(width: 22)
+                        Text(sub.rawValue).font(.subheadline)
+                        Spacer()
+                        Text("\(items.count) 筆")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        Text(formatGiftTotal(items.reduce(0) { $0 + $1.amount }))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
+                    }
+                    .padding(.horizontal).padding(.vertical, 6)
+                    Divider().padding(.leading, 44)
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private func formatGiftTotal(_ v: Double) -> String {
+        let f = NumberFormatter(); f.numberStyle = .currency
+        f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     var body: some View {
@@ -128,6 +185,9 @@ struct FamilyMemberDetailView: View {
                 VStack(spacing: 16) {
                     headerCard
                     eventsSection
+                    if !memberGifts.isEmpty {
+                        memberGiftsSection
+                    }
                     photosSection
                 }
                 .padding(.vertical)

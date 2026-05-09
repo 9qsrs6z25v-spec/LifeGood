@@ -128,6 +128,67 @@ struct ChildDetailView: View {
         }
         // 睡眠章節下方：消費（依本人名字連動到變動支出）
         consumptionSection
+        // 收到的禮金（依本人名字連動到 .social 變動支出收受人）
+        if !childGifts.isEmpty {
+            childGiftsSection
+        }
+    }
+
+    /// 變動支出 .social 中將兒女列為收受人的紀錄
+    private var childGifts: [Expense] {
+        let target = child.chineseName
+        guard !target.isEmpty else { return [] }
+        return expenseStore.expenses
+            .filter { $0.expenseType == .variable && $0.variableCategory == .social }
+            .filter { e in
+                guard let raw = e.socialRecipient, !raw.isEmpty else { return false }
+                let names = raw.components(separatedBy: CharacterSet(charactersIn: ",、，"))
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                return names.contains(target)
+            }
+            .sorted { $0.date > $1.date }
+    }
+
+    private var childGiftsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "gift.fill").foregroundStyle(.pink)
+                Text("收到的禮金").font(.headline)
+                Spacer()
+                Text(formatGiftTotal(childGifts.reduce(0) { $0 + $1.amount }))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.pink)
+            }
+            .padding(.horizontal).padding(.top, 8).padding(.bottom, 4)
+
+            ForEach(SocialSubCategory.allCases) { sub in
+                let items = childGifts.filter { $0.socialSubCategory == sub }
+                if !items.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: sub.icon).foregroundStyle(.pink).frame(width: 22)
+                        Text(sub.rawValue).font(.subheadline)
+                        Spacer()
+                        Text("\(items.count) 筆")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        Text(formatGiftTotal(items.reduce(0) { $0 + $1.amount }))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
+                    }
+                    .padding(.horizontal).padding(.vertical, 6)
+                    Divider().padding(.leading, 44)
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+    }
+
+    private func formatGiftTotal(_ v: Double) -> String {
+        let f = NumberFormatter(); f.numberStyle = .currency
+        f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     private func dailySection(_ type: DailyRecordType) -> some View {

@@ -68,6 +68,34 @@ enum VariableCategory: String, Codable, Identifiable {
     }
 }
 
+// MARK: - 社交子分類
+
+enum SocialSubCategory: String, Codable, CaseIterable, Identifiable {
+    case birthdayGift = "生日禮金"
+    case newYearRedEnvelope = "過年紅包"
+    case weddingGift = "結婚禮金"
+    case funeralGift = "白包"
+    case babyShower = "彌月禮"
+    case visitGift = "探病禮"
+    case promotionHousewarming = "升遷／喬遷"
+    case other = "其他"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .birthdayGift: return "gift.fill"
+        case .newYearRedEnvelope: return "envelope.fill"
+        case .weddingGift: return "heart.fill"
+        case .funeralGift: return "leaf.fill"
+        case .babyShower: return "figure.child"
+        case .visitGift: return "cross.case.fill"
+        case .promotionHousewarming: return "sparkles"
+        case .other: return "ellipsis.circle.fill"
+        }
+    }
+}
+
 // MARK: - 節稅子分類
 
 /// 變動支出分類為「節稅」時可細分的子分類，
@@ -207,6 +235,9 @@ struct Expense: Identifiable, Codable {
     var vehicleExpenseCategory: VehicleVariableCategory?  // 汽車變動支出子分類
     var realEstateExpenseCategory: RealEstateExpenseCategory?  // 房地產變動支出子分類
     var taxSavingSubCategory: TaxSavingSubCategory?  // 節稅變動支出子分類
+    var socialSubCategory: SocialSubCategory?  // 社交變動支出子分類（禮金 / 紅包 / 白包 等）
+    /// 社交禮金的收受人姓名清單（多筆以逗號分隔）；對應家人或人際關係紀錄
+    var socialRecipient: String?
     /// 固定支出是否列入稅務頁節稅追蹤；nil 採自動推斷（見 TaxOverviewView）。
     /// true / false 是使用者明確覆寫。
     var taxDeductibleOverride: Bool?
@@ -246,6 +277,8 @@ struct Expense: Identifiable, Codable {
         vehicleExpenseCategory: VehicleVariableCategory? = nil,
         realEstateExpenseCategory: RealEstateExpenseCategory? = nil,
         taxSavingSubCategory: TaxSavingSubCategory? = nil,
+        socialSubCategory: SocialSubCategory? = nil,
+        socialRecipient: String? = nil,
         taxDeductibleOverride: Bool? = nil,
         note: String = "",
         currencyCode: String = "NT$",
@@ -278,6 +311,8 @@ struct Expense: Identifiable, Codable {
         self.vehicleExpenseCategory = vehicleExpenseCategory
         self.realEstateExpenseCategory = realEstateExpenseCategory
         self.taxSavingSubCategory = taxSavingSubCategory
+        self.socialSubCategory = socialSubCategory
+        self.socialRecipient = socialRecipient
         self.taxDeductibleOverride = taxDeductibleOverride
         self.note = note
         self.currencyCode = currencyCode
@@ -314,6 +349,8 @@ struct Expense: Identifiable, Codable {
         vehicleExpenseCategory = try? c.decode(VehicleVariableCategory.self, forKey: .vehicleExpenseCategory)
         realEstateExpenseCategory = try? c.decode(RealEstateExpenseCategory.self, forKey: .realEstateExpenseCategory)
         taxSavingSubCategory = try? c.decodeIfPresent(TaxSavingSubCategory.self, forKey: .taxSavingSubCategory)
+        socialSubCategory = try? c.decodeIfPresent(SocialSubCategory.self, forKey: .socialSubCategory)
+        socialRecipient = try? c.decodeIfPresent(String.self, forKey: .socialRecipient)
         taxDeductibleOverride = try? c.decodeIfPresent(Bool.self, forKey: .taxDeductibleOverride)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         currencyCode = (try? c.decode(String.self, forKey: .currencyCode)) ?? "NT$"
@@ -333,7 +370,8 @@ struct Expense: Identifiable, Codable {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
         case insuranceSubCategory, loanSubCategory
         case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
-        case vehicleExpenseCategory, realEstateExpenseCategory, taxSavingSubCategory, taxDeductibleOverride, note, currencyCode, diningMember
+        case vehicleExpenseCategory, realEstateExpenseCategory, taxSavingSubCategory
+        case socialSubCategory, socialRecipient, taxDeductibleOverride, note, currencyCode, diningMember
         case loanTotalAmount, loanYears, loanRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
         case placeAddress, placeLatitude, placeLongitude, photoFileNames
@@ -350,6 +388,9 @@ struct Expense: Identifiable, Codable {
             }
             if variableCategory == .taxSaving, let sub = taxSavingSubCategory {
                 return "節稅 - \(sub.rawValue)"
+            }
+            if variableCategory == .social, let sub = socialSubCategory {
+                return "社交 - \(sub.rawValue)"
             }
             return variableCategory?.rawValue ?? "未分類"
         case .fixed:

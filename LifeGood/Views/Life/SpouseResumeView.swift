@@ -26,6 +26,21 @@ struct SpouseResumeView: View {
         spouseExpenses.reduce(0) { $0 + $1.amount }
     }
 
+    /// 變動支出 .social 中將配偶列為收受人的紀錄
+    private var spouseGifts: [Expense] {
+        guard let s = spouse, !s.chineseName.isEmpty else { return [] }
+        let target = s.chineseName
+        return expenseStore.expenses
+            .filter { $0.expenseType == .variable && $0.variableCategory == .social }
+            .filter { e in
+                guard let raw = e.socialRecipient, !raw.isEmpty else { return false }
+                let names = raw.components(separatedBy: CharacterSet(charactersIn: ",、，"))
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                return names.contains(target)
+            }
+            .sorted { $0.date > $1.date }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -33,11 +48,19 @@ struct SpouseResumeView: View {
                     profileSection(s)
                     marriageSection(s)
                     milestoneSection
+                    giftSection
                     expenseSection
                 }
             }
             .listStyle(.insetGrouped)
             .navigationTitle("配偶履歷")
+        }
+    }
+
+    @ViewBuilder
+    private var giftSection: some View {
+        if !spouseGifts.isEmpty {
+            ResumeGiftSection(gifts: spouseGifts, recipientName: spouse?.chineseName ?? "配偶")
         }
     }
 

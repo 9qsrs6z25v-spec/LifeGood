@@ -590,6 +590,8 @@ struct AddMilestoneView: View {
     @State private var familyRole: FamilyMemberRole = .spouse
     @State private var familyChineseName = ""
     @State private var familyEnglishName = ""
+    @State private var familySide: FamilySide = .mine
+    @State private var familySpouseId: UUID? = nil
     @State private var hasMarriageDate = false
     @State private var marriageDate = Date()
     @State private var isDivorced = false
@@ -745,6 +747,36 @@ struct AddMilestoneView: View {
         TextField("中文姓名", text: $familyChineseName)
         TextField("英文姓名", text: $familyEnglishName)
             .autocapitalization(.words)
+
+        // 家族側選擇：父母 / 兄姊弟妹 / 其他親屬才出現
+        if familyRole.supportsFamilySide {
+            Picker("家族側", selection: $familySide) {
+                ForEach(FamilySide.allCases) { side in
+                    Text(side.rawValue).tag(side)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: familySide) { _, _ in
+                // family side 換掉時清掉 spouseId（避免指向不同 side 的人）
+                familySpouseId = nil
+            }
+        }
+
+        // 父 / 母配對：可從現有反向 role + 同 family side 選一位「另一半」
+        if let spouseRole = familyRole.spouseCandidateRole {
+            let candidates = store.familyMembers.filter {
+                $0.role == spouseRole &&
+                $0.familySide == familySide &&
+                $0.id != editingFamily?.id
+            }
+            Picker("另一半", selection: $familySpouseId) {
+                Text("不指定").tag(nil as UUID?)
+                ForEach(candidates) { m in
+                    Text(m.chineseName.isEmpty ? m.role.rawValue : m.chineseName)
+                        .tag(m.id as UUID?)
+                }
+            }
+        }
 
         if familyRole == .spouse {
             Toggle("填入結婚時間", isOn: $hasMarriageDate)
@@ -1052,8 +1084,9 @@ struct AddMilestoneView: View {
         if isFamily {
             let isSpouse = familyRole == .spouse
             let isOther = familyRole == .otherRelative
+            let memberId = editingFamily?.id ?? UUID()
             let member = FamilyMember(
-                id: editingFamily?.id ?? UUID(),
+                id: memberId,
                 role: familyRole,
                 chineseName: familyChineseName.trimmingCharacters(in: .whitespaces),
                 englishName: familyEnglishName.trimmingCharacters(in: .whitespaces),
@@ -1063,9 +1096,27 @@ struct AddMilestoneView: View {
                 divorceDate: isSpouse && isDivorced ? divorceDate : nil,
                 birthYear: isOther ? Int(birthYearText) : nil,
                 idNumber: isOther ? idNumber.trimmingCharacters(in: .whitespaces) : nil,
-                relativeNote: isOther ? relativeNote.trimmingCharacters(in: .whitespaces) : nil
+                relativeNote: isOther ? relativeNote.trimmingCharacters(in: .whitespaces) : nil,
+                familySide: familyRole.supportsFamilySide ? familySide : nil,
+                spouseId: familyRole.spouseCandidateRole != nil ? familySpouseId : nil
             )
-            if editingFamily != nil { store.update(member) } else { store.add(member) }
+            // 保留既有的 dailyRecords / childRecords / familyEvents / familyPhotos
+            var preserved = member
+            if let original = editingFamily {
+                preserved.childRecords = original.childRecords
+                preserved.dailyRecords = original.dailyRecords
+                preserved.familyEvents = original.familyEvents
+                preserved.familyPhotos = original.familyPhotos
+            }
+            if editingFamily != nil { store.update(preserved) } else { store.add(preserved) }
+            // 雙向綁定：把選中的另一半也指向自己（同步補位）
+            if let spouseId = familySpouseId,
+               var other = store.familyMembers.first(where: { $0.id == spouseId }),
+               other.spouseId != memberId {
+                other.spouseId = memberId
+                other.familySide = familyRole.supportsFamilySide ? familySide : other.familySide
+                store.update(other)
+            }
         } else if isRealEstate {
             // 連結既有：里程碑由 realEstateDerivedMilestones 自動產生，不需建立實體
             // 新增物件：在按下「開啟新增房地產介面」時已開啟另一視窗，此處僅關閉
@@ -1234,6 +1285,8 @@ struct AddMilestoneView: View {
             if let by = f.birthYear { birthYearText = "\(by)" }
             idNumber = f.idNumber ?? ""
             relativeNote = f.relativeNote ?? ""
+            familySide = f.familySide ?? .mine
+            familySpouseId = f.spouseId
             return
         }
         category = initialCategory
