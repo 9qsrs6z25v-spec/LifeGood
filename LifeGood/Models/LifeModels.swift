@@ -1089,15 +1089,67 @@ struct BusinessCard: Identifiable, Codable {
     var address: String
     var note: String
     var date: Date
+    /// 名片頭像照片檔名（存於 BusinessCardPhotos 目錄）
+    var photoFileName: String?
 
     init(id: UUID = UUID(), name: String = "", company: String = "",
          department: String = "", jobTitle: String = "",
          phone: String = "", email: String = "", address: String = "",
-         note: String = "", date: Date = Date()) {
+         note: String = "", date: Date = Date(),
+         photoFileName: String? = nil) {
         self.id = id; self.name = name; self.company = company
         self.department = department; self.jobTitle = jobTitle
         self.phone = phone; self.email = email
         self.address = address; self.note = note; self.date = date
+        self.photoFileName = photoFileName
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        company = (try? c.decode(String.self, forKey: .company)) ?? ""
+        department = (try? c.decode(String.self, forKey: .department)) ?? ""
+        jobTitle = (try? c.decode(String.self, forKey: .jobTitle)) ?? ""
+        phone = (try? c.decode(String.self, forKey: .phone)) ?? ""
+        email = (try? c.decode(String.self, forKey: .email)) ?? ""
+        address = (try? c.decode(String.self, forKey: .address)) ?? ""
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        photoFileName = try? c.decodeIfPresent(String.self, forKey: .photoFileName)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, company, department, jobTitle
+        case phone, email, address, note, date, photoFileName
+    }
+
+    // MARK: - 名片頭像照片儲存
+
+    static var photosDirectory: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("BusinessCardPhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func savePhoto(_ data: Data, id: UUID) -> String {
+        let name = "\(id.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        try? data.write(to: url)
+        PhotoCloudSync.upload(directory: "BusinessCardPhotos", fileName: name)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "BusinessCardPhotos", fileName: fileName)
+    }
+
+    var photoURL: URL? {
+        guard let name = photoFileName else { return nil }
+        return Self.photosDirectory.appendingPathComponent(name)
     }
 }
 

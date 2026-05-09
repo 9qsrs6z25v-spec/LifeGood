@@ -107,7 +107,10 @@ class LifeStore: ObservableObject {
     func update(_ item: BusinessCard) {
         if let i = businessCards.firstIndex(where: { $0.id == item.id }) { businessCards[i] = item }
     }
-    func deleteBusinessCard(_ item: BusinessCard) { businessCards.removeAll { $0.id == item.id } }
+    func deleteBusinessCard(_ item: BusinessCard) {
+        if let name = item.photoFileName { BusinessCard.deletePhoto(name) }
+        businessCards.removeAll { $0.id == item.id }
+    }
 
     // MARK: - 家庭衍生里程碑
 

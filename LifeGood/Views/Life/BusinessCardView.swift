@@ -1,4 +1,7 @@
 import SwiftUI
+import PhotosUI
+import CoreImage.CIFilterBuiltins
+import UIKit
 
 struct BusinessCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -176,19 +179,29 @@ struct BusinessCardView: View {
         .padding(.vertical, 4)
     }
 
+    @ViewBuilder
     private func avatarView(_ card: BusinessCard) -> some View {
-        let initial = String((card.name.isEmpty ? card.company : card.name).prefix(1))
-        return ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(LinearGradient(
-                    colors: [.orange, .pink.opacity(0.8)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ))
+        if let url = card.photoURL,
+           let img = UIImage(contentsOfFile: url.path) {
+            Image(uiImage: img)
+                .resizable()
+                .scaledToFill()
                 .frame(width: 48, height: 48)
-            Text(initial)
-                .font(.title3.bold())
-                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+        } else {
+            let initial = String((card.name.isEmpty ? card.company : card.name).prefix(1))
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(LinearGradient(
+                        colors: [.orange, .pink.opacity(0.8)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 48, height: 48)
+                Text(initial)
+                    .font(.title3.bold())
+                    .foregroundStyle(.white)
+            }
         }
     }
 
@@ -209,6 +222,10 @@ struct BusinessCardDetailView: View {
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
     @State private var showPremiumAlert = false
+    @State private var showCamera = false
+    @State private var showPhotosPicker = false
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var showQRFullscreen = false
 
     private var card: BusinessCard {
         lifeStore.businessCards.first(where: { $0.id == cardId })
@@ -267,29 +284,25 @@ struct BusinessCardDetailView: View {
     // MARK: - Hero 名片卡
 
     private var heroCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(card.name.isEmpty ? "未命名" : card.name)
-                        .font(.largeTitle.bold())
-                        .foregroundStyle(.white)
-                    if !card.jobTitle.isEmpty {
-                        Text(card.jobTitle)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.85))
-                    }
+        HStack(alignment: .top, spacing: 16) {
+            // 左側文字資訊
+            VStack(alignment: .leading, spacing: 6) {
+                Text(card.name.isEmpty ? "未命名" : card.name)
+                    .font(.title.bold())
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                if !card.jobTitle.isEmpty {
+                    Text(card.jobTitle)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.85))
                 }
-                Spacer()
-                Image(systemName: "person.crop.rectangle.fill")
-                    .font(.system(size: 38))
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-            Spacer().frame(height: 8)
-            VStack(alignment: .leading, spacing: 3) {
+                Spacer().frame(height: 4)
                 if !card.company.isEmpty {
                     Text(card.company)
                         .font(.headline)
                         .foregroundStyle(.white)
+                        .lineLimit(2)
                 }
                 if !card.department.isEmpty {
                     Text(card.department)
@@ -297,10 +310,17 @@ struct BusinessCardDetailView: View {
                         .foregroundStyle(.white.opacity(0.85))
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // 右側：頭像 + QR Code
+            VStack(spacing: 10) {
+                avatarMenu
+                qrCodeView
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 180)
+        .frame(minHeight: 200)
         .background(
             LinearGradient(
                 colors: [Color.orange, Color.pink.opacity(0.85), Color.purple.opacity(0.7)],
@@ -311,6 +331,213 @@ struct BusinessCardDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
         .padding(.horizontal)
+        .sheet(isPresented: $showCamera) {
+            CameraPicker { image in
+                if let data = image.jpegData(compressionQuality: 0.85) {
+                    saveAvatarData(data)
+                }
+            }
+            .ignoresSafeArea()
+        }
+        .photosPicker(isPresented: $showPhotosPicker, selection: $pickerItem, matching: .images)
+        .onChange(of: pickerItem) { _, item in
+            Task {
+                guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+                await MainActor.run {
+                    saveAvatarData(data)
+                    pickerItem = nil
+                }
+            }
+        }
+        .sheet(isPresented: $showQRFullscreen) {
+            qrFullscreenView
+        }
+    }
+
+    // MARK: - 頭像（可點選）
+
+    private var avatarMenu: some View {
+        Menu {
+            Button {
+                showCamera = true
+            } label: {
+                Label("拍照", systemImage: "camera.fill")
+            }
+            Button {
+                showPhotosPicker = true
+            } label: {
+                Label("從相簿選取", systemImage: "photo.on.rectangle")
+            }
+            if card.photoFileName != nil {
+                Button(role: .destructive) {
+                    removeAvatar()
+                } label: {
+                    Label("移除照片", systemImage: "trash")
+                }
+            }
+        } label: {
+            avatarContent
+        }
+    }
+
+    @ViewBuilder
+    private var avatarContent: some View {
+        ZStack {
+            if let url = card.photoURL,
+               let img = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 76, height: 76)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            } else {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 76, height: 76)
+                    .overlay(
+                        Image(systemName: "person.crop.rectangle.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.white.opacity(0.85))
+                    )
+            }
+            // 右下角小相機圖示提示可點選
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Image(systemName: "camera.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.white, .black.opacity(0.5))
+                        .offset(x: 4, y: 4)
+                }
+            }
+            .frame(width: 76, height: 76)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.white.opacity(0.5), lineWidth: 1)
+        )
+    }
+
+    // MARK: - QR Code
+
+    private var qrCodeView: some View {
+        Group {
+            if let img = generateQRCode(from: vCardString) {
+                Button {
+                    showQRFullscreen = true
+                } label: {
+                    Image(uiImage: img)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 76, height: 76)
+                        .padding(4)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.white.opacity(0.4))
+                    .frame(width: 76, height: 76)
+                    .overlay(Image(systemName: "qrcode").foregroundStyle(.white))
+            }
+        }
+    }
+
+    private var qrFullscreenView: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                if let img = generateQRCode(from: vCardString, scale: 16) {
+                    Image(uiImage: img)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .padding()
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .padding()
+                }
+                Text(card.name.isEmpty ? "名片 QR Code" : "\(card.name) 的名片")
+                    .font(.headline)
+                Text("掃描後可直接匯入聯絡人")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.top, 32)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("名片 QR Code")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("關閉") { showQRFullscreen = false }
+                }
+            }
+        }
+    }
+
+    // MARK: - 動作
+
+    private func saveAvatarData(_ data: Data) {
+        guard var c = lifeStore.businessCards.first(where: { $0.id == cardId }) else { return }
+        if let oldName = c.photoFileName { BusinessCard.deletePhoto(oldName) }
+        c.photoFileName = BusinessCard.savePhoto(data, id: c.id)
+        lifeStore.update(c)
+    }
+
+    private func removeAvatar() {
+        guard var c = lifeStore.businessCards.first(where: { $0.id == cardId }) else { return }
+        if let oldName = c.photoFileName { BusinessCard.deletePhoto(oldName) }
+        c.photoFileName = nil
+        lifeStore.update(c)
+    }
+
+    // MARK: - vCard / QR
+
+    private var vCardString: String {
+        var lines: [String] = ["BEGIN:VCARD", "VERSION:3.0"]
+        let name = card.name.trimmingCharacters(in: .whitespaces)
+        if !name.isEmpty {
+            lines.append("FN:\(name)")
+            lines.append("N:\(name);;;;")
+        }
+        let org = [card.company, card.department]
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if !org.isEmpty {
+            lines.append("ORG:\(org.joined(separator: ";"))")
+        }
+        if !card.jobTitle.isEmpty {
+            lines.append("TITLE:\(card.jobTitle)")
+        }
+        if !card.phone.isEmpty {
+            lines.append("TEL;TYPE=WORK,VOICE:\(card.phone)")
+        }
+        if !card.email.isEmpty {
+            lines.append("EMAIL;TYPE=WORK:\(card.email)")
+        }
+        if !card.address.isEmpty {
+            lines.append("ADR;TYPE=WORK:;;\(card.address);;;;")
+        }
+        if !card.note.isEmpty {
+            lines.append("NOTE:\(card.note.replacingOccurrences(of: "\n", with: " "))")
+        }
+        lines.append("END:VCARD")
+        return lines.joined(separator: "\n")
+    }
+
+    private func generateQRCode(from string: String, scale: CGFloat = 8) -> UIImage? {
+        let context = CIContext()
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(string.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage else { return nil }
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        guard let cg = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     // MARK: - 聯絡方式
@@ -515,7 +742,8 @@ struct BusinessCardEditor: View {
             email: email.trimmingCharacters(in: .whitespaces),
             address: address.trimmingCharacters(in: .whitespaces),
             note: note.trimmingCharacters(in: .whitespaces),
-            date: date
+            date: date,
+            photoFileName: editing?.photoFileName  // 編輯時保留既有頭像
         )
         if editing != nil { lifeStore.update(card) } else { lifeStore.add(card) }
         dismiss()
