@@ -28,7 +28,8 @@ struct OrganizationView: View {
                     emptyState
                 } else {
                     ScrollView([.horizontal, .vertical]) {
-                        VStack(spacing: 32) {
+                        VStack(spacing: 24) {
+                            statsHeader
                             ForEach(rootDepartments) { root in
                                 deptTreeNode(root, visited: [])
                             }
@@ -41,14 +42,6 @@ struct OrganizationView: View {
             .navigationTitle("公司組織")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 16) {
-                        Text("\(lifeStore.orgPeople.count) 人")
-                            .font(.caption2).foregroundStyle(.secondary)
-                        Text("\(lifeStore.departments.count) 部門")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     if !lifeStore.departments.isEmpty {
                         Button {
@@ -77,6 +70,34 @@ struct OrganizationView: View {
                 if !subscription.isPremium { showPremiumAlert = true }
             }
             .disabled(!subscription.isPremium)
+        }
+    }
+
+    /// 頁面內統計列：部門數 / 在職人員 / 離職人員
+    private var statsHeader: some View {
+        HStack(spacing: 24) {
+            statBox(value: "\(lifeStore.departments.count)", label: "部門", icon: "building.2.fill", color: .indigo)
+            Divider().frame(height: 36)
+            let active = lifeStore.orgPeople.filter { !$0.isInactive }.count
+            statBox(value: "\(active)", label: "在職人員", icon: "person.2.fill", color: .green)
+            let inactive = lifeStore.orgPeople.filter { $0.isInactive }.count
+            if inactive > 0 {
+                Divider().frame(height: 36)
+                statBox(value: "\(inactive)", label: "離職", icon: "person.fill.xmark", color: .gray)
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+    }
+
+    private func statBox(value: String, label: String, icon: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon).font(.subheadline).foregroundStyle(color)
+            Text(value).font(.headline).foregroundStyle(color)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
         }
     }
 
