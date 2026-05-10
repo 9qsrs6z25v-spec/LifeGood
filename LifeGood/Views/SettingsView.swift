@@ -284,7 +284,7 @@ struct SettingsView: View {
         icon: String,
         color: Color,
         isExpanded: Binding<Bool>,
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         Section {
             DisclosureGroup(isExpanded: isExpanded) {
