@@ -18,6 +18,7 @@ class LifeStore: ObservableObject {
 
     init() {
         load()
+        backfillOrgPeopleFromSubordinates()
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(reloadFromCloud),
@@ -28,6 +29,7 @@ class LifeStore: ObservableObject {
 
     @objc private func reloadFromCloud() {
         load()
+        backfillOrgPeopleFromSubordinates()
         objectWillChange.send()
     }
 
@@ -82,11 +84,79 @@ class LifeStore: ObservableObject {
 
     // MARK: - 部屬 CRUD
 
-    func add(_ item: Subordinate) { subordinates.append(item) }
+    func add(_ item: Subordinate) {
+        subordinates.append(item)
+        syncOrgPersonFor(subordinate: item)
+    }
     func update(_ item: Subordinate) {
         if let i = subordinates.firstIndex(where: { $0.id == item.id }) { subordinates[i] = item }
+        syncOrgPersonFor(subordinate: item)
     }
-    func deleteSubordinate(_ item: Subordinate) { subordinates.removeAll { $0.id == item.id } }
+    func deleteSubordinate(_ item: Subordinate) {
+        subordinates.removeAll { $0.id == item.id }
+        // 解除與公司組織人員的連結（保留人員資料以維持歷史）
+        if let i = orgPeople.firstIndex(where: { $0.linkedSubordinateId == item.id }) {
+            orgPeople[i].linkedSubordinateId = nil
+        }
+    }
+
+    /// 把部屬資料同步到公司組織人員：
+    /// - 已連結 → 更新姓名/職稱/部門
+    /// - 未連結但有部門 → 新建 OrgPerson + 自動連動產生 BusinessCard
+    /// - 未連結且無部門 → 不動
+    private func syncOrgPersonFor(subordinate sub: Subordinate) {
+        if let i = orgPeople.firstIndex(where: { $0.linkedSubordinateId == sub.id }) {
+            var p = orgPeople[i]
+            p.name = sub.name
+            p.jobTitle = sub.jobTitle
+            p.departmentId = sub.departmentId
+            orgPeople[i] = p
+            return
+        }
+        guard let deptId = sub.departmentId else { return }
+
+        let personId = UUID()
+        let cardId = UUID()
+        let deptName = departments.first(where: { $0.id == deptId })?.name ?? sub.department
+
+        // 自動產生對應名片
+        let card = BusinessCard(
+            id: cardId,
+            name: sub.name,
+            company: "",
+            department: deptName,
+            jobTitle: sub.jobTitle,
+            phone: "",
+            email: "",
+            address: "",
+            note: "",
+            date: Date(),
+            photoFileName: nil,
+            linkedOrgPersonId: personId
+        )
+        businessCards.append(card)
+
+        // 建立組織人員
+        let person = OrgPerson(
+            id: personId,
+            name: sub.name,
+            jobTitle: sub.jobTitle,
+            departmentId: deptId,
+            dateAdded: Date(),
+            linkedBusinessCardId: cardId,
+            linkedSubordinateId: sub.id
+        )
+        orgPeople.append(person)
+    }
+
+    /// 一次性 backfill：把舊有部屬補出對應的公司組織人員（之前沒有同步過的）
+    func backfillOrgPeopleFromSubordinates() {
+        for sub in subordinates {
+            if !orgPeople.contains(where: { $0.linkedSubordinateId == sub.id }) {
+                syncOrgPersonFor(subordinate: sub)
+            }
+        }
+    }
 
     // MARK: - 部門 CRUD
 
@@ -112,6 +182,12 @@ class LifeStore: ObservableObject {
     }
     func deleteOrgPerson(_ item: OrgPerson) {
         if let name = item.photoFileName { OrgPerson.deletePhoto(name) }
+        // 解除名片反向連結
+        if let cid = item.linkedBusinessCardId,
+           let i = businessCards.firstIndex(where: { $0.id == cid }),
+           businessCards[i].linkedOrgPersonId == item.id {
+            businessCards[i].linkedOrgPersonId = nil
+        }
         orgPeople.removeAll { $0.id == item.id }
     }
 
@@ -121,6 +197,12 @@ class LifeStore: ObservableObject {
     }
     func deleteBusinessCard(_ item: BusinessCard) {
         if let name = item.photoFileName { BusinessCard.deletePhoto(name) }
+        // 解除組織人員反向連結
+        if let pid = item.linkedOrgPersonId,
+           let i = orgPeople.firstIndex(where: { $0.id == pid }),
+           orgPeople[i].linkedBusinessCardId == item.id {
+            orgPeople[i].linkedBusinessCardId = nil
+        }
         businessCards.removeAll { $0.id == item.id }
     }
 

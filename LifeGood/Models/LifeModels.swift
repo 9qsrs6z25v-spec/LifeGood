@@ -1263,6 +1263,8 @@ struct OrgPerson: Identifiable, Codable {
     var leftDate: Date?
     /// 連結的名片 ID（雙向同步：BusinessCard.linkedOrgPersonId 也會指回來）
     var linkedBusinessCardId: UUID?
+    /// 從職涯管理「部屬」自動連動產生的對應 ID（用於同步）
+    var linkedSubordinateId: UUID?
 
     init(id: UUID = UUID(), name: String = "", jobTitle: String = "",
          departmentId: UUID? = nil, photoFileName: String? = nil,
@@ -1270,7 +1272,8 @@ struct OrgPerson: Identifiable, Codable {
          children: [OrgPersonChild] = [], relations: [OrgPersonRelation] = [],
          dateAdded: Date = Date(),
          isInactive: Bool = false, leftDate: Date? = nil,
-         linkedBusinessCardId: UUID? = nil) {
+         linkedBusinessCardId: UUID? = nil,
+         linkedSubordinateId: UUID? = nil) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.departmentId = departmentId; self.photoFileName = photoFileName
         self.birthday = birthday; self.relationship = relationship
@@ -1278,6 +1281,7 @@ struct OrgPerson: Identifiable, Codable {
         self.dateAdded = dateAdded
         self.isInactive = isInactive; self.leftDate = leftDate
         self.linkedBusinessCardId = linkedBusinessCardId
+        self.linkedSubordinateId = linkedSubordinateId
     }
 
     init(from decoder: Decoder) throws {
@@ -1296,12 +1300,13 @@ struct OrgPerson: Identifiable, Codable {
         isInactive = (try? c.decode(Bool.self, forKey: .isInactive)) ?? false
         leftDate = try? c.decodeIfPresent(Date.self, forKey: .leftDate)
         linkedBusinessCardId = try? c.decodeIfPresent(UUID.self, forKey: .linkedBusinessCardId)
+        linkedSubordinateId = try? c.decodeIfPresent(UUID.self, forKey: .linkedSubordinateId)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, jobTitle, departmentId, photoFileName, birthday
         case relationship, note, children, relations, dateAdded
-        case isInactive, leftDate, linkedBusinessCardId
+        case isInactive, leftDate, linkedBusinessCardId, linkedSubordinateId
     }
 
     /// 主導關係：取所有 relations 中出現最多次的類型，沒有則 nil

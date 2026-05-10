@@ -749,6 +749,11 @@ struct OrgPersonEditor: View {
         let validRelations = relations.filter { rel in
             lifeStore.orgPeople.contains { $0.id == rel.personId } && rel.personId != id
         }
+        // 新增人員且尚未連結名片時 → 自動產生對應名片
+        var finalCardId = linkedBusinessCardId
+        if !isEditing, finalCardId == nil {
+            finalCardId = autoCreateCard(for: id)
+        }
         let person = OrgPerson(
             id: id,
             name: name.trimmingCharacters(in: .whitespaces),
@@ -763,11 +768,36 @@ struct OrgPersonEditor: View {
             dateAdded: existing?.dateAdded ?? Date(),
             isInactive: isInactive,
             leftDate: isInactive ? leftDate : nil,
-            linkedBusinessCardId: linkedBusinessCardId
+            linkedBusinessCardId: finalCardId,
+            linkedSubordinateId: existing?.linkedSubordinateId
         )
         if isEditing { lifeStore.update(person) } else { lifeStore.add(person) }
-        syncBusinessCardLink(personId: id, oldCardId: existing?.linkedBusinessCardId, newCardId: linkedBusinessCardId)
+        syncBusinessCardLink(personId: id, oldCardId: existing?.linkedBusinessCardId, newCardId: finalCardId)
         dismiss()
+    }
+
+    /// 為新人員自動產生一張預填基本資料的名片，並回傳 ID
+    private func autoCreateCard(for personId: UUID) -> UUID {
+        let cardId = UUID()
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        let trimmedTitle = jobTitle.trimmingCharacters(in: .whitespaces)
+        let deptName = lifeStore.departments.first(where: { $0.id == departmentId })?.name ?? ""
+        let card = BusinessCard(
+            id: cardId,
+            name: trimmedName,
+            company: "",
+            department: deptName,
+            jobTitle: trimmedTitle,
+            phone: "",
+            email: "",
+            address: "",
+            note: "",
+            date: Date(),
+            photoFileName: nil,
+            linkedOrgPersonId: personId
+        )
+        lifeStore.add(card)
+        return cardId
     }
 
     /// 名片雙向同步：舊連結移除、新連結補上
