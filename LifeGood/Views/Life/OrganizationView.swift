@@ -836,18 +836,25 @@ struct OrgPersonEditor: View {
         dismiss()
     }
 
-    /// 為新人員自動產生一張預填基本資料的名片，並回傳 ID
+    /// 為新人員自動產生一張預填基本資料的名片，並回傳 ID。
+    /// 公司直接帶我目前的公司（同公司同事邏輯）。
     private func autoCreateCard(for personId: UUID) -> UUID {
         let cardId = UUID()
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
-        let trimmedTitle = jobTitle.trimmingCharacters(in: .whitespaces)
+        let resolvedTitle: String = {
+            if let id = gradeTitleId,
+               let gt = lifeStore.gradeTitles.first(where: { $0.id == id }) {
+                return gt.title.trimmingCharacters(in: .whitespaces)
+            }
+            return jobTitle.trimmingCharacters(in: .whitespaces)
+        }()
         let deptName = lifeStore.departments.first(where: { $0.id == departmentId })?.name ?? ""
         let card = BusinessCard(
             id: cardId,
             name: trimmedName,
-            company: "",
+            company: lifeStore.myCurrentCompany,
             department: deptName,
-            jobTitle: trimmedTitle,
+            jobTitle: resolvedTitle,
             phone: "",
             email: "",
             address: "",

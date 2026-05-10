@@ -104,6 +104,24 @@ class LifeStore: ObservableObject {
     /// - 已連結 → 更新姓名/職稱/部門
     /// - 未連結但有部門 → 新建 OrgPerson + 自動連動產生 BusinessCard
     /// - 未連結且無部門 → 不動
+    /// 我目前的公司：取「career 類別最新的非離職」里程碑的 companyName，
+    /// 找不到就退到 profile.company。
+    var myCurrentCompany: String {
+        let careers = milestones
+            .filter { $0.category == .career }
+            .sorted { $0.date > $1.date }
+        for m in careers {
+            if m.careerSubCategory == .resign {
+                return profile.company.trimmingCharacters(in: .whitespaces)
+            }
+            if let name = m.companyName?.trimmingCharacters(in: .whitespaces),
+               !name.isEmpty {
+                return name
+            }
+        }
+        return profile.company.trimmingCharacters(in: .whitespaces)
+    }
+
     private func syncOrgPersonFor(subordinate sub: Subordinate) {
         // 解析職稱：若有 gradeTitleId 用 GradeTitle.title，沒有則用 sub.jobTitle
         let resolvedTitle: String = {
@@ -133,7 +151,7 @@ class LifeStore: ObservableObject {
         let card = BusinessCard(
             id: cardId,
             name: sub.name,
-            company: "",
+            company: myCurrentCompany,
             department: deptName,
             jobTitle: resolvedTitle,
             phone: "",

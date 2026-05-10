@@ -1,9 +1,11 @@
 import SwiftUI
+import EventKit
 
-/// 我的行事曆：彙整當日家庭紀念日、工作會議與任務、本週快覽、未來里程碑。
+/// 我的行事曆：彙整當日家庭紀念日、工作會議與任務、本週快覽、未來里程碑、Apple 行事曆事件。
 struct MyCalendarView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
+    @ObservedObject private var appleCal = AppleCalendarBridge.shared
 
     @State private var selectedDate = Date()
     @State private var showAdd = false
@@ -16,6 +18,7 @@ struct MyCalendarView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     MacaronDatePicker(selectedDate: $selectedDate)
+                    appleCalendarBanner
                     todayEventsSection
                     weekPreviewSection
                     upcomingMilestonesSection
@@ -38,6 +41,61 @@ struct MyCalendarView: View {
             .sheet(item: $editingEvent) { ev in
                 PersonalEventEditor(initialDate: ev.date, editing: ev)
             }
+            .task {
+                if appleCal.authorizationStatus == .notDetermined {
+                    await appleCal.requestAccess()
+                } else {
+                    appleCal.refreshStatus()
+                }
+            }
+        }
+    }
+
+    /// 顯示 Apple 行事曆狀態 banner：未授權／拒絕時顯示，已授權則隱藏
+    @ViewBuilder
+    private var appleCalendarBanner: some View {
+        if appleCal.authorizationStatus == .notDetermined {
+            HStack(spacing: 10) {
+                Image(systemName: "calendar.badge.plus").foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("連動 Apple 行事曆")
+                        .font(.subheadline.weight(.semibold))
+                    Text("授權後可在這裡看到 iOS 行事曆事件")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("開啟") {
+                    Task { await appleCal.requestAccess() }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            .padding(12)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+        } else if appleCal.isDenied {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Apple 行事曆權限被拒")
+                        .font(.subheadline.weight(.semibold))
+                    Text("請到「設定 → LifeGood」開啟「行事曆」權限")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("設定") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(12)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
         }
     }
 
@@ -53,23 +111,25 @@ struct MyCalendarView: View {
         var personalEventId: UUID? = nil
 
         enum EventType {
-            case birthday, anniversary, meeting, task, milestone
+            case birthday, anniversary, meeting, task, milestone, appleCalendar
             var icon: String {
                 switch self {
-                case .birthday:    return "gift.fill"
-                case .anniversary: return "heart.fill"
-                case .meeting:     return "person.3.fill"
-                case .task:        return "checklist"
-                case .milestone:   return "flag.fill"
+                case .birthday:      return "gift.fill"
+                case .anniversary:   return "heart.fill"
+                case .meeting:       return "person.3.fill"
+                case .task:          return "checklist"
+                case .milestone:     return "flag.fill"
+                case .appleCalendar: return "calendar"
                 }
             }
             var color: Color {
                 switch self {
-                case .birthday:    return Color(red: 0.99, green: 0.74, blue: 0.80)
-                case .anniversary: return Color(red: 0.95, green: 0.55, blue: 0.65)
-                case .meeting:     return Color(red: 0.78, green: 0.71, blue: 0.89)
-                case .task:        return Color(red: 0.66, green: 0.86, blue: 0.74)
-                case .milestone:   return Color(red: 0.99, green: 0.80, blue: 0.65)
+                case .birthday:      return Color(red: 0.99, green: 0.74, blue: 0.80)
+                case .anniversary:   return Color(red: 0.95, green: 0.55, blue: 0.65)
+                case .meeting:       return Color(red: 0.78, green: 0.71, blue: 0.89)
+                case .task:          return Color(red: 0.66, green: 0.86, blue: 0.74)
+                case .milestone:     return Color(red: 0.99, green: 0.80, blue: 0.65)
+                case .appleCalendar: return Color(red: 0.45, green: 0.65, blue: 0.95)
                 }
             }
             var name: String {
@@ -79,6 +139,7 @@ struct MyCalendarView: View {
                 case .meeting: return "會議"
                 case .task: return "任務"
                 case .milestone: return "里程碑"
+                case .appleCalendar: return "系統行事曆"
                 }
             }
         }
@@ -164,6 +225,24 @@ struct MyCalendarView: View {
                 time: ms.date,
                 detail: ms.category.rawValue
             ))
+        }
+
+        // Apple 系統行事曆（讀取自 EventKit）
+        if appleCal.hasAccess {
+            for ev in appleCal.events(forDay: day, calendar: calendar) {
+                let calName = ev.calendar?.title ?? "行事曆"
+                let location = (ev.location?.trimmingCharacters(in: .whitespaces)) ?? ""
+                var detailParts: [String] = [calName]
+                if ev.isAllDay { detailParts.append("全日") }
+                if !location.isEmpty { detailParts.append(location) }
+                events.append(CalendarEvent(
+                    id: "ek-\(ev.calendarItemIdentifier)-\(ev.startDate.timeIntervalSince1970)",
+                    type: .appleCalendar,
+                    title: ev.title.isEmpty ? "(無標題)" : ev.title,
+                    time: ev.isAllDay ? nil : ev.startDate,
+                    detail: detailParts.joined(separator: " · ")
+                ))
+            }
         }
 
         // 個人行事曆事件（事務 / 會議，含重複展開）
