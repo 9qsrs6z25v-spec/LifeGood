@@ -2,18 +2,6 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 
-// MARK: - ShareSheet（包 UIActivityViewController）
-
-struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
 // MARK: - 公司組織頁
 
 /// 依 Department.upstreamIds / downstreamIds 計算組織樹，
