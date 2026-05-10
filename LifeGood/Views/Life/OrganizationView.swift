@@ -140,42 +140,42 @@ struct OrganizationView: View {
         return f.string(from: Date())
     }
 
-    /// 遞迴繪製：本節點 + 下方連線 + 下游節點 HStack
-    @ViewBuilder
-    private func deptTreeNode(_ dept: Department, visited: Set<UUID>) -> some View {
+    /// 遞迴繪製：本節點 + 下方連線 + 下游節點 HStack。
+    /// 回傳 AnyView 是必要的——SwiftUI 對遞迴 some View 無法推論型別。
+    private func deptTreeNode(_ dept: Department, visited: Set<UUID>) -> AnyView {
         let nextVisited = visited.union([dept.id])
         let children = lifeStore.departments.filter {
             dept.downstreamIds.contains($0.id) && !visited.contains($0.id)
         }
-        VStack(spacing: 12) {
-            departmentCard(dept)
-                .onTapGesture { viewingDeptId = dept.id }
+        return AnyView(
+            VStack(spacing: 12) {
+                departmentCard(dept)
+                    .onTapGesture { viewingDeptId = dept.id }
 
-            if !children.isEmpty {
-                // 連接線 + 下游分支
-                Rectangle()
-                    .fill(Color.indigo.opacity(0.4))
-                    .frame(width: 2, height: 16)
-                HStack(alignment: .top, spacing: 24) {
-                    ForEach(children) { child in
-                        deptTreeNode(child, visited: nextVisited)
-                    }
-                }
-                .overlay(alignment: .top) {
-                    // 子節點之間的橫線
-                    if children.count > 1 {
-                        GeometryReader { geo in
-                            Rectangle()
-                                .fill(Color.indigo.opacity(0.4))
-                                .frame(height: 2)
-                                .frame(width: geo.size.width * (Double(children.count - 1) / Double(children.count)))
-                                .offset(x: geo.size.width / Double(children.count) / 2 - 1)
+                if !children.isEmpty {
+                    Rectangle()
+                        .fill(Color.indigo.opacity(0.4))
+                        .frame(width: 2, height: 16)
+                    HStack(alignment: .top, spacing: 24) {
+                        ForEach(children) { child in
+                            deptTreeNode(child, visited: nextVisited)
                         }
-                        .frame(height: 2)
+                    }
+                    .overlay(alignment: .top) {
+                        if children.count > 1 {
+                            GeometryReader { geo in
+                                Rectangle()
+                                    .fill(Color.indigo.opacity(0.4))
+                                    .frame(height: 2)
+                                    .frame(width: geo.size.width * (Double(children.count - 1) / Double(children.count)))
+                                    .offset(x: geo.size.width / Double(children.count) / 2 - 1)
+                            }
+                            .frame(height: 2)
+                        }
                     }
                 }
             }
-        }
+        )
     }
 
     private func departmentCard(_ dept: Department) -> some View {
