@@ -450,5 +450,8 @@ class LifeStore: ObservableObject {
         subordinates.removeAll()
         departments.removeAll()
         gradeTitles.removeAll()
+        businessCards.removeAll()
+        personalEvents.removeAll()
+        orgPeople.removeAll()
     }
 }

@@ -554,6 +554,12 @@ class ExpenseStore: ObservableObject {
     // MARK: - 清除
 
     func clearAll() {
+        // 清除支出附帶的照片
+        for exp in expenses {
+            for name in exp.photoFileNames { Expense.deletePhoto(name) }
+        }
         expenses.removeAll()
+        incomes.removeAll()
+        currencyRates.removeAll()
     }
 }

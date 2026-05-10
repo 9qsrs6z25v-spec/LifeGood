@@ -1422,6 +1422,14 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
     var recurrence: EventRecurrence
     var recurrenceEndDate: Date?    // 可選：重複結束日（含當天為最後一次）
     var reminderMinutes: Int        // -1 = 不提醒；0 = 事件當下；正整數 = N 分鐘前
+    /// 地點（同步到 Apple 行事曆時對應 EKEvent.location）
+    var location: String
+    /// 是否同步到 Apple 行事曆
+    var syncToAppleCalendar: Bool
+    /// 寫入哪個 iOS 行事曆（EKCalendar.calendarIdentifier）
+    var appleCalendarId: String?
+    /// 已寫入的 EKEvent 識別碼，用於更新與刪除
+    var ekEventIdentifier: String?
 
     init(id: UUID = UUID(),
          title: String = "",
@@ -1431,7 +1439,11 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
          note: String = "",
          recurrence: EventRecurrence = .none,
          recurrenceEndDate: Date? = nil,
-         reminderMinutes: Int = EventReminder.none.rawValue) {
+         reminderMinutes: Int = EventReminder.none.rawValue,
+         location: String = "",
+         syncToAppleCalendar: Bool = false,
+         appleCalendarId: String? = nil,
+         ekEventIdentifier: String? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
@@ -1441,9 +1453,13 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
         self.recurrence = recurrence
         self.recurrenceEndDate = recurrenceEndDate
         self.reminderMinutes = reminderMinutes
+        self.location = location
+        self.syncToAppleCalendar = syncToAppleCalendar
+        self.appleCalendarId = appleCalendarId
+        self.ekEventIdentifier = ekEventIdentifier
     }
 
-    /// 向下相容：舊版 JSON 沒有 recurrence / reminder 欄位
+    /// 向下相容：舊版 JSON 沒有 recurrence / reminder / Apple 同步欄位
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -1455,10 +1471,15 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
         recurrence = (try? c.decode(EventRecurrence.self, forKey: .recurrence)) ?? .none
         recurrenceEndDate = try? c.decode(Date.self, forKey: .recurrenceEndDate)
         reminderMinutes = (try? c.decode(Int.self, forKey: .reminderMinutes)) ?? EventReminder.none.rawValue
+        location = (try? c.decode(String.self, forKey: .location)) ?? ""
+        syncToAppleCalendar = (try? c.decode(Bool.self, forKey: .syncToAppleCalendar)) ?? false
+        appleCalendarId = try? c.decodeIfPresent(String.self, forKey: .appleCalendarId)
+        ekEventIdentifier = try? c.decodeIfPresent(String.self, forKey: .ekEventIdentifier)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, kind, date, durationMinutes, note, recurrence, recurrenceEndDate, reminderMinutes
+        case location, syncToAppleCalendar, appleCalendarId, ekEventIdentifier
     }
 
     /// 結束時間

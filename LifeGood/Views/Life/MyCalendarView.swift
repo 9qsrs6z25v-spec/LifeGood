@@ -227,9 +227,10 @@ struct MyCalendarView: View {
             ))
         }
 
-        // Apple 系統行事曆（讀取自 EventKit）
+        // Apple 系統行事曆（讀取自 EventKit）— 排除已從 LifeGood 同步出去的事件，避免重複
         if appleCal.hasAccess {
-            for ev in appleCal.events(forDay: day, calendar: calendar) {
+            let syncedIds = Set(lifeStore.personalEvents.compactMap { $0.ekEventIdentifier })
+            for ev in appleCal.events(forDay: day, calendar: calendar) where !syncedIds.contains(ev.eventIdentifier) {
                 let calName = ev.calendar?.title ?? "行事曆"
                 let location = (ev.location?.trimmingCharacters(in: .whitespaces)) ?? ""
                 var detailParts: [String] = [calName]
@@ -275,9 +276,18 @@ struct MyCalendarView: View {
 
     private var todayEvents: [CalendarEvent] { eventsOn(selectedDate) }
 
+    /// 當前選定日期顯示用（今天 → 「當日事件」、其他日 → 「2025/5/15 (Wed) 事件」）
+    private var selectedDayHeaderTitle: String {
+        if calendar.isDateInToday(selectedDate) { return "當日事件" }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d (EEE)"
+        return "\(f.string(from: selectedDate)) 事件"
+    }
+
     private var todayEventsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("當日事件",
+            sectionHeader(selectedDayHeaderTitle,
                           icon: "calendar.badge.clock",
                           color: Color(red: 0.95, green: 0.55, blue: 0.65),
                           count: todayEvents.count)
@@ -505,6 +515,11 @@ struct PersonalEventEditor: View {
     @State private var reminder: EventReminder = .none
     @State private var showDeleteConfirm = false
     @State private var permissionDeniedAlert = false
+    // Apple 行事曆連動
+    @State private var location: String = ""
+    @State private var syncToAppleCalendar: Bool = false
+    @State private var selectedAppleCalendarId: String?
+    @ObservedObject private var appleCal = AppleCalendarBridge.shared
 
     /// 常用長度選項（分鐘），0 = 全日
     private let durationOptions: [(label: String, minutes: Int)] = [
@@ -575,6 +590,8 @@ struct PersonalEventEditor: View {
                     }
                 }
 
+                appleCalendarSection
+
                 Section("備註") {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                 }
@@ -621,6 +638,9 @@ struct PersonalEventEditor: View {
                         recurrenceEndDate = endDate
                     }
                     reminder = EventReminder(rawValue: e.reminderMinutes) ?? .none
+                    location = e.location
+                    syncToAppleCalendar = e.syncToAppleCalendar
+                    selectedAppleCalendarId = e.appleCalendarId
                 } else {
                     // 預設將時間設為使用者選的日期 + 當下時間
                     let now = Date()
@@ -631,6 +651,52 @@ struct PersonalEventEditor: View {
                     dayComp.minute = timeComp.minute
                     date = cal.date(from: dayComp) ?? initialDate
                 }
+                // 預設行事曆 ID（若使用者尚未選擇）
+                if selectedAppleCalendarId == nil {
+                    selectedAppleCalendarId = appleCal.defaultCalendarId
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var appleCalendarSection: some View {
+        Section {
+            Toggle(isOn: $syncToAppleCalendar) {
+                Label("同步到 Apple 行事曆", systemImage: "calendar.badge.plus")
+            }
+            .tint(.blue)
+            .disabled(appleCal.isDenied)
+
+            if syncToAppleCalendar {
+                if appleCal.hasAccess {
+                    if !appleCal.writableCalendars.isEmpty {
+                        Picker("寫入行事曆", selection: $selectedAppleCalendarId) {
+                            ForEach(appleCal.writableCalendars, id: \.calendarIdentifier) { c in
+                                HStack {
+                                    Circle().fill(Color(cgColor: c.cgColor)).frame(width: 10, height: 10)
+                                    Text(c.title)
+                                }
+                                .tag(c.calendarIdentifier as String?)
+                            }
+                        }
+                    }
+                    TextField("地點（選填）", text: $location)
+                } else if appleCal.authorizationStatus == .notDetermined {
+                    Text("儲存時將跳出 Apple 行事曆授權")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Apple 行事曆")
+        } footer: {
+            if appleCal.isDenied {
+                Text("Apple 行事曆權限被拒，無法寫入。請至「設定 → LifeGood」開啟。")
+                    .foregroundStyle(.orange)
+            } else if syncToAppleCalendar && editing?.ekEventIdentifier != nil {
+                Text("關閉開關並儲存，會把 Apple 行事曆中對應的事件一起移除。")
+            } else {
+                Text("打開後，事件會寫入並同步到 Apple 行事曆。地點 / 提醒 / 重複都會帶過去。")
             }
         }
     }
@@ -652,7 +718,13 @@ struct PersonalEventEditor: View {
     private func save() {
         let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
         guard !trimmedTitle.isEmpty else { return }
-        let event = PersonalEvent(
+        Task { await performSave(trimmedTitle: trimmedTitle) }
+    }
+
+    @MainActor
+    private func performSave(trimmedTitle: String) async {
+        // 先按目前 form 內容組事件
+        var event = PersonalEvent(
             id: editing?.id ?? UUID(),
             title: trimmedTitle,
             kind: kind,
@@ -661,8 +733,30 @@ struct PersonalEventEditor: View {
             note: note.trimmingCharacters(in: .whitespaces),
             recurrence: recurrence,
             recurrenceEndDate: (recurrence != .none && hasRecurrenceEnd) ? recurrenceEndDate : nil,
-            reminderMinutes: reminder.rawValue
+            reminderMinutes: reminder.rawValue,
+            location: location.trimmingCharacters(in: .whitespaces),
+            syncToAppleCalendar: syncToAppleCalendar,
+            appleCalendarId: selectedAppleCalendarId,
+            ekEventIdentifier: editing?.ekEventIdentifier
         )
+
+        // Apple 行事曆同步
+        if syncToAppleCalendar {
+            // 還沒拿權限就先請求
+            if appleCal.authorizationStatus == .notDetermined {
+                await appleCal.requestAccess()
+            }
+            if appleCal.hasAccess {
+                if let newId = appleCal.writeOrUpdate(from: event, calendarId: selectedAppleCalendarId ?? appleCal.defaultCalendarId) {
+                    event.ekEventIdentifier = newId
+                }
+            }
+        } else if let oldId = editing?.ekEventIdentifier {
+            // 從同步切回不同步 → 刪掉 EKEvent
+            appleCal.delete(eventIdentifier: oldId)
+            event.ekEventIdentifier = nil
+        }
+
         if let idx = lifeStore.personalEvents.firstIndex(where: { $0.id == event.id }) {
             lifeStore.personalEvents[idx] = event
         } else {
@@ -670,21 +764,22 @@ struct PersonalEventEditor: View {
         }
 
         // 排程通知（會自動覆蓋舊的）
-        Task {
-            if reminder != .none {
-                let granted = await NotificationManager.shared.requestAuthorization()
-                if !granted {
-                    await MainActor.run { permissionDeniedAlert = true }
-                }
+        if reminder != .none {
+            let granted = await NotificationManager.shared.requestAuthorization()
+            if !granted {
+                permissionDeniedAlert = true
             }
-            await NotificationManager.shared.schedule(event)
         }
+        await NotificationManager.shared.schedule(event)
         dismiss()
     }
 
     private func delete() {
         guard let e = editing else { return }
         NotificationManager.shared.cancel(eventId: e.id)
+        if let ekId = e.ekEventIdentifier {
+            appleCal.delete(eventIdentifier: ekId)
+        }
         lifeStore.personalEvents.removeAll { $0.id == e.id }
         dismiss()
     }

@@ -84,4 +84,99 @@ final class AppleCalendarBridge: ObservableObject {
         guard let url = URL(string: "calshow:\(interval)") else { return }
         UIApplication.shared.open(url)
     }
+
+    // MARK: - 寫入相關
+
+    /// 可寫入的行事曆清單（給 PersonalEventEditor picker 用）
+    var writableCalendars: [EKCalendar] {
+        guard hasAccess else { return [] }
+        return eventStore.calendars(for: .event)
+            .filter { $0.allowsContentModifications }
+            .sorted { $0.title < $1.title }
+    }
+
+    /// 預設要寫入的行事曆 ID
+    var defaultCalendarId: String? {
+        eventStore.defaultCalendarForNewEvents?.calendarIdentifier
+    }
+
+    /// 把 PersonalEvent 寫入或更新到 Apple 行事曆，回傳對應的 eventIdentifier
+    func writeOrUpdate(from pe: PersonalEvent, calendarId: String?) -> String? {
+        guard hasAccess else { return nil }
+
+        let event: EKEvent = {
+            if let existingId = pe.ekEventIdentifier,
+               let found = eventStore.event(withIdentifier: existingId) {
+                return found
+            }
+            return EKEvent(eventStore: eventStore)
+        }()
+
+        // 設定行事曆
+        if let id = calendarId,
+           let target = eventStore.calendar(withIdentifier: id),
+           target.allowsContentModifications {
+            event.calendar = target
+        } else if event.calendar == nil {
+            event.calendar = eventStore.defaultCalendarForNewEvents
+        }
+        guard event.calendar != nil else { return nil }
+
+        // 基本欄位
+        let cal = Calendar.current
+        event.title = pe.title.isEmpty ? pe.kind.rawValue : pe.title
+        event.notes = pe.note.isEmpty ? nil : pe.note
+        event.location = pe.location.isEmpty ? nil : pe.location
+        event.startDate = pe.date
+        if pe.durationMinutes > 0 {
+            event.endDate = cal.date(byAdding: .minute, value: pe.durationMinutes, to: pe.date) ?? pe.date
+            event.isAllDay = false
+        } else {
+            // 全日：endDate 設為當日 23:59 同一天
+            let startOfDay = cal.startOfDay(for: pe.date)
+            event.endDate = cal.date(byAdding: .day, value: 1, to: startOfDay)?.addingTimeInterval(-1) ?? pe.date
+            event.isAllDay = true
+        }
+
+        // 提醒
+        event.alarms = nil
+        if pe.reminderMinutes >= 0 {
+            event.alarms = [EKAlarm(relativeOffset: -Double(pe.reminderMinutes * 60))]
+        }
+
+        // 重複
+        let freq: EKRecurrenceFrequency? = {
+            switch pe.recurrence {
+            case .daily: return .daily
+            case .weekly: return .weekly
+            case .monthly: return .monthly
+            case .yearly: return .yearly
+            case .none: return nil
+            }
+        }()
+        if let f = freq {
+            let endRule: EKRecurrenceEnd? = pe.recurrenceEndDate.map { EKRecurrenceEnd(end: $0) }
+            event.recurrenceRules = [EKRecurrenceRule(recurrenceWith: f, interval: 1, end: endRule)]
+        } else {
+            event.recurrenceRules = nil
+        }
+
+        do {
+            try eventStore.save(event, span: .futureEvents, commit: true)
+            return event.eventIdentifier
+        } catch {
+            return nil
+        }
+    }
+
+    /// 刪除指定 EKEvent
+    func delete(eventIdentifier: String) {
+        guard hasAccess,
+              let event = eventStore.event(withIdentifier: eventIdentifier) else { return }
+        do {
+            try eventStore.remove(event, span: .futureEvents, commit: true)
+        } catch {
+            // ignore
+        }
+    }
 }
