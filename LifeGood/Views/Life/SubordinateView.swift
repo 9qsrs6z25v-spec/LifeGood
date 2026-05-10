@@ -301,7 +301,7 @@ struct AddSubordinateView: View {
                 Text("職位")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("請先至「職等職稱」設定")
+                Text("請先至「部門職等」設定")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }

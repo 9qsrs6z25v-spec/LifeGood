@@ -85,7 +85,7 @@ struct OrganizationView: View {
             Image(systemName: "building.2.crop.circle")
                 .font(.system(size: 56)).foregroundStyle(.tertiary)
             Text("尚無部門資料").font(.headline).foregroundStyle(.secondary)
-            Text("到「職等職稱」頁新增部門，並設定上下游關係，組織圖會自動繪製。")
+            Text("到「部門職等」頁新增部門，並設定上下游關係，組織圖會自動繪製。")
                 .font(.caption).foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
@@ -485,6 +485,7 @@ struct OrgPersonEditor: View {
 
     @State private var name = ""
     @State private var jobTitle = ""
+    @State private var gradeTitleId: UUID?
     @State private var departmentId: UUID?
     @State private var birthday: Date = Date()
     @State private var hasBirthday: Bool = false
@@ -513,7 +514,24 @@ struct OrgPersonEditor: View {
             Form {
                 Section("基本資訊") {
                     TextField("姓名", text: $name)
-                    TextField("職稱", text: $jobTitle)
+
+                    Picker("職等", selection: $gradeTitleId) {
+                        Text("自訂").tag(nil as UUID?)
+                        ForEach(lifeStore.gradeTitles) { gt in
+                            Text(gradeTitleLabel(gt)).tag(gt.id as UUID?)
+                        }
+                    }
+                    if gradeTitleId == nil {
+                        TextField("自訂職稱", text: $jobTitle)
+                    } else if let gt = lifeStore.gradeTitles.first(where: { $0.id == gradeTitleId }) {
+                        HStack {
+                            Text("職稱").foregroundStyle(.secondary)
+                            Spacer()
+                            Text(gt.title.isEmpty ? "未命名" : gt.title)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     Picker("部門", selection: $departmentId) {
                         Text("未指派").tag(nil as UUID?)
                         ForEach(lifeStore.departments) { d in
@@ -720,9 +738,20 @@ struct OrgPersonEditor: View {
         lifeStore.orgPeople.filter { $0.id != editingId }
     }
 
+    /// 職等 picker 的顯示文字：「[職等] 職稱」
+    private func gradeTitleLabel(_ gt: GradeTitle) -> String {
+        let g = gt.grade.trimmingCharacters(in: .whitespaces)
+        let t = gt.title.trimmingCharacters(in: .whitespaces)
+        if g.isEmpty && t.isEmpty { return "未命名" }
+        if g.isEmpty { return t }
+        if t.isEmpty { return g }
+        return "\(g) \(t)"
+    }
+
     private func loadInitial() {
         if let e = existing {
             name = e.name; jobTitle = e.jobTitle
+            gradeTitleId = e.gradeTitleId
             departmentId = e.departmentId
             if let bd = e.birthday { birthday = bd; hasBirthday = true }
             relationship = e.relationship
@@ -754,10 +783,19 @@ struct OrgPersonEditor: View {
         if !isEditing, finalCardId == nil {
             finalCardId = autoCreateCard(for: id)
         }
+        // 若選了職等職稱，jobTitle 直接用對應 GradeTitle.title；自訂則用自填文字
+        let resolvedJobTitle: String = {
+            if let id = gradeTitleId,
+               let gt = lifeStore.gradeTitles.first(where: { $0.id == id }) {
+                return gt.title.trimmingCharacters(in: .whitespaces)
+            }
+            return jobTitle.trimmingCharacters(in: .whitespaces)
+        }()
+
         let person = OrgPerson(
             id: id,
             name: name.trimmingCharacters(in: .whitespaces),
-            jobTitle: jobTitle.trimmingCharacters(in: .whitespaces),
+            jobTitle: resolvedJobTitle,
             departmentId: departmentId,
             photoFileName: newPhoto,
             birthday: hasBirthday ? birthday : nil,
@@ -769,7 +807,8 @@ struct OrgPersonEditor: View {
             isInactive: isInactive,
             leftDate: isInactive ? leftDate : nil,
             linkedBusinessCardId: finalCardId,
-            linkedSubordinateId: existing?.linkedSubordinateId
+            linkedSubordinateId: existing?.linkedSubordinateId,
+            gradeTitleId: gradeTitleId
         )
         if isEditing { lifeStore.update(person) } else { lifeStore.add(person) }
         syncBusinessCardLink(personId: id, oldCardId: existing?.linkedBusinessCardId, newCardId: finalCardId)

@@ -865,23 +865,19 @@ struct AddMilestoneView: View {
         case .join:
             TextField("公司名稱", text: $companyName)
             TextField("部門", text: $department)
-            TextField("職位名稱", text: $jobTitle)
-            TextField("職等編號", text: $jobGrade)
+            gradeTitlePicker(titleLabel: "職位名稱", gradeLabel: "職等編號")
             salaryField
         case .promote:
-            TextField("更新後職位名稱", text: $jobTitle)
-            TextField("更新後職等編號", text: $jobGrade)
+            gradeTitlePicker(titleLabel: "更新後職位名稱", gradeLabel: "更新後職等編號")
             salaryField
         case .salaryAdjust:
             EmptyView()
         case .transfer:
             TextField("更新後部門", text: $department)
-            TextField("職位名稱", text: $jobTitle)
-            TextField("職等編號", text: $jobGrade)
+            gradeTitlePicker(titleLabel: "職位名稱", gradeLabel: "職等編號")
             salaryField
         case .demote:
-            TextField("更新後職位名稱", text: $jobTitle)
-            TextField("更新後職等編號", text: $jobGrade)
+            gradeTitlePicker(titleLabel: "更新後職位名稱", gradeLabel: "更新後職等編號")
             salaryField
         case .resign:
             EmptyView()
@@ -902,6 +898,69 @@ struct AddMilestoneView: View {
             TextField("薪水（選填）", text: $salaryText)
                 .keyboardType(.numberPad)
         }
+    }
+
+    /// 職稱 / 職等編號連動「部門職等」設定。
+    /// 選了清單項目就把 jobTitle / jobGrade 自動帶入；選「自訂」就退回純文字輸入。
+    @ViewBuilder
+    private func gradeTitlePicker(titleLabel: String, gradeLabel: String) -> some View {
+        if store.gradeTitles.isEmpty {
+            TextField(titleLabel, text: $jobTitle)
+            TextField(gradeLabel, text: $jobGrade)
+        } else {
+            Picker("部門職等", selection: gradeTitleSelectionBinding) {
+                Text("自訂").tag(nil as UUID?)
+                ForEach(store.gradeTitles) { gt in
+                    Text(formatGradeTitle(gt)).tag(gt.id as UUID?)
+                }
+            }
+            if matchedGradeTitleId == nil {
+                TextField(titleLabel, text: $jobTitle)
+                TextField(gradeLabel, text: $jobGrade)
+            } else {
+                HStack {
+                    Text(titleLabel).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(jobTitle.isEmpty ? "—" : jobTitle).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text(gradeLabel).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(jobGrade.isEmpty ? "—" : jobGrade).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// 把目前 jobTitle / jobGrade 對應到 GradeTitle ID（找不到就回 nil = 自訂）
+    private var matchedGradeTitleId: UUID? {
+        store.gradeTitles.first(where: {
+            $0.title == jobTitle && $0.grade == jobGrade
+        })?.id
+    }
+
+    private var gradeTitleSelectionBinding: Binding<UUID?> {
+        Binding(
+            get: { matchedGradeTitleId },
+            set: { newValue in
+                if let id = newValue,
+                   let gt = store.gradeTitles.first(where: { $0.id == id }) {
+                    jobTitle = gt.title
+                    jobGrade = gt.grade
+                } else {
+                    // 自訂：保留現有文字
+                }
+            }
+        )
+    }
+
+    private func formatGradeTitle(_ gt: GradeTitle) -> String {
+        let g = gt.grade.trimmingCharacters(in: .whitespaces)
+        let t = gt.title.trimmingCharacters(in: .whitespaces)
+        if g.isEmpty && t.isEmpty { return "未命名" }
+        if g.isEmpty { return t }
+        if t.isEmpty { return g }
+        return "\(g) \(t)"
     }
 
     @ViewBuilder

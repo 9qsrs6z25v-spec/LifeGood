@@ -66,7 +66,7 @@ struct GradeTitleView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("職等對應職稱")
+            .navigationTitle("部門職等")
             .disabled(!subscription.isPremium)
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .onAppear {

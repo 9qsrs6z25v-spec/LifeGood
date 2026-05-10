@@ -105,10 +105,20 @@ class LifeStore: ObservableObject {
     /// - 未連結但有部門 → 新建 OrgPerson + 自動連動產生 BusinessCard
     /// - 未連結且無部門 → 不動
     private func syncOrgPersonFor(subordinate sub: Subordinate) {
+        // 解析職稱：若有 gradeTitleId 用 GradeTitle.title，沒有則用 sub.jobTitle
+        let resolvedTitle: String = {
+            if let gtId = sub.gradeTitleId,
+               let gt = gradeTitles.first(where: { $0.id == gtId }) {
+                return gt.title.trimmingCharacters(in: .whitespaces)
+            }
+            return sub.jobTitle
+        }()
+
         if let i = orgPeople.firstIndex(where: { $0.linkedSubordinateId == sub.id }) {
             var p = orgPeople[i]
             p.name = sub.name
-            p.jobTitle = sub.jobTitle
+            p.jobTitle = resolvedTitle
+            p.gradeTitleId = sub.gradeTitleId
             p.departmentId = sub.departmentId
             orgPeople[i] = p
             return
@@ -125,7 +135,7 @@ class LifeStore: ObservableObject {
             name: sub.name,
             company: "",
             department: deptName,
-            jobTitle: sub.jobTitle,
+            jobTitle: resolvedTitle,
             phone: "",
             email: "",
             address: "",
@@ -140,11 +150,12 @@ class LifeStore: ObservableObject {
         let person = OrgPerson(
             id: personId,
             name: sub.name,
-            jobTitle: sub.jobTitle,
+            jobTitle: resolvedTitle,
             departmentId: deptId,
             dateAdded: Date(),
             linkedBusinessCardId: cardId,
-            linkedSubordinateId: sub.id
+            linkedSubordinateId: sub.id,
+            gradeTitleId: sub.gradeTitleId
         )
         orgPeople.append(person)
     }

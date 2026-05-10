@@ -89,7 +89,7 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
         case .subordinates: return "部屬"
         case .businessCard: return "名片"
         case .organization: return "公司組織"
-        case .gradeTitle: return "職等職稱"
+        case .gradeTitle: return "部門職等"
         }
     }
     var icon: String {
