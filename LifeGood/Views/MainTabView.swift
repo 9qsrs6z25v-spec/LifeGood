@@ -80,7 +80,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
 }
 
 enum ManagementFeature: String, CaseIterable, Identifiable {
-    case calendar, overview, subordinates, businessCard, gradeTitle
+    case calendar, overview, subordinates, businessCard, organization, gradeTitle
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -88,6 +88,7 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
         case .overview: return "部屬總覽"
         case .subordinates: return "部屬"
         case .businessCard: return "名片"
+        case .organization: return "公司組織"
         case .gradeTitle: return "職等職稱"
         }
     }
@@ -97,6 +98,7 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
         case .overview: return "chart.bar.doc.horizontal"
         case .subordinates: return "person.2.fill"
         case .businessCard: return "person.crop.rectangle.stack"
+        case .organization: return "building.2.crop.circle"
         case .gradeTitle: return "list.number"
         }
     }
@@ -633,6 +635,7 @@ struct MainTabView: View {
                 case .overview:     SubordinateOverviewView()
                 case .subordinates: SubordinateView()
                 case .businessCard: BusinessCardView()
+                case .organization: OrganizationView()
                 case .gradeTitle:   GradeTitleView()
                 }
             } else if hasCareerMilestones {

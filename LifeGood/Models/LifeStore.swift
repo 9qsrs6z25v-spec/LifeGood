@@ -12,6 +12,7 @@ class LifeStore: ObservableObject {
     @Published var gradeTitles: [GradeTitle] = [] { didSet { if !isLoading { save() } } }
     @Published var businessCards: [BusinessCard] = [] { didSet { if !isLoading { save() } } }
     @Published var personalEvents: [PersonalEvent] = [] { didSet { if !isLoading { save() } } }
+    @Published var orgPeople: [OrgPerson] = [] { didSet { if !isLoading { save() } } }
 
     private var isLoading = false
 
@@ -102,6 +103,17 @@ class LifeStore: ObservableObject {
         if let i = gradeTitles.firstIndex(where: { $0.id == item.id }) { gradeTitles[i] = item }
     }
     func deleteGradeTitle(_ item: GradeTitle) { gradeTitles.removeAll { $0.id == item.id } }
+
+    // MARK: - 公司組織人員 CRUD
+
+    func add(_ item: OrgPerson) { orgPeople.append(item) }
+    func update(_ item: OrgPerson) {
+        if let i = orgPeople.firstIndex(where: { $0.id == item.id }) { orgPeople[i] = item }
+    }
+    func deleteOrgPerson(_ item: OrgPerson) {
+        if let name = item.photoFileName { OrgPerson.deletePhoto(name) }
+        orgPeople.removeAll { $0.id == item.id }
+    }
 
     func add(_ item: BusinessCard) { businessCards.append(item) }
     func update(_ item: BusinessCard) {
@@ -254,6 +266,9 @@ class LifeStore: ObservableObject {
         if let data = try? encoder.encode(personalEvents) {
             UserDefaults.standard.set(data, forKey: "life_personal_events")
         }
+        if let data = try? encoder.encode(orgPeople) {
+            UserDefaults.standard.set(data, forKey: "life_org_people")
+        }
         CloudSyncManager.shared.pushAll()
     }
 
@@ -305,6 +320,10 @@ class LifeStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "life_personal_events"),
            let items = try? decoder.decode([PersonalEvent].self, from: data) {
             personalEvents = items
+        }
+        if let data = UserDefaults.standard.data(forKey: "life_org_people"),
+           let items = try? decoder.decode([OrgPerson].self, from: data) {
+            orgPeople = items
         }
     }
 

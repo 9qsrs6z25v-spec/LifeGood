@@ -34,7 +34,8 @@ final class CloudKitManager {
         "ElevatorPhotos",
         "UtilityPhotos",
         "ExpensePhotos",
-        "BusinessCardPhotos"
+        "BusinessCardPhotos",
+        "OrgPersonPhotos"
     ]
 
     private let container: CKContainer

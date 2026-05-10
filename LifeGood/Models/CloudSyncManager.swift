@@ -33,7 +33,8 @@ final class CloudSyncManager: ObservableObject {
         "life_departments",
         "life_grade_titles",
         "life_business_cards",
-        "life_personal_events"
+        "life_personal_events",
+        "life_org_people"
     ]
 
     private static let enabledKey = "icloud_sync_enabled"

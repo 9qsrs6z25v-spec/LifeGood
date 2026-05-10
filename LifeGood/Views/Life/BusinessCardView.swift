@@ -811,9 +811,9 @@ struct BusinessCardDetailView: View {
     }
 }
 
-// MARK: - UUID Identifiable wrapper（給 .sheet(item:) 用）
+// MARK: - UUID Identifiable wrapper（給 .sheet(item:) 用，模組共用）
 
-private struct IdentifiableUUID: Identifiable {
+struct IdentifiableUUID: Identifiable {
     let id: UUID
 }
 

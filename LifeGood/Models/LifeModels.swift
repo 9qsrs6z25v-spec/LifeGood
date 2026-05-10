@@ -1159,9 +1159,163 @@ struct Department: Identifiable, Codable {
     let id: UUID
     var code: String
     var name: String
+    /// 部門功能描述（公司組織頁顯示）
+    var function: String
+    /// 上游部門 ID 清單
+    var upstreamIds: [UUID]
+    /// 下游部門 ID 清單
+    var downstreamIds: [UUID]
 
-    init(id: UUID = UUID(), code: String = "", name: String = "") {
+    init(id: UUID = UUID(), code: String = "", name: String = "",
+         function: String = "",
+         upstreamIds: [UUID] = [],
+         downstreamIds: [UUID] = []) {
         self.id = id; self.code = code; self.name = name
+        self.function = function
+        self.upstreamIds = upstreamIds
+        self.downstreamIds = downstreamIds
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        code = (try? c.decode(String.self, forKey: .code)) ?? ""
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        function = (try? c.decode(String.self, forKey: .function)) ?? ""
+        upstreamIds = (try? c.decode([UUID].self, forKey: .upstreamIds)) ?? []
+        downstreamIds = (try? c.decode([UUID].self, forKey: .downstreamIds)) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, code, name, function, upstreamIds, downstreamIds
+    }
+}
+
+// MARK: - 公司組織人員
+
+struct OrgPersonChild: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    var birthday: Date?
+    var note: String
+
+    init(id: UUID = UUID(), name: String = "", birthday: Date? = nil, note: String = "") {
+        self.id = id; self.name = name; self.birthday = birthday; self.note = note
+    }
+}
+
+enum OrgRelationType: String, Codable, CaseIterable, Identifiable {
+    case ally = "同盟"
+    case neutral = "中立"
+    case rival = "對手"
+    case mentor = "前輩"
+    case mentee = "後輩"
+    case other = "其他"
+
+    var id: String { rawValue }
+
+    var color: String {
+        switch self {
+        case .ally: return "green"
+        case .neutral: return "gray"
+        case .rival: return "red"
+        case .mentor: return "indigo"
+        case .mentee: return "teal"
+        case .other: return "secondary"
+        }
+    }
+}
+
+struct OrgPersonRelation: Identifiable, Codable, Equatable {
+    let id: UUID
+    var personId: UUID
+    var type: OrgRelationType
+    var note: String
+
+    init(id: UUID = UUID(), personId: UUID, type: OrgRelationType = .neutral, note: String = "") {
+        self.id = id; self.personId = personId; self.type = type; self.note = note
+    }
+}
+
+struct OrgPerson: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    var jobTitle: String
+    var departmentId: UUID?
+    var photoFileName: String?
+    var birthday: Date?
+    /// 我與他的利害關係描述
+    var relationship: String
+    /// 相關記事
+    var note: String
+    var children: [OrgPersonChild]
+    var relations: [OrgPersonRelation]
+    var dateAdded: Date
+    /// 是否離職
+    var isInactive: Bool
+    var leftDate: Date?
+
+    init(id: UUID = UUID(), name: String = "", jobTitle: String = "",
+         departmentId: UUID? = nil, photoFileName: String? = nil,
+         birthday: Date? = nil, relationship: String = "", note: String = "",
+         children: [OrgPersonChild] = [], relations: [OrgPersonRelation] = [],
+         dateAdded: Date = Date(),
+         isInactive: Bool = false, leftDate: Date? = nil) {
+        self.id = id; self.name = name; self.jobTitle = jobTitle
+        self.departmentId = departmentId; self.photoFileName = photoFileName
+        self.birthday = birthday; self.relationship = relationship
+        self.note = note; self.children = children; self.relations = relations
+        self.dateAdded = dateAdded
+        self.isInactive = isInactive; self.leftDate = leftDate
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        jobTitle = (try? c.decode(String.self, forKey: .jobTitle)) ?? ""
+        departmentId = try? c.decodeIfPresent(UUID.self, forKey: .departmentId)
+        photoFileName = try? c.decodeIfPresent(String.self, forKey: .photoFileName)
+        birthday = try? c.decodeIfPresent(Date.self, forKey: .birthday)
+        relationship = (try? c.decode(String.self, forKey: .relationship)) ?? ""
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        children = (try? c.decode([OrgPersonChild].self, forKey: .children)) ?? []
+        relations = (try? c.decode([OrgPersonRelation].self, forKey: .relations)) ?? []
+        dateAdded = (try? c.decode(Date.self, forKey: .dateAdded)) ?? Date()
+        isInactive = (try? c.decode(Bool.self, forKey: .isInactive)) ?? false
+        leftDate = try? c.decodeIfPresent(Date.self, forKey: .leftDate)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, jobTitle, departmentId, photoFileName, birthday
+        case relationship, note, children, relations, dateAdded
+        case isInactive, leftDate
+    }
+
+    static var photosDirectory: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("OrgPersonPhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func savePhoto(_ data: Data, id: UUID) -> String {
+        let name = "\(id.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        try? data.write(to: url)
+        PhotoCloudSync.upload(directory: "OrgPersonPhotos", fileName: name)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "OrgPersonPhotos", fileName: fileName)
+    }
+
+    var photoURL: URL? {
+        guard let name = photoFileName else { return nil }
+        return Self.photosDirectory.appendingPathComponent(name)
     }
 }
 
