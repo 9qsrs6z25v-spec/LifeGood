@@ -70,19 +70,44 @@ struct SettingsView: View {
     @State private var showRestoreResult = false
     @State private var restoreResultMessage = ""
 
+    @State private var subscriptionExpanded = true   // 訂閱常會看，預設開
+    @State private var einvoiceExpanded = false
+    @State private var currencyExpanded = false
+    @State private var iCloudExpanded = false
+    @State private var dataManagementExpanded = false
+    @State private var dataStatsExpanded = false
+    @State private var restoreExpanded = false
+    @State private var aboutExpanded = false
+
     var body: some View {
         NavigationStack {
             List {
-                subscriptionSection
-                einvoiceSection
-                modeSwitchSection
-                currencyRateSection
-                iCloudSyncSection
-                dataManagementSection
-                dataStatsSection
-                restoreSection
+                disclosureBlock("訂閱方案", icon: "crown.fill", color: .yellow, isExpanded: $subscriptionExpanded) {
+                    subscriptionSection
+                }
+                disclosureBlock("電子發票自動匯入", icon: "doc.text.viewfinder", color: .indigo, isExpanded: $einvoiceExpanded) {
+                    einvoiceSection
+                }
+                disclosureBlock("自訂幣別匯率", icon: "dollarsign.arrow.circlepath", color: .blue, isExpanded: $currencyExpanded) {
+                    currencyRateSection
+                }
+                disclosureBlock("iCloud 同步", icon: "icloud.fill", color: .blue, isExpanded: $iCloudExpanded) {
+                    iCloudSyncSection
+                }
+                disclosureBlock("資料匯出 / 匯入", icon: "tray.and.arrow.up.fill", color: .green, isExpanded: $dataManagementExpanded) {
+                    dataManagementSection
+                }
+                disclosureBlock("資料統計", icon: "chart.bar.fill", color: .orange, isExpanded: $dataStatsExpanded) {
+                    dataStatsSection
+                }
+                disclosureBlock("自動備份還原", icon: "clock.arrow.circlepath", color: .teal, isExpanded: $restoreExpanded) {
+                    restoreSection
+                }
+                // 危險區一律外露不收合，避免使用者誤觸或找不到
                 dangerZoneSection
-                aboutSection
+                disclosureBlock("關於", icon: "info.circle.fill", color: .gray, isExpanded: $aboutExpanded) {
+                    aboutSection
+                }
             }
             .navigationTitle("設定")
             .sheet(isPresented: $showPaywall) {
@@ -251,26 +276,27 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - 模式切換
+    // MARK: - DisclosureGroup 包裝
 
-    private var modeSwitchSection: some View {
+    @ViewBuilder
+    private func disclosureBlock<Content: View>(
+        _ title: String,
+        icon: String,
+        color: Color,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         Section {
-            Picker("功能模式", selection: $appMode) {
-                ForEach(AppMode.allCases, id: \.rawValue) { mode in
-                    Text(mode.rawValue).tag(mode.rawValue)
+            DisclosureGroup(isExpanded: isExpanded) {
+                // 用 List Section 包出來的 content 直接內嵌
+                content()
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: icon)
+                        .foregroundStyle(color)
+                        .frame(width: 22)
+                    Text(title).font(.subheadline.weight(.medium))
                 }
-            }
-            .pickerStyle(.segmented)
-        } header: {
-            Text("功能切換")
-        } footer: {
-            switch currentMode {
-            case .expense:
-                Text("目前為記帳模式：管理每日變動支出與固定開支。")
-            case .finance:
-                Text("目前為理財模式：管理儲蓄險、股票與房地產資產。")
-            case .life:
-                Text("目前為人生模式：記錄里程碑、人際關係、寵物與行程。")
             }
         }
     }

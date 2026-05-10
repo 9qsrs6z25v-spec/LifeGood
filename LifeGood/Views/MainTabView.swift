@@ -138,6 +138,7 @@ struct MainTabView: View {
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showPaywall: Bool = false
 
@@ -686,10 +687,28 @@ struct MainTabView: View {
         if hasCareerMilestones { list.append(.career) }
         if !lifeStore.familyMembers.isEmpty { list.append(.family) }
         if !financeStore.realEstates.isEmpty { list.append(.realEstate) }
-        let hasTaxExpenses = true
-        if hasTaxExpenses { list.append(.tax) }
-        list.append(.foodMap)
+        if hasTaxData { list.append(.tax) }
+        if hasFoodMapData { list.append(.foodMap) }
         return list
+    }
+
+    /// 任一稅費 / 節稅紀錄、有房產或車輛（會產生年度稅）→ 顯示稅務頁
+    private var hasTaxData: Bool {
+        if expenseStore.expenses.contains(where: {
+            $0.variableCategory == .tax || $0.variableCategory == .taxSaving
+        }) { return true }
+        if expenseStore.expenses.contains(where: {
+            $0.expenseType == .fixed && $0.effectivelyTaxDeductible
+        }) { return true }
+        if !financeStore.realEstates.isEmpty || !financeStore.vehicles.isEmpty { return true }
+        return false
+    }
+
+    /// 任一飲食紀錄已附經緯度 → 顯示美食地圖頁
+    private var hasFoodMapData: Bool {
+        expenseStore.expenses.contains(where: {
+            $0.variableCategory == .food && $0.placeLatitude != nil && $0.placeLongitude != nil
+        })
     }
 }
 
