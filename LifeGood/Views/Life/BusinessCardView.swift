@@ -377,6 +377,7 @@ struct BusinessCardDetailView: View {
     @State private var showPhotosPicker = false
     @State private var pickerItem: PhotosPickerItem?
     @State private var showQRFullscreen = false
+    @State private var viewingLinkedOrgPersonId: UUID?
 
     private var card: BusinessCard {
         lifeStore.businessCards.first(where: { $0.id == cardId })
@@ -388,6 +389,9 @@ struct BusinessCardDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     heroCard
+                    if card.linkedOrgPersonId != nil {
+                        linkedOrgPersonButton
+                    }
                     if hasContact {
                         contactCard
                     }
@@ -421,15 +425,46 @@ struct BusinessCardDetailView: View {
             .sheet(isPresented: $showEdit) {
                 BusinessCardEditor(editing: card)
             }
+            .sheet(item: Binding(
+                get: { viewingLinkedOrgPersonId.map { IdentifiableUUID(id: $0) } },
+                set: { viewingLinkedOrgPersonId = $0?.id }
+            )) { wrapper in
+                OrgPersonDetailView(personId: wrapper.id)
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .alert("確定要刪除這張名片嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
+                    // 移除時清掉組織人員端的連結
+                    if let pid = card.linkedOrgPersonId,
+                       var person = lifeStore.orgPeople.first(where: { $0.id == pid }),
+                       person.linkedBusinessCardId == cardId {
+                        person.linkedBusinessCardId = nil
+                        lifeStore.update(person)
+                    }
                     lifeStore.deleteBusinessCard(card)
                     dismiss()
                 }
                 Button("取消", role: .cancel) {}
             }
         }
+    }
+
+    private var linkedOrgPersonButton: some View {
+        Button {
+            viewingLinkedOrgPersonId = card.linkedOrgPersonId
+        } label: {
+            HStack {
+                Image(systemName: "building.2.crop.circle").foregroundStyle(.indigo)
+                Text("查看公司組織人員").font(.subheadline.weight(.medium))
+                Spacer()
+                Image(systemName: "arrow.up.right.square").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Hero 名片卡
@@ -894,7 +929,8 @@ struct BusinessCardEditor: View {
             address: address.trimmingCharacters(in: .whitespaces),
             note: note.trimmingCharacters(in: .whitespaces),
             date: date,
-            photoFileName: editing?.photoFileName  // 編輯時保留既有頭像
+            photoFileName: editing?.photoFileName,
+            linkedOrgPersonId: editing?.linkedOrgPersonId
         )
         if editing != nil { lifeStore.update(card) } else { lifeStore.add(card) }
         dismiss()

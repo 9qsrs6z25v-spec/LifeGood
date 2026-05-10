@@ -1091,17 +1091,21 @@ struct BusinessCard: Identifiable, Codable {
     var date: Date
     /// 名片頭像照片檔名（存於 BusinessCardPhotos 目錄）
     var photoFileName: String?
+    /// 連結的公司組織人員 ID（雙向同步：OrgPerson.linkedBusinessCardId 也會指回來）
+    var linkedOrgPersonId: UUID?
 
     init(id: UUID = UUID(), name: String = "", company: String = "",
          department: String = "", jobTitle: String = "",
          phone: String = "", email: String = "", address: String = "",
          note: String = "", date: Date = Date(),
-         photoFileName: String? = nil) {
+         photoFileName: String? = nil,
+         linkedOrgPersonId: UUID? = nil) {
         self.id = id; self.name = name; self.company = company
         self.department = department; self.jobTitle = jobTitle
         self.phone = phone; self.email = email
         self.address = address; self.note = note; self.date = date
         self.photoFileName = photoFileName
+        self.linkedOrgPersonId = linkedOrgPersonId
     }
 
     init(from decoder: Decoder) throws {
@@ -1117,11 +1121,12 @@ struct BusinessCard: Identifiable, Codable {
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
         photoFileName = try? c.decodeIfPresent(String.self, forKey: .photoFileName)
+        linkedOrgPersonId = try? c.decodeIfPresent(UUID.self, forKey: .linkedOrgPersonId)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, company, department, jobTitle
-        case phone, email, address, note, date, photoFileName
+        case phone, email, address, note, date, photoFileName, linkedOrgPersonId
     }
 
     // MARK: - 名片頭像照片儲存
@@ -1159,21 +1164,22 @@ struct Department: Identifiable, Codable {
     let id: UUID
     var code: String
     var name: String
-    /// 部門功能描述（公司組織頁顯示）
     var function: String
-    /// 上游部門 ID 清單
     var upstreamIds: [UUID]
-    /// 下游部門 ID 清單
     var downstreamIds: [UUID]
+    /// 同層級部門（peer / 平行單位）
+    var peerIds: [UUID]
 
     init(id: UUID = UUID(), code: String = "", name: String = "",
          function: String = "",
          upstreamIds: [UUID] = [],
-         downstreamIds: [UUID] = []) {
+         downstreamIds: [UUID] = [],
+         peerIds: [UUID] = []) {
         self.id = id; self.code = code; self.name = name
         self.function = function
         self.upstreamIds = upstreamIds
         self.downstreamIds = downstreamIds
+        self.peerIds = peerIds
     }
 
     init(from decoder: Decoder) throws {
@@ -1184,10 +1190,11 @@ struct Department: Identifiable, Codable {
         function = (try? c.decode(String.self, forKey: .function)) ?? ""
         upstreamIds = (try? c.decode([UUID].self, forKey: .upstreamIds)) ?? []
         downstreamIds = (try? c.decode([UUID].self, forKey: .downstreamIds)) ?? []
+        peerIds = (try? c.decode([UUID].self, forKey: .peerIds)) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, code, name, function, upstreamIds, downstreamIds
+        case id, code, name, function, upstreamIds, downstreamIds, peerIds
     }
 }
 
@@ -1254,19 +1261,23 @@ struct OrgPerson: Identifiable, Codable {
     /// 是否離職
     var isInactive: Bool
     var leftDate: Date?
+    /// 連結的名片 ID（雙向同步：BusinessCard.linkedOrgPersonId 也會指回來）
+    var linkedBusinessCardId: UUID?
 
     init(id: UUID = UUID(), name: String = "", jobTitle: String = "",
          departmentId: UUID? = nil, photoFileName: String? = nil,
          birthday: Date? = nil, relationship: String = "", note: String = "",
          children: [OrgPersonChild] = [], relations: [OrgPersonRelation] = [],
          dateAdded: Date = Date(),
-         isInactive: Bool = false, leftDate: Date? = nil) {
+         isInactive: Bool = false, leftDate: Date? = nil,
+         linkedBusinessCardId: UUID? = nil) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.departmentId = departmentId; self.photoFileName = photoFileName
         self.birthday = birthday; self.relationship = relationship
         self.note = note; self.children = children; self.relations = relations
         self.dateAdded = dateAdded
         self.isInactive = isInactive; self.leftDate = leftDate
+        self.linkedBusinessCardId = linkedBusinessCardId
     }
 
     init(from decoder: Decoder) throws {
@@ -1284,12 +1295,21 @@ struct OrgPerson: Identifiable, Codable {
         dateAdded = (try? c.decode(Date.self, forKey: .dateAdded)) ?? Date()
         isInactive = (try? c.decode(Bool.self, forKey: .isInactive)) ?? false
         leftDate = try? c.decodeIfPresent(Date.self, forKey: .leftDate)
+        linkedBusinessCardId = try? c.decodeIfPresent(UUID.self, forKey: .linkedBusinessCardId)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, jobTitle, departmentId, photoFileName, birthday
         case relationship, note, children, relations, dateAdded
-        case isInactive, leftDate
+        case isInactive, leftDate, linkedBusinessCardId
+    }
+
+    /// 主導關係：取所有 relations 中出現最多次的類型，沒有則 nil
+    var dominantRelationType: OrgRelationType? {
+        guard !relations.isEmpty else { return nil }
+        var counts: [OrgRelationType: Int] = [:]
+        for r in relations { counts[r.type, default: 0] += 1 }
+        return counts.max(by: { $0.value < $1.value })?.key
     }
 
     static var photosDirectory: URL {

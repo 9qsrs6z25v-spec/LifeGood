@@ -1,5 +1,18 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
+
+// MARK: - ShareSheet（包 UIActivityViewController）
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
 
 // MARK: - 公司組織頁
 
@@ -10,6 +23,7 @@ struct OrganizationView: View {
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var viewingDeptId: UUID?
     @State private var showPremiumAlert = false
+    @State private var pdfURL: URL?
 
     private var rootDepartments: [Department] {
         // root = 沒有 upstream 的部門；若全部都有 upstream（可能成環），退而求其次抓部門裡的全部，
@@ -39,7 +53,7 @@ struct OrganizationView: View {
             .navigationTitle("公司組織")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     HStack(spacing: 16) {
                         Text("\(lifeStore.orgPeople.count) 人")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -47,6 +61,22 @@ struct OrganizationView: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !lifeStore.departments.isEmpty {
+                        Button {
+                            pdfURL = generatePDFURL()
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+            }
+            .sheet(item: Binding(
+                get: { pdfURL.map { IdentifiableURL(url: $0) } },
+                set: { pdfURL = $0?.url }
+            )) { wrapper in
+                ShareSheet(items: [wrapper.url])
             }
             .sheet(item: Binding(
                 get: { viewingDeptId.map { IdentifiableUUID(id: $0) } },
@@ -73,6 +103,53 @@ struct OrganizationView: View {
                 .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - PDF 匯出
+
+    /// 把整個樹的內容渲染成 PDF
+    @MainActor
+    private func generatePDFURL() -> URL? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("公司組織圖.pdf")
+        let exportContent = VStack(spacing: 32) {
+            HStack {
+                Text("公司組織圖")
+                    .font(.title.bold())
+                Spacer()
+                Text(formattedExportDate())
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(rootDepartments) { root in
+                deptTreeNode(root, visited: [])
+            }
+        }
+        .padding(40)
+        .background(Color.white)
+        .environmentObject(lifeStore)
+        .environmentObject(subscription)
+
+        let renderer = ImageRenderer(content: exportContent)
+        renderer.proposedSize = .unspecified
+        renderer.scale = 2
+
+        guard let consumer = CGDataConsumer(url: url as CFURL) else { return nil }
+        var box = CGRect(x: 0, y: 0, width: 1200, height: 1600)
+        guard let pdfContext = CGContext(consumer: consumer, mediaBox: &box, nil) else { return nil }
+        renderer.render { size, render in
+            let pageBox = CGRect(origin: .zero, size: size)
+            let pageInfo = [kCGPDFContextMediaBox as String: NSValue(cgRect: pageBox)]
+            pdfContext.beginPDFPage(pageInfo as CFDictionary)
+            render(pdfContext)
+            pdfContext.endPDFPage()
+        }
+        pdfContext.closePDF()
+        return url
+    }
+
+    private func formattedExportDate() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy/M/d HH:mm"
+        return f.string(from: Date())
     }
 
     /// 遞迴繪製：本節點 + 下方連線 + 下游節點 HStack
@@ -115,6 +192,9 @@ struct OrganizationView: View {
 
     private func departmentCard(_ dept: Department) -> some View {
         let peopleCount = lifeStore.orgPeople.filter { $0.departmentId == dept.id && !$0.isInactive }.count
+        let peerNames = dept.peerIds.compactMap { id in
+            lifeStore.departments.first(where: { $0.id == id })?.name
+        }.filter { !$0.isEmpty }
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "building.2.fill").foregroundStyle(.indigo)
@@ -140,6 +220,18 @@ struct OrganizationView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
+            if !peerNames.isEmpty {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.left.and.right")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.purple)
+                    Text(peerNames.joined(separator: " · "))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.purple)
+                        .lineLimit(1)
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(10)
         .frame(width: 160)
@@ -147,7 +239,11 @@ struct OrganizationView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.indigo.opacity(0.3), lineWidth: 1)
+                .strokeBorder(
+                    style: StrokeStyle(lineWidth: dept.peerIds.isEmpty ? 1 : 1.5,
+                                       dash: dept.peerIds.isEmpty ? [] : [4])
+                )
+                .foregroundStyle(dept.peerIds.isEmpty ? Color.indigo.opacity(0.3) : Color.purple.opacity(0.6))
         )
         .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
     }
@@ -356,18 +452,36 @@ struct DepartmentDetailView: View {
 
     @ViewBuilder
     private func personAvatar(_ p: OrgPerson) -> some View {
-        if let url = p.photoURL, let img = UIImage(contentsOfFile: url.path) {
-            Image(uiImage: img)
-                .resizable().scaledToFill()
-                .frame(width: 40, height: 40)
-                .clipShape(Circle())
-        } else {
-            ZStack {
-                Circle().fill(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+        let ringColor = relationRingColor(for: p)
+        Group {
+            if let url = p.photoURL, let img = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: img)
+                    .resizable().scaledToFill()
                     .frame(width: 40, height: 40)
-                Text(String(p.name.prefix(1)))
-                    .font(.headline).foregroundStyle(.white)
+                    .clipShape(Circle())
+            } else {
+                ZStack {
+                    Circle().fill(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 40, height: 40)
+                    Text(String(p.name.prefix(1)))
+                        .font(.headline).foregroundStyle(.white)
+                }
             }
+        }
+        .overlay(
+            Circle().stroke(ringColor, lineWidth: ringColor == .clear ? 0 : 2.5)
+        )
+    }
+
+    private func relationRingColor(for p: OrgPerson) -> Color {
+        guard let dominant = p.dominantRelationType else { return .clear }
+        switch dominant {
+        case .ally: return .green
+        case .neutral: return .gray
+        case .rival: return .red
+        case .mentor: return .indigo
+        case .mentee: return .teal
+        case .other: return .clear
         }
     }
 }
@@ -392,6 +506,8 @@ struct OrgPersonEditor: View {
     @State private var leftDate: Date = Date()
     @State private var photoFileName: String?
     @State private var children: [OrgPersonChild] = []
+    @State private var relations: [OrgPersonRelation] = []
+    @State private var linkedBusinessCardId: UUID?
     @State private var pendingImageData: Data?
     @State private var showCamera = false
     @State private var photoItem: PhotosPickerItem?
@@ -464,6 +580,56 @@ struct OrgPersonEditor: View {
                     Text("他的子女")
                 } footer: {
                     Text("方便記住對方家庭背景，找話題用。")
+                }
+
+                // 派系：跟其他公司組織人員的關係
+                Section {
+                    ForEach($relations) { $rel in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Picker("對象", selection: $rel.personId) {
+                                ForEach(otherPeopleCandidates) { p in
+                                    Text(p.name.isEmpty ? "未命名" : p.name).tag(p.id)
+                                }
+                            }
+                            Picker("關係", selection: $rel.type) {
+                                ForEach(OrgRelationType.allCases) { t in
+                                    Text(t.rawValue).tag(t)
+                                }
+                            }
+                            TextField("備註", text: $rel.note, axis: .vertical).lineLimit(1...3)
+                        }
+                    }
+                    .onDelete { offsets in relations.remove(atOffsets: offsets) }
+
+                    if let firstCandidate = otherPeopleCandidates.first {
+                        Button {
+                            relations.append(OrgPersonRelation(personId: firstCandidate.id, type: .neutral))
+                        } label: {
+                            Label("新增關係人", systemImage: "plus.circle")
+                                .foregroundStyle(.green)
+                        }
+                    } else {
+                        Text("還沒有其他人員可選")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
+                } header: {
+                    Text("派系與相關人員")
+                } footer: {
+                    Text("標記同盟（綠）/ 對手（紅）/ 中立（灰）/ 前輩 / 後輩，組織圖頭像會用主導關係的顏色標示。")
+                }
+
+                // 連結至名片
+                Section {
+                    Picker("連結名片", selection: $linkedBusinessCardId) {
+                        Text("不連結").tag(nil as UUID?)
+                        ForEach(lifeStore.businessCards.sorted { $0.name < $1.name }) { c in
+                            Text(c.name.isEmpty ? c.company : c.name).tag(c.id as UUID?)
+                        }
+                    }
+                } header: {
+                    Text("名片連結")
+                } footer: {
+                    Text("連結後，名片詳細頁可一鍵跳轉至此人員，反之亦然。")
                 }
 
                 Section {
@@ -562,6 +728,10 @@ struct OrgPersonEditor: View {
         }
     }
 
+    private var otherPeopleCandidates: [OrgPerson] {
+        lifeStore.orgPeople.filter { $0.id != editingId }
+    }
+
     private func loadInitial() {
         if let e = existing {
             name = e.name; jobTitle = e.jobTitle
@@ -570,6 +740,8 @@ struct OrgPersonEditor: View {
             relationship = e.relationship
             note = e.note
             children = e.children
+            relations = e.relations
+            linkedBusinessCardId = e.linkedBusinessCardId
             isInactive = e.isInactive
             leftDate = e.leftDate ?? Date()
             photoFileName = e.photoFileName
@@ -585,6 +757,10 @@ struct OrgPersonEditor: View {
             if let oldName = photoFileName { OrgPerson.deletePhoto(oldName) }
             newPhoto = OrgPerson.savePhoto(data, id: id)
         }
+        // 過濾掉指向不存在人員的 relation
+        let validRelations = relations.filter { rel in
+            lifeStore.orgPeople.contains { $0.id == rel.personId } && rel.personId != id
+        }
         let person = OrgPerson(
             id: id,
             name: name.trimmingCharacters(in: .whitespaces),
@@ -595,13 +771,33 @@ struct OrgPersonEditor: View {
             relationship: relationship.trimmingCharacters(in: .whitespaces),
             note: note.trimmingCharacters(in: .whitespaces),
             children: children,
-            relations: existing?.relations ?? [],
+            relations: validRelations,
             dateAdded: existing?.dateAdded ?? Date(),
             isInactive: isInactive,
-            leftDate: isInactive ? leftDate : nil
+            leftDate: isInactive ? leftDate : nil,
+            linkedBusinessCardId: linkedBusinessCardId
         )
         if isEditing { lifeStore.update(person) } else { lifeStore.add(person) }
+        syncBusinessCardLink(personId: id, oldCardId: existing?.linkedBusinessCardId, newCardId: linkedBusinessCardId)
         dismiss()
+    }
+
+    /// 名片雙向同步：舊連結移除、新連結補上
+    private func syncBusinessCardLink(personId: UUID, oldCardId: UUID?, newCardId: UUID?) {
+        if oldCardId != newCardId {
+            if let old = oldCardId,
+               var oldCard = lifeStore.businessCards.first(where: { $0.id == old }),
+               oldCard.linkedOrgPersonId == personId {
+                oldCard.linkedOrgPersonId = nil
+                lifeStore.update(oldCard)
+            }
+        }
+        if let new = newCardId,
+           var newCard = lifeStore.businessCards.first(where: { $0.id == new }),
+           newCard.linkedOrgPersonId != personId {
+            newCard.linkedOrgPersonId = personId
+            lifeStore.update(newCard)
+        }
     }
 }
 
@@ -615,6 +811,8 @@ struct OrgPersonDetailView: View {
     let personId: UUID
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
+    @State private var viewingRelatedPersonId: UUID?
+    @State private var viewingLinkedCardId: UUID?
 
     private var person: OrgPerson {
         lifeStore.orgPeople.first(where: { $0.id == personId }) ?? OrgPerson(id: personId)
@@ -646,6 +844,9 @@ struct OrgPersonDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     headerCard
+                    if person.linkedBusinessCardId != nil {
+                        linkedCardButton
+                    }
                     if !person.relationship.isEmpty {
                         sectionCard("我與他的利害關係", systemImage: "link.circle.fill", color: .indigo) {
                             Text(person.relationship).font(.subheadline)
@@ -655,6 +856,9 @@ struct OrgPersonDetailView: View {
                         sectionCard("記事", systemImage: "note.text", color: .gray) {
                             Text(person.note).font(.subheadline)
                         }
+                    }
+                    if !person.relations.isEmpty {
+                        relationsCard
                     }
                     if !person.children.isEmpty {
                         childrenCard
@@ -680,13 +884,94 @@ struct OrgPersonDetailView: View {
             .sheet(isPresented: $showEdit) {
                 OrgPersonEditor(editingId: personId, defaultDepartmentId: nil)
             }
+            .sheet(item: Binding(
+                get: { viewingRelatedPersonId.map { IdentifiableUUID(id: $0) } },
+                set: { viewingRelatedPersonId = $0?.id }
+            )) { wrapper in
+                OrgPersonDetailView(personId: wrapper.id)
+            }
+            .sheet(item: Binding(
+                get: { viewingLinkedCardId.map { IdentifiableUUID(id: $0) } },
+                set: { viewingLinkedCardId = $0?.id }
+            )) { wrapper in
+                BusinessCardDetailView(cardId: wrapper.id)
+            }
             .alert("確定要刪除這個人員嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
+                    // 移除時清掉名片端的連結
+                    if let cid = person.linkedBusinessCardId,
+                       var card = lifeStore.businessCards.first(where: { $0.id == cid }),
+                       card.linkedOrgPersonId == personId {
+                        card.linkedOrgPersonId = nil
+                        lifeStore.update(card)
+                    }
                     lifeStore.deleteOrgPerson(person)
                     dismiss()
                 }
                 Button("取消", role: .cancel) {}
             }
+        }
+    }
+
+    private var linkedCardButton: some View {
+        Button {
+            viewingLinkedCardId = person.linkedBusinessCardId
+        } label: {
+            HStack {
+                Image(systemName: "person.crop.rectangle.fill").foregroundStyle(.orange)
+                Text("查看對應名片").font(.subheadline.weight(.medium))
+                Spacer()
+                Image(systemName: "arrow.up.right.square").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var relationsCard: some View {
+        sectionCard("派系與相關人員", systemImage: "person.2.circle.fill", color: .indigo) {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(person.relations) { rel in
+                    if let other = lifeStore.orgPeople.first(where: { $0.id == rel.personId }) {
+                        Button {
+                            viewingRelatedPersonId = other.id
+                        } label: {
+                            HStack {
+                                Circle()
+                                    .fill(relationColor(rel.type))
+                                    .frame(width: 10, height: 10)
+                                Text(other.name).font(.subheadline.weight(.medium))
+                                Text(rel.type.rawValue).font(.caption2)
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(relationColor(rel.type).opacity(0.15))
+                                    .foregroundStyle(relationColor(rel.type))
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                                Spacer()
+                                if !rel.note.isEmpty {
+                                    Text(rel.note).font(.caption2)
+                                        .foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private func relationColor(_ type: OrgRelationType) -> Color {
+        switch type {
+        case .ally: return .green
+        case .neutral: return .gray
+        case .rival: return .red
+        case .mentor: return .indigo
+        case .mentee: return .teal
+        case .other: return .secondary
         }
     }
 

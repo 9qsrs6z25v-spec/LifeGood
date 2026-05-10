@@ -120,6 +120,10 @@ struct GradeTitleView: View {
                         Label("下 \(dept.downstreamIds.count)", systemImage: "arrow.down")
                             .font(.caption2).foregroundStyle(.orange)
                     }
+                    if !dept.peerIds.isEmpty {
+                        Label("平 \(dept.peerIds.count)", systemImage: "arrow.left.and.right")
+                            .font(.caption2).foregroundStyle(.purple)
+                    }
                 }
             }
             Spacer()
@@ -159,6 +163,7 @@ struct DepartmentEditor: View {
     @State private var function = ""
     @State private var upstreamIds: Set<UUID> = []
     @State private var downstreamIds: Set<UUID> = []
+    @State private var peerIds: Set<UUID> = []
     @State private var showDeleteConfirm = false
 
     private var isEditing: Bool { editingId != nil }
@@ -235,6 +240,7 @@ struct DepartmentEditor: View {
                                 } else {
                                     downstreamIds.insert(d.id)
                                     upstreamIds.remove(d.id)
+                                    peerIds.remove(d.id)
                                 }
                             }
                         }
@@ -243,6 +249,34 @@ struct DepartmentEditor: View {
                     Text("下游部門（誰受我支援 / 由我管轄）")
                 } footer: {
                     Text("一個部門不能同時是上游又是下游。儲存時會把對方對應的關係雙向同步。")
+                }
+
+                Section {
+                    if candidates.isEmpty {
+                        Text("尚無其他部門可選，請先新增部門。")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    } else {
+                        ForEach(candidates) { d in
+                            checkRow(
+                                isOn: peerIds.contains(d.id),
+                                label: d.name.isEmpty ? "未命名" : d.name,
+                                code: d.code,
+                                color: .purple
+                            ) {
+                                if peerIds.contains(d.id) {
+                                    peerIds.remove(d.id)
+                                } else {
+                                    peerIds.insert(d.id)
+                                    upstreamIds.remove(d.id)
+                                    downstreamIds.remove(d.id)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("同層級部門（peer / 平行單位）")
+                } footer: {
+                    Text("互不上下級的平行部門，組織圖會以紫色虛線連接表示「橫向夥伴」。")
                 }
 
                 if isEditing {
@@ -305,6 +339,7 @@ struct DepartmentEditor: View {
         function = e.function
         upstreamIds = Set(e.upstreamIds)
         downstreamIds = Set(e.downstreamIds)
+        peerIds = Set(e.peerIds)
     }
 
     private func save() {
@@ -315,11 +350,12 @@ struct DepartmentEditor: View {
             name: name.trimmingCharacters(in: .whitespaces),
             function: function.trimmingCharacters(in: .whitespaces),
             upstreamIds: Array(upstreamIds),
-            downstreamIds: Array(downstreamIds)
+            downstreamIds: Array(downstreamIds),
+            peerIds: Array(peerIds)
         )
         if isEditing { lifeStore.update(dept) } else { lifeStore.add(dept) }
 
-        // 雙向同步：對方的 upstream/downstream 一併更新
+        // 雙向同步：對方的 upstream/downstream/peer 一併更新
         syncReverseLinks(forDept: dept)
         dismiss()
     }
@@ -327,17 +363,15 @@ struct DepartmentEditor: View {
     private func syncReverseLinks(forDept dept: Department) {
         for d in lifeStore.departments where d.id != dept.id {
             var changed = d
-            // 我把對方加進 upstream → 對方應加我進 downstream
+            // upstream / downstream 對映同步
             let shouldHaveDown = dept.upstreamIds.contains(d.id)
             if shouldHaveDown && !changed.downstreamIds.contains(dept.id) {
                 changed.downstreamIds.append(dept.id)
             } else if !shouldHaveDown && changed.downstreamIds.contains(dept.id) {
-                // 若我也沒把對方加進 downstream（即兩邊都沒選），對方移除我
                 if !dept.downstreamIds.contains(d.id) {
                     changed.downstreamIds.removeAll { $0 == dept.id }
                 }
             }
-            // 我把對方加進 downstream → 對方應加我進 upstream
             let shouldHaveUp = dept.downstreamIds.contains(d.id)
             if shouldHaveUp && !changed.upstreamIds.contains(dept.id) {
                 changed.upstreamIds.append(dept.id)
@@ -346,11 +380,24 @@ struct DepartmentEditor: View {
                     changed.upstreamIds.removeAll { $0 == dept.id }
                 }
             }
-            // 互斥檢查：對方的 upstream 與 downstream 不該同時有 dept.id
+            // peer 對映同步
+            let shouldHavePeer = dept.peerIds.contains(d.id)
+            if shouldHavePeer && !changed.peerIds.contains(dept.id) {
+                changed.peerIds.append(dept.id)
+            } else if !shouldHavePeer && changed.peerIds.contains(dept.id) {
+                changed.peerIds.removeAll { $0 == dept.id }
+            }
+            // 互斥
             if changed.upstreamIds.contains(dept.id) && changed.downstreamIds.contains(dept.id) {
                 changed.downstreamIds.removeAll { $0 == dept.id }
             }
-            if changed.upstreamIds != d.upstreamIds || changed.downstreamIds != d.downstreamIds {
+            if changed.peerIds.contains(dept.id) {
+                changed.upstreamIds.removeAll { $0 == dept.id }
+                changed.downstreamIds.removeAll { $0 == dept.id }
+            }
+            if changed.upstreamIds != d.upstreamIds
+                || changed.downstreamIds != d.downstreamIds
+                || changed.peerIds != d.peerIds {
                 lifeStore.update(changed)
             }
         }
@@ -360,6 +407,7 @@ struct DepartmentEditor: View {
         for var other in lifeStore.departments where other.id != dept.id {
             other.upstreamIds.removeAll { $0 == dept.id }
             other.downstreamIds.removeAll { $0 == dept.id }
+            other.peerIds.removeAll { $0 == dept.id }
             lifeStore.update(other)
         }
         for var p in lifeStore.orgPeople where p.departmentId == dept.id {
