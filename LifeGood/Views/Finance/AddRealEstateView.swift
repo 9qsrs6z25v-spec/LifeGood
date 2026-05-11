@@ -782,6 +782,7 @@ struct AddRealEstateView: View {
                     HStack(spacing: 6) {
                         VStack(spacing: 2) {
                             TextField("站所", text: $waterStation)
+                                .keyboardType(.numberPad)
                                 .multilineTextAlignment(.center)
                             Text("站所").font(.system(size: 9)).foregroundStyle(.tertiary)
                         }
@@ -789,12 +790,14 @@ struct AddRealEstateView: View {
                         Text("-").foregroundStyle(.secondary)
                         VStack(spacing: 2) {
                             TextField("編號", text: $waterCode)
+                                .keyboardType(.numberPad)
                                 .multilineTextAlignment(.center)
                             Text("編號").font(.system(size: 9)).foregroundStyle(.tertiary)
                         }
                         Text("-").foregroundStyle(.secondary)
                         VStack(spacing: 2) {
                             TextField("檢", text: $waterCheck)
+                                .keyboardType(.numberPad)
                                 .multilineTextAlignment(.center)
                             Text("檢號").font(.system(size: 9)).foregroundStyle(.tertiary)
                         }
@@ -806,15 +809,15 @@ struct AddRealEstateView: View {
             HStack {
                 Image(systemName: "bolt.fill").foregroundStyle(.yellow).frame(width: 24)
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("電號", text: $electricityMeterNumber)
+                    TextField("電號", text: $electricityMeterNumber).keyboardType(.numberPad)
                     ownerPicker(selection: $electricityMeterOwner, placeholder: "所有權人")
                 }
             }
             HStack {
                 Image(systemName: "flame.fill").foregroundStyle(.orange).frame(width: 24)
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("用戶編號", text: $gasUserNumber)
-                    TextField("表號", text: $gasMeterNumber)
+                    TextField("用戶編號", text: $gasUserNumber).keyboardType(.numberPad)
+                    TextField("表號", text: $gasMeterNumber).keyboardType(.numberPad)
                     ownerPicker(selection: $gasMeterOwner, placeholder: "所有權人")
                 }
             }
@@ -845,9 +848,9 @@ struct AddRealEstateView: View {
                     }
                     TextField("名稱（例：客廳、廚房、二樓）", text: $meter.label)
                     if meter.type == .gas {
-                        TextField("用戶編號", text: $meter.userNumber)
+                        TextField("用戶編號", text: $meter.userNumber).keyboardType(.numberPad)
                     }
-                    TextField(meterNumberLabel(for: meter.type), text: $meter.meterNumber)
+                    TextField(meterNumberLabel(for: meter.type), text: $meter.meterNumber).keyboardType(.numberPad)
                     ownerPicker(selection: $meter.owner, placeholder: "所有權人")
                 }
                 .padding(.vertical, 4)

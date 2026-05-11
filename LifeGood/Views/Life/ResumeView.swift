@@ -1026,7 +1026,7 @@ struct AddMilestoneView: View {
             Section("銀行資訊") {
                 TextField("銀行名稱", text: $bankName)
                 TextField("分行（選填）", text: $branchName)
-                TextField("帳號（選填）", text: $accountNumber)
+                TextField("帳號（選填）", text: $accountNumber).keyboardType(.numberPad)
                 Picker("帳戶類型", selection: $bankAccType) {
                     ForEach(BankAccountType.allCases) { t in Text(t.rawValue).tag(t) }
                 }
@@ -1056,7 +1056,7 @@ struct AddMilestoneView: View {
         case .securities:
             Section("證券資訊") {
                 TextField("券商名稱", text: $bankName)
-                TextField("帳號（選填）", text: $accountNumber)
+                TextField("帳號（選填）", text: $accountNumber).keyboardType(.numberPad)
                 Picker("帳戶類型", selection: $secAccType) {
                     ForEach(SecuritiesAccountType.allCases) { t in Text(t.rawValue).tag(t) }
                 }
