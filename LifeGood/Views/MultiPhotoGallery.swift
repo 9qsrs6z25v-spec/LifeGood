@@ -229,3 +229,83 @@ struct IdentifiableURL: Identifiable, Equatable {
     let id = UUID()
     let url: URL
 }
+
+// MARK: - 通用：可縮放圖片（UIScrollView wrap）
+
+/// 用 UIScrollView 包圖片提供原生雙指縮放 + 拖曳 + 雙擊縮放/還原。
+/// 給 stack viewer（裝潢照片 / 支出照片）共用。
+struct ZoomableImageView: UIViewRepresentable {
+    let image: UIImage
+    var maxZoom: CGFloat = 5.0
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.delegate = context.coordinator
+        scrollView.minimumZoomScale = 1.0
+        scrollView.maximumZoomScale = maxZoom
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.bouncesZoom = true
+        scrollView.backgroundColor = .clear
+        scrollView.contentInsetAdjustmentBehavior = .never
+
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.frame = scrollView.bounds
+        imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        imageView.isUserInteractionEnabled = true
+        scrollView.addSubview(imageView)
+        context.coordinator.imageView = imageView
+
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator,
+                                               action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        scrollView.addGestureRecognizer(doubleTap)
+
+        return scrollView
+    }
+
+    func updateUIView(_ uiView: UIScrollView, context: Context) {
+        if context.coordinator.imageView?.image !== image {
+            context.coordinator.imageView?.image = image
+            uiView.setZoomScale(1.0, animated: false)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var imageView: UIImageView?
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            // 縮放時把圖片置中
+            guard let iv = imageView else { return }
+            let bound = scrollView.bounds.size
+            let content = iv.frame.size
+            let offX = max(0, (bound.width - content.width) / 2)
+            let offY = max(0, (bound.height - content.height) / 2)
+            iv.center = CGPoint(
+                x: content.width / 2 + offX,
+                y: content.height / 2 + offY
+            )
+        }
+
+        @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard let sv = gesture.view as? UIScrollView else { return }
+            if sv.zoomScale > 1.0 {
+                sv.setZoomScale(1.0, animated: true)
+            } else {
+                let point = gesture.location(in: imageView)
+                let zoomRect = CGRect(
+                    x: point.x - sv.bounds.width / 6,
+                    y: point.y - sv.bounds.height / 6,
+                    width: sv.bounds.width / 3,
+                    height: sv.bounds.height / 3
+                )
+                sv.zoom(to: zoomRect, animated: true)
+            }
+        }
+    }
+}

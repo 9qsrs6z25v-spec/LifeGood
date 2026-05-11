@@ -411,7 +411,7 @@ struct RealEstateDetailView: View {
                     emptySectionRow("尚無已支出項目")
                 } else {
                     ForEach(estate.paidItems.sorted { $0.date > $1.date }) { p in
-                        HStack {
+                        HStack(alignment: .top) {
                             Text(p.title.isEmpty ? "已付款" : p.title)
                                 .font(.caption.weight(.medium))
                                 .padding(.horizontal, 6).padding(.vertical, 2)
@@ -419,7 +419,12 @@ struct RealEstateDetailView: View {
                                 .foregroundStyle(.purple)
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                             Spacer()
-                            Text(fmt(p.amount)).font(.subheadline.bold())
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(fmt(p.amount)).font(.subheadline.bold())
+                                Text(fmtDate(p.date))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .padding(.horizontal).padding(.vertical, 8)
                     }
@@ -1937,7 +1942,7 @@ struct ExpensePhotoStackViewer: View {
                             let url = Expense.photoURL(for: name)
                             ZStack {
                                 if let img = UIImage(contentsOfFile: url.path) {
-                                    Image(uiImage: img).resizable().scaledToFit()
+                                    ZoomableImageView(image: img)
                                 } else {
                                     ProgressView().tint(.white)
                                 }

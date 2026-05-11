@@ -270,21 +270,48 @@ struct AddRealEstateView: View {
         List {
             Section("理財") {
                 Toggle(isOn: $showRental) { Label("租金收入", systemImage: "dollarsign.circle") }
+                    .onChange(of: showRental) { _, v in saveStoredToggle("showRental", v) }
                 Toggle(isOn: $showMortgage) { Label("貸款項目", systemImage: "building.columns") }
+                    .onChange(of: showMortgage) { _, v in saveStoredToggle("showMortgage", v) }
                 Toggle(isOn: $showPaid) { Label("已支出房屋金額", systemImage: "banknote") }
+                    .onChange(of: showPaid) { _, v in saveStoredToggle("showPaid", v) }
                 Toggle(isOn: $showVariable) { Label("變動支出", systemImage: "cart") }
+                    .onChange(of: showVariable) { _, v in saveStoredToggle("showVariable", v) }
             }
             Section("房屋資料") {
                 Toggle(isOn: $showLandDetail) { Label("詳細", systemImage: "map") }
+                    .onChange(of: showLandDetail) { _, v in saveStoredToggle("showLandDetail", v) }
                 Toggle(isOn: $showFloor) { Label("樓層資訊", systemImage: "building.2") }
+                    .onChange(of: showFloor) { _, v in saveStoredToggle("showFloor", v) }
                 Toggle(isOn: $showUtilities) { Label("水電瓦斯", systemImage: "bolt.fill") }
+                    .onChange(of: showUtilities) { _, v in saveStoredToggle("showUtilities", v) }
                 Toggle(isOn: $showInsurance) { Label("保險項目", systemImage: "shield.fill") }
+                    .onChange(of: showInsurance) { _, v in saveStoredToggle("showInsurance", v) }
                 Toggle(isOn: $showAsset) { Label("房屋附屬資產", systemImage: "sofa.fill") }
+                    .onChange(of: showAsset) { _, v in saveStoredToggle("showAsset", v) }
             }
         }
         .listStyle(.insetGrouped)
         .frame(width: 300, height: 460)
         .presentationCompactAdaptation(.popover)
+    }
+
+    // MARK: - 功能切換持久化
+
+    /// UserDefaults key prefix（依本筆房地產的 stableEstateId 區分）
+    private func featureToggleKey(_ name: String) -> String {
+        "realEstate.\(stableEstateId.uuidString).feature.\(name)"
+    }
+
+    /// 讀已儲存的切換值；無資料時回 nil（讓呼叫端 fallback 到資料推導）
+    private func loadStoredToggle(_ name: String) -> Bool? {
+        let key = featureToggleKey(name)
+        guard UserDefaults.standard.object(forKey: key) != nil else { return nil }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
+    private func saveStoredToggle(_ name: String, _ value: Bool) {
+        UserDefaults.standard.set(value, forKey: featureToggleKey(name))
     }
 
     // MARK: - 物件資訊
@@ -1291,15 +1318,16 @@ struct AddRealEstateView: View {
     private func loadEditing() {
         guard let e = editing else { return }
 
-        showRental = e.monthlyRental > 0
-        showMortgage = !e.mortgageItems.isEmpty
-        showPaid = !e.paidItems.isEmpty
-        showVariable = !e.variableExpenses.isEmpty
-        showLandDetail = !e.landDeeds.isEmpty || !e.buildingDeeds.isEmpty
-        showFloor = !e.floors.isEmpty
-        showUtilities = !e.waterMeterNumber.isEmpty || !e.electricityMeterNumber.isEmpty || !e.gasMeterNumber.isEmpty || !e.gasUserNumber.isEmpty
-        showInsurance = !e.insuranceItems.isEmpty
-        showAsset = !e.propertyAssets.isEmpty
+        // 優先使用 UserDefaults 中持久化的切換值；若未儲存過則依資料推導預設值
+        showRental = loadStoredToggle("showRental") ?? (e.monthlyRental > 0)
+        showMortgage = loadStoredToggle("showMortgage") ?? !e.mortgageItems.isEmpty
+        showPaid = loadStoredToggle("showPaid") ?? !e.paidItems.isEmpty
+        showVariable = loadStoredToggle("showVariable") ?? !e.variableExpenses.isEmpty
+        showLandDetail = loadStoredToggle("showLandDetail") ?? (!e.landDeeds.isEmpty || !e.buildingDeeds.isEmpty)
+        showFloor = loadStoredToggle("showFloor") ?? !e.floors.isEmpty
+        showUtilities = loadStoredToggle("showUtilities") ?? (!e.waterMeterNumber.isEmpty || !e.electricityMeterNumber.isEmpty || !e.gasMeterNumber.isEmpty || !e.gasUserNumber.isEmpty)
+        showInsurance = loadStoredToggle("showInsurance") ?? !e.insuranceItems.isEmpty
+        showAsset = loadStoredToggle("showAsset") ?? !e.propertyAssets.isEmpty
 
         name = e.name; city = e.city; address = e.address
         purchaseDate = e.purchaseDate

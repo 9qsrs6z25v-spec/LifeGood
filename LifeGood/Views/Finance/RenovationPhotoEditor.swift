@@ -207,9 +207,7 @@ struct RenovationStackViewer: View {
                             let url = RenovationPhoto.photoURL(for: name)
                             ZStack {
                                 if let img = UIImage(contentsOfFile: url.path) {
-                                    Image(uiImage: img)
-                                        .resizable()
-                                        .scaledToFit()
+                                    ZoomableImageView(image: img)
                                 } else {
                                     ProgressView().tint(.white)
                                 }
