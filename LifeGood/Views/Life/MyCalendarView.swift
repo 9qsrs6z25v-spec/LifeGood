@@ -1,5 +1,6 @@
 import SwiftUI
 import EventKit
+import MapKit
 
 /// 我的行事曆：彙整當日家庭紀念日、工作會議與任務、本週快覽、未來里程碑、Apple 行事曆事件。
 struct MyCalendarView: View {
@@ -521,6 +522,13 @@ struct PersonalEventEditor: View {
     @State private var selectedAppleCalendarId: String?
     @ObservedObject private var appleCal = AppleCalendarBridge.shared
 
+    // 地點自動完成（Apple Maps POI + 過去用過的地點）
+    @StateObject private var locationCompleter = RestaurantSearchCompleter()
+    @ObservedObject private var locationProvider = LocationProvider.shared
+    @FocusState private var locationFieldFocused: Bool
+    @State private var locationSuppressNextUpdate: Bool = false
+    @State private var locationExpandedSuggestions: Bool = false
+
     /// 常用長度選項（分鐘），0 = 全日
     private let durationOptions: [(label: String, minutes: Int)] = [
         ("全日", 0),
@@ -681,7 +689,7 @@ struct PersonalEventEditor: View {
                             }
                         }
                     }
-                    TextField("地點（選填）", text: $location)
+                    locationAutocompleteField
                 } else if appleCal.authorizationStatus == .notDetermined {
                     Text("儲存時將跳出 Apple 行事曆授權")
                         .font(.caption2).foregroundStyle(.secondary)
@@ -699,6 +707,184 @@ struct PersonalEventEditor: View {
                 Text("打開後，事件會寫入並同步到 Apple 行事曆。地點 / 提醒 / 重複都會帶過去。")
             }
         }
+    }
+
+    // MARK: - 地點自動完成
+
+    @ViewBuilder
+    private var locationAutocompleteField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "mappin.and.ellipse")
+                    .foregroundStyle(.blue)
+                    .frame(width: 20)
+                TextField("地點（選填）", text: $location)
+                    .focused($locationFieldFocused)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                if !location.isEmpty {
+                    Button {
+                        location = ""
+                        locationExpandedSuggestions = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if locationFieldFocused {
+                locationSuggestionsList
+            }
+        }
+        .onAppear {
+            LocationProvider.shared.requestIfNeeded()
+            locationCompleter.setRegion(LocationProvider.shared.searchRegion)
+            if !location.isEmpty { locationCompleter.queryFragment = location }
+        }
+        .onChange(of: location) { _, newValue in
+            if locationSuppressNextUpdate {
+                locationSuppressNextUpdate = false
+                return
+            }
+            locationCompleter.queryFragment = newValue
+            locationExpandedSuggestions = false
+        }
+        .onChange(of: locationProvider.lastLocation) { _, _ in
+            locationCompleter.setRegion(LocationProvider.shared.searchRegion)
+            if !location.isEmpty { locationCompleter.queryFragment = location }
+        }
+    }
+
+    @ViewBuilder
+    private var locationSuggestionsList: some View {
+        let all = allLocationSuggestions
+        if !all.isEmpty {
+            let limit = 20
+            let visible = locationExpandedSuggestions ? all : Array(all.prefix(limit))
+            let hiddenCount = max(0, all.count - limit)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(visible) { item in
+                        Button { applyLocationSuggestion(item) } label: {
+                            locationSuggestionRow(item)
+                        }
+                        .buttonStyle(.plain)
+                        Divider().padding(.leading, 44)
+                    }
+                    if !locationExpandedSuggestions && hiddenCount > 0 {
+                        Button {
+                            locationExpandedSuggestions = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "chevron.down.circle.fill").foregroundStyle(.blue)
+                                Text("顯示更多 (\(hiddenCount))")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.blue)
+                                Spacer()
+                            }
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    } else if locationExpandedSuggestions && all.count > limit {
+                        Button {
+                            locationExpandedSuggestions = false
+                        } label: {
+                            HStack {
+                                Image(systemName: "chevron.up.circle.fill").foregroundStyle(.secondary)
+                                Text("收合")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(maxHeight: 240)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 0.5)
+            )
+        }
+    }
+
+    private func locationSuggestionRow(_ item: CalendarLocationSuggestion) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(item.iconColor.opacity(0.15)).frame(width: 28, height: 28)
+                Image(systemName: item.iconName)
+                    .foregroundStyle(item.iconColor)
+                    .font(.caption)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                if !item.subtitle.isEmpty {
+                    Text(item.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+            Image(systemName: "arrow.up.left").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6).padding(.horizontal, 8)
+        .contentShape(Rectangle())
+    }
+
+    /// 合併過去 PersonalEvent 用過的地點 + Apple Maps 結果
+    private var allLocationSuggestions: [CalendarLocationSuggestion] {
+        let q = location.trimmingCharacters(in: .whitespaces).lowercased()
+        var seen: Set<String> = []
+        var output: [CalendarLocationSuggestion] = []
+
+        for ev in lifeStore.personalEvents
+            where !ev.location.trimmingCharacters(in: .whitespaces).isEmpty {
+            if !q.isEmpty && !ev.location.lowercased().contains(q) { continue }
+            let key = "past|\(ev.location.lowercased())"
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            output.append(CalendarLocationSuggestion(
+                id: key, source: .past, title: ev.location,
+                subtitle: "", completion: nil
+            ))
+        }
+
+        for c in locationCompleter.results {
+            let key = "apple|\(c.title.lowercased())|\(c.subtitle.lowercased())"
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            output.append(CalendarLocationSuggestion(
+                id: key, source: .apple, title: c.title,
+                subtitle: c.subtitle, completion: c
+            ))
+        }
+
+        return output
+    }
+
+    private func applyLocationSuggestion(_ item: CalendarLocationSuggestion) {
+        locationSuppressNextUpdate = true
+        switch item.source {
+        case .past:
+            location = item.title
+        case .apple:
+            // 地點欄位帶「名稱 - 地址」較完整；若無 subtitle 則只帶名稱
+            if item.subtitle.isEmpty {
+                location = item.title
+            } else {
+                location = "\(item.title) - \(item.subtitle)"
+            }
+        }
+        locationExpandedSuggestions = false
+        locationFieldFocused = false
     }
 
     /// 提醒提示文字
@@ -794,6 +980,24 @@ struct PersonalEventEditor: View {
             f.dateFormat = "M/d HH:mm"
         }
         return f.string(from: end)
+    }
+}
+
+// MARK: - 行事曆地點候選資料型別
+
+fileprivate struct CalendarLocationSuggestion: Identifiable {
+    enum Source { case past, apple }
+    let id: String
+    let source: Source
+    let title: String
+    let subtitle: String
+    let completion: MKLocalSearchCompletion?
+
+    var iconName: String {
+        source == .past ? "clock.arrow.circlepath" : "mappin"
+    }
+    var iconColor: Color {
+        source == .past ? .green : .blue
     }
 }
 
