@@ -210,6 +210,25 @@ struct StockTransaction: Identifiable, Codable, Equatable {
 
     var shares: Double { lots * 1000 }
     var amount: Double { shares * price }
+
+    /// 台股交割日：成交日 + 2 個營業日（跳過六日；不含國定假日）。
+    /// 用於計算銀行 / 證券帳戶實際扣款 / 入帳日。
+    var settlementDate: Date {
+        StockTransaction.taiwanSettlementDate(from: date)
+    }
+
+    static func taiwanSettlementDate(from tradeDate: Date) -> Date {
+        var date = tradeDate
+        var added = 0
+        let cal = Calendar(identifier: .gregorian)
+        while added < 2 {
+            date = cal.date(byAdding: .day, value: 1, to: date) ?? date
+            let weekday = cal.component(.weekday, from: date)
+            // weekday: 1 = 週日, 7 = 週六
+            if weekday != 1 && weekday != 7 { added += 1 }
+        }
+        return date
+    }
 }
 
 struct Stock: Identifiable, Codable {

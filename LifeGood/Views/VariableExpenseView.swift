@@ -8,6 +8,7 @@ struct VariableExpenseView: View {
     @State private var selectedCategory: VariableCategory?
     @State private var expenseToEdit: Expense?
     @State private var visibleWeeks = 1
+    @State private var searchText: String = ""
 
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -19,10 +20,24 @@ struct VariableExpenseView: View {
     }()
 
     var filteredExpenses: [Expense] {
+        var list = store.variableExpenses
         if let category = selectedCategory {
-            return store.variableExpenses.filter { $0.variableCategory == category }
+            list = list.filter { $0.variableCategory == category }
         }
-        return store.variableExpenses
+        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        if !q.isEmpty {
+            list = list.filter { exp in
+                exp.title.lowercased().contains(q)
+                    || exp.note.lowercased().contains(q)
+                    || exp.categoryName.lowercased().contains(q)
+                    || (exp.placeAddress?.lowercased().contains(q) ?? false)
+                    || (exp.diningMember?.lowercased().contains(q) ?? false)
+                    || (exp.socialRecipient?.lowercased().contains(q) ?? false)
+                    || (exp.taxSavingSubCategory?.rawValue.lowercased().contains(q) ?? false)
+                    || (exp.socialSubCategory?.rawValue.lowercased().contains(q) ?? false)
+            }
+        }
+        return list
     }
 
     var body: some View {
@@ -60,6 +75,11 @@ struct VariableExpenseView: View {
             .sheet(item: $expenseToEdit) { expense in
                 AddExpenseView(expenseType: .variable, editingExpense: expense)
             }
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer(displayMode: .automatic),
+                prompt: "搜尋名稱 / 備註 / 分類 / 地點"
+            )
         }
     }
 
@@ -111,15 +131,16 @@ struct VariableExpenseView: View {
     // MARK: - 空狀態
 
     private var emptyStateView: some View {
-        VStack(spacing: 16) {
+        let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        return VStack(spacing: 16) {
             Spacer()
-            Image(systemName: "tray")
+            Image(systemName: isSearching ? "magnifyingglass" : "tray")
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
-            Text("尚無變動支出紀錄")
+            Text(isSearching ? "找不到符合的支出" : "尚無變動支出紀錄")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("點擊右上角 + 新增支出")
+            Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增支出")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -131,12 +152,14 @@ struct VariableExpenseView: View {
 
     private var expenseList: some View {
         let allGroups = groupedByDate()
+        let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
         let cutoff = Calendar.current.date(byAdding: .day, value: -7 * visibleWeeks, to: Date()) ?? Date()
-        let visibleGroups = allGroups.filter { group in
+        // 搜尋時不限制週數，顯示所有符合的結果
+        let visibleGroups = isSearching ? allGroups : allGroups.filter { group in
             guard let d = group.value.first?.date else { return false }
             return d >= cutoff
         }
-        let hiddenGroups = allGroups.filter { group in
+        let hiddenGroups: [(key: String, value: [Expense])] = isSearching ? [] : allGroups.filter { group in
             guard let d = group.value.first?.date else { return true }
             return d < cutoff
         }

@@ -521,11 +521,11 @@ struct AddStockView: View {
         let currency = stock.linkedBankCurrency ?? "NT$"
 
         if !stock.transactions.isEmpty {
-            // 已使用交易紀錄模式：每筆交易寫一筆 BankDeposit
+            // 已使用交易紀錄模式：每筆交易寫一筆 BankDeposit（依 T+2 交割日）
             for tx in stock.transactions {
                 list.append(BankDeposit(
                     id: UUID(),
-                    date: tx.date,
+                    date: tx.settlementDate,
                     amount: tx.amount,
                     currencyCode: currency,
                     isWithdrawal: tx.kind == .buy,
@@ -534,11 +534,13 @@ struct AddStockView: View {
                 ))
             }
         } else {
-            // 舊版聚合模式：一筆買入 + 一筆賣出（若有）
+            // 舊版聚合模式：一筆買入 + 一筆賣出（若有），皆依 T+2 交割
             let cost = stock.shares * stock.purchasePrice
             if cost > 0 {
                 list.append(BankDeposit(
-                    id: UUID(), date: stock.purchaseDate, amount: cost,
+                    id: UUID(),
+                    date: StockTransaction.taiwanSettlementDate(from: stock.purchaseDate),
+                    amount: cost,
                     currencyCode: currency, isWithdrawal: true,
                     linkedExpenseId: nil, linkedStockId: stock.id
                 ))
@@ -547,7 +549,9 @@ struct AddStockView: View {
                 let saleAmount = stock.shares * stock.soldPrice
                 if saleAmount > 0 {
                     list.append(BankDeposit(
-                        id: UUID(), date: sd, amount: saleAmount,
+                        id: UUID(),
+                        date: StockTransaction.taiwanSettlementDate(from: sd),
+                        amount: saleAmount,
                         currencyCode: currency, isWithdrawal: false,
                         linkedExpenseId: nil, linkedStockId: stock.id
                     ))

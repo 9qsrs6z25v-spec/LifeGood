@@ -7,6 +7,7 @@ struct IncomeView: View {
     @State private var showAdd = false
     @State private var editingItem: Income?
     @State private var selectedCategory: IncomeCategory?
+    @State private var searchText: String = ""
 
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -15,11 +16,19 @@ struct IncomeView: View {
     }()
 
     var filteredIncomes: [Income] {
-        let sorted = store.incomes.sorted { $0.date > $1.date }
+        var list = store.incomes.sorted { $0.date > $1.date }
         if let cat = selectedCategory {
-            return sorted.filter { $0.category == cat }
+            list = list.filter { $0.category == cat }
         }
-        return sorted
+        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        if !q.isEmpty {
+            list = list.filter { inc in
+                inc.title.lowercased().contains(q)
+                    || inc.note.lowercased().contains(q)
+                    || inc.category.rawValue.lowercased().contains(q)
+            }
+        }
+        return list
     }
 
     var body: some View {
@@ -54,6 +63,11 @@ struct IncomeView: View {
             }
             .sheet(isPresented: $showAdd) { AddIncomeView() }
             .sheet(item: $editingItem) { item in AddIncomeView(editing: item) }
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer(displayMode: .automatic),
+                prompt: "搜尋名稱 / 備註 / 分類"
+            )
         }
     }
 
@@ -169,11 +183,15 @@ struct IncomeView: View {
     // MARK: - 空狀態
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
+        let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        return VStack(spacing: 16) {
             Spacer()
-            Image(systemName: "banknote").font(.system(size: 48)).foregroundStyle(.secondary)
-            Text("尚無收入紀錄").font(.headline).foregroundStyle(.secondary)
-            Text("點擊右上角 + 新增收入").font(.subheadline).foregroundStyle(.tertiary)
+            Image(systemName: isSearching ? "magnifyingglass" : "banknote")
+                .font(.system(size: 48)).foregroundStyle(.secondary)
+            Text(isSearching ? "找不到符合的收入" : "尚無收入紀錄")
+                .font(.headline).foregroundStyle(.secondary)
+            Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增收入")
+                .font(.subheadline).foregroundStyle(.tertiary)
             Spacer()
         }.frame(maxWidth: .infinity)
     }

@@ -472,7 +472,7 @@ struct StockTransactionEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本") {
+                Section {
                     DatePicker("日期", selection: $date, displayedComponents: .date)
                     Picker("類型", selection: $kind) {
                         ForEach(StockTransactionKind.allCases) { k in
@@ -480,6 +480,11 @@ struct StockTransactionEditor: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                } header: {
+                    Text("基本")
+                } footer: {
+                    Text("台股交割：成交日 T+2 個營業日。實際扣款／入帳日：\(formatTradeDate(StockTransaction.taiwanSettlementDate(from: date)))")
+                        .font(.caption2)
                 }
 
                 Section("張數 / 單價") {
@@ -603,7 +608,7 @@ struct StockTransactionEditor: View {
         for tx in stock.transactions {
             list.append(BankDeposit(
                 id: UUID(),
-                date: tx.date,
+                date: tx.settlementDate,
                 amount: tx.amount,
                 currencyCode: currency,
                 isWithdrawal: tx.kind == .buy,
@@ -626,5 +631,11 @@ struct StockTransactionEditor: View {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: v)) ?? "NT$0"
+    }
+
+    private func formatTradeDate(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy/MM/dd"
+        return f.string(from: d)
     }
 }
