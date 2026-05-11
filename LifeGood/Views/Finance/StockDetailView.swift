@@ -11,6 +11,8 @@ struct StockDetailView: View {
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
     @State private var showPremiumAlert = false
+    @State private var addingTransaction = false
+    @State private var editingTransaction: StockTransaction?
 
     init(stock: Stock) {
         self.stockId = stock.id
@@ -31,6 +33,7 @@ struct StockDetailView: View {
                 VStack(spacing: 24) {
                     flashCard
                     infoSection
+                    transactionsSection
                     if let bankInfo = bankAccountInfo {
                         accountSection(label: "扣款 / 入帳銀行",
                                        icon: "building.columns.fill",
@@ -73,6 +76,12 @@ struct StockDetailView: View {
             }
             .sheet(isPresented: $showEdit) {
                 AddStockView(editing: stock)
+            }
+            .sheet(isPresented: $addingTransaction) {
+                StockTransactionEditor(stockId: stockId, editing: nil)
+            }
+            .sheet(item: $editingTransaction) { tx in
+                StockTransactionEditor(stockId: stockId, editing: tx)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .alert("確定要刪除這筆股票嗎？", isPresented: $showDeleteConfirm) {
@@ -235,6 +244,108 @@ struct StockDetailView: View {
         .padding(.horizontal)
     }
 
+    // MARK: - 交易紀錄
+
+    private var sortedTransactions: [StockTransaction] {
+        stock.transactions.sorted { $0.date > $1.date }
+    }
+
+    @ViewBuilder
+    private var transactionsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "list.bullet.rectangle").foregroundStyle(.indigo)
+                Text("交易紀錄").font(.headline)
+                Spacer()
+                Text("\(sortedTransactions.count) 筆")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Button {
+                    if subscription.isPremium { addingTransaction = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                }
+            }
+            .padding(.horizontal).padding(.top, 12).padding(.bottom, 6)
+
+            if sortedTransactions.isEmpty {
+                Text("尚無交易紀錄，按右上角 + 新增買入或賣出。新增第一筆時會以股票卡的「購入日期 / 張數 / 買入價」作為初始買入。")
+                    .font(.caption).foregroundStyle(.tertiary)
+                    .padding(.horizontal).padding(.bottom, 12)
+            } else {
+                ForEach(sortedTransactions) { tx in
+                    Button {
+                        editingTransaction = tx
+                    } label: {
+                        transactionRow(tx)
+                    }
+                    .buttonStyle(.plain)
+                    Divider().padding(.leading, 14)
+                }
+                summaryFooter
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private func transactionRow(_ tx: StockTransaction) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(tx.kind.rawValue)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background((tx.kind == .buy ? Color.red : Color.green).opacity(0.15))
+                        .foregroundStyle(tx.kind == .buy ? Color.red : Color.green)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    Text(fmtDate(tx.date)).font(.caption).foregroundStyle(.secondary)
+                }
+                Text("\(formatLots(tx.lots)) 張 × \(formatPrice(tx.price))")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Text(fmt(tx.amount))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(tx.kind == .buy ? Color.primary : Color.green)
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
+
+    /// 顯示成本均價（不一定 = 最新一筆買入價）
+    private var summaryFooter: some View {
+        VStack(spacing: 4) {
+            Divider()
+            HStack {
+                Text("目前持股").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(formatLots(stock.shares / 1000)) 張")
+                    .font(.caption.weight(.semibold))
+            }
+            HStack {
+                Text("成本均價").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text(formatPrice(stock.purchasePrice))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.blue)
+            }
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+    }
+
+    private func formatLots(_ v: Double) -> String {
+        if v == v.rounded() { return String(format: "%.0f", v) }
+        return String(format: "%g", v)
+    }
+
+    private func formatPrice(_ v: Double) -> String {
+        let f = NumberFormatter(); f.numberStyle = .decimal
+        f.minimumFractionDigits = 2; f.maximumFractionDigits = 2
+        return (stock.linkedBankCurrency ?? "NT$") + (f.string(from: NSNumber(value: v)) ?? "0")
+    }
+
     // MARK: - 連結帳戶
 
     private var bankAccountInfo: String? {
@@ -330,5 +441,190 @@ struct StockDetailView: View {
         let f = DateFormatter()
         f.dateFormat = "yyyy/M/d"
         return f.string(from: d)
+    }
+}
+
+// MARK: - 交易紀錄編輯器
+
+struct StockTransactionEditor: View {
+    @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @Environment(\.dismiss) private var dismiss
+
+    let stockId: UUID
+    let editing: StockTransaction?
+
+    @State private var date: Date = Date()
+    @State private var kind: StockTransactionKind = .buy
+    @State private var lotsText: String = ""
+    @State private var priceText: String = ""
+    @State private var showDeleteConfirm = false
+
+    private var isEditing: Bool { editing != nil }
+
+    private var amountPreview: Double {
+        let lots = Double(lotsText) ?? 0
+        let price = Double(priceText) ?? 0
+        return lots * 1000 * price
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("基本") {
+                    DatePicker("日期", selection: $date, displayedComponents: .date)
+                    Picker("類型", selection: $kind) {
+                        ForEach(StockTransactionKind.allCases) { k in
+                            Text(k.rawValue).tag(k)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section("張數 / 單價") {
+                    HStack {
+                        TextField("張數", text: $lotsText)
+                            .keyboardType(.decimalPad)
+                        Text("張").foregroundStyle(.secondary)
+                    }
+                    if let lots = Double(lotsText), lots > 0 {
+                        HStack {
+                            Text("約合").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(Int(lots * 1000)) 股")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    HStack {
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("每股單價", text: $priceText)
+                            .keyboardType(.decimalPad)
+                    }
+                    if amountPreview > 0 {
+                        HStack {
+                            Text("總金額").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(formatNT(amountPreview))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(kind == .buy ? .red : .green)
+                        }
+                    }
+                }
+
+                if isEditing {
+                    Section {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("刪除此筆交易", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .navigationTitle(isEditing ? "編輯交易" : "新增交易")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(isEditing ? "儲存" : "新增") { save() }
+                        .bold().foregroundStyle(.green)
+                        .disabled(!canSave)
+                }
+            }
+            .alert("確定刪除這筆交易？", isPresented: $showDeleteConfirm) {
+                Button("刪除", role: .destructive) { performDelete() }
+                Button("取消", role: .cancel) {}
+            }
+            .onAppear { loadInitial() }
+        }
+    }
+
+    private var canSave: Bool {
+        (Double(lotsText) ?? 0) > 0 && (Double(priceText) ?? 0) > 0
+    }
+
+    private func loadInitial() {
+        if let e = editing {
+            date = e.date
+            kind = e.kind
+            lotsText = formatLots(e.lots)
+            priceText = String(format: "%.2f", e.price)
+        }
+    }
+
+    private func save() {
+        guard var s = store.stocks.first(where: { $0.id == stockId }) else { dismiss(); return }
+        s.seedTransactionsFromLegacyIfNeeded()
+        let lots = Double(lotsText) ?? 0
+        let price = Double(priceText) ?? 0
+        let tx = StockTransaction(
+            id: editing?.id ?? UUID(),
+            date: date,
+            kind: kind,
+            lots: lots,
+            price: price
+        )
+        if let idx = s.transactions.firstIndex(where: { $0.id == tx.id }) {
+            s.transactions[idx] = tx
+        } else {
+            s.transactions.append(tx)
+        }
+        s.transactions.sort { $0.date < $1.date }
+        s.recomputeFromTransactions()
+        store.update(s)
+        syncBankDepositsForTransactions(s)
+        dismiss()
+    }
+
+    private func performDelete() {
+        guard let e = editing,
+              var s = store.stocks.first(where: { $0.id == stockId }) else {
+            dismiss(); return
+        }
+        s.transactions.removeAll { $0.id == e.id }
+        if !s.transactions.isEmpty {
+            s.recomputeFromTransactions()
+        }
+        store.update(s)
+        syncBankDepositsForTransactions(s)
+        dismiss()
+    }
+
+    /// 把目前 transactions 寫回對應銀行 / 證券帳戶的 BankDeposit（買入＝扣款、賣出＝入帳）。
+    /// 清掉舊有以 linkedStockId 連結到此股票的 deposit 後重新寫入。
+    private func syncBankDepositsForTransactions(_ stock: Stock) {
+        let target = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId
+        guard let accId = target,
+              var ms = lifeStore.milestones.first(where: { $0.id == accId }) else { return }
+        let currency = stock.linkedBankCurrency ?? "NT$"
+        var list = ms.bankDeposits ?? []
+        list.removeAll { $0.linkedStockId == stock.id }
+        for tx in stock.transactions {
+            list.append(BankDeposit(
+                id: UUID(),
+                date: tx.date,
+                amount: tx.amount,
+                currencyCode: currency,
+                isWithdrawal: tx.kind == .buy,
+                linkedExpenseId: nil,
+                linkedStockId: stock.id
+            ))
+        }
+        ms.bankDeposits = list
+        lifeStore.update(ms)
+    }
+
+    // MARK: - Helpers
+
+    private func formatLots(_ v: Double) -> String {
+        if v == v.rounded() { return String(format: "%.0f", v) }
+        return String(format: "%g", v)
+    }
+
+    private func formatNT(_ v: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 }

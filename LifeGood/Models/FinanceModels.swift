@@ -186,6 +186,32 @@ struct SavingsInsurance: Identifiable, Codable {
 
 // MARK: - 股票
 
+enum StockTransactionKind: String, Codable, CaseIterable, Identifiable {
+    case buy = "買入"
+    case sell = "賣出"
+    var id: String { rawValue }
+}
+
+struct StockTransaction: Identifiable, Codable, Equatable {
+    let id: UUID
+    var date: Date
+    var kind: StockTransactionKind
+    /// 張數（台股 1 張 = 1000 股），允許小數（零股）
+    var lots: Double
+    /// 每股單價
+    var price: Double
+
+    init(id: UUID = UUID(), date: Date = Date(),
+         kind: StockTransactionKind = .buy,
+         lots: Double = 0, price: Double = 0) {
+        self.id = id; self.date = date; self.kind = kind
+        self.lots = lots; self.price = price
+    }
+
+    var shares: Double { lots * 1000 }
+    var amount: Double { shares * price }
+}
+
 struct Stock: Identifiable, Codable {
     let id: UUID
     var name: String
@@ -203,6 +229,8 @@ struct Stock: Identifiable, Codable {
     var linkedBankMilestoneId: UUID?
     var linkedBankCurrency: String?
     var linkedSecuritiesMilestoneId: UUID?
+    /// 多筆交易紀錄；空陣列代表延用原本單筆 shares/purchasePrice 模式
+    var transactions: [StockTransaction]
 
     init(
         id: UUID = UUID(),
@@ -220,7 +248,8 @@ struct Stock: Identifiable, Codable {
         linkedIncomeId: UUID? = nil,
         linkedBankMilestoneId: UUID? = nil,
         linkedBankCurrency: String? = nil,
-        linkedSecuritiesMilestoneId: UUID? = nil
+        linkedSecuritiesMilestoneId: UUID? = nil,
+        transactions: [StockTransaction] = []
     ) {
         self.id = id
         self.name = name
@@ -238,6 +267,7 @@ struct Stock: Identifiable, Codable {
         self.linkedBankMilestoneId = linkedBankMilestoneId
         self.linkedBankCurrency = linkedBankCurrency
         self.linkedSecuritiesMilestoneId = linkedSecuritiesMilestoneId
+        self.transactions = transactions
     }
 
     init(from decoder: Decoder) throws {
@@ -258,6 +288,15 @@ struct Stock: Identifiable, Codable {
         linkedBankMilestoneId = try c.decodeIfPresent(UUID.self, forKey: .linkedBankMilestoneId)
         linkedBankCurrency = try c.decodeIfPresent(String.self, forKey: .linkedBankCurrency)
         linkedSecuritiesMilestoneId = try c.decodeIfPresent(UUID.self, forKey: .linkedSecuritiesMilestoneId)
+        transactions = (try? c.decodeIfPresent([StockTransaction].self, forKey: .transactions)) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, symbol, purchaseDate, shares, purchasePrice, currentPrice, note
+        case isSold, soldPrice, soldDate
+        case linkedExpenseId, linkedIncomeId
+        case linkedBankMilestoneId, linkedBankCurrency, linkedSecuritiesMilestoneId
+        case transactions
     }
 
     /// 投入成本
@@ -270,6 +309,83 @@ struct Stock: Identifiable, Codable {
     var returnRate: Double {
         guard totalCost > 0 else { return 0 }
         return profitLoss / totalCost * 100
+    }
+
+    // MARK: - 交易彙整
+
+    /// 依 transactions 重算 shares / purchasePrice / isSold / soldPrice / soldDate。
+    /// shares = 累積買入股數 − 累積賣出股數
+    /// purchasePrice（成本均價）= 累積買入金額 / 累積買入股數（加權平均）
+    /// 若 shares 歸零且曾有賣出，isSold = true、soldDate = 最後賣出日、soldPrice = 加權平均賣出價
+    mutating func recomputeFromTransactions() {
+        guard !transactions.isEmpty else { return }
+        var buyShares: Double = 0
+        var buyAmount: Double = 0
+        var sellShares: Double = 0
+        var sellAmount: Double = 0
+        var lastSellDate: Date? = nil
+        for tx in transactions {
+            switch tx.kind {
+            case .buy:
+                buyShares += tx.shares
+                buyAmount += tx.shares * tx.price
+            case .sell:
+                sellShares += tx.shares
+                sellAmount += tx.shares * tx.price
+                if lastSellDate == nil || tx.date > (lastSellDate ?? .distantPast) {
+                    lastSellDate = tx.date
+                }
+            }
+        }
+        let netShares = buyShares - sellShares
+        let avgCost = buyShares > 0 ? buyAmount / buyShares : 0
+        shares = max(0, netShares)
+        purchasePrice = avgCost
+        if netShares <= 0.0001 && sellShares > 0 {
+            isSold = true
+            soldDate = lastSellDate
+            soldPrice = sellShares > 0 ? sellAmount / sellShares : 0
+        } else {
+            isSold = false
+            soldDate = nil
+            soldPrice = 0
+        }
+        // purchaseDate 用第一筆買入日期
+        if let firstBuy = transactions.filter({ $0.kind == .buy }).min(by: { $0.date < $1.date }) {
+            purchaseDate = firstBuy.date
+        }
+    }
+
+    /// 若 transactions 為空，但已有 shares / purchasePrice → 種一筆原始買入（與賣出，若已售出）
+    mutating func seedTransactionsFromLegacyIfNeeded() {
+        guard transactions.isEmpty, shares > 0 || isSold else { return }
+        var seeds: [StockTransaction] = []
+        if shares > 0 || (isSold && soldPrice > 0) {
+            // 原始買入（包含售出後的數量需要先還原）
+            let originalLots = (shares + (isSold ? shares : 0)) / 1000
+            // 若已售出，shares 通常為 0；要靠 soldPrice 推不出原始張數，只能憑使用者輸入的 shares 為基礎
+            let baseLots: Double = {
+                if shares > 0 { return shares / 1000 }
+                // 已賣完且 shares=0：以 soldPrice 推不出，給 0
+                return 0
+            }()
+            if baseLots > 0 || isSold {
+                let lots = baseLots > 0 ? baseLots : 1  // fallback
+                seeds.append(StockTransaction(
+                    id: UUID(), date: purchaseDate,
+                    kind: .buy,
+                    lots: lots, price: purchasePrice
+                ))
+            }
+            _ = originalLots  // keep symbol used
+        }
+        if isSold, let sd = soldDate, soldPrice > 0, let firstBuy = seeds.first {
+            seeds.append(StockTransaction(
+                id: UUID(), date: sd, kind: .sell,
+                lots: firstBuy.lots, price: soldPrice
+            ))
+        }
+        transactions = seeds
     }
 }
 

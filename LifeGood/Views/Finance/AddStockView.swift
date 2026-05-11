@@ -520,25 +520,38 @@ struct AddStockView: View {
 
         let currency = stock.linkedBankCurrency ?? "NT$"
 
-        // 買入：扣款（投入成本）
-        let cost = stock.shares * stock.purchasePrice
-        if cost > 0 {
-            list.append(BankDeposit(
-                id: UUID(), date: stock.purchaseDate, amount: cost,
-                currencyCode: currency, isWithdrawal: true,
-                linkedExpenseId: nil, linkedStockId: stock.id
-            ))
-        }
-
-        // 賣出：回收全部賣出金額（本金＋損益）
-        if stock.isSold, stock.soldPrice > 0, let sd = stock.soldDate {
-            let saleAmount = stock.shares * stock.soldPrice
-            if saleAmount > 0 {
+        if !stock.transactions.isEmpty {
+            // 已使用交易紀錄模式：每筆交易寫一筆 BankDeposit
+            for tx in stock.transactions {
                 list.append(BankDeposit(
-                    id: UUID(), date: sd, amount: saleAmount,
-                    currencyCode: currency, isWithdrawal: false,
+                    id: UUID(),
+                    date: tx.date,
+                    amount: tx.amount,
+                    currencyCode: currency,
+                    isWithdrawal: tx.kind == .buy,
+                    linkedExpenseId: nil,
+                    linkedStockId: stock.id
+                ))
+            }
+        } else {
+            // 舊版聚合模式：一筆買入 + 一筆賣出（若有）
+            let cost = stock.shares * stock.purchasePrice
+            if cost > 0 {
+                list.append(BankDeposit(
+                    id: UUID(), date: stock.purchaseDate, amount: cost,
+                    currencyCode: currency, isWithdrawal: true,
                     linkedExpenseId: nil, linkedStockId: stock.id
                 ))
+            }
+            if stock.isSold, stock.soldPrice > 0, let sd = stock.soldDate {
+                let saleAmount = stock.shares * stock.soldPrice
+                if saleAmount > 0 {
+                    list.append(BankDeposit(
+                        id: UUID(), date: sd, amount: saleAmount,
+                        currencyCode: currency, isWithdrawal: false,
+                        linkedExpenseId: nil, linkedStockId: stock.id
+                    ))
+                }
             }
         }
 
