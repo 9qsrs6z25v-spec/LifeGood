@@ -1212,7 +1212,7 @@ struct AddMilestoneView: View {
         } else if isFinance {
             let autoTitle = generateFinanceTitle()
             let t = note.trimmingCharacters(in: .whitespaces)
-            let item = LifeMilestone(
+            var item = LifeMilestone(
                 id: editing?.id ?? UUID(),
                 title: autoTitle, date: date, category: .achievement,
                 note: t,
@@ -1236,6 +1236,8 @@ struct AddMilestoneView: View {
                 beneficiary: beneficiary.trimmingCharacters(in: .whitespaces).isEmpty ? nil : beneficiary.trimmingCharacters(in: .whitespaces),
                 linkedBankMilestoneId: financeSub == .creditCard ? selectedLinkedBankId : nil
             )
+            // 編輯既有財富卡時保留銀行存取紀錄（init 沒提供 bankDeposits 參數，需手動帶回）
+            item.bankDeposits = editing?.bankDeposits
             if editing != nil { store.update(item) } else { store.add(item) }
         } else {
             let item = LifeMilestone(
