@@ -1073,6 +1073,8 @@ struct AddRealEstateView: View {
         let syncedPaids: [RealEstatePaidItem] = currentEstate?.paidItems ?? []
         let syncedVariable: [RealEstateVariableExpense] = currentEstate?.variableExpenses ?? []
         let existingUtilityPayments: [UtilityPayment] = currentEstate?.utilityPayments ?? []
+        // 房屋照片集錦由詳細頁 RenovationPhotoEditor 直接寫入，這裡保留既有資料避免被清空
+        let existingRenovationPhotos: [RenovationPhoto] = currentEstate?.renovationPhotos ?? []
 
         // 同步保險項目到變動支出（有價格才連動）
         var syncedInsurance: [RealEstateInsuranceItem] = []
@@ -1173,7 +1175,8 @@ struct AddRealEstateView: View {
                              meterNumber: m.meterNumber.trimmingCharacters(in: .whitespaces),
                              owner: m.owner.trimmingCharacters(in: .whitespaces),
                              userNumber: m.userNumber.trimmingCharacters(in: .whitespaces))
-            }.filter { !$0.meterNumber.isEmpty || !$0.label.isEmpty }
+            }.filter { !$0.meterNumber.isEmpty || !$0.label.isEmpty },
+            renovationPhotos: existingRenovationPhotos
         )
         if currentEstate != nil { financeStore.update(re) } else { financeStore.add(re) }
         dismiss()
