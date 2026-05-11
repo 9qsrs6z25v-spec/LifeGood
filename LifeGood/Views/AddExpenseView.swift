@@ -142,8 +142,8 @@ struct AddExpenseView: View {
     @State private var placeLongitude: Double?
     @FocusState private var titleFieldFocused: Bool
     @State private var suppressNextCompleterUpdate = false
-    /// 是否顯示地點選擇 sheet（飲食 / 娛樂 / 購物 / 日用品 / 醫療）
-    @State private var showPlacePicker = false
+    /// 是否展開所有候選地點（預設僅顯示 20 個）
+    @State private var expandedSuggestions: Bool = false
 
     // MARK: - 條件判斷
 
@@ -464,7 +464,7 @@ struct AddExpenseView: View {
                             .lineLimit(2)
                     }
                 } else if supportsPlacePicker {
-                    placeNameRow
+                    placeNameAutocomplete
                 } else {
                     TextField(expenseType == .variable ? "名稱（留空自動以分類為名）" : "名稱", text: $title)
                 }
@@ -591,51 +591,280 @@ struct AddExpenseView: View {
 
     // MARK: - 地點欄位（飲食 / 娛樂 / 購物 / 日用品 / 醫療）
 
-    /// 名稱欄位列：點下開啟 PlacePickerSheet 滾動選擇
+    /// 名稱欄位列：輸入店名同時跑出歷史地點 + Apple Maps 候選清單
     @ViewBuilder
-    private var placeNameRow: some View {
-        Button {
-            showPlacePicker = true
-        } label: {
-            HStack {
+    private var placeNameAutocomplete: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: placeIcon)
                     .foregroundStyle(placeIconColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title.isEmpty ? "選擇地點 / 輸入名稱" : title)
-                        .foregroundStyle(title.isEmpty ? .secondary : .primary)
-                        .font(.subheadline)
-                    if let addr = placeAddress, !addr.isEmpty {
-                        Text(addr)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
+                    .frame(width: 22)
+                TextField(placeNamePrompt, text: $title)
+                    .focused($titleFieldFocused)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
                 if placeLatitude != nil {
                     Image(systemName: "mappin.circle.fill")
                         .foregroundStyle(.green)
                         .font(.caption)
                 }
-                Image(systemName: "chevron.right")
+                if !title.isEmpty {
+                    Button {
+                        title = ""
+                        clearPlace()
+                        expandedSuggestions = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if let addr = placeAddress, !addr.isEmpty, placeLatitude != nil {
+                Text(addr)
                     .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.leading, 32)
+            }
+            if titleFieldFocused {
+                placeSuggestionsList
+            }
+        }
+        .padding(.vertical, 2)
+        .onAppear {
+            LocationProvider.shared.requestIfNeeded()
+            restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
+            if !title.isEmpty { restaurantCompleter.queryFragment = title }
+        }
+        .onChange(of: title) { _, newValue in
+            if suppressNextCompleterUpdate {
+                suppressNextCompleterUpdate = false
+                return
+            }
+            restaurantCompleter.queryFragment = newValue
+            expandedSuggestions = false
+            // 重新輸入時清掉之前選定的座標 / 地址
+            if placeLatitude != nil || placeLongitude != nil || placeAddress != nil {
+                clearPlace()
+            }
+        }
+        .onChange(of: locationProvider.lastLocation) { _, _ in
+            restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
+            if !title.isEmpty { restaurantCompleter.queryFragment = title }
+        }
+    }
+
+    private var placeNamePrompt: String {
+        switch selectedVariableCategory {
+        case .food: return "店名 / 餐廳"
+        case .entertainment: return "電影院 / KTV / 場館"
+        case .shopping: return "百貨 / 商家"
+        case .dailyNecessities: return "賣場 / 超市"
+        case .medical: return "醫院 / 診所 / 藥局"
+        default: return "名稱"
+        }
+    }
+
+    /// 候選清單：預設顯示 20 個項目，21 格為「顯示更多」按鈕；展開後顯示全部，並換成「收合」
+    @ViewBuilder
+    private var placeSuggestionsList: some View {
+        let all = allPlaceSuggestions
+        if !all.isEmpty {
+            let limit = 20
+            let visible: [PlaceSuggestion] = expandedSuggestions ? all : Array(all.prefix(limit))
+            let hiddenCount = max(0, all.count - limit)
+            VStack(spacing: 0) {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(visible) { item in
+                            Button {
+                                applySuggestion(item)
+                            } label: {
+                                placeSuggestionRow(item)
+                            }
+                            .buttonStyle(.plain)
+                            Divider().padding(.leading, 52)
+                        }
+                        if !expandedSuggestions && hiddenCount > 0 {
+                            Button {
+                                expandedSuggestions = true
+                            } label: {
+                                HStack {
+                                    Image(systemName: "chevron.down.circle.fill")
+                                        .foregroundStyle(.blue)
+                                    Text("顯示更多 (\(hiddenCount))")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.blue)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        } else if expandedSuggestions && all.count > limit {
+                            Button {
+                                expandedSuggestions = false
+                            } label: {
+                                HStack {
+                                    Image(systemName: "chevron.up.circle.fill")
+                                        .foregroundStyle(.secondary)
+                                    Text("收合")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxHeight: 260)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 0.5)
+            )
+        } else if !title.trimmingCharacters(in: .whitespaces).isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
                     .foregroundStyle(.tertiary)
+                Text("找不到符合的地點，將以「\(title)」儲存。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
-            .contentShape(Rectangle())
+            .padding(.vertical, 4)
         }
-        .buttonStyle(.plain)
-        .sheet(isPresented: $showPlacePicker) {
-            PlacePickerSheet(
-                category: selectedVariableCategory,
-                initialQuery: title
-            ) { name, addr, lat, lon in
-                title = name
-                placeAddress = addr
-                placeLatitude = lat
-                placeLongitude = lon
+    }
+
+    private func placeSuggestionRow(_ item: PlaceSuggestion) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(item.iconColor.opacity(0.15))
+                    .frame(width: 32, height: 32)
+                Image(systemName: item.iconName)
+                    .foregroundStyle(item.iconColor)
+                    .font(.callout)
             }
-            .environmentObject(store)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if !item.subtitle.isEmpty {
+                    Text(item.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            Image(systemName: "arrow.up.left")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .contentShape(Rectangle())
+    }
+
+    /// 合併「之前去過」（依名稱含查詢字串）與 Apple Maps POI 結果，去重後產生候選清單
+    private var allPlaceSuggestions: [PlaceSuggestion] {
+        let q = title.trimmingCharacters(in: .whitespaces).lowercased()
+        var seenKeys: Set<String> = []
+        var output: [PlaceSuggestion] = []
+
+        // 1) 之前去過：同類別、含座標、名稱含查詢字串（空字串時也顯示所有歷史）
+        for exp in store.expenses
+            where exp.expenseType == .variable
+                && exp.variableCategory == selectedVariableCategory
+                && exp.placeLatitude != nil
+                && exp.placeLongitude != nil
+                && !exp.title.trimmingCharacters(in: .whitespaces).isEmpty {
+            if !q.isEmpty && !exp.title.lowercased().contains(q) { continue }
+            let key = "past|\(exp.title.lowercased())|\(exp.placeAddress?.lowercased() ?? "")"
+            if seenKeys.contains(key) { continue }
+            seenKeys.insert(key)
+            output.append(PlaceSuggestion(
+                id: key,
+                source: .past,
+                title: exp.title,
+                subtitle: exp.placeAddress ?? "",
+                completion: nil,
+                latitude: exp.placeLatitude,
+                longitude: exp.placeLongitude,
+                address: exp.placeAddress
+            ))
+        }
+
+        // 2) Apple Maps：搜尋字串非空才會有結果
+        for c in restaurantCompleter.results {
+            let key = "apple|\(c.title.lowercased())|\(c.subtitle.lowercased())"
+            if seenKeys.contains(key) { continue }
+            // 名稱完全相同且同地址的 past 已存在時略過
+            let pastKey = "past|\(c.title.lowercased())|\(c.subtitle.lowercased())"
+            if seenKeys.contains(pastKey) { continue }
+            seenKeys.insert(key)
+            output.append(PlaceSuggestion(
+                id: key,
+                source: .apple,
+                title: c.title,
+                subtitle: c.subtitle,
+                completion: c,
+                latitude: nil,
+                longitude: nil,
+                address: c.subtitle.isEmpty ? nil : c.subtitle
+            ))
+        }
+
+        return output
+    }
+
+    /// 套用使用者選擇的候選
+    private func applySuggestion(_ item: PlaceSuggestion) {
+        suppressNextCompleterUpdate = true
+        title = item.title
+        expandedSuggestions = false
+        switch item.source {
+        case .past:
+            placeAddress = item.address
+            placeLatitude = item.latitude
+            placeLongitude = item.longitude
+            titleFieldFocused = false
+        case .apple:
+            // 先帶 fallback，再呼叫 resolve 補完整地址 / 座標
+            placeAddress = item.address
+            placeLatitude = nil
+            placeLongitude = nil
+            if let c = item.completion {
+                restaurantCompleter.resolve(c) { mapItem in
+                    if let mapItem {
+                        let resolved = mapItem.formattedAddress
+                        placeAddress = resolved.isEmpty ? item.address : resolved
+                        placeLatitude = mapItem.placemark.coordinate.latitude
+                        placeLongitude = mapItem.placemark.coordinate.longitude
+                    }
+                }
+            }
+            titleFieldFocused = false
+        }
+    }
+
+    /// 清掉先前綁定的地點資料
+    private func clearPlace() {
+        placeAddress = nil
+        placeLatitude = nil
+        placeLongitude = nil
     }
 
     private var placeIcon: String {
@@ -2335,6 +2564,34 @@ struct AddExpensePreset {
     var fixedAssetLink: AddExpenseView.FixedAssetLinkType?
     var realEstateLinkExisting: Bool?
     var mortgageLinkExisting: Bool?
+}
+
+// MARK: - 地點候選資料型別
+
+/// 變動支出名稱自動完成的候選項目（合併歷史紀錄 + Apple Maps）
+fileprivate struct PlaceSuggestion: Identifiable {
+    enum Source { case past, apple }
+    let id: String
+    let source: Source
+    let title: String
+    let subtitle: String
+    let completion: MKLocalSearchCompletion?
+    let latitude: Double?
+    let longitude: Double?
+    let address: String?
+
+    var iconName: String {
+        switch source {
+        case .past: return "clock.arrow.circlepath"
+        case .apple: return "mappin"
+        }
+    }
+    var iconColor: Color {
+        switch source {
+        case .past: return .green
+        case .apple: return .orange
+        }
+    }
 }
 
 #Preview {
