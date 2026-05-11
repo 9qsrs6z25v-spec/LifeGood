@@ -30,6 +30,14 @@ struct RealEstateDetailView: View {
     /// 用於在子 sheet 關閉後強制刷新水電瓦斯區塊（解決 SwiftUI 巢狀 sheet 偶爾不更新的問題）
     @State private var dataRefreshID = UUID()
 
+    // MARK: - 收合狀態（理財分頁）
+    /// 試算章節預設展開
+    @State private var calcSectionExpanded = true
+    @State private var mortgageSectionExpanded = false
+    @State private var paidSectionExpanded = false
+    @State private var variableSectionExpanded = false
+    @State private var incomeSectionExpanded = false
+
     enum DetailTab: String, CaseIterable {
         case finance = "理財"
         case house = "房屋資料"
@@ -245,30 +253,36 @@ struct RealEstateDetailView: View {
         let allPaid = paidTotal + mortgagePaidTotal + varTotal
 
         if rental > 0 || mortgageMonthly > 0 || paidTotal > 0 || varTotal > 0 {
-            sectionHeader("試算")
-            VStack(spacing: 0) {
-                if rental > 0 || mortgageMonthly > 0 {
-                    calcRow("每月淨現金流", fmt(rental - mortgageMonthly),
-                            color: rental - mortgageMonthly >= 0 ? .green : .red)
+            collapsibleSection(
+                title: "試算",
+                summary: fmt(allPaid),
+                summaryColor: .red,
+                isExpanded: $calcSectionExpanded
+            ) {
+                VStack(spacing: 0) {
+                    if rental > 0 || mortgageMonthly > 0 {
+                        calcRow("每月淨現金流", fmt(rental - mortgageMonthly),
+                                color: rental - mortgageMonthly >= 0 ? .green : .red)
+                    }
+                    if mortgageTotal > 0 {
+                        calcRow("貸款總額", fmt(mortgageTotal), color: .secondary)
+                    }
+                    if mortgagePaidTotal > 0 {
+                        calcRow("已繳貸款金額", fmt(mortgagePaidTotal), color: .blue)
+                    }
+                    if paidTotal > 0 {
+                        calcRow("已支出房屋金額", fmt(paidTotal), color: .purple)
+                    }
+                    if varTotal > 0 {
+                        calcRow("變動支出累計", fmt(varTotal), color: .orange)
+                    }
+                    HStack {
+                        Text("房屋總已支出").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(fmt(allPaid)).font(.subheadline.bold()).foregroundStyle(.red)
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
                 }
-                if mortgageTotal > 0 {
-                    calcRow("貸款總額", fmt(mortgageTotal), color: .secondary)
-                }
-                if mortgagePaidTotal > 0 {
-                    calcRow("已繳貸款金額", fmt(mortgagePaidTotal), color: .blue)
-                }
-                if paidTotal > 0 {
-                    calcRow("已支出房屋金額", fmt(paidTotal), color: .purple)
-                }
-                if varTotal > 0 {
-                    calcRow("變動支出累計", fmt(varTotal), color: .orange)
-                }
-                HStack {
-                    Text("房屋總已支出").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(fmt(allPaid)).font(.subheadline.bold()).foregroundStyle(.red)
-                }
-                .padding(.horizontal).padding(.vertical, 8)
             }
         }
     }
@@ -287,119 +301,149 @@ struct RealEstateDetailView: View {
             calcSummary
 
             if !estate.mortgageItems.isEmpty {
-                sectionHeader("貸款明細")
-                ForEach(estate.mortgageItems) { m in
-                    HStack {
-                        Text(m.title.isEmpty ? "房貸" : m.title)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.1))
-                            .foregroundStyle(.blue)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                        Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(fmt(m.amount) + "/月").font(.subheadline.bold())
+                collapsibleSection(
+                    title: "貸款明細 (\(estate.mortgageItems.count) 筆)",
+                    summary: "已繳 " + fmt(estate.totalMortgagePaid),
+                    summaryColor: .blue,
+                    isExpanded: $mortgageSectionExpanded
+                ) {
+                    ForEach(estate.mortgageItems) { m in
+                        HStack {
+                            Text(m.title.isEmpty ? "房貸" : m.title)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.blue.opacity(0.1))
+                                .foregroundStyle(.blue)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(fmt(m.amount) + "/月").font(.subheadline.bold())
+                        }
+                        .padding(.horizontal).padding(.vertical, 8)
                     }
-                    .padding(.horizontal).padding(.vertical, 8)
+                    HStack {
+                        Text("已繳貸款").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(fmt(estate.totalMortgagePaid))
+                            .font(.subheadline.bold()).foregroundStyle(.blue)
+                    }
+                    .padding(.horizontal).padding(.vertical, 6)
                 }
-                HStack {
-                    Text("已繳貸款").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(fmt(estate.totalMortgagePaid))
-                        .font(.subheadline.bold()).foregroundStyle(.blue)
-                }
-                .padding(.horizontal).padding(.vertical, 6)
             }
 
             if !estate.paidItems.isEmpty {
-                sectionHeader("已支出")
-                ForEach(estate.paidItems) { p in
-                    HStack {
-                        Text(p.title.isEmpty ? "已付款" : p.title)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.purple.opacity(0.1))
-                            .foregroundStyle(.purple)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                        Spacer()
-                        Text(fmt(p.amount)).font(.subheadline.bold())
+                let paidTotal = estate.paidItems.reduce(0.0) { $0 + $1.amount }
+                collapsibleSection(
+                    title: "已支出 (\(estate.paidItems.count) 筆)",
+                    summary: fmt(paidTotal),
+                    summaryColor: .purple,
+                    isExpanded: $paidSectionExpanded
+                ) {
+                    ForEach(estate.paidItems) { p in
+                        HStack {
+                            Text(p.title.isEmpty ? "已付款" : p.title)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.purple.opacity(0.1))
+                                .foregroundStyle(.purple)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            Spacer()
+                            Text(fmt(p.amount)).font(.subheadline.bold())
+                        }
+                        .padding(.horizontal).padding(.vertical, 8)
                     }
-                    .padding(.horizontal).padding(.vertical, 8)
                 }
             }
 
             if !estate.variableExpenses.isEmpty {
-                sectionHeader("變動支出")
-                ForEach(estate.variableExpenses) { ve in
-                    let isExpanded = expandedVariableExpenseIds.contains(ve.id)
-                    let isLong = ve.name.count > 18
-                    Button {
-                        if isLong {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                if isExpanded { expandedVariableExpenseIds.remove(ve.id) }
-                                else { expandedVariableExpenseIds.insert(ve.id) }
-                            }
-                        }
-                    } label: {
-                        HStack(alignment: .top) {
-                            Text(ve.category.rawValue)
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.1))
-                                .foregroundStyle(.orange)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                            if !ve.name.isEmpty {
-                                Text(ve.name)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(isExpanded ? nil : 1)
-                                    .multilineTextAlignment(.leading)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else {
-                                Spacer()
-                            }
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(fmt(ve.amount)).font(.subheadline.bold())
-                                if isLong {
-                                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                        .padding(.horizontal).padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!isLong)
-                }
+                variableExpensesContent
             }
 
             if estate.monthlyRental > 0 {
-                sectionHeader("收益")
-                HStack {
-                    Text("月淨現金流").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    let flow = estate.monthlyCashFlow
-                    Text(fmt(flow))
-                        .font(.subheadline.bold())
-                        .foregroundStyle(flow >= 0 ? .green : .red)
+                let flow = estate.monthlyCashFlow
+                collapsibleSection(
+                    title: "收益",
+                    summary: fmt(flow) + "/月",
+                    summaryColor: flow >= 0 ? .green : .red,
+                    isExpanded: $incomeSectionExpanded
+                ) {
+                    HStack {
+                        Text("月淨現金流").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(fmt(flow))
+                            .font(.subheadline.bold())
+                            .foregroundStyle(flow >= 0 ? .green : .red)
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
+                    HStack {
+                        Text("年租金報酬率").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "%.2f%%", estate.rentalYield))
+                            .font(.subheadline.bold()).foregroundStyle(.blue)
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
                 }
-                .padding(.horizontal).padding(.vertical, 8)
-                HStack {
-                    Text("年租金報酬率").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(String(format: "%.2f%%", estate.rentalYield))
-                        .font(.subheadline.bold()).foregroundStyle(.blue)
-                }
-                .padding(.horizontal).padding(.vertical, 8)
             }
         }
         .padding(.bottom, 8)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private var variableExpensesContent: some View {
+        collapsibleSection(
+            title: "變動支出 (\(estate.variableExpenses.count) 筆)",
+            summary: fmt(estate.variableTotal),
+            summaryColor: .orange,
+            isExpanded: $variableSectionExpanded
+        ) {
+            ForEach(estate.variableExpenses) { ve in
+                let isRowExpanded = expandedVariableExpenseIds.contains(ve.id)
+                let isLong = ve.name.count > 18
+                Button {
+                    if isLong {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if isRowExpanded { expandedVariableExpenseIds.remove(ve.id) }
+                            else { expandedVariableExpenseIds.insert(ve.id) }
+                        }
+                    }
+                } label: {
+                    HStack(alignment: .top) {
+                        Text(ve.category.rawValue)
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.1))
+                            .foregroundStyle(.orange)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                        if !ve.name.isEmpty {
+                            Text(ve.name)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(isRowExpanded ? nil : 1)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Spacer()
+                        }
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(fmt(ve.amount)).font(.subheadline.bold())
+                            if isLong {
+                                Image(systemName: isRowExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!isLong)
+            }
+        }
     }
 
     // MARK: - 分頁選擇器
@@ -1045,6 +1089,42 @@ struct RealEstateDetailView: View {
             Spacer()
         }
         .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+    }
+
+    /// 可收合區塊：未展開時顯示摘要金額；點 header 切換展開
+    @ViewBuilder
+    private func collapsibleSection<Content: View>(
+        title: String,
+        summary: String?,
+        summaryColor: Color = .secondary,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded.wrappedValue.toggle()
+            }
+        } label: {
+            HStack {
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                if let summary, !isExpanded.wrappedValue {
+                    Text(summary)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(summaryColor)
+                }
+                Image(systemName: isExpanded.wrappedValue ? "chevron.up" : "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+
+        if isExpanded.wrappedValue {
+            content()
+        }
     }
 
     private func sectionHeaderWithAdd(_ title: String, action: @escaping () -> Void) -> some View {
