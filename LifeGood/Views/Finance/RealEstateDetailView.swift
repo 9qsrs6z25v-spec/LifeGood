@@ -40,6 +40,11 @@ struct RealEstateDetailView: View {
     @State private var variableSectionExpanded = false
     @State private var incomeSectionExpanded = false
 
+    // MARK: - 直接從卡片新增支出項目
+    @State private var addingMortgageItem = false
+    @State private var addingPaidItem = false
+    @State private var addingVariableCategory: RealEstateExpenseCategory?
+
     enum DetailTab: String, CaseIterable {
         case finance = "理財"
         case house = "房屋資料"
@@ -140,6 +145,42 @@ struct RealEstateDetailView: View {
             }
             .sheet(item: $expandingExpensePhotos) { e in
                 ExpensePhotoStackViewer(expense: e)
+            }
+            .sheet(isPresented: $addingMortgageItem, onDismiss: { dataRefreshID = UUID() }) {
+                AddExpenseView(
+                    expenseType: .fixed,
+                    preset: AddExpensePreset(
+                        fixedCategory: .loan,
+                        loanSubCategory: .mortgage,
+                        recurrence: .monthly,
+                        linkedRealEstateId: estateId,
+                        mortgageLinkExisting: true
+                    )
+                )
+            }
+            .sheet(isPresented: $addingPaidItem, onDismiss: { dataRefreshID = UUID() }) {
+                AddExpenseView(
+                    expenseType: .variable,
+                    preset: AddExpensePreset(
+                        variableCategory: .realEstate,
+                        realEstateExpenseCategory: .housePayment,
+                        linkedRealEstateId: estateId,
+                        assetLink: .realEstate,
+                        realEstateLinkExisting: true
+                    )
+                )
+            }
+            .sheet(item: $addingVariableCategory, onDismiss: { dataRefreshID = UUID() }) { cat in
+                AddExpenseView(
+                    expenseType: .variable,
+                    preset: AddExpensePreset(
+                        variableCategory: .realEstate,
+                        realEstateExpenseCategory: cat,
+                        linkedRealEstateId: estateId,
+                        assetLink: .realEstate,
+                        realEstateLinkExisting: true
+                    )
+                )
             }
             .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
@@ -305,14 +346,26 @@ struct RealEstateDetailView: View {
         VStack(spacing: 0) {
             calcSummary
 
-            if !estate.mortgageItems.isEmpty {
-                collapsibleSection(
-                    title: "貸款明細 (\(estate.mortgageItems.count) 筆)",
-                    summary: "已繳 " + fmt(estate.totalMortgagePaid),
-                    summaryColor: .blue,
-                    isExpanded: $mortgageSectionExpanded
-                ) {
-                    ForEach(estate.mortgageItems) { m in
+            collapsibleSection(
+                title: "貸款明細 (\(estate.mortgageItems.count) 筆)",
+                summary: estate.mortgageItems.isEmpty ? nil : "已繳 " + fmt(estate.totalMortgagePaid),
+                summaryColor: .blue,
+                isExpanded: $mortgageSectionExpanded,
+                trailing: {
+                    Button {
+                        if subscription.isPremium { addingMortgageItem = true }
+                        else { showPremiumAlert = true }
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.subheadline).foregroundStyle(.green)
+                    }
+                    .buttonStyle(.plain)
+                }
+            ) {
+                if estate.mortgageItems.isEmpty {
+                    emptySectionRow("尚無貸款項目")
+                } else {
+                    ForEach(estate.mortgageItems.sorted { $0.startDate > $1.startDate }) { m in
                         HStack {
                             Text(m.title.isEmpty ? "房貸" : m.title)
                                 .font(.caption.weight(.medium))
@@ -337,15 +390,27 @@ struct RealEstateDetailView: View {
                 }
             }
 
-            if !estate.paidItems.isEmpty {
-                let paidTotal = estate.paidItems.reduce(0.0) { $0 + $1.amount }
-                collapsibleSection(
-                    title: "已支出 (\(estate.paidItems.count) 筆)",
-                    summary: fmt(paidTotal),
-                    summaryColor: .purple,
-                    isExpanded: $paidSectionExpanded
-                ) {
-                    ForEach(estate.paidItems) { p in
+            let paidTotal = estate.paidItems.reduce(0.0) { $0 + $1.amount }
+            collapsibleSection(
+                title: "已支出 (\(estate.paidItems.count) 筆)",
+                summary: estate.paidItems.isEmpty ? nil : fmt(paidTotal),
+                summaryColor: .purple,
+                isExpanded: $paidSectionExpanded,
+                trailing: {
+                    Button {
+                        if subscription.isPremium { addingPaidItem = true }
+                        else { showPremiumAlert = true }
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.subheadline).foregroundStyle(.green)
+                    }
+                    .buttonStyle(.plain)
+                }
+            ) {
+                if estate.paidItems.isEmpty {
+                    emptySectionRow("尚無已支出項目")
+                } else {
+                    ForEach(estate.paidItems.sorted { $0.date > $1.date }) { p in
                         HStack {
                             Text(p.title.isEmpty ? "已付款" : p.title)
                                 .font(.caption.weight(.medium))
@@ -361,9 +426,7 @@ struct RealEstateDetailView: View {
                 }
             }
 
-            if !estate.variableExpenses.isEmpty {
-                variableExpensesContent
-            }
+            variableExpensesContent
 
             if estate.monthlyRental > 0 {
                 let flow = estate.monthlyCashFlow
@@ -401,54 +464,82 @@ struct RealEstateDetailView: View {
     private var variableExpensesContent: some View {
         collapsibleSection(
             title: "變動支出 (\(estate.variableExpenses.count) 筆)",
-            summary: fmt(estate.variableTotal),
+            summary: estate.variableExpenses.isEmpty ? nil : fmt(estate.variableTotal),
             summaryColor: .orange,
-            isExpanded: $variableSectionExpanded
-        ) {
-            ForEach(estate.variableExpenses) { ve in
-                let isRowExpanded = expandedVariableExpenseIds.contains(ve.id)
-                let isLong = ve.name.count > 18
-                Button {
-                    if isLong {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            if isRowExpanded { expandedVariableExpenseIds.remove(ve.id) }
-                            else { expandedVariableExpenseIds.insert(ve.id) }
+            isExpanded: $variableSectionExpanded,
+            trailing: {
+                Menu {
+                    ForEach(RealEstateExpenseCategory.allCases.filter { $0 != .housePayment }) { cat in
+                        Button {
+                            if subscription.isPremium { addingVariableCategory = cat }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Label(cat.rawValue, systemImage: cat.icon)
                         }
                     }
                 } label: {
-                    HStack(alignment: .top) {
-                        Text(ve.category.rawValue)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.1))
-                            .foregroundStyle(.orange)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                        if !ve.name.isEmpty {
-                            Text(ve.name)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(isRowExpanded ? nil : 1)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            Spacer()
-                        }
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(fmt(ve.amount)).font(.subheadline.bold())
-                            if isLong {
-                                Image(systemName: isRowExpanded ? "chevron.up" : "chevron.down")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                    }
-                    .padding(.horizontal).padding(.vertical, 8)
-                    .contentShape(Rectangle())
+                    Image(systemName: "plus.circle.fill")
+                        .font(.subheadline).foregroundStyle(.green)
                 }
                 .buttonStyle(.plain)
-                .disabled(!isLong)
+            }
+        ) {
+            if estate.variableExpenses.isEmpty {
+                emptySectionRow("尚無變動支出")
+            } else {
+                ForEach(estate.variableExpenses.sorted { $0.date > $1.date }) { ve in
+                    let isRowExpanded = expandedVariableExpenseIds.contains(ve.id)
+                    let isLong = ve.name.count > 18
+                    Button {
+                        if isLong {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if isRowExpanded { expandedVariableExpenseIds.remove(ve.id) }
+                                else { expandedVariableExpenseIds.insert(ve.id) }
+                            }
+                        }
+                    } label: {
+                        HStack(alignment: .top) {
+                            Text(ve.category.rawValue)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.1))
+                                .foregroundStyle(.orange)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            if !ve.name.isEmpty {
+                                Text(ve.name)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(isRowExpanded ? nil : 1)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                Spacer()
+                            }
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(fmt(ve.amount)).font(.subheadline.bold())
+                                if isLong {
+                                    Image(systemName: isRowExpanded ? "chevron.up" : "chevron.down")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .padding(.horizontal).padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!isLong)
+                }
             }
         }
+    }
+
+    private func emptySectionRow(_ text: String) -> some View {
+        HStack {
+            Text(text).font(.caption).foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.horizontal).padding(.vertical, 6)
     }
 
     // MARK: - 分頁選擇器
@@ -1209,27 +1300,48 @@ struct RealEstateDetailView: View {
         isExpanded: Binding<Bool>,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isExpanded.wrappedValue.toggle()
-            }
-        } label: {
-            HStack {
-                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Spacer()
-                if let summary, !isExpanded.wrappedValue {
-                    Text(summary)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(summaryColor)
+        collapsibleSection(
+            title: title, summary: summary, summaryColor: summaryColor,
+            isExpanded: isExpanded,
+            trailing: { EmptyView() },
+            content: content
+        )
+    }
+
+    /// 可收合區塊（含右側自訂按鈕，例：「+」新增鈕、Menu 等）
+    @ViewBuilder
+    private func collapsibleSection<Content: View, Trailing: View>(
+        title: String,
+        summary: String?,
+        summaryColor: Color = .secondary,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder trailing: () -> Trailing,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.wrappedValue.toggle()
                 }
-                Image(systemName: isExpanded.wrappedValue ? "chevron.up" : "chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            } label: {
+                HStack {
+                    Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    if let summary, !isExpanded.wrappedValue {
+                        Text(summary)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(summaryColor)
+                    }
+                    Image(systemName: isExpanded.wrappedValue ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            trailing()
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
 
         if isExpanded.wrappedValue {
             content()
