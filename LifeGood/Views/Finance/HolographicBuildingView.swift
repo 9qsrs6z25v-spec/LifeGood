@@ -277,7 +277,7 @@ struct BuildingSceneView: UIViewRepresentable {
             // 相機（拉遠一點讓建築看起來小一些 + 留給地板呼吸空間）
             let camNode = SCNNode()
             camNode.camera = SCNCamera()
-            camNode.camera?.fieldOfView = 32
+            camNode.camera?.fieldOfView = 50
             camNode.position = SCNVector3(0, 1.0, 18)
             scene.rootNode.addChildNode(camNode)
 
@@ -374,8 +374,8 @@ struct BuildingSceneView: UIViewRepresentable {
             buildingRoot.runAction(auto, forKey: "auto-rotate")
             self.rotationAction = auto
 
-            // 微微傾斜，視覺更有立體感（傾斜縮小）
-            buildingRoot.eulerAngles = SCNVector3(-0.08, 0.6, 0)
+            // 視角設定：仰角 20°（top 微微仰），無斜角（yaw=0），無滾轉（roll=0）
+            buildingRoot.eulerAngles = SCNVector3(-Float.pi / 9, 0, 0)
 
             // 全息地板：放在建築底部，浮空略低於最低層
             let groundY = Float(baseY) - Float(floorHeight) / 2 - 0.15

@@ -24,6 +24,8 @@ struct RealEstateDetailView: View {
     @State private var pendingBulkPhotoNames: [String]? = nil
     /// 點開哪一張裝潢紀錄展開大圖瀏覽
     @State private var expandingRenovationStack: RenovationPhoto?
+    /// 點開哪一筆支出的照片展開大圖瀏覽
+    @State private var expandingExpensePhotos: Expense?
     @State private var showPremiumAlert = false
     /// 已展開備註的變動支出項目 IDs
     @State private var expandedVariableExpenseIds: Set<UUID> = []
@@ -135,6 +137,9 @@ struct RealEstateDetailView: View {
             }
             .sheet(item: $expandingRenovationStack) { p in
                 RenovationStackViewer(record: p)
+            }
+            .sheet(item: $expandingExpensePhotos) { e in
+                ExpensePhotoStackViewer(expense: e)
             }
             .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
@@ -652,12 +657,12 @@ struct RealEstateDetailView: View {
         .padding(.horizontal).padding(.vertical, 8)
     }
 
-    // MARK: - 裝潢照片
+    // MARK: - 房屋照片集錦（裝潢 + 關聯支出照片）
 
-    /// 裝潢區塊的 header：含「+」Menu（單張詳細 / 批次多選）
+    /// 照片集錦區塊的 header：含「+」Menu（單張詳細 / 批次多選）
     private var renovationSectionHeader: some View {
         HStack {
-            Text("裝潢照片").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text("房屋照片集錦").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             Spacer()
             Menu {
                 Button {
@@ -702,35 +707,43 @@ struct RealEstateDetailView: View {
         pendingBulkPhotoNames = fileNames
     }
 
+    /// 該房地產關聯的、有附照片的支出（變動 + 固定皆含）
+    private var linkedExpensePhotos: [Expense] {
+        expenseStore.expenses
+            .filter { $0.linkedRealEstateId == estateId && !$0.photoFileNames.isEmpty }
+    }
+
     @ViewBuilder
     private var renovationPhotosContent: some View {
         renovationSectionHeader
 
-        if estate.renovationPhotos.isEmpty {
+        let renovationItems = estate.renovationPhotos.map { HousePhotoItem.renovation($0) }
+        let expenseItems = linkedExpensePhotos.map { HousePhotoItem.expense($0) }
+        let allItems = (renovationItems + expenseItems).sorted { $0.date > $1.date }
+
+        if allItems.isEmpty {
             HStack {
-                Text("尚無裝潢照片").font(.caption).foregroundStyle(.tertiary)
+                Text("尚無房屋照片").font(.caption).foregroundStyle(.tertiary)
                 Spacer()
             }
             .padding(.horizontal).padding(.vertical, 6)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {
-                    ForEach(estate.renovationPhotos.sorted { $0.date > $1.date }) { p in
+                    ForEach(allItems) { item in
                         Button {
-                            if p.photoFileNames.count >= 2 {
-                                expandingRenovationStack = p
-                            } else {
-                                editingRenovationPhoto = p
-                            }
+                            handleHousePhotoTap(item)
                         } label: {
-                            renovationPhotoCard(p)
+                            housePhotoCard(item)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
-                            Button {
-                                editingRenovationPhoto = p
-                            } label: {
-                                Label("編輯資訊", systemImage: "pencil")
+                            if case .renovation(let p) = item.kind {
+                                Button {
+                                    editingRenovationPhoto = p
+                                } label: {
+                                    Label("編輯資訊", systemImage: "pencil")
+                                }
                             }
                         }
                     }
@@ -739,6 +752,102 @@ struct RealEstateDetailView: View {
                 .padding(.bottom, 12)
             }
         }
+    }
+
+    private func handleHousePhotoTap(_ item: HousePhotoItem) {
+        switch item.kind {
+        case .renovation(let p):
+            if p.photoFileNames.count >= 2 { expandingRenovationStack = p }
+            else { editingRenovationPhoto = p }
+        case .expense(let e):
+            if e.photoFileNames.count >= 2 {
+                expandingExpensePhotos = e
+            } else if let name = e.photoFileNames.first {
+                viewingPhotoURL = Expense.photoURL(for: name)
+            }
+        }
+    }
+
+    private func housePhotoCard(_ item: HousePhotoItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if item.fileNames.count >= 2 {
+                stackedHousePhotos(fileNames: item.fileNames, urlFor: item.urlForFileName)
+            } else if let url = item.primaryURL {
+                renovationSinglePhoto(url: url)
+            } else {
+                renovationSinglePhoto(url: nil)
+            }
+            HStack(spacing: 4) {
+                Image(systemName: item.badgeIcon)
+                    .font(.system(size: 9))
+                    .foregroundStyle(item.badgeColor)
+                Text(item.displayTitle)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+            }
+            .frame(width: 130, alignment: .leading)
+            Text(fmtDate(item.date))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(8)
+    }
+
+    /// 通用堆疊照片視圖：用一個 urlFor 閉包來支援 RenovationPhoto / Expense 兩種來源
+    private func stackedHousePhotos(fileNames: [String], urlFor: (String) -> URL) -> some View {
+        let visible = Array(fileNames.prefix(3))
+        return ZStack {
+            if visible.count >= 3 {
+                stackedHousePhotoLayer(url: urlFor(visible[2]))
+                    .rotationEffect(.degrees(7))
+                    .offset(x: 7, y: 4)
+                    .opacity(0.85)
+            }
+            if visible.count >= 2 {
+                stackedHousePhotoLayer(url: urlFor(visible[1]))
+                    .rotationEffect(.degrees(-5))
+                    .offset(x: -4, y: 2)
+                    .opacity(0.92)
+            }
+            stackedHousePhotoLayer(url: urlFor(visible[0]))
+
+            VStack {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 3) {
+                        Image(systemName: "square.stack.3d.up.fill").font(.system(size: 10))
+                        Text("\(fileNames.count)").font(.caption2.weight(.bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color.black.opacity(0.65))
+                    .clipShape(Capsule())
+                    .padding(6)
+                }
+                Spacer()
+            }
+            .frame(width: 130, height: 100)
+        }
+        .frame(width: 140, height: 110)
+    }
+
+    @ViewBuilder
+    private func stackedHousePhotoLayer(url: URL) -> some View {
+        Group {
+            if let img = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: img).resizable().scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill))
+            }
+        }
+        .frame(width: 130, height: 100)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white, lineWidth: 2)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
     }
 
     private func renovationPhotoCard(_ p: RenovationPhoto) -> some View {
@@ -1619,5 +1728,167 @@ struct UtilityPaymentEditor: View {
         ))
         ms.bankDeposits = list
         lifeStore.update(ms)
+    }
+}
+
+// MARK: - 房屋照片集錦：彙整裝潢 + 關聯支出照片
+
+fileprivate enum HousePhotoItem: Identifiable {
+    case renovation(RenovationPhoto)
+    case expense(Expense)
+
+    var id: String {
+        switch self {
+        case .renovation(let p): return "r-\(p.id.uuidString)"
+        case .expense(let e): return "e-\(e.id.uuidString)"
+        }
+    }
+
+    var kind: HousePhotoItem { self }
+
+    var date: Date {
+        switch self {
+        case .renovation(let p): return p.date
+        case .expense(let e): return e.date
+        }
+    }
+
+    /// 顯示用標題：
+    /// - 裝潢：原 title（空白回退到「N 張照片」/「未命名」）
+    /// - 支出：備註優先（空白回退到 expense.title）
+    var displayTitle: String {
+        switch self {
+        case .renovation(let p):
+            if !p.title.isEmpty { return p.title }
+            if p.photoFileNames.count >= 2 { return "\(p.photoFileNames.count) 張照片" }
+            return "未命名"
+        case .expense(let e):
+            let trimmedNote = e.note.trimmingCharacters(in: .whitespaces)
+            if !trimmedNote.isEmpty { return trimmedNote }
+            return e.title.isEmpty ? "支出照片" : e.title
+        }
+    }
+
+    var fileNames: [String] {
+        switch self {
+        case .renovation(let p): return p.photoFileNames
+        case .expense(let e): return e.photoFileNames
+        }
+    }
+
+    var primaryURL: URL? {
+        guard let name = fileNames.first else { return nil }
+        return urlForFileName(name)
+    }
+
+    func urlForFileName(_ name: String) -> URL {
+        switch self {
+        case .renovation: return RenovationPhoto.photoURL(for: name)
+        case .expense: return Expense.photoURL(for: name)
+        }
+    }
+
+    /// 卡片標題前的圖示：可一眼分辨來源
+    var badgeIcon: String {
+        switch self {
+        case .renovation: return "paintbrush.fill"
+        case .expense: return "tag.fill"
+        }
+    }
+
+    var badgeColor: Color {
+        switch self {
+        case .renovation: return .blue
+        case .expense: return .orange
+        }
+    }
+}
+
+// MARK: - 支出多張照片展開瀏覽器
+
+/// 把一筆 Expense 的所有照片以左右滑動方式逐張展開（與 RenovationStackViewer 對等）。
+struct ExpensePhotoStackViewer: View {
+    let expense: Expense
+    @Environment(\.dismiss) private var dismiss
+    @State private var currentIndex: Int = 0
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                if expense.photoFileNames.isEmpty {
+                    Text("沒有照片").foregroundStyle(.white.opacity(0.7))
+                } else {
+                    TabView(selection: $currentIndex) {
+                        ForEach(Array(expense.photoFileNames.enumerated()), id: \.offset) { idx, name in
+                            let url = Expense.photoURL(for: name)
+                            ZStack {
+                                if let img = UIImage(contentsOfFile: url.path) {
+                                    Image(uiImage: img).resizable().scaledToFit()
+                                } else {
+                                    ProgressView().tint(.white)
+                                }
+                            }
+                            .tag(idx)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .always))
+                    .indexViewStyle(.page(backgroundDisplayMode: .always))
+                }
+
+                VStack {
+                    Spacer()
+                    panelContent
+                }
+            }
+            .navigationTitle(displayTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("關閉") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var displayTitle: String {
+        let trimmedNote = expense.note.trimmingCharacters(in: .whitespaces)
+        if !trimmedNote.isEmpty { return trimmedNote }
+        return expense.title.isEmpty ? "支出照片" : expense.title
+    }
+
+    @ViewBuilder
+    private var panelContent: some View {
+        let trimmedNote = expense.note.trimmingCharacters(in: .whitespaces)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(displayTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("\(currentIndex + 1) / \(expense.photoFileNames.count)")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            if !expense.title.isEmpty && !trimmedNote.isEmpty {
+                Text(expense.title)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+            }
+            Text(fmtDate(expense.date))
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.65))
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial)
+        .padding(.bottom, 32)
+    }
+
+    private func fmtDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
     }
 }
