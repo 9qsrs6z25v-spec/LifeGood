@@ -44,6 +44,8 @@ struct RealEstateDetailView: View {
     @State private var addingMortgageItem = false
     @State private var addingPaidItem = false
     @State private var addingVariableCategory: RealEstateExpenseCategory?
+    /// 點章節項目時開啟編輯該筆 Expense
+    @State private var editingLinkedExpense: Expense?
 
     enum DetailTab: String, CaseIterable {
         case finance = "理財"
@@ -181,6 +183,9 @@ struct RealEstateDetailView: View {
                         realEstateLinkExisting: true
                     )
                 )
+            }
+            .sheet(item: $editingLinkedExpense, onDismiss: { dataRefreshID = UUID() }) { exp in
+                AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
             }
             .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) {
@@ -366,19 +371,26 @@ struct RealEstateDetailView: View {
                     emptySectionRow("尚無貸款項目")
                 } else {
                     ForEach(estate.mortgageItems.sorted { $0.startDate > $1.startDate }) { m in
-                        HStack {
-                            Text(m.title.isEmpty ? "房貸" : m.title)
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.blue.opacity(0.1))
-                                .foregroundStyle(.blue)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                            Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(fmt(m.amount) + "/月").font(.subheadline.bold())
+                        SwipeableRow(
+                            onCopy: { duplicateMortgageItem(m) },
+                            onDelete: { deleteMortgageItem(m) }
+                        ) {
+                            HStack {
+                                Text(m.title.isEmpty ? "房貸" : m.title)
+                                    .font(.caption.weight(.medium))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.blue.opacity(0.1))
+                                    .foregroundStyle(.blue)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                                Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(fmt(m.amount) + "/月").font(.subheadline.bold())
+                            }
+                            .padding(.horizontal).padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                            .onTapGesture { openLinkedExpense(id: m.linkedExpenseId) }
                         }
-                        .padding(.horizontal).padding(.vertical, 8)
                     }
                     HStack {
                         Text("已繳貸款").font(.caption).foregroundStyle(.secondary)
@@ -411,22 +423,29 @@ struct RealEstateDetailView: View {
                     emptySectionRow("尚無已支出項目")
                 } else {
                     ForEach(estate.paidItems.sorted { $0.date > $1.date }) { p in
-                        HStack(alignment: .top) {
-                            Text(p.title.isEmpty ? "已付款" : p.title)
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.purple.opacity(0.1))
-                                .foregroundStyle(.purple)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(fmt(p.amount)).font(.subheadline.bold())
-                                Text(fmtDate(p.date))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                        SwipeableRow(
+                            onCopy: { duplicatePaidItem(p) },
+                            onDelete: { deletePaidItem(p) }
+                        ) {
+                            HStack(alignment: .top) {
+                                Text(p.title.isEmpty ? "已付款" : p.title)
+                                    .font(.caption.weight(.medium))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.purple.opacity(0.1))
+                                    .foregroundStyle(.purple)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text(fmt(p.amount)).font(.subheadline.bold())
+                                    Text(fmtDate(p.date))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
+                            .padding(.horizontal).padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                            .onTapGesture { openLinkedExpense(id: p.linkedExpenseId) }
                         }
-                        .padding(.horizontal).padding(.vertical, 8)
                     }
                 }
             }
@@ -493,16 +512,10 @@ struct RealEstateDetailView: View {
                 emptySectionRow("尚無變動支出")
             } else {
                 ForEach(estate.variableExpenses.sorted { $0.date > $1.date }) { ve in
-                    let isRowExpanded = expandedVariableExpenseIds.contains(ve.id)
-                    let isLong = ve.name.count > 18
-                    Button {
-                        if isLong {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                if isRowExpanded { expandedVariableExpenseIds.remove(ve.id) }
-                                else { expandedVariableExpenseIds.insert(ve.id) }
-                            }
-                        }
-                    } label: {
+                    SwipeableRow(
+                        onCopy: { duplicateVariableExpenseItem(ve) },
+                        onDelete: { deleteVariableExpenseItem(ve) }
+                    ) {
                         HStack(alignment: .top) {
                             Text(ve.category.rawValue)
                                 .font(.caption.weight(.medium))
@@ -514,7 +527,7 @@ struct RealEstateDetailView: View {
                                 Text(ve.name)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                    .lineLimit(isRowExpanded ? nil : 1)
+                                    .lineLimit(2)
                                     .multilineTextAlignment(.leading)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
@@ -522,18 +535,14 @@ struct RealEstateDetailView: View {
                             }
                             VStack(alignment: .trailing, spacing: 2) {
                                 Text(fmt(ve.amount)).font(.subheadline.bold())
-                                if isLong {
-                                    Image(systemName: isRowExpanded ? "chevron.up" : "chevron.down")
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(.tertiary)
-                                }
+                                Text(fmtDate(ve.date))
+                                    .font(.caption2).foregroundStyle(.secondary)
                             }
                         }
                         .padding(.horizontal).padding(.vertical, 8)
                         .contentShape(Rectangle())
+                        .onTapGesture { openLinkedExpense(id: ve.linkedExpenseId) }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!isLong)
                 }
             }
         }
@@ -1429,6 +1438,257 @@ struct RealEstateDetailView: View {
 
     private func fmtDate(_ d: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
+    }
+
+    // MARK: - 章節項目：點擊編輯 / 複製 / 刪除
+
+    /// 依 linkedExpenseId 查找對應的 Expense（找不到時 sheet 不會開啟）
+    private func openLinkedExpense(id: UUID?) {
+        guard let id, let exp = expenseStore.expenses.first(where: { $0.id == id }) else { return }
+        editingLinkedExpense = exp
+    }
+
+    /// 移除指定 Expense 與其所有 side-effects（房地產項目、銀行扣款、信用卡連結等）
+    private func deleteLinkedExpense(_ expense: Expense) {
+        if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            re.mortgageItems.removeAll { $0.linkedExpenseId == expense.id }
+            re.paidItems.removeAll { $0.linkedExpenseId == expense.id }
+            re.variableExpenses.removeAll { $0.linkedExpenseId == expense.id }
+            store.update(re)
+        }
+        if let bankId = expense.linkedBankMilestoneId,
+           var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+            ms.bankDeposits?.removeAll { $0.linkedExpenseId == expense.id }
+            lifeStore.update(ms)
+        }
+        expenseStore.expenses.removeAll { $0.id == expense.id }
+    }
+
+    /// 複製一個 Expense（新 id、日期改為今天）並重新觸發房地產 / 銀行同步
+    private func duplicateLinkedExpense(_ source: Expense) {
+        let newId = UUID()
+        let copy = Expense(
+            id: newId,
+            title: source.title,
+            amount: source.amount,
+            date: Date(),
+            expenseType: source.expenseType,
+            variableCategory: source.variableCategory,
+            fixedCategory: source.fixedCategory,
+            recurrence: source.recurrence,
+            insuranceSubCategory: source.insuranceSubCategory,
+            loanSubCategory: source.loanSubCategory,
+            linkedInsuranceId: source.linkedInsuranceId,
+            linkedStockId: source.linkedStockId,
+            linkedRealEstateId: source.linkedRealEstateId,
+            linkedVehicleId: source.linkedVehicleId,
+            vehicleExpenseCategory: source.vehicleExpenseCategory,
+            realEstateExpenseCategory: source.realEstateExpenseCategory,
+            taxSavingSubCategory: source.taxSavingSubCategory,
+            socialSubCategory: source.socialSubCategory,
+            socialRecipient: source.socialRecipient,
+            taxDeductibleOverride: source.taxDeductibleOverride,
+            note: source.note,
+            currencyCode: source.currencyCode,
+            diningMember: source.diningMember,
+            linkedBankMilestoneId: source.linkedBankMilestoneId,
+            linkedBankCurrency: source.linkedBankCurrency,
+            linkedCreditCardMilestoneId: source.linkedCreditCardMilestoneId,
+            placeAddress: source.placeAddress,
+            placeLatitude: source.placeLatitude,
+            placeLongitude: source.placeLongitude,
+            photoFileNames: source.photoFileNames
+        )
+        expenseStore.expenses.append(copy)
+        // 房地產項目層級同步：依原本 source 出現在哪個陣列，clone 一份新項目
+        if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            if let m = re.mortgageItems.first(where: { $0.linkedExpenseId == source.id }) {
+                re.mortgageItems.append(RealEstateMortgageItem(
+                    id: UUID(), title: m.title, amount: m.amount,
+                    totalPeriods: m.totalPeriods, startDate: Date(),
+                    linkedExpenseId: newId
+                ))
+            }
+            if let p = re.paidItems.first(where: { $0.linkedExpenseId == source.id }) {
+                re.paidItems.append(RealEstatePaidItem(
+                    id: UUID(), title: p.title, amount: p.amount,
+                    date: Date(), linkedExpenseId: newId
+                ))
+            }
+            if let v = re.variableExpenses.first(where: { $0.linkedExpenseId == source.id }) {
+                re.variableExpenses.append(RealEstateVariableExpense(
+                    id: UUID(), category: v.category, name: v.name,
+                    amount: v.amount, date: Date(), linkedExpenseId: newId
+                ))
+            }
+            store.update(re)
+        }
+        // 銀行扣款由 syncBankWithdrawal 模式自動接管（週期性會虛擬展開，
+        // 一次性會由原 Expense 流程處理；這裡未走 AddExpenseView 故手動處理一次性）
+        if copy.linkedCreditCardMilestoneId == nil,
+           !(copy.expenseType == .fixed && copy.recurrence != nil),
+           let bankId = copy.linkedBankMilestoneId,
+           var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+            var list = ms.bankDeposits ?? []
+            list.append(BankDeposit(
+                id: UUID(), date: copy.date, amount: copy.amount,
+                currencyCode: copy.linkedBankCurrency ?? "NT$",
+                isWithdrawal: true, linkedExpenseId: copy.id
+            ))
+            ms.bankDeposits = list
+            lifeStore.update(ms)
+        }
+    }
+
+    // 三個分頁各自的入口
+
+    private func deleteMortgageItem(_ m: RealEstateMortgageItem) {
+        if let expId = m.linkedExpenseId,
+           let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+            deleteLinkedExpense(exp)
+        } else if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            re.mortgageItems.removeAll { $0.id == m.id }
+            store.update(re)
+        }
+    }
+
+    private func duplicateMortgageItem(_ m: RealEstateMortgageItem) {
+        if let expId = m.linkedExpenseId,
+           let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+            duplicateLinkedExpense(exp)
+        }
+    }
+
+    private func deletePaidItem(_ p: RealEstatePaidItem) {
+        if let expId = p.linkedExpenseId,
+           let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+            deleteLinkedExpense(exp)
+        } else if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            re.paidItems.removeAll { $0.id == p.id }
+            store.update(re)
+        }
+    }
+
+    private func duplicatePaidItem(_ p: RealEstatePaidItem) {
+        if let expId = p.linkedExpenseId,
+           let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+            duplicateLinkedExpense(exp)
+        }
+    }
+
+    private func deleteVariableExpenseItem(_ v: RealEstateVariableExpense) {
+        if let expId = v.linkedExpenseId,
+           let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+            deleteLinkedExpense(exp)
+        } else if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            re.variableExpenses.removeAll { $0.id == v.id }
+            store.update(re)
+        }
+    }
+
+    private func duplicateVariableExpenseItem(_ v: RealEstateVariableExpense) {
+        if let expId = v.linkedExpenseId,
+           let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+            duplicateLinkedExpense(exp)
+        }
+    }
+}
+
+// MARK: - 章節項目向左滑動顯示複製 / 刪除
+
+/// 房地產卡片章節項目用的可滑動 row：向左拖曳露出複製 / 刪除按鈕。
+/// content 內可放 .onTapGesture 來開啟編輯頁面。
+fileprivate struct SwipeableRow<Content: View>: View {
+    let content: Content
+    let onCopy: () -> Void
+    let onDelete: () -> Void
+
+    init(
+        onCopy: @escaping () -> Void,
+        onDelete: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.onCopy = onCopy
+        self.onDelete = onDelete
+        self.content = content()
+    }
+
+    private let actionWidth: CGFloat = 64
+    private var revealOffset: CGFloat { -(actionWidth * 2) }
+
+    @State private var offset: CGFloat = 0
+    @State private var settledOffset: CGFloat = 0
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            // 滑開後露出的按鈕
+            HStack(spacing: 0) {
+                Spacer()
+                Button {
+                    close()
+                    onCopy()
+                } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: "doc.on.doc.fill").font(.system(size: 16))
+                        Text("複製").font(.caption2.bold())
+                    }
+                    .foregroundStyle(.white)
+                    .frame(width: actionWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(Color.blue)
+                }
+                .buttonStyle(.plain)
+                Button {
+                    close()
+                    onDelete()
+                } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: "trash.fill").font(.system(size: 16))
+                        Text("刪除").font(.caption2.bold())
+                    }
+                    .foregroundStyle(.white)
+                    .frame(width: actionWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(Color.red)
+                }
+                .buttonStyle(.plain)
+            }
+
+            // 前景內容
+            content
+                .background(Color(.systemBackground))
+                .offset(x: offset)
+                .gesture(
+                    DragGesture(minimumDistance: 8)
+                        .onChanged { value in
+                            let proposed = settledOffset + value.translation.width
+                            if proposed > 0 {
+                                // 不允許向右拉超過 0（過 0 加阻尼）
+                                offset = proposed / 4
+                            } else if proposed < revealOffset {
+                                // 過頭加阻尼
+                                offset = revealOffset + (proposed - revealOffset) / 3
+                            } else {
+                                offset = proposed
+                            }
+                        }
+                        .onEnded { value in
+                            let predicted = settledOffset + value.predictedEndTranslation.width
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                offset = predicted < revealOffset / 2 ? revealOffset : 0
+                                settledOffset = offset
+                            }
+                        }
+                )
+        }
+        .clipped()
+    }
+
+    private func close() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            offset = 0
+            settledOffset = 0
+        }
     }
 }
 
