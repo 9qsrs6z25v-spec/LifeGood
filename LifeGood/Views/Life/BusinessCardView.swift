@@ -180,6 +180,12 @@ struct BusinessCardView: View {
                                                 if subscription.isPremium { lifeStore.deleteBusinessCard(card) }
                                                 else { showPremiumAlert = true }
                                             } label: { Label("刪除", systemImage: "trash") }
+
+                                            Button {
+                                                if subscription.isPremium { duplicateBusinessCard(card) }
+                                                else { showPremiumAlert = true }
+                                            } label: { Label("複製", systemImage: "doc.on.doc") }
+                                            .tint(.blue)
                                         }
                                 }
                             }
@@ -336,6 +342,36 @@ struct BusinessCardView: View {
 
     private func fmtDate(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+    }
+
+    // MARK: - 複製名片
+
+    /// 複製一張名片：新 UUID、頭像照片複寫一份檔案（避免兩張共用同檔被刪掉）；
+    /// 不複製 linkedOrgPersonId（避免兩張名片同時對應同一筆組織人員）。
+    private func duplicateBusinessCard(_ source: BusinessCard) {
+        let newId = UUID()
+        var newPhotoFileName: String? = nil
+        if let srcName = source.photoFileName {
+            let srcURL = BusinessCard.photosDirectory.appendingPathComponent(srcName)
+            if let data = try? Data(contentsOf: srcURL) {
+                newPhotoFileName = BusinessCard.savePhoto(data, id: newId)
+            }
+        }
+        let copy = BusinessCard(
+            id: newId,
+            name: source.name,
+            company: source.company,
+            department: source.department,
+            jobTitle: source.jobTitle,
+            phone: source.phone,
+            email: source.email,
+            address: source.address,
+            note: source.note,
+            date: Date(),
+            photoFileName: newPhotoFileName,
+            linkedOrgPersonId: nil
+        )
+        lifeStore.add(copy)
     }
 
     // MARK: - 從系統聯絡人匯入
