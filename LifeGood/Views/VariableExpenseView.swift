@@ -42,22 +42,36 @@ struct VariableExpenseView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // 本月變動支出摘要
-                monthSummaryHeader
+            List {
+                Section {
+                    monthSummaryHeader
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+                Section {
+                    categoryFilter
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
 
-                // 分類篩選
-                categoryFilter
-
-                // 支出列表
                 if filteredExpenses.isEmpty {
-                    emptyStateView
+                    Section {
+                        emptyStateView
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                 } else {
-                    expenseList
+                    expenseListSections
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("變動支出")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -77,7 +91,7 @@ struct VariableExpenseView: View {
             }
             .searchable(
                 text: $searchText,
-                placement: .navigationBarDrawer(displayMode: .automatic),
+                placement: .navigationBarDrawer(displayMode: .always),
                 prompt: "搜尋名稱 / 備註 / 分類 / 地點"
             )
         }
@@ -148,9 +162,10 @@ struct VariableExpenseView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 支出列表
+    // MARK: - 支出列表（List sections，包在外層的 List 內）
 
-    private var expenseList: some View {
+    @ViewBuilder
+    private var expenseListSections: some View {
         let allGroups = groupedByDate()
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
         let cutoff = Calendar.current.date(byAdding: .day, value: -7 * visibleWeeks, to: Date()) ?? Date()
@@ -165,47 +180,44 @@ struct VariableExpenseView: View {
         }
         let hiddenCount = hiddenGroups.reduce(0) { $0 + $1.value.count }
 
-        return List {
-            ForEach(visibleGroups, id: \.key) { dateString, expenses in
-                Section(header: Text(dateString)) {
-                    ForEach(expenses) { expense in
-                        ExpenseRow(expense: expense)
-                            .contentShape(Rectangle())
-                            .onTapGesture { expenseToEdit = expense }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    if let idx = expenses.firstIndex(where: { $0.id == expense.id }) {
-                                        deleteWithSync(offsets: IndexSet(integer: idx), from: expenses)
-                                    }
-                                } label: { Label("刪除", systemImage: "trash") }
+        ForEach(visibleGroups, id: \.key) { dateString, expenses in
+            Section(header: Text(dateString)) {
+                ForEach(expenses) { expense in
+                    ExpenseRow(expense: expense)
+                        .contentShape(Rectangle())
+                        .onTapGesture { expenseToEdit = expense }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                if let idx = expenses.firstIndex(where: { $0.id == expense.id }) {
+                                    deleteWithSync(offsets: IndexSet(integer: idx), from: expenses)
+                                }
+                            } label: { Label("刪除", systemImage: "trash") }
 
-                                Button {
-                                    duplicateExpense(expense)
-                                } label: { Label("複製", systemImage: "doc.on.doc") }
-                                .tint(.blue)
-                            }
-                    }
-                }
-            }
-
-            if hiddenCount > 0 {
-                Section {
-                    Button {
-                        withAnimation { visibleWeeks += 1 }
-                    } label: {
-                        HStack {
-                            Spacer()
-                            Image(systemName: "chevron.down").font(.caption2)
-                            Text("展開更早一週（剩 \(hiddenCount) 筆）")
-                                .font(.caption.weight(.medium))
-                            Spacer()
+                            Button {
+                                duplicateExpense(expense)
+                            } label: { Label("複製", systemImage: "doc.on.doc") }
+                            .tint(.blue)
                         }
-                        .foregroundStyle(.green)
-                    }
                 }
             }
         }
-        .listStyle(.insetGrouped)
+
+        if hiddenCount > 0 {
+            Section {
+                Button {
+                    withAnimation { visibleWeeks += 1 }
+                } label: {
+                    HStack {
+                        Spacer()
+                        Image(systemName: "chevron.down").font(.caption2)
+                        Text("展開更早一週（剩 \(hiddenCount) 筆）")
+                            .font(.caption.weight(.medium))
+                        Spacer()
+                    }
+                    .foregroundStyle(.green)
+                }
+            }
+        }
     }
 
     /// 刪除變動支出時同步刪除理財連結項目

@@ -33,16 +33,33 @@ struct IncomeView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                summaryHeader
-                categoryFilter
+            List {
+                Section {
+                    summaryHeader
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+                Section {
+                    categoryFilter
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
 
                 if filteredIncomes.isEmpty {
-                    emptyState
+                    Section {
+                        emptyState
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                 } else {
-                    incomeList
+                    incomeListSections
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("收入")
             .navigationBarTitleDisplayMode(.large)
@@ -65,7 +82,7 @@ struct IncomeView: View {
             .sheet(item: $editingItem) { item in AddIncomeView(editing: item) }
             .searchable(
                 text: $searchText,
-                placement: .navigationBarDrawer(displayMode: .automatic),
+                placement: .navigationBarDrawer(displayMode: .always),
                 prompt: "搜尋名稱 / 備註 / 分類"
             )
         }
@@ -196,37 +213,35 @@ struct IncomeView: View {
         }.frame(maxWidth: .infinity)
     }
 
-    // MARK: - 列表
+    // MARK: - 列表（List sections，包在外層的 List 內）
 
-    private var incomeList: some View {
-        List {
-            ForEach(groupedByDate(), id: \.key) { dateString, incomes in
-                Section(header: Text(dateString)) {
-                    ForEach(incomes) { income in
-                        incomeRow(income)
-                            .contentShape(Rectangle())
-                            .onTapGesture { editingItem = income }
-                    }
-                    .onDelete { offsets in
-                        for index in offsets {
-                            let income = incomes[index]
-                            if let stockId = income.linkedStockId,
-                               var stock = financeStore.stocks.first(where: { $0.id == stockId }) {
-                                stock.linkedIncomeId = nil
-                                financeStore.update(stock)
-                            }
-                            if let bankId = income.linkedBankMilestoneId,
-                               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
-                                ms.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
-                                lifeStore.update(ms)
-                            }
+    @ViewBuilder
+    private var incomeListSections: some View {
+        ForEach(groupedByDate(), id: \.key) { dateString, incomes in
+            Section(header: Text(dateString)) {
+                ForEach(incomes) { income in
+                    incomeRow(income)
+                        .contentShape(Rectangle())
+                        .onTapGesture { editingItem = income }
+                }
+                .onDelete { offsets in
+                    for index in offsets {
+                        let income = incomes[index]
+                        if let stockId = income.linkedStockId,
+                           var stock = financeStore.stocks.first(where: { $0.id == stockId }) {
+                            stock.linkedIncomeId = nil
+                            financeStore.update(stock)
                         }
-                        store.deleteIncome(at: offsets, from: incomes)
+                        if let bankId = income.linkedBankMilestoneId,
+                           var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                            ms.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
+                            lifeStore.update(ms)
+                        }
                     }
+                    store.deleteIncome(at: offsets, from: incomes)
                 }
             }
         }
-        .listStyle(.insetGrouped)
     }
 
     private func incomeRow(_ income: Income) -> some View {
