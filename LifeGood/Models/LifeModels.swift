@@ -1084,8 +1084,10 @@ struct BusinessCard: Identifiable, Codable {
     var company: String
     var department: String
     var jobTitle: String
-    var phone: String
-    var email: String
+    /// 多筆電話（手機 / 公司 / 副線 等）
+    var phones: [String]
+    /// 多筆 Email（公司 / 個人 等）
+    var emails: [String]
     var address: String
     var note: String
     var date: Date
@@ -1094,15 +1096,55 @@ struct BusinessCard: Identifiable, Codable {
     /// 連結的公司組織人員 ID（雙向同步：OrgPerson.linkedBusinessCardId 也會指回來）
     var linkedOrgPersonId: UUID?
 
+    /// Backward-compatible 單值 accessor：讀取第一筆、寫入更新第一筆，
+    /// 主要供舊有 `.phone` / `.email` 程式碼維持運作。
+    var phone: String {
+        get { phones.first ?? "" }
+        set {
+            let v = newValue.trimmingCharacters(in: .whitespaces)
+            if phones.isEmpty {
+                phones = v.isEmpty ? [] : [v]
+            } else if v.isEmpty {
+                phones.removeFirst()
+            } else {
+                phones[0] = v
+            }
+        }
+    }
+    var email: String {
+        get { emails.first ?? "" }
+        set {
+            let v = newValue.trimmingCharacters(in: .whitespaces)
+            if emails.isEmpty {
+                emails = v.isEmpty ? [] : [v]
+            } else if v.isEmpty {
+                emails.removeFirst()
+            } else {
+                emails[0] = v
+            }
+        }
+    }
+
     init(id: UUID = UUID(), name: String = "", company: String = "",
          department: String = "", jobTitle: String = "",
          phone: String = "", email: String = "", address: String = "",
          note: String = "", date: Date = Date(),
          photoFileName: String? = nil,
-         linkedOrgPersonId: UUID? = nil) {
+         linkedOrgPersonId: UUID? = nil,
+         phones: [String] = [], emails: [String] = []) {
         self.id = id; self.name = name; self.company = company
         self.department = department; self.jobTitle = jobTitle
-        self.phone = phone; self.email = email
+        // 多值優先；只給單值時包成單元素陣列（空字串忽略）
+        if !phones.isEmpty {
+            self.phones = phones
+        } else {
+            self.phones = phone.isEmpty ? [] : [phone]
+        }
+        if !emails.isEmpty {
+            self.emails = emails
+        } else {
+            self.emails = email.isEmpty ? [] : [email]
+        }
         self.address = address; self.note = note; self.date = date
         self.photoFileName = photoFileName
         self.linkedOrgPersonId = linkedOrgPersonId
@@ -1115,8 +1157,21 @@ struct BusinessCard: Identifiable, Codable {
         company = (try? c.decode(String.self, forKey: .company)) ?? ""
         department = (try? c.decode(String.self, forKey: .department)) ?? ""
         jobTitle = (try? c.decode(String.self, forKey: .jobTitle)) ?? ""
-        phone = (try? c.decode(String.self, forKey: .phone)) ?? ""
-        email = (try? c.decode(String.self, forKey: .email)) ?? ""
+        // 多值優先；舊資料只有單值時自動轉成單元素陣列
+        if let arr = try? c.decode([String].self, forKey: .phones) {
+            phones = arr.filter { !$0.isEmpty }
+        } else if let single = try? c.decode(String.self, forKey: .phone), !single.isEmpty {
+            phones = [single]
+        } else {
+            phones = []
+        }
+        if let arr = try? c.decode([String].self, forKey: .emails) {
+            emails = arr.filter { !$0.isEmpty }
+        } else if let single = try? c.decode(String.self, forKey: .email), !single.isEmpty {
+            emails = [single]
+        } else {
+            emails = []
+        }
         address = (try? c.decode(String.self, forKey: .address)) ?? ""
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
@@ -1124,9 +1179,27 @@ struct BusinessCard: Identifiable, Codable {
         linkedOrgPersonId = try? c.decodeIfPresent(UUID.self, forKey: .linkedOrgPersonId)
     }
 
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(company, forKey: .company)
+        try c.encode(department, forKey: .department)
+        try c.encode(jobTitle, forKey: .jobTitle)
+        try c.encode(phones, forKey: .phones)
+        try c.encode(emails, forKey: .emails)
+        try c.encode(address, forKey: .address)
+        try c.encode(note, forKey: .note)
+        try c.encode(date, forKey: .date)
+        try c.encodeIfPresent(photoFileName, forKey: .photoFileName)
+        try c.encodeIfPresent(linkedOrgPersonId, forKey: .linkedOrgPersonId)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, name, company, department, jobTitle
-        case phone, email, address, note, date, photoFileName, linkedOrgPersonId
+        case phone, email                                 // legacy 單值（讀取相容）
+        case phones, emails                               // 新多值
+        case address, note, date, photoFileName, linkedOrgPersonId
     }
 
     // MARK: - 名片頭像照片儲存

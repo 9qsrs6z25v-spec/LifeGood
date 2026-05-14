@@ -88,8 +88,8 @@ enum BusinessCardOCR {
         var name: String
         var company: String
         var jobTitle: String
-        var phone: String
-        var email: String
+        var phones: [String]
+        var emails: [String]
         var address: String
         /// 未指派到任何欄位的剩餘文字，丟到備註讓使用者人工搬位置。
         var note: String
@@ -119,7 +119,7 @@ enum BusinessCardOCR {
         let cleaned = lines.map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
-        var email: String?
+        var emails: [String] = []
         var phones: [String] = []
         var address: String?
         var company: String?
@@ -165,16 +165,21 @@ enum BusinessCardOCR {
         ]
 
         for line in cleaned {
-            // Email
-            if email == nil,
-               let regex = emailRegex,
-               let m = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-               let r = Range(m.range, in: line) {
-                email = String(line[r])
-                let stripped = line.replacingOccurrences(of: String(line[r]), with: "")
-                    .trimmingCharacters(in: .whitespaces)
-                if !stripped.isEmpty { remaining.append(stripped) }
-                continue
+            // Email（一行可能含多個）
+            if let regex = emailRegex {
+                let matches = regex.matches(in: line, range: NSRange(line.startIndex..., in: line))
+                if !matches.isEmpty {
+                    var stripped = line
+                    for m in matches {
+                        if let r = Range(m.range, in: line) {
+                            emails.append(String(line[r]))
+                            stripped = stripped.replacingOccurrences(of: String(line[r]), with: "")
+                        }
+                    }
+                    stripped = stripped.trimmingCharacters(in: .whitespaces)
+                    if !stripped.isEmpty { remaining.append(stripped) }
+                    continue
+                }
             }
             // 電話（一行可能含多個）
             if let regex = phoneRegex {
@@ -240,8 +245,8 @@ enum BusinessCardOCR {
             name: name ?? "",
             company: company ?? "",
             jobTitle: jobTitle ?? "",
-            phone: phones.first ?? "",
-            email: email ?? "",
+            phones: phones,
+            emails: emails,
             address: address ?? "",
             note: leftoverNote
         )
@@ -264,25 +269,38 @@ extension BusinessCard {
         let company = c.organizationName.trimmingCharacters(in: .whitespaces)
         let department = c.departmentName.trimmingCharacters(in: .whitespaces)
         let jobTitle = c.jobTitle.trimmingCharacters(in: .whitespaces)
-        // 電話：優先 mobile，再 work，再第一筆
-        let phone: String = {
+        // 電話：依優先順序排列（mobile / iPhone / work / home / main / 其他），全部帶入
+        let phones: [String] = {
             let labelOrder: [String] = [
                 CNLabelPhoneNumberMobile, CNLabelPhoneNumberiPhone,
                 CNLabelWork, CNLabelHome, CNLabelPhoneNumberMain
             ]
+            var ordered: [CNLabeledValue<CNPhoneNumber>] = []
             for label in labelOrder {
-                if let match = c.phoneNumbers.first(where: { $0.label == label }) {
-                    return match.value.stringValue
-                }
+                ordered.append(contentsOf: c.phoneNumbers.filter { $0.label == label })
             }
-            return c.phoneNumbers.first?.value.stringValue ?? ""
+            // 其他未涵蓋 label 依原順序追加
+            ordered.append(contentsOf: c.phoneNumbers.filter { !labelOrder.contains($0.label ?? "") })
+            var seen: Set<String> = []
+            return ordered.compactMap { entry in
+                let v = entry.value.stringValue.trimmingCharacters(in: .whitespaces)
+                guard !v.isEmpty, !seen.contains(v) else { return nil }
+                seen.insert(v)
+                return v
+            }
         }()
-        // Email：優先 work
-        let email: String = {
-            if let work = c.emailAddresses.first(where: { $0.label == CNLabelWork }) {
-                return work.value as String
+        // Email：work 優先，其他依原序追加
+        let emails: [String] = {
+            var ordered: [CNLabeledValue<NSString>] = []
+            ordered.append(contentsOf: c.emailAddresses.filter { $0.label == CNLabelWork })
+            ordered.append(contentsOf: c.emailAddresses.filter { $0.label != CNLabelWork })
+            var seen: Set<String> = []
+            return ordered.compactMap { entry in
+                let v = (entry.value as String).trimmingCharacters(in: .whitespaces)
+                guard !v.isEmpty, !seen.contains(v) else { return nil }
+                seen.insert(v)
+                return v
             }
-            return (c.emailAddresses.first?.value as String?) ?? ""
         }()
         // 地址：優先 work
         let address: String = {
@@ -316,12 +334,15 @@ extension BusinessCard {
             company: company,
             department: department,
             jobTitle: jobTitle,
-            phone: phone,
-            email: email,
+            phone: "",
+            email: "",
             address: address,
             note: note,
             date: Date(),
-            photoFileName: photoFileNameHolder
+            photoFileName: photoFileNameHolder,
+            linkedOrgPersonId: nil,
+            phones: phones,
+            emails: emails
         )
     }
 }
@@ -349,10 +370,12 @@ struct BusinessCardView: View {
         let sorted = lifeStore.businessCards.sorted { $0.date > $1.date }
         if searchText.isEmpty { return sorted }
         let q = searchText.lowercased()
-        return sorted.filter {
-            $0.name.lowercased().contains(q)
-            || $0.company.lowercased().contains(q)
-            || $0.jobTitle.lowercased().contains(q)
+        return sorted.filter { card in
+            card.name.lowercased().contains(q)
+            || card.company.lowercased().contains(q)
+            || card.jobTitle.lowercased().contains(q)
+            || card.phones.contains(where: { $0.lowercased().contains(q) })
+            || card.emails.contains(where: { $0.lowercased().contains(q) })
         }
     }
 
@@ -625,13 +648,15 @@ struct BusinessCardView: View {
             company: source.company,
             department: source.department,
             jobTitle: source.jobTitle,
-            phone: source.phone,
-            email: source.email,
+            phone: "",
+            email: "",
             address: source.address,
             note: source.note,
             date: Date(),
             photoFileName: newPhotoFileName,
-            linkedOrgPersonId: nil
+            linkedOrgPersonId: nil,
+            phones: source.phones,
+            emails: source.emails
         )
         lifeStore.add(copy)
     }
@@ -997,11 +1022,14 @@ struct BusinessCardDetailView: View {
         if !card.jobTitle.isEmpty {
             lines.append("TITLE:\(card.jobTitle)")
         }
-        if !card.phone.isEmpty {
-            lines.append("TEL;TYPE=WORK,VOICE:\(card.phone)")
+        for (idx, ph) in card.phones.enumerated() {
+            // 第一筆用 WORK,VOICE，後續用 OTHER,VOICE 區隔
+            let typeTag = idx == 0 ? "WORK,VOICE" : "OTHER,VOICE"
+            lines.append("TEL;TYPE=\(typeTag):\(ph)")
         }
-        if !card.email.isEmpty {
-            lines.append("EMAIL;TYPE=WORK:\(card.email)")
+        for (idx, em) in card.emails.enumerated() {
+            let typeTag = idx == 0 ? "WORK" : "OTHER"
+            lines.append("EMAIL;TYPE=\(typeTag):\(em)")
         }
         if !card.address.isEmpty {
             lines.append("ADR;TYPE=WORK:;;\(card.address);;;;")
@@ -1027,22 +1055,32 @@ struct BusinessCardDetailView: View {
     // MARK: - 聯絡方式
 
     private var hasContact: Bool {
-        !card.phone.isEmpty || !card.email.isEmpty || !card.address.isEmpty
+        !card.phones.isEmpty || !card.emails.isEmpty || !card.address.isEmpty
     }
 
     private var contactCard: some View {
         VStack(spacing: 0) {
-            if !card.phone.isEmpty {
-                contactRow(icon: "phone.fill", label: "電話", value: card.phone, color: .green) {
-                    callPhone(card.phone)
+            ForEach(Array(card.phones.enumerated()), id: \.offset) { idx, ph in
+                contactRow(
+                    icon: "phone.fill",
+                    label: card.phones.count > 1 ? "電話 \(idx + 1)" : "電話",
+                    value: ph,
+                    color: .green
+                ) { callPhone(ph) }
+                if idx < card.phones.count - 1 || !card.emails.isEmpty || !card.address.isEmpty {
+                    Divider().padding(.leading, 48)
                 }
-                Divider().padding(.leading, 48)
             }
-            if !card.email.isEmpty {
-                contactRow(icon: "envelope.fill", label: "Email", value: card.email, color: .indigo) {
-                    sendEmail(card.email)
+            ForEach(Array(card.emails.enumerated()), id: \.offset) { idx, em in
+                contactRow(
+                    icon: "envelope.fill",
+                    label: card.emails.count > 1 ? "Email \(idx + 1)" : "Email",
+                    value: em,
+                    color: .indigo
+                ) { sendEmail(em) }
+                if idx < card.emails.count - 1 || !card.address.isEmpty {
+                    Divider().padding(.leading, 48)
                 }
-                Divider().padding(.leading, 48)
             }
             if !card.address.isEmpty {
                 contactRow(icon: "mappin.and.ellipse", label: "地址", value: card.address, color: .red) {
@@ -1166,8 +1204,8 @@ struct BusinessCardEditor: View {
     @State private var company = ""
     @State private var department = ""
     @State private var jobTitle = ""
-    @State private var phone = ""
-    @State private var email = ""
+    @State private var phones: [String] = [""]
+    @State private var emails: [String] = [""]
     @State private var address = ""
     @State private var note = ""
     @State private var date = Date()
@@ -1181,9 +1219,57 @@ struct BusinessCardEditor: View {
                     TextField("部門", text: $department)
                     TextField("職稱", text: $jobTitle)
                 }
-                Section("聯絡方式") {
-                    TextField("電話", text: $phone).keyboardType(.phonePad)
-                    TextField("Email", text: $email).keyboardType(.emailAddress).autocapitalization(.none)
+                Section("電話") {
+                    ForEach(phones.indices, id: \.self) { idx in
+                        HStack {
+                            TextField("電話 \(phones.count > 1 ? "\(idx + 1)" : "")",
+                                      text: $phones[idx])
+                                .keyboardType(.phonePad)
+                            if phones.count > 1 {
+                                Button(role: .destructive) {
+                                    phones.remove(at: idx)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    Button {
+                        phones.append("")
+                    } label: {
+                        Label("新增電話", systemImage: "plus.circle").foregroundStyle(.green)
+                    }
+                }
+
+                Section("Email") {
+                    ForEach(emails.indices, id: \.self) { idx in
+                        HStack {
+                            TextField("Email \(emails.count > 1 ? "\(idx + 1)" : "")",
+                                      text: $emails[idx])
+                                .keyboardType(.emailAddress)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                            if emails.count > 1 {
+                                Button(role: .destructive) {
+                                    emails.remove(at: idx)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    Button {
+                        emails.append("")
+                    } label: {
+                        Label("新增 Email", systemImage: "plus.circle").foregroundStyle(.green)
+                    }
+                }
+
+                Section("地址") {
                     TextField("地址", text: $address)
                 }
                 Section("其他") {
@@ -1212,11 +1298,15 @@ struct BusinessCardEditor: View {
             .onAppear {
                 if let e = editing {
                     name = e.name; company = e.company; department = e.department
-                    jobTitle = e.jobTitle; phone = e.phone; email = e.email
+                    jobTitle = e.jobTitle
+                    phones = e.phones.isEmpty ? [""] : e.phones
+                    emails = e.emails.isEmpty ? [""] : e.emails
                     address = e.address; note = e.note; date = e.date
                 } else if let p = prefilled {
                     name = p.name; company = p.company; jobTitle = p.jobTitle
-                    phone = p.phone; email = p.email; address = p.address
+                    phones = p.phones.isEmpty ? [""] : p.phones
+                    emails = p.emails.isEmpty ? [""] : p.emails
+                    address = p.address
                     note = p.note; date = Date()
                 }
             }
@@ -1230,19 +1320,27 @@ struct BusinessCardEditor: View {
         if editing == nil, let data = prefilledPhotoData, photoFileName == nil {
             photoFileName = BusinessCard.savePhoto(data, id: id)
         }
+        let cleanedPhones = phones
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let cleanedEmails = emails
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
         let card = BusinessCard(
             id: id,
             name: name.trimmingCharacters(in: .whitespaces),
             company: company.trimmingCharacters(in: .whitespaces),
             department: department.trimmingCharacters(in: .whitespaces),
             jobTitle: jobTitle.trimmingCharacters(in: .whitespaces),
-            phone: phone.trimmingCharacters(in: .whitespaces),
-            email: email.trimmingCharacters(in: .whitespaces),
+            phone: "",
+            email: "",
             address: address.trimmingCharacters(in: .whitespaces),
             note: note.trimmingCharacters(in: .whitespaces),
             date: date,
             photoFileName: photoFileName,
-            linkedOrgPersonId: editing?.linkedOrgPersonId
+            linkedOrgPersonId: editing?.linkedOrgPersonId,
+            phones: cleanedPhones,
+            emails: cleanedEmails
         )
         if editing != nil { lifeStore.update(card) } else { lifeStore.add(card) }
         dismiss()
