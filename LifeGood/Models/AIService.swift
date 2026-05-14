@@ -3,6 +3,7 @@ import Security
 import Speech
 import AVFoundation
 import SwiftUI
+import CoreLocation
 
 // MARK: - Keychain 儲存 API Key
 
@@ -165,17 +166,19 @@ final class AIExpenseParserService {
     private let systemPrompt = """
 你是記帳助手。從使用者的口語句子中抽取「變動支出」資訊，回傳純 JSON 物件（不要 markdown 圍欄、不要說明文字、不要任何前後綴）。
 
+如果使用者句子前面附帶 [使用者目前位置：XXX] 標籤，請用這個位置去推斷講到的店名指的是哪一家分店、或推斷常見的店家慣用名稱（例如「鬍鬚張」在不同城市仍是同一品牌）。
+
 欄位：
 - amount (number)：金額，正整數或小數
-- categoryRaw (string)：必須是這些之一：飲食、娛樂、購物、日用品、醫療、交通、教育、稅費、節稅、社交、寵物、訂閱、汽車、股票、房地產、其他
-- title (string)：店家名 / 項目名稱（簡短）
+- categoryRaw (string)：必須是這些之一：飲食、娛樂、購物、日用品、醫療、交通、教育、稅費、節稅、社交、汽車、股票、房地產、其他
+- title (string)：店家名 / 項目名稱（簡短；若位置標籤可以幫助補完店家名稱，請補上區域）
 - note (string)：備註細節，沒講則省略
 - diningMember (string)：同行者，沒講則省略
 
-範例輸入：「今天午餐去鬍鬚張吃了 250」
-範例輸出：{"amount":250,"categoryRaw":"飲食","title":"鬍鬚張","note":"午餐"}
+範例輸入：[使用者目前位置：台北市信義區] 使用者說的話：今天午餐去鬍鬚張吃了 250
+範例輸出：{"amount":250,"categoryRaw":"飲食","title":"鬍鬚張 信義店","note":"午餐"}
 
-範例輸入：「跟太太去看電影花了 600」
+範例輸入：跟太太去看電影花了 600
 範例輸出：{"amount":600,"categoryRaw":"娛樂","title":"電影","diningMember":"太太"}
 """
 
@@ -185,11 +188,20 @@ final class AIExpenseParserService {
         let key = await settings.key(for: provider)
         guard !key.isEmpty else { throw AIParseError.noKey }
 
+        // 取得使用者目前位置（reverse geocode 結果，5 分鐘 cache），讓 AI 判斷分店
+        let locationContext = await LocationContextProvider.shared.currentContext()
+        let prompt: String
+        if let ctx = locationContext, !ctx.isEmpty {
+            prompt = "[使用者目前位置：\(ctx)] 使用者說的話：\(text)"
+        } else {
+            prompt = text
+        }
+
         let raw: String
         switch provider {
-        case .anthropic: raw = try await callAnthropic(prompt: text, apiKey: key)
-        case .openai:    raw = try await callOpenAI(prompt: text, apiKey: key)
-        case .gemini:    raw = try await callGemini(prompt: text, apiKey: key)
+        case .anthropic: raw = try await callAnthropic(prompt: prompt, apiKey: key)
+        case .openai:    raw = try await callOpenAI(prompt: prompt, apiKey: key)
+        case .gemini:    raw = try await callGemini(prompt: prompt, apiKey: key)
         }
         var result = try decodeJSON(raw)
         result.originalText = text
@@ -408,6 +420,54 @@ final class SpeechRecognizer: NSObject, ObservableObject {
     }
 }
 
+// MARK: - 位置 context（reverse geocode 給 AI 判斷店家分店用）
+
+@MainActor
+final class LocationContextProvider {
+    static let shared = LocationContextProvider()
+
+    private var cached: String?
+    private var cachedAt: Date?
+
+    /// 把 LocationProvider 提供的座標 reverse geocode 成「縣市 + 區」字串。
+    /// 5 分鐘內回傳 cache，避免每次都打 CLGeocoder。
+    /// 若沒有位置 / 權限被拒，回傳 nil。
+    func currentContext() async -> String? {
+        // 先觸發授權（若還沒）
+        LocationProvider.shared.requestIfNeeded()
+
+        if let cached, let cachedAt, Date().timeIntervalSince(cachedAt) < 300 {
+            return cached
+        }
+        guard let loc = LocationProvider.shared.lastLocation else { return nil }
+
+        let geocoder = CLGeocoder()
+        do {
+            let placemarks = try await geocoder.reverseGeocodeLocation(loc)
+            guard let p = placemarks.first else { return nil }
+            var parts: [String] = []
+            if let admin = p.administrativeArea, !admin.isEmpty {
+                parts.append(admin)
+            }
+            if let sub = p.subAdministrativeArea, !sub.isEmpty, sub != p.administrativeArea {
+                parts.append(sub)
+            }
+            if let locality = p.locality, !locality.isEmpty, !parts.contains(locality) {
+                parts.append(locality)
+            }
+            if let subLocality = p.subLocality, !subLocality.isEmpty, !parts.contains(subLocality) {
+                parts.append(subLocality)
+            }
+            let str = parts.joined()
+            cached = str.isEmpty ? nil : str
+            cachedAt = Date()
+            return cached
+        } catch {
+            return nil
+        }
+    }
+}
+
 // MARK: - 中文分類字串 → VariableCategory
 
 enum AIVariableCategoryMapper {
@@ -424,13 +484,14 @@ enum AIVariableCategoryMapper {
             "購物": .shopping,
             "日用品": .dailyNecessities, "日用": .dailyNecessities, "雜物": .dailyNecessities,
             "醫療": .medical, "看病": .medical, "藥": .medical,
-            "交通": .transport, "車費": .transport, "油錢": .transport,
+            "交通": .transportation, "車費": .transportation, "油錢": .transportation,
             "教育": .education, "學費": .education, "書": .education,
             "稅費": .tax, "稅": .tax,
             "節稅": .taxSaving,
             "社交": .social, "禮金": .social,
-            "寵物": .pet,
-            "訂閱": .subscription,
+            // 沒有獨立分類，回退到既有最相近項目
+            "寵物": .other,
+            "訂閱": .other,
             "汽車": .vehicle, "車輛": .vehicle,
             "股票": .stock,
             "房地產": .realEstate, "房屋": .realEstate,

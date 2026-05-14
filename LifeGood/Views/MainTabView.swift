@@ -241,7 +241,6 @@ struct MainTabView: View {
     // MARK: - 語音 AI 記帳
     @StateObject private var aiSettings = AISettingsStore.shared
     @StateObject private var speechRecognizer = SpeechRecognizer()
-    @EnvironmentObject var expenseStore: ExpenseStore
     @State private var aiToast: AIToastInfo?
     @State private var aiBusy = false
 
