@@ -74,10 +74,12 @@ struct SettingsView: View {
     @State private var einvoiceExpanded = false
     @State private var currencyExpanded = false
     @State private var iCloudExpanded = false
+    @State private var aiExpanded = false
     @State private var dataManagementExpanded = false
     @State private var dataStatsExpanded = false
     @State private var restoreExpanded = false
     @State private var aboutExpanded = false
+    @StateObject private var aiSettings = AISettingsStore.shared
 
     var body: some View {
         NavigationStack {
@@ -93,6 +95,9 @@ struct SettingsView: View {
                 }
                 disclosureBlock("iCloud 同步", icon: "icloud.fill", color: .blue, isExpanded: $iCloudExpanded) {
                     iCloudSyncSection
+                }
+                disclosureBlock("語音 AI 助手", icon: "waveform", color: .purple, isExpanded: $aiExpanded) {
+                    aiAssistantSection
                 }
                 disclosureBlock("資料匯出 / 匯入", icon: "tray.and.arrow.up.fill", color: .green, isExpanded: $dataManagementExpanded) {
                     dataManagementSection
@@ -439,6 +444,67 @@ struct SettingsView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy/M/d HH:mm"
         return formatter.string(from: date)
+    }
+
+    // MARK: - 語音 AI 助手
+
+    @ViewBuilder
+    private var aiAssistantSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("啟用後，變動支出頁面下方會出現麥克風按鈕，長按說話即可由 AI 自動建立記帳。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("語音辨識在裝置上完成；文字內容會送到你選的 AI 服務做欄位抽取。API Key 只存在這支手機的 Keychain，不會經過 LifeGood 伺服器。")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        Section {
+            Picker("使用中的 AI 服務", selection: Binding(
+                get: { aiSettings.activeProvider?.rawValue ?? "" },
+                set: { aiSettings.activeProvider = AIProvider(rawValue: $0) }
+            )) {
+                Text("停用").tag("")
+                ForEach(AIProvider.allCases) { p in
+                    Label(p.displayName, systemImage: p.icon).tag(p.rawValue)
+                }
+            }
+        } header: {
+            Text("供應商").textCase(.none)
+        }
+
+        ForEach(AIProvider.allCases) { p in
+            providerKeySection(p)
+        }
+    }
+
+    @ViewBuilder
+    private func providerKeySection(_ p: AIProvider) -> some View {
+        Section {
+            HStack {
+                Image(systemName: p.icon).foregroundStyle(.purple)
+                Text(p.displayName).font(.subheadline.weight(.semibold))
+                Spacer()
+                if !aiSettings.key(for: p).isEmpty {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                }
+            }
+            SecureField("API Key", text: Binding(
+                get: { aiSettings.key(for: p) },
+                set: { aiSettings.setKey($0, for: p) }
+            ))
+            .textInputAutocapitalization(.never)
+            .disableAutocorrection(true)
+            .autocorrectionDisabled()
+            Link(destination: URL(string: p.consoleURL)!) {
+                HStack(spacing: 6) {
+                    Image(systemName: "safari.fill").font(.caption)
+                    Text("前往 \(p.displayName) Console 取得 Key").font(.caption)
+                }
+                .foregroundStyle(.blue)
+            }
+        } footer: {
+            Text(p.helpText).font(.caption2)
+        }
     }
 
     // MARK: - 資料管理

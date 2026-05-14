@@ -238,6 +238,27 @@ struct MainTabView: View {
     @State private var fabOffset: CGSize = .zero
     @State private var fabDragOffset: CGSize = .zero
 
+    // MARK: - 語音 AI 記帳
+    @StateObject private var aiSettings = AISettingsStore.shared
+    @StateObject private var speechRecognizer = SpeechRecognizer()
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @State private var aiToast: AIToastInfo?
+    @State private var aiBusy = false
+
+    /// 是否在「收支 → 變動支出」分頁
+    private var isOnVariableExpense: Bool {
+        currentMode == .expense
+        && expenseFeatureRaw == ExpenseFeature.variable.rawValue
+        && !isSettingsActive
+    }
+
+    private struct AIToastInfo: Identifiable {
+        let id = UUID()
+        let title: String
+        let detail: String
+        let isError: Bool
+    }
+
     /// 目前所在頁面是否屬於付費功能（且尚未訂閱）。
     private var isCurrentViewPremiumLocked: Bool {
         if subscription.isPremium { return false }
@@ -276,6 +297,14 @@ struct MainTabView: View {
             }
 
             floatingActionButton
+
+            if isOnVariableExpense && aiSettings.isReady && subscription.isPremium {
+                aiMicOverlay
+            }
+
+            if let toast = aiToast {
+                aiToastView(toast)
+            }
         }
         .sheet(isPresented: $showAddIncome) { AddIncomeView() }
         .sheet(isPresented: $showAddExpense) { AddExpenseView(expenseType: .variable) }
@@ -283,6 +312,200 @@ struct MainTabView: View {
             PaywallView()
                 .environmentObject(subscription)
         }
+    }
+
+    // MARK: - 語音 AI 浮動麥克風
+
+    private var aiMicOverlay: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            // 即時辨識文字氣泡
+            if speechRecognizer.isRecording && !speechRecognizer.transcript.isEmpty {
+                Text(speechRecognizer.transcript)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
+                    .padding(.horizontal, 36)
+                    .transition(.scale.combined(with: .opacity))
+            }
+            aiMicButton
+                .padding(.bottom, 28)
+        }
+        .allowsHitTesting(true)
+    }
+
+    private var aiMicButton: some View {
+        let listening = speechRecognizer.isRecording
+        return ZStack {
+            // 外圍呼吸光暈
+            Circle()
+                .fill(Color.purple.opacity(listening ? 0.45 : 0))
+                .frame(width: 96, height: 96)
+                .scaleEffect(listening ? 1.25 : 1.0)
+                .blur(radius: listening ? 14 : 0)
+                .animation(
+                    listening
+                    ? .easeInOut(duration: 1.1).repeatForever(autoreverses: true)
+                    : .easeInOut(duration: 0.2),
+                    value: listening
+                )
+            // 中圈光暈
+            Circle()
+                .stroke(Color.purple.opacity(listening ? 0.55 : 0), lineWidth: 2)
+                .frame(width: 78, height: 78)
+                .scaleEffect(listening ? 1.18 : 1.0)
+                .animation(
+                    listening
+                    ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+                    : .easeInOut(duration: 0.2),
+                    value: listening
+                )
+            // 主按鈕
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.55, green: 0.35, blue: 0.95),
+                                 Color(red: 0.40, green: 0.20, blue: 0.85)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 62, height: 62)
+                .shadow(color: Color.purple.opacity(listening ? 0.7 : 0.35),
+                        radius: listening ? 14 : 8, y: 4)
+                .scaleEffect(listening ? 1.08 : 1.0)
+                .animation(
+                    listening
+                    ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
+                    : .easeInOut(duration: 0.2),
+                    value: listening
+                )
+            Group {
+                if aiBusy {
+                    ProgressView().tint(.white)
+                } else {
+                    Image(systemName: listening ? "waveform" : "mic.fill")
+                        .foregroundStyle(.white)
+                        .font(.system(size: 24, weight: .bold))
+                        .scaleEffect(listening ? 1.1 : 1.0)
+                }
+            }
+        }
+        .contentShape(Circle())
+        // 按住開始 / 放開停止
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    guard !speechRecognizer.isRecording, !aiBusy else { return }
+                    Task { await aiStartRecording() }
+                }
+                .onEnded { _ in
+                    guard speechRecognizer.isRecording else { return }
+                    Task { await aiFinishRecording() }
+                }
+        )
+    }
+
+    @MainActor
+    private func aiStartRecording() async {
+        let granted = await speechRecognizer.requestAccess()
+        guard granted else {
+            aiShowToast("無法啟用語音", detail: "請至「設定 → LifeGood」開啟麥克風與語音辨識權限。", isError: true)
+            return
+        }
+        do {
+            try speechRecognizer.startRecording()
+        } catch {
+            aiShowToast("錄音失敗", detail: error.localizedDescription, isError: true)
+        }
+    }
+
+    @MainActor
+    private func aiFinishRecording() async {
+        let text = speechRecognizer.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        speechRecognizer.stopRecording()
+        guard !text.isEmpty else {
+            aiShowToast("沒聽到內容", detail: "請再按住麥克風試一次。", isError: true)
+            return
+        }
+        aiBusy = true
+        do {
+            let parsed = try await AIExpenseParserService.shared.parse(text)
+            aiBusy = false
+            try await aiCommitExpense(parsed: parsed)
+        } catch {
+            aiBusy = false
+            aiShowToast("AI 解析失敗", detail: error.localizedDescription, isError: true)
+        }
+    }
+
+    @MainActor
+    private func aiCommitExpense(parsed: ParsedAIExpense) async throws {
+        let amount = parsed.amount ?? 0
+        guard amount > 0 else {
+            aiShowToast("找不到金額", detail: parsed.originalText ?? "AI 沒辨識出金額", isError: true)
+            return
+        }
+        let category = AIVariableCategoryMapper.map(parsed.categoryRaw) ?? .other
+        let title: String = {
+            if let t = parsed.title, !t.isEmpty { return t }
+            return category.rawValue
+        }()
+        let exp = Expense(
+            id: UUID(),
+            title: title,
+            amount: amount,
+            date: Date(),
+            expenseType: .variable,
+            variableCategory: category,
+            note: parsed.note ?? "",
+            diningMember: parsed.diningMember
+        )
+        expenseStore.add(exp)
+        // 顯示成功 toast
+        let categoryName = category.rawValue
+        let detail = "\(categoryName)・NT$ \(Int(amount))" + (parsed.diningMember.map { "・\($0)" } ?? "")
+        aiShowToast("✨ 已記一筆：\(title)", detail: detail, isError: false)
+    }
+
+    @MainActor
+    private func aiShowToast(_ title: String, detail: String, isError: Bool) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            aiToast = AIToastInfo(title: title, detail: detail, isError: isError)
+        }
+        Task {
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    aiToast = nil
+                }
+            }
+        }
+    }
+
+    private func aiToastView(_ toast: AIToastInfo) -> some View {
+        VStack {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(toast.isError ? Color.orange : Color.green)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(toast.title).font(.subheadline.weight(.semibold))
+                    Text(toast.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            Spacer()
+        }
+        .allowsHitTesting(false)
     }
 
     // MARK: - 頂部子功能列
