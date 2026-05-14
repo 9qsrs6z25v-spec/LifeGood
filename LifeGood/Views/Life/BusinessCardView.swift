@@ -359,6 +359,11 @@ struct BusinessCardView: View {
     @State private var showCardScanner = false
     @State private var scannedDraft: ScannedCardDraft?
     @State private var isProcessingScan = false
+    // 多選 → 加入聯絡人
+    @State private var isMultiSelect = false
+    @State private var selectedIds: Set<UUID> = []
+    @State private var showExportConfirm = false
+    @State private var exportAlertMessage: String?
 
     fileprivate struct ScannedCardDraft: Identifiable {
         let id = UUID()
@@ -414,13 +419,34 @@ struct BusinessCardView: View {
                         ForEach(groupedByCompany, id: \.key) { company, cards in
                             Section(header: Text(company)) {
                                 ForEach(cards) { card in
-                                    cardRow(card)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            if subscription.isPremium { viewingCardId = card.id }
-                                            else { showPremiumAlert = true }
+                                    HStack(spacing: 12) {
+                                        if isMultiSelect {
+                                            Image(systemName: selectedIds.contains(card.id)
+                                                  ? "checkmark.circle.fill" : "circle")
+                                                .foregroundStyle(selectedIds.contains(card.id)
+                                                                 ? .green : Color.secondary.opacity(0.5))
+                                                .font(.title3)
+                                                .transition(.scale.combined(with: .opacity))
                                         }
-                                        .swipeActions(edge: .trailing) {
+                                        cardRow(card)
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if isMultiSelect {
+                                            toggleSelection(card.id)
+                                        } else if subscription.isPremium {
+                                            viewingCardId = card.id
+                                        } else {
+                                            showPremiumAlert = true
+                                        }
+                                    }
+                                    .onLongPressGesture(minimumDuration: 0.4) {
+                                        guard !isMultiSelect, subscription.isPremium else { return }
+                                        withAnimation { isMultiSelect = true }
+                                        selectedIds = [card.id]
+                                    }
+                                    .swipeActions(edge: .trailing) {
+                                        if !isMultiSelect {
                                             Button(role: .destructive) {
                                                 if subscription.isPremium { lifeStore.deleteBusinessCard(card) }
                                                 else { showPremiumAlert = true }
@@ -432,6 +458,7 @@ struct BusinessCardView: View {
                                             } label: { Label("複製", systemImage: "doc.on.doc") }
                                             .tint(.blue)
                                         }
+                                    }
                                 }
                             }
                         }
@@ -442,38 +469,103 @@ struct BusinessCardView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("名片")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            if subscription.isPremium { showAdd = true }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            Label("新增空白名片", systemImage: "square.and.pencil")
+                if isMultiSelect {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("取消") {
+                            withAnimation {
+                                isMultiSelect = false
+                                selectedIds = []
+                            }
                         }
-                        Button {
-                            if subscription.isPremium {
-                                if VNDocumentCameraViewController.isSupported {
-                                    showCardScanner = true
+                    }
+                    ToolbarItem(placement: .principal) {
+                        Text("已選 \(selectedIds.count) 張")
+                            .font(.headline)
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: 12) {
+                            Button {
+                                let all = Set(filteredCards.map { $0.id })
+                                selectedIds = (selectedIds == all) ? [] : all
+                            } label: {
+                                Image(systemName: selectedIds.count == filteredCards.count && !filteredCards.isEmpty
+                                      ? "checkmark.circle.fill" : "checklist")
+                                    .foregroundStyle(.blue)
+                            }
+                            Button {
+                                if selectedIds.isEmpty { return }
+                                showExportConfirm = true
+                            } label: {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundStyle(.green)
+                            }
+                            .disabled(selectedIds.isEmpty)
+                        }
+                    }
+                } else {
+                    ToolbarItem(placement: .topBarLeading) {
+                        if !lifeStore.businessCards.isEmpty {
+                            Button("選取") {
+                                withAnimation {
+                                    isMultiSelect = true
+                                    selectedIds = []
                                 }
-                            } else { showPremiumAlert = true }
-                        } label: {
-                            Label("拍名片自動辨識", systemImage: "camera.viewfinder")
+                            }
                         }
-                        Button {
-                            if subscription.isPremium { showContactPicker = true }
-                            else { showPremiumAlert = true }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button {
+                                if subscription.isPremium { showAdd = true }
+                                else { showPremiumAlert = true }
+                            } label: {
+                                Label("新增空白名片", systemImage: "square.and.pencil")
+                            }
+                            Button {
+                                if subscription.isPremium {
+                                    if VNDocumentCameraViewController.isSupported {
+                                        showCardScanner = true
+                                    }
+                                } else { showPremiumAlert = true }
+                            } label: {
+                                Label("拍名片自動辨識", systemImage: "camera.viewfinder")
+                            }
+                            Button {
+                                if subscription.isPremium { showContactPicker = true }
+                                else { showPremiumAlert = true }
+                            } label: {
+                                Label("從聯絡人匯入", systemImage: "person.crop.circle.badge.plus")
+                            }
                         } label: {
-                            Label("從聯絡人匯入", systemImage: "person.crop.circle.badge.plus")
-                        }
-                    } label: {
-                        if isProcessingScan {
-                            ProgressView().tint(.green)
-                        } else {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title3).foregroundStyle(.green)
+                            if isProcessingScan {
+                                ProgressView().tint(.green)
+                            } else {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title3).foregroundStyle(.green)
+                            }
                         }
                     }
                 }
+            }
+            .confirmationDialog(
+                "將 \(selectedIds.count) 張名片加入「聯絡人」？",
+                isPresented: $showExportConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("加入聯絡人") {
+                    Task { await exportSelectedToContacts() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("會把姓名、公司、職稱、電話、Email、地址、頭像複製到 iOS 聯絡人。LifeGood 中的名片不受影響。")
+            }
+            .alert("加入聯絡人", isPresented: Binding(
+                get: { exportAlertMessage != nil },
+                set: { if !$0 { exportAlertMessage = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(exportAlertMessage ?? "")
             }
             .fullScreenCover(isPresented: $showCardScanner) {
                 BusinessCardScannerView(
@@ -659,6 +751,75 @@ struct BusinessCardView: View {
             emails: source.emails
         )
         lifeStore.add(copy)
+    }
+
+    // MARK: - 多選 → 加入聯絡人
+
+    private func toggleSelection(_ id: UUID) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            if selectedIds.contains(id) { selectedIds.remove(id) }
+            else { selectedIds.insert(id) }
+        }
+    }
+
+    /// 把目前選取的名片寫入 iOS 聯絡人
+    @MainActor
+    private func exportSelectedToContacts() async {
+        let store = CNContactStore()
+        // 取得寫入聯絡人權限（read + write 共用 .contacts）
+        let granted: Bool
+        do {
+            granted = try await store.requestAccess(for: .contacts)
+        } catch {
+            granted = false
+        }
+        guard granted else {
+            exportAlertMessage = "未取得聯絡人權限。請至「設定 → LifeGood → 聯絡人」開啟存取。"
+            return
+        }
+        let cards = lifeStore.businessCards.filter { selectedIds.contains($0.id) }
+        guard !cards.isEmpty else { return }
+
+        let request = CNSaveRequest()
+        for card in cards {
+            let mutable = CNMutableContact()
+            mutable.givenName = card.name.trimmingCharacters(in: .whitespaces)
+            mutable.organizationName = card.company.trimmingCharacters(in: .whitespaces)
+            mutable.departmentName = card.department.trimmingCharacters(in: .whitespaces)
+            mutable.jobTitle = card.jobTitle.trimmingCharacters(in: .whitespaces)
+            mutable.phoneNumbers = card.phones.enumerated().map { idx, p in
+                let label = idx == 0 ? CNLabelPhoneNumberMobile : CNLabelOther
+                return CNLabeledValue(label: label, value: CNPhoneNumber(stringValue: p))
+            }
+            mutable.emailAddresses = card.emails.enumerated().map { idx, e in
+                let label = idx == 0 ? CNLabelWork : CNLabelOther
+                return CNLabeledValue(label: label, value: e as NSString)
+            }
+            let trimmedAddr = card.address.trimmingCharacters(in: .whitespaces)
+            if !trimmedAddr.isEmpty {
+                let addr = CNMutablePostalAddress()
+                addr.street = trimmedAddr
+                mutable.postalAddresses = [CNLabeledValue(label: CNLabelWork, value: addr)]
+            }
+            if let name = card.photoFileName {
+                let url = BusinessCard.photosDirectory.appendingPathComponent(name)
+                if let data = try? Data(contentsOf: url) {
+                    mutable.imageData = data
+                }
+            }
+            request.add(mutable, toContainerWithIdentifier: nil)
+        }
+
+        do {
+            try store.execute(request)
+            exportAlertMessage = "已將 \(cards.count) 張名片加入聯絡人。"
+            withAnimation {
+                isMultiSelect = false
+                selectedIds = []
+            }
+        } catch {
+            exportAlertMessage = "寫入失敗：\(error.localizedDescription)"
+        }
     }
 
     // MARK: - 從系統聯絡人匯入
