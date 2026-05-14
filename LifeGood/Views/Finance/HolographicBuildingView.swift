@@ -274,11 +274,12 @@ struct BuildingSceneView: UIViewRepresentable {
         func makeScene(floors: [FloorInfo], isApartment: Bool) -> SCNScene {
             let scene = SCNScene()
 
-            // 相機（拉遠一點讓建築看起來小一些 + 留給地板呼吸空間）
+            // 相機：放在地面之下、向上仰望，營造由地面往上看的視角
             let camNode = SCNNode()
             camNode.camera = SCNCamera()
             camNode.camera?.fieldOfView = 50
-            camNode.position = SCNVector3(0, 1.0, 18)
+            camNode.position = SCNVector3(0, -4, 16)
+            camNode.eulerAngles = SCNVector3(Float.pi / 8, 0, 0)  // 鏡頭仰角 22.5°
             scene.rootNode.addChildNode(camNode)
 
             // 環境光（暗一點讓 emission 突出）
@@ -368,14 +369,10 @@ struct BuildingSceneView: UIViewRepresentable {
             let cycle = SCNAction.sequence([scanUp, fadeOut, reset, wait])
             scanNode.runAction(SCNAction.repeatForever(cycle))
 
-            // 自動旋轉（緩慢，~60 秒一圈）
-            let rot = SCNAction.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 60)
-            let auto = SCNAction.repeatForever(rot)
-            buildingRoot.runAction(auto, forKey: "auto-rotate")
-            self.rotationAction = auto
-
-            // 視角設定：仰角 20°（top 微微仰），無斜角（yaw=0），無滾轉（roll=0）
-            buildingRoot.eulerAngles = SCNVector3(-Float.pi / 9, 0, 0)
+            // 建築物保持正立（不傾斜、不自動旋轉）；視覺仰望感由相機角度提供。
+            // 仍保留 self.rotationAction = nil，方便手勢結束後也不會自動恢復轉動。
+            buildingRoot.eulerAngles = SCNVector3(0, 0, 0)
+            self.rotationAction = nil
 
             // 全息地板：放在建築底部，浮空略低於最低層
             let groundY = Float(baseY) - Float(floorHeight) / 2 - 0.15
