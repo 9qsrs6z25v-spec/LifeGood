@@ -90,6 +90,7 @@ enum BusinessCardOCR {
         var jobTitle: String
         var phones: [String]
         var emails: [String]
+        var faxes: [String]
         var address: String
         /// 未指派到任何欄位的剩餘文字，丟到備註讓使用者人工搬位置。
         var note: String
@@ -121,6 +122,7 @@ enum BusinessCardOCR {
 
         var emails: [String] = []
         var phones: [String] = []
+        var faxes: [String] = []
         var address: String?
         var company: String?
         var jobTitle: String?
@@ -131,8 +133,13 @@ enum BusinessCardOCR {
             pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
         )
         // 台灣手機 09xx-xxx-xxx、市話 0x-xxxx-xxxx，含 (), 空格, 減號變體
+        // 後方選擇性接「分機 / ext / # / 轉」+ 1–5 位數，整段被視為同一支號碼
         let phoneRegex = try? NSRegularExpression(
-            pattern: "(?:\\+?886[-\\s]?|0)(?:9[-\\s]?\\d[-\\s\\d]{6,12}|[2-8][-\\s\\d()]{6,12})"
+            pattern: "(?:\\+?886[-\\s]?|0)(?:9[-\\s]?\\d[-\\s\\d]{6,12}|[2-8][-\\s\\d()]{6,12})(?:\\s*(?:ext\\.?|EXT\\.?|分機|轉|#)\\s*\\d{1,5})?"
+        )
+        // 傳真關鍵字：含 fax / FAX / 傳真 即視為傳真行
+        let faxKeyword = try? NSRegularExpression(
+            pattern: "(?i)fax|傳真", options: []
         )
 
         let companyKeywords = [
@@ -181,13 +188,22 @@ enum BusinessCardOCR {
                     continue
                 }
             }
-            // 電話（一行可能含多個）
+            // 電話 / 傳真（一行可能含多個）
             if let regex = phoneRegex {
                 let matches = regex.matches(in: line, range: NSRange(line.startIndex..., in: line))
                 if !matches.isEmpty {
+                    let isFaxLine: Bool = {
+                        guard let fr = faxKeyword else { return false }
+                        return fr.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil
+                    }()
                     for m in matches {
                         if let r = Range(m.range, in: line) {
-                            phones.append(String(line[r]))
+                            let value = String(line[r]).trimmingCharacters(in: .whitespaces)
+                            if isFaxLine {
+                                faxes.append(value)
+                            } else {
+                                phones.append(value)
+                            }
                         }
                     }
                     continue
@@ -247,6 +263,7 @@ enum BusinessCardOCR {
             jobTitle: jobTitle ?? "",
             phones: phones,
             emails: emails,
+            faxes: faxes,
             address: address ?? "",
             note: leftoverNote
         )
@@ -269,18 +286,27 @@ extension BusinessCard {
         let company = c.organizationName.trimmingCharacters(in: .whitespaces)
         let department = c.departmentName.trimmingCharacters(in: .whitespaces)
         let jobTitle = c.jobTitle.trimmingCharacters(in: .whitespaces)
-        // 電話：依優先順序排列（mobile / iPhone / work / home / main / 其他），全部帶入
+        // 是否為傳真 label
+        func isFaxLabel(_ label: String?) -> Bool {
+            guard let label else { return false }
+            return label == CNLabelPhoneNumberWorkFax
+                || label == CNLabelPhoneNumberHomeFax
+                || label == CNLabelPhoneNumberOtherFax
+                || label.lowercased().contains("fax")
+                || label.contains("傳真")
+        }
+        // 電話（非傳真）：依優先順序排列（mobile / iPhone / work / home / main / 其他）
         let phones: [String] = {
             let labelOrder: [String] = [
                 CNLabelPhoneNumberMobile, CNLabelPhoneNumberiPhone,
                 CNLabelWork, CNLabelHome, CNLabelPhoneNumberMain
             ]
+            let nonFax = c.phoneNumbers.filter { !isFaxLabel($0.label) }
             var ordered: [CNLabeledValue<CNPhoneNumber>] = []
             for label in labelOrder {
-                ordered.append(contentsOf: c.phoneNumbers.filter { $0.label == label })
+                ordered.append(contentsOf: nonFax.filter { $0.label == label })
             }
-            // 其他未涵蓋 label 依原順序追加
-            ordered.append(contentsOf: c.phoneNumbers.filter { !labelOrder.contains($0.label ?? "") })
+            ordered.append(contentsOf: nonFax.filter { !labelOrder.contains($0.label ?? "") })
             var seen: Set<String> = []
             return ordered.compactMap { entry in
                 let v = entry.value.stringValue.trimmingCharacters(in: .whitespaces)
@@ -288,6 +314,18 @@ extension BusinessCard {
                 seen.insert(v)
                 return v
             }
+        }()
+        // 傳真：抓 fax label 的號碼
+        let faxes: [String] = {
+            var seen: Set<String> = []
+            return c.phoneNumbers
+                .filter { isFaxLabel($0.label) }
+                .compactMap { entry in
+                    let v = entry.value.stringValue.trimmingCharacters(in: .whitespaces)
+                    guard !v.isEmpty, !seen.contains(v) else { return nil }
+                    seen.insert(v)
+                    return v
+                }
         }()
         // Email：work 優先，其他依原序追加
         let emails: [String] = {
@@ -342,7 +380,8 @@ extension BusinessCard {
             photoFileName: photoFileNameHolder,
             linkedOrgPersonId: nil,
             phones: phones,
-            emails: emails
+            emails: emails,
+            faxes: faxes
         )
     }
 }
@@ -748,7 +787,8 @@ struct BusinessCardView: View {
             photoFileName: newPhotoFileName,
             linkedOrgPersonId: nil,
             phones: source.phones,
-            emails: source.emails
+            emails: source.emails,
+            faxes: source.faxes
         )
         lifeStore.add(copy)
     }
@@ -787,10 +827,14 @@ struct BusinessCardView: View {
             mutable.organizationName = card.company.trimmingCharacters(in: .whitespaces)
             mutable.departmentName = card.department.trimmingCharacters(in: .whitespaces)
             mutable.jobTitle = card.jobTitle.trimmingCharacters(in: .whitespaces)
-            mutable.phoneNumbers = card.phones.enumerated().map { idx, p in
+            var phoneEntries: [CNLabeledValue<CNPhoneNumber>] = card.phones.enumerated().map { idx, p in
                 let label = idx == 0 ? CNLabelPhoneNumberMobile : CNLabelOther
                 return CNLabeledValue(label: label, value: CNPhoneNumber(stringValue: p))
             }
+            phoneEntries.append(contentsOf: card.faxes.map { fax in
+                CNLabeledValue(label: CNLabelPhoneNumberWorkFax, value: CNPhoneNumber(stringValue: fax))
+            })
+            mutable.phoneNumbers = phoneEntries
             mutable.emailAddresses = card.emails.enumerated().map { idx, e in
                 let label = idx == 0 ? CNLabelWork : CNLabelOther
                 return CNLabeledValue(label: label, value: e as NSString)
@@ -859,6 +903,7 @@ struct BusinessCardDetailView: View {
     @State private var showPremiumAlert = false
     @State private var showCamera = false
     @State private var showPhotosPicker = false
+    @State private var showAvatarLightbox = false
     @State private var pickerItem: PhotosPickerItem?
     @State private var showQRFullscreen = false
     @State private var viewingLinkedOrgPersonId: UUID?
@@ -1028,6 +1073,13 @@ struct BusinessCardDetailView: View {
 
     private var avatarMenu: some View {
         Menu {
+            if card.photoFileName != nil {
+                Button {
+                    showAvatarLightbox = true
+                } label: {
+                    Label("放大檢視", systemImage: "arrow.up.left.and.arrow.down.right")
+                }
+            }
             Button {
                 showCamera = true
             } label: {
@@ -1047,6 +1099,11 @@ struct BusinessCardDetailView: View {
             }
         } label: {
             avatarContent
+        }
+        .fullScreenCover(isPresented: $showAvatarLightbox) {
+            if let url = card.photoURL {
+                PhotoLightbox(url: url)
+            }
         }
     }
 
@@ -1188,6 +1245,9 @@ struct BusinessCardDetailView: View {
             let typeTag = idx == 0 ? "WORK,VOICE" : "OTHER,VOICE"
             lines.append("TEL;TYPE=\(typeTag):\(ph)")
         }
+        for fx in card.faxes {
+            lines.append("TEL;TYPE=WORK,FAX:\(fx)")
+        }
         for (idx, em) in card.emails.enumerated() {
             let typeTag = idx == 0 ? "WORK" : "OTHER"
             lines.append("EMAIL;TYPE=\(typeTag):\(em)")
@@ -1216,7 +1276,7 @@ struct BusinessCardDetailView: View {
     // MARK: - 聯絡方式
 
     private var hasContact: Bool {
-        !card.phones.isEmpty || !card.emails.isEmpty || !card.address.isEmpty
+        !card.phones.isEmpty || !card.emails.isEmpty || !card.faxes.isEmpty || !card.address.isEmpty
     }
 
     private var contactCard: some View {
@@ -1228,7 +1288,21 @@ struct BusinessCardDetailView: View {
                     value: ph,
                     color: .green
                 ) { callPhone(ph) }
-                if idx < card.phones.count - 1 || !card.emails.isEmpty || !card.address.isEmpty {
+                if idx < card.phones.count - 1 || !card.faxes.isEmpty || !card.emails.isEmpty || !card.address.isEmpty {
+                    Divider().padding(.leading, 48)
+                }
+            }
+            ForEach(Array(card.faxes.enumerated()), id: \.offset) { idx, fx in
+                contactRow(
+                    icon: "printer.fill",
+                    label: card.faxes.count > 1 ? "傳真 \(idx + 1)" : "傳真",
+                    value: fx,
+                    color: .gray
+                ) {
+                    // 傳真不支援撥號，改為複製到剪貼簿
+                    UIPasteboard.general.string = fx
+                }
+                if idx < card.faxes.count - 1 || !card.emails.isEmpty || !card.address.isEmpty {
                     Divider().padding(.leading, 48)
                 }
             }
@@ -1321,7 +1395,16 @@ struct BusinessCardDetailView: View {
     // MARK: - 動作
 
     private func callPhone(_ phone: String) {
-        let cleaned = phone.filter { $0.isNumber || $0 == "+" }
+        // 切掉分機後綴（"分機 123" / "ext 123" / "轉 123" / "#123"），避免撥號失敗
+        var main = phone
+        let cuts = ["分機", "轉", "ext.", "ext", "EXT.", "EXT", "#"]
+        for c in cuts {
+            if let r = main.range(of: c, options: .caseInsensitive) {
+                main = String(main[..<r.lowerBound])
+                break
+            }
+        }
+        let cleaned = main.filter { $0.isNumber || $0 == "+" }
         guard !cleaned.isEmpty,
               let url = URL(string: "tel://\(cleaned)") else { return }
         openURL(url)
@@ -1367,6 +1450,7 @@ struct BusinessCardEditor: View {
     @State private var jobTitle = ""
     @State private var phones: [String] = [""]
     @State private var emails: [String] = [""]
+    @State private var faxes: [String] = []
     @State private var address = ""
     @State private var note = ""
     @State private var date = Date()
@@ -1430,6 +1514,28 @@ struct BusinessCardEditor: View {
                     }
                 }
 
+                Section("傳真") {
+                    ForEach(faxes.indices, id: \.self) { idx in
+                        HStack {
+                            TextField("傳真 \(faxes.count > 1 ? "\(idx + 1)" : "")",
+                                      text: $faxes[idx])
+                                .keyboardType(.phonePad)
+                            Button(role: .destructive) {
+                                faxes.remove(at: idx)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    Button {
+                        faxes.append("")
+                    } label: {
+                        Label("新增傳真", systemImage: "plus.circle").foregroundStyle(.green)
+                    }
+                }
+
                 Section("地址") {
                     TextField("地址", text: $address)
                 }
@@ -1462,11 +1568,13 @@ struct BusinessCardEditor: View {
                     jobTitle = e.jobTitle
                     phones = e.phones.isEmpty ? [""] : e.phones
                     emails = e.emails.isEmpty ? [""] : e.emails
+                    faxes = e.faxes
                     address = e.address; note = e.note; date = e.date
                 } else if let p = prefilled {
                     name = p.name; company = p.company; jobTitle = p.jobTitle
                     phones = p.phones.isEmpty ? [""] : p.phones
                     emails = p.emails.isEmpty ? [""] : p.emails
+                    faxes = p.faxes
                     address = p.address
                     note = p.note; date = Date()
                 }
@@ -1487,6 +1595,9 @@ struct BusinessCardEditor: View {
         let cleanedEmails = emails
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+        let cleanedFaxes = faxes
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
         let card = BusinessCard(
             id: id,
             name: name.trimmingCharacters(in: .whitespaces),
@@ -1501,7 +1612,8 @@ struct BusinessCardEditor: View {
             photoFileName: photoFileName,
             linkedOrgPersonId: editing?.linkedOrgPersonId,
             phones: cleanedPhones,
-            emails: cleanedEmails
+            emails: cleanedEmails,
+            faxes: cleanedFaxes
         )
         if editing != nil { lifeStore.update(card) } else { lifeStore.add(card) }
         dismiss()

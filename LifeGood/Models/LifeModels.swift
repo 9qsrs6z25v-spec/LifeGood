@@ -1084,10 +1084,12 @@ struct BusinessCard: Identifiable, Codable {
     var company: String
     var department: String
     var jobTitle: String
-    /// 多筆電話（手機 / 公司 / 副線 等）
+    /// 多筆電話（手機 / 公司 / 副線 等）；可含分機字串如「02-1234-5678 分機 123」
     var phones: [String]
     /// 多筆 Email（公司 / 個人 等）
     var emails: [String]
+    /// 傳真號碼
+    var faxes: [String]
     var address: String
     var note: String
     var date: Date
@@ -1131,7 +1133,7 @@ struct BusinessCard: Identifiable, Codable {
          note: String = "", date: Date = Date(),
          photoFileName: String? = nil,
          linkedOrgPersonId: UUID? = nil,
-         phones: [String] = [], emails: [String] = []) {
+         phones: [String] = [], emails: [String] = [], faxes: [String] = []) {
         self.id = id; self.name = name; self.company = company
         self.department = department; self.jobTitle = jobTitle
         // 多值優先；只給單值時包成單元素陣列（空字串忽略）
@@ -1145,6 +1147,7 @@ struct BusinessCard: Identifiable, Codable {
         } else {
             self.emails = email.isEmpty ? [] : [email]
         }
+        self.faxes = faxes
         self.address = address; self.note = note; self.date = date
         self.photoFileName = photoFileName
         self.linkedOrgPersonId = linkedOrgPersonId
@@ -1172,6 +1175,7 @@ struct BusinessCard: Identifiable, Codable {
         } else {
             emails = []
         }
+        faxes = (try? c.decode([String].self, forKey: .faxes))?.filter { !$0.isEmpty } ?? []
         address = (try? c.decode(String.self, forKey: .address)) ?? ""
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
@@ -1188,6 +1192,7 @@ struct BusinessCard: Identifiable, Codable {
         try c.encode(jobTitle, forKey: .jobTitle)
         try c.encode(phones, forKey: .phones)
         try c.encode(emails, forKey: .emails)
+        try c.encode(faxes, forKey: .faxes)
         try c.encode(address, forKey: .address)
         try c.encode(note, forKey: .note)
         try c.encode(date, forKey: .date)
@@ -1198,7 +1203,7 @@ struct BusinessCard: Identifiable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, name, company, department, jobTitle
         case phone, email                                 // legacy 單值（讀取相容）
-        case phones, emails                               // 新多值
+        case phones, emails, faxes                        // 新多值
         case address, note, date, photoFileName, linkedOrgPersonId
     }
 
