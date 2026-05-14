@@ -4,6 +4,8 @@ import CoreImage.CIFilterBuiltins
 import UIKit
 import Contacts
 import ContactsUI
+import VisionKit
+import Vision
 
 // MARK: - 聯絡人挑選器（包 CNContactPickerViewController）
 
@@ -33,6 +35,216 @@ struct ContactPickerView: UIViewControllerRepresentable {
         func contactPickerDidCancel(_ picker: CNContactPickerViewController) {
             parent.dismiss()
         }
+    }
+}
+
+// MARK: - 名片掃描器（VNDocumentCameraViewController + Vision OCR）
+
+/// 包 VisionKit 的文件掃描 view controller，使用者拍完後丟回掃描到的圖片。
+/// 跟系統內建的「文件掃描」UX 一樣：自動偵測邊框、自動拍攝、透視校正。
+struct BusinessCardScannerView: UIViewControllerRepresentable {
+    var onCapture: ([UIImage]) -> Void
+    var onCancel: () -> Void
+
+    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
+        let vc = VNDocumentCameraViewController()
+        vc.delegate = context.coordinator
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: VNDocumentCameraViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+        let parent: BusinessCardScannerView
+        init(parent: BusinessCardScannerView) { self.parent = parent }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+            var images: [UIImage] = []
+            for i in 0..<scan.pageCount {
+                images.append(scan.imageOfPage(at: i))
+            }
+            parent.onCapture(images)
+        }
+
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
+            parent.onCancel()
+        }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
+            parent.onCancel()
+        }
+    }
+}
+
+// MARK: - 名片 OCR / 欄位解析
+
+/// 用 Vision Framework 對名片影像做 OCR，並以 regex / 關鍵字字典啟發式
+/// 把辨識出的文字行對應到 BusinessCard 各欄位（姓名 / 公司 / 職稱 / 電話 / Email / 地址）。
+enum BusinessCardOCR {
+
+    struct Parsed {
+        var name: String
+        var company: String
+        var jobTitle: String
+        var phone: String
+        var email: String
+        var address: String
+        /// 未指派到任何欄位的剩餘文字，丟到備註讓使用者人工搬位置。
+        var note: String
+    }
+
+    /// 對單張圖片做 OCR，回傳辨識到的文字行
+    static func recognizeText(in image: UIImage) async -> [String] {
+        guard let cgImage = image.cgImage else { return [] }
+        return await withCheckedContinuation { continuation in
+            let request = VNRecognizeTextRequest { req, _ in
+                let observations = req.results as? [VNRecognizedTextObservation] ?? []
+                let lines = observations.compactMap { $0.topCandidates(1).first?.string }
+                continuation.resume(returning: lines)
+            }
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            request.recognitionLanguages = ["zh-Hant", "zh-Hans", "en-US"]
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            DispatchQueue.global(qos: .userInitiated).async {
+                try? handler.perform([request])
+            }
+        }
+    }
+
+    /// 根據 OCR 文字行解析欄位
+    static func parse(lines: [String]) -> Parsed {
+        let cleaned = lines.map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        var email: String?
+        var phones: [String] = []
+        var address: String?
+        var company: String?
+        var jobTitle: String?
+        var remaining: [String] = []
+
+        // 規則庫
+        let emailRegex = try? NSRegularExpression(
+            pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+        )
+        // 台灣手機 09xx-xxx-xxx、市話 0x-xxxx-xxxx，含 (), 空格, 減號變體
+        let phoneRegex = try? NSRegularExpression(
+            pattern: "(?:\\+?886[-\\s]?|0)(?:9[-\\s]?\\d[-\\s\\d]{6,12}|[2-8][-\\s\\d()]{6,12})"
+        )
+
+        let companyKeywords = [
+            "公司", "股份有限", "有限公司", "Inc.", "Inc", "Ltd.", "Ltd",
+            "Co.", "Co", "Corp", "Corporation", "Group", "集團", "企業",
+            "工作室", "Studio", "事務所", "中心", "Center"
+        ]
+        let titleKeywords = [
+            // 商業職稱
+            "經理", "總監", "工程師", "助理", "專員", "主任", "執行長",
+            "總經理", "副總", "副理", "顧問", "業務", "處長", "副處長",
+            "Director", "Manager", "Engineer", "CEO", "CFO", "CTO", "COO",
+            "VP", "President", "Founder", "Lead", "Senior", "Principal",
+            "Consultant", "Designer", "Developer", "Analyst", "Architect",
+            // 教育職稱
+            "老師", "教授", "副教授", "助理教授", "講師", "助教", "教練",
+            "校長", "副校長", "院長", "副院長", "系主任", "所長",
+            "Teacher", "Professor", "Prof.", "Prof", "Lecturer",
+            "Coach", "Dean",
+            // 醫療職稱
+            "醫師", "醫生", "藥師", "護理師", "技師", "心理師",
+            "Doctor", "Dr.", "Dr", "Nurse", "Pharmacist",
+            // 法律 / 會計 / 設計
+            "律師", "會計師", "建築師", "設計師", "記者",
+            "Lawyer", "Attorney", "Accountant"
+        ]
+        let addressKeywords = [
+            "市", "縣", "區", "路", "街", "巷", "弄", "號", "樓",
+            "鄉", "鎮", "Road", "Rd.", "Street", "St.", "Ave."
+        ]
+
+        for line in cleaned {
+            // Email
+            if email == nil,
+               let regex = emailRegex,
+               let m = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+               let r = Range(m.range, in: line) {
+                email = String(line[r])
+                let stripped = line.replacingOccurrences(of: String(line[r]), with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                if !stripped.isEmpty { remaining.append(stripped) }
+                continue
+            }
+            // 電話（一行可能含多個）
+            if let regex = phoneRegex {
+                let matches = regex.matches(in: line, range: NSRange(line.startIndex..., in: line))
+                if !matches.isEmpty {
+                    for m in matches {
+                        if let r = Range(m.range, in: line) {
+                            phones.append(String(line[r]))
+                        }
+                    }
+                    continue
+                }
+            }
+            // 地址（含關鍵字 + 較長）
+            if address == nil,
+               addressKeywords.contains(where: { line.contains($0) }),
+               line.count >= 8 {
+                address = line
+                continue
+            }
+            // 公司
+            if company == nil, companyKeywords.contains(where: { line.contains($0) }) {
+                company = line
+                continue
+            }
+            // 職稱
+            if jobTitle == nil,
+               titleKeywords.contains(where: { line.contains($0) }),
+               line.count <= 25 {
+                jobTitle = line
+                continue
+            }
+            remaining.append(line)
+        }
+
+        // 姓名：先找剩餘行中「2–5 個中文字」的短行
+        var name: String?
+        for line in remaining {
+            let stripped = line.trimmingCharacters(in: .whitespaces)
+            if stripped.count >= 2 && stripped.count <= 5 {
+                let hasHan = stripped.unicodeScalars.contains {
+                    $0.value >= 0x4E00 && $0.value <= 0x9FFF
+                }
+                if hasHan {
+                    name = stripped
+                    break
+                }
+            }
+        }
+        // Fallback：找任意短行（2–30 字）
+        if name == nil {
+            name = remaining.first(where: { $0.count >= 2 && $0.count <= 30 })
+        }
+
+        let usedSet: Set<String> = [name ?? "", company ?? "", jobTitle ?? "", address ?? ""]
+            .filter { !$0.isEmpty }
+            .reduce(into: Set<String>()) { $0.insert($1) }
+        let leftoverNote = remaining
+            .filter { !usedSet.contains($0) }
+            .joined(separator: "\n")
+
+        return Parsed(
+            name: name ?? "",
+            company: company ?? "",
+            jobTitle: jobTitle ?? "",
+            phone: phones.first ?? "",
+            email: email ?? "",
+            address: address ?? "",
+            note: leftoverNote
+        )
     }
 }
 
@@ -122,6 +334,16 @@ struct BusinessCardView: View {
     @State private var searchText = ""
     @State private var showPremiumAlert = false
     @State private var showContactPicker = false
+    // 拍名片掃描
+    @State private var showCardScanner = false
+    @State private var scannedDraft: ScannedCardDraft?
+    @State private var isProcessingScan = false
+
+    fileprivate struct ScannedCardDraft: Identifiable {
+        let id = UUID()
+        let parsed: BusinessCardOCR.Parsed
+        let photoData: Data?
+    }
 
     private var filteredCards: [BusinessCard] {
         let sorted = lifeStore.businessCards.sorted { $0.date > $1.date }
@@ -206,16 +428,56 @@ struct BusinessCardView: View {
                             Label("新增空白名片", systemImage: "square.and.pencil")
                         }
                         Button {
+                            if subscription.isPremium {
+                                if VNDocumentCameraViewController.isSupported {
+                                    showCardScanner = true
+                                }
+                            } else { showPremiumAlert = true }
+                        } label: {
+                            Label("拍名片自動辨識", systemImage: "camera.viewfinder")
+                        }
+                        Button {
                             if subscription.isPremium { showContactPicker = true }
                             else { showPremiumAlert = true }
                         } label: {
                             Label("從聯絡人匯入", systemImage: "person.crop.circle.badge.plus")
                         }
                     } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title3).foregroundStyle(.green)
+                        if isProcessingScan {
+                            ProgressView().tint(.green)
+                        } else {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
+            }
+            .fullScreenCover(isPresented: $showCardScanner) {
+                BusinessCardScannerView(
+                    onCapture: { images in
+                        showCardScanner = false
+                        guard let first = images.first else { return }
+                        isProcessingScan = true
+                        Task {
+                            let lines = await BusinessCardOCR.recognizeText(in: first)
+                            let parsed = BusinessCardOCR.parse(lines: lines)
+                            let data = first.jpegData(compressionQuality: 0.8)
+                            await MainActor.run {
+                                scannedDraft = ScannedCardDraft(parsed: parsed, photoData: data)
+                                isProcessingScan = false
+                            }
+                        }
+                    },
+                    onCancel: { showCardScanner = false }
+                )
+                .ignoresSafeArea()
+            }
+            .sheet(item: $scannedDraft) { draft in
+                BusinessCardEditor(
+                    editing: nil,
+                    prefilled: draft.parsed,
+                    prefilledPhotoData: draft.photoData
+                )
             }
             .sheet(isPresented: $showAdd) {
                 BusinessCardEditor(editing: nil)
@@ -895,6 +1157,10 @@ struct BusinessCardEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     var editing: BusinessCard?
+    /// OCR 掃描完帶進來的預填欄位
+    var prefilled: BusinessCardOCR.Parsed?
+    /// OCR 掃描完帶進來的整張名片照片資料（會存成頭像）
+    var prefilledPhotoData: Data?
 
     @State private var name = ""
     @State private var company = ""
@@ -948,14 +1214,24 @@ struct BusinessCardEditor: View {
                     name = e.name; company = e.company; department = e.department
                     jobTitle = e.jobTitle; phone = e.phone; email = e.email
                     address = e.address; note = e.note; date = e.date
+                } else if let p = prefilled {
+                    name = p.name; company = p.company; jobTitle = p.jobTitle
+                    phone = p.phone; email = p.email; address = p.address
+                    note = p.note; date = Date()
                 }
             }
         }
     }
 
     private func save() {
+        let id = editing?.id ?? UUID()
+        // 新增 + 有掃描影像時，把整張名片存成頭像
+        var photoFileName = editing?.photoFileName
+        if editing == nil, let data = prefilledPhotoData, photoFileName == nil {
+            photoFileName = BusinessCard.savePhoto(data, id: id)
+        }
         let card = BusinessCard(
-            id: editing?.id ?? UUID(),
+            id: id,
             name: name.trimmingCharacters(in: .whitespaces),
             company: company.trimmingCharacters(in: .whitespaces),
             department: department.trimmingCharacters(in: .whitespaces),
@@ -965,7 +1241,7 @@ struct BusinessCardEditor: View {
             address: address.trimmingCharacters(in: .whitespaces),
             note: note.trimmingCharacters(in: .whitespaces),
             date: date,
-            photoFileName: editing?.photoFileName,
+            photoFileName: photoFileName,
             linkedOrgPersonId: editing?.linkedOrgPersonId
         )
         if editing != nil { lifeStore.update(card) } else { lifeStore.add(card) }
