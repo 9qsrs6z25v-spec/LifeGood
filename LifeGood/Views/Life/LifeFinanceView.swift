@@ -20,7 +20,13 @@ fileprivate func expandedFixedExpenseWithdrawals(
     var result: [BankDeposit] = []
     for exp in candidates {
         guard let recurrence = exp.recurrence else { continue }
+        // 貸款類（房貸 / 車貸）的「日期」代表撥款日 / 起始日；
+        // 第一次實際扣款是一個週期之後（撥款日 3/5 → 第一期 4/5）。
+        // 其他類型（房租、訂閱、保費⋯）的日期就是第一次扣款日。
         var current = exp.date
+        if exp.fixedCategory == .loan {
+            current = nextRecurrenceDate(from: current, recurrence: recurrence, calendar: cal)
+        }
         var idx = 0
         while current <= now && idx < 1200 {
             let stableId = stableDepositUUID(seed: "\(exp.id.uuidString)-\(idx)")
@@ -33,17 +39,22 @@ fileprivate func expandedFixedExpenseWithdrawals(
                 linkedExpenseId: exp.id
             ))
             idx += 1
-            switch recurrence {
-            case .monthly:
-                current = cal.date(byAdding: .month, value: 1, to: current) ?? current
-            case .quarterly:
-                current = cal.date(byAdding: .month, value: 3, to: current) ?? current
-            case .yearly:
-                current = cal.date(byAdding: .year, value: 1, to: current) ?? current
-            }
+            current = nextRecurrenceDate(from: current, recurrence: recurrence, calendar: cal)
         }
     }
     return result
+}
+
+/// 依週期算下一次日期
+private func nextRecurrenceDate(from date: Date, recurrence: Recurrence, calendar: Calendar) -> Date {
+    switch recurrence {
+    case .monthly:
+        return calendar.date(byAdding: .month, value: 1, to: date) ?? date
+    case .quarterly:
+        return calendar.date(byAdding: .month, value: 3, to: date) ?? date
+    case .yearly:
+        return calendar.date(byAdding: .year, value: 1, to: date) ?? date
+    }
 }
 
 /// 把連結到指定銀行 milestone 的「週期性」收入（月薪 / 年薪），
