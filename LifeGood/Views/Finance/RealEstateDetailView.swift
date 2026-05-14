@@ -4,6 +4,7 @@ import PhotosUI
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
