@@ -330,8 +330,9 @@ struct MainTabView: View {
                     .padding(.horizontal, 36)
                     .transition(.scale.combined(with: .opacity))
             }
+            // 推到 tab bar 下緣，約 1/4 露出上方
             aiMicButton
-                .padding(.bottom, 28)
+                .padding(.bottom, 0)
         }
         .allowsHitTesting(true)
     }

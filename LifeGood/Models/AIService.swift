@@ -164,22 +164,45 @@ final class AIExpenseParserService {
     static let shared = AIExpenseParserService()
 
     private let systemPrompt = """
-你是記帳助手。從使用者的口語句子中抽取「變動支出」資訊，回傳純 JSON 物件（不要 markdown 圍欄、不要說明文字、不要任何前後綴）。
+你是記帳助手。從使用者的口語句子中抽取「變動支出」資訊，**只回傳一個純 JSON 物件**，不要 markdown 圍欄、不要說明文字、不要任何前後綴。
 
 如果使用者句子前面附帶 [使用者目前位置：XXX] 標籤，請用這個位置去推斷講到的店名指的是哪一家分店、或推斷常見的店家慣用名稱（例如「鬍鬚張」在不同城市仍是同一品牌）。
 
-欄位：
-- amount (number)：金額，正整數或小數
-- categoryRaw (string)：必須是這些之一：飲食、娛樂、購物、日用品、醫療、交通、教育、稅費、節稅、社交、汽車、股票、房地產、其他
-- title (string)：店家名 / 項目名稱（簡短；若位置標籤可以幫助補完店家名稱，請補上區域）
-- note (string)：備註細節，沒講則省略
-- diningMember (string)：同行者，沒講則省略
+**必填欄位**（請務必每次回傳）：
+- amount (number)：金額
+- categoryRaw (string)：**必須**從這個清單擇一回傳，**不要回傳清單外的詞**：
+  飲食、娛樂、購物、日用品、醫療、交通、教育、稅費、節稅、社交、汽車、股票、房地產、其他
 
-範例輸入：[使用者目前位置：台北市信義區] 使用者說的話：今天午餐去鬍鬚張吃了 250
-範例輸出：{"amount":250,"categoryRaw":"飲食","title":"鬍鬚張 信義店","note":"午餐"}
+**選填欄位**（有提到就一定要填）：
+- title (string)：店家名 / 項目名稱（簡短；若位置標籤可以幫助補完，請補上區域，例如「鬍鬚張 信義店」）
+- note (string)：備註細節
+- diningMember (string)：同行者姓名 / 稱謂。判斷規則：
+  · 句子裡只要出現「跟」「和」「同」「與」「陪」「帶」後接一個指人的詞，就要抽出
+  · 常見指人詞：太太、老婆、先生、老公、女友、男友、女朋友、男朋友、家人、爸媽、爸爸、媽媽、孩子、兒子、女兒、小孩、朋友、同事、同學、客戶、廠商、長官、老闆、家裡人、家人們
+  · 多人時用「、」分隔（例：「太太、兒子」）
 
-範例輸入：跟太太去看電影花了 600
-範例輸出：{"amount":600,"categoryRaw":"娛樂","title":"電影","diningMember":"太太"}
+**分類判斷示例**：
+- 早午晚餐 / 餐廳 / 便當 / 飲料 / 咖啡 / 火鍋 / 燒烤 → 飲食
+- 電影 / KTV / 演唱會 / 健身房 / 遊戲 / 書 / 玩具 → 娛樂
+- 衣服 / 鞋子 / 包包 / 化妝品 / 3C → 購物
+- 衛生紙 / 洗衣精 / 牙膏 / 廚房用品 → 日用品
+- 看醫生 / 藥局 / 健檢 → 醫療
+- 計程車 / 公車 / 高鐵 / 加油 / 停車 → 交通
+- 學費 / 補習 / 課程 / 線上課 → 教育
+- 報稅 / 牌照稅 / 房屋稅 → 稅費
+- 捐款 / 結婚禮金 / 喪禮白包 → 社交
+
+**範例輸入 1**：[使用者目前位置：台北市信義區] 使用者說的話：今天中午去鬍鬚張吃了 250
+**範例輸出 1**：{"amount":250,"categoryRaw":"飲食","title":"鬍鬚張 信義店","note":"午餐"}
+
+**範例輸入 2**：跟太太去看電影花了 600
+**範例輸出 2**：{"amount":600,"categoryRaw":"娛樂","title":"電影","diningMember":"太太"}
+
+**範例輸入 3**：剛剛叫了 uber 從家裡到公司花 350
+**範例輸出 3**：{"amount":350,"categoryRaw":"交通","title":"Uber","note":"家裡到公司"}
+
+**範例輸入 4**：和女兒在家樂福買了 1280 的日用品
+**範例輸出 4**：{"amount":1280,"categoryRaw":"日用品","title":"家樂福","diningMember":"女兒"}
 """
 
     func parse(_ text: String) async throws -> ParsedAIExpense {
@@ -333,10 +356,38 @@ final class AIExpenseParserService {
         if let n = json["amount"] as? Double { p.amount = n }
         else if let n = json["amount"] as? Int { p.amount = Double(n) }
         else if let s = json["amount"] as? String { p.amount = Double(s) }
-        p.categoryRaw = (json["categoryRaw"] as? String)?.trimmingCharacters(in: .whitespaces)
-        p.title = (json["title"] as? String)?.trimmingCharacters(in: .whitespaces)
-        p.note = (json["note"] as? String)?.trimmingCharacters(in: .whitespaces)
-        p.diningMember = (json["diningMember"] as? String)?.trimmingCharacters(in: .whitespaces)
+        // categoryRaw / category 兩種命名都接受
+        p.categoryRaw = ((json["categoryRaw"] as? String)
+                         ?? (json["category"] as? String))?
+                         .trimmingCharacters(in: .whitespaces)
+        // title / name / item 都接受
+        p.title = ((json["title"] as? String)
+                   ?? (json["name"] as? String)
+                   ?? (json["item"] as? String))?
+                   .trimmingCharacters(in: .whitespaces)
+        p.note = ((json["note"] as? String)
+                  ?? (json["notes"] as? String)
+                  ?? (json["description"] as? String))?
+                  .trimmingCharacters(in: .whitespaces)
+        // 同行者：可能字串或陣列，欄位命名也常變
+        if let s = json["diningMember"] as? String {
+            p.diningMember = s.trimmingCharacters(in: .whitespaces)
+        } else if let arr = json["diningMembers"] as? [String] {
+            p.diningMember = arr.joined(separator: "、")
+        } else if let s = json["with"] as? String {
+            p.diningMember = s.trimmingCharacters(in: .whitespaces)
+        } else if let arr = json["with"] as? [String] {
+            p.diningMember = arr.joined(separator: "、")
+        } else if let s = json["companion"] as? String {
+            p.diningMember = s.trimmingCharacters(in: .whitespaces)
+        } else if let arr = json["companions"] as? [String] {
+            p.diningMember = arr.joined(separator: "、")
+        } else if let s = json["person"] as? String {
+            p.diningMember = s.trimmingCharacters(in: .whitespaces)
+        } else if let arr = json["people"] as? [String] {
+            p.diningMember = arr.joined(separator: "、")
+        }
+        if let m = p.diningMember, m.isEmpty { p.diningMember = nil }
         return p
     }
 }
@@ -475,28 +526,71 @@ enum AIVariableCategoryMapper {
     static func map(_ raw: String?) -> VariableCategory? {
         guard let raw, !raw.isEmpty else { return nil }
         let normalized = raw.trimmingCharacters(in: .whitespaces)
-        // 先嘗試直接用 rawValue 對映（VariableCategory 的 rawValue 已是中文）
+        // 1) 直接用 rawValue 對映（VariableCategory 的 rawValue 已是中文）
         if let direct = VariableCategory(rawValue: normalized) { return direct }
-        // 同義詞表
+
+        // 2) 中文 / 英文同義詞表（混在一起，含 lowercase 英文）
         let table: [String: VariableCategory] = [
+            // 飲食
             "餐飲": .food, "吃飯": .food, "午餐": .food, "晚餐": .food, "早餐": .food,
-            "娛樂": .entertainment, "休閒": .entertainment,
-            "購物": .shopping,
+            "宵夜": .food, "下午茶": .food, "點心": .food, "飲料": .food, "咖啡": .food,
+            "food": .food, "dining": .food, "meal": .food, "restaurant": .food, "drink": .food,
+            // 娛樂
+            "娛樂": .entertainment, "休閒": .entertainment, "電影": .entertainment, "遊戲": .entertainment,
+            "entertainment": .entertainment, "fun": .entertainment, "leisure": .entertainment, "movie": .entertainment,
+            // 購物
+            "購物": .shopping, "服飾": .shopping, "衣服": .shopping,
+            "shopping": .shopping, "clothing": .shopping, "apparel": .shopping,
+            // 日用品
             "日用品": .dailyNecessities, "日用": .dailyNecessities, "雜物": .dailyNecessities,
-            "醫療": .medical, "看病": .medical, "藥": .medical,
-            "交通": .transportation, "車費": .transportation, "油錢": .transportation,
-            "教育": .education, "學費": .education, "書": .education,
-            "稅費": .tax, "稅": .tax,
+            "家用": .dailyNecessities, "生活用品": .dailyNecessities,
+            "daily": .dailyNecessities, "necessities": .dailyNecessities, "household": .dailyNecessities,
+            // 醫療
+            "醫療": .medical, "看病": .medical, "藥": .medical, "藥品": .medical, "醫藥": .medical, "健保": .medical,
+            "medical": .medical, "health": .medical, "doctor": .medical, "pharmacy": .medical,
+            // 交通
+            "交通": .transportation, "車費": .transportation, "油錢": .transportation, "停車": .transportation,
+            "捷運": .transportation, "公車": .transportation, "高鐵": .transportation, "計程車": .transportation,
+            "transport": .transportation, "transportation": .transportation, "travel": .transportation,
+            "uber": .transportation, "taxi": .transportation, "gas": .transportation,
+            // 教育
+            "教育": .education, "學費": .education, "書": .education, "補習": .education, "課程": .education,
+            "education": .education, "learning": .education, "course": .education, "tuition": .education, "book": .education,
+            // 稅
+            "稅費": .tax, "稅": .tax, "報稅": .tax,
+            "tax": .tax, "taxes": .tax,
+            // 節稅
             "節稅": .taxSaving,
-            "社交": .social, "禮金": .social,
+            "taxsaving": .taxSaving, "tax-saving": .taxSaving, "tax saving": .taxSaving,
+            // 社交
+            "社交": .social, "禮金": .social, "紅包": .social, "白包": .social, "送禮": .social,
+            "social": .social, "gift": .social, "donation": .social,
             // 沒有獨立分類，回退到既有最相近項目
-            "寵物": .other,
-            "訂閱": .other,
+            "寵物": .other, "pet": .other,
+            "訂閱": .other, "subscription": .other,
+            // 汽車（與交通區分，這指買車或養車項目）
             "汽車": .vehicle, "車輛": .vehicle,
-            "股票": .stock,
-            "房地產": .realEstate, "房屋": .realEstate,
-            "其他": .other
+            "vehicle": .vehicle, "car": .vehicle, "auto": .vehicle,
+            // 股票
+            "股票": .stock, "投資": .stock,
+            "stock": .stock, "stocks": .stock, "investment": .stock,
+            // 房地產
+            "房地產": .realEstate, "房屋": .realEstate, "房子": .realEstate,
+            "realestate": .realEstate, "real estate": .realEstate, "property": .realEstate, "house": .realEstate,
+            // 其他
+            "其他": .other,
+            "other": .other, "misc": .other, "miscellaneous": .other
         ]
-        return table[normalized]
+
+        // 3) 大小寫不敏感對映
+        if let direct = table[normalized] { return direct }
+        let lower = normalized.lowercased()
+        if let lc = table[lower] { return lc }
+
+        // 4) 部分包含（AI 可能回傳「飲食/餐飲」這樣的複合字）
+        for (key, value) in table {
+            if normalized.contains(key) || lower.contains(key) { return value }
+        }
+        return nil
     }
 }
