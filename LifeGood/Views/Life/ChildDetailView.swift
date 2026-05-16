@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import MapKit
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -642,6 +643,13 @@ struct ChildRecordEditorSheet: View {
     @State private var weightText = ""
     @State private var dose = ""
     @State private var severity: AllergySeverity = .mild
+
+    // 就醫 / 接種院所 自動完成
+    @StateObject private var clinicCompleter = RestaurantSearchCompleter()
+    @ObservedObject private var locationProvider = LocationProvider.shared
+    @FocusState private var detailFieldFocused: Bool
+    @State private var clinicSuppressNextUpdate: Bool = false
+    @State private var clinicExpandedSuggestions: Bool = false
     @State private var photoFileName: String?
     @State private var photoItem: PhotosPickerItem?
     @State private var sketchMode = true
@@ -767,7 +775,7 @@ struct ChildRecordEditorSheet: View {
         Section("疫苗資訊") {
             TextField("疫苗名稱（如：五合一）", text: $title)
             TextField("劑次（如：第 1 劑、追加）", text: $dose)
-            TextField("接種院所（選填）", text: $detail)
+            clinicAutocompleteField(label: "接種院所（選填）")
         }
     }
     private var allergyFields: some View {
@@ -784,7 +792,190 @@ struct ChildRecordEditorSheet: View {
         }
     }
     private var medicalFields: some View {
-        Section("就醫資訊") { TextField("症狀/診斷", text: $title); TextField("院所（選填）", text: $detail) }
+        Section("就醫資訊") {
+            TextField("症狀/診斷", text: $title)
+            clinicAutocompleteField(label: "院所（選填）")
+        }
+    }
+
+    // MARK: - 院所自動完成（適用於就醫 / 疫苗接種院所）
+
+    @ViewBuilder
+    private func clinicAutocompleteField(label: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "cross.case.fill")
+                    .foregroundStyle(.red)
+                    .frame(width: 18)
+                TextField(label, text: $detail)
+                    .focused($detailFieldFocused)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                if !detail.isEmpty {
+                    Button {
+                        detail = ""
+                        clinicExpandedSuggestions = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if detailFieldFocused {
+                clinicSuggestionsList
+            }
+        }
+        .onAppear {
+            LocationProvider.shared.requestIfNeeded()
+            clinicCompleter.setRegion(LocationProvider.shared.searchRegion)
+            if !detail.isEmpty { clinicCompleter.queryFragment = detail }
+        }
+        .onChange(of: detail) { _, newValue in
+            if clinicSuppressNextUpdate {
+                clinicSuppressNextUpdate = false
+                return
+            }
+            clinicCompleter.queryFragment = newValue
+            clinicExpandedSuggestions = false
+        }
+        .onChange(of: locationProvider.lastLocation) { _, _ in
+            clinicCompleter.setRegion(LocationProvider.shared.searchRegion)
+            if !detail.isEmpty { clinicCompleter.queryFragment = detail }
+        }
+    }
+
+    @ViewBuilder
+    private var clinicSuggestionsList: some View {
+        let all = allClinicSuggestions
+        if !all.isEmpty {
+            let limit = 20
+            let visible = clinicExpandedSuggestions ? all : Array(all.prefix(limit))
+            let hiddenCount = max(0, all.count - limit)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(visible) { item in
+                        Button { applyClinicSuggestion(item) } label: {
+                            clinicSuggestionRow(item)
+                        }
+                        .buttonStyle(.plain)
+                        Divider().padding(.leading, 44)
+                    }
+                    if !clinicExpandedSuggestions && hiddenCount > 0 {
+                        Button {
+                            clinicExpandedSuggestions = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "chevron.down.circle.fill").foregroundStyle(.blue)
+                                Text("顯示更多 (\(hiddenCount))")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.blue)
+                                Spacer()
+                            }
+                            .padding(.vertical, 10).padding(.horizontal, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    } else if clinicExpandedSuggestions && all.count > limit {
+                        Button {
+                            clinicExpandedSuggestions = false
+                        } label: {
+                            HStack {
+                                Image(systemName: "chevron.up.circle.fill").foregroundStyle(.secondary)
+                                Text("收合")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.vertical, 10).padding(.horizontal, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(maxHeight: 240)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 0.5)
+            )
+        }
+    }
+
+    private func clinicSuggestionRow(_ item: ClinicSuggestion) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(item.iconColor.opacity(0.15)).frame(width: 28, height: 28)
+                Image(systemName: item.iconName)
+                    .foregroundStyle(item.iconColor)
+                    .font(.caption)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                if !item.subtitle.isEmpty {
+                    Text(item.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+            Image(systemName: "arrow.up.left").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6).padding(.horizontal, 8)
+        .contentShape(Rectangle())
+    }
+
+    /// 合併所有小孩過往就醫 / 接種院所 + Apple Maps POI（醫療類）
+    private var allClinicSuggestions: [ClinicSuggestion] {
+        let q = detail.trimmingCharacters(in: .whitespaces).lowercased()
+        var seen: Set<String> = []
+        var output: [ClinicSuggestion] = []
+
+        let pastDetails: [String] = lifeStore.familyMembers
+            .flatMap { $0.childRecords }
+            .filter { ($0.type == .medical || $0.type == .vaccination) }
+            .map { $0.detail.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        for d in pastDetails {
+            if !q.isEmpty && !d.lowercased().contains(q) { continue }
+            let key = "past|\(d.lowercased())"
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            output.append(ClinicSuggestion(
+                id: key, source: .past, title: d, subtitle: "", completion: nil
+            ))
+        }
+
+        for c in clinicCompleter.results {
+            let key = "apple|\(c.title.lowercased())|\(c.subtitle.lowercased())"
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            output.append(ClinicSuggestion(
+                id: key, source: .apple, title: c.title, subtitle: c.subtitle, completion: c
+            ))
+        }
+
+        return output
+    }
+
+    private func applyClinicSuggestion(_ item: ClinicSuggestion) {
+        clinicSuppressNextUpdate = true
+        switch item.source {
+        case .past:
+            detail = item.title
+        case .apple:
+            // Apple Maps 帶「名稱 - 地址」較完整
+            if item.subtitle.isEmpty {
+                detail = item.title
+            } else {
+                detail = "\(item.title) - \(item.subtitle)"
+            }
+        }
+        clinicExpandedSuggestions = false
+        detailFieldFocused = false
     }
     private var educationFields: some View {
         Section("教育里程碑") { TextField("事件", text: $title); TextField("學校或單位（選填）", text: $detail) }
@@ -832,5 +1023,23 @@ struct ChildRecordEditorSheet: View {
         guard let e = editing, var member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { dismiss(); return }
         member.childRecords.removeAll { $0.id == e.id }
         lifeStore.update(member); dismiss()
+    }
+}
+
+// MARK: - 院所候選資料型別
+
+fileprivate struct ClinicSuggestion: Identifiable {
+    enum Source { case past, apple }
+    let id: String
+    let source: Source
+    let title: String
+    let subtitle: String
+    let completion: MKLocalSearchCompletion?
+
+    var iconName: String {
+        source == .past ? "clock.arrow.circlepath" : "cross.case.fill"
+    }
+    var iconColor: Color {
+        source == .past ? .green : .red
     }
 }
