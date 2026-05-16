@@ -57,6 +57,46 @@ private func nextRecurrenceDate(from date: Date, recurrence: Recurrence, calenda
     }
 }
 
+// MARK: - 信用卡支出展開（共用）
+
+/// 信用卡虛擬條目：每期一筆的金額與發生日（包含週期性固定支出自動展開後的每期）
+fileprivate struct CreditCardEntry {
+    let date: Date
+    let amount: Double
+    /// 真實的 Expense id（多期同 id 沒關係，僅供 deposit linkage 比對使用）
+    let expenseId: UUID
+}
+
+/// 把連結到指定信用卡的支出展開：
+/// - 一次性支出：直接帶入（date <= now 才算）
+/// - 週期性固定支出：從 exp.date 依 recurrence 展開到今天，每期一筆虛擬條目
+///   貸款類起始日視為撥款日，第一期從下一個週期開始（與 expandedFixedExpenseWithdrawals 一致）
+fileprivate func expandedCreditCardEntries(
+    forCard cardId: UUID,
+    expenses: [Expense]
+) -> [CreditCardEntry] {
+    let now = Date()
+    let cal = Calendar.current
+    var output: [CreditCardEntry] = []
+    for exp in expenses where exp.linkedCreditCardMilestoneId == cardId {
+        if exp.expenseType == .fixed, let recurrence = exp.recurrence {
+            var current = exp.date
+            if exp.fixedCategory == .loan {
+                current = nextRecurrenceDate(from: current, recurrence: recurrence, calendar: cal)
+            }
+            var idx = 0
+            while current <= now && idx < 1200 {
+                output.append(CreditCardEntry(date: current, amount: exp.amount, expenseId: exp.id))
+                idx += 1
+                current = nextRecurrenceDate(from: current, recurrence: recurrence, calendar: cal)
+            }
+        } else if exp.date <= now {
+            output.append(CreditCardEntry(date: exp.date, amount: exp.amount, expenseId: exp.id))
+        }
+    }
+    return output
+}
+
 /// 把連結到指定銀行 milestone 的「週期性」收入（月薪 / 年薪），
 /// 從建立日依 period 一路展開成每期一筆 BankDeposit（虛擬條目，
 /// 用於顯示與餘額計算）。已截至「今天」為止。
@@ -358,15 +398,13 @@ struct LifeFinanceView: View {
         for dep in expandedIncomeDeposits(for: ms.id, incomes: expenseStore.incomes) {
             totals[dep.currencyCode, default: 0] += dep.amount
         }
-        // 信用卡彙總扣款一律以 NT$ 計
+        // 信用卡彙總扣款一律以 NT$ 計（週期性固定支出依 recurrence 展開到今天）
         let cards = lifeStore.milestones.filter {
             $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
         }
         for card in cards {
-            let exps = expenseStore.expenses.filter {
-                $0.linkedCreditCardMilestoneId == card.id && $0.date <= now
-            }
-            for exp in exps { totals["NT$", default: 0] -= exp.amount }
+            let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
+            for entry in entries { totals["NT$", default: 0] -= entry.amount }
         }
         // 過濾掉淨額為 0 的幣別（避免單一幣別帳戶被誤判為混幣）
         let nonZero = totals.filter { $0.value != 0 }
@@ -694,29 +732,28 @@ struct FinanceCardView: View {
         return (real + aggregated + fixedExpanded + incomeExpanded).sorted { $0.date < $1.date }
     }
 
-    /// 將連結到本銀行的信用卡支出依月份彙總成虛擬 BankDeposit
+    /// 將連結到本銀行的信用卡支出依月份彙總成虛擬 BankDeposit。
+    /// 週期性固定支出（每月 / 每季 / 每年）會依 recurrence 自動展開到今天，
+    /// 例如「4/6 開始的月繳訂閱」會自動產生 4/6、5/6、6/6 …的扣款條目。
     private func aggregatedCreditCardWithdrawals() -> [BankDeposit] {
-        let now = Date()
         let cards = lifeStore.milestones.filter {
             $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == milestoneId
         }
         var result: [BankDeposit] = []
         for card in cards {
-            let cardExpenses = expenseStore.expenses.filter {
-                $0.linkedCreditCardMilestoneId == card.id && $0.date <= now
-            }
-            let groups = Dictionary(grouping: cardExpenses) { exp -> String in
+            let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
+            let groups = Dictionary(grouping: entries) { entry -> String in
                 let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
-                    for: exp.date,
+                    for: entry.date,
                     billingDay: card.billingDay,
                     paymentDay: card.paymentDay
                 )
                 let comps = Calendar.current.dateComponents([.year, .month], from: withdrawalDate)
                 return "\(comps.year ?? 0)-\(comps.month ?? 0)"
             }
-            for (_, exps) in groups {
-                let total = exps.reduce(0.0) { $0 + $1.amount }
-                let firstDate = exps.first?.date ?? Date()
+            for (_, list) in groups {
+                let total = list.reduce(0.0) { $0 + $1.amount }
+                let firstDate = list.first?.date ?? Date()
                 let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
                     for: firstDate,
                     billingDay: card.billingDay,
@@ -829,24 +866,24 @@ struct FinanceCardView: View {
     }
 
     private var creditCardMonthlyTotals: [CreditCardMonthlyTotal] {
-        let exps = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == milestoneId }
-        let groups = Dictionary(grouping: exps) { exp -> String in
+        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+        let groups = Dictionary(grouping: entries) { entry -> String in
             let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
-                for: exp.date,
+                for: entry.date,
                 billingDay: item.billingDay,
                 paymentDay: item.paymentDay
             )
             let comps = Calendar.current.dateComponents([.year, .month], from: withdrawalDate)
             return "\(comps.year ?? 0)-\(comps.month ?? 0)"
         }
-        return groups.compactMap { (key, exps) -> CreditCardMonthlyTotal? in
-            guard let firstExp = exps.first else { return nil }
+        return groups.compactMap { (key, list) -> CreditCardMonthlyTotal? in
+            guard let first = list.first else { return nil }
             let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
-                for: firstExp.date,
+                for: first.date,
                 billingDay: item.billingDay,
                 paymentDay: item.paymentDay
             )
-            let total = exps.reduce(0.0) { $0 + $1.amount }
+            let total = list.reduce(0.0) { $0 + $1.amount }
             return CreditCardMonthlyTotal(id: key, date: withdrawalDate, amount: total)
         }
         .sorted { $0.date < $1.date }
@@ -860,16 +897,16 @@ struct FinanceCardView: View {
     }
 
     private var creditCardDailyTotals: [CreditCardDailyTotal] {
-        let exps = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == milestoneId }
+        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
         let calendar = Calendar.current
-        let groups = Dictionary(grouping: exps) { exp -> String in
-            let comps = calendar.dateComponents([.year, .month, .day], from: exp.date)
+        let groups = Dictionary(grouping: entries) { entry -> String in
+            let comps = calendar.dateComponents([.year, .month, .day], from: entry.date)
             return "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
         }
-        return groups.compactMap { (key, exps) -> CreditCardDailyTotal? in
-            guard let firstExp = exps.first else { return nil }
-            let total = exps.reduce(0.0) { $0 + $1.amount }
-            return CreditCardDailyTotal(id: key, date: firstExp.date, amount: total)
+        return groups.compactMap { (key, list) -> CreditCardDailyTotal? in
+            guard let first = list.first else { return nil }
+            let total = list.reduce(0.0) { $0 + $1.amount }
+            return CreditCardDailyTotal(id: key, date: first.date, amount: total)
         }
         .sorted { $0.date < $1.date }
     }
@@ -1109,18 +1146,18 @@ struct FinanceCardView: View {
         !(item.bankDeposits ?? []).contains(where: { $0.id == dep.id })
     }
 
-    /// 根據聚合條目 id 比對產生它的信用卡
+    /// 根據聚合條目 id 比對產生它的信用卡（含週期性固定支出展開後的虛擬條目）
     private func matchingAggregatedCard(card: LifeMilestone, depositId: UUID) -> LifeMilestone? {
-        let cardExpenses = expenseStore.expenses.filter { $0.linkedCreditCardMilestoneId == card.id }
-        let groups = Dictionary(grouping: cardExpenses) { exp -> String in
+        let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
+        let groups = Dictionary(grouping: entries) { entry -> String in
             let date = LifeMilestone.creditCardWithdrawalDate(
-                for: exp.date, billingDay: card.billingDay, paymentDay: card.paymentDay
+                for: entry.date, billingDay: card.billingDay, paymentDay: card.paymentDay
             )
             let comps = Calendar.current.dateComponents([.year, .month], from: date)
             return "\(comps.year ?? 0)-\(comps.month ?? 0)"
         }
-        for (_, exps) in groups {
-            guard let first = exps.first else { continue }
+        for (_, list) in groups {
+            guard let first = list.first else { continue }
             let date = LifeMilestone.creditCardWithdrawalDate(
                 for: first.date, billingDay: card.billingDay, paymentDay: card.paymentDay
             )
