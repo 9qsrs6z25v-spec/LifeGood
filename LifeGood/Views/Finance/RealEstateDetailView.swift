@@ -1883,6 +1883,9 @@ fileprivate struct SwipeableRow<Content: View>: View {
 
     @State private var offset: CGFloat = 0
     @State private var settledOffset: CGFloat = 0
+    @State private var dragAxis: DragAxis? = nil
+
+    private enum DragAxis { case horizontal, vertical }
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -1923,21 +1926,34 @@ fileprivate struct SwipeableRow<Content: View>: View {
             content
                 .background(Color(.systemBackground))
                 .offset(x: offset)
-                .gesture(
-                    DragGesture(minimumDistance: 8)
+                // simultaneousGesture：讓外層 ScrollView 也收到垂直手勢；
+                // 我們只在「水平移動明顯大於垂直」時才接管，避免上下滑動被吃掉。
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 8, coordinateSpace: .local)
                         .onChanged { value in
+                            if dragAxis == nil {
+                                let dx = abs(value.translation.width)
+                                let dy = abs(value.translation.height)
+                                // 已經被滑開過就視為水平；否則需 dx 明顯大過 dy 才接管
+                                if offset != 0 || (dx > dy + 4 && dx > 10) {
+                                    dragAxis = .horizontal
+                                } else if dy > dx + 4 {
+                                    dragAxis = .vertical
+                                }
+                            }
+                            guard dragAxis == .horizontal else { return }
                             let proposed = settledOffset + value.translation.width
                             if proposed > 0 {
-                                // 不允許向右拉超過 0（過 0 加阻尼）
                                 offset = proposed / 4
                             } else if proposed < revealOffset {
-                                // 過頭加阻尼
                                 offset = revealOffset + (proposed - revealOffset) / 3
                             } else {
                                 offset = proposed
                             }
                         }
                         .onEnded { value in
+                            defer { dragAxis = nil }
+                            guard dragAxis == .horizontal else { return }
                             let predicted = settledOffset + value.predictedEndTranslation.width
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                                 offset = predicted < revealOffset / 2 ? revealOffset : 0
