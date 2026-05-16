@@ -45,6 +45,16 @@ struct RealEstateDetailView: View {
     @State private var variableSectionExpanded = false
     @State private var incomeSectionExpanded = false
 
+    // MARK: - 收合狀態（房屋資料分頁）
+    @State private var hiBasicExpanded = false
+    @State private var hiFloorsExpanded = false
+    /// 集錦預設展開（房屋資料分頁的主視覺）
+    @State private var hiGalleryExpanded = true
+    @State private var hiElevatorExpanded = false
+    @State private var hiUtilitiesExpanded = false
+    @State private var hiInsuranceExpanded = false
+    @State private var hiAssetsExpanded = false
+
     // MARK: - 直接從卡片新增支出項目
     @State private var addingMortgageItem = false
     @State private var addingPaidItem = false
@@ -578,80 +588,60 @@ struct RealEstateDetailView: View {
     private var houseInfoSection: some View {
         VStack(spacing: 0) {
             let hasProperty = estate.pingCount > 0 || !estate.landOwner.isEmpty
+            let hasDeeds = !estate.landDeeds.isEmpty || !estate.buildingDeeds.isEmpty
+            let hasBasic = hasProperty || hasDeeds
 
-            if hasProperty {
-                sectionHeader("房屋資料")
-                if estate.pingCount > 0 { infoRow("坪數", String(format: "%g 坪", estate.pingCount)) }
-                if !estate.landOwner.isEmpty { infoRow("所有權人", estate.landOwner) }
-            }
-
-            if !estate.landDeeds.isEmpty || !estate.buildingDeeds.isEmpty {
-                ForEach(Array(estate.landDeeds.enumerated()), id: \.element.id) { i, d in
-                    sectionHeader("土地權狀\(estate.landDeeds.count > 1 ? " \(i + 1)" : "")")
-                    if !d.situation.isEmpty { infoRow("坐落", d.situation) }
-                    if !d.number.isEmpty { infoRow("地號", d.number) }
-                    if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
-                }
-                ForEach(Array(estate.buildingDeeds.enumerated()), id: \.element.id) { i, d in
-                    sectionHeader("建物權狀\(estate.buildingDeeds.count > 1 ? " \(i + 1)" : "")")
-                    if !d.situation.isEmpty { infoRow("坐落", d.situation) }
-                    if !d.number.isEmpty { infoRow("建號", d.number) }
-                    if !d.address.isEmpty { infoRow("門牌", d.address) }
-                    if let cd = d.completionDate {
-                        infoRow("完工日", fmtDate(cd))
-                    }
-                    if !d.usage.isEmpty { infoRow("用途", d.usage) }
-                    if !d.annex.isEmpty { infoRow("附屬建物", d.annex) }
-                    if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
+            // 1. 房屋基本資料（坪數 / 所有權人 / 權狀）
+            if hasBasic {
+                collapsibleSection(
+                    title: "房屋基本資料",
+                    summary: basicSummary,
+                    summaryColor: .secondary,
+                    isExpanded: $hiBasicExpanded
+                ) {
+                    basicAndDeedsContent
                 }
             }
 
+            // 2. 樓層 3D
             if !estate.floors.isEmpty {
-                buildingVisualization
-            }
-
-            // 樓層下方：裝潢照片
-            renovationPhotosContent
-
-            if estate.hasElevator {
-                sectionHeaderWithAdd("電梯資料") { addingElevatorMaintenance = true }
-                if estate.elevatorMaintenances.isEmpty {
-                    HStack {
-                        Text("尚無保養記錄").font(.caption).foregroundStyle(.tertiary)
-                        Spacer()
-                    }
-                    .padding(.horizontal).padding(.vertical, 6)
-                } else {
-                    ForEach(estate.elevatorMaintenances) { m in
-                        Button { editingElevatorMaintenance = m } label: {
-                            HStack {
-                                Image(systemName: "wrench.and.screwdriver")
-                                    .font(.caption).foregroundStyle(.blue)
-                                Text(fmtDate(m.date))
-                                    .font(.subheadline).foregroundStyle(.primary)
-                                Spacer()
-                                if m.photoFileName != nil {
-                                    Button {
-                                        if let url = m.photoURL {
-                                            viewingPhotoURL = url
-                                        }
-                                    } label: {
-                                        Image(systemName: "photo.fill")
-                                            .font(.caption).foregroundStyle(.blue)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2).foregroundStyle(.tertiary)
-                            }
-                            .padding(.horizontal).padding(.vertical, 6)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
+                collapsibleSection(
+                    title: "樓層 3D",
+                    summary: "\(estate.floors.count) 層",
+                    summaryColor: Self.cyanColor,
+                    isExpanded: $hiFloorsExpanded
+                ) {
+                    buildingVisualization
                 }
             }
 
+            // 3. 房屋資料集錦（預設展開；右側 + Menu）
+            collapsibleSection(
+                title: "房屋資料集錦",
+                summary: gallerySummary,
+                summaryColor: .green,
+                isExpanded: $hiGalleryExpanded,
+                trailing: { galleryAddMenu }
+            ) {
+                renovationPhotosContent
+            }
+
+            // 4. 電梯資料
+            if estate.hasElevator {
+                collapsibleSection(
+                    title: "電梯資料",
+                    summary: estate.elevatorMaintenances.isEmpty
+                        ? "尚無紀錄"
+                        : "\(estate.elevatorMaintenances.count) 筆保養",
+                    summaryColor: .blue,
+                    isExpanded: $hiElevatorExpanded,
+                    trailing: { addButton { addingElevatorMaintenance = true } }
+                ) {
+                    elevatorContent
+                }
+            }
+
+            // 5. 水電瓦斯
             let hasUtilities = !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty
                 || !estate.electricityMeterNumber.isEmpty || !estate.electricityMeterOwner.isEmpty
                 || !estate.gasMeterNumber.isEmpty || !estate.gasMeterOwner.isEmpty || !estate.gasUserNumber.isEmpty
@@ -659,62 +649,47 @@ struct RealEstateDetailView: View {
                 || !estate.extraMeters.isEmpty
 
             if hasUtilities {
-                utilitiesContent
-                    .id(dataRefreshID)
+                collapsibleSection(
+                    title: "水電瓦斯",
+                    summary: utilitiesSummary,
+                    summaryColor: .teal,
+                    isExpanded: $hiUtilitiesExpanded,
+                    trailing: { addButton { addingUtilityPayment = true } }
+                ) {
+                    utilitiesContent
+                        .id(dataRefreshID)
+                }
             }
 
+            // 6. 保險項目
             if !estate.insuranceItems.isEmpty {
-                sectionHeader("保險項目")
-                ForEach(estate.insuranceItems) { ins in
-                    HStack {
-                        Image(systemName: "shield.fill").foregroundStyle(.indigo)
-                        Text(ins.policyNumber.isEmpty ? "未填險號" : ins.policyNumber)
-                            .font(.subheadline)
-                            .foregroundStyle(ins.policyNumber.isEmpty ? .tertiary : .primary)
-                        Spacer()
-                        if ins.amount > 0 {
-                            Text(fmt(ins.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
-                        }
-                    }
-                    .padding(.horizontal).padding(.vertical, 8)
+                let total = estate.insuranceItems.reduce(0.0) { $0 + $1.amount }
+                collapsibleSection(
+                    title: "保險項目 (\(estate.insuranceItems.count) 筆)",
+                    summary: total > 0 ? fmt(total) : nil,
+                    summaryColor: .orange,
+                    isExpanded: $hiInsuranceExpanded
+                ) {
+                    insuranceContent
                 }
             }
 
+            // 7. 房屋附屬資產
             if !estate.propertyAssets.isEmpty {
-                sectionHeader("房屋附屬資產")
-                ForEach(estate.propertyAssets) { asset in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(asset.category.rawValue)
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.1))
-                                .foregroundStyle(.orange)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                            Text(asset.name.isEmpty ? "—" : asset.name)
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            if asset.amount > 0 {
-                                Text(fmt(asset.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
-                            }
-                        }
-                        HStack(spacing: 10) {
-                            if !asset.brand.isEmpty {
-                                Text("廠牌 \(asset.brand)")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                            if !asset.floorLocation.isEmpty {
-                                Text("位置 \(asset.floorLocation)")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.horizontal).padding(.vertical, 8)
+                let total = estate.propertyAssets.reduce(0.0) { $0 + $1.amount }
+                collapsibleSection(
+                    title: "房屋附屬資產 (\(estate.propertyAssets.count) 筆)",
+                    summary: total > 0 ? fmt(total) : nil,
+                    summaryColor: .orange,
+                    isExpanded: $hiAssetsExpanded
+                ) {
+                    propertyAssetsContent
                 }
             }
 
-            let hasDeeds = !estate.landDeeds.isEmpty || !estate.buildingDeeds.isEmpty
-            if !hasProperty && !hasDeeds && estate.floors.isEmpty && !hasUtilities && estate.insuranceItems.isEmpty && estate.propertyAssets.isEmpty {
+            // 空狀態
+            if !hasBasic && estate.floors.isEmpty && !hasUtilities
+                && estate.insuranceItems.isEmpty && estate.propertyAssets.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.system(size: 36)).foregroundStyle(.tertiary)
@@ -729,6 +704,173 @@ struct RealEstateDetailView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
+    }
+
+    /// 通用的「+」按鈕（給 collapsibleSection trailing 用）
+    private func addButton(action: @escaping () -> Void) -> some View {
+        Button {
+            if subscription.isPremium { action() }
+            else { showPremiumAlert = true }
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .font(.subheadline).foregroundStyle(.green)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 房屋基本資料章節（坪數 + 所有權人 + 權狀）
+
+    private var basicSummary: String? {
+        var parts: [String] = []
+        if estate.pingCount > 0 { parts.append(String(format: "%g 坪", estate.pingCount)) }
+        let deedCount = estate.landDeeds.count + estate.buildingDeeds.count
+        if deedCount > 0 { parts.append("\(deedCount) 份權狀") }
+        return parts.isEmpty ? nil : parts.joined(separator: "・")
+    }
+
+    @ViewBuilder
+    private var basicAndDeedsContent: some View {
+        if estate.pingCount > 0 { infoRow("坪數", String(format: "%g 坪", estate.pingCount)) }
+        if !estate.landOwner.isEmpty { infoRow("所有權人", estate.landOwner) }
+        ForEach(Array(estate.landDeeds.enumerated()), id: \.element.id) { i, d in
+            sectionHeader("土地權狀\(estate.landDeeds.count > 1 ? " \(i + 1)" : "")")
+            if !d.situation.isEmpty { infoRow("坐落", d.situation) }
+            if !d.number.isEmpty { infoRow("地號", d.number) }
+            if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
+        }
+        ForEach(Array(estate.buildingDeeds.enumerated()), id: \.element.id) { i, d in
+            sectionHeader("建物權狀\(estate.buildingDeeds.count > 1 ? " \(i + 1)" : "")")
+            if !d.situation.isEmpty { infoRow("坐落", d.situation) }
+            if !d.number.isEmpty { infoRow("建號", d.number) }
+            if !d.address.isEmpty { infoRow("門牌", d.address) }
+            if let cd = d.completionDate {
+                infoRow("完工日", fmtDate(cd))
+            }
+            if !d.usage.isEmpty { infoRow("用途", d.usage) }
+            if !d.annex.isEmpty { infoRow("附屬建物", d.annex) }
+            if d.area > 0 { infoRow("面積", String(format: "%g ㎡", d.area)) }
+        }
+    }
+
+    // MARK: - 集錦摘要
+
+    private var gallerySummary: String? {
+        let photoCount = estate.renovationPhotos.reduce(0) { $0 + max(1, $1.photoFileNames.count) }
+        let expensePhotoCount = linkedExpensePhotos.reduce(0) { $0 + $1.photoFileNames.count }
+        let docCount = estate.documents.count
+        let utilityPhotoCount = estate.utilityPayments.filter { $0.photoFileName != nil }.count
+        let total = photoCount + expensePhotoCount + docCount + utilityPhotoCount
+        return total > 0 ? "\(total) 筆" : "尚無"
+    }
+
+    // MARK: - 電梯章節 content
+
+    @ViewBuilder
+    private var elevatorContent: some View {
+        if estate.elevatorMaintenances.isEmpty {
+            HStack {
+                Text("尚無保養記錄").font(.caption).foregroundStyle(.tertiary)
+                Spacer()
+            }
+            .padding(.horizontal).padding(.vertical, 6)
+        } else {
+            ForEach(estate.elevatorMaintenances) { m in
+                Button { editingElevatorMaintenance = m } label: {
+                    HStack {
+                        Image(systemName: "wrench.and.screwdriver")
+                            .font(.caption).foregroundStyle(.blue)
+                        Text(fmtDate(m.date))
+                            .font(.subheadline).foregroundStyle(.primary)
+                        Spacer()
+                        if m.photoFileName != nil {
+                            Button {
+                                if let url = m.photoURL {
+                                    viewingPhotoURL = url
+                                }
+                            } label: {
+                                Image(systemName: "photo.fill")
+                                    .font(.caption).foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal).padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: - 水電瓦斯摘要
+
+    private var utilitiesSummary: String? {
+        var parts: [String] = []
+        if !estate.utilityPayments.isEmpty {
+            parts.append("\(estate.utilityPayments.count) 筆繳費")
+        }
+        let meterCount = (estate.waterMeterNumber.isEmpty ? 0 : 1)
+            + (estate.electricityMeterNumber.isEmpty ? 0 : 1)
+            + (estate.gasMeterNumber.isEmpty ? 0 : 1)
+            + estate.extraMeters.count
+        if meterCount > 0 { parts.append("\(meterCount) 個表") }
+        return parts.isEmpty ? "尚無" : parts.joined(separator: "・")
+    }
+
+    // MARK: - 保險章節 content
+
+    @ViewBuilder
+    private var insuranceContent: some View {
+        ForEach(estate.insuranceItems) { ins in
+            HStack {
+                Image(systemName: "shield.fill").foregroundStyle(.indigo)
+                Text(ins.policyNumber.isEmpty ? "未填險號" : ins.policyNumber)
+                    .font(.subheadline)
+                    .foregroundStyle(ins.policyNumber.isEmpty ? .tertiary : .primary)
+                Spacer()
+                if ins.amount > 0 {
+                    Text(fmt(ins.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
+                }
+            }
+            .padding(.horizontal).padding(.vertical, 8)
+        }
+    }
+
+    // MARK: - 房屋附屬資產 content
+
+    @ViewBuilder
+    private var propertyAssetsContent: some View {
+        ForEach(estate.propertyAssets) { asset in
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(asset.category.rawValue)
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.1))
+                        .foregroundStyle(.orange)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    Text(asset.name.isEmpty ? "—" : asset.name)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if asset.amount > 0 {
+                        Text(fmt(asset.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
+                    }
+                }
+                HStack(spacing: 10) {
+                    if !asset.brand.isEmpty {
+                        Text("廠牌 \(asset.brand)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if !asset.floorLocation.isEmpty {
+                        Text("位置 \(asset.floorLocation)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal).padding(.vertical, 8)
+        }
     }
 
     // MARK: - 建物立體圖
@@ -769,37 +911,33 @@ struct RealEstateDetailView: View {
 
     // MARK: - 房屋資料集錦（裝潢照片 + 關聯支出照片 + PDF / PPT / Excel 等文件）
 
-    /// 集錦區塊的 header：含「+」Menu（拍照 / 批次多選 / 上傳文件）
-    private var renovationSectionHeader: some View {
-        HStack {
-            Text("房屋資料集錦").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Spacer()
-            Menu {
-                Button {
-                    if subscription.isPremium { addingRenovationPhoto = true }
-                    else { showPremiumAlert = true }
-                } label: {
-                    Label("新增單張照片（含描述）", systemImage: "photo")
-                }
-                Button {
-                    if subscription.isPremium { showBulkRenovationPicker = true }
-                    else { showPremiumAlert = true }
-                } label: {
-                    Label("批次匯入多張照片", systemImage: "photo.on.rectangle.angled")
-                }
-                Divider()
-                Button {
-                    if subscription.isPremium { showDocumentPicker = true }
-                    else { showPremiumAlert = true }
-                } label: {
-                    Label("上傳文件 (PDF / PPT / Excel…)", systemImage: "doc.badge.plus")
-                }
+    /// 集錦章節右側「+」Menu（給 collapsibleSection trailing 用）
+    private var galleryAddMenu: some View {
+        Menu {
+            Button {
+                if subscription.isPremium { addingRenovationPhoto = true }
+                else { showPremiumAlert = true }
             } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.subheadline).foregroundStyle(.green)
+                Label("新增單張照片（含描述）", systemImage: "photo")
             }
+            Button {
+                if subscription.isPremium { showBulkRenovationPicker = true }
+                else { showPremiumAlert = true }
+            } label: {
+                Label("批次匯入多張照片", systemImage: "photo.on.rectangle.angled")
+            }
+            Divider()
+            Button {
+                if subscription.isPremium { showDocumentPicker = true }
+                else { showPremiumAlert = true }
+            } label: {
+                Label("上傳文件 (PDF / PPT / Excel…)", systemImage: "doc.badge.plus")
+            }
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .font(.subheadline).foregroundStyle(.green)
         }
-        .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+        .buttonStyle(.plain)
         .photosPicker(isPresented: $showBulkRenovationPicker,
                       selection: $bulkRenovationPickerItems,
                       maxSelectionCount: 0,
@@ -844,16 +982,19 @@ struct RealEstateDetailView: View {
 
     @ViewBuilder
     private var renovationPhotosContent: some View {
-        renovationSectionHeader
-
         let renovationItems = estate.renovationPhotos.map { HousePhotoItem.renovation($0) }
         let expenseItems = linkedExpensePhotos.map { HousePhotoItem.expense($0) }
         let documentItems = estate.documents.map { HousePhotoItem.document($0) }
-        let allItems = (renovationItems + expenseItems + documentItems).sorted { $0.date > $1.date }
+        let utilityItems = estate.utilityPayments
+            .filter { $0.photoFileName != nil }
+            .map { HousePhotoItem.utility($0) }
+        let allItems = (renovationItems + expenseItems + documentItems + utilityItems)
+            .sorted { $0.date > $1.date }
 
         if allItems.isEmpty {
             HStack {
-                Text("尚無房屋資料").font(.caption).foregroundStyle(.tertiary)
+                Text("尚無房屋資料（裝潢照片 / 關聯支出 / 文件 / 水電瓦斯收據）")
+                    .font(.caption).foregroundStyle(.tertiary)
                 Spacer()
             }
             .padding(.horizontal).padding(.vertical, 6)
@@ -880,6 +1021,13 @@ struct RealEstateDetailView: View {
                                     deleteDocument(d)
                                 } label: {
                                     Label("刪除文件", systemImage: "trash")
+                                }
+                            }
+                            if case .utility(let u) = item.kind {
+                                Button {
+                                    editingUtilityPayment = u
+                                } label: {
+                                    Label("編輯繳費紀錄", systemImage: "pencil")
                                 }
                             }
                         }
@@ -924,6 +1072,22 @@ struct RealEstateDetailView: View {
             )
         case .document(let d):
             previewingDocumentURL = IdentifiableURL(url: d.fileURL)
+        case .utility(let u):
+            guard let name = u.photoFileName else {
+                editingUtilityPayment = u
+                return
+            }
+            let url = UtilityPayment.photosDirectory.appendingPathComponent(name)
+            let amountText: String = u.amount > 0 ? fmt(u.amount) : ""
+            let noteParts = [amountText, u.note.trimmingCharacters(in: .whitespaces)]
+                .filter { !$0.isEmpty }
+            cutePhotoDraft = CutePhotoDraft(
+                urls: [url],
+                title: "\(u.type.rawValue) 繳費",
+                note: noteParts.joined(separator: "・"),
+                date: u.date,
+                kind: .utility(u.type)
+            )
         }
     }
 
@@ -1174,8 +1338,6 @@ struct RealEstateDetailView: View {
 
     @ViewBuilder
     private var utilitiesContent: some View {
-        sectionHeaderWithAdd("水電瓦斯") { addingUtilityPayment = true }
-
         // 水（主表）
         if !estate.waterMeterNumber.isEmpty || !estate.waterMeterOwner.isEmpty {
             utilityRow(icon: "drop.fill", color: .blue,
@@ -2217,12 +2379,14 @@ fileprivate enum HousePhotoItem: Identifiable {
     case renovation(RenovationPhoto)
     case expense(Expense)
     case document(RealEstateDocument)
+    case utility(UtilityPayment)
 
     var id: String {
         switch self {
         case .renovation(let p): return "r-\(p.id.uuidString)"
         case .expense(let e): return "e-\(e.id.uuidString)"
         case .document(let d): return "d-\(d.id.uuidString)"
+        case .utility(let u): return "u-\(u.id.uuidString)"
         }
     }
 
@@ -2233,6 +2397,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .renovation(let p): return p.date
         case .expense(let e): return e.date
         case .document(let d): return d.date
+        case .utility(let u): return u.date
         }
     }
 
@@ -2250,6 +2415,8 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .document(let d):
             if !d.displayName.isEmpty { return d.displayName }
             return "文件"
+        case .utility(let u):
+            return "\(u.type.rawValue) 收據"
         }
     }
 
@@ -2257,7 +2424,8 @@ fileprivate enum HousePhotoItem: Identifiable {
         switch self {
         case .renovation(let p): return p.photoFileNames
         case .expense(let e): return e.photoFileNames
-        case .document: return []   // 文件不是圖片堆疊
+        case .document: return []
+        case .utility(let u): return u.photoFileName.map { [$0] } ?? []
         }
     }
 
@@ -2271,6 +2439,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .renovation: return RenovationPhoto.photoURL(for: name)
         case .expense: return Expense.photoURL(for: name)
         case .document(let d): return d.fileURL
+        case .utility: return UtilityPayment.photosDirectory.appendingPathComponent(name)
         }
     }
 
@@ -2280,6 +2449,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .renovation: return "paintbrush.fill"
         case .expense: return "tag.fill"
         case .document(let d): return d.icon
+        case .utility(let u): return u.type.icon
         }
     }
 
@@ -2288,6 +2458,12 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .renovation: return .blue
         case .expense: return .orange
         case .document(let d): return d.iconColor
+        case .utility(let u):
+            switch u.type {
+            case .water: return .blue
+            case .electricity: return .yellow
+            case .gas: return .orange
+            }
         }
     }
 }
@@ -2385,23 +2561,34 @@ struct ExpensePhotoStackViewer: View {
 
 struct CutePhotoDraft: Identifiable {
     enum Kind {
-        case renovation, expense
+        case renovation
+        case expense
+        case utility(UtilityType)
+
         var label: String {
             switch self {
             case .renovation: return "裝潢紀錄"
             case .expense: return "支出照片"
+            case .utility(let t): return "\(t.rawValue) 收據"
             }
         }
         var icon: String {
             switch self {
             case .renovation: return "paintbrush.fill"
             case .expense: return "tag.fill"
+            case .utility(let t): return t.icon
             }
         }
         var accent: Color {
             switch self {
             case .renovation: return Color(red: 0.82, green: 0.55, blue: 0.92)   // 粉紫
             case .expense:    return Color(red: 0.98, green: 0.62, blue: 0.45)   // 蜜桃
+            case .utility(let t):
+                switch t {
+                case .water:       return Color(red: 0.40, green: 0.70, blue: 0.95)   // 海藍
+                case .electricity: return Color(red: 0.98, green: 0.78, blue: 0.30)   // 暖黃
+                case .gas:         return Color(red: 0.96, green: 0.55, blue: 0.35)   // 蜜橘
+                }
             }
         }
     }
