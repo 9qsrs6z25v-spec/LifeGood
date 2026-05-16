@@ -25,10 +25,8 @@ struct RealEstateDetailView: View {
     @State private var showBulkRenovationPicker = false
     /// 批次匯入後等待輸入日期/標題的暫存檔名（傳給 RenovationPhotoEditor）
     @State private var pendingBulkPhotoNames: [String]? = nil
-    /// 點開哪一張裝潢紀錄展開大圖瀏覽
-    @State private var expandingRenovationStack: RenovationPhoto?
-    /// 點開哪一筆支出的照片展開大圖瀏覽
-    @State private var expandingExpensePhotos: Expense?
+    /// 房屋資料集錦中點任何一張照片，都用這個 cute viewer 呈現
+    @State private var cutePhotoDraft: CutePhotoDraft?
     /// 文件上傳 picker
     @State private var showDocumentPicker = false
     /// 點擊文件後 QuickLook 預覽
@@ -149,11 +147,8 @@ struct RealEstateDetailView: View {
                     RenovationPhotoEditor(estateId: estateId, editing: nil, preloadedFileNames: names)
                 }
             }
-            .sheet(item: $expandingRenovationStack) { p in
-                RenovationStackViewer(record: p)
-            }
-            .sheet(item: $expandingExpensePhotos) { e in
-                ExpensePhotoStackViewer(expense: e)
+            .sheet(item: $cutePhotoDraft) { draft in
+                CutePhotoViewer(draft: draft)
             }
             .sheet(item: $previewingDocumentURL) { wrapper in
                 DocumentQuickLookView(url: wrapper.url)
@@ -899,14 +894,34 @@ struct RealEstateDetailView: View {
     private func handleHousePhotoTap(_ item: HousePhotoItem) {
         switch item.kind {
         case .renovation(let p):
-            if p.photoFileNames.count >= 2 { expandingRenovationStack = p }
-            else { editingRenovationPhoto = p }
-        case .expense(let e):
-            if e.photoFileNames.count >= 2 {
-                expandingExpensePhotos = e
-            } else if let name = e.photoFileNames.first {
-                viewingPhotoURL = Expense.photoURL(for: name)
+            guard !p.photoFileNames.isEmpty else {
+                editingRenovationPhoto = p
+                return
             }
+            let urls = p.photoFileNames.map { RenovationPhoto.photoURL(for: $0) }
+            let title = p.title.isEmpty ? "裝潢紀錄" : p.title
+            cutePhotoDraft = CutePhotoDraft(
+                urls: urls,
+                title: title,
+                note: p.note,
+                date: p.date,
+                kind: .renovation
+            )
+        case .expense(let e):
+            guard !e.photoFileNames.isEmpty else { return }
+            let urls = e.photoFileNames.map { Expense.photoURL(for: $0) }
+            let trimmedNote = e.note.trimmingCharacters(in: .whitespaces)
+            let title: String = {
+                if !trimmedNote.isEmpty { return trimmedNote }
+                return e.title.isEmpty ? "支出照片" : e.title
+            }()
+            cutePhotoDraft = CutePhotoDraft(
+                urls: urls,
+                title: title,
+                note: (trimmedNote.isEmpty || trimmedNote == title) ? "" : trimmedNote,
+                date: e.date,
+                kind: .expense
+            )
         case .document(let d):
             previewingDocumentURL = IdentifiableURL(url: d.fileURL)
         }
@@ -2363,6 +2378,282 @@ struct ExpensePhotoStackViewer: View {
 
     private func fmtDate(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+    }
+}
+
+// MARK: - 房屋資料集錦：可愛風照片瀏覽器
+
+struct CutePhotoDraft: Identifiable {
+    enum Kind {
+        case renovation, expense
+        var label: String {
+            switch self {
+            case .renovation: return "裝潢紀錄"
+            case .expense: return "支出照片"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .renovation: return "paintbrush.fill"
+            case .expense: return "tag.fill"
+            }
+        }
+        var accent: Color {
+            switch self {
+            case .renovation: return Color(red: 0.82, green: 0.55, blue: 0.92)   // 粉紫
+            case .expense:    return Color(red: 0.98, green: 0.62, blue: 0.45)   // 蜜桃
+            }
+        }
+    }
+
+    let id = UUID()
+    let urls: [URL]
+    let title: String
+    let note: String
+    let date: Date
+    let kind: Kind
+}
+
+/// 可愛風照片瀏覽器：粉色漸層背景 + 圓角描邊照片 + 自訂頁碼點 + 友善資訊卡。
+/// 支援雙指縮放（內含 ZoomableImageView）+ 多張左右滑動切換。
+struct CutePhotoViewer: View {
+    let draft: CutePhotoDraft
+    @Environment(\.dismiss) private var dismiss
+    @State private var currentIndex: Int = 0
+
+    var body: some View {
+        ZStack {
+            backgroundGradient
+            decorativeOrbs
+
+            VStack(spacing: 0) {
+                topBar
+                Spacer(minLength: 4)
+                photoArea
+                Spacer(minLength: 4)
+                if draft.urls.count > 1 {
+                    pageDots
+                        .padding(.bottom, 4)
+                }
+                infoCard
+            }
+        }
+        .presentationDragIndicator(.visible)
+    }
+
+    // MARK: 背景
+
+    private var backgroundGradient: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 1.00, green: 0.94, blue: 0.93),    // 淡桃
+                Color(red: 1.00, green: 0.90, blue: 0.94),    // 淡粉
+                Color(red: 0.94, green: 0.90, blue: 1.00)     // 淡紫
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+
+    /// 角落漂浮的兩顆柔光圓球，讓畫面更活潑
+    private var decorativeOrbs: some View {
+        GeometryReader { geo in
+            ZStack {
+                Circle()
+                    .fill(draft.kind.accent.opacity(0.18))
+                    .frame(width: 220, height: 220)
+                    .blur(radius: 50)
+                    .offset(x: -geo.size.width * 0.35, y: -geo.size.height * 0.32)
+                Circle()
+                    .fill(Color.pink.opacity(0.12))
+                    .frame(width: 280, height: 280)
+                    .blur(radius: 60)
+                    .offset(x: geo.size.width * 0.32, y: geo.size.height * 0.18)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+
+    // MARK: 上方 chrome
+
+    private var topBar: some View {
+        HStack {
+            // 來源膠囊
+            HStack(spacing: 6) {
+                Image(systemName: draft.kind.icon)
+                    .font(.caption.weight(.bold))
+                Text(draft.kind.label)
+                    .font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(LinearGradient(
+                        colors: [draft.kind.accent, draft.kind.accent.opacity(0.75)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+            )
+            .shadow(color: draft.kind.accent.opacity(0.35), radius: 6, y: 3)
+
+            Spacer()
+
+            // 關閉按鈕
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(draft.kind.accent)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(.ultraThinMaterial))
+                    .overlay(Circle().stroke(draft.kind.accent.opacity(0.25), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 14)
+    }
+
+    // MARK: 主照片區
+
+    private var photoArea: some View {
+        TabView(selection: $currentIndex) {
+            ForEach(Array(draft.urls.enumerated()), id: \.offset) { idx, url in
+                photoCard(url: url)
+                    .tag(idx)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+    }
+
+    private func photoCard(url: URL) -> some View {
+        Group {
+            if let img = UIImage(contentsOfFile: url.path) {
+                ZoomableImageView(image: img)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Color.white, lineWidth: 4)
+                    )
+                    .shadow(color: Color.black.opacity(0.15), radius: 14, y: 6)
+            } else {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        VStack(spacing: 10) {
+                            Image(systemName: "photo.fill.on.rectangle.fill")
+                                .font(.system(size: 40))
+                                .foregroundStyle(draft.kind.accent.opacity(0.6))
+                            Text("找不到照片")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Color.white, lineWidth: 4)
+                    )
+                    .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
+            }
+        }
+    }
+
+    // MARK: 自訂頁碼點
+
+    private var pageDots: some View {
+        HStack(spacing: 6) {
+            ForEach(0..<draft.urls.count, id: \.self) { idx in
+                Capsule()
+                    .fill(idx == currentIndex
+                          ? draft.kind.accent
+                          : Color.gray.opacity(0.3))
+                    .frame(
+                        width: idx == currentIndex ? 18 : 6,
+                        height: 6
+                    )
+                    .animation(.spring(response: 0.32, dampingFraction: 0.7),
+                               value: currentIndex)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 6)
+        .background(Capsule().fill(.ultraThinMaterial))
+        .overlay(Capsule().stroke(Color.white.opacity(0.6), lineWidth: 0.5))
+    }
+
+    // MARK: 底部資訊卡
+
+    private var infoCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("📸")
+                    .font(.title3)
+                Text(draft.title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.25, green: 0.18, blue: 0.35))
+                    .lineLimit(2)
+                Spacer()
+                if draft.urls.count > 1 {
+                    Text("\(currentIndex + 1) / \(draft.urls.count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(draft.kind.accent)
+                        .padding(.horizontal, 9).padding(.vertical, 3)
+                        .background(
+                            Capsule().fill(draft.kind.accent.opacity(0.15))
+                        )
+                }
+            }
+            if !draft.note.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Text("💬")
+                    Text(draft.note)
+                        .font(.subheadline)
+                        .foregroundStyle(Color(red: 0.35, green: 0.3, blue: 0.45))
+                        .lineLimit(4)
+                }
+            }
+            HStack(spacing: 6) {
+                Text("📅")
+                Text(fmtDate(draft.date))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.white.opacity(0.85))
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(
+                        LinearGradient(colors: [
+                            Color.white.opacity(0.6),
+                            draft.kind.accent.opacity(0.08)
+                        ], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+            }
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(Color.white.opacity(0.7), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 14, y: -2)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 18)
+    }
+
+    private func fmtDate(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy 年 M 月 d 日"
+        f.locale = Locale(identifier: "zh_TW")
+        return f.string(from: d)
     }
 }
 
