@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - 幣別
 
@@ -819,6 +820,102 @@ struct RenovationPhoto: Identifiable, Codable {
     }
 }
 
+// MARK: - 房屋資料文件（PDF / PPT / Excel 等）
+
+struct RealEstateDocument: Identifiable, Codable {
+    let id: UUID
+    /// 儲存於本機的檔名（`{uuid}.{ext}`）
+    var fileName: String
+    /// 使用者看到的原始檔名（含副檔名）
+    var displayName: String
+    var date: Date
+    var note: String
+
+    init(id: UUID = UUID(), fileName: String = "",
+         displayName: String = "", date: Date = Date(),
+         note: String = "") {
+        self.id = id
+        self.fileName = fileName
+        self.displayName = displayName
+        self.date = date
+        self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        fileName = (try? c.decode(String.self, forKey: .fileName)) ?? ""
+        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? ""
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, fileName, displayName, date, note
+    }
+
+    static var folderURL: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("RealEstateDocuments", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    var fileURL: URL { Self.folderURL.appendingPathComponent(fileName) }
+
+    static func importDocument(from source: URL, id: UUID = UUID()) -> RealEstateDocument? {
+        let didAccess = source.startAccessingSecurityScopedResource()
+        defer { if didAccess { source.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: source) else { return nil }
+        let ext = source.pathExtension.lowercased()
+        let storedName = ext.isEmpty ? id.uuidString : "\(id.uuidString).\(ext)"
+        let dst = folderURL.appendingPathComponent(storedName)
+        do {
+            try data.write(to: dst)
+        } catch {
+            return nil
+        }
+        PhotoCloudSync.upload(directory: "RealEstateDocuments", fileName: storedName)
+        return RealEstateDocument(
+            id: id,
+            fileName: storedName,
+            displayName: source.lastPathComponent,
+            date: Date()
+        )
+    }
+
+    static func deleteDocument(_ fileName: String) {
+        let url = folderURL.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "RealEstateDocuments", fileName: fileName)
+    }
+
+    /// 依副檔名選 icon / 顏色
+    var icon: String {
+        switch (fileName as NSString).pathExtension.lowercased() {
+        case "pdf": return "doc.richtext.fill"
+        case "doc", "docx", "pages": return "doc.text.fill"
+        case "xls", "xlsx", "csv", "numbers": return "tablecells.fill"
+        case "ppt", "pptx", "key", "keynote": return "rectangle.on.rectangle.angled.fill"
+        case "txt", "md", "rtf": return "doc.plaintext.fill"
+        case "zip", "rar", "7z": return "doc.zipper"
+        case "jpg", "jpeg", "png", "heic", "heif", "gif": return "photo.fill"
+        default: return "doc.fill"
+        }
+    }
+
+    var iconColor: Color {
+        switch (fileName as NSString).pathExtension.lowercased() {
+        case "pdf": return .red
+        case "doc", "docx", "pages": return .blue
+        case "xls", "xlsx", "csv", "numbers": return .green
+        case "ppt", "pptx", "key", "keynote": return .orange
+        case "txt", "md", "rtf": return .gray
+        default: return .secondary
+        }
+    }
+}
+
 // MARK: - 土地權狀
 
 struct LandDeed: Identifiable, Codable {
@@ -956,6 +1053,7 @@ struct RealEstate: Identifiable, Codable {
     var utilityPayments: [UtilityPayment]               // 水電瓦斯繳費紀錄
     var extraMeters: [UtilityMeter]                     // 額外的水/電/瓦斯表（主表以單一欄位存放）
     var renovationPhotos: [RenovationPhoto]             // 裝潢照片（接在樓層資訊章節下）
+    var documents: [RealEstateDocument]                 // PDF / PPT / Excel 等文件
 
     init(
         id: UUID = UUID(),
@@ -1006,7 +1104,8 @@ struct RealEstate: Identifiable, Codable {
         propertyAssets: [RealEstatePropertyAsset] = [],
         utilityPayments: [UtilityPayment] = [],
         extraMeters: [UtilityMeter] = [],
-        renovationPhotos: [RenovationPhoto] = []
+        renovationPhotos: [RenovationPhoto] = [],
+        documents: [RealEstateDocument] = []
     ) {
         self.id = id
         self.name = name
@@ -1057,6 +1156,7 @@ struct RealEstate: Identifiable, Codable {
         self.utilityPayments = utilityPayments
         self.extraMeters = extraMeters
         self.renovationPhotos = renovationPhotos
+        self.documents = documents
     }
 
     // MARK: - 向下相容解碼
@@ -1119,6 +1219,7 @@ struct RealEstate: Identifiable, Codable {
         utilityPayments = (try? c.decode([UtilityPayment].self, forKey: .utilityPayments)) ?? []
         extraMeters = (try? c.decode([UtilityMeter].self, forKey: .extraMeters)) ?? []
         renovationPhotos = (try? c.decode([RenovationPhoto].self, forKey: .renovationPhotos)) ?? []
+        documents = (try? c.decode([RealEstateDocument].self, forKey: .documents)) ?? []
 
         // 向下相容：舊版有 monthlyMortgage 欄位，轉為 mortgageItems
         if mortgageItems.isEmpty,
@@ -1136,7 +1237,7 @@ struct RealEstate: Identifiable, Codable {
         case totalFloors, fromFloor, toFloor, floors
         case waterMeterNumber, waterMeterOwner, electricityMeterNumber, electricityMeterOwner
         case gasMeterNumber, gasMeterOwner, gasUserNumber, insuranceItems, propertyAssets
-        case utilityPayments, extraMeters, renovationPhotos
+        case utilityPayments, extraMeters, renovationPhotos, documents
         case monthlyMortgage // 舊版欄位，僅用於解碼
     }
 
@@ -1191,6 +1292,7 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(utilityPayments, forKey: .utilityPayments)
         try c.encode(extraMeters, forKey: .extraMeters)
         try c.encode(renovationPhotos, forKey: .renovationPhotos)
+        try c.encode(documents, forKey: .documents)
     }
 
     /// 顯示用的完整地點（縣市 + 地址）

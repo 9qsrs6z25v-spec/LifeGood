@@ -1,5 +1,7 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
+import QuickLook
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -27,6 +29,10 @@ struct RealEstateDetailView: View {
     @State private var expandingRenovationStack: RenovationPhoto?
     /// 點開哪一筆支出的照片展開大圖瀏覽
     @State private var expandingExpensePhotos: Expense?
+    /// 文件上傳 picker
+    @State private var showDocumentPicker = false
+    /// 點擊文件後 QuickLook 預覽
+    @State private var previewingDocumentURL: IdentifiableURL?
     @State private var showPremiumAlert = false
     /// 已展開備註的變動支出項目 IDs
     @State private var expandedVariableExpenseIds: Set<UUID> = []
@@ -148,6 +154,9 @@ struct RealEstateDetailView: View {
             }
             .sheet(item: $expandingExpensePhotos) { e in
                 ExpensePhotoStackViewer(expense: e)
+            }
+            .sheet(item: $previewingDocumentURL) { wrapper in
+                DocumentQuickLookView(url: wrapper.url)
             }
             .sheet(isPresented: $addingMortgageItem, onDismiss: { dataRefreshID = UUID() }) {
                 AddExpenseView(
@@ -763,25 +772,32 @@ struct RealEstateDetailView: View {
         .padding(.horizontal).padding(.vertical, 8)
     }
 
-    // MARK: - 房屋照片集錦（裝潢 + 關聯支出照片）
+    // MARK: - 房屋資料集錦（裝潢照片 + 關聯支出照片 + PDF / PPT / Excel 等文件）
 
-    /// 照片集錦區塊的 header：含「+」Menu（單張詳細 / 批次多選）
+    /// 集錦區塊的 header：含「+」Menu（拍照 / 批次多選 / 上傳文件）
     private var renovationSectionHeader: some View {
         HStack {
-            Text("房屋照片集錦").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text("房屋資料集錦").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             Spacer()
             Menu {
                 Button {
                     if subscription.isPremium { addingRenovationPhoto = true }
                     else { showPremiumAlert = true }
                 } label: {
-                    Label("新增單張（含描述）", systemImage: "photo")
+                    Label("新增單張照片（含描述）", systemImage: "photo")
                 }
                 Button {
                     if subscription.isPremium { showBulkRenovationPicker = true }
                     else { showPremiumAlert = true }
                 } label: {
-                    Label("批次匯入多張", systemImage: "photo.on.rectangle.angled")
+                    Label("批次匯入多張照片", systemImage: "photo.on.rectangle.angled")
+                }
+                Divider()
+                Button {
+                    if subscription.isPremium { showDocumentPicker = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Label("上傳文件 (PDF / PPT / Excel…)", systemImage: "doc.badge.plus")
                 }
             } label: {
                 Image(systemName: "plus.circle.fill")
@@ -796,6 +812,18 @@ struct RealEstateDetailView: View {
         .onChange(of: bulkRenovationPickerItems) { _, items in
             guard !items.isEmpty else { return }
             Task { await importBulkRenovationPhotos(items) }
+        }
+        .fileImporter(
+            isPresented: $showDocumentPicker,
+            allowedContentTypes: [
+                .pdf, .presentation, .spreadsheet, .text, .commaSeparatedText,
+                .plainText, .rtf, .image, .data
+            ],
+            allowsMultipleSelection: true
+        ) { result in
+            if case .success(let urls) = result {
+                importDocuments(urls)
+            }
         }
     }
 
@@ -825,11 +853,12 @@ struct RealEstateDetailView: View {
 
         let renovationItems = estate.renovationPhotos.map { HousePhotoItem.renovation($0) }
         let expenseItems = linkedExpensePhotos.map { HousePhotoItem.expense($0) }
-        let allItems = (renovationItems + expenseItems).sorted { $0.date > $1.date }
+        let documentItems = estate.documents.map { HousePhotoItem.document($0) }
+        let allItems = (renovationItems + expenseItems + documentItems).sorted { $0.date > $1.date }
 
         if allItems.isEmpty {
             HStack {
-                Text("尚無房屋照片").font(.caption).foregroundStyle(.tertiary)
+                Text("尚無房屋資料").font(.caption).foregroundStyle(.tertiary)
                 Spacer()
             }
             .padding(.horizontal).padding(.vertical, 6)
@@ -849,6 +878,13 @@ struct RealEstateDetailView: View {
                                     editingRenovationPhoto = p
                                 } label: {
                                     Label("編輯資訊", systemImage: "pencil")
+                                }
+                            }
+                            if case .document(let d) = item.kind {
+                                Button(role: .destructive) {
+                                    deleteDocument(d)
+                                } label: {
+                                    Label("刪除文件", systemImage: "trash")
                                 }
                             }
                         }
@@ -871,12 +907,16 @@ struct RealEstateDetailView: View {
             } else if let name = e.photoFileNames.first {
                 viewingPhotoURL = Expense.photoURL(for: name)
             }
+        case .document(let d):
+            previewingDocumentURL = IdentifiableURL(url: d.fileURL)
         }
     }
 
     private func housePhotoCard(_ item: HousePhotoItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if item.fileNames.count >= 2 {
+            if case .document(let d) = item.kind {
+                documentThumbnail(for: d)
+            } else if item.fileNames.count >= 2 {
                 stackedHousePhotos(fileNames: item.fileNames, urlFor: item.urlForFileName)
             } else if let url = item.primaryURL {
                 renovationSinglePhoto(url: url)
@@ -897,6 +937,53 @@ struct RealEstateDetailView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(8)
+    }
+
+    /// 文件縮圖卡片：大張的彩色 icon + 副檔名標籤，與照片卡片同尺寸
+    private func documentThumbnail(for doc: RealEstateDocument) -> some View {
+        let ext = (doc.fileName as NSString).pathExtension.uppercased()
+        return ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(doc.iconColor.opacity(0.12))
+                .frame(width: 130, height: 100)
+            VStack(spacing: 6) {
+                Image(systemName: doc.icon)
+                    .font(.system(size: 38))
+                    .foregroundStyle(doc.iconColor)
+                if !ext.isEmpty {
+                    Text(ext)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(doc.iconColor)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(doc.iconColor.opacity(0.18))
+                        .clipShape(Capsule())
+                }
+            }
+            .frame(width: 130, height: 100)
+        }
+        .frame(width: 130, height: 100)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - 文件匯入 / 刪除
+
+    private func importDocuments(_ urls: [URL]) {
+        guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        for url in urls {
+            if let doc = RealEstateDocument.importDocument(from: url) {
+                estate.documents.append(doc)
+            }
+        }
+        store.update(estate)
+        dataRefreshID = UUID()
+    }
+
+    private func deleteDocument(_ doc: RealEstateDocument) {
+        guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        RealEstateDocument.deleteDocument(doc.fileName)
+        estate.documents.removeAll { $0.id == doc.id }
+        store.update(estate)
+        dataRefreshID = UUID()
     }
 
     /// 通用堆疊照片視圖：用一個 urlFor 閉包來支援 RenovationPhoto / Expense 兩種來源
@@ -2114,11 +2201,13 @@ struct UtilityPaymentEditor: View {
 fileprivate enum HousePhotoItem: Identifiable {
     case renovation(RenovationPhoto)
     case expense(Expense)
+    case document(RealEstateDocument)
 
     var id: String {
         switch self {
         case .renovation(let p): return "r-\(p.id.uuidString)"
         case .expense(let e): return "e-\(e.id.uuidString)"
+        case .document(let d): return "d-\(d.id.uuidString)"
         }
     }
 
@@ -2128,12 +2217,11 @@ fileprivate enum HousePhotoItem: Identifiable {
         switch self {
         case .renovation(let p): return p.date
         case .expense(let e): return e.date
+        case .document(let d): return d.date
         }
     }
 
-    /// 顯示用標題：
-    /// - 裝潢：原 title（空白回退到「N 張照片」/「未命名」）
-    /// - 支出：備註優先（空白回退到 expense.title）
+    /// 顯示用標題
     var displayTitle: String {
         switch self {
         case .renovation(let p):
@@ -2144,6 +2232,9 @@ fileprivate enum HousePhotoItem: Identifiable {
             let trimmedNote = e.note.trimmingCharacters(in: .whitespaces)
             if !trimmedNote.isEmpty { return trimmedNote }
             return e.title.isEmpty ? "支出照片" : e.title
+        case .document(let d):
+            if !d.displayName.isEmpty { return d.displayName }
+            return "文件"
         }
     }
 
@@ -2151,6 +2242,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         switch self {
         case .renovation(let p): return p.photoFileNames
         case .expense(let e): return e.photoFileNames
+        case .document: return []   // 文件不是圖片堆疊
         }
     }
 
@@ -2163,14 +2255,16 @@ fileprivate enum HousePhotoItem: Identifiable {
         switch self {
         case .renovation: return RenovationPhoto.photoURL(for: name)
         case .expense: return Expense.photoURL(for: name)
+        case .document(let d): return d.fileURL
         }
     }
 
-    /// 卡片標題前的圖示：可一眼分辨來源
+    /// 卡片標題前的徽章圖示：分辨來源
     var badgeIcon: String {
         switch self {
         case .renovation: return "paintbrush.fill"
         case .expense: return "tag.fill"
+        case .document(let d): return d.icon
         }
     }
 
@@ -2178,6 +2272,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         switch self {
         case .renovation: return .blue
         case .expense: return .orange
+        case .document(let d): return d.iconColor
         }
     }
 }
@@ -2268,5 +2363,32 @@ struct ExpensePhotoStackViewer: View {
 
     private func fmtDate(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+    }
+}
+
+// MARK: - 文件預覽（QuickLook 包裝）
+
+/// 用 QLPreviewController 預覽 PDF / PPT / Excel / Word 等，支援 Apple 內建的縮放與分享。
+/// 以 sheet 包裹呈現，使用者下拉即可關閉。
+struct DocumentQuickLookView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let preview = QLPreviewController()
+        preview.dataSource = context.coordinator
+        return preview
+    }
+
+    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as QLPreviewItem
+        }
     }
 }
