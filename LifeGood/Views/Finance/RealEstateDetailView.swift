@@ -1879,6 +1879,7 @@ fileprivate struct SwipeableRow<Content: View>: View {
     }
 
     private let actionWidth: CGFloat = 64
+    private let rowMinHeight: CGFloat = 56
     private var revealOffset: CGFloat { -(actionWidth * 2) }
 
     @State private var offset: CGFloat = 0
@@ -1923,7 +1924,10 @@ fileprivate struct SwipeableRow<Content: View>: View {
             }
 
             // 前景內容
+            // minHeight 與按鈕一致 → 短內容也能完全蓋住背後的「複製 / 刪除」按鈕，
+            // 避免項目高度太短時按鈕從上下露出馬腳。
             content
+                .frame(maxWidth: .infinity, minHeight: rowMinHeight, alignment: .leading)
                 .background(Color(.systemBackground))
                 .offset(x: offset)
                 // simultaneousGesture：讓外層 ScrollView 也收到垂直手勢；
