@@ -933,9 +933,11 @@ struct ChildRecordEditorSheet: View {
         var seen: Set<String> = []
         var output: [ClinicSuggestion] = []
 
-        let pastDetails: [String] = lifeStore.familyMembers
-            .flatMap { $0.childRecords }
-            .filter { ($0.type == .medical || $0.type == .vaccination) }
+        let allRecords: [ChildRecord] = lifeStore.familyMembers.flatMap { $0.childRecords }
+        let medicalAndVaccination = allRecords.filter {
+            $0.type == .medical || $0.type == .vaccination
+        }
+        let pastDetails: [String] = medicalAndVaccination
             .map { $0.detail.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
