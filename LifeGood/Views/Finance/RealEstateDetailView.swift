@@ -1930,19 +1930,26 @@ fileprivate struct SwipeableRow<Content: View>: View {
                 .frame(maxWidth: .infinity, minHeight: rowMinHeight, alignment: .leading)
                 .background(Color(.systemBackground))
                 .offset(x: offset)
-                // simultaneousGesture：讓外層 ScrollView 也收到垂直手勢；
-                // 我們只在「水平移動明顯大於垂直」時才接管，避免上下滑動被吃掉。
+                // simultaneousGesture + 大 minimumDistance：讓外層 ScrollView
+                // 有時間先取得垂直滾動主導權；我們只在使用者明顯做「水平大幅度」
+                // 滑動時才接管，否則完全不插手垂直滑動。
                 .simultaneousGesture(
-                    DragGesture(minimumDistance: 8, coordinateSpace: .local)
+                    DragGesture(minimumDistance: 18, coordinateSpace: .local)
                         .onChanged { value in
+                            let dx = abs(value.translation.width)
+                            let dy = abs(value.translation.height)
                             if dragAxis == nil {
-                                let dx = abs(value.translation.width)
-                                let dy = abs(value.translation.height)
-                                // 已經被滑開過就視為水平；否則需 dx 明顯大過 dy 才接管
-                                if offset != 0 || (dx > dy + 4 && dx > 10) {
+                                // 已經滑開過視為水平
+                                if offset != 0 {
                                     dragAxis = .horizontal
-                                } else if dy > dx + 4 {
+                                }
+                                // 垂直主導：dy 明顯大於 dx → 永不接管
+                                else if dy > dx, dy > 10 {
                                     dragAxis = .vertical
+                                }
+                                // 水平主導：dx 至少是 dy 的 1.5 倍、且超過 14pt
+                                else if dx > dy * 1.5, dx > 14 {
+                                    dragAxis = .horizontal
                                 }
                             }
                             guard dragAxis == .horizontal else { return }
