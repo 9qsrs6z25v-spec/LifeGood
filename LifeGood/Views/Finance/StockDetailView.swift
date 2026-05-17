@@ -13,6 +13,8 @@ struct StockDetailView: View {
     @State private var showPremiumAlert = false
     @State private var addingTransaction = false
     @State private var editingTransaction: StockTransaction?
+    @State private var addingDividend = false
+    @State private var editingDividend: StockDividend?
 
     init(stock: Stock) {
         self.stockId = stock.id
@@ -34,6 +36,7 @@ struct StockDetailView: View {
                     flashCard
                     infoSection
                     transactionsSection
+                    dividendsSection
                     if let bankInfo = bankAccountInfo {
                         accountSection(label: "扣款 / 入帳銀行",
                                        icon: "building.columns.fill",
@@ -82,6 +85,12 @@ struct StockDetailView: View {
             }
             .sheet(item: $editingTransaction) { tx in
                 StockTransactionEditor(stockId: stockId, editing: tx)
+            }
+            .sheet(isPresented: $addingDividend) {
+                StockDividendEditor(stockId: stockId, editing: nil)
+            }
+            .sheet(item: $editingDividend) { div in
+                StockDividendEditor(stockId: stockId, editing: div)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .alert("確定要刪除這筆股票嗎？", isPresented: $showDeleteConfirm) {
@@ -330,6 +339,143 @@ struct StockDetailView: View {
                 Text(formatPrice(stock.purchasePrice))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.blue)
+            }
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+    }
+
+    // MARK: - 股利章節
+
+    private var sortedDividends: [StockDividend] {
+        stock.dividends.sorted { $0.date > $1.date }
+    }
+
+    private var dividendsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "gift.fill").foregroundStyle(.pink)
+                Text("股票股利 / 現金股利").font(.headline)
+                Spacer()
+                Text(dividendsSummaryLabel)
+                    .font(.caption2).foregroundStyle(.secondary)
+                Button {
+                    if subscription.isPremium { addingDividend = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3).foregroundStyle(.green)
+                }
+            }
+            .padding(.horizontal).padding(.top, 12).padding(.bottom, 6)
+
+            if sortedDividends.isEmpty {
+                Text("尚無股利紀錄，按右上角 + 新增配股或配息。")
+                    .font(.caption).foregroundStyle(.tertiary)
+                    .padding(.horizontal).padding(.bottom, 12)
+            } else {
+                ForEach(sortedDividends) { div in
+                    Button {
+                        editingDividend = div
+                    } label: {
+                        dividendRow(div)
+                    }
+                    .buttonStyle(.plain)
+                    Divider().padding(.leading, 14)
+                }
+                dividendsFooter
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private var dividendsSummaryLabel: String {
+        let stockCount = stock.dividends.filter { $0.kind == .stock }.count
+        let totalCash = stock.dividends
+            .filter { $0.kind == .cash }
+            .reduce(0.0) { $0 + $1.cashTotal }
+        var parts: [String] = []
+        if stockCount > 0 { parts.append("\(stockCount) 次配股") }
+        if totalCash > 0 { parts.append("配息 \(fmt(totalCash))") }
+        return parts.isEmpty ? "0 筆" : parts.joined(separator: "・")
+    }
+
+    private func dividendRow(_ div: StockDividend) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill((div.kind == .stock ? Color.green : Color.pink).opacity(0.15))
+                    .frame(width: 30, height: 30)
+                Image(systemName: div.kind.icon)
+                    .foregroundStyle(div.kind == .stock ? Color.green : Color.pink)
+                    .font(.subheadline)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(div.kind.rawValue)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background((div.kind == .stock ? Color.green : Color.pink).opacity(0.15))
+                        .foregroundStyle(div.kind == .stock ? Color.green : Color.pink)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    Text(fmtDate(div.date)).font(.caption).foregroundStyle(.secondary)
+                }
+                Text(dividendSubtitle(div))
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Text(dividendRightLabel(div))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(div.kind == .stock ? Color.green : Color.pink)
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
+
+    private func dividendSubtitle(_ div: StockDividend) -> String {
+        switch div.kind {
+        case .stock:
+            return "+\(formatLots(div.lots)) 張 (\(Int(div.sharesEarned)) 股)"
+        case .cash:
+            let p = String(format: "%.2f", div.perShare)
+            return "每股 \(p) × \(Int(div.sharesAtEvent)) 股"
+        }
+    }
+
+    private func dividendRightLabel(_ div: StockDividend) -> String {
+        switch div.kind {
+        case .stock: return "+\(formatLots(div.lots)) 張"
+        case .cash:  return fmt(div.cashTotal)
+        }
+    }
+
+    private var dividendsFooter: some View {
+        let stockTotal = stock.dividends
+            .filter { $0.kind == .stock }
+            .reduce(0.0) { $0 + $1.sharesEarned }
+        let cashTotal = stock.dividends
+            .filter { $0.kind == .cash }
+            .reduce(0.0) { $0 + $1.cashTotal }
+        return VStack(spacing: 4) {
+            Divider()
+            if stockTotal > 0 {
+                HStack {
+                    Text("累計配股").font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(formatLots(stockTotal / 1000)) 張 (\(Int(stockTotal)) 股)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                }
+            }
+            if cashTotal > 0 {
+                HStack {
+                    Text("累計配息").font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(fmt(cashTotal))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.pink)
+                }
             }
         }
         .padding(.horizontal).padding(.vertical, 8)
@@ -637,5 +783,365 @@ struct StockTransactionEditor: View {
         let f = DateFormatter()
         f.dateFormat = "yyyy/MM/dd"
         return f.string(from: d)
+    }
+}
+
+// MARK: - 股利編輯器
+
+struct StockDividendEditor: View {
+    @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let stockId: UUID
+    let editing: StockDividend?
+
+    @State private var date: Date = Date()
+    @State private var kind: StockDividendKind = .cash
+    @State private var lotsText: String = ""
+    @State private var perShareText: String = ""
+    @State private var sharesAtEventText: String = ""
+    @State private var note: String = ""
+    @State private var showDeleteConfirm = false
+
+    private var isEditing: Bool { editing != nil }
+    private var stock: Stock? { store.stocks.first(where: { $0.id == stockId }) }
+
+    private var cashTotalPreview: Double {
+        let p = Double(perShareText) ?? 0
+        let s = Double(sharesAtEventText) ?? 0
+        return p * s
+    }
+
+    private var canSave: Bool {
+        switch kind {
+        case .stock: return (Double(lotsText) ?? 0) > 0
+        case .cash:
+            return (Double(perShareText) ?? 0) > 0 && (Double(sharesAtEventText) ?? 0) > 0
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    DatePicker("日期", selection: $date, displayedComponents: .date)
+                    Picker("類型", selection: $kind) {
+                        ForEach(StockDividendKind.allCases) { k in
+                            Text(k.rawValue).tag(k)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("基本")
+                } footer: {
+                    Text(kindFooterText)
+                        .font(.caption2)
+                }
+
+                if kind == .stock {
+                    Section("配股股數") {
+                        HStack {
+                            TextField("發放張數", text: $lotsText)
+                                .keyboardType(.decimalPad)
+                            Text("張").foregroundStyle(.secondary)
+                        }
+                        if let lots = Double(lotsText), lots > 0 {
+                            HStack {
+                                Text("約合").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Text("\(Int(lots * 1000)) 股")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } else {
+                    Section("配息計算") {
+                        HStack {
+                            Text("NT$").foregroundStyle(.secondary)
+                            TextField("每股配息", text: $perShareText)
+                                .keyboardType(.decimalPad)
+                        }
+                        HStack {
+                            TextField("基準股數", text: $sharesAtEventText)
+                                .keyboardType(.decimalPad)
+                            Text("股").foregroundStyle(.secondary)
+                        }
+                        if cashTotalPreview > 0 {
+                            HStack {
+                                Text("總配息").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(formatCash(cashTotalPreview))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.pink)
+                            }
+                        }
+                    }
+                }
+
+                Section("備註") {
+                    TextField("選填", text: $note, axis: .vertical).lineLimit(2...4)
+                }
+
+                if let bankInfo = bankInfoText {
+                    Section {
+                        HStack(spacing: 8) {
+                            Image(systemName: "building.columns.fill")
+                                .foregroundStyle(.blue)
+                            Text(bankInfo)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text(kind == .cash ? "入帳銀行" : "連結銀行")
+                    } footer: {
+                        if kind == .cash {
+                            Text("配息會自動建立一筆「投資」類收入並寫入此銀行帳戶。")
+                                .font(.caption2)
+                        }
+                    }
+                }
+
+                if isEditing {
+                    Section {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("刪除此筆股利", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .navigationTitle(isEditing ? "編輯股利" : "新增股利")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(isEditing ? "儲存" : "新增") { save() }
+                        .bold().foregroundStyle(.green)
+                        .disabled(!canSave)
+                }
+            }
+            .alert("確定刪除這筆股利？", isPresented: $showDeleteConfirm) {
+                Button("刪除", role: .destructive) { performDelete() }
+                Button("取消", role: .cancel) {}
+            }
+            .onAppear { loadInitial() }
+            .onChange(of: kind) { _, newKind in
+                // 切到配息時若還沒填基準股數，自動帶入該日期之持股
+                if newKind == .cash && (Double(sharesAtEventText) ?? 0) == 0 {
+                    sharesAtEventText = "\(Int(currentHeldShares))"
+                }
+            }
+            .onChange(of: date) { _, _ in
+                if kind == .cash, !isEditing {
+                    sharesAtEventText = "\(Int(currentHeldShares))"
+                }
+            }
+        }
+    }
+
+    private var kindFooterText: String {
+        switch kind {
+        case .stock: return "配股會增加持股股數、稀釋成本均價（總成本不變）。"
+        case .cash:  return "配息會自動建立一筆收入並寫入連結的銀行帳戶。"
+        }
+    }
+
+    private var bankInfoText: String? {
+        guard let stock else { return nil }
+        let id = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId
+        guard let id, let ms = lifeStore.milestones.first(where: { $0.id == id }) else { return nil }
+        let name = ms.bankName ?? ms.title
+        let currency = stock.linkedBankCurrency ?? "NT$"
+        return currency == "NT$" ? name : "\(name) · \(currency)"
+    }
+
+    /// 當前股票在 date 當下的持股股數估算（用 transactions 累積）
+    private var currentHeldShares: Double {
+        guard let stock else { return 0 }
+        if stock.transactions.isEmpty {
+            return stock.shares
+        }
+        var s: Double = 0
+        for tx in stock.transactions where tx.date <= date {
+            s += tx.kind == .buy ? tx.shares : -tx.shares
+        }
+        // 加上 date 之前已發放的配股
+        for div in stock.dividends where div.kind == .stock && div.date <= date && div.id != editing?.id {
+            s += div.sharesEarned
+        }
+        return max(0, s)
+    }
+
+    private func loadInitial() {
+        if let e = editing {
+            date = e.date
+            kind = e.kind
+            lotsText = e.lots > 0 ? String(format: "%g", e.lots) : ""
+            perShareText = e.perShare > 0 ? String(format: "%g", e.perShare) : ""
+            sharesAtEventText = e.sharesAtEvent > 0 ? "\(Int(e.sharesAtEvent))" : ""
+            note = e.note
+        } else {
+            // 新增時，配息預設帶入當下持股股數
+            if kind == .cash {
+                sharesAtEventText = "\(Int(currentHeldShares))"
+            }
+        }
+    }
+
+    private func formatCash(_ v: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+    }
+
+    // MARK: - Save / Delete
+
+    private func save() {
+        guard var stock = store.stocks.first(where: { $0.id == stockId }) else { return }
+        let lots = Double(lotsText) ?? 0
+        let perShare = Double(perShareText) ?? 0
+        let sharesAtEvent = Double(sharesAtEventText) ?? 0
+
+        var dividend = StockDividend(
+            id: editing?.id ?? UUID(),
+            date: date,
+            kind: kind,
+            lots: kind == .stock ? lots : 0,
+            perShare: kind == .cash ? perShare : 0,
+            sharesAtEvent: kind == .cash ? sharesAtEvent : 0,
+            linkedIncomeId: editing?.linkedIncomeId,
+            note: note.trimmingCharacters(in: .whitespaces)
+        )
+
+        // 配息：建立 / 更新 Income + BankDeposit
+        if kind == .cash {
+            dividend.linkedIncomeId = syncCashDividendIncome(
+                stockId: stockId,
+                stockName: stock.name,
+                amount: dividend.cashTotal,
+                date: dividend.date,
+                existingId: editing?.linkedIncomeId
+            )
+            syncCashDividendBankDeposit(
+                stock: stock,
+                dividendId: dividend.id,
+                amount: dividend.cashTotal,
+                date: dividend.date
+            )
+        } else if let oldIncomeId = editing?.linkedIncomeId {
+            // 從「配息」改為「配股」→ 刪掉原本的 Income / BankDeposit
+            removeCashDividendIncome(incomeId: oldIncomeId)
+            removeCashDividendBankDeposit(stock: stock, dividendId: dividend.id)
+            dividend.linkedIncomeId = nil
+        }
+
+        // 寫回 stock.dividends
+        if let idx = stock.dividends.firstIndex(where: { $0.id == dividend.id }) {
+            stock.dividends[idx] = dividend
+        } else {
+            stock.dividends.append(dividend)
+        }
+        stock.recomputeFromTransactions()
+        store.update(stock)
+        dismiss()
+    }
+
+    private func performDelete() {
+        guard let editing,
+              var stock = store.stocks.first(where: { $0.id == stockId }) else { return }
+        if let incomeId = editing.linkedIncomeId {
+            removeCashDividendIncome(incomeId: incomeId)
+        }
+        removeCashDividendBankDeposit(stock: stock, dividendId: editing.id)
+        stock.dividends.removeAll { $0.id == editing.id }
+        stock.recomputeFromTransactions()
+        store.update(stock)
+        dismiss()
+    }
+
+    // MARK: - Income / BankDeposit 同步
+
+    /// 建立 / 更新「{name} 配息」收入，回傳該 Income id
+    private func syncCashDividendIncome(
+        stockId: UUID,
+        stockName: String,
+        amount: Double,
+        date: Date,
+        existingId: UUID?
+    ) -> UUID {
+        let id = existingId ?? UUID()
+        let stockHasBank = stock?.linkedBankMilestoneId
+        let income = Income(
+            id: id,
+            title: "\(stockName) 配息",
+            amount: amount,
+            date: date,
+            category: .investment,
+            period: .once,
+            isFixedSalary: false,
+            note: "",
+            linkedStockId: stockId,
+            linkedBankMilestoneId: stockHasBank,
+            linkedBankCurrency: stock?.linkedBankCurrency
+        )
+        if let idx = expenseStore.incomes.firstIndex(where: { $0.id == id }) {
+            expenseStore.incomes[idx] = income
+        } else {
+            expenseStore.incomes.append(income)
+        }
+        return id
+    }
+
+    private func removeCashDividendIncome(incomeId: UUID) {
+        expenseStore.incomes.removeAll { $0.id == incomeId }
+    }
+
+    /// 寫入 / 更新對應的銀行 BankDeposit（依 dividendId 當 stable 識別）
+    private func syncCashDividendBankDeposit(
+        stock: Stock,
+        dividendId: UUID,
+        amount: Double,
+        date: Date
+    ) {
+        guard let bankId = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId,
+              var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
+        let currency = stock.linkedBankCurrency ?? "NT$"
+        var list = ms.bankDeposits ?? []
+        // 用 dividendId 衍生穩定 deposit id，方便更新 / 刪除
+        let depositId = stableDepositId(seed: "dividend-\(dividendId.uuidString)")
+        list.removeAll { $0.id == depositId }
+        list.append(BankDeposit(
+            id: depositId,
+            date: date,
+            amount: amount,
+            currencyCode: currency,
+            isWithdrawal: false,
+            linkedExpenseId: nil,
+            linkedStockId: stock.id
+        ))
+        ms.bankDeposits = list
+        lifeStore.update(ms)
+    }
+
+    private func removeCashDividendBankDeposit(stock: Stock, dividendId: UUID) {
+        guard let bankId = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId,
+              var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
+        let depositId = stableDepositId(seed: "dividend-\(dividendId.uuidString)")
+        ms.bankDeposits?.removeAll { $0.id == depositId }
+        lifeStore.update(ms)
+    }
+
+    private func stableDepositId(seed: String) -> UUID {
+        var hasher = Hasher()
+        hasher.combine(seed)
+        let h = UInt64(bitPattern: Int64(hasher.finalize()))
+        var bytes = [UInt8](repeating: 0, count: 16)
+        for i in 0..<8 { bytes[i] = UInt8((h >> (i * 8)) & 0xff) }
+        for i in 8..<16 { bytes[i] = UInt8((h >> ((i - 8) * 8)) & 0xff) }
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                          bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
     }
 }

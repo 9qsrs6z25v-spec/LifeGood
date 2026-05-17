@@ -232,6 +232,76 @@ struct StockTransaction: Identifiable, Codable, Equatable {
     }
 }
 
+// MARK: - 股票股利 / 現金股利
+
+enum StockDividendKind: String, Codable, CaseIterable, Identifiable {
+    case stock = "股票股利"   // 配股 → 增加股數
+    case cash  = "現金股利"   // 配息 → 產生收入
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .stock: return "leaf.fill"        // 🌱 free shares
+        case .cash:  return "dollarsign.circle.fill"
+        }
+    }
+}
+
+struct StockDividend: Identifiable, Codable, Equatable {
+    let id: UUID
+    var date: Date
+    var kind: StockDividendKind
+    /// 配股：發放張數（允許小數，1 張 = 1000 股）。配息類不使用。
+    var lots: Double
+    /// 配息：每股配息金額。配股類不使用。
+    var perShare: Double
+    /// 配息：計算基準的當時持股股數。配股類不使用。
+    var sharesAtEvent: Double
+    /// 配息聯動產生的 Income id（同步刪除用）
+    var linkedIncomeId: UUID?
+    var note: String
+
+    init(
+        id: UUID = UUID(),
+        date: Date = Date(),
+        kind: StockDividendKind = .cash,
+        lots: Double = 0,
+        perShare: Double = 0,
+        sharesAtEvent: Double = 0,
+        linkedIncomeId: UUID? = nil,
+        note: String = ""
+    ) {
+        self.id = id
+        self.date = date
+        self.kind = kind
+        self.lots = lots
+        self.perShare = perShare
+        self.sharesAtEvent = sharesAtEvent
+        self.linkedIncomeId = linkedIncomeId
+        self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        kind = (try? c.decode(StockDividendKind.self, forKey: .kind)) ?? .cash
+        lots = (try? c.decode(Double.self, forKey: .lots)) ?? 0
+        perShare = (try? c.decode(Double.self, forKey: .perShare)) ?? 0
+        sharesAtEvent = (try? c.decode(Double.self, forKey: .sharesAtEvent)) ?? 0
+        linkedIncomeId = try? c.decodeIfPresent(UUID.self, forKey: .linkedIncomeId)
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, kind, lots, perShare, sharesAtEvent, linkedIncomeId, note
+    }
+
+    /// 配股換算成股數
+    var sharesEarned: Double { lots * 1000 }
+    /// 配息總額 = 每股配息 × 當時持股股數
+    var cashTotal: Double { perShare * sharesAtEvent }
+}
+
 struct Stock: Identifiable, Codable {
     let id: UUID
     var name: String
@@ -251,6 +321,8 @@ struct Stock: Identifiable, Codable {
     var linkedSecuritiesMilestoneId: UUID?
     /// 多筆交易紀錄；空陣列代表延用原本單筆 shares/purchasePrice 模式
     var transactions: [StockTransaction]
+    /// 股票股利（配股）/ 現金股利（配息）紀錄
+    var dividends: [StockDividend]
 
     init(
         id: UUID = UUID(),
@@ -269,7 +341,8 @@ struct Stock: Identifiable, Codable {
         linkedBankMilestoneId: UUID? = nil,
         linkedBankCurrency: String? = nil,
         linkedSecuritiesMilestoneId: UUID? = nil,
-        transactions: [StockTransaction] = []
+        transactions: [StockTransaction] = [],
+        dividends: [StockDividend] = []
     ) {
         self.id = id
         self.name = name
@@ -288,6 +361,7 @@ struct Stock: Identifiable, Codable {
         self.linkedBankCurrency = linkedBankCurrency
         self.linkedSecuritiesMilestoneId = linkedSecuritiesMilestoneId
         self.transactions = transactions
+        self.dividends = dividends
     }
 
     init(from decoder: Decoder) throws {
@@ -309,6 +383,7 @@ struct Stock: Identifiable, Codable {
         linkedBankCurrency = try c.decodeIfPresent(String.self, forKey: .linkedBankCurrency)
         linkedSecuritiesMilestoneId = try c.decodeIfPresent(UUID.self, forKey: .linkedSecuritiesMilestoneId)
         transactions = (try? c.decodeIfPresent([StockTransaction].self, forKey: .transactions)) ?? []
+        dividends = (try? c.decodeIfPresent([StockDividend].self, forKey: .dividends)) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -316,7 +391,7 @@ struct Stock: Identifiable, Codable {
         case isSold, soldPrice, soldDate
         case linkedExpenseId, linkedIncomeId
         case linkedBankMilestoneId, linkedBankCurrency, linkedSecuritiesMilestoneId
-        case transactions
+        case transactions, dividends
     }
 
     /// 投入成本
@@ -333,16 +408,18 @@ struct Stock: Identifiable, Codable {
 
     // MARK: - 交易彙整
 
-    /// 依 transactions 重算 shares / purchasePrice / isSold / soldPrice / soldDate。
-    /// shares = 累積買入股數 − 累積賣出股數
-    /// purchasePrice（成本均價）= 累積買入金額 / 累積買入股數（加權平均）
+    /// 依 transactions + dividends 重算 shares / purchasePrice / isSold / soldPrice / soldDate。
+    /// shares = 累積買入股數 − 累積賣出股數 + 累積配股股數
+    /// purchasePrice（成本均價）= 累積買入金額 / (累積買入股數 + 配股股數)
+    ///   → 配股稀釋均價（總成本不變，股數變多）
     /// 若 shares 歸零且曾有賣出，isSold = true、soldDate = 最後賣出日、soldPrice = 加權平均賣出價
     mutating func recomputeFromTransactions() {
-        guard !transactions.isEmpty else { return }
+        guard !transactions.isEmpty || !dividends.isEmpty else { return }
         var buyShares: Double = 0
         var buyAmount: Double = 0
         var sellShares: Double = 0
         var sellAmount: Double = 0
+        var stockDividendShares: Double = 0
         var lastSellDate: Date? = nil
         for tx in transactions {
             switch tx.kind {
@@ -357,8 +434,12 @@ struct Stock: Identifiable, Codable {
                 }
             }
         }
-        let netShares = buyShares - sellShares
-        let avgCost = buyShares > 0 ? buyAmount / buyShares : 0
+        for div in dividends where div.kind == .stock {
+            stockDividendShares += div.sharesEarned
+        }
+        let netShares = buyShares - sellShares + stockDividendShares
+        let totalShareBasis = buyShares + stockDividendShares
+        let avgCost = totalShareBasis > 0 ? buyAmount / totalShareBasis : 0
         shares = max(0, netShares)
         purchasePrice = avgCost
         if netShares <= 0.0001 && sellShares > 0 {
