@@ -331,9 +331,9 @@ struct MainTabView: View {
                     .padding(.horizontal, 36)
                     .transition(.scale.combined(with: .opacity))
             }
-            // 推到 tab bar 下方，幾乎與底部齊平、僅留些微露出
+            // 往上移到 tab bar 上方留出兩個按鈕高度的距離，避免誤觸切換 tab
             aiMicButton
-                .padding(.bottom, -62)
+                .padding(.bottom, 62)
         }
         .allowsHitTesting(true)
     }
