@@ -397,6 +397,7 @@ struct BusinessCardView: View {
     // 拍名片掃描
     @State private var showCardScanner = false
     @State private var scannedDraft: ScannedCardDraft?
+    @State private var scanQueue: [ScannedCardDraft] = []
     @State private var isProcessingScan = false
     // 多選 → 加入聯絡人
     @State private var isMultiSelect = false
@@ -610,15 +611,21 @@ struct BusinessCardView: View {
                 BusinessCardScannerView(
                     onCapture: { images in
                         showCardScanner = false
-                        guard let first = images.first else { return }
+                        guard !images.isEmpty else { return }
                         isProcessingScan = true
                         Task {
-                            let lines = await BusinessCardOCR.recognizeText(in: first)
-                            let parsed = BusinessCardOCR.parse(lines: lines)
-                            let data = first.jpegData(compressionQuality: 0.8)
+                            var drafts: [ScannedCardDraft] = []
+                            for image in images {
+                                let lines = await BusinessCardOCR.recognizeText(in: image)
+                                let parsed = BusinessCardOCR.parse(lines: lines)
+                                let data = image.jpegData(compressionQuality: 0.8)
+                                drafts.append(ScannedCardDraft(parsed: parsed, photoData: data))
+                            }
                             await MainActor.run {
-                                scannedDraft = ScannedCardDraft(parsed: parsed, photoData: data)
                                 isProcessingScan = false
+                                guard let first = drafts.first else { return }
+                                scannedDraft = first
+                                scanQueue = Array(drafts.dropFirst())
                             }
                         }
                     },
@@ -626,7 +633,14 @@ struct BusinessCardView: View {
                 )
                 .ignoresSafeArea()
             }
-            .sheet(item: $scannedDraft) { draft in
+            .sheet(item: $scannedDraft, onDismiss: {
+                // 多張連續編輯：上一張關閉後自動帶出下一張
+                guard !scanQueue.isEmpty else { return }
+                let next = scanQueue.removeFirst()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    scannedDraft = next
+                }
+            }) { draft in
                 BusinessCardEditor(
                     editing: nil,
                     prefilled: draft.parsed,
@@ -900,6 +914,9 @@ struct BusinessCardDetailView: View {
     let cardId: UUID
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
+    @State private var showRescanScanner = false
+    @State private var rescanDraft: BusinessCardView.ScannedCardDraft?
+    @State private var isRescanning = false
     @State private var showPremiumAlert = false
     @State private var showCamera = false
     @State private var showPhotosPicker = false
@@ -939,20 +956,69 @@ struct BusinessCardDetailView: View {
                     Button("關閉") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button {
-                            if subscription.isPremium { showEdit = true }
-                            else { showPremiumAlert = true }
-                        } label: { Text("編輯").foregroundStyle(.green) }
-                        Button {
-                            if subscription.isPremium { showDeleteConfirm = true }
-                            else { showPremiumAlert = true }
-                        } label: { Text("刪除").foregroundStyle(.red) }
+                    if isRescanning {
+                        ProgressView().tint(.green)
+                    } else {
+                        Menu {
+                            Button {
+                                if subscription.isPremium { showEdit = true }
+                                else { showPremiumAlert = true }
+                            } label: {
+                                Label("編輯", systemImage: "pencil")
+                            }
+                            Button {
+                                if subscription.isPremium {
+                                    if VNDocumentCameraViewController.isSupported {
+                                        showRescanScanner = true
+                                    }
+                                } else { showPremiumAlert = true }
+                            } label: {
+                                Label("重新拍照辨識", systemImage: "camera.viewfinder")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                if subscription.isPremium { showDeleteConfirm = true }
+                                else { showPremiumAlert = true }
+                            } label: {
+                                Label("刪除", systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
             }
             .sheet(isPresented: $showEdit) {
                 BusinessCardEditor(editing: card)
+            }
+            .fullScreenCover(isPresented: $showRescanScanner) {
+                BusinessCardScannerView(
+                    onCapture: { images in
+                        showRescanScanner = false
+                        guard let first = images.first else { return }
+                        isRescanning = true
+                        Task {
+                            let lines = await BusinessCardOCR.recognizeText(in: first)
+                            let parsed = BusinessCardOCR.parse(lines: lines)
+                            let data = first.jpegData(compressionQuality: 0.8)
+                            await MainActor.run {
+                                isRescanning = false
+                                rescanDraft = BusinessCardView.ScannedCardDraft(parsed: parsed, photoData: data)
+                            }
+                        }
+                    },
+                    onCancel: { showRescanScanner = false }
+                )
+                .ignoresSafeArea()
+            }
+            .sheet(item: $rescanDraft) { draft in
+                // 帶 editing + prefilled → 編輯器以 prefilled 覆寫欄位但保留 id / 連結
+                BusinessCardEditor(
+                    editing: card,
+                    prefilled: draft.parsed,
+                    prefilledPhotoData: draft.photoData
+                )
             }
             .sheet(item: Binding(
                 get: { viewingLinkedOrgPersonId.map { IdentifiableUUID(id: $0) } },
@@ -1563,20 +1629,24 @@ struct BusinessCardEditor: View {
                 }
             }
             .onAppear {
-                if let e = editing {
+                // 預填值（拍名片掃描 / 重新拍照辨識）優先；編輯模式下用 prefilled
+                // 覆蓋既有欄位，但保留 date 與部門（OCR 抓不到部門）
+                if let p = prefilled {
+                    name = p.name; company = p.company; jobTitle = p.jobTitle
+                    phones = p.phones.isEmpty ? [""] : p.phones
+                    emails = p.emails.isEmpty ? [""] : p.emails
+                    faxes = p.faxes
+                    address = p.address
+                    note = p.note
+                    date = editing?.date ?? Date()
+                    department = editing?.department ?? ""
+                } else if let e = editing {
                     name = e.name; company = e.company; department = e.department
                     jobTitle = e.jobTitle
                     phones = e.phones.isEmpty ? [""] : e.phones
                     emails = e.emails.isEmpty ? [""] : e.emails
                     faxes = e.faxes
                     address = e.address; note = e.note; date = e.date
-                } else if let p = prefilled {
-                    name = p.name; company = p.company; jobTitle = p.jobTitle
-                    phones = p.phones.isEmpty ? [""] : p.phones
-                    emails = p.emails.isEmpty ? [""] : p.emails
-                    faxes = p.faxes
-                    address = p.address
-                    note = p.note; date = Date()
                 }
             }
         }
@@ -1584,9 +1654,12 @@ struct BusinessCardEditor: View {
 
     private func save() {
         let id = editing?.id ?? UUID()
-        // 新增 + 有掃描影像時，把整張名片存成頭像
+        // 新增 / 重新拍照辨識：有新的掃描照片時就用它，並把舊照片刪掉
         var photoFileName = editing?.photoFileName
-        if editing == nil, let data = prefilledPhotoData, photoFileName == nil {
+        if let data = prefilledPhotoData {
+            if let oldName = photoFileName {
+                BusinessCard.deletePhoto(oldName)
+            }
             photoFileName = BusinessCard.savePhoto(data, id: id)
         }
         let cleanedPhones = phones
