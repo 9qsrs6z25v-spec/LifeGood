@@ -162,7 +162,23 @@ final class CloudSyncManager: ObservableObject {
     }
 
     /// 手動觸發同步：刷新帳號狀態 → 拉取 → 推送
+    /// 開放給「使用者明確要求同步」用的入口；忽略節流
     func syncNow() {
+        performSync(force: true)
+    }
+
+    /// 給 scenePhase 變動時自動觸發的入口：30 秒內已同步過就跳過，
+    /// 避免使用者快速切換 App 時頻繁拉雲端造成畫面閃爍
+    func syncNowIfDue() {
+        performSync(force: false)
+    }
+
+    private func performSync(force: Bool) {
+        if !force, let last = lastSyncDate,
+           Date().timeIntervalSince(last) < 30 {
+            // 30 秒內已同步，跳過
+            return
+        }
         CloudKitManager.shared.refreshAccountStatus { [weak self] status in
             guard let self = self else { return }
             self.updateAccountStatus(status)

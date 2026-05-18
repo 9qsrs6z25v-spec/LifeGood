@@ -64,7 +64,9 @@ struct LifeGoodApp: App {
                             expense: expenseStore, finance: financeStore, life: lifeStore
                         )
                     } else if phase == .active {
-                        cloudSync.syncNow()
+                        // 節流：30 秒內已同步過會自動跳過，避免快速切換 App
+                        // 造成的反覆 CloudKit pull 觸發畫面閃爍
+                        cloudSync.syncNowIfDue()
                         Task {
                             await subscription.refreshStatus()
                             await einvoiceSync.syncIfDue(expenseStore: expenseStore)
