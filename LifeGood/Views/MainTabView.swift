@@ -434,10 +434,16 @@ struct MainTabView: View {
         aiBusy = true
         do {
             // 把家庭成員姓名與本人名字一起送給 AI，讓它從固定清單選同行者
+            // 優先用中文姓名，沒填才用英文姓名
+            func memberName(_ chinese: String, _ english: String) -> String {
+                let c = chinese.trimmingCharacters(in: .whitespaces)
+                if !c.isEmpty { return c }
+                return english.trimmingCharacters(in: .whitespaces)
+            }
             var familyNames: [String] = lifeStore.familyMembers
-                .map { $0.name.trimmingCharacters(in: .whitespaces) }
+                .map { memberName($0.chineseName, $0.englishName) }
                 .filter { !$0.isEmpty }
-            let myName = lifeStore.profile.name.trimmingCharacters(in: .whitespaces)
+            let myName = memberName(lifeStore.profile.chineseName, lifeStore.profile.englishName)
             if !myName.isEmpty { familyNames.insert(myName, at: 0) }
             let parsed = try await AIExpenseParserService.shared.parse(
                 text, availableMembers: familyNames
