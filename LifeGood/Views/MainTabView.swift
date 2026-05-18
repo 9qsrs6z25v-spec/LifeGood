@@ -1,4 +1,5 @@
 import SwiftUI
+import MapKit
 
 // MARK: - 功能項目定義
 
@@ -330,9 +331,9 @@ struct MainTabView: View {
                     .padding(.horizontal, 36)
                     .transition(.scale.combined(with: .opacity))
             }
-            // 推到 tab bar 下緣，約 1/4 露出上方
+            // 推到 tab bar 下方，幾乎與底部齊平、僅留些微露出
             aiMicButton
-                .padding(.bottom, 0)
+                .padding(.bottom, -62)
         }
         .allowsHitTesting(true)
     }
@@ -432,7 +433,15 @@ struct MainTabView: View {
         }
         aiBusy = true
         do {
-            let parsed = try await AIExpenseParserService.shared.parse(text)
+            // 把家庭成員姓名與本人名字一起送給 AI，讓它從固定清單選同行者
+            var familyNames: [String] = lifeStore.familyMembers
+                .map { $0.name.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            let myName = lifeStore.profile.name.trimmingCharacters(in: .whitespaces)
+            if !myName.isEmpty { familyNames.insert(myName, at: 0) }
+            let parsed = try await AIExpenseParserService.shared.parse(
+                text, availableMembers: familyNames
+            )
             aiBusy = false
             try await aiCommitExpense(parsed: parsed)
         } catch {
@@ -453,6 +462,21 @@ struct MainTabView: View {
             if let t = parsed.title, !t.isEmpty { return t }
             return category.rawValue
         }()
+        // 飲食 / 娛樂 / 購物 / 日用品 / 醫療類支出做 Apple Maps 查詢，
+        // 抓到座標後寫入 placeLatitude / Longitude / Address，讓美食地圖能標到
+        let placeCategories: Set<VariableCategory> = [
+            .food, .entertainment, .shopping, .dailyNecessities, .medical
+        ]
+        var placeAddress: String? = nil
+        var placeLat: Double? = nil
+        var placeLon: Double? = nil
+        if placeCategories.contains(category), !title.isEmpty {
+            if let mapItem = await aiLookupPlace(query: title) {
+                placeAddress = mapItem.formattedAddress
+                placeLat = mapItem.placemark.coordinate.latitude
+                placeLon = mapItem.placemark.coordinate.longitude
+            }
+        }
         let exp = Expense(
             id: UUID(),
             title: title,
@@ -461,13 +485,33 @@ struct MainTabView: View {
             expenseType: .variable,
             variableCategory: category,
             note: parsed.note ?? "",
-            diningMember: parsed.diningMember
+            diningMember: parsed.diningMember,
+            placeAddress: placeAddress,
+            placeLatitude: placeLat,
+            placeLongitude: placeLon
         )
         expenseStore.add(exp)
-        // 顯示成功 toast
-        let categoryName = category.rawValue
-        let detail = "\(categoryName)・NT$ \(Int(amount))" + (parsed.diningMember.map { "・\($0)" } ?? "")
-        aiShowToast("✨ 已記一筆：\(title)", detail: detail, isError: false)
+        // 成功 toast
+        var detailParts: [String] = ["\(category.rawValue)・NT$ \(Int(amount))"]
+        if let m = parsed.diningMember, !m.isEmpty { detailParts.append(m) }
+        if placeLat != nil { detailParts.append("已標 美食地圖") }
+        aiShowToast("已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false)
+    }
+
+    /// 用 MKLocalSearch 查 AI 給出的店家名稱，帶當前位置偏向
+    private func aiLookupPlace(query: String) async -> MKMapItem? {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        if let region = LocationProvider.shared.searchRegion {
+            request.region = region
+        }
+        request.resultTypes = .pointOfInterest
+        let search = MKLocalSearch(request: request)
+        return await withCheckedContinuation { cont in
+            search.start { resp, _ in
+                cont.resume(returning: resp?.mapItems.first)
+            }
+        }
     }
 
     @MainActor

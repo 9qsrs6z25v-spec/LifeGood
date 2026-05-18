@@ -168,6 +168,14 @@ final class AIExpenseParserService {
 
 如果使用者句子前面附帶 [使用者目前位置：XXX] 標籤，請用這個位置去推斷講到的店名指的是哪一家分店、或推斷常見的店家慣用名稱（例如「鬍鬚張」在不同城市仍是同一品牌）。
 
+如果句子前面附帶 [可選同行者名稱：A、B、C] 標籤，diningMember 必須從這個清單中挑出最匹配的人名。比對規則：
+- 句子裡出現「跟我太太」「和老婆」「跟太太」→ 在清單中找「太太」「老婆」「妻」字樣或對應的人名
+- 「跟兒子」「跟我兒子」「帶兒子」→ 找清單中的兒子姓名
+- 「跟爸爸 / 媽媽」→ 找清單中的父母
+- 「跟同事 / 朋友」→ 沒有對應的家人姓名時，照原始字串填入
+- 多人時用「、」分隔
+- 完全無法對應就回原始字串（如「跟客戶」）
+
 **必填欄位**（請務必每次回傳）：
 - amount (number)：金額
 - categoryRaw (string)：**必須**從這個清單擇一回傳，**不要回傳清單外的詞**：
@@ -205,7 +213,7 @@ final class AIExpenseParserService {
 **範例輸出 4**：{"amount":1280,"categoryRaw":"日用品","title":"家樂福","diningMember":"女兒"}
 """
 
-    func parse(_ text: String) async throws -> ParsedAIExpense {
+    func parse(_ text: String, availableMembers: [String] = []) async throws -> ParsedAIExpense {
         let settings = await AISettingsStore.shared
         guard let provider = await settings.activeProvider else { throw AIParseError.noProvider }
         let key = await settings.key(for: provider)
@@ -213,12 +221,17 @@ final class AIExpenseParserService {
 
         // 取得使用者目前位置（reverse geocode 結果，5 分鐘 cache），讓 AI 判斷分店
         let locationContext = await LocationContextProvider.shared.currentContext()
-        let prompt: String
+        var contextParts: [String] = []
         if let ctx = locationContext, !ctx.isEmpty {
-            prompt = "[使用者目前位置：\(ctx)] 使用者說的話：\(text)"
-        } else {
-            prompt = text
+            contextParts.append("[使用者目前位置：\(ctx)]")
         }
+        if !availableMembers.isEmpty {
+            let list = availableMembers.joined(separator: "、")
+            contextParts.append("[可選同行者名稱：\(list)]")
+        }
+        let prompt = contextParts.isEmpty
+            ? text
+            : "\(contextParts.joined()) 使用者說的話：\(text)"
 
         let raw: String
         switch provider {
