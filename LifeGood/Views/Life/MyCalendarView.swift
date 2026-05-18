@@ -520,6 +520,9 @@ struct PersonalEventEditor: View {
     @State private var location: String = ""
     @State private var syncToAppleCalendar: Bool = false
     @State private var selectedAppleCalendarId: String?
+    // 上一次新增事件用的設定，新事件預填用
+    @AppStorage("calendar.lastSyncToAppleCalendar") private var lastSyncToAppleCalendar: Bool = false
+    @AppStorage("calendar.lastAppleCalendarId") private var lastAppleCalendarIdRaw: String = ""
     @ObservedObject private var appleCal = AppleCalendarBridge.shared
 
     // 地點自動完成（Apple Maps POI + 過去用過的地點）
@@ -650,7 +653,7 @@ struct PersonalEventEditor: View {
                     syncToAppleCalendar = e.syncToAppleCalendar
                     selectedAppleCalendarId = e.appleCalendarId
                 } else {
-                    // 預設將時間設為使用者選的日期 + 當下時間
+                    // 新事件：時間 = 使用者選的日期 + 當下時間
                     let now = Date()
                     let cal = Calendar.current
                     let timeComp = cal.dateComponents([.hour, .minute], from: now)
@@ -658,11 +661,27 @@ struct PersonalEventEditor: View {
                     dayComp.hour = timeComp.hour
                     dayComp.minute = timeComp.minute
                     date = cal.date(from: dayComp) ?? initialDate
+                    // Apple 行事曆：用上次新增時的設定預填
+                    syncToAppleCalendar = lastSyncToAppleCalendar
+                    if !lastAppleCalendarIdRaw.isEmpty {
+                        // 若上次選的行事曆仍存在且可寫入，沿用；否則 fallback 預設
+                        let writableIds = appleCal.writableCalendars.map { $0.calendarIdentifier }
+                        if writableIds.contains(lastAppleCalendarIdRaw) {
+                            selectedAppleCalendarId = lastAppleCalendarIdRaw
+                        }
+                    }
                 }
                 // 預設行事曆 ID（若使用者尚未選擇）
                 if selectedAppleCalendarId == nil {
                     selectedAppleCalendarId = appleCal.defaultCalendarId
                 }
+            }
+            // 使用者改動時即時記下，方便下次新事件預填
+            .onChange(of: syncToAppleCalendar) { _, newValue in
+                if editing == nil { lastSyncToAppleCalendar = newValue }
+            }
+            .onChange(of: selectedAppleCalendarId) { _, newValue in
+                if editing == nil, let id = newValue { lastAppleCalendarIdRaw = id }
             }
         }
     }
