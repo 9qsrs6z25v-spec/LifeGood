@@ -1113,7 +1113,7 @@ struct AddMilestoneView: View {
                 if let d = cal.date(from: c) { expiryDate = d }
             }
         )
-        return HStack {
+        HStack {
             Text("到期").foregroundStyle(.secondary)
             Spacer()
             Picker("年", selection: yearBinding) {
@@ -1127,6 +1127,7 @@ struct AddMilestoneView: View {
         }
     }
 
+    @ViewBuilder
     private var bankNamePicker: some View {
         if bankMilestonesList.isEmpty {
             TextField("發卡銀行", text: $bankName)
