@@ -602,7 +602,17 @@ struct FinanceCardView: View {
         }
     }
 
+    @ViewBuilder
     private var headerCard: some View {
+        switch sub {
+        case .creditCard: creditCardHeader
+        case .bank:       bankPassbookHeader
+        default:          defaultHeader
+        }
+    }
+
+    /// 預設樣式（證券／保險）
+    private var defaultHeader: some View {
         VStack(spacing: 10) {
             Image(systemName: sub.icon)
                 .font(.system(size: 44))
@@ -628,6 +638,181 @@ struct FinanceCardView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+    }
+
+    /// 信用卡樣式（仿真實信用卡 banner）
+    private var creditCardHeader: some View {
+        let disabled = item.isDisabled == true
+        let cardName = item.cardName?.isEmpty == false ? item.cardName! : item.title
+        let last4 = item.cardLastFour ?? "----"
+        let bankName: String? = {
+            guard let bid = item.linkedBankMilestoneId,
+                  let b = lifeStore.milestones.first(where: { $0.id == bid }) else { return nil }
+            return b.bankName ?? b.title
+        }()
+        let gradient: [Color] = disabled
+            ? [Color(white: 0.55), Color(white: 0.30)]
+            : [Color(red: 0.95, green: 0.55, blue: 0.20),
+               Color(red: 0.75, green: 0.30, blue: 0.10)]
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let bn = bankName, !bn.isEmpty {
+                        Text(bn)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+                    }
+                    Text("CREDIT CARD")
+                        .font(.caption2.weight(.bold).monospaced())
+                        .tracking(2)
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+                Spacer()
+                Image(systemName: "wave.3.right")
+                    .font(.title3)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+
+            // 晶片
+            RoundedRectangle(cornerRadius: 4)
+                .fill(LinearGradient(colors: [Color(white: 0.95), Color(white: 0.75)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 40, height: 28)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.black.opacity(0.15), lineWidth: 0.5)
+                )
+
+            // 卡號
+            Text("•••• •••• •••• \(last4)")
+                .font(.title3.weight(.semibold).monospaced())
+                .tracking(2)
+                .foregroundStyle(.white)
+
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("CARD HOLDER").font(.system(size: 9)).tracking(1.5)
+                        .foregroundStyle(.white.opacity(0.7))
+                    Text(cardName.uppercased())
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+                Spacer()
+                if let ed = item.expiryDate {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("VALID THRU").font(.system(size: 9)).tracking(1.5)
+                            .foregroundStyle(.white.opacity(0.7))
+                        Text(fmtMonthYear(ed))
+                            .font(.subheadline.weight(.semibold).monospaced())
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+
+            if disabled {
+                Text("已停用")
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(Color.white.opacity(0.2))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.18), radius: 8, y: 4)
+        .padding(.horizontal)
+    }
+
+    /// 銀行存摺樣式
+    private var bankPassbookHeader: some View {
+        let bn = item.bankName?.isEmpty == false ? item.bankName! : item.title
+        let branch = item.branchName ?? ""
+        let acc = item.accountNumber ?? ""
+        let accType = item.bankAccountType?.rawValue ?? ""
+        return VStack(alignment: .leading, spacing: 0) {
+            // 上半 — 像存摺封面
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: "building.columns.fill")
+                        .foregroundStyle(.white.opacity(0.95))
+                    Text("BANK PASSBOOK")
+                        .font(.caption2.weight(.bold).monospaced())
+                        .tracking(2)
+                        .foregroundStyle(.white.opacity(0.85))
+                    Spacer()
+                }
+                Text(bn).font(.title3.bold()).foregroundStyle(.white)
+                Text("存摺").font(.caption).foregroundStyle(.white.opacity(0.85))
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                LinearGradient(colors: [Color(red: 0.20, green: 0.40, blue: 0.75),
+                                        Color(red: 0.12, green: 0.25, blue: 0.55)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+
+            // 下半 — 像存摺內頁
+            VStack(spacing: 8) {
+                if !branch.isEmpty {
+                    passbookRow(label: "分行", value: branch)
+                }
+                if !acc.isEmpty {
+                    passbookRow(label: "帳號", value: acc)
+                }
+                if !accType.isEmpty {
+                    passbookRow(label: "類型", value: accType)
+                }
+                passbookRow(label: "開戶日", value: fmtDate(item.date))
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(Color(.systemBackground))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 6, y: 3)
+        .padding(.horizontal)
+    }
+
+    private func passbookRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.subheadline.weight(.medium).monospaced())
+        }
+        .padding(.vertical, 2)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.15))
+                .frame(height: 0.5)
+                .offset(y: 4)
+        }
+    }
+
+    private func fmtMonthYear(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MM/yy"
+        return f.string(from: d)
+    }
+
+    private func fmtYearMonthZh(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy 年 M 月"
+        return f.string(from: d)
     }
 
     private var detailCard: some View {
@@ -656,12 +841,12 @@ struct FinanceCardView: View {
     private var creditCardDetail: some View {
         if let c = item.cardName, !c.isEmpty { infoRow("卡別", c) }
         if let l = item.cardLastFour, !l.isEmpty { infoRow("卡號末四碼", l) }
-        if let cl = item.creditLimit, cl > 0 { infoRow("額度", "NT$\(fmtNum(cl))") }
+        if let cl = item.creditLimit, cl > 0 { infoRow("額度", "\(fmtNum(cl / 10000)) 萬元") }
         if let af = item.annualFee, af > 0 { infoRow("年費", "NT$\(fmtNum(af))") }
         if let bd = item.billingDay { infoRow("帳單日", "每月 \(bd) 日") }
         if let pd = item.paymentDay { infoRow("繳款日", "每月 \(pd) 日") }
         infoRow("核卡日期", fmtDate(item.date))
-        if let ed = item.expiryDate { infoRow("到期日", fmtDate(ed)) }
+        if let ed = item.expiryDate { infoRow("到期日", fmtYearMonthZh(ed)) }
         infoRow("使用狀態", item.isDisabled == true ? "已停用" : "使用中")
         creditCardDisableButton
     }
@@ -1044,103 +1229,97 @@ struct FinanceCardView: View {
         .padding(.horizontal)
     }
 
+    /// 把整串資料切成每頁 30 筆（由舊到新，最後一頁可能不足 30 筆）
+    private var creditCardChartPages: [[CreditCardDailyTotal]] {
+        let data = creditCardDailyTotals
+        guard !data.isEmpty else { return [] }
+        let pageSize = 30
+        var pages: [[CreditCardDailyTotal]] = []
+        var i = 0
+        while i < data.count {
+            let end = min(i + pageSize, data.count)
+            pages.append(Array(data[i..<end]))
+            i = end
+        }
+        return pages
+    }
+
+    @State private var chartCurrentPage: Int = 0
+
     @ViewBuilder
     private var creditCardChart: some View {
-        let data = creditCardDailyTotals
-        let useLineChart = data.count > 12
-        let labelStride = max(1, data.count / 6)
-        let maxAmount = data.map(\.amount).max() ?? 1
-
-        if useLineChart {
-            creditCardLineChart(data: data, maxAmount: maxAmount, labelStride: labelStride)
+        let pages = creditCardChartPages
+        if pages.isEmpty {
+            EmptyView()
         } else {
-            creditCardBarChart(data: data, maxAmount: maxAmount, labelStride: labelStride)
-        }
-    }
+            VStack(alignment: .leading, spacing: 6) {
+                GeometryReader { geo in
+                    let pageWidth = geo.size.width
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 0) {
+                            ForEach(Array(pages.enumerated()), id: \.offset) { idx, pageData in
+                                creditCardChartPage(data: pageData)
+                                    .frame(width: pageWidth)
+                                    .id(idx)
+                            }
+                        }
+                        .scrollTargetLayout()
+                    }
+                    .scrollTargetBehavior(.paging)
+                    .scrollPosition(id: Binding<Int?>(
+                        get: { chartCurrentPage },
+                        set: { if let v = $0 { chartCurrentPage = v } }
+                    ))
+                }
+                .frame(height: 150)
 
-    @ViewBuilder
-    private func creditCardBarChart(data: [CreditCardDailyTotal], maxAmount: Double, labelStride: Int) -> some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            ForEach(Array(data.enumerated()), id: \.element.id) { index, row in
-                VStack(spacing: 2) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.red)
-                        .frame(
-                            width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(data.count, 1))),
-                            height: max(4, CGFloat(row.amount / max(maxAmount, 1)) * 120)
-                        )
-                    Text(index % labelStride == 0 ? shortDate(row.date) : " ")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+                if pages.count > 1 {
+                    HStack(spacing: 6) {
+                        Spacer()
+                        ForEach(0..<pages.count, id: \.self) { i in
+                            Circle()
+                                .fill(i == chartCurrentPage ? Color.orange : Color.secondary.opacity(0.3))
+                                .frame(width: 6, height: 6)
+                        }
+                        Spacer()
+                    }
                 }
             }
         }
-        .frame(height: 140, alignment: .bottom)
-        .frame(maxWidth: .infinity)
     }
 
+    /// 單一頁的長條圖：Y 軸最大值依本頁資料 fit
     @ViewBuilder
-    private func creditCardLineChart(data: [CreditCardDailyTotal], maxAmount: Double, labelStride: Int) -> some View {
-        let chartHeight: CGFloat = 120
+    private func creditCardChartPage(data: [CreditCardDailyTotal]) -> some View {
+        let maxAmount = data.map(\.amount).max() ?? 1
+        let labelStride = max(1, data.count / 6)
         GeometryReader { geo in
-            let width = geo.size.width
-            let count = max(data.count, 1)
-            let stepX = count > 1 ? width / CGFloat(count - 1) : 0
-
-            ZStack {
-                // 折線
-                Path { p in
-                    for (i, row) in data.enumerated() {
-                        let x = CGFloat(i) * stepX
-                        let y = chartHeight - CGFloat(row.amount / max(maxAmount, 1)) * chartHeight
-                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
-                        else { p.addLine(to: CGPoint(x: x, y: y)) }
+            let chartHeight: CGFloat = 120
+            let barAreaWidth = geo.size.width
+            let barWidth = max(4, (barAreaWidth - CGFloat(data.count - 1) * 4) / CGFloat(max(data.count, 1)))
+            VStack(spacing: 2) {
+                HStack(alignment: .bottom, spacing: 4) {
+                    ForEach(Array(data.enumerated()), id: \.element.id) { _, row in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.red)
+                            .frame(
+                                width: barWidth,
+                                height: max(4, CGFloat(row.amount / max(maxAmount, 1)) * chartHeight)
+                            )
                     }
                 }
-                .stroke(Color.red, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                .frame(height: chartHeight, alignment: .bottom)
 
-                // 漸層填色
-                Path { p in
-                    for (i, row) in data.enumerated() {
-                        let x = CGFloat(i) * stepX
-                        let y = chartHeight - CGFloat(row.amount / max(maxAmount, 1)) * chartHeight
-                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
-                        else { p.addLine(to: CGPoint(x: x, y: y)) }
+                HStack(alignment: .top, spacing: 4) {
+                    ForEach(Array(data.enumerated()), id: \.element.id) { idx, row in
+                        Text(idx % labelStride == 0 ? shortDate(row.date) : " ")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: barWidth)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
-                    p.addLine(to: CGPoint(x: width, y: chartHeight))
-                    p.addLine(to: CGPoint(x: 0, y: chartHeight))
-                    p.closeSubpath()
                 }
-                .fill(LinearGradient(colors: [Color.red.opacity(0.3), Color.red.opacity(0.0)],
-                                     startPoint: .top, endPoint: .bottom))
-
-                // 數據點
-                ForEach(Array(data.enumerated()), id: \.element.id) { i, row in
-                    let x = CGFloat(i) * stepX
-                    let y = chartHeight - CGFloat(row.amount / max(maxAmount, 1)) * chartHeight
-                    Circle().fill(Color.red).frame(width: 4, height: 4).position(x: x, y: y)
-                }
-            }
-        }
-        .frame(height: chartHeight)
-
-        let visibleLabels: [(index: Int, label: String)] = {
-            var result: [(Int, String)] = []
-            for i in stride(from: 0, to: data.count, by: labelStride) {
-                result.append((i, shortDate(data[i].date)))
-            }
-            if let last = data.last, (result.last?.0 ?? -1) != data.count - 1 {
-                result.append((data.count - 1, shortDate(last.date)))
-            }
-            return result
-        }()
-        HStack {
-            ForEach(visibleLabels, id: \.index) { item in
-                Text(item.label)
-                    .font(.system(size: 8))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
             }
         }
     }

@@ -1040,14 +1040,14 @@ struct AddMilestoneView: View {
                 bankNamePicker
                 TextField("卡別名稱（如：御璽卡）", text: $cardName)
                 TextField("卡號末四碼（選填）", text: $cardLastFour).keyboardType(.numberPad)
-                HStack { Text("NT$").foregroundStyle(.secondary); TextField("額度", text: $creditLimitText).keyboardType(.numberPad) }
+                HStack { TextField("額度", text: $creditLimitText).keyboardType(.numberPad); Text("萬元").foregroundStyle(.secondary) }
                 HStack { Text("NT$").foregroundStyle(.secondary); TextField("年費", text: $annualFeeText).keyboardType(.numberPad) }
                 HStack { TextField("帳單日", text: $billingDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
                 HStack { TextField("繳款日", text: $paymentDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
                 DatePicker("核卡日期", selection: $date, displayedComponents: .date)
                 Toggle("填入到期日", isOn: $hasExpiryDate)
                 if hasExpiryDate {
-                    DatePicker("到期日", selection: $expiryDate, displayedComponents: .date)
+                    expiryMonthYearPicker
                 }
             }
             Section("備註") {
@@ -1091,6 +1091,42 @@ struct AddMilestoneView: View {
     }
 
     @ViewBuilder
+    /// 年 + 月雙 Picker（信用卡 / 保險到期日只記到月）
+    private var expiryMonthYearPicker: some View {
+        let cal = Calendar.current
+        let nowYear = cal.component(.year, from: Date())
+        let years = Array(nowYear...(nowYear + 20))
+        let months = Array(1...12)
+        let yearBinding = Binding<Int>(
+            get: { cal.component(.year, from: expiryDate) },
+            set: { newY in
+                var c = cal.dateComponents([.year, .month], from: expiryDate)
+                c.year = newY; c.day = 1
+                if let d = cal.date(from: c) { expiryDate = d }
+            }
+        )
+        let monthBinding = Binding<Int>(
+            get: { cal.component(.month, from: expiryDate) },
+            set: { newM in
+                var c = cal.dateComponents([.year, .month], from: expiryDate)
+                c.month = newM; c.day = 1
+                if let d = cal.date(from: c) { expiryDate = d }
+            }
+        )
+        return HStack {
+            Text("到期").foregroundStyle(.secondary)
+            Spacer()
+            Picker("年", selection: yearBinding) {
+                ForEach(years, id: \.self) { y in Text("\(String(format: "%d", y)) 年").tag(y) }
+            }
+            .pickerStyle(.menu)
+            Picker("月", selection: monthBinding) {
+                ForEach(months, id: \.self) { m in Text("\(m) 月").tag(m) }
+            }
+            .pickerStyle(.menu)
+        }
+    }
+
     private var bankNamePicker: some View {
         if bankMilestonesList.isEmpty {
             TextField("發卡銀行", text: $bankName)
@@ -1223,7 +1259,10 @@ struct AddMilestoneView: View {
                 bankAccountType: financeSub == .bank ? bankAccType : nil,
                 cardName: cardName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cardName.trimmingCharacters(in: .whitespaces),
                 cardLastFour: cardLastFour.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cardLastFour.trimmingCharacters(in: .whitespaces),
-                creditLimit: Double(creditLimitText),
+                // 信用卡額度輸入值單位為「萬元」，存進 LifeMilestone 時換算回元
+                creditLimit: financeSub == .creditCard
+                    ? (Double(creditLimitText).map { $0 * 10000 })
+                    : Double(creditLimitText),
                 annualFee: Double(annualFeeText),
                 billingDay: Int(billingDayText),
                 paymentDay: Int(paymentDayText),
@@ -1320,7 +1359,14 @@ struct AddMilestoneView: View {
             if let bat = e.bankAccountType { bankAccType = bat }
             cardName = e.cardName ?? ""
             cardLastFour = e.cardLastFour ?? ""
-            if let cl = e.creditLimit, cl > 0 { creditLimitText = String(format: "%.0f", cl) }
+            if let cl = e.creditLimit, cl > 0 {
+                // 信用卡額度以「萬元」顯示；其他子分類保留原始值
+                if e.financeSubCategory == .creditCard {
+                    creditLimitText = String(format: "%.0f", cl / 10000)
+                } else {
+                    creditLimitText = String(format: "%.0f", cl)
+                }
+            }
             if let af = e.annualFee, af > 0 { annualFeeText = String(format: "%.0f", af) }
             if let bd = e.billingDay { billingDayText = "\(bd)" }
             if let pd = e.paymentDay { paymentDayText = "\(pd)" }
