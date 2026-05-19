@@ -351,6 +351,7 @@ struct MainTabView: View {
                 }
                 aiMicButton
                     .scaleEffect(1.8)
+                    .rotationEffect(.degrees(30))
                     .offset(x: -30, y: 35)
             }
             .padding(.leading, 20)
