@@ -141,6 +141,7 @@ struct MainTabView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var subscription: SubscriptionManager
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showPaywall: Bool = false
 
     private var currentMode: AppMode {
@@ -311,6 +312,14 @@ struct MainTabView: View {
         .sheet(isPresented: $showPaywall) {
             PaywallView()
                 .environmentObject(subscription)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // 切換 App 時，若正在錄音則立即終止；避免 audio session 被系統中斷
+            // 反覆觸發 isRecording 切換造成麥克風光暈動畫不停閃爍
+            if phase != .active && speechRecognizer.isRecording {
+                speechRecognizer.stopRecording()
+                aiBusy = false
+            }
         }
     }
 
