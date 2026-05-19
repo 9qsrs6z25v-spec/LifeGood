@@ -245,6 +245,8 @@ struct MainTabView: View {
     @StateObject private var speechRecognizer = SpeechRecognizer()
     @State private var aiToast: AIToastInfo?
     @State private var aiBusy = false
+    /// 麥克風進場動畫旗標：每次切到變動支出頁就從左下角彈一次
+    @State private var micEntered = false
 
     /// 是否在「收支 → 變動支出」分頁
     private var isOnVariableExpense: Bool {
@@ -329,6 +331,19 @@ struct MainTabView: View {
                 aiBusy = false
             }
         }
+        .onChange(of: isOnVariableExpense, initial: true) { _, isOn in
+            // 每次切到變動支出頁，從左下角彈一次皮球進場
+            if isOn {
+                micEntered = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    withAnimation(.spring(response: 0.55, dampingFraction: 0.5)) {
+                        micEntered = true
+                    }
+                }
+            } else {
+                micEntered = false
+            }
+        }
     }
 
     // MARK: - 語音 AI 浮動麥克風
@@ -350,9 +365,12 @@ struct MainTabView: View {
                         .transition(.scale.combined(with: .opacity))
                 }
                 aiMicButton
-                    .scaleEffect(1.8)
-                    .rotationEffect(.degrees(30))
-                    .offset(x: -30, y: 35)
+                    .scaleEffect(micEntered ? 1.8 : 0.05)
+                    .rotationEffect(.degrees(micEntered ? 30 : -120))
+                    .offset(
+                        x: micEntered ? -30 : -120,
+                        y: micEntered ? 35 : 180
+                    )
             }
             .padding(.leading, 20)
             .padding(.bottom, 80)
