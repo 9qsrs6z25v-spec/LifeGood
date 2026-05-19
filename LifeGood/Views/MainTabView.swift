@@ -428,10 +428,15 @@ struct MainTabView: View {
                 if aiBusy {
                     ProgressView().tint(.white)
                 } else {
-                    Image(systemName: listening ? "waveform" : "mic.fill")
-                        .foregroundStyle(.white)
-                        .font(.system(size: 24, weight: .bold))
-                        .scaleEffect(listening ? 1.1 : 1.0)
+                    VStack(spacing: 1) {
+                        Image(systemName: listening ? "waveform" : "mic.fill")
+                            .foregroundStyle(.white)
+                            .font(.system(size: 22, weight: .bold))
+                            .scaleEffect(listening ? 1.1 : 1.0)
+                        Text("AI 嵌入")
+                            .foregroundStyle(.white)
+                            .font(.system(size: 8, weight: .semibold))
+                    }
                 }
             }
         }
