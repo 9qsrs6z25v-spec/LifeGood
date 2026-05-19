@@ -326,25 +326,27 @@ struct MainTabView: View {
     // MARK: - 語音 AI 浮動麥克風
 
     private var aiMicOverlay: some View {
-        VStack(spacing: 8) {
-            Spacer()
-            // 即時辨識文字氣泡
-            if speechRecognizer.isRecording && !speechRecognizer.transcript.isEmpty {
-                Text(speechRecognizer.transcript)
-                    .font(.caption.weight(.medium))
-                    .lineLimit(3)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                    .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
-                    .padding(.horizontal, 36)
-                    .transition(.scale.combined(with: .opacity))
+        ZStack(alignment: .bottomLeading) {
+            Color.clear
+            VStack(alignment: .leading, spacing: 8) {
+                // 即時辨識文字氣泡
+                if speechRecognizer.isRecording && !speechRecognizer.transcript.isEmpty {
+                    Text(speechRecognizer.transcript)
+                        .font(.caption.weight(.medium))
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                        .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
+                        .frame(maxWidth: 260, alignment: .leading)
+                        .transition(.scale.combined(with: .opacity))
+                }
+                aiMicButton
             }
-            // 往上拉開與 tab bar 的距離，避免誤觸切換 tab；
-            // 累積 3 個按鈕直徑（62×3 ≈ 186pt）
-            aiMicButton
-                .padding(.bottom, 186)
+            .padding(.leading, 20)
+            .padding(.bottom, 80)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(true)
     }
 
