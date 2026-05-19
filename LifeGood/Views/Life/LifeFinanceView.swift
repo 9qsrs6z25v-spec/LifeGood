@@ -847,6 +847,9 @@ struct FinanceCardView: View {
         if let pd = item.paymentDay { infoRow("繳款日", "每月 \(pd) 日") }
         infoRow("核卡日期", fmtDate(item.date))
         if let ed = item.expiryDate { infoRow("到期日", fmtYearMonthZh(ed)) }
+        if let ec = item.easyCardNumber, !ec.isEmpty { infoRow("悠遊卡", ec) }
+        if let ip = item.iPassNumber, !ip.isEmpty { infoRow("一卡通", ip) }
+        if let hg = item.happyGoNumber, !hg.isEmpty { infoRow("Happy Go", hg) }
         infoRow("使用狀態", item.isDisabled == true ? "已停用" : "使用中")
         creditCardDisableButton
     }

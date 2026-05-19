@@ -638,6 +638,9 @@ struct AddMilestoneView: View {
     @State private var paymentDayText = ""
     @State private var hasExpiryDate = false
     @State private var expiryDate = Date()
+    @State private var easyCardNumber = ""
+    @State private var iPassNumber = ""
+    @State private var happyGoNumber = ""
     @State private var secAccType: SecuritiesAccountType = .regular
     @State private var insuranceCompany = ""
     @State private var policyNumber = ""
@@ -1050,6 +1053,13 @@ struct AddMilestoneView: View {
                     expiryMonthYearPicker
                 }
             }
+            Section("綁定電子票證") {
+                TextField("悠遊卡卡號（選填）", text: $easyCardNumber).keyboardType(.numbersAndPunctuation)
+                TextField("一卡通卡號（選填）", text: $iPassNumber).keyboardType(.numbersAndPunctuation)
+            }
+            Section("綁定會員") {
+                TextField("Happy Go 卡號（選填）", text: $happyGoNumber).keyboardType(.numbersAndPunctuation)
+            }
             Section("備註") {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
             }
@@ -1278,6 +1288,17 @@ struct AddMilestoneView: View {
             )
             // 編輯既有財富卡時保留銀行存取紀錄（init 沒提供 bankDeposits 參數，需手動帶回）
             item.bankDeposits = editing?.bankDeposits
+            // 信用卡綁定的電子票證與會員卡號（init 沒提供參數）
+            if financeSub == .creditCard {
+                let ec = easyCardNumber.trimmingCharacters(in: .whitespaces)
+                let ip = iPassNumber.trimmingCharacters(in: .whitespaces)
+                let hg = happyGoNumber.trimmingCharacters(in: .whitespaces)
+                item.easyCardNumber = ec.isEmpty ? nil : ec
+                item.iPassNumber = ip.isEmpty ? nil : ip
+                item.happyGoNumber = hg.isEmpty ? nil : hg
+            }
+            // 保留現有停用狀態
+            item.isDisabled = editing?.isDisabled
             if editing != nil { store.update(item) } else { store.add(item) }
         } else {
             let item = LifeMilestone(
@@ -1360,6 +1381,9 @@ struct AddMilestoneView: View {
             if let bat = e.bankAccountType { bankAccType = bat }
             cardName = e.cardName ?? ""
             cardLastFour = e.cardLastFour ?? ""
+            easyCardNumber = e.easyCardNumber ?? ""
+            iPassNumber = e.iPassNumber ?? ""
+            happyGoNumber = e.happyGoNumber ?? ""
             if let cl = e.creditLimit, cl > 0 {
                 // 信用卡額度以「萬元」顯示；其他子分類保留原始值
                 if e.financeSubCategory == .creditCard {

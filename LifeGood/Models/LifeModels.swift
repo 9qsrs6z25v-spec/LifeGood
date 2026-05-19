@@ -618,6 +618,12 @@ struct LifeMilestone: Identifiable, Codable {
     var linkedBankMilestoneId: UUID?
     /// 信用卡是否已停用（停用後不會出現在新增支出的信用卡選單，但歷史紀錄保留）
     var isDisabled: Bool?
+    /// 信用卡綁定的悠遊卡卡號
+    var easyCardNumber: String?
+    /// 信用卡綁定的一卡通卡號
+    var iPassNumber: String?
+    /// 信用卡綁定的 Happy Go 會員卡號
+    var happyGoNumber: String?
 
     init(id: UUID = UUID(), title: String, date: Date = Date(),
          category: MilestoneCategory = .other, note: String = "",
@@ -698,6 +704,9 @@ struct LifeMilestone: Identifiable, Codable {
         bankDeposits = try? c.decode([BankDeposit].self, forKey: .bankDeposits)
         linkedBankMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedBankMilestoneId)
         isDisabled = try? c.decodeIfPresent(Bool.self, forKey: .isDisabled)
+        easyCardNumber = try? c.decodeIfPresent(String.self, forKey: .easyCardNumber)
+        iPassNumber = try? c.decodeIfPresent(String.self, forKey: .iPassNumber)
+        happyGoNumber = try? c.decodeIfPresent(String.self, forKey: .happyGoNumber)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -708,6 +717,7 @@ struct LifeMilestone: Identifiable, Codable {
         case cardName, cardLastFour, creditLimit, annualFee, billingDay, paymentDay, expiryDate
         case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary, bankDeposits, linkedBankMilestoneId
         case isDisabled
+        case easyCardNumber, iPassNumber, happyGoNumber
     }
 
     /// 信用卡實際扣款日：以消費日推算結帳後的繳款日
