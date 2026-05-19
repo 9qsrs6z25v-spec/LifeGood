@@ -342,11 +342,11 @@ struct MainTabView: View {
                         .transition(.scale.combined(with: .opacity))
                 }
                 aiMicButton
+                    .scaleEffect(1.5)
             }
             .padding(.leading, 20)
             .padding(.bottom, 80)
-            // 再往左 1/3、往下 1/2 個麥克風直徑（62）
-            .offset(x: -21, y: 31)
+            .offset(x: -26, y: 35)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(true)
