@@ -337,7 +337,7 @@ struct MainTabView: View {
         ZStack(alignment: .bottomLeading) {
             Color.clear
             VStack(alignment: .leading, spacing: 8) {
-                // 即時辨識文字氣泡
+                // 即時辨識文字氣泡：保持在原本 20pt 內距、不跟著麥克風偏左，否則會被銀幕邊緣裁掉
                 if speechRecognizer.isRecording && !speechRecognizer.transcript.isEmpty {
                     Text(speechRecognizer.transcript)
                         .font(.caption.weight(.medium))
@@ -351,10 +351,10 @@ struct MainTabView: View {
                 }
                 aiMicButton
                     .scaleEffect(1.8)
+                    .offset(x: -30, y: 35)
             }
             .padding(.leading, 20)
             .padding(.bottom, 80)
-            .offset(x: -30, y: 35)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(true)
