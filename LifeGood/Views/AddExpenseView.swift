@@ -897,10 +897,16 @@ struct AddExpenseView: View {
         }
     }
 
-    private var creditCardMilestones: [LifeMilestone] {
+    /// 所有信用卡（含停用，用於顯示既有支出已連結的卡片名稱）
+    private var allCreditCardMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
             $0.category == .achievement && $0.financeSubCategory == .creditCard
         }
+    }
+
+    /// 可選用的信用卡（過濾掉停用卡，用於新增/編輯時的選單）
+    private var creditCardMilestones: [LifeMilestone] {
+        allCreditCardMilestones.filter { $0.isDisabled != true }
     }
 
     private func bankCurrencies(for ms: LifeMilestone) -> [String] {
@@ -951,7 +957,7 @@ struct AddExpenseView: View {
 
     private var bankPickerLabel: String {
         if let id = selectedCreditCardMilestoneId,
-           let card = creditCardMilestones.first(where: { $0.id == id }) {
+           let card = allCreditCardMilestones.first(where: { $0.id == id }) {
             let cardName = card.cardName ?? card.title
             if let bankId = card.linkedBankMilestoneId,
                let bank = bankMilestones.first(where: { $0.id == bankId }) {

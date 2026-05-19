@@ -616,6 +616,8 @@ struct LifeMilestone: Identifiable, Codable {
     var beneficiary: String?
     var bankDeposits: [BankDeposit]?
     var linkedBankMilestoneId: UUID?
+    /// 信用卡是否已停用（停用後不會出現在新增支出的信用卡選單，但歷史紀錄保留）
+    var isDisabled: Bool?
 
     init(id: UUID = UUID(), title: String, date: Date = Date(),
          category: MilestoneCategory = .other, note: String = "",
@@ -695,6 +697,7 @@ struct LifeMilestone: Identifiable, Codable {
         beneficiary = try? c.decode(String.self, forKey: .beneficiary)
         bankDeposits = try? c.decode([BankDeposit].self, forKey: .bankDeposits)
         linkedBankMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedBankMilestoneId)
+        isDisabled = try? c.decodeIfPresent(Bool.self, forKey: .isDisabled)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -704,6 +707,7 @@ struct LifeMilestone: Identifiable, Codable {
         case financeSubCategory, bankName, branchName, accountNumber, bankAccountType
         case cardName, cardLastFour, creditLimit, annualFee, billingDay, paymentDay, expiryDate
         case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary, bankDeposits, linkedBankMilestoneId
+        case isDisabled
     }
 
     /// 信用卡實際扣款日：以消費日推算結帳後的繳款日

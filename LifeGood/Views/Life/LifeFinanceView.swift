@@ -313,17 +313,29 @@ struct LifeFinanceView: View {
     }
 
     private func creditCardSubRow(_ card: LifeMilestone) -> some View {
-        HStack(spacing: 8) {
+        let disabled = card.isDisabled == true
+        return HStack(spacing: 8) {
             Rectangle().fill(Color.clear).frame(width: 20)
             Image(systemName: "creditcard.fill")
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(disabled ? Color.secondary : .orange)
                 .frame(width: 24, height: 24)
-                .background(Color.orange.opacity(0.12))
+                .background((disabled ? Color.secondary : Color.orange).opacity(0.12))
                 .clipShape(Circle())
             VStack(alignment: .leading, spacing: 2) {
-                Text(card.cardName ?? card.title)
-                    .font(.caption.weight(.medium))
+                HStack(spacing: 6) {
+                    Text(card.cardName ?? card.title)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(disabled ? .secondary : .primary)
+                    if disabled {
+                        Text("已停用")
+                            .font(.caption2.weight(.medium))
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.18))
+                            .foregroundStyle(.secondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                }
                 HStack(spacing: 4) {
                     if let lf = card.cardLastFour, !lf.isEmpty {
                         Text("末\(lf)").font(.caption2).foregroundStyle(.tertiary)
@@ -339,6 +351,7 @@ struct LifeFinanceView: View {
                 .font(.caption2).foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
+        .opacity(disabled ? 0.7 : 1.0)
     }
 
     private func milestoneRow(_ item: LifeMilestone) -> some View {
@@ -515,6 +528,7 @@ struct FinanceCardView: View {
     @State private var editingIncome: Income?
     @State private var editingStock: Stock?
     @State private var showPremiumAlert = false
+    @State private var showDisableConfirm = false
 
     private var item: LifeMilestone {
         lifeStore.milestones.first(where: { $0.id == milestoneId })
@@ -648,6 +662,43 @@ struct FinanceCardView: View {
         if let pd = item.paymentDay { infoRow("繳款日", "每月 \(pd) 日") }
         infoRow("核卡日期", fmtDate(item.date))
         if let ed = item.expiryDate { infoRow("到期日", fmtDate(ed)) }
+        infoRow("使用狀態", item.isDisabled == true ? "已停用" : "使用中")
+        creditCardDisableButton
+    }
+
+    private var creditCardDisableButton: some View {
+        let disabled = item.isDisabled == true
+        return Button {
+            if disabled {
+                toggleCardDisabled(false)
+            } else {
+                showDisableConfirm = true
+            }
+        } label: {
+            HStack {
+                Image(systemName: disabled ? "checkmark.circle" : "nosign")
+                Text(disabled ? "啟用卡片" : "停用卡片").font(.subheadline.weight(.medium))
+                Spacer()
+            }
+            .foregroundStyle(disabled ? Color.green : Color.red)
+            .padding(.horizontal).padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .confirmationDialog(
+            "停用此信用卡？停用後將不會出現在新增支出的信用卡選單，歷史紀錄仍會保留。",
+            isPresented: $showDisableConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("停用", role: .destructive) { toggleCardDisabled(true) }
+            Button("取消", role: .cancel) {}
+        }
+    }
+
+    private func toggleCardDisabled(_ disabled: Bool) {
+        var updated = item
+        updated.isDisabled = disabled ? true : nil
+        lifeStore.update(updated)
     }
 
     @ViewBuilder
