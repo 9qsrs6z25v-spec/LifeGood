@@ -132,6 +132,8 @@ struct ParsedAIExpense {
     var title: String?
     var note: String?
     var diningMember: String?
+    /// AI 從帳戶清單挑出的扣款帳戶顯示名稱（呼叫端用此字串對回 LifeMilestone）
+    var paymentAccount: String?
     /// 原始辨識到的語音文字（保底放到備註用）
     var originalText: String?
 }
@@ -176,6 +178,14 @@ final class AIExpenseParserService {
 - 多人時用「、」分隔
 - 完全無法對應就回原始字串（如「跟客戶」）
 
+如果句子前面附帶 [可選信用卡：A、B、C] 或 [可選銀行帳戶：X、Y、Z] 標籤，請依下列規則決定 paymentAccount：
+- 句子明確提到「刷卡」「刷 XX 卡」「用 XX 卡」「信用卡付」→ 從信用卡清單挑出最相近的整段字串，原樣回填到 paymentAccount
+- 句子明確提到「用現金」「現金付」→ 不要填 paymentAccount
+- 句子明確提到「從 XX 銀行扣」「XX 戶頭付」「轉帳」「匯款」「Apple Pay 直接扣銀行」→ 從銀行清單挑出最相近的整段字串，原樣回填
+- 沒提到付款方式就不要填 paymentAccount
+- 比對銀行 / 卡片名稱時忽略「銀行」「商業銀行」「股份有限公司」「信用卡」等通用詞，重點比對品牌字（玉山、國泰、中信、台新…）與末四碼
+- paymentAccount 一定要與清單中的某一項完全相同，不要自己改寫
+
 **必填欄位**（請務必每次回傳）：
 - amount (number)：金額
 - categoryRaw (string)：**必須**從這個清單擇一回傳，**不要回傳清單外的詞**：
@@ -184,6 +194,7 @@ final class AIExpenseParserService {
 **選填欄位**（有提到就一定要填）：
 - title (string)：店家名 / 項目名稱（簡短；若位置標籤可以幫助補完，請補上區域，例如「鬍鬚張 信義店」）
 - note (string)：備註細節
+- paymentAccount (string)：扣款帳戶。**必須**從 [可選信用卡] 或 [可選銀行帳戶] 清單中原樣挑一個，沒有對應就不要填
 - diningMember (string)：同行者姓名 / 稱謂。判斷規則：
   · 句子裡只要出現「跟」「和」「同」「與」「陪」「帶」後接一個指人的詞，就要抽出
   · 常見指人詞：太太、老婆、先生、老公、女友、男友、女朋友、男朋友、家人、爸媽、爸爸、媽媽、孩子、兒子、女兒、小孩、朋友、同事、同學、客戶、廠商、長官、老闆、家裡人、家人們
@@ -211,9 +222,20 @@ final class AIExpenseParserService {
 
 **範例輸入 4**：和女兒在家樂福買了 1280 的日用品
 **範例輸出 4**：{"amount":1280,"categoryRaw":"日用品","title":"家樂福","diningMember":"女兒"}
+
+**範例輸入 5**：[可選信用卡：玉山 Pi 卡 末1234、國泰 Cube 卡 末5678] [可選銀行帳戶：玉山銀行、國泰世華銀行] 刷玉山卡買了 380 的咖啡
+**範例輸出 5**：{"amount":380,"categoryRaw":"飲食","title":"咖啡","paymentAccount":"玉山 Pi 卡 末1234"}
+
+**範例輸入 6**：[可選銀行帳戶：玉山銀行、國泰世華銀行] 從國泰扣 1500 給管理費
+**範例輸出 6**：{"amount":1500,"categoryRaw":"其他","title":"管理費","paymentAccount":"國泰世華銀行"}
 """
 
-    func parse(_ text: String, availableMembers: [String] = []) async throws -> ParsedAIExpense {
+    func parse(
+        _ text: String,
+        availableMembers: [String] = [],
+        availableCreditCards: [String] = [],
+        availableBankAccounts: [String] = []
+    ) async throws -> ParsedAIExpense {
         let settings = await AISettingsStore.shared
         guard let provider = await settings.activeProvider else { throw AIParseError.noProvider }
         let key = await settings.key(for: provider)
@@ -228,6 +250,14 @@ final class AIExpenseParserService {
         if !availableMembers.isEmpty {
             let list = availableMembers.joined(separator: "、")
             contextParts.append("[可選同行者名稱：\(list)]")
+        }
+        if !availableCreditCards.isEmpty {
+            let list = availableCreditCards.joined(separator: "、")
+            contextParts.append("[可選信用卡：\(list)]")
+        }
+        if !availableBankAccounts.isEmpty {
+            let list = availableBankAccounts.joined(separator: "、")
+            contextParts.append("[可選銀行帳戶：\(list)]")
         }
         let prompt = contextParts.isEmpty
             ? text
@@ -401,6 +431,12 @@ final class AIExpenseParserService {
             p.diningMember = arr.joined(separator: "、")
         }
         if let m = p.diningMember, m.isEmpty { p.diningMember = nil }
+        if let acc = (json["paymentAccount"] as? String)
+            ?? (json["account"] as? String)
+            ?? (json["paymentMethod"] as? String) {
+            let trimmed = acc.trimmingCharacters(in: .whitespaces)
+            p.paymentAccount = trimmed.isEmpty ? nil : trimmed
+        }
         return p
     }
 }

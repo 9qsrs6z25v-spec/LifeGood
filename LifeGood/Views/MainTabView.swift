@@ -331,9 +331,10 @@ struct MainTabView: View {
                     .padding(.horizontal, 36)
                     .transition(.scale.combined(with: .opacity))
             }
-            // 往上移到 tab bar 上方留出兩個按鈕高度的距離，避免誤觸切換 tab
+            // 往上拉開與 tab bar 的距離，避免誤觸切換 tab；
+            // 累積 3 個按鈕直徑（62×3 ≈ 186pt）
             aiMicButton
-                .padding(.bottom, 62)
+                .padding(.bottom, 186)
         }
         .allowsHitTesting(true)
     }
@@ -445,19 +446,67 @@ struct MainTabView: View {
                 .filter { !$0.isEmpty }
             let myName = memberName(lifeStore.profile.chineseName, lifeStore.profile.englishName)
             if !myName.isEmpty { familyNames.insert(myName, at: 0) }
+
+            // 蒐集信用卡 / 銀行帳戶顯示名稱，讓 AI 從清單挑選扣款帳戶
+            let cardDisplayNames = aiCreditCardDisplayNames()
+            let bankDisplayNames = aiBankDisplayNames()
+
             let parsed = try await AIExpenseParserService.shared.parse(
-                text, availableMembers: familyNames
+                text,
+                availableMembers: familyNames,
+                availableCreditCards: cardDisplayNames.map(\.display),
+                availableBankAccounts: bankDisplayNames.map(\.display)
             )
             aiBusy = false
-            try await aiCommitExpense(parsed: parsed)
+            try await aiCommitExpense(
+                parsed: parsed,
+                cardDisplayNames: cardDisplayNames,
+                bankDisplayNames: bankDisplayNames
+            )
         } catch {
             aiBusy = false
             aiShowToast("AI 解析失敗", detail: error.localizedDescription, isError: true)
         }
     }
 
+    private struct AIAccountOption {
+        let id: UUID
+        let display: String
+        /// 信用卡專用：底下連結的銀行帳戶 id
+        let linkedBankId: UUID?
+    }
+
+    /// 信用卡清單：排除停用卡，顯示名稱包含品牌名 + 末四碼
+    private func aiCreditCardDisplayNames() -> [AIAccountOption] {
+        lifeStore.milestones.compactMap { ms in
+            guard ms.category == .achievement,
+                  ms.financeSubCategory == .creditCard,
+                  ms.isDisabled != true else { return nil }
+            let name = (ms.cardName?.isEmpty == false ? ms.cardName! : ms.title)
+            var display = name
+            if let last4 = ms.cardLastFour, !last4.isEmpty {
+                display += " 末\(last4)"
+            }
+            return AIAccountOption(id: ms.id, display: display, linkedBankId: ms.linkedBankMilestoneId)
+        }
+    }
+
+    /// 銀行帳戶清單：顯示名稱使用 bankName 或 title
+    private func aiBankDisplayNames() -> [AIAccountOption] {
+        lifeStore.milestones.compactMap { ms in
+            guard ms.category == .achievement,
+                  ms.financeSubCategory == .bank else { return nil }
+            let name = (ms.bankName?.isEmpty == false ? ms.bankName! : ms.title)
+            return AIAccountOption(id: ms.id, display: name, linkedBankId: nil)
+        }
+    }
+
     @MainActor
-    private func aiCommitExpense(parsed: ParsedAIExpense) async throws {
+    private func aiCommitExpense(
+        parsed: ParsedAIExpense,
+        cardDisplayNames: [AIAccountOption] = [],
+        bankDisplayNames: [AIAccountOption] = []
+    ) async throws {
         let amount = parsed.amount ?? 0
         guard amount > 0 else {
             aiShowToast("找不到金額", detail: parsed.originalText ?? "AI 沒辨識出金額", isError: true)
@@ -483,6 +532,21 @@ struct MainTabView: View {
                 placeLon = mapItem.placemark.coordinate.longitude
             }
         }
+        // AI 辨識到的扣款帳戶：對回 LifeMilestone（信用卡優先；無對應再找銀行）
+        var linkedBankId: UUID? = nil
+        var linkedCardId: UUID? = nil
+        var matchedAccountDisplay: String? = nil
+        if let acc = parsed.paymentAccount?.trimmingCharacters(in: .whitespaces),
+           !acc.isEmpty {
+            if let card = cardDisplayNames.first(where: { $0.display == acc }) {
+                linkedCardId = card.id
+                linkedBankId = card.linkedBankId
+                matchedAccountDisplay = card.display
+            } else if let bank = bankDisplayNames.first(where: { $0.display == acc }) {
+                linkedBankId = bank.id
+                matchedAccountDisplay = bank.display
+            }
+        }
         let exp = Expense(
             id: UUID(),
             title: title,
@@ -492,6 +556,9 @@ struct MainTabView: View {
             variableCategory: category,
             note: parsed.note ?? "",
             diningMember: parsed.diningMember,
+            linkedBankMilestoneId: linkedBankId,
+            linkedBankCurrency: linkedBankId == nil ? nil : "NT$",
+            linkedCreditCardMilestoneId: linkedCardId,
             placeAddress: placeAddress,
             placeLatitude: placeLat,
             placeLongitude: placeLon
@@ -500,6 +567,7 @@ struct MainTabView: View {
         // 成功 toast
         var detailParts: [String] = ["\(category.rawValue)・NT$ \(Int(amount))"]
         if let m = parsed.diningMember, !m.isEmpty { detailParts.append(m) }
+        if let acc = matchedAccountDisplay { detailParts.append(acc) }
         if placeLat != nil { detailParts.append("已標 美食地圖") }
         aiShowToast("已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false)
     }
