@@ -342,11 +342,11 @@ struct MainTabView: View {
                         .transition(.scale.combined(with: .opacity))
                 }
                 aiMicButton
-                    .scaleEffect(1.5)
+                    .scaleEffect(1.8)
             }
             .padding(.leading, 20)
             .padding(.bottom, 80)
-            .offset(x: -26, y: 35)
+            .offset(x: -30, y: 35)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(true)
