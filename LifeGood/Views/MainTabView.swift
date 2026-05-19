@@ -345,6 +345,8 @@ struct MainTabView: View {
             }
             .padding(.leading, 20)
             .padding(.bottom, 80)
+            // 再往左 1/3、往下 1/2 個麥克風直徑（62）
+            .offset(x: -21, y: 31)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(true)
