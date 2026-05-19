@@ -285,7 +285,9 @@ struct MainTabView: View {
                 }
                 contentView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 佔位用：與底部 tab bar 同高，保證內容區不會被 tab bar 蓋住
                 bottomTabBar
+                    .hidden()
             }
             .tint(.green)
             .onChange(of: appMode) { _, _ in
@@ -301,6 +303,12 @@ struct MainTabView: View {
 
             if isOnVariableExpense && aiSettings.isReady && subscription.isPremium {
                 aiMicOverlay
+            }
+
+            // 真正顯示用的 tab bar：壓在麥克風上層，誤觸時也能看清楚分頁
+            VStack(spacing: 0) {
+                Spacer()
+                bottomTabBar
             }
 
             if let toast = aiToast {
