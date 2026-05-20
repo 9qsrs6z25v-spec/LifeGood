@@ -415,8 +415,11 @@ struct MainTabView: View {
                     )
                 )
                 .frame(width: 62, height: 62)
-                .shadow(color: Color.purple.opacity(listening ? 0.7 : 0.35),
-                        radius: listening ? 14 : 8, y: 4)
+                // 深色陰影：營造按鈕浮起感
+                .shadow(color: Color.black.opacity(0.45), radius: 12, x: 0, y: 8)
+                // 紫色光暈：強調主題色、錄音時更亮
+                .shadow(color: Color.purple.opacity(listening ? 0.8 : 0.5),
+                        radius: listening ? 18 : 14, x: 0, y: 4)
                 .scaleEffect(listening ? 1.08 : 1.0)
                 .animation(
                     listening
