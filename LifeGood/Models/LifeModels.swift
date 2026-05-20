@@ -1107,6 +1107,8 @@ struct BusinessCard: Identifiable, Codable {
     var address: String
     var note: String
     var date: Date
+    /// 主要業務 / 經營項目（可被搜尋欄位命中）
+    var primaryBusiness: String
     /// 名片頭像照片檔名（存於 BusinessCardPhotos 目錄）
     var photoFileName: String?
     /// 連結的公司組織人員 ID（雙向同步：OrgPerson.linkedBusinessCardId 也會指回來）
@@ -1147,7 +1149,8 @@ struct BusinessCard: Identifiable, Codable {
          note: String = "", date: Date = Date(),
          photoFileName: String? = nil,
          linkedOrgPersonId: UUID? = nil,
-         phones: [String] = [], emails: [String] = [], faxes: [String] = []) {
+         phones: [String] = [], emails: [String] = [], faxes: [String] = [],
+         primaryBusiness: String = "") {
         self.id = id; self.name = name; self.company = company
         self.department = department; self.jobTitle = jobTitle
         // 多值優先；只給單值時包成單元素陣列（空字串忽略）
@@ -1165,6 +1168,7 @@ struct BusinessCard: Identifiable, Codable {
         self.address = address; self.note = note; self.date = date
         self.photoFileName = photoFileName
         self.linkedOrgPersonId = linkedOrgPersonId
+        self.primaryBusiness = primaryBusiness
     }
 
     init(from decoder: Decoder) throws {
@@ -1195,6 +1199,7 @@ struct BusinessCard: Identifiable, Codable {
         date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
         photoFileName = try? c.decodeIfPresent(String.self, forKey: .photoFileName)
         linkedOrgPersonId = try? c.decodeIfPresent(UUID.self, forKey: .linkedOrgPersonId)
+        primaryBusiness = (try? c.decodeIfPresent(String.self, forKey: .primaryBusiness)) ?? ""
     }
 
     func encode(to encoder: Encoder) throws {
@@ -1212,6 +1217,7 @@ struct BusinessCard: Identifiable, Codable {
         try c.encode(date, forKey: .date)
         try c.encodeIfPresent(photoFileName, forKey: .photoFileName)
         try c.encodeIfPresent(linkedOrgPersonId, forKey: .linkedOrgPersonId)
+        try c.encode(primaryBusiness, forKey: .primaryBusiness)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1219,6 +1225,7 @@ struct BusinessCard: Identifiable, Codable {
         case phone, email                                 // legacy 單值（讀取相容）
         case phones, emails, faxes                        // 新多值
         case address, note, date, photoFileName, linkedOrgPersonId
+        case primaryBusiness
     }
 
     // MARK: - 名片頭像照片儲存

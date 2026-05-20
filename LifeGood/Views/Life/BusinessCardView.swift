@@ -419,6 +419,8 @@ struct BusinessCardView: View {
             card.name.lowercased().contains(q)
             || card.company.lowercased().contains(q)
             || card.jobTitle.lowercased().contains(q)
+            || card.department.lowercased().contains(q)
+            || card.primaryBusiness.lowercased().contains(q)
             || card.phones.contains(where: { $0.lowercased().contains(q) })
             || card.emails.contains(where: { $0.lowercased().contains(q) })
         }
@@ -435,7 +437,7 @@ struct BusinessCardView: View {
                 if !lifeStore.businessCards.isEmpty {
                     HStack {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("搜尋姓名、公司、職稱", text: $searchText)
+                        TextField("搜尋姓名、公司、職稱、主要業務", text: $searchText)
                             .textFieldStyle(.plain)
                     }
                     .padding(10)
@@ -802,7 +804,8 @@ struct BusinessCardView: View {
             linkedOrgPersonId: nil,
             phones: source.phones,
             emails: source.emails,
-            faxes: source.faxes
+            faxes: source.faxes,
+            primaryBusiness: source.primaryBusiness
         )
         lifeStore.add(copy)
     }
@@ -1089,6 +1092,12 @@ struct BusinessCardDetailView: View {
                     Text(card.department)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.85))
+                }
+                if !card.primaryBusiness.isEmpty {
+                    Text("主要業務：\(card.primaryBusiness)")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(2)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1514,6 +1523,7 @@ struct BusinessCardEditor: View {
     @State private var company = ""
     @State private var department = ""
     @State private var jobTitle = ""
+    @State private var primaryBusiness = ""
     @State private var phones: [String] = [""]
     @State private var emails: [String] = [""]
     @State private var faxes: [String] = []
@@ -1529,6 +1539,7 @@ struct BusinessCardEditor: View {
                     TextField("公司名稱", text: $company)
                     TextField("部門", text: $department)
                     TextField("職稱", text: $jobTitle)
+                    TextField("主要業務（可搜尋）", text: $primaryBusiness)
                 }
                 Section("電話") {
                     ForEach(phones.indices, id: \.self) { idx in
@@ -1643,6 +1654,7 @@ struct BusinessCardEditor: View {
                 } else if let e = editing {
                     name = e.name; company = e.company; department = e.department
                     jobTitle = e.jobTitle
+                    primaryBusiness = e.primaryBusiness
                     phones = e.phones.isEmpty ? [""] : e.phones
                     emails = e.emails.isEmpty ? [""] : e.emails
                     faxes = e.faxes
@@ -1686,7 +1698,8 @@ struct BusinessCardEditor: View {
             linkedOrgPersonId: editing?.linkedOrgPersonId,
             phones: cleanedPhones,
             emails: cleanedEmails,
-            faxes: cleanedFaxes
+            faxes: cleanedFaxes,
+            primaryBusiness: primaryBusiness.trimmingCharacters(in: .whitespaces)
         )
         if editing != nil { lifeStore.update(card) } else { lifeStore.add(card) }
         dismiss()
