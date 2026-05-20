@@ -134,6 +134,10 @@ struct ParsedAIExpense {
     var diningMember: String?
     /// AI 從帳戶清單挑出的扣款帳戶顯示名稱（呼叫端用此字串對回 LifeMilestone）
     var paymentAccount: String?
+    /// AI 從房地產清單挑出的物件顯示名稱（呼叫端對回 RealEstate UUID）
+    var realEstate: String?
+    /// 房地產變動支出子分類（房屋價金 / 裝修 / 維修 / 家具 / 清潔 / 水電瓦斯 / 稅費 / 保險 / 其他）
+    var realEstateSubCategory: String?
     /// 原始辨識到的語音文字（保底放到備註用）
     var originalText: String?
 }
@@ -186,6 +190,21 @@ final class AIExpenseParserService {
 - 比對銀行 / 卡片名稱時忽略「銀行」「商業銀行」「股份有限公司」「信用卡」等通用詞，重點比對品牌字（玉山、國泰、中信、台新…）與末四碼
 - paymentAccount 一定要與清單中的某一項完全相同，不要自己改寫
 
+如果句子前面附帶 [可選房地產：A、B、C] 標籤，請依下列規則決定 realEstate 與 realEstateSubCategory：
+- 句子提到房子的別名、地址關鍵字（信義店、新店、老家、出租屋…），或「我家／我的房子／房屋／物件／租屋處／管理費／房貸／房屋稅／地價稅／房屋保險」等與不動產有關的詞 → 從清單挑出最相近的整段字串原樣回填到 realEstate
+- 沒有清單或完全沒提到房子就不要填 realEstate
+- 一旦判斷有房地產關聯，請把 categoryRaw 設為「房地產」
+- realEstateSubCategory 必須從這個清單擇一：房屋價金、裝修、維修、家具、清潔、水電瓦斯、稅費、保險、其他
+  · 「裝潢／重新粉刷／木工／系統櫃」→ 裝修
+  · 「修水管／換馬桶／抓漏」→ 維修
+  · 「沙發／床／桌椅／冰箱／冷氣」→ 家具
+  · 「打掃／清潔費／除蟲」→ 清潔
+  · 「水費／電費／瓦斯／管理費」→ 水電瓦斯
+  · 「房屋稅／地價稅／土增稅」→ 稅費
+  · 「火險／地震險／房屋保險」→ 保險
+  · 「頭期款／自備款／房屋價金」→ 房屋價金
+  · 其他不確定的 → 其他
+
 **必填欄位**（請務必每次回傳）：
 - amount (number)：金額
 - categoryRaw (string)：**必須**從這個清單擇一回傳，**不要回傳清單外的詞**：
@@ -195,6 +214,8 @@ final class AIExpenseParserService {
 - title (string)：店家名 / 項目名稱（簡短；若位置標籤可以幫助補完，請補上區域，例如「鬍鬚張 信義店」）
 - note (string)：備註細節
 - paymentAccount (string)：扣款帳戶。**必須**從 [可選信用卡] 或 [可選銀行帳戶] 清單中原樣挑一個，沒有對應就不要填
+- realEstate (string)：房地產物件。**必須**從 [可選房地產] 清單中原樣挑一個，沒提到房子就不要填
+- realEstateSubCategory (string)：房地產支出子分類（房屋價金 / 裝修 / 維修 / 家具 / 清潔 / 水電瓦斯 / 稅費 / 保險 / 其他）；有設 realEstate 就要一併設這個
 - diningMember (string)：同行者姓名 / 稱謂。判斷規則：
   · 句子裡只要出現「跟」「和」「同」「與」「陪」「帶」後接一個指人的詞，就要抽出
   · 常見指人詞：太太、老婆、先生、老公、女友、男友、女朋友、男朋友、家人、爸媽、爸爸、媽媽、孩子、兒子、女兒、小孩、朋友、同事、同學、客戶、廠商、長官、老闆、家裡人、家人們
@@ -228,13 +249,20 @@ final class AIExpenseParserService {
 
 **範例輸入 6**：[可選銀行帳戶：玉山銀行、國泰世華銀行] 從國泰扣 1500 給管理費
 **範例輸出 6**：{"amount":1500,"categoryRaw":"其他","title":"管理費","paymentAccount":"國泰世華銀行"}
+
+**範例輸入 7**：[可選房地產：信義小套房、新店透天] 幫信義那間房子繳了 3500 管理費
+**範例輸出 7**：{"amount":3500,"categoryRaw":"房地產","title":"管理費","realEstate":"信義小套房","realEstateSubCategory":"水電瓦斯"}
+
+**範例輸入 8**：[可選房地產：信義小套房] 房屋稅繳了 12000
+**範例輸出 8**：{"amount":12000,"categoryRaw":"房地產","title":"房屋稅","realEstate":"信義小套房","realEstateSubCategory":"稅費"}
 """
 
     func parse(
         _ text: String,
         availableMembers: [String] = [],
         availableCreditCards: [String] = [],
-        availableBankAccounts: [String] = []
+        availableBankAccounts: [String] = [],
+        availableRealEstates: [String] = []
     ) async throws -> ParsedAIExpense {
         let settings = await AISettingsStore.shared
         guard let provider = await settings.activeProvider else { throw AIParseError.noProvider }
@@ -258,6 +286,10 @@ final class AIExpenseParserService {
         if !availableBankAccounts.isEmpty {
             let list = availableBankAccounts.joined(separator: "、")
             contextParts.append("[可選銀行帳戶：\(list)]")
+        }
+        if !availableRealEstates.isEmpty {
+            let list = availableRealEstates.joined(separator: "、")
+            contextParts.append("[可選房地產：\(list)]")
         }
         let prompt = contextParts.isEmpty
             ? text
@@ -436,6 +468,16 @@ final class AIExpenseParserService {
             ?? (json["paymentMethod"] as? String) {
             let trimmed = acc.trimmingCharacters(in: .whitespaces)
             p.paymentAccount = trimmed.isEmpty ? nil : trimmed
+        }
+        if let re = (json["realEstate"] as? String)
+            ?? (json["property"] as? String) {
+            let trimmed = re.trimmingCharacters(in: .whitespaces)
+            p.realEstate = trimmed.isEmpty ? nil : trimmed
+        }
+        if let sub = (json["realEstateSubCategory"] as? String)
+            ?? (json["realEstateCategory"] as? String) {
+            let trimmed = sub.trimmingCharacters(in: .whitespaces)
+            p.realEstateSubCategory = trimmed.isEmpty ? nil : trimmed
         }
         return p
     }

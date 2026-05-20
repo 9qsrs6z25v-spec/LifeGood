@@ -495,21 +495,24 @@ struct MainTabView: View {
             let myName = aiSpeakerName()
             if !myName.isEmpty { familyNames.insert(myName, at: 0) }
 
-            // 蒐集信用卡 / 銀行帳戶顯示名稱，讓 AI 從清單挑選扣款帳戶
+            // 蒐集信用卡 / 銀行帳戶 / 房地產顯示名稱，讓 AI 從清單挑選關聯
             let cardDisplayNames = aiCreditCardDisplayNames()
             let bankDisplayNames = aiBankDisplayNames()
+            let realEstateDisplayNames = aiRealEstateDisplayNames()
 
             let parsed = try await AIExpenseParserService.shared.parse(
                 text,
                 availableMembers: familyNames,
                 availableCreditCards: cardDisplayNames.map(\.display),
-                availableBankAccounts: bankDisplayNames.map(\.display)
+                availableBankAccounts: bankDisplayNames.map(\.display),
+                availableRealEstates: realEstateDisplayNames.map(\.display)
             )
             aiBusy = false
             try await aiCommitExpense(
                 parsed: parsed,
                 cardDisplayNames: cardDisplayNames,
-                bankDisplayNames: bankDisplayNames
+                bankDisplayNames: bankDisplayNames,
+                realEstateDisplayNames: realEstateDisplayNames
             )
         } catch {
             aiBusy = false
@@ -549,11 +552,27 @@ struct MainTabView: View {
         }
     }
 
+    private struct AIRealEstateOption {
+        let id: UUID
+        let display: String
+    }
+
+    /// 房地產清單（排除已售出）：顯示名稱使用 RealEstate.name
+    private func aiRealEstateDisplayNames() -> [AIRealEstateOption] {
+        financeStore.realEstates.compactMap { re in
+            guard re.soldDate == nil else { return nil }
+            let name = re.name.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return nil }
+            return AIRealEstateOption(id: re.id, display: name)
+        }
+    }
+
     @MainActor
     private func aiCommitExpense(
         parsed: ParsedAIExpense,
         cardDisplayNames: [AIAccountOption] = [],
-        bankDisplayNames: [AIAccountOption] = []
+        bankDisplayNames: [AIAccountOption] = [],
+        realEstateDisplayNames: [AIRealEstateOption] = []
     ) async throws {
         let amount = parsed.amount ?? 0
         guard amount > 0 else {
@@ -598,13 +617,29 @@ struct MainTabView: View {
         // 把本人也加進同行者：AI 通常只抽出對方（「我跟老婆」會抽出老婆），
         // 但用「我跟」「和」「陪」「帶」等措辭時，本人也在場
         let resolvedDiningMember = aiAppendSpeakerIfNeeded(parsed.diningMember)
+        // 對回房地產 UUID 與子分類；若 AI 配到房地產，分類強制為 .realEstate
+        var linkedRealEstateId: UUID? = nil
+        var realEstateSubCat: RealEstateExpenseCategory? = nil
+        var matchedRealEstateDisplay: String? = nil
+        if let re = parsed.realEstate?.trimmingCharacters(in: .whitespaces),
+           !re.isEmpty,
+           let match = realEstateDisplayNames.first(where: { $0.display == re }) {
+            linkedRealEstateId = match.id
+            matchedRealEstateDisplay = match.display
+            realEstateSubCat = RealEstateExpenseCategory(rawValue:
+                parsed.realEstateSubCategory?.trimmingCharacters(in: .whitespaces) ?? ""
+            ) ?? .other
+        }
+        let finalCategory: VariableCategory = (linkedRealEstateId != nil) ? .realEstate : category
         let exp = Expense(
             id: UUID(),
             title: title,
             amount: amount,
             date: Date(),
             expenseType: .variable,
-            variableCategory: category,
+            variableCategory: finalCategory,
+            linkedRealEstateId: linkedRealEstateId,
+            realEstateExpenseCategory: realEstateSubCat,
             note: parsed.note ?? "",
             diningMember: resolvedDiningMember,
             linkedBankMilestoneId: linkedBankId,
@@ -616,9 +651,13 @@ struct MainTabView: View {
         )
         expenseStore.add(exp)
         // 成功 toast
-        var detailParts: [String] = ["\(category.rawValue)・NT$ \(Int(amount))"]
+        var detailParts: [String] = ["\(finalCategory.rawValue)・NT$ \(Int(amount))"]
         if let m = resolvedDiningMember, !m.isEmpty { detailParts.append(m) }
         if let acc = matchedAccountDisplay { detailParts.append(acc) }
+        if let re = matchedRealEstateDisplay {
+            let subText = realEstateSubCat.map { "（\($0.rawValue)）" } ?? ""
+            detailParts.append("\(re)\(subText)")
+        }
         if placeLat != nil { detailParts.append("已標 美食地圖") }
         aiShowToast("已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false)
     }
