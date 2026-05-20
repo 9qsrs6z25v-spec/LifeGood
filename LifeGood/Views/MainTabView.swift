@@ -489,7 +489,7 @@ struct MainTabView: View {
             var familyNames: [String] = lifeStore.familyMembers
                 .map { memberName($0.chineseName, $0.englishName) }
                 .filter { !$0.isEmpty }
-            let myName = memberName(lifeStore.profile.chineseName, lifeStore.profile.englishName)
+            let myName = aiSpeakerName()
             if !myName.isEmpty { familyNames.insert(myName, at: 0) }
 
             // 蒐集信用卡 / 銀行帳戶顯示名稱，讓 AI 從清單挑選扣款帳戶
@@ -592,6 +592,9 @@ struct MainTabView: View {
                 matchedAccountDisplay = bank.display
             }
         }
+        // 把本人也加進同行者：AI 通常只抽出對方（「我跟老婆」會抽出老婆），
+        // 但用「我跟」「和」「陪」「帶」等措辭時，本人也在場
+        let resolvedDiningMember = aiAppendSpeakerIfNeeded(parsed.diningMember)
         let exp = Expense(
             id: UUID(),
             title: title,
@@ -600,7 +603,7 @@ struct MainTabView: View {
             expenseType: .variable,
             variableCategory: category,
             note: parsed.note ?? "",
-            diningMember: parsed.diningMember,
+            diningMember: resolvedDiningMember,
             linkedBankMilestoneId: linkedBankId,
             linkedBankCurrency: linkedBankId == nil ? nil : "NT$",
             linkedCreditCardMilestoneId: linkedCardId,
@@ -611,10 +614,33 @@ struct MainTabView: View {
         expenseStore.add(exp)
         // 成功 toast
         var detailParts: [String] = ["\(category.rawValue)・NT$ \(Int(amount))"]
-        if let m = parsed.diningMember, !m.isEmpty { detailParts.append(m) }
+        if let m = resolvedDiningMember, !m.isEmpty { detailParts.append(m) }
         if let acc = matchedAccountDisplay { detailParts.append(acc) }
         if placeLat != nil { detailParts.append("已標 美食地圖") }
         aiShowToast("已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false)
+    }
+
+    /// 取得本人姓名（中文優先，否則英文；都空 → 回空字串）
+    private func aiSpeakerName() -> String {
+        let c = lifeStore.profile.chineseName.trimmingCharacters(in: .whitespaces)
+        if !c.isEmpty { return c }
+        return lifeStore.profile.englishName.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 若 AI 抽出的 diningMember 沒包含本人，幫忙補進去（最前面）
+    private func aiAppendSpeakerIfNeeded(_ raw: String?) -> String? {
+        let speaker = aiSpeakerName()
+        guard !speaker.isEmpty,
+              let raw = raw?.trimmingCharacters(in: .whitespaces),
+              !raw.isEmpty
+        else { return raw?.isEmpty == true ? nil : raw }
+        let separators = CharacterSet(charactersIn: "、,，;； ")
+        let existing = raw
+            .components(separatedBy: separators)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if existing.contains(speaker) { return raw }
+        return "\(speaker)、\(raw)"
     }
 
     /// 用 MKLocalSearch 查 AI 給出的店家名稱，帶當前位置偏向
