@@ -251,25 +251,29 @@ struct RealEstateView: View {
             Divider()
 
             if !item.mortgageItems.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(item.mortgageItems) { m in
-                        HStack {
-                            Text(m.title.isEmpty ? "房貸" : m.title)
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(Color.blue.opacity(0.1))
-                                .foregroundStyle(.blue)
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
-                            Text("\(m.elapsedPeriods)/\(m.totalPeriods)期")
-                                .font(.caption2).foregroundStyle(.tertiary)
-                            Spacer()
-                            Text(fmt(m.amount) + "/月").font(.caption)
+                // 只顯示「正在繳費中」的貸款（已繳期數 < 總期數），已繳完的省略
+                let activeMortgages = item.mortgageItems.filter { $0.elapsedPeriods < $0.totalPeriods }
+                if !activeMortgages.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(activeMortgages) { m in
+                            HStack {
+                                Text(m.title.isEmpty ? "房貸" : m.title)
+                                    .font(.caption2.weight(.medium))
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.blue.opacity(0.1))
+                                    .foregroundStyle(.blue)
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                                Text("\(m.elapsedPeriods)/\(m.totalPeriods)期")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                                Spacer()
+                                Text(fmt(m.amount) + "/月").font(.caption)
+                            }
                         }
-                    }
-                    HStack {
-                        Text("已繳貸款").font(.caption2).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(fmt(item.totalMortgagePaid)).font(.caption.bold()).foregroundStyle(.blue)
+                        HStack {
+                            Text("已繳貸款").font(.caption2).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(fmt(item.totalMortgagePaid)).font(.caption.bold()).foregroundStyle(.blue)
+                        }
                     }
                 }
             }
