@@ -279,23 +279,17 @@ struct RealEstateView: View {
             }
 
             if !item.paidItems.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(item.paidItems.suffix(2)) { p in
-                        HStack {
-                            Text(p.title.isEmpty ? "已付款" : p.title)
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(Color.purple.opacity(0.1))
-                                .foregroundStyle(.purple)
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
-                            Spacer()
-                            Text(fmt(p.amount)).font(.caption)
-                        }
-                    }
-                    if item.paidItems.count > 2 {
-                        Text("還有 \(item.paidItems.count - 2) 筆...")
-                            .font(.caption2).foregroundStyle(.tertiary)
-                    }
+                HStack {
+                    Text("房屋價金")
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.purple.opacity(0.1))
+                        .foregroundStyle(.purple)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    Text("\(item.paidItems.count) 筆")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    Spacer()
+                    Text(fmt(item.totalPaid)).font(.caption.bold()).foregroundStyle(.purple)
                 }
             }
 
