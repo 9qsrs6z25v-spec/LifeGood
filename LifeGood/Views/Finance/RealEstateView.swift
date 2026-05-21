@@ -294,23 +294,17 @@ struct RealEstateView: View {
             }
 
             if !item.variableExpenses.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(item.variableExpenses.suffix(3)) { ve in
-                        HStack {
-                            Text(ve.category.rawValue)
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(Color.orange.opacity(0.1))
-                                .foregroundStyle(.orange)
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
-                            Spacer()
-                            Text(fmt(ve.amount)).font(.caption)
-                        }
-                    }
-                    if item.variableExpenses.count > 3 {
-                        Text("還有 \(item.variableExpenses.count - 3) 筆...")
-                            .font(.caption2).foregroundStyle(.tertiary)
-                    }
+                HStack {
+                    Text("變動支出")
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.1))
+                        .foregroundStyle(.orange)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    Text("\(item.variableExpenses.count) 筆")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    Spacer()
+                    Text(fmt(item.variableTotal)).font(.caption.bold()).foregroundStyle(.orange)
                 }
             }
 
@@ -358,9 +352,26 @@ struct RealEstateView: View {
         }
     }
 
+    /// 依數字大小自動帶單位：< 1 萬顯示「元」、1 萬 ~ 1 億顯示「萬元」、≥ 1 億顯示「億元」
     private func fmt(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        let abs = Swift.abs(v)
+        let sign = v < 0 ? "-" : ""
+        let nf = NumberFormatter()
+        nf.numberStyle = .decimal
+        if abs >= 100_000_000 {
+            nf.maximumFractionDigits = 2
+            nf.minimumFractionDigits = 0
+            let s = nf.string(from: NSNumber(value: abs / 100_000_000)) ?? "0"
+            return "\(sign)NT$ \(s) 億元"
+        }
+        if abs >= 10_000 {
+            nf.maximumFractionDigits = 1
+            nf.minimumFractionDigits = 0
+            let s = nf.string(from: NSNumber(value: abs / 10_000)) ?? "0"
+            return "\(sign)NT$ \(s) 萬元"
+        }
+        nf.maximumFractionDigits = 0
+        let s = nf.string(from: NSNumber(value: abs)) ?? "0"
+        return "\(sign)NT$ \(s) 元"
     }
 }
