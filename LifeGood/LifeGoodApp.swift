@@ -51,6 +51,8 @@ struct LifeGoodApp: App {
                     await subscription.refreshStatus()
                     await subscription.loadProducts()
                     await einvoiceSync.syncIfDue(expenseStore: expenseStore)
+                    // 啟動時重排所有事件提醒，讓舊事件升級到新版 body / 截止日邏輯
+                    await NotificationManager.shared.rescheduleAll(events: lifeStore.personalEvents)
                 }
                 .onAppear {
                     BackupManager.shared.createSnapshotIfNeeded(
