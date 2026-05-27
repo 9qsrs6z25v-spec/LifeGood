@@ -223,24 +223,70 @@ struct IncomeView: View {
                     incomeRow(income)
                         .contentShape(Rectangle())
                         .onTapGesture { editingItem = income }
-                }
-                .onDelete { offsets in
-                    for index in offsets {
-                        let income = incomes[index]
-                        if let stockId = income.linkedStockId,
-                           var stock = financeStore.stocks.first(where: { $0.id == stockId }) {
-                            stock.linkedIncomeId = nil
-                            financeStore.update(stock)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                if let idx = incomes.firstIndex(where: { $0.id == income.id }) {
+                                    deleteIncomes(at: IndexSet(integer: idx), from: incomes)
+                                }
+                            } label: { Label("刪除", systemImage: "trash") }
+
+                            Button {
+                                duplicateIncome(income)
+                            } label: { Label("複製", systemImage: "doc.on.doc") }
+                            .tint(.blue)
                         }
-                        if let bankId = income.linkedBankMilestoneId,
-                           var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
-                            ms.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
-                            lifeStore.update(ms)
-                        }
-                    }
-                    store.deleteIncome(at: offsets, from: incomes)
                 }
             }
+        }
+    }
+
+    /// 刪除收入時同步清掉股票連結與銀行存款紀錄
+    private func deleteIncomes(at offsets: IndexSet, from incomes: [Income]) {
+        for index in offsets {
+            let income = incomes[index]
+            if let stockId = income.linkedStockId,
+               var stock = financeStore.stocks.first(where: { $0.id == stockId }) {
+                stock.linkedIncomeId = nil
+                financeStore.update(stock)
+            }
+            if let bankId = income.linkedBankMilestoneId,
+               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                ms.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
+                lifeStore.update(ms)
+            }
+        }
+        store.deleteIncome(at: offsets, from: incomes)
+    }
+
+    /// 複製收入：欄位沿用、日期改為現在、不沿用股票配息連結（避免 1:1 配息重複連結）。
+    /// 若是一次性且連結銀行帳戶，補一筆對應的入帳紀錄維持餘額正確。
+    private func duplicateIncome(_ income: Income) {
+        let copy = Income(
+            id: UUID(),
+            title: income.title,
+            amount: income.amount,
+            date: Date(),
+            category: income.category,
+            period: income.period,
+            isFixedSalary: income.isFixedSalary,
+            note: income.note,
+            linkedStockId: nil,
+            linkedBankMilestoneId: income.linkedBankMilestoneId,
+            linkedBankCurrency: income.linkedBankCurrency
+        )
+        store.add(copy)
+        // 一次性收入 + 有連結銀行 → 補一筆入帳，週期性收入靠展開不需單筆
+        if copy.period == .once,
+           let bankId = copy.linkedBankMilestoneId,
+           var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+            var list = ms.bankDeposits ?? []
+            list.append(BankDeposit(
+                id: UUID(), date: copy.date, amount: copy.amount,
+                currencyCode: copy.linkedBankCurrency ?? "NT$",
+                isWithdrawal: false, linkedExpenseId: copy.id
+            ))
+            ms.bankDeposits = list
+            lifeStore.update(ms)
         }
     }
 
