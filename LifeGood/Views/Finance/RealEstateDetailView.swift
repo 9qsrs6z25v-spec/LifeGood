@@ -759,7 +759,8 @@ struct RealEstateDetailView: View {
         let expensePhotoCount = linkedExpensePhotos.reduce(0) { $0 + $1.photoFileNames.count }
         let docCount = estate.documents.count
         let utilityPhotoCount = estate.utilityPayments.filter { $0.photoFileName != nil }.count
-        let total = photoCount + expensePhotoCount + docCount + utilityPhotoCount
+        let elevatorPhotoCount = estate.elevatorMaintenances.filter { $0.photoFileName != nil }.count
+        let total = photoCount + expensePhotoCount + docCount + utilityPhotoCount + elevatorPhotoCount
         return total > 0 ? "\(total) 筆" : "尚無"
     }
 
@@ -988,12 +989,15 @@ struct RealEstateDetailView: View {
         let utilityItems = estate.utilityPayments
             .filter { $0.photoFileName != nil }
             .map { HousePhotoItem.utility($0) }
-        let allItems = (renovationItems + expenseItems + documentItems + utilityItems)
+        let elevatorItems = estate.elevatorMaintenances
+            .filter { $0.photoFileName != nil }
+            .map { HousePhotoItem.elevator($0) }
+        let allItems = (renovationItems + expenseItems + documentItems + utilityItems + elevatorItems)
             .sorted { $0.date > $1.date }
 
         if allItems.isEmpty {
             HStack {
-                Text("尚無房屋資料（裝潢照片 / 關聯支出 / 文件 / 水電瓦斯收據）")
+                Text("尚無房屋資料（裝潢照片 / 關聯支出 / 文件 / 水電瓦斯收據 / 電梯保養）")
                     .font(.caption).foregroundStyle(.tertiary)
                 Spacer()
             }
@@ -1028,6 +1032,13 @@ struct RealEstateDetailView: View {
                                     editingUtilityPayment = u
                                 } label: {
                                     Label("編輯繳費紀錄", systemImage: "pencil")
+                                }
+                            }
+                            if case .elevator(let m) = item.kind {
+                                Button {
+                                    editingElevatorMaintenance = m
+                                } label: {
+                                    Label("編輯保養紀錄", systemImage: "pencil")
                                 }
                             }
                         }
@@ -1088,6 +1099,19 @@ struct RealEstateDetailView: View {
                 date: u.date,
                 kind: .utility(u.type)
             )
+        case .elevator(let m):
+            guard let name = m.photoFileName else {
+                editingElevatorMaintenance = m
+                return
+            }
+            let url = ElevatorMaintenance.photosDirectory.appendingPathComponent(name)
+            cutePhotoDraft = CutePhotoDraft(
+                urls: [url],
+                title: "電梯保養",
+                note: "",
+                date: m.date,
+                kind: .elevator
+            )
         }
     }
 
@@ -1110,7 +1134,7 @@ struct RealEstateDetailView: View {
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
             }
-            .frame(width: 130, alignment: .leading)
+            .frame(width: 140, alignment: .leading)
             Text(fmtDate(item.date))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -1142,6 +1166,8 @@ struct RealEstateDetailView: View {
         }
         .frame(width: 130, height: 100)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.12), radius: 3, y: 2)
+        .frame(width: 140, height: 110)
     }
 
     // MARK: - 文件匯入 / 刪除
@@ -1215,11 +1241,8 @@ struct RealEstateDetailView: View {
         .frame(width: 130, height: 100)
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.white, lineWidth: 2)
-        )
-        .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
+        // 去掉突兀的白色外框，改用陰影分層（疊張之間靠旋轉位移 + 陰影區隔）
+        .shadow(color: .black.opacity(0.2), radius: 3, y: 2)
     }
 
     private func renovationPhotoCard(_ p: RenovationPhoto) -> some View {
@@ -1247,27 +1270,31 @@ struct RealEstateDetailView: View {
         return "未命名"
     }
 
-    /// 單張照片卡片（同舊版）
+    /// 單張照片卡片：footprint 與堆疊卡片一致（140×110，內容 130×100 置中），
+    /// 不再自帶白框與 onTapGesture，由外層 Button 統一導向 CutePhotoViewer。
     @ViewBuilder
     private func renovationSinglePhoto(url: URL?) -> some View {
-        if let url = url, let img = UIImage(contentsOfFile: url.path) {
-            Image(uiImage: img)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 130, height: 100)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .onTapGesture { viewingPhotoURL = url }
-        } else {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(.tertiarySystemFill))
-                .frame(width: 130, height: 100)
-                .overlay(
-                    Image(systemName: "photo")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                )
+        Group {
+            if let url = url, let img = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 130, height: 100)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
+            } else {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(.tertiarySystemFill))
+                    .frame(width: 130, height: 100)
+                    .overlay(
+                        Image(systemName: "photo")
+                            .font(.title2)
+                            .foregroundStyle(.tertiary)
+                    )
+            }
         }
+        .frame(width: 140, height: 110)
     }
 
     /// 多張照片堆疊卡片：3 張往後遞減旋轉位移，最上層放第一張，右上角徽章顯示總張數
@@ -2407,6 +2434,7 @@ fileprivate enum HousePhotoItem: Identifiable {
     case expense(Expense)
     case document(RealEstateDocument)
     case utility(UtilityPayment)
+    case elevator(ElevatorMaintenance)
 
     var id: String {
         switch self {
@@ -2414,6 +2442,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .expense(let e): return "e-\(e.id.uuidString)"
         case .document(let d): return "d-\(d.id.uuidString)"
         case .utility(let u): return "u-\(u.id.uuidString)"
+        case .elevator(let m): return "ev-\(m.id.uuidString)"
         }
     }
 
@@ -2425,6 +2454,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .expense(let e): return e.date
         case .document(let d): return d.date
         case .utility(let u): return u.date
+        case .elevator(let m): return m.date
         }
     }
 
@@ -2444,6 +2474,8 @@ fileprivate enum HousePhotoItem: Identifiable {
             return "文件"
         case .utility(let u):
             return "\(u.type.rawValue) 收據"
+        case .elevator:
+            return "電梯保養"
         }
     }
 
@@ -2453,6 +2485,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .expense(let e): return e.photoFileNames
         case .document: return []
         case .utility(let u): return u.photoFileName.map { [$0] } ?? []
+        case .elevator(let m): return m.photoFileName.map { [$0] } ?? []
         }
     }
 
@@ -2467,6 +2500,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .expense: return Expense.photoURL(for: name)
         case .document(let d): return d.fileURL
         case .utility: return UtilityPayment.photosDirectory.appendingPathComponent(name)
+        case .elevator: return ElevatorMaintenance.photosDirectory.appendingPathComponent(name)
         }
     }
 
@@ -2477,6 +2511,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .expense: return "tag.fill"
         case .document(let d): return d.icon
         case .utility(let u): return u.type.icon
+        case .elevator: return "arrow.up.arrow.down.square.fill"
         }
     }
 
@@ -2491,6 +2526,7 @@ fileprivate enum HousePhotoItem: Identifiable {
             case .electricity: return .yellow
             case .gas: return .orange
             }
+        case .elevator: return .teal
         }
     }
 }
@@ -2591,12 +2627,14 @@ struct CutePhotoDraft: Identifiable {
         case renovation
         case expense
         case utility(UtilityType)
+        case elevator
 
         var label: String {
             switch self {
             case .renovation: return "裝潢紀錄"
             case .expense: return "支出照片"
             case .utility(let t): return "\(t.rawValue) 收據"
+            case .elevator: return "電梯保養"
             }
         }
         var icon: String {
@@ -2604,6 +2642,7 @@ struct CutePhotoDraft: Identifiable {
             case .renovation: return "paintbrush.fill"
             case .expense: return "tag.fill"
             case .utility(let t): return t.icon
+            case .elevator: return "arrow.up.arrow.down.square.fill"
             }
         }
         var accent: Color {
@@ -2616,6 +2655,7 @@ struct CutePhotoDraft: Identifiable {
                 case .electricity: return Color(red: 0.98, green: 0.78, blue: 0.30)   // 暖黃
                 case .gas:         return Color(red: 0.96, green: 0.55, blue: 0.35)   // 蜜橘
                 }
+            case .elevator: return Color(red: 0.45, green: 0.78, blue: 0.70)   // 薄荷綠
             }
         }
     }
