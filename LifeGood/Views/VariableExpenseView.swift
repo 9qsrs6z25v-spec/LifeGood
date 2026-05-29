@@ -271,7 +271,10 @@ struct VariableExpenseView: View {
             diningMember: expense.diningMember,
             linkedBankMilestoneId: expense.linkedBankMilestoneId,
             linkedBankCurrency: expense.linkedBankCurrency,
-            linkedCreditCardMilestoneId: expense.linkedCreditCardMilestoneId
+            linkedCreditCardMilestoneId: expense.linkedCreditCardMilestoneId,
+            placeAddress: expense.placeAddress,
+            placeLatitude: expense.placeLatitude,
+            placeLongitude: expense.placeLongitude
         )
         store.add(copy)
     }
