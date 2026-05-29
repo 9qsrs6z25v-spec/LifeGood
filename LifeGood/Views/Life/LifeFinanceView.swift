@@ -1484,12 +1484,27 @@ struct FinanceCardView: View {
         .buttonStyle(.plain)
     }
 
+    /// 把單筆金額換算成台幣（NT$ 直接回傳；找不到匯率時不換算以免丟資料）
+    private func depositAmountInTWD(_ amount: Double, currency: String) -> Double {
+        if currency == "NT$" { return amount }
+        if let rate = expenseStore.currencyRates.first(where: { $0.code == currency }), rate.rate > 0 {
+            return amount * rate.rate
+        }
+        return amount
+    }
+
     private var depositChart: some View {
         let data = deposits
+        // 混幣帳戶（例如台幣存款 + 美金提款）一律換算 TWD 後再累計，
+        // 避免外幣提款被當成台幣金額直接相減；單一幣別則保留原幣別不換算。
+        let currencies = Set(data.map(\.currencyCode))
+        let isMixed = currencies.count > 1
+        let displayCurrency = isMixed ? "NT$" : (currencies.first ?? "NT$")
         var balances: [(date: Date, balance: Double, id: UUID)] = []
         var running: Double = 0
         for dep in data {
-            if dep.isWithdrawal { running -= dep.amount } else { running += dep.amount }
+            let amt = isMixed ? depositAmountInTWD(dep.amount, currency: dep.currencyCode) : dep.amount
+            if dep.isWithdrawal { running -= amt } else { running += amt }
             balances.append((dep.date, running, dep.id))
         }
         let maxBal = balances.map(\.balance).max() ?? 1
@@ -1508,8 +1523,11 @@ struct FinanceCardView: View {
             if let last = balances.last {
                 HStack {
                     Text("目前總額").font(.caption).foregroundStyle(.secondary)
+                    if isMixed {
+                        Text("（含外幣換算）").font(.caption2).foregroundStyle(.tertiary)
+                    }
                     Spacer()
-                    Text("\(fmtNum(last.balance))").font(.caption.bold())
+                    Text("\(displayCurrency) \(fmtNum(last.balance))").font(.caption.bold())
                         .foregroundStyle(last.balance >= 0 ? Color.blue : Color.red)
                 }
                 .padding(.horizontal, 4)
@@ -1676,9 +1694,20 @@ struct DepositEditorSheet: View {
             if let expId = dep.linkedExpenseId,
                let exp = expenseStore.expenses.first(where: { $0.id == expId }),
                exp.linkedCreditCardMilestoneId != nil { continue }
-            total += dep.isWithdrawal ? -dep.amount : dep.amount
+            // 換算成台幣再加總，外幣提款 / 存款才不會被當成台幣金額直接計算
+            let twd = depositAmountInTWD(dep.amount, currency: dep.currencyCode)
+            total += dep.isWithdrawal ? -twd : twd
         }
         return total
+    }
+
+    /// 把單筆金額換算成台幣（NT$ 直接回傳；找不到匯率時不換算以免丟資料）
+    private func depositAmountInTWD(_ amount: Double, currency: String) -> Double {
+        if currency == "NT$" { return amount }
+        if let rate = expenseStore.currencyRates.first(where: { $0.code == currency }), rate.rate > 0 {
+            return amount * rate.rate
+        }
+        return amount
     }
 
     private var currentBalance: Double {
