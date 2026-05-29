@@ -1493,6 +1493,8 @@ struct FinanceCardView: View {
         return amount
     }
 
+    @State private var depositChartPage: Int = 0
+
     private var depositChart: some View {
         let data = deposits
         // 混幣帳戶（例如台幣存款 + 美金提款）一律換算 TWD 後再累計，
@@ -1507,17 +1509,49 @@ struct FinanceCardView: View {
             if dep.isWithdrawal { running -= amt } else { running += amt }
             balances.append((dep.date, running, dep.id))
         }
-        let maxBal = balances.map(\.balance).max() ?? 1
-        let minBal = min(0, balances.map(\.balance).min() ?? 0)
-        let range = max(maxBal - minBal, 1)
-        let useLineChart = balances.count > 12
-        let labelStride = max(1, balances.count / 6)
+        // 每頁 30 筆，由舊到新切頁；超過 30 筆可左右滑動
+        let pageSize = 30
+        var pages: [[(date: Date, balance: Double, id: UUID)]] = []
+        var i = 0
+        while i < balances.count {
+            let end = min(i + pageSize, balances.count)
+            pages.append(Array(balances[i..<end]))
+            i = end
+        }
 
-        return VStack(alignment: .leading, spacing: 4) {
-            if useLineChart {
-                balanceLineChart(balances: balances, minBal: minBal, range: range, labelStride: labelStride)
-            } else {
-                balanceBarChart(balances: balances, minBal: minBal, range: range, labelStride: labelStride)
+        return VStack(alignment: .leading, spacing: 6) {
+            if !pages.isEmpty {
+                GeometryReader { geo in
+                    let pageWidth = geo.size.width
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 0) {
+                            ForEach(Array(pages.enumerated()), id: \.offset) { idx, pageData in
+                                depositChartPageView(pageData)
+                                    .frame(width: pageWidth)
+                                    .id(idx)
+                            }
+                        }
+                        .scrollTargetLayout()
+                    }
+                    .scrollTargetBehavior(.paging)
+                    .scrollPosition(id: Binding<Int?>(
+                        get: { depositChartPage },
+                        set: { if let v = $0 { depositChartPage = v } }
+                    ))
+                }
+                .frame(height: 150)
+
+                if pages.count > 1 {
+                    HStack(spacing: 6) {
+                        Spacer()
+                        ForEach(0..<pages.count, id: \.self) { p in
+                            Circle()
+                                .fill(p == depositChartPage ? Color.blue : Color.secondary.opacity(0.3))
+                                .frame(width: 6, height: 6)
+                        }
+                        Spacer()
+                    }
+                }
             }
 
             if let last = balances.last {
@@ -1535,124 +1569,46 @@ struct FinanceCardView: View {
         }
     }
 
+    /// 單頁的餘額長條圖：Y 軸最大 / 最小值依「本頁」資料自適應
+    @ViewBuilder
+    private func depositChartPageView(_ pageData: [(date: Date, balance: Double, id: UUID)]) -> some View {
+        let maxBal = pageData.map(\.balance).max() ?? 1
+        let minBal = min(0, pageData.map(\.balance).min() ?? 0)
+        let range = max(maxBal - minBal, 1)
+        let labelStride = max(1, pageData.count / 6)
+        GeometryReader { geo in
+            let chartHeight: CGFloat = 120
+            let barAreaWidth = geo.size.width
+            let barWidth = max(4, (barAreaWidth - CGFloat(pageData.count - 1) * 4) / CGFloat(max(pageData.count, 1)))
+            VStack(spacing: 2) {
+                HStack(alignment: .bottom, spacing: 4) {
+                    ForEach(Array(pageData.enumerated()), id: \.element.id) { _, item in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(item.balance >= 0 ? Color.blue : Color.red)
+                            .frame(
+                                width: barWidth,
+                                height: max(4, CGFloat(abs(item.balance - minBal) / range) * chartHeight)
+                            )
+                    }
+                }
+                .frame(height: chartHeight, alignment: .bottom)
+
+                HStack(alignment: .top, spacing: 4) {
+                    ForEach(Array(pageData.enumerated()), id: \.element.id) { idx, item in
+                        Text(idx % labelStride == 0 ? shortDate(item.date) : " ")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: barWidth)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+            }
+        }
+    }
+
     private func shortDate(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: date)
-    }
-
-    private func barColor(for dep: BankDeposit) -> Color {
-        if dep.isWithdrawal { return .red }
-        return dep.currencyCode == "NT$" ? .blue : .orange
-    }
-
-    @ViewBuilder
-    private func balanceBarChart(
-        balances: [(date: Date, balance: Double, id: UUID)],
-        minBal: Double,
-        range: Double,
-        labelStride: Int
-    ) -> some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            ForEach(Array(balances.enumerated()), id: \.element.id) { index, item in
-                VStack(spacing: 2) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(item.balance >= 0 ? Color.blue : Color.red)
-                        .frame(
-                            width: max(12, (UIScreen.main.bounds.width - 80) / CGFloat(max(balances.count, 1))),
-                            height: max(4, CGFloat(abs(item.balance - minBal) / range) * 120)
-                        )
-                    Text(index % labelStride == 0 ? shortDate(item.date) : " ")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-            }
-        }
-        .frame(height: 140, alignment: .bottom)
-        .frame(maxWidth: .infinity)
-    }
-
-    @ViewBuilder
-    private func balanceLineChart(
-        balances: [(date: Date, balance: Double, id: UUID)],
-        minBal: Double,
-        range: Double,
-        labelStride: Int
-    ) -> some View {
-        let chartHeight: CGFloat = 120
-        GeometryReader { geo in
-            let width = geo.size.width
-            let count = max(balances.count, 1)
-            let stepX = count > 1 ? width / CGFloat(count - 1) : 0
-
-            ZStack {
-                // 零線
-                if minBal < 0 {
-                    let zeroY = chartHeight - CGFloat(-minBal / range) * chartHeight
-                    Path { p in
-                        p.move(to: CGPoint(x: 0, y: zeroY))
-                        p.addLine(to: CGPoint(x: width, y: zeroY))
-                    }
-                    .stroke(Color.secondary.opacity(0.3), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
-                }
-
-                // 折線
-                Path { p in
-                    for (i, item) in balances.enumerated() {
-                        let x = CGFloat(i) * stepX
-                        let y = chartHeight - CGFloat((item.balance - minBal) / range) * chartHeight
-                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
-                        else { p.addLine(to: CGPoint(x: x, y: y)) }
-                    }
-                }
-                .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-
-                // 填色
-                Path { p in
-                    for (i, item) in balances.enumerated() {
-                        let x = CGFloat(i) * stepX
-                        let y = chartHeight - CGFloat((item.balance - minBal) / range) * chartHeight
-                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
-                        else { p.addLine(to: CGPoint(x: x, y: y)) }
-                    }
-                    p.addLine(to: CGPoint(x: width, y: chartHeight))
-                    p.addLine(to: CGPoint(x: 0, y: chartHeight))
-                    p.closeSubpath()
-                }
-                .fill(LinearGradient(colors: [Color.blue.opacity(0.3), Color.blue.opacity(0.0)],
-                                     startPoint: .top, endPoint: .bottom))
-
-                // 數據點
-                ForEach(Array(balances.enumerated()), id: \.element.id) { i, item in
-                    let x = CGFloat(i) * stepX
-                    let y = chartHeight - CGFloat((item.balance - minBal) / range) * chartHeight
-                    Circle()
-                        .fill(item.balance >= 0 ? Color.blue : Color.red)
-                        .frame(width: 4, height: 4)
-                        .position(x: x, y: y)
-                }
-            }
-        }
-        .frame(height: chartHeight)
-
-        // X 軸日期（只渲染要顯示的標籤，平均分佈）
-        let visibleLabels: [(index: Int, label: String)] = {
-            var result: [(Int, String)] = []
-            for i in stride(from: 0, to: balances.count, by: labelStride) {
-                result.append((i, shortDate(balances[i].date)))
-            }
-            if let last = balances.last, (result.last?.0 ?? -1) != balances.count - 1 {
-                result.append((balances.count - 1, shortDate(last.date)))
-            }
-            return result
-        }()
-        HStack {
-            ForEach(visibleLabels, id: \.index) { item in
-                Text(item.label)
-                    .font(.system(size: 8))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
-            }
-        }
     }
 }
 
