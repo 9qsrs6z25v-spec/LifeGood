@@ -1044,6 +1044,9 @@ struct StockDividendEditor: View {
         } else {
             stock.dividends.append(dividend)
         }
+        // 舊資料（只有 shares、無 transactions）需先補種原始買入交易，
+        // 否則 recompute 會因 transactions 為空把股數歸零。
+        stock.seedTransactionsFromLegacyIfNeeded()
         stock.recomputeFromTransactions()
         store.update(stock)
         dismiss()
@@ -1057,6 +1060,8 @@ struct StockDividendEditor: View {
         }
         removeCashDividendBankDeposit(stock: stock, dividendId: editing.id)
         stock.dividends.removeAll { $0.id == editing.id }
+        // 同 save()：舊資料需先補種交易，避免 recompute 把股數歸零。
+        stock.seedTransactionsFromLegacyIfNeeded()
         stock.recomputeFromTransactions()
         store.update(stock)
         dismiss()
