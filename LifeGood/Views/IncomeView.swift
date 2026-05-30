@@ -8,6 +8,7 @@ struct IncomeView: View {
     @State private var editingItem: Income?
     @State private var selectedCategory: IncomeCategory?
     @State private var searchText: String = ""
+    @State private var headerAppeared = false
 
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -39,6 +40,13 @@ struct IncomeView: View {
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+                        .opacity(headerAppeared ? 1 : 0)
+                        .offset(y: headerAppeared ? 0 : 22)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                headerAppeared = true
+                            }
+                        }
                 }
                 Section {
                     categoryFilter
@@ -191,14 +199,26 @@ struct IncomeView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
         .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.16, green: 0.74, blue: 0.50),
-                    Color(red: 0.07, green: 0.50, blue: 0.38)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.16, green: 0.74, blue: 0.50),
+                        Color(red: 0.07, green: 0.50, blue: 0.38)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 140, height: 140)
+                    .offset(x: 90, y: -55)
+                    .blur(radius: 14)
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 90, height: 90)
+                    .offset(x: -70, y: 55)
+                    .blur(radius: 10)
+            }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.40), radius: 16, x: 0, y: 8)
@@ -349,47 +369,67 @@ struct IncomeView: View {
 
     private func incomeRow(_ income: Income) -> some View {
         let accent = incomeCategoryColor(income.category)
-        return HStack {
-            Image(systemName: income.category.icon)
-                .font(.title3).foregroundStyle(accent)
-                .frame(width: 36, height: 36)
-                .background(accent.opacity(0.12))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(income.title).font(.subheadline.weight(.medium))
-                HStack(spacing: 4) {
-                    Text(income.category.rawValue)
-                    if income.period != .once {
-                        Text(income.period.rawValue)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.1))
-                            .foregroundStyle(.blue)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                    }
-                    if !income.note.isEmpty {
-                        Text("- \(income.note)")
-                    }
-                }
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        return HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.20), accent.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 42, height: 42)
+                Image(systemName: income.category.icon)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(accent)
             }
 
-            Spacer()
+            VStack(alignment: .leading, spacing: 3) {
+                Text(income.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(income.category.rawValue)
+                        .foregroundStyle(.secondary)
+                    if income.period != .once {
+                        Text(income.period.rawValue)
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(accent.opacity(0.12))
+                            .foregroundStyle(accent)
+                            .clipShape(Capsule())
+                    }
+                    if !income.note.isEmpty {
+                        Text("· \(income.note)")
+                            .foregroundStyle(Color(.tertiaryLabel))
+                    }
+                }
+                .font(.caption)
+                .lineLimit(1)
+            }
 
-            VStack(alignment: .trailing, spacing: 2) {
+            Spacer(minLength: 4)
+
+            VStack(alignment: .trailing, spacing: 3) {
                 Text(fmt(income.amount))
-                    .font(.subheadline.bold()).foregroundStyle(accent)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(accent)
+                    .contentTransition(.numericText())
                 if let label = depositBankLabel(for: income) {
                     HStack(spacing: 3) {
                         Image(systemName: "building.columns.fill")
-                            .font(.caption2)
-                        Text(label).font(.caption2)
+                            .font(.system(size: 9))
+                        Text(label)
+                            .font(.system(size: 10, weight: .medium))
                     }
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
     private func depositBankLabel(for income: Income) -> String? {
