@@ -116,65 +116,95 @@ struct IncomeView: View {
         let useEstimate = !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
         let displayedIncome = useEstimate ? store.estimatedMonthlyIncome : store.currentMonthIncomeTotal
         let displayedBalance = displayedIncome - store.currentMonthTotal
+        let isPositive = displayedBalance >= 0
+        let recurringMonthly = store.incomes
+            .filter { $0.period != .once }
+            .reduce(0.0) { $0 + $1.monthlyAmount }
 
-        return VStack(spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
+        return VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
                         Text(useEstimate ? "本月收入（預估）" : "本月收入")
-                            .font(.subheadline).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.78))
                         if useEstimate {
-                            Image(systemName: "chart.line.uptrend.xyaxis")
-                                .font(.caption2).foregroundStyle(.orange)
+                            HStack(spacing: 3) {
+                                Image(systemName: "chart.line.uptrend.xyaxis")
+                                    .font(.system(size: 8))
+                                Text("預估")
+                                    .font(.system(size: 9, weight: .semibold))
+                            }
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.white.opacity(0.22))
+                            .clipShape(Capsule())
+                            .foregroundStyle(.white)
                         }
                     }
                     Text(fmt(displayedIncome))
-                        .font(.title2.bold())
-                        .foregroundStyle(useEstimate ? .orange : .green)
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 3) {
                     Text("收支餘額")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    Text(fmt(displayedBalance))
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.78))
+                    Text((isPositive ? "+" : "") + fmt(displayedBalance))
                         .font(.title3.bold())
-                        .foregroundStyle(displayedBalance >= 0 ? .green : .red)
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
                 }
             }
 
             if useEstimate {
-                HStack {
+                HStack(spacing: 5) {
                     Image(systemName: "info.circle")
-                        .foregroundStyle(.orange)
-                    Text("本月尚無收入紀錄，顯示近 6 個月中位數預估")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption2)
+                    Text("顯示近 6 個月收入中位數預估值")
+                        .font(.caption2)
                     Spacer()
                 }
-                .padding(10)
-                .background(Color.orange.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .foregroundStyle(.white.opacity(0.70))
+                .padding(.top, 10)
             }
 
-            // 週期收入摘要
-            let recurringMonthly = store.incomes
-                .filter { $0.period != .once }
-                .reduce(0.0) { $0 + $1.monthlyAmount }
             if recurringMonthly > 0 {
-                HStack {
+                Rectangle()
+                    .fill(.white.opacity(0.20))
+                    .frame(height: 0.5)
+                    .padding(.vertical, 12)
+
+                HStack(spacing: 6) {
                     Image(systemName: "arrow.clockwise")
-                        .foregroundStyle(.blue)
-                    Text("固定月收入：\(fmt(recurringMonthly))")
+                        .font(.caption2)
+                    Text("固定月收入")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
                     Spacer()
+                    Text(fmt(recurringMonthly))
+                        .font(.caption.bold())
                 }
-                .padding(10)
-                .background(Color.blue.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .foregroundStyle(.white.opacity(0.88))
             }
         }
-        .padding()
-        .background(Color(.systemBackground))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 20)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.16, green: 0.74, blue: 0.50),
+                    Color(red: 0.07, green: 0.50, blue: 0.38)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.40), radius: 16, x: 0, y: 8)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
     }
 
     // MARK: - 篩選
@@ -201,16 +231,33 @@ struct IncomeView: View {
 
     private var emptyState: some View {
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
-        return VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: isSearching ? "magnifyingglass" : "banknote")
-                .font(.system(size: 48)).foregroundStyle(.secondary)
-            Text(isSearching ? "找不到符合的收入" : "尚無收入紀錄")
-                .font(.headline).foregroundStyle(.secondary)
-            Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增收入")
-                .font(.subheadline).foregroundStyle(.tertiary)
-            Spacer()
-        }.frame(maxWidth: .infinity)
+        return VStack(spacing: 18) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(.systemFill), Color(.secondarySystemFill)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 84, height: 84)
+                Image(systemName: isSearching ? "magnifyingglass" : "banknote")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            VStack(spacing: 7) {
+                Text(isSearching ? "找不到符合的收入" : "尚無收入紀錄")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增收入")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 52)
     }
 
     // MARK: - 列表（List sections，包在外層的 List 內）
@@ -290,12 +337,23 @@ struct IncomeView: View {
         }
     }
 
+    private func incomeCategoryColor(_ category: IncomeCategory) -> Color {
+        switch category {
+        case .salary:     return Color(red: 0.16, green: 0.74, blue: 0.50)
+        case .bonus:      return Color(red: 1.00, green: 0.72, blue: 0.18)
+        case .gift:       return Color(red: 1.00, green: 0.35, blue: 0.55)
+        case .luck:       return Color(red: 0.68, green: 0.40, blue: 1.00)
+        case .investment: return Color(red: 0.27, green: 0.67, blue: 0.99)
+        }
+    }
+
     private func incomeRow(_ income: Income) -> some View {
-        HStack {
+        let accent = incomeCategoryColor(income.category)
+        return HStack {
             Image(systemName: income.category.icon)
-                .font(.title3).foregroundStyle(.green)
+                .font(.title3).foregroundStyle(accent)
                 .frame(width: 36, height: 36)
-                .background(Color.green.opacity(0.1))
+                .background(accent.opacity(0.12))
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 2) {
@@ -320,7 +378,7 @@ struct IncomeView: View {
 
             VStack(alignment: .trailing, spacing: 2) {
                 Text(fmt(income.amount))
-                    .font(.subheadline.bold()).foregroundStyle(.green)
+                    .font(.subheadline.bold()).foregroundStyle(accent)
                 if let label = depositBankLabel(for: income) {
                     HStack(spacing: 3) {
                         Image(systemName: "building.columns.fill")
