@@ -230,6 +230,34 @@ struct VariableExpenseView: View {
             .padding(.vertical, 10)
         }
         .background(Color(.systemBackground))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(.separator).opacity(0.22), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: 1)
+        }
+    }
+
+    // MARK: - 日期 Section Header（含日計合計）
+
+    private func daySectionHeader(dateString: String, expenses: [Expense]) -> some View {
+        let dayTotal = expenses.reduce(0.0) { $0 + $1.amount }
+        return HStack(spacing: 6) {
+            Text(dateString)
+            Spacer(minLength: 8)
+            HStack(spacing: 3) {
+                Text(formatCurrency(dayTotal))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color(red: 0.90, green: 0.40, blue: 0.10).opacity(0.85))
+                Text("・\(expenses.count) 筆")
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 
     // MARK: - 空狀態
@@ -284,7 +312,7 @@ struct VariableExpenseView: View {
         let hiddenCount = hiddenGroups.reduce(0) { $0 + $1.value.count }
 
         ForEach(visibleGroups, id: \.key) { dateString, expenses in
-            Section(header: Text(dateString)) {
+            Section(header: daySectionHeader(dateString: dateString, expenses: expenses)) {
                 ForEach(expenses) { expense in
                     ExpenseRow(expense: expense)
                         .contentShape(Rectangle())

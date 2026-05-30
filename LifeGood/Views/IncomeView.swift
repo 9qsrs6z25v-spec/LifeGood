@@ -252,6 +252,34 @@ struct IncomeView: View {
             .padding(.vertical, 10)
         }
         .background(Color(.systemBackground))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(.separator).opacity(0.22), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: 1)
+        }
+    }
+
+    // MARK: - 日期 Section Header（含日計合計）
+
+    private func daySectionHeader(dateString: String, incomes: [Income]) -> some View {
+        let dayTotal = incomes.reduce(0.0) { $0 + $1.amount }
+        return HStack(spacing: 6) {
+            Text(dateString)
+            Spacer(minLength: 8)
+            HStack(spacing: 3) {
+                Text(fmt(dayTotal))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color(red: 0.16, green: 0.74, blue: 0.50).opacity(0.9))
+                Text("・\(incomes.count) 筆")
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 
     // MARK: - 空狀態
@@ -292,7 +320,7 @@ struct IncomeView: View {
     @ViewBuilder
     private var incomeListSections: some View {
         ForEach(groupedByDate(), id: \.key) { dateString, incomes in
-            Section(header: Text(dateString)) {
+            Section(header: daySectionHeader(dateString: dateString, incomes: incomes)) {
                 ForEach(incomes) { income in
                     incomeRow(income)
                         .contentShape(Rectangle())
