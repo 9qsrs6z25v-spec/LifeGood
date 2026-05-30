@@ -87,27 +87,44 @@ struct ChartView: View {
     // MARK: - 統計摘要
 
     private var statisticsSummary: some View {
-        HStack(spacing: 12) {
-            StatCard(
-                title: "總計",
-                value: formatCurrency(totalForPeriod),
-                icon: "sum",
-                color: .green
-            )
-            StatCard(
-                title: "平均",
-                value: formatCurrency(averageForPeriod),
-                icon: "divide",
-                color: .blue
-            )
-            StatCard(
-                title: "最高",
-                value: formatCurrency(chartData.map(\.amount).max() ?? 0),
-                icon: "arrow.up",
-                color: .red
-            )
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 20)
+                Text("區間統計")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            .padding(.horizontal)
+
+            HStack(spacing: 12) {
+                StatCard(
+                    title: "總計",
+                    value: formatCurrency(totalForPeriod),
+                    icon: "sum",
+                    color: .green
+                )
+                StatCard(
+                    title: "平均",
+                    value: formatCurrency(averageForPeriod),
+                    icon: "divide",
+                    color: .blue
+                )
+                StatCard(
+                    title: "最高",
+                    value: formatCurrency(chartData.map(\.amount).max() ?? 0),
+                    icon: "arrow.up",
+                    color: .red
+                )
+            }
+            .padding(.horizontal)
         }
-        .padding(.horizontal)
     }
 
     // MARK: - 圖表輪播（左右滑動切換）
@@ -402,78 +419,123 @@ struct ChartView: View {
     // MARK: - 支出類型比例
 
     private var expenseTypeBreakdown: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("支出類型比例")
-                .font(.headline)
-                .padding(.horizontal)
+        let variableTotal = store.currentMonthVariableTotal
+        let fixedTotal = store.currentMonthFixedTotal
+        let total = variableTotal + fixedTotal
 
-            let variableTotal = store.currentMonthVariableTotal
-            let fixedTotal = store.currentMonthFixedTotal
-            let total = variableTotal + fixedTotal
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 20)
+                Text("支出類型比例")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                if total > 0 {
+                    Text("本月")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                }
+            }
+            .padding(.horizontal)
 
             if total == 0 {
-                Text("尚無資料")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-            } else {
-                // 比例條
-                HStack(spacing: 0) {
-                    if variableTotal > 0 {
-                        Rectangle()
-                            .fill(Color.orange)
-                            .frame(width: max(4, CGFloat(variableTotal / total) * (UIScreen.main.bounds.width - 64)))
-                    }
-                    if fixedTotal > 0 {
-                        Rectangle()
-                            .fill(Color.blue)
-                            .frame(width: max(4, CGFloat(fixedTotal / total) * (UIScreen.main.bounds.width - 64)))
-                    }
+                VStack(spacing: 10) {
+                    Image(systemName: "chart.pie")
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundStyle(.secondary)
+                    Text("尚無支出資料")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                .frame(height: 12)
-                .clipShape(Capsule())
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
                 .padding(.horizontal)
-
-                HStack(spacing: 24) {
-                    HStack(spacing: 6) {
-                        Circle().fill(Color.orange).frame(width: 10, height: 10)
-                        VStack(alignment: .leading) {
-                            Text("變動支出")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(formatCurrency(variableTotal))
-                                .font(.subheadline.bold())
-                            Text(String(format: "%.1f%%", total > 0 ? variableTotal / total * 100 : 0))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 14) {
+                    // 比例條：用 GeometryReader 取動態寬度，避免 UIScreen 相依
+                    GeometryReader { geo in
+                        HStack(spacing: 0) {
+                            if variableTotal > 0 {
+                                LinearGradient(
+                                    colors: [.orange, .orange.opacity(0.75)],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                                .frame(width: max(6, geo.size.width * CGFloat(variableTotal / total)))
+                            }
+                            if fixedTotal > 0 {
+                                LinearGradient(
+                                    colors: [Color.blue.opacity(0.80), .blue],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                            }
                         }
+                        .frame(height: 12)
+                        .clipShape(Capsule())
                     }
+                    .frame(height: 12)
 
-                    HStack(spacing: 6) {
-                        Circle().fill(Color.blue).frame(width: 10, height: 10)
-                        VStack(alignment: .leading) {
-                            Text("固定支出")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(formatCurrency(fixedTotal))
-                                .font(.subheadline.bold())
-                            Text(String(format: "%.1f%%", total > 0 ? fixedTotal / total * 100 : 0))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
+                    // 圖例
+                    HStack(spacing: 20) {
+                        breakdownLegendItem(
+                            color: .orange,
+                            icon: "arrow.up.arrow.down.circle.fill",
+                            label: "變動支出",
+                            amount: variableTotal,
+                            total: total
+                        )
+                        breakdownLegendItem(
+                            color: .blue,
+                            icon: "pin.circle.fill",
+                            label: "固定支出",
+                            amount: fixedTotal,
+                            total: total
+                        )
+                        Spacer()
                     }
-
-                    Spacer()
                 }
+                .padding(16)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
             }
         }
-        .padding(.vertical)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
-        .padding(.horizontal)
+    }
+
+    private func breakdownLegendItem(color: Color, icon: String, label: String, amount: Double, total: Double) -> some View {
+        HStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.14))
+                    .frame(width: 30, height: 30)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(color)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(formatCurrency(amount))
+                    .font(.subheadline.bold())
+                    .contentTransition(.numericText())
+                Text(String(format: "%.1f%%", total > 0 ? amount / total * 100 : 0))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     // MARK: - 期間明細
@@ -553,23 +615,60 @@ struct StatCard: View {
     let color: Color
 
     var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(color)
+        VStack(alignment: .leading, spacing: 0) {
+            // 彩色頂端條（與 OverviewView summaryCard 一致）
+            RoundedRectangle(cornerRadius: 2)
+                .fill(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.55)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                )
+                .frame(height: 4)
+                .padding(.bottom, 10)
+
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.16))
+                    .frame(width: 30, height: 30)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+
+            Spacer(minLength: 8)
+
             Text(title)
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.bold())
                 .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            Text(value)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
                 .minimumScaleFactor(0.7)
+                .lineLimit(1)
+                .contentTransition(.numericText())
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                color.opacity(0.04)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(color.opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: color.opacity(0.13), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 1)
     }
 }
 
