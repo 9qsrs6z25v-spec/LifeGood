@@ -361,8 +361,22 @@ struct OverviewView: View {
         let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
         let weekdayIdx = weekday - 1
         let weekdayStr = weekdays.indices.contains(weekdayIdx) ? weekdays[weekdayIdx] : ""
+        let hasSpending = store.todayTotal > 0
 
-        return HStack(spacing: 14) {
+        return HStack(spacing: 0) {
+            // 左側綠色強調條
+            RoundedRectangle(cornerRadius: 2)
+                .fill(
+                    LinearGradient(
+                        colors: [.green, .green.opacity(0.40)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4)
+                .padding(.vertical, 10)
+                .padding(.trailing, 14)
+
             // 日期圓形徽章
             ZStack {
                 // 向外擴散的脈衝光環
@@ -385,7 +399,7 @@ struct OverviewView: View {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [.green.opacity(0.18), .green.opacity(0.06)],
+                            colors: [.green.opacity(0.22), .green.opacity(0.07)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -400,6 +414,7 @@ struct OverviewView: View {
                         .foregroundStyle(.green.opacity(0.7))
                 }
             }
+            .padding(.trailing, 14)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("今日花費")
@@ -407,27 +422,57 @@ struct OverviewView: View {
                     .foregroundStyle(.secondary)
                 Text(smartCurrency(store.todayTotal))
                     .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(store.todayTotal > 0 ? .primary : .secondary)
+                    .foregroundStyle(hasSpending ? .primary : Color.green.opacity(0.5))
                     .contentTransition(.numericText())
             }
 
             Spacer()
 
-            if store.todayTotal == 0 {
-                VStack(alignment: .trailing, spacing: 2) {
+            if !hasSpending {
+                // 零支出成就徽章：綠色膠囊 + 圖示
+                HStack(spacing: 5) {
                     Image(systemName: "checkmark.seal.fill")
-                        .font(.title2)
-                        .foregroundStyle(.green.opacity(0.6))
-                    Text("今日無支出")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("今日零支出")
+                        .font(.caption.weight(.semibold))
                 }
+                .foregroundStyle(.green)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.green.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.green.opacity(0.20), lineWidth: 0.75)
+                )
             }
         }
-        .padding(16)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 18)
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                // 左上角淡綠色散景光暈，增加卡片層次感
+                Circle()
+                    .fill(Color.green.opacity(0.06))
+                    .frame(width: 110, height: 110)
+                    .offset(x: -10, y: -35)
+                    .blur(radius: 18)
+                // 右下補光
+                Circle()
+                    .fill(Color.green.opacity(0.04))
+                    .frame(width: 70, height: 70)
+                    .offset(x: 80, y: 32)
+                    .blur(radius: 12)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.green.opacity(0.10), lineWidth: 0.75)
+        )
+        .shadow(color: Color.green.opacity(0.12), radius: 14, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - 分類配色（委派給 VariableCategory.accentColor）
