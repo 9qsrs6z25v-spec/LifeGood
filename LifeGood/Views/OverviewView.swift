@@ -51,7 +51,7 @@ struct OverviewView: View {
                         .offset(y: appearedCards.contains("header") ? 0 : 20)
                         .onAppear {
                             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                                appearedCards.insert("header")
+                                _ = appearedCards.insert("header")
                             }
                         }
 
@@ -291,7 +291,7 @@ struct OverviewView: View {
         .offset(y: appearedCards.contains(key) ? 0 : 18)
         .onAppear {
             withAnimation(.spring(response: 0.50, dampingFraction: 0.78).delay(cardDelay(key))) {
-                appearedCards.insert(key)
+                _ = appearedCards.insert(key)
             }
         }
     }
