@@ -545,7 +545,7 @@ struct MainTabView: View {
             guard ms.category == .achievement,
                   ms.financeSubCategory == .creditCard,
                   ms.isDisabled != true else { return nil }
-            let name = (ms.cardName?.isEmpty == false ? ms.cardName! : ms.title)
+            let name = (ms.cardName?.isEmpty == false ? ms.cardName ?? ms.title : ms.title)
             var display = name
             if let last4 = ms.cardLastFour, !last4.isEmpty {
                 display += " 末\(last4)"
@@ -559,7 +559,7 @@ struct MainTabView: View {
         lifeStore.milestones.compactMap { ms in
             guard ms.category == .achievement,
                   ms.financeSubCategory == .bank else { return nil }
-            let name = (ms.bankName?.isEmpty == false ? ms.bankName! : ms.title)
+            let name = (ms.bankName?.isEmpty == false ? ms.bankName ?? ms.title : ms.title)
             return AIAccountOption(id: ms.id, display: name, linkedBankId: nil)
         }
     }

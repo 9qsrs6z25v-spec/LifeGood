@@ -51,6 +51,9 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
+    // 防抖：2 秒內多次 pushAll() 合併為一次
+    private var pushDebounceTimer: Timer?
+
     @Published private(set) var isAccountAvailable: Bool = false
     @Published private(set) var lastSyncDate: Date?
     @Published private(set) var lastChangeReason: ChangeReason = .none
@@ -132,8 +135,16 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
-    /// 任何 Store 的 save() 都會觸發：將所有 sync key 一次推送（增量 — CloudKit 內部會 dedupe）
+    /// 任何 Store 的 save() 都會觸發：2 秒防抖後將所有 sync key 一次推送
     func pushAll() {
+        guard isEnabled, isAccountAvailable else { return }
+        pushDebounceTimer?.invalidate()
+        pushDebounceTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+            self?.flushPushAll()
+        }
+    }
+
+    private func flushPushAll() {
         guard isEnabled, isAccountAvailable else { return }
         let keys = Self.syncKeys
         let group = DispatchGroup()

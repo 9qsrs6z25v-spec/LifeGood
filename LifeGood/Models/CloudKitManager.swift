@@ -197,7 +197,9 @@ final class CloudKitManager {
     /// 上傳指定本地照片檔到 iCloud；若檔案不存在則跳過。
     func uploadPhoto(directory: String, fileName: String, completion: ((Bool) -> Void)? = nil) {
         guard isAvailable else { completion?(false); return }
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            completion?(false); return
+        }
         let fileURL = docs.appendingPathComponent(directory).appendingPathComponent(fileName)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { completion?(false); return }
 
@@ -288,8 +290,8 @@ final class CloudKitManager {
                     if let dir = record["directory"] as? String,
                        let name = record["fileName"] as? String,
                        let asset = record["asset"] as? CKAsset,
-                       let url = asset.fileURL {
-                        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                       let url = asset.fileURL,
+                       let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
                         let dirURL = docs.appendingPathComponent(dir, isDirectory: true)
                         try? FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
                         let dest = dirURL.appendingPathComponent(name)
@@ -361,7 +363,9 @@ final class CloudKitManager {
     func uploadAllLocalPhotos(completion: (() -> Void)? = nil) {
         guard isAvailable else { completion?(); return }
         queue.async {
-            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                completion?(); return
+            }
             for dir in Self.photoDirectories {
                 let url = docs.appendingPathComponent(dir, isDirectory: true)
                 guard let files = try? FileManager.default.contentsOfDirectory(atPath: url.path) else { continue }

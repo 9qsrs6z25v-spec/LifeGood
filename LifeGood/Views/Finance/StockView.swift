@@ -122,6 +122,7 @@ struct StockView: View {
 
     // MARK: - 自動更新報價
 
+    @MainActor
     private func refreshAllPrices() async {
         let targets = activeStocks.filter { !$0.symbol.isEmpty }
         guard !targets.isEmpty else { return }

@@ -541,10 +541,10 @@ final class SpeechRecognizer: NSObject, ObservableObject {
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
             guard let self else { return }
             if let result {
-                Task { @MainActor in self.transcript = result.bestTranscription.formattedString }
+                Task { @MainActor [weak self] in self?.transcript = result.bestTranscription.formattedString }
             }
             if let error {
-                Task { @MainActor in self.errorMessage = error.localizedDescription }
+                Task { @MainActor [weak self] in self?.errorMessage = error.localizedDescription }
             }
         }
         isRecording = true

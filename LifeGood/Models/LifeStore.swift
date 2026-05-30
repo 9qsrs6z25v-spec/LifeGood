@@ -29,7 +29,10 @@ class LifeStore: ObservableObject {
 
     @objc private func reloadFromCloud() {
         load()
+        // backfill 期間暫停 save()，避免剛從雲端拉取就立刻回寫
+        isLoading = true
         backfillOrgPeopleFromSubordinates()
+        isLoading = false
         objectWillChange.send()
     }
 
@@ -180,10 +183,9 @@ class LifeStore: ObservableObject {
 
     /// 一次性 backfill：把舊有部屬補出對應的公司組織人員（之前沒有同步過的）
     func backfillOrgPeopleFromSubordinates() {
-        for sub in subordinates {
-            if !orgPeople.contains(where: { $0.linkedSubordinateId == sub.id }) {
-                syncOrgPersonFor(subordinate: sub)
-            }
+        let linked = Set(orgPeople.compactMap(\.linkedSubordinateId))
+        for sub in subordinates where !linked.contains(sub.id) {
+            syncOrgPersonFor(subordinate: sub)
         }
     }
 
