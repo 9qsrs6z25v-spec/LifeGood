@@ -251,8 +251,12 @@ struct RealEstateView: View {
             Divider()
 
             if !item.mortgageItems.isEmpty {
-                // 只顯示「正在繳費中」的貸款（已繳期數 < 總期數），已繳完的省略
-                let activeMortgages = item.mortgageItems.filter { $0.elapsedPeriods < $0.totalPeriods }
+                // 只顯示「正在繳費中」的貸款：已開始（startDate <= 今天）且尚未繳完（elapsedPeriods < totalPeriods）。
+                // 未來才開始的接續貸款，elapsedPeriods 會被 clamp 成 0，光看 elapsedPeriods < totalPeriods 會誤判為繳費中。
+                let today = Date()
+                let activeMortgages = item.mortgageItems.filter {
+                    $0.startDate <= today && $0.elapsedPeriods < $0.totalPeriods
+                }
                 if !activeMortgages.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(activeMortgages) { m in
