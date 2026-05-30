@@ -47,6 +47,7 @@ final class CloudKitManager {
     private let queue = DispatchQueue(label: "CloudKitManager.queue", qos: .utility)
 
     private let defaults = UserDefaults.standard
+    private let fetchLock = NSLock()
     private let zoneCreatedKey = "ck_zone_created"
     private let subscriptionCreatedKey = "ck_zone_sub_created"
     private let serverChangeTokenKey = "ck_server_change_token"
@@ -114,7 +115,9 @@ final class CloudKitManager {
         op.modifyRecordZonesResultBlock = { [weak self] result in
             switch result {
             case .success:
-                self?.defaults.set(true, forKey: self?.zoneCreatedKey ?? "")
+                if let self = self {
+                    self.defaults.set(true, forKey: self.zoneCreatedKey)
+                }
                 completion(true)
             case .failure:
                 completion(false)
@@ -137,7 +140,9 @@ final class CloudKitManager {
         op.modifySubscriptionsResultBlock = { [weak self] result in
             switch result {
             case .success:
-                self?.defaults.set(true, forKey: self?.subscriptionCreatedKey ?? "")
+                if let self = self {
+                    self.defaults.set(true, forKey: self.subscriptionCreatedKey)
+                }
                 completion(true)
             case .failure:
                 completion(false)
@@ -273,6 +278,7 @@ final class CloudKitManager {
         var pulledKVKeys = Set<String>()
         var pulledPhotos = Set<String>() // pathKey
         var deletedPhotos = Set<String>() // pathKey
+        let lock = self.fetchLock
 
         op.recordWasChangedBlock = { [weak self] _, result in
             guard let self = self else { return }
@@ -284,7 +290,7 @@ final class CloudKitManager {
                        let url = asset.fileURL,
                        let data = try? Data(contentsOf: url) {
                         self.defaults.set(data, forKey: key)
-                        pulledKVKeys.insert(key)
+                        lock.lock(); pulledKVKeys.insert(key); lock.unlock()
                     }
                 } else if record.recordType == Self.photoRecordType {
                     if let dir = record["directory"] as? String,
@@ -298,7 +304,7 @@ final class CloudKitManager {
                         try? FileManager.default.removeItem(at: dest)
                         do {
                             try FileManager.default.copyItem(at: url, to: dest)
-                            pulledPhotos.insert("\(dir)/\(name)")
+                            lock.lock(); pulledPhotos.insert("\(dir)/\(name)"); lock.unlock()
                         } catch {
                             // ignore
                         }
@@ -314,7 +320,7 @@ final class CloudKitManager {
             let name = recID.recordName
             if name.hasPrefix("photo_") {
                 // 對應的 pathKey 不易回推（已 sanitize），靠檔案系統清掃法處理
-                deletedPhotos.insert(name)
+                lock.lock(); deletedPhotos.insert(name); lock.unlock()
             }
         }
 
@@ -327,7 +333,8 @@ final class CloudKitManager {
                 if let t = token { self?.saveChangeToken(t) }
             }
         }
-        op.fetchRecordZoneChangesResultBlock = { result in
+        op.fetchRecordZoneChangesResultBlock = { [weak self] result in
+            guard let self = self else { completion?(false); return }
             DispatchQueue.main.async {
                 if !pulledKVKeys.isEmpty {
                     NotificationCenter.default.post(

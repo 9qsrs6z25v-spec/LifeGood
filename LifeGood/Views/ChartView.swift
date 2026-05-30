@@ -16,6 +16,7 @@ struct ChartView: View {
     @State private var chartData: [ChartDataPoint] = []
     @State private var isLoading = true
     @State private var chartMode: ChartMode = .trend
+    @State private var loadTask: Task<Void, Never>?
 
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -57,19 +58,18 @@ struct ChartView: View {
                 await loadChartData()
             }
             .onChange(of: store.expenses.count) { _, _ in
-                Task { await loadChartData() }
+                loadTask?.cancel()
+                loadTask = Task { await loadChartData() }
             }
         }
     }
 
+    @MainActor
     private func loadChartData() async {
         isLoading = true
-        let period = selectedPeriod
-        let data = store.chartData(for: period)
-        await MainActor.run {
-            chartData = data
-            isLoading = false
-        }
+        let data = store.chartData(for: selectedPeriod)
+        chartData = data
+        isLoading = false
     }
 
     // MARK: - 時間選擇

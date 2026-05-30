@@ -495,12 +495,14 @@ struct SettingsView: View {
             .textInputAutocapitalization(.never)
             .disableAutocorrection(true)
             .autocorrectionDisabled()
-            Link(destination: URL(string: p.consoleURL)!) {
-                HStack(spacing: 6) {
-                    Image(systemName: "safari.fill").font(.caption)
-                    Text("前往 \(p.displayName) Console 取得 Key").font(.caption)
+            if let consoleURL = URL(string: p.consoleURL) {
+                Link(destination: consoleURL) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "safari.fill").font(.caption)
+                        Text("前往 \(p.displayName) Console 取得 Key").font(.caption)
+                    }
+                    .foregroundStyle(.blue)
                 }
-                .foregroundStyle(.blue)
             }
         } footer: {
             Text(p.helpText).font(.caption2)

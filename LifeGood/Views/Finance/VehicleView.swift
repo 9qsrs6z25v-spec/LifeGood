@@ -158,14 +158,14 @@ struct VehicleView: View {
 
     /// 自動計算折舊後估值：每年折舊 15%（定率遞減法）
     private func applyDepreciation() {
-        for i in store.vehicles.indices {
-            let v = store.vehicles[i]
+        var updated = store.vehicles
+        for i in updated.indices {
+            let v = updated[i]
             guard !v.isSold, v.purchasePrice > 0 else { continue }
-            let years = v.yearsOwned
-            let rate = 0.15
-            let depreciated = v.purchasePrice * pow(1 - rate, years)
-            store.vehicles[i].currentValue = max(0, (depreciated / 10000).rounded() * 10000)
+            let depreciated = v.purchasePrice * pow(1 - 0.15, v.yearsOwned)
+            updated[i].currentValue = max(0, (depreciated / 10000).rounded() * 10000)
         }
+        store.vehicles = updated
     }
 
     private var summaryHeader: some View {

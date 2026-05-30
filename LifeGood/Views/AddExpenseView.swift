@@ -848,11 +848,15 @@ struct AddExpenseView: View {
             placeLongitude = nil
             if let c = item.completion {
                 restaurantCompleter.resolve(c) { mapItem in
-                    if let mapItem {
-                        let resolved = mapItem.formattedAddress
-                        placeAddress = resolved.isEmpty ? item.address : resolved
-                        placeLatitude = mapItem.placemark.coordinate.latitude
-                        placeLongitude = mapItem.placemark.coordinate.longitude
+                    guard let mapItem else { return }
+                    let resolved = mapItem.formattedAddress
+                    let lat = mapItem.placemark.coordinate.latitude
+                    let lon = mapItem.placemark.coordinate.longitude
+                    let fallback = item.address
+                    Task { @MainActor in
+                        placeAddress = resolved.isEmpty ? fallback : resolved
+                        placeLatitude = lat
+                        placeLongitude = lon
                     }
                 }
             }

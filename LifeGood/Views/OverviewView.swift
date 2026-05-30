@@ -302,7 +302,9 @@ struct OverviewView: View {
         let cal = Calendar.current
         let day = cal.component(.day, from: Date())
         let weekday = cal.component(.weekday, from: Date())
-        let weekdayStr = ["日", "一", "二", "三", "四", "五", "六"][weekday - 1]
+        let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
+        let weekdayIdx = weekday - 1
+        let weekdayStr = weekdays.indices.contains(weekdayIdx) ? weekdays[weekdayIdx] : ""
 
         return HStack(spacing: 14) {
             // 日期圓形徽章

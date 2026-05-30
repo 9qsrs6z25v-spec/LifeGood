@@ -365,7 +365,11 @@ final class AIExpenseParserService {
     // MARK: Gemini
 
     private func callGemini(prompt: String, apiKey: String) async throws -> String {
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=\(apiKey)")!
+        var components = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent")!
+        components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
+        guard let url = components.url else {
+            throw AIParseError.network("Invalid Gemini API key")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

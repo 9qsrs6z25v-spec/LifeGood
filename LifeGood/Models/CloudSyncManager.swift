@@ -109,8 +109,8 @@ final class CloudSyncManager: ObservableObject {
 
     private func updateAccountStatus(_ status: CKAccountStatus) {
         let avail = (status == .available)
-        DispatchQueue.main.async {
-            self.isAccountAvailable = avail
+        DispatchQueue.main.async { [weak self] in
+            self?.isAccountAvailable = avail
         }
     }
 
@@ -138,9 +138,12 @@ final class CloudSyncManager: ObservableObject {
     /// 任何 Store 的 save() 都會觸發：2 秒防抖後將所有 sync key 一次推送
     func pushAll() {
         guard isEnabled, isAccountAvailable else { return }
-        pushDebounceTimer?.invalidate()
-        pushDebounceTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
-            self?.flushPushAll()
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.pushDebounceTimer?.invalidate()
+            self.pushDebounceTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+                self?.flushPushAll()
+            }
         }
     }
 

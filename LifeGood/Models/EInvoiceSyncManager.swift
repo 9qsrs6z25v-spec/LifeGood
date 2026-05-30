@@ -38,7 +38,8 @@ final class EInvoiceSyncManager: ObservableObject {
 
     private init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory,
-                                               in: .userDomainMask).first!
+                                               in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         if !FileManager.default.fileExists(atPath: support.path) {
             try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
         }

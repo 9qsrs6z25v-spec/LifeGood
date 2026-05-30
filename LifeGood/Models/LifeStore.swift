@@ -18,7 +18,9 @@ class LifeStore: ObservableObject {
 
     init() {
         load()
+        isLoading = true
         backfillOrgPeopleFromSubordinates()
+        isLoading = false
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(reloadFromCloud),

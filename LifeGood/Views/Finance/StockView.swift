@@ -130,11 +130,12 @@ struct StockView: View {
         withAnimation { isUpdating = true; fetchStatus = [:] }
         var success = 0
         var fail = 0
+        var updatedStocks = store.stocks
 
         for stock in targets {
             if let price = await fetchPrice(symbol: stock.symbol) {
-                if let idx = store.stocks.firstIndex(where: { $0.id == stock.id }) {
-                    store.stocks[idx].currentPrice = price
+                if let idx = updatedStocks.firstIndex(where: { $0.id == stock.id }) {
+                    updatedStocks[idx].currentPrice = price
                 }
                 fetchStatus[stock.id] = true
                 success += 1
@@ -143,6 +144,7 @@ struct StockView: View {
                 fail += 1
             }
         }
+        store.stocks = updatedStocks
 
         withAnimation { isUpdating = false }
 

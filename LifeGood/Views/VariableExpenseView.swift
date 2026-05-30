@@ -10,6 +10,13 @@ struct VariableExpenseView: View {
     @State private var visibleWeeks = 1
     @State private var searchText: String = ""
 
+    private static let groupDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M月d日 EEEE"
+        f.locale = Locale(identifier: "zh_TW")
+        return f
+    }()
+
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
@@ -339,12 +346,8 @@ struct VariableExpenseView: View {
     // MARK: - 依日期分組
 
     private func groupedByDate() -> [(key: String, value: [Expense])] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M月d日 EEEE"
-        formatter.locale = Locale(identifier: "zh_TW")
-
         let grouped = Dictionary(grouping: filteredExpenses) { expense in
-            formatter.string(from: expense.date)
+            Self.groupDateFormatter.string(from: expense.date)
         }
 
         return grouped.sorted { pair1, pair2 in
