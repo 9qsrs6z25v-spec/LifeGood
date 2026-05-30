@@ -63,11 +63,23 @@ struct FixedExpenseView: View {
 
     // MARK: - 摘要
 
+    private var monthProgress: Double {
+        let cal = Calendar.current
+        let now = Date()
+        let day = Double(cal.component(.day, from: now))
+        let total = Double(cal.range(of: .day, in: .month, for: now)?.count ?? 30)
+        return min(day / total, 1.0)
+    }
+
     private var fixedSummaryHeader: some View {
         let yearlyEstimate = store.fixedExpenses.reduce(0.0) { total, expense in
             total + expense.amount * Double(occurrencesThisYear(for: expense))
         }
         let count = store.fixedExpenses.count
+        let monthlyTotal = store.currentMonthFixedTotal
+        let taxTotal = store.fixedExpenses
+            .filter { $0.effectivelyTaxDeductible }
+            .reduce(0.0) { $0 + monthlyEquivalent($1) }
 
         return VStack(spacing: 0) {
             HStack(alignment: .top) {
@@ -75,33 +87,70 @@ struct FixedExpenseView: View {
                     Text("本月固定支出")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
-                    Text(formatCurrency(store.currentMonthFixedTotal))
+                    Text(formatCurrency(monthlyTotal))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
+                    if monthlyTotal > 0 {
+                        Text("日均 " + formatCurrency(monthlyTotal / max(1, Double(Calendar.current.component(.day, from: Date())))))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.top, 1)
+                    }
                 }
                 Spacer()
-                Text("\(count) 筆")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                    .background(.white.opacity(0.22))
-                    .clipShape(Capsule())
-                    .foregroundStyle(.white)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text("\(count) 筆")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 5)
+                        .background(.white.opacity(0.22))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
+                    if taxTotal > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "leaf.fill")
+                                .font(.system(size: 9))
+                            Text("節稅 " + formatCurrency(taxTotal))
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.white.opacity(0.18))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white.opacity(0.90))
+                    }
+                }
             }
 
-            // 年度預估列
-            HStack(spacing: 6) {
-                Image(systemName: "calendar.badge.clock")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.75))
-                Text("年度預估 \(formatCurrency(yearlyEstimate))")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.82))
-                Spacer()
+            // 月進度條
+            VStack(spacing: 5) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(.white.opacity(0.18))
+                            .frame(height: 5)
+                        Capsule()
+                            .fill(.white.opacity(0.80))
+                            .frame(width: geo.size.width * monthProgress, height: 5)
+                            .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
+                    }
+                }
+                .frame(height: 5)
+                HStack {
+                    HStack(spacing: 4) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 10))
+                        Text("月進度 \(Int(monthProgress * 100))%")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.60))
+                    Spacer()
+                    Text("年度預估 " + formatCurrency(yearlyEstimate))
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.60))
+                }
             }
-            .padding(.top, 14)
-            .padding(.horizontal, 2)
+            .padding(.top, 12)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
@@ -399,6 +448,18 @@ struct FixedExpenseRow: View {
                             .background(categoryAccent.opacity(0.12))
                             .foregroundStyle(categoryAccent)
                             .clipShape(Capsule())
+                    }
+                    if expense.effectivelyTaxDeductible {
+                        HStack(spacing: 2) {
+                            Image(systemName: "leaf.fill")
+                                .font(.system(size: 8))
+                            Text("節稅")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Color.green.opacity(0.12))
+                        .foregroundStyle(Color.green)
+                        .clipShape(Capsule())
                     }
                     if !expense.note.isEmpty {
                         Text(expense.note)
