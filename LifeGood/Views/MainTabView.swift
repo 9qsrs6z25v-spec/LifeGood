@@ -245,6 +245,10 @@ struct MainTabView: View {
     @StateObject private var speechRecognizer = SpeechRecognizer()
     @State private var aiToast: AIToastInfo?
     @State private var aiBusy = false
+    /// 同步守門旗標：DragGesture.onChanged 在按住期間會反覆觸發，
+    /// 但 aiStartRecording 是 async，從觸發到 speechRecognizer.isRecording=true 之間有空窗，
+    /// 若沒這個旗標會多次平行 startRecording → 重設 transcript / 重裝 audio tap → 畫面閃爍
+    @State private var aiStartingRecording = false
     /// 麥克風進場動畫旗標：每次切到變動支出頁就從左下角彈一次
     @State private var micEntered = false
 
@@ -448,8 +452,16 @@ struct MainTabView: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in
-                    guard !speechRecognizer.isRecording, !aiBusy else { return }
-                    Task { await aiStartRecording() }
+                    // 已在錄音、AI 處理中或正在啟動 → 直接略過
+                    guard !speechRecognizer.isRecording,
+                          !aiBusy,
+                          !aiStartingRecording
+                    else { return }
+                    aiStartingRecording = true
+                    Task {
+                        await aiStartRecording()
+                        await MainActor.run { aiStartingRecording = false }
+                    }
                 }
                 .onEnded { _ in
                     guard speechRecognizer.isRecording else { return }

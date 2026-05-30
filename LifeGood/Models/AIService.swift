@@ -513,6 +513,8 @@ final class SpeechRecognizer: NSObject, ObservableObject {
     }
 
     func startRecording() throws {
+        // 已在錄音中 → 直接略過，避免重複呼叫把 transcript 清空、重裝 audio tap
+        if isRecording { return }
         transcript = ""
         errorMessage = nil
 
