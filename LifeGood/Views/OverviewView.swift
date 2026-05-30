@@ -7,6 +7,8 @@ struct OverviewView: View {
     @State private var showAddStock = false
     @State private var showAddRealEstate = false
     @State private var appearedCards: Set<String> = []
+    @State private var ringPulse = false
+    @State private var recentListAppeared = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -100,10 +102,20 @@ struct OverviewView: View {
 
                     todayCard
                         .padding(.horizontal)
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                                ringPulse = true
+                            }
+                        }
 
                     categoryBreakdownSection
 
                     recentTransactionsSection
+                        .onAppear {
+                            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.15)) {
+                                recentListAppeared = true
+                            }
+                        }
                 }
                 .padding(.vertical)
             }
@@ -200,8 +212,12 @@ struct OverviewView: View {
                 Spacer()
                 Text((isPositive ? "+" : "") + smartCurrency(balance))
                     .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
                     .contentTransition(.numericText())
+                    .shadow(
+                        color: isPositive ? .clear : Color.red.opacity(0.45),
+                        radius: 8, x: 0, y: 2
+                    )
             }
 
             // 支出進度條
@@ -349,10 +365,27 @@ struct OverviewView: View {
         return HStack(spacing: 14) {
             // 日期圓形徽章
             ZStack {
+                // 向外擴散的脈衝光環
+                Circle()
+                    .stroke(Color.green.opacity(ringPulse ? 0 : 0.42), lineWidth: 1.5)
+                    .frame(width: 52, height: 52)
+                    .scaleEffect(ringPulse ? 1.55 : 1.0)
+                    .animation(
+                        .easeOut(duration: 1.6).repeatForever(autoreverses: false),
+                        value: ringPulse
+                    )
+                Circle()
+                    .stroke(Color.green.opacity(ringPulse ? 0 : 0.20), lineWidth: 1)
+                    .frame(width: 52, height: 52)
+                    .scaleEffect(ringPulse ? 1.85 : 1.0)
+                    .animation(
+                        .easeOut(duration: 1.6).delay(0.25).repeatForever(autoreverses: false),
+                        value: ringPulse
+                    )
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [.green.opacity(0.15), .green.opacity(0.05)],
+                            colors: [.green.opacity(0.18), .green.opacity(0.06)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -406,6 +439,9 @@ struct OverviewView: View {
 
     private var categoryBreakdownSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            let categoryTotals = store.variableCategoryTotals()
+            let maxAmount = categoryTotals.map(\.amount).max() ?? 1
+
             HStack(spacing: 10) {
                 Capsule()
                     .fill(
@@ -415,15 +451,20 @@ struct OverviewView: View {
                             endPoint: .bottom
                         )
                     )
-                    .frame(width: 4, height: 18)
+                    .frame(width: 4, height: 20)
                 Text("本月變動支出分類")
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                if !categoryTotals.isEmpty {
+                    Text("\(categoryTotals.count) 項")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                }
             }
             .padding(.horizontal)
-
-            let categoryTotals = store.variableCategoryTotals()
-            let maxAmount = categoryTotals.map(\.amount).max() ?? 1
 
             if categoryTotals.isEmpty {
                 emptyPlaceholder(
@@ -536,10 +577,18 @@ struct OverviewView: View {
                             endPoint: .bottom
                         )
                     )
-                    .frame(width: 4, height: 18)
+                    .frame(width: 4, height: 20)
                 Text("最近交易")
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                if !recentItems.isEmpty {
+                    Text("\(recentItems.count) 筆")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                }
             }
             .padding(.horizontal)
 
@@ -554,6 +603,13 @@ struct OverviewView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(recentItems.enumerated()), id: \.element.id) { idx, item in
                         recentRow(item)
+                            .opacity(recentListAppeared ? 1 : 0)
+                            .offset(y: recentListAppeared ? 0 : 14)
+                            .animation(
+                                .spring(response: 0.45, dampingFraction: 0.80)
+                                    .delay(0.06 * Double(idx)),
+                                value: recentListAppeared
+                            )
 
                         if idx < recentItems.count - 1 {
                             Divider().padding(.leading, 56)
