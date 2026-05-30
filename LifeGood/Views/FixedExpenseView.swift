@@ -7,7 +7,6 @@ struct FixedExpenseView: View {
     @State private var showingAddSheet = false
     @State private var expenseToEdit: Expense?
     @State private var headerAppeared = false
-    @State private var listAppeared = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -31,29 +30,35 @@ struct FixedExpenseView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // 月固定支出摘要
-                fixedSummaryHeader
-                    .opacity(headerAppeared ? 1 : 0)
-                    .offset(y: headerAppeared ? 0 : 22)
-                    .onAppear {
-                        withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                            headerAppeared = true
-                        }
-                    }
-
-                if store.fixedExpenses.isEmpty {
-                    emptyStateView
-                } else {
-                    fixedExpenseList
-                        .opacity(listAppeared ? 1 : 0)
+            List {
+                // 月固定支出摘要（嵌入 List，與列表一起捲動）
+                Section {
+                    fixedSummaryHeader
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .opacity(headerAppeared ? 1 : 0)
+                        .offset(y: headerAppeared ? 0 : 22)
                         .onAppear {
-                            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.12)) {
-                                listAppeared = true
+                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                headerAppeared = true
                             }
                         }
                 }
+
+                if store.fixedExpenses.isEmpty {
+                    Section {
+                        emptyStateView
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                } else {
+                    fixedExpenseSections
+                }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("固定支出")
             .toolbar {
@@ -264,27 +269,24 @@ struct FixedExpenseView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 列表
+    // MARK: - 分類群組 Sections（嵌入外層 List）
 
-    private var fixedExpenseList: some View {
-        List {
-            ForEach(groupedByCategory, id: \.key) { category, expenses in
-                Section(header: categoryHeader(category: category, expenses: expenses)) {
-                    ForEach(expenses) { expense in
-                        FixedExpenseRow(expense: expense)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                expenseToEdit = expense
-                            }
-                    }
-                    .onDelete { offsets in
-                        deleteWithSync(offsets: offsets, from: expenses)
-                    }
+    @ViewBuilder
+    private var fixedExpenseSections: some View {
+        ForEach(groupedByCategory, id: \.key) { category, expenses in
+            Section(header: categoryHeader(category: category, expenses: expenses)) {
+                ForEach(expenses) { expense in
+                    FixedExpenseRow(expense: expense)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            expenseToEdit = expense
+                        }
+                }
+                .onDelete { offsets in
+                    deleteWithSync(offsets: offsets, from: expenses)
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
     }
 
     private func categoryAccentColor(_ category: FixedCategory) -> Color {
@@ -306,34 +308,46 @@ struct FixedExpenseView: View {
         let accent = categoryAccentColor(category)
 
         return HStack(spacing: 8) {
+            // 分類圖示（略放大，與 DisclosureBlock icon 風格一致）
             ZStack {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(accent.opacity(0.14))
-                    .frame(width: 28, height: 28)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.18), accent.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 30, height: 30)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(accent.opacity(0.20), lineWidth: 0.75)
+                    )
                 Image(systemName: category.icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(accent)
             }
             Text(category.rawValue)
-                .font(.subheadline.weight(.semibold))
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(accent)
             Spacer()
-            if category == .insurance {
-                insuranceHeaderAmount(activeExpenses)
-                    .font(.caption.weight(.bold))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(accent.opacity(0.10))
-                    .foregroundStyle(accent)
-                    .clipShape(Capsule())
-            } else {
-                Text(formatCurrency(activeExpenses.reduce(0) { $0 + monthlyEquivalent($1) }))
-                    .font(.caption.weight(.bold))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(accent.opacity(0.10))
-                    .foregroundStyle(accent)
-                    .clipShape(Capsule())
+            // 月費用小計膠囊
+            Group {
+                if category == .insurance {
+                    insuranceHeaderAmount(activeExpenses)
+                        .font(.caption.weight(.bold))
+                } else {
+                    Text(formatCurrency(activeExpenses.reduce(0) { $0 + monthlyEquivalent($1) }))
+                        .font(.caption.weight(.bold))
+                }
             }
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(accent.opacity(0.10))
+            .foregroundStyle(accent)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(accent.opacity(0.20), lineWidth: 0.6))
         }
+        .textCase(nil)
     }
 
     @ViewBuilder
@@ -475,78 +489,93 @@ struct FixedExpenseRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            // 分類圖示圓
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [categoryAccent.opacity(0.18), categoryAccent.opacity(0.08)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+        HStack(spacing: 0) {
+            // 左側分類色彩強調條
+            RoundedRectangle(cornerRadius: 2)
+                .fill(
+                    LinearGradient(
+                        colors: [categoryAccent, categoryAccent.opacity(0.45)],
+                        startPoint: .top,
+                        endPoint: .bottom
                     )
-                    .frame(width: 40, height: 40)
-                Image(systemName: expense.fixedCategory?.icon ?? "pin.circle.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(categoryAccent)
-            }
+                )
+                .frame(width: 3)
+                .padding(.vertical, 10)
+                .padding(.trailing, 13)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(expense.title)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                HStack(spacing: 4) {
-                    if let recurrence = expense.recurrence {
-                        Text(recurrence.rawValue)
-                            .font(.system(size: 10, weight: .semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(categoryAccent.opacity(0.12))
-                            .foregroundStyle(categoryAccent)
-                            .clipShape(Capsule())
-                    }
-                    if expense.effectivelyTaxDeductible {
-                        HStack(spacing: 2) {
-                            Image(systemName: "leaf.fill")
-                                .font(.system(size: 8))
-                            Text("節稅")
-                                .font(.system(size: 9, weight: .bold))
+            HStack(spacing: 12) {
+                // 分類圖示圓（略加大、漸層更清晰）
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [categoryAccent.opacity(0.22), categoryAccent.opacity(0.10)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 42, height: 42)
+                    Image(systemName: expense.fixedCategory?.icon ?? "pin.circle.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(categoryAccent)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(expense.title)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        if let recurrence = expense.recurrence {
+                            Text(recurrence.rawValue)
+                                .font(.system(size: 10, weight: .semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(categoryAccent.opacity(0.12))
+                                .foregroundStyle(categoryAccent)
+                                .clipShape(Capsule())
                         }
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(Color.green.opacity(0.12))
-                        .foregroundStyle(Color.green)
-                        .clipShape(Capsule())
+                        if expense.effectivelyTaxDeductible {
+                            HStack(spacing: 2) {
+                                Image(systemName: "leaf.fill")
+                                    .font(.system(size: 8))
+                                Text("節稅")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Color.green.opacity(0.12))
+                            .foregroundStyle(Color.green)
+                            .clipShape(Capsule())
+                        }
+                        if !expense.note.isEmpty {
+                            Text(expense.note)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
-                    if !expense.note.isEmpty {
-                        Text(expense.note)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                }
+
+                Spacer(minLength: 4)
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(formattedAmount)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28))
+                        .contentTransition(.numericText())
+                    if let label = deductionTargetLabel {
+                        HStack(spacing: 3) {
+                            Image(systemName: deductionIcon)
+                                .font(.system(size: 9))
+                            Text(label)
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .foregroundStyle(categoryAccent.opacity(0.85))
+                        .lineLimit(1)
                     }
                 }
             }
-
-            Spacer(minLength: 4)
-
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(formattedAmount)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28))
-                    .contentTransition(.numericText())
-                if let label = deductionTargetLabel {
-                    HStack(spacing: 3) {
-                        Image(systemName: deductionIcon)
-                            .font(.system(size: 9))
-                        Text(label)
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(categoryAccent.opacity(0.85))
-                    .lineLimit(1)
-                }
-            }
+            .padding(.vertical, 5)
         }
-        .padding(.vertical, 3)
     }
 
     private var formattedAmount: String {
