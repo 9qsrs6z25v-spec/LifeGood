@@ -794,12 +794,15 @@ struct FloorInfo: Identifiable, Codable {
     var floorNumber: String
     var functions: [FloorFunction]
     var area: Double
+    /// 該樓層下的物件樹（可遞迴：例如 衣櫃 → 第一格 / 第二格）
+    var items: [FloorItem]
 
-    init(id: UUID = UUID(), floorNumber: String = "", functions: [FloorFunction] = [], area: Double = 0) {
+    init(id: UUID = UUID(), floorNumber: String = "", functions: [FloorFunction] = [], area: Double = 0, items: [FloorItem] = []) {
         self.id = id
         self.floorNumber = floorNumber
         self.functions = functions
         self.area = area
+        self.items = items
     }
 
     init(from decoder: Decoder) throws {
@@ -808,6 +811,20 @@ struct FloorInfo: Identifiable, Codable {
         floorNumber = try c.decode(String.self, forKey: .floorNumber)
         functions = (try? c.decode([FloorFunction].self, forKey: .functions)) ?? []
         area = (try? c.decode(Double.self, forKey: .area)) ?? 0
+        items = (try? c.decode([FloorItem].self, forKey: .items)) ?? []
+    }
+}
+
+/// 樓層下的物件節點：可遞迴展開（衣櫃 → 第一格 → …）
+struct FloorItem: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    var children: [FloorItem]
+
+    init(id: UUID = UUID(), name: String = "", children: [FloorItem] = []) {
+        self.id = id
+        self.name = name
+        self.children = children
     }
 }
 

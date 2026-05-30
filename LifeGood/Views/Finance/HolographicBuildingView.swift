@@ -19,8 +19,9 @@ struct HolographicBuildingView: View {
     let floors: [FloorInfo]
     /// 大樓型態：true = 公寓（會在使用者樓層上下加灰色虛擬樓層）
     let isApartment: Bool
+    /// 由父層提供的選中樓層 ID（讓父層可以據此渲染樓層底下的物件樹）
+    @Binding var selectedFloorId: UUID?
 
-    @State private var selectedFloorId: UUID?
     @State private var pulse: Double = 0.4
 
     var body: some View {

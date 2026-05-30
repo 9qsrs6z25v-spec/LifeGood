@@ -55,6 +55,11 @@ struct RealEstateDetailView: View {
     @State private var hiInsuranceExpanded = false
     @State private var hiAssetsExpanded = false
 
+    /// 樓層 3D 目前選中的樓層；同步給 3D 與下方物件樹
+    @State private var selectedFloorId: UUID?
+    /// 物件編輯 sheet：依（樓層 id, 項目 id, 是否為新增）開啟
+    @State private var editingFloorItemTarget: FloorItemEditTarget?
+
     // MARK: - 直接從卡片新增支出項目
     @State private var addingMortgageItem = false
     @State private var addingPaidItem = false
@@ -162,6 +167,18 @@ struct RealEstateDetailView: View {
             }
             .sheet(item: $previewingDocumentURL) { wrapper in
                 DocumentQuickLookView(url: wrapper.url)
+            }
+            .sheet(item: $editingFloorItemTarget) { target in
+                FloorItemEditor(
+                    initialName: target.currentName,
+                    isEditing: target.itemId != nil
+                ) { newName in
+                    if let itemId = target.itemId {
+                        renameFloorItem(floorId: target.floorId, itemId: itemId, newName: newName)
+                    } else {
+                        addFloorItem(floorId: target.floorId, parentItemId: target.parentItemId, name: newName)
+                    }
+                }
             }
             .sheet(isPresented: $addingMortgageItem, onDismiss: { dataRefreshID = UUID() }) {
                 AddExpenseView(
@@ -892,13 +909,212 @@ struct RealEstateDetailView: View {
     }
 
     private var buildingVisualization: some View {
-        HolographicBuildingView(
-            floors: sortedFloors,
-            isApartment: estate.buildingType != .townhouse
+        VStack(alignment: .leading, spacing: 12) {
+            HolographicBuildingView(
+                floors: sortedFloors,
+                isApartment: estate.buildingType != .townhouse,
+                selectedFloorId: $selectedFloorId
+            )
+            .shadow(color: Self.cyanColor.opacity(0.25), radius: 10)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+
+            if let fid = selectedFloorId,
+               let floor = estate.floors.first(where: { $0.id == fid }) {
+                floorItemsTree(for: floor)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: selectedFloorId)
+    }
+
+    // MARK: - 樓層物件樹
+
+    /// 樓層物件樹：根節點是樓層、底下可遞迴展開。每個節點旁有「+」加子項目。
+    @ViewBuilder
+    private func floorItemsTree(for floor: FloorInfo) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // 樓層標題列：floor 1 / 2F …
+            HStack(spacing: 6) {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .foregroundStyle(Self.cyanColor)
+                Text(floor.floorNumber.isEmpty ? "樓層" : floor.floorNumber)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button {
+                    editingFloorItemTarget = FloorItemEditTarget(
+                        floorId: floor.id, parentItemId: nil, itemId: nil, currentName: ""
+                    )
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "plus.circle.fill")
+                        Text("新增物件").font(.caption.weight(.medium))
+                    }
+                    .foregroundStyle(Self.cyanColor)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.top, 10)
+
+            if floor.items.isEmpty {
+                HStack {
+                    Text("尚無物件，點右上「新增物件」開始建立")
+                        .font(.caption).foregroundStyle(.tertiary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12).padding(.bottom, 10)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(floor.items.enumerated()), id: \.element.id) { idx, item in
+                        floorItemRow(floor: floor, item: item, depth: 0,
+                                     isLast: idx == floor.items.count - 1,
+                                     ancestorIsLast: [])
+                    }
+                }
+                .padding(.horizontal, 12).padding(.bottom, 10)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemBackground))
         )
-        .shadow(color: Self.cyanColor.opacity(0.25), radius: 10)
         .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+    }
+
+    /// 單筆物件列：用「│  ├──」風格繪製樹狀分支；同時遞迴渲染子節點。
+    /// 因 Swift 不接受 `some View` 的遞迴回傳，故 wrap 成 AnyView。
+    private func floorItemRow(
+        floor: FloorInfo,
+        item: FloorItem,
+        depth: Int,
+        isLast: Bool,
+        ancestorIsLast: [Bool]
+    ) -> AnyView {
+        AnyView(VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 0) {
+                // 前綴：每一層祖先用 "│  " 或 "   "
+                ForEach(0..<ancestorIsLast.count, id: \.self) { i in
+                    Text(ancestorIsLast[i] ? "   " : "│  ")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+                if depth > 0 {
+                    Text(isLast ? "└── " : "├── ")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+                Image(systemName: item.children.isEmpty ? "cube" : "cube.fill")
+                    .font(.caption2)
+                    .foregroundStyle(Self.cyanColor)
+                    .padding(.trailing, 4)
+                Text(item.name.isEmpty ? "未命名" : item.name)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                Spacer()
+                Button {
+                    editingFloorItemTarget = FloorItemEditTarget(
+                        floorId: floor.id, parentItemId: item.id, itemId: nil, currentName: ""
+                    )
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(Self.cyanColor)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 6)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                editingFloorItemTarget = FloorItemEditTarget(
+                    floorId: floor.id, parentItemId: nil, itemId: item.id, currentName: item.name
+                )
+            }
+            .contextMenu {
+                Button(role: .destructive) {
+                    deleteFloorItem(floorId: floor.id, itemId: item.id)
+                } label: { Label("刪除", systemImage: "trash") }
+            }
+
+            ForEach(Array(item.children.enumerated()), id: \.element.id) { idx, child in
+                floorItemRow(
+                    floor: floor,
+                    item: child,
+                    depth: depth + 1,
+                    isLast: idx == item.children.count - 1,
+                    ancestorIsLast: ancestorIsLast + [isLast]
+                )
+            }
+        })
+    }
+
+    // MARK: - 樓層物件 CRUD
+
+    /// 新增物件：parentItemId 為 nil → 加在 floor.items 根層；否則加在指定 parent 的 children
+    private func addFloorItem(floorId: UUID, parentItemId: UUID?, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              var estate = store.realEstates.first(where: { $0.id == estateId }),
+              let fIdx = estate.floors.firstIndex(where: { $0.id == floorId }) else { return }
+        let newItem = FloorItem(name: trimmed)
+        if let parentId = parentItemId {
+            estate.floors[fIdx].items = insertChild(into: estate.floors[fIdx].items, parentId: parentId, child: newItem)
+        } else {
+            estate.floors[fIdx].items.append(newItem)
+        }
+        store.update(estate)
+        dataRefreshID = UUID()
+    }
+
+    private func renameFloorItem(floorId: UUID, itemId: UUID, newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              var estate = store.realEstates.first(where: { $0.id == estateId }),
+              let fIdx = estate.floors.firstIndex(where: { $0.id == floorId }) else { return }
+        estate.floors[fIdx].items = renameInTree(estate.floors[fIdx].items, targetId: itemId, newName: trimmed)
+        store.update(estate)
+        dataRefreshID = UUID()
+    }
+
+    private func deleteFloorItem(floorId: UUID, itemId: UUID) {
+        guard var estate = store.realEstates.first(where: { $0.id == estateId }),
+              let fIdx = estate.floors.firstIndex(where: { $0.id == floorId }) else { return }
+        estate.floors[fIdx].items = removeFromTree(estate.floors[fIdx].items, targetId: itemId)
+        store.update(estate)
+        dataRefreshID = UUID()
+    }
+
+    private func insertChild(into items: [FloorItem], parentId: UUID, child: FloorItem) -> [FloorItem] {
+        items.map { node in
+            var node = node
+            if node.id == parentId {
+                node.children.append(child)
+            } else {
+                node.children = insertChild(into: node.children, parentId: parentId, child: child)
+            }
+            return node
+        }
+    }
+
+    private func renameInTree(_ items: [FloorItem], targetId: UUID, newName: String) -> [FloorItem] {
+        items.map { node in
+            var node = node
+            if node.id == targetId {
+                node.name = newName
+            } else {
+                node.children = renameInTree(node.children, targetId: targetId, newName: newName)
+            }
+            return node
+        }
+    }
+
+    private func removeFromTree(_ items: [FloorItem], targetId: UUID) -> [FloorItem] {
+        var result: [FloorItem] = []
+        for node in items where node.id != targetId {
+            var copy = node
+            copy.children = removeFromTree(node.children, targetId: targetId)
+            result.append(copy)
+        }
+        return result
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
@@ -2935,5 +3151,60 @@ struct DocumentQuickLookView: UIViewControllerRepresentable {
         func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
             url as QLPreviewItem
         }
+    }
+}
+
+// MARK: - 樓層物件編輯
+
+/// 樓層物件編輯目標：
+/// - itemId 為 nil → 新增（parentItemId 為 nil = 加到樓層根，否則加到指定父節點底下）
+/// - itemId 非 nil → 重新命名既有節點
+fileprivate struct FloorItemEditTarget: Identifiable {
+    let id = UUID()
+    let floorId: UUID
+    let parentItemId: UUID?
+    let itemId: UUID?
+    let currentName: String
+}
+
+/// 簡單的樓層物件命名 sheet：一個 TextField + 取消 / 儲存
+fileprivate struct FloorItemEditor: View {
+    let initialName: String
+    let isEditing: Bool
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("物件名稱") {
+                    TextField("例如：衣櫃 / 第一格", text: $name)
+                        .focused($focused)
+                }
+            }
+            .navigationTitle(isEditing ? "重新命名物件" : "新增物件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("儲存") {
+                        onSave(name)
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear {
+                name = initialName
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    focused = true
+                }
+            }
+        }
+        .presentationDetents([.height(220)])
     }
 }
