@@ -269,42 +269,96 @@ struct IncomeView: View {
 
     private func daySectionHeader(dateString: String, incomes: [Income]) -> some View {
         let dayTotal = incomes.reduce(0.0) { $0 + $1.amount }
-        return HStack(spacing: 6) {
+        let accent = Color(red: 0.16, green: 0.74, blue: 0.50)
+        return HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3, height: 14)
+
             Text(dateString)
-            Spacer(minLength: 8)
-            HStack(spacing: 3) {
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.primary.opacity(0.75))
+
+            Spacer(minLength: 6)
+
+            HStack(spacing: 4) {
                 Text(fmt(dayTotal))
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Color(red: 0.16, green: 0.74, blue: 0.50).opacity(0.9))
-                Text("・\(incomes.count) 筆")
-                    .foregroundStyle(.tertiary)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(accent)
+                Text("· \(incomes.count) 筆")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(accent.opacity(0.10))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(accent.opacity(0.22), lineWidth: 0.6)
+            )
         }
+        .textCase(nil)
     }
 
     // MARK: - 空狀態
 
+    @State private var emptyIconPulse = false
+
     private var emptyState: some View {
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
-        return VStack(spacing: 18) {
+        let accent = Color(red: 0.16, green: 0.74, blue: 0.50)
+        return VStack(spacing: 20) {
             ZStack {
+                if !isSearching {
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.25), lineWidth: 1.5)
+                        .frame(width: 100, height: 100)
+                        .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
+                }
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color(.systemFill), Color(.secondarySystemFill)],
+                            colors: isSearching
+                                ? [Color(.systemFill), Color(.secondarySystemFill)]
+                                : [accent.opacity(0.14), accent.opacity(0.05)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 84, height: 84)
+                    .frame(width: 82, height: 82)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                isSearching ? Color.clear : accent.opacity(0.20),
+                                lineWidth: 1.2
+                            )
+                    )
                 Image(systemName: isSearching ? "magnifyingglass" : "banknote")
-                    .font(.system(size: 36, weight: .light))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.75))
             }
-            VStack(spacing: 7) {
+            .onAppear {
+                if !isSearching {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        emptyIconPulse = true
+                    }
+                }
+            }
+
+            VStack(spacing: 8) {
                 Text(isSearching ? "找不到符合的收入" : "尚無收入紀錄")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary.opacity(0.65))
                 Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增收入")
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
