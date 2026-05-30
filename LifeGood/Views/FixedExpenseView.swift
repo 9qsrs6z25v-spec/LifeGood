@@ -6,6 +6,8 @@ struct FixedExpenseView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var showingAddSheet = false
     @State private var expenseToEdit: Expense?
+    @State private var headerAppeared = false
+    @State private var listAppeared = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -32,11 +34,24 @@ struct FixedExpenseView: View {
             VStack(spacing: 0) {
                 // 月固定支出摘要
                 fixedSummaryHeader
+                    .opacity(headerAppeared ? 1 : 0)
+                    .offset(y: headerAppeared ? 0 : 22)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                            headerAppeared = true
+                        }
+                    }
 
                 if store.fixedExpenses.isEmpty {
                     emptyStateView
                 } else {
                     fixedExpenseList
+                        .opacity(listAppeared ? 1 : 0)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.12)) {
+                                listAppeared = true
+                            }
+                        }
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -186,31 +201,64 @@ struct FixedExpenseView: View {
     // MARK: - 空狀態
 
     private var emptyStateView: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 24) {
             Spacer()
+
             ZStack {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color(.systemFill), Color(.secondarySystemFill)],
+                            colors: [
+                                Color(red: 0.22, green: 0.53, blue: 0.98).opacity(0.12),
+                                Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.06)
+                            ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 88, height: 88)
+                    .frame(width: 96, height: 96)
+                Circle()
+                    .stroke(Color(red: 0.22, green: 0.53, blue: 0.98).opacity(0.18), lineWidth: 1.5)
+                    .frame(width: 96, height: 96)
                 Image(systemName: "pin.slash")
-                    .font(.system(size: 36, weight: .light))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 38, weight: .light))
+                    .foregroundStyle(Color(red: 0.22, green: 0.53, blue: 0.98).opacity(0.55))
             }
-            VStack(spacing: 8) {
+
+            VStack(spacing: 10) {
                 Text("尚無固定支出紀錄")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("點擊右上角 + 新增固定支出")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text("固定支出包含房租、水電、保險、\n貸款等每月重複發生的費用")
                     .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(3)
             }
+
+            Button {
+                showingAddSheet = true
+            } label: {
+                Label("新增固定支出", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+                    .background(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.22, green: 0.53, blue: 0.98),
+                                Color(red: 0.10, green: 0.35, blue: 0.82)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .clipShape(Capsule())
+                    .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.35), radius: 10, y: 5)
+            }
+            .buttonStyle(.plain)
+
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -257,24 +305,33 @@ struct FixedExpenseView: View {
         let activeExpenses = expenses.filter { $0.date <= now }
         let accent = categoryAccentColor(category)
 
-        return HStack(spacing: 6) {
+        return HStack(spacing: 8) {
             ZStack {
-                Circle()
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(accent.opacity(0.14))
-                    .frame(width: 26, height: 26)
+                    .frame(width: 28, height: 28)
                 Image(systemName: category.icon)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(accent)
             }
             Text(category.rawValue)
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(accent)
             Spacer()
             if category == .insurance {
                 insuranceHeaderAmount(activeExpenses)
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(accent.opacity(0.10))
+                    .foregroundStyle(accent)
+                    .clipShape(Capsule())
             } else {
                 Text(formatCurrency(activeExpenses.reduce(0) { $0 + monthlyEquivalent($1) }))
-                    .font(.caption.bold())
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(accent.opacity(0.10))
                     .foregroundStyle(accent)
+                    .clipShape(Capsule())
             }
         }
     }
