@@ -6,6 +6,7 @@ struct OverviewView: View {
     @State private var showAddFixed = false
     @State private var showAddStock = false
     @State private var showAddRealEstate = false
+    @State private var appearedCards: Set<String> = []
 
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -24,43 +25,59 @@ struct OverviewView: View {
         !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
     }
 
+    // 本月過了幾天 / 共幾天
+    private var monthProgress: Double {
+        let cal = Calendar.current
+        let now = Date()
+        let day = Double(cal.component(.day, from: now))
+        let range = cal.range(of: .day, in: .month, for: now)
+        let total = Double(range?.count ?? 30)
+        return min(day / total, 1.0)
+    }
+
+    // 支出占收入比例（用於進度條）
+    private var spendingRatio: Double {
+        guard displayedIncome > 0 else { return 0 }
+        return min(store.currentMonthTotal / displayedIncome, 1.0)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    // 本月收支摘要
                     monthlyBalanceCard
+                        .padding(.horizontal)
 
-                    // 收支分類摘要
                     HStack(alignment: .top, spacing: 12) {
                         summaryCard(
                             title: isEstimated ? "收入 (預估)" : "收入",
                             amount: displayedIncome,
                             icon: "banknote.fill",
-                            color: .green
+                            color: .green,
+                            key: "income"
                         )
                         summaryCard(
                             title: "變動支出",
                             amount: store.currentMonthVariableTotal,
                             icon: "arrow.up.arrow.down.circle.fill",
-                            color: .orange
+                            color: .orange,
+                            key: "variable"
                         )
                         summaryCard(
                             title: "固定支出",
                             amount: store.currentMonthFixedTotal,
                             icon: "pin.circle.fill",
-                            color: .blue
+                            color: .blue,
+                            key: "fixed"
                         )
                     }
                     .padding(.horizontal)
 
-                    // 今日花費
                     todayCard
+                        .padding(.horizontal)
 
-                    // 本月分類支出
                     categoryBreakdownSection
 
-                    // 最近交易
                     recentTransactionsSection
                 }
                 .padding(.vertical)
@@ -90,165 +107,304 @@ struct OverviewView: View {
         }
     }
 
-    // MARK: - 本月收支摘要
+    // MARK: - 本月收支摘要卡片
 
     private var monthlyBalanceCard: some View {
-        VStack(spacing: 12) {
-            let income = displayedIncome
-            let balance = income - store.currentMonthTotal
-            let isPositive = balance >= 0
+        let income = displayedIncome
+        let balance = income - store.currentMonthTotal
+        let isPositive = balance >= 0
 
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        Text("本月收入").font(.caption).foregroundStyle(.white.opacity(0.7))
+        return VStack(spacing: 0) {
+            // 頂部：收入 vs 支出
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text(isEstimated ? "本月收入（預估）" : "本月收入")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.75))
                         if isEstimated {
                             Text("預估")
                                 .font(.system(size: 9, weight: .semibold))
-                                .padding(.horizontal, 4).padding(.vertical, 1)
-                                .background(Color.white.opacity(0.25))
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(.white.opacity(0.22))
+                                .clipShape(Capsule())
                                 .foregroundStyle(.white)
                         }
                     }
                     Text(smartCurrency(income))
-                        .font(.title3.bold()).foregroundStyle(.white)
+                        .font(.title3.bold())
+                        .foregroundStyle(.white)
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("本月支出").font(.caption).foregroundStyle(.white.opacity(0.7))
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text("本月支出")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.75))
                     Text(smartCurrency(store.currentMonthTotal))
-                        .font(.title3.bold()).foregroundStyle(.white)
+                        .font(.title3.bold())
+                        .foregroundStyle(.white)
                 }
             }
 
-            Divider().background(.white.opacity(0.3))
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.2))
+                .frame(height: 0.5)
+                .padding(.vertical, 14)
 
-            HStack {
-                HStack(spacing: 4) {
-                    Text("收支餘額").font(.subheadline).foregroundStyle(.white.opacity(0.8))
-                    if isEstimated {
-                        Text("預估")
-                            .font(.system(size: 9, weight: .semibold))
-                            .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(Color.white.opacity(0.25))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .foregroundStyle(.white)
+            // 收支餘額
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text("收支餘額")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.8))
+                        if isEstimated {
+                            Text("預估")
+                                .font(.system(size: 9, weight: .semibold))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(.white.opacity(0.22))
+                                .clipShape(Capsule())
+                                .foregroundStyle(.white)
+                        }
                     }
+                    Text(currentMonthString())
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.45))
                 }
                 Spacer()
                 Text((isPositive ? "+" : "") + smartCurrency(balance))
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
+                    .contentTransition(.numericText())
             }
 
-            Text(currentMonthString())
-                .font(.caption).foregroundStyle(.white.opacity(0.5))
+            // 支出進度條
+            if income > 0 {
+                VStack(spacing: 6) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(.white.opacity(0.18))
+                                .frame(height: 6)
+                            Capsule()
+                                .fill(spendingRatio > 0.9 ? Color.red.opacity(0.85) : .white.opacity(0.85))
+                                .frame(width: geo.size.width * spendingRatio, height: 6)
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingRatio)
+                        }
+                    }
+                    .frame(height: 6)
+
+                    HStack {
+                        Text("支出 \(Int(spendingRatio * 100))%")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.6))
+                        Spacer()
+                        Text("月進度 \(Int(monthProgress * 100))%")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                .padding(.top, 12)
+            }
         }
-        .frame(maxWidth: .infinity)
         .padding(20)
         .background(
             LinearGradient(
-                colors: [Color.green, Color.green.opacity(0.7)],
+                colors: [
+                    Color(red: 0.16, green: 0.74, blue: 0.50),
+                    Color(red: 0.07, green: 0.50, blue: 0.38)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.40), radius: 16, x: 0, y: 8)
     }
 
-    // MARK: - 摘要卡片
+    // MARK: - 摘要小卡
 
-    private func summaryCard(title: String, amount: Double, icon: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: icon)
-                    .foregroundStyle(color)
+    private func summaryCard(title: String, amount: Double, icon: String, color: Color, key: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 彩色頂端條
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color)
+                .frame(height: 3)
+                .padding(.bottom, 10)
+
+            HStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(0.12))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(color)
+                }
                 Text(title)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
 
             Text(smartCurrency(amount))
-                .font(.title3.bold())
+                .font(.system(size: 15, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
     // MARK: - 今日花費
 
     private var todayCard: some View {
-        HStack {
+        let cal = Calendar.current
+        let day = cal.component(.day, from: Date())
+        let weekday = cal.component(.weekday, from: Date())
+        let weekdayStr = ["日", "一", "二", "三", "四", "五", "六"][weekday - 1]
+
+        return HStack(spacing: 14) {
+            // 日期圓形徽章
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green.opacity(0.15), .green.opacity(0.05)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 52, height: 52)
+                VStack(spacing: 0) {
+                    Text("\(day)")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(.green)
+                    Text("週\(weekdayStr)")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.green.opacity(0.7))
+                }
+            }
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("今日花費")
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(smartCurrency(store.todayTotal))
-                    .font(.title2.bold())
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(store.todayTotal > 0 ? .primary : .secondary)
+                    .contentTransition(.numericText())
             }
+
             Spacer()
-            Image(systemName: "calendar")
-                .font(.title2)
-                .foregroundStyle(.green)
+
+            if store.todayTotal == 0 {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.title2)
+                        .foregroundStyle(.green.opacity(0.6))
+                    Text("今日無支出")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
-        .padding()
+        .padding(16)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
-        .padding(.horizontal)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
-    // MARK: - 分類支出
+    // MARK: - 分類支出（帶比例條）
 
     private var categoryBreakdownSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("本月變動支出分類")
-                .font(.headline)
-                .padding(.horizontal)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("本月變動支出分類")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.horizontal)
 
             let categoryTotals = store.variableCategoryTotals()
+            let maxAmount = categoryTotals.map(\.amount).max() ?? 1
 
             if categoryTotals.isEmpty {
-                Text("尚無資料")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                emptyPlaceholder(
+                    icon: "chart.bar.xaxis",
+                    title: "尚無分類紀錄",
+                    subtitle: "新增變動支出後顯示分類統計"
+                )
+                .padding(.horizontal)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(categoryTotals.enumerated()), id: \.offset) { _, item in
-                        HStack {
-                            Image(systemName: item.category.icon)
-                                .frame(width: 30)
-                                .foregroundStyle(.green)
-                            Text(item.category.rawValue)
-                                .font(.subheadline)
-                            Spacer()
-                            Text(smartCurrency(item.amount))
-                                .font(.subheadline.bold())
-                        }
-                        .padding(.horizontal)
-                        .padding(.vertical, 10)
+                    ForEach(Array(categoryTotals.enumerated()), id: \.offset) { idx, item in
+                        categoryRow(item: item, maxAmount: maxAmount)
 
-                        if item.category != categoryTotals.last?.category {
-                            Divider().padding(.leading, 50)
+                        if idx < categoryTotals.count - 1 {
+                            Divider().padding(.leading, 46)
                         }
                     }
                 }
                 .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
             }
         }
+    }
+
+    private func categoryRow(item: (category: VariableCategory, amount: Double), maxAmount: Double) -> some View {
+        let ratio = maxAmount > 0 ? item.amount / maxAmount : 0
+        let totalVar = store.currentMonthVariableTotal
+        let pct = totalVar > 0 ? Int(item.amount / totalVar * 100) : 0
+
+        return VStack(spacing: 6) {
+            HStack {
+                ZStack {
+                    Circle()
+                        .fill(Color.green.opacity(0.10))
+                        .frame(width: 30, height: 30)
+                    Image(systemName: item.category.icon)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.green)
+                }
+                Text(item.category.rawValue)
+                    .font(.subheadline)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(smartCurrency(item.amount))
+                        .font(.subheadline.bold())
+                    Text("\(pct)%")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // 比例進度條
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color(.systemFill))
+                        .frame(height: 4)
+                    Capsule()
+                        .fill(Color.green.opacity(0.7))
+                        .frame(width: geo.size.width * ratio, height: 4)
+                }
+            }
+            .frame(height: 4)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
     // MARK: - 最近交易
@@ -276,58 +432,101 @@ struct OverviewView: View {
     }
 
     private var recentTransactionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("最近交易")
-                .font(.headline)
-                .padding(.horizontal)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("最近交易")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.horizontal)
 
             if recentItems.isEmpty {
-                Text("尚無交易紀錄")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                emptyPlaceholder(
+                    icon: "list.bullet.rectangle",
+                    title: "尚無交易紀錄",
+                    subtitle: "新增收入或支出後顯示於此"
+                )
+                .padding(.horizontal)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(recentItems) { item in
-                        HStack {
-                            Image(systemName: item.icon)
-                                .frame(width: 30)
-                                .foregroundStyle(item.isIncome ? .green : .red)
+                    ForEach(Array(recentItems.enumerated()), id: \.element.id) { idx, item in
+                        recentRow(item)
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title)
-                                    .font(.subheadline)
-                                Text(item.category)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Spacer()
-
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("\(item.isIncome ? "+" : "-")\(smartCurrency(item.amount))")
-                                    .font(.subheadline.bold())
-                                    .foregroundStyle(item.isIncome ? .green : .red)
-                                Text(formatDate(item.date))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.vertical, 10)
-
-                        if item.id != recentItems.last?.id {
-                            Divider().padding(.leading, 50)
+                        if idx < recentItems.count - 1 {
+                            Divider().padding(.leading, 56)
                         }
                     }
                 }
                 .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
             }
         }
+    }
+
+    private func recentRow(_ item: RecentItem) -> some View {
+        let accentColor: Color = item.isIncome ? .green : .red
+
+        return HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(accentColor.opacity(0.12))
+                    .frame(width: 40, height: 40)
+                Image(systemName: item.icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(accentColor)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Text(item.category)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(item.isIncome ? "+" : "-")\(smartCurrency(item.amount))")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(accentColor)
+                Text(formatDate(item.date))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - 空狀態元件
+
+    private func emptyPlaceholder(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color(.systemFill))
+                    .frame(width: 64, height: 64)
+                Image(systemName: icon)
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
     }
 
     // MARK: - Helpers
