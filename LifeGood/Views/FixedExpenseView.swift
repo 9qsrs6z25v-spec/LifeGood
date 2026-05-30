@@ -7,7 +7,7 @@ struct FixedExpenseView: View {
     @State private var showingAddSheet = false
     @State private var expenseToEdit: Expense?
 
-    private let currencyFormatter: NumberFormatter = {
+    private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = "TWD"
@@ -250,15 +250,16 @@ struct FixedExpenseView: View {
         }
     }
 
+    private static var currencyFormatterCache: [String: NumberFormatter] = [:]
     private func formatCurrencyWithCode(_ value: Double, code: String) -> String {
+        if let f = Self.currencyFormatterCache[code] {
+            return f.string(from: NSNumber(value: value)) ?? "\(code) 0"
+        }
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.maximumFractionDigits = 0
-        if code == "NT$" || code == "TWD" {
-            f.currencySymbol = "NT$"
-        } else {
-            f.currencySymbol = "\(code) "
-        }
+        f.currencySymbol = (code == "NT$" || code == "TWD") ? "NT$" : "\(code) "
+        Self.currencyFormatterCache[code] = f
         return f.string(from: NSNumber(value: value)) ?? "\(code) 0"
     }
 
@@ -301,7 +302,7 @@ struct FixedExpenseView: View {
     }
 
     private func formatCurrency(_ value: Double) -> String {
-        currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 
     /// 依開始日期與週期，估算該筆固定支出在當年度內發生的次數
@@ -338,11 +339,18 @@ struct FixedExpenseRow: View {
     @EnvironmentObject var store: ExpenseStore
     let expense: Expense
 
-    private let currencyFormatter: NumberFormatter = {
+    private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = "TWD"
         f.currencySymbol = "NT$"
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
+    private static let decimalFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
         f.maximumFractionDigits = 0
         return f
     }()
@@ -437,10 +445,7 @@ struct FixedExpenseRow: View {
             } else {
                 displayAmount = expense.amount
             }
-            let f = NumberFormatter()
-            f.numberStyle = .decimal
-            f.maximumFractionDigits = 0
-            let str = f.string(from: NSNumber(value: displayAmount)) ?? "0"
+            let str = Self.decimalFormatter.string(from: NSNumber(value: displayAmount)) ?? "0"
             return "\(code) \(str)"
         }
         return formatCurrency(expense.amount)
@@ -465,7 +470,7 @@ struct FixedExpenseRow: View {
     }
 
     private func formatCurrency(_ value: Double) -> String {
-        currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 }
 

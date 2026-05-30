@@ -8,12 +8,30 @@ struct OverviewView: View {
     @State private var showAddRealEstate = false
     @State private var appearedCards: Set<String> = []
 
-    private let currencyFormatter: NumberFormatter = {
+    private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = "TWD"
         f.currencySymbol = "NT$"
         f.maximumFractionDigits = 0
+        return f
+    }()
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M/d"
+        return f
+    }()
+
+    private static let monthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy年M月"
         return f
     }()
 
@@ -617,7 +635,7 @@ struct OverviewView: View {
     // MARK: - Helpers
 
     private func formatCurrency(_ value: Double) -> String {
-        currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 
     private func smartCurrency(_ value: Double) -> String {
@@ -634,21 +652,13 @@ struct OverviewView: View {
 
     private func formatDate(_ date: Date) -> String {
         let cal = Calendar.current
-        if cal.isDateInToday(date) {
-            let f = DateFormatter()
-            f.dateFormat = "HH:mm"
-            return f.string(from: date)
-        }
+        if cal.isDateInToday(date) { return Self.timeFormatter.string(from: date) }
         if cal.isDateInYesterday(date) { return "昨天" }
-        let f = DateFormatter()
-        f.dateFormat = "M/d"
-        return f.string(from: date)
+        return Self.shortDateFormatter.string(from: date)
     }
 
     private func currentMonthString() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy年M月"
-        return formatter.string(from: Date())
+        Self.monthFormatter.string(from: Date())
     }
 }
 

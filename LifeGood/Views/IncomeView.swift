@@ -10,9 +10,16 @@ struct IncomeView: View {
     @State private var searchText: String = ""
     @State private var headerAppeared = false
 
-    private let currencyFormatter: NumberFormatter = {
+    private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f
+    }()
+
+    private static let groupDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M月d日 EEEE"
+        f.locale = Locale(identifier: "zh_TW")
         return f
     }()
 
@@ -443,12 +450,8 @@ struct IncomeView: View {
     // MARK: - 分組
 
     private func groupedByDate() -> [(key: String, value: [Income])] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M月d日 EEEE"
-        formatter.locale = Locale(identifier: "zh_TW")
-
         let grouped = Dictionary(grouping: filteredIncomes) { income in
-            formatter.string(from: income.date)
+            Self.groupDateFormatter.string(from: income.date)
         }
 
         return grouped.sorted { pair1, pair2 in
@@ -458,6 +461,6 @@ struct IncomeView: View {
     }
 
     private func fmt(_ v: Double) -> String {
-        currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
+        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 }

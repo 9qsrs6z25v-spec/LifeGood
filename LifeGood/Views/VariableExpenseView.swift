@@ -17,7 +17,7 @@ struct VariableExpenseView: View {
         return f
     }()
 
-    private let currencyFormatter: NumberFormatter = {
+    private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = "TWD"
@@ -407,7 +407,7 @@ struct VariableExpenseView: View {
     }
 
     private func formatCurrency(_ value: Double) -> String {
-        currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 }
 
@@ -452,11 +452,18 @@ struct ExpenseRow: View {
     @EnvironmentObject var store: ExpenseStore
     let expense: Expense
 
-    private let currencyFormatter: NumberFormatter = {
+    private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = "TWD"
         f.currencySymbol = "NT$"
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
+    private static let decimalFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
         f.maximumFractionDigits = 0
         return f
     }()
@@ -558,7 +565,7 @@ struct ExpenseRow: View {
     }
 
     private func formatCurrency(_ value: Double) -> String {
-        currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 
     /// 顯示用金額：外幣時將儲存的台幣等值除以匯率還原原幣金額
@@ -571,10 +578,7 @@ struct ExpenseRow: View {
             } else {
                 displayAmount = expense.amount
             }
-            let f = NumberFormatter()
-            f.numberStyle = .decimal
-            f.maximumFractionDigits = 0
-            let str = f.string(from: NSNumber(value: displayAmount)) ?? "0"
+            let str = Self.decimalFormatter.string(from: NSNumber(value: displayAmount)) ?? "0"
             return "\(code) \(str)"
         }
         return formatCurrency(expense.amount)

@@ -12,7 +12,9 @@ struct LifeOverviewView: View {
     @State private var showPremiumAlert = false
 
     var body: some View {
-        NavigationStack {
+        // 計算一次，避免 statsCard / milestoneTimeline / categoryBreakdown 各自重算（共 5 次）
+        let allMS = store.combinedMilestones(realEstates: financeStore.realEstates)
+        return NavigationStack {
             VStack(spacing: 0) {
                 ProfileFlashCard(
                     profile: store.profile,
@@ -27,9 +29,9 @@ struct LifeOverviewView: View {
 
                 ScrollView {
                     VStack(spacing: 20) {
-                        statsCard
-                        milestoneTimelineSection
-                        categoryBreakdownSection
+                        statsCard(allMS)
+                        milestoneTimelineSection(allMS)
+                        categoryBreakdownSection(allMS)
                     }
                     .padding(.vertical)
                 }
@@ -85,14 +87,14 @@ struct LifeOverviewView: View {
 
     // MARK: - 統計卡
 
-    private var statsCard: some View {
+    private func statsCard(_ allMS: [LifeMilestone]) -> some View {
         HStack(spacing: 12) {
             statBadge(title: "總里程碑",
-                      count: store.combinedMilestones(realEstates: financeStore.realEstates).count,
+                      count: allMS.count,
                       icon: "trophy.fill", color: .orange)
-            statBadge(title: "本年新增", count: milestonesThisYear,
+            statBadge(title: "本年新增", count: milestonesThisYear(allMS),
                       icon: "calendar.badge.plus", color: .green)
-            statBadge(title: "分類數", count: usedCategories,
+            statBadge(title: "分類數", count: usedCategories(allMS),
                       icon: "square.grid.2x2.fill", color: .blue)
         }
         .padding(.horizontal)
@@ -128,20 +130,20 @@ struct LifeOverviewView: View {
         .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
     }
 
-    private var milestonesThisYear: Int {
+    private func milestonesThisYear(_ allMS: [LifeMilestone]) -> Int {
         let year = Calendar.current.component(.year, from: Date())
-        return store.combinedMilestones(realEstates: financeStore.realEstates).filter {
+        return allMS.filter {
             Calendar.current.component(.year, from: $0.date) == year
         }.count
     }
 
-    private var usedCategories: Int {
-        Set(store.combinedMilestones(realEstates: financeStore.realEstates).map { $0.category }).count
+    private func usedCategories(_ allMS: [LifeMilestone]) -> Int {
+        Set(allMS.map { $0.category }).count
     }
 
     // MARK: - 里程碑時間軸
 
-    private var milestoneTimelineSection: some View {
+    private func milestoneTimelineSection(_ allMS: [LifeMilestone]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Capsule()
@@ -158,7 +160,7 @@ struct LifeOverviewView: View {
             }
             .padding(.horizontal)
 
-            let sorted = store.combinedMilestones(realEstates: financeStore.realEstates).sorted { $0.date > $1.date }
+            let sorted = allMS.sorted { $0.date > $1.date }
             let recent = Array(sorted.prefix(5))
             if recent.isEmpty {
                 emptyMilestonePlaceholder
@@ -235,8 +237,8 @@ struct LifeOverviewView: View {
 
     // MARK: - 分類統計
 
-    private var categoryBreakdownSection: some View {
-        let grouped = Dictionary(grouping: store.combinedMilestones(realEstates: financeStore.realEstates), by: { $0.category })
+    private func categoryBreakdownSection(_ allMS: [LifeMilestone]) -> some View {
+        let grouped = Dictionary(grouping: allMS, by: { $0.category })
         let entries = MilestoneCategory.allCases
             .compactMap { cat -> (MilestoneCategory, Int)? in
                 guard let count = grouped[cat]?.count, count > 0 else { return nil }
@@ -320,9 +322,13 @@ struct LifeOverviewView: View {
         }
     }
 
-    private func formatDate(_ date: Date) -> String {
+    private static let milestoneDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy/M/d"
-        return f.string(from: date)
+        return f
+    }()
+
+    private func formatDate(_ date: Date) -> String {
+        Self.milestoneDateFormatter.string(from: date)
     }
 }
