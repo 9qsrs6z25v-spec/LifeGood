@@ -992,17 +992,11 @@ struct RealEstateDetailView: View {
     ) -> AnyView {
         AnyView(VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 0) {
-                // 前綴：每一層祖先用 "│  " 或 "   "
-                ForEach(0..<ancestorIsLast.count, id: \.self) { i in
-                    Text(ancestorIsLast[i] ? "   " : "│  ")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
-                if depth > 0 {
-                    Text(isLast ? "└── " : "├── ")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
+                // 把祖先的「│  / 空白」前綴 + 本層的 ├── / └──  組成單一字串渲染，
+                // 避免 ForEach(0..<dynamic, id: \.self) 在動態 Range 上的未定義行為（會閃退）。
+                Text(treePrefix(depth: depth, isLast: isLast, ancestorIsLast: ancestorIsLast))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.tertiary)
                 Image(systemName: item.children.isEmpty ? "cube" : "cube.fill")
                     .font(.caption2)
                     .foregroundStyle(Self.cyanColor)
@@ -1048,6 +1042,18 @@ struct RealEstateDetailView: View {
     }
 
     // MARK: - 樓層物件 CRUD
+
+    /// 組合樹狀分支前綴字串：祖先層用「│  」或「   」，本層用「├── 」或「└── 」（root 不加）
+    private func treePrefix(depth: Int, isLast: Bool, ancestorIsLast: [Bool]) -> String {
+        var s = ""
+        for ancestor in ancestorIsLast {
+            s += ancestor ? "   " : "│  "
+        }
+        if depth > 0 {
+            s += isLast ? "└── " : "├── "
+        }
+        return s
+    }
 
     /// 新增物件：parentItemId 為 nil → 加在 floor.items 根層；否則加在指定 parent 的 children
     private func addFloorItem(floorId: UUID, parentItemId: UUID?, name: String) {
