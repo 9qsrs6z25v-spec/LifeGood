@@ -10,6 +10,8 @@ struct LifeOverviewView: View {
     @State private var showAddStock = false
     @State private var showAddRealEstate = false
     @State private var showPremiumAlert = false
+    @State private var timelineRowsAppeared = false
+    @State private var categoryRowsAppeared = false
 
     var body: some View {
         // 計算一次，避免 statsCard / milestoneTimeline / categoryBreakdown 各自重算（共 5 次）
@@ -104,7 +106,16 @@ struct LifeOverviewView: View {
         VStack(spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(color.opacity(0.14))
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.20), color.opacity(0.07)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                Circle()
+                    .stroke(color.opacity(0.22), lineWidth: 1.5)
                     .frame(width: 48, height: 48)
                 Image(systemName: icon)
                     .font(.system(size: 20, weight: .semibold))
@@ -113,6 +124,7 @@ struct LifeOverviewView: View {
             Text("\(count)")
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
+                .contentTransition(.numericText())
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -120,11 +132,16 @@ struct LifeOverviewView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
-        .background(Color(.systemBackground))
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                color.opacity(0.03)
+            }
+        )
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(color.opacity(0.10), lineWidth: 1)
+                .stroke(color.opacity(0.12), lineWidth: 0.75)
         )
         .shadow(color: color.opacity(0.14), radius: 10, x: 0, y: 4)
         .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
@@ -144,7 +161,11 @@ struct LifeOverviewView: View {
     // MARK: - 里程碑時間軸
 
     private func milestoneTimelineSection(_ allMS: [LifeMilestone]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let sorted = allMS.sorted { $0.date > $1.date }
+        let recent = Array(sorted.prefix(5))
+
+        return VStack(alignment: .leading, spacing: 12) {
+            // 區塊標題
             HStack(spacing: 10) {
                 Capsule()
                     .fill(
@@ -157,48 +178,94 @@ struct LifeOverviewView: View {
                 Text("最近里程碑")
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                if !recent.isEmpty {
+                    Text("\(recent.count) / \(allMS.count) 筆")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                }
             }
             .padding(.horizontal)
 
-            let sorted = allMS.sorted { $0.date > $1.date }
-            let recent = Array(sorted.prefix(5))
             if recent.isEmpty {
                 emptyMilestonePlaceholder
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(recent.enumerated()), id: \.element.id) { idx, m in
                         let accent = milestoneColor(m.category)
-                        HStack(alignment: .center, spacing: 12) {
+
+                        HStack(alignment: .center, spacing: 0) {
+                            // 左側彩色強調條（每個分類獨立顏色）
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [accent, accent.opacity(0.45)],
+                                        startPoint: .top, endPoint: .bottom
+                                    )
+                                )
+                                .frame(width: 3)
+                                .padding(.vertical, 10)
+                                .padding(.trailing, 14)
+
+                            // 分類圖示圓（帶漸層 + 細邊框）
                             ZStack {
                                 Circle()
-                                    .fill(accent.opacity(0.14))
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [accent.opacity(0.22), accent.opacity(0.08)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 40, height: 40)
+                                Circle()
+                                    .stroke(accent.opacity(0.28), lineWidth: 1.5)
                                     .frame(width: 40, height: 40)
                                 Image(systemName: m.category.icon)
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: 15, weight: .semibold))
                                     .foregroundStyle(accent)
                             }
-                            VStack(alignment: .leading, spacing: 2) {
+                            .padding(.trailing, 12)
+
+                            // 標題 + 分類徽章 + 日期
+                            VStack(alignment: .leading, spacing: 5) {
                                 Text(m.title)
-                                    .font(.subheadline.weight(.medium))
+                                    .font(.subheadline.weight(.semibold))
                                     .lineLimit(1)
-                                Text(m.category.displayName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                HStack(spacing: 6) {
+                                    // 彩色分類膠囊徽章
+                                    Text(m.category.displayName)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .padding(.horizontal, 7).padding(.vertical, 3)
+                                        .background(accent.opacity(0.13))
+                                        .foregroundStyle(accent)
+                                        .clipShape(Capsule())
+                                    Text(formatDate(m.date))
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
                             }
-                            Spacer()
-                            Text(formatDate(m.date))
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color(.secondarySystemFill))
-                                .clipShape(Capsule())
-                                .foregroundStyle(.secondary)
+
+                            Spacer(minLength: 8)
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
+                        // 錯落進場動畫：從左滑入 + 淡入
+                        .opacity(timelineRowsAppeared ? 1 : 0)
+                        .offset(x: timelineRowsAppeared ? 0 : -18)
+                        .animation(
+                            .spring(response: 0.48, dampingFraction: 0.80)
+                                .delay(0.07 * Double(idx)),
+                            value: timelineRowsAppeared
+                        )
 
                         if idx < recent.count - 1 {
-                            Divider().padding(.leading, 68)
+                            Rectangle()
+                                .fill(Color(.separator).opacity(0.20))
+                                .frame(height: 0.5)
+                                .padding(.leading, 16 + 3 + 14 + 40 + 12) // 對齊左側強調條右緣後文字區
                         }
                     }
                 }
@@ -206,6 +273,9 @@ struct LifeOverviewView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
+                .onAppear {
+                    withAnimation { timelineRowsAppeared = true }
+                }
             }
         }
     }
@@ -261,6 +331,12 @@ struct LifeOverviewView: View {
                         Text("分類統計")
                             .font(.subheadline.weight(.bold))
                         Spacer()
+                        Text("\(entries.count) 類")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
                     }
                     .padding(.horizontal)
 
@@ -273,7 +349,16 @@ struct LifeOverviewView: View {
                                 HStack(spacing: 12) {
                                     ZStack {
                                         Circle()
-                                            .fill(accent.opacity(0.14))
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [accent.opacity(0.20), accent.opacity(0.08)],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                )
+                                            )
+                                            .frame(width: 36, height: 36)
+                                        Circle()
+                                            .stroke(accent.opacity(0.22), lineWidth: 1)
                                             .frame(width: 36, height: 36)
                                         Image(systemName: entry.0.icon)
                                             .font(.system(size: 14, weight: .semibold))
@@ -282,9 +367,13 @@ struct LifeOverviewView: View {
                                     Text(entry.0.displayName)
                                         .font(.subheadline)
                                     Spacer()
+                                    // 筆數徽章
                                     Text("\(entry.1) 筆")
-                                        .font(.subheadline.bold())
+                                        .font(.system(size: 12, weight: .bold))
+                                        .padding(.horizontal, 9).padding(.vertical, 4)
+                                        .background(accent.opacity(0.12))
                                         .foregroundStyle(accent)
+                                        .clipShape(Capsule())
                                 }
 
                                 GeometryReader { geo in
@@ -295,7 +384,7 @@ struct LifeOverviewView: View {
                                         Capsule()
                                             .fill(
                                                 LinearGradient(
-                                                    colors: [accent, accent.opacity(0.65)],
+                                                    colors: [accent, accent.opacity(0.60)],
                                                     startPoint: .leading, endPoint: .trailing
                                                 )
                                             )
@@ -307,6 +396,14 @@ struct LifeOverviewView: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
+                            // 錯落淡入動畫
+                            .opacity(categoryRowsAppeared ? 1 : 0)
+                            .offset(y: categoryRowsAppeared ? 0 : 12)
+                            .animation(
+                                .spring(response: 0.48, dampingFraction: 0.80)
+                                    .delay(0.06 * Double(index)),
+                                value: categoryRowsAppeared
+                            )
 
                             if index < entries.count - 1 {
                                 Divider().padding(.leading, 64)
@@ -317,6 +414,9 @@ struct LifeOverviewView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                     .padding(.horizontal)
+                    .onAppear {
+                        withAnimation { categoryRowsAppeared = true }
+                    }
                 }
             }
         }
