@@ -585,50 +585,59 @@ struct ExpenseRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // 分類圖示圓
+            // 分類圖示圓（加大 + 陰影）
             ZStack {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [categoryAccent.opacity(0.18), categoryAccent.opacity(0.08)],
+                            colors: [categoryAccent.opacity(0.22), categoryAccent.opacity(0.09)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
+                    .shadow(color: categoryAccent.opacity(0.22), radius: 6, x: 0, y: 3)
                 Image(systemName: expense.categoryIcon)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(categoryAccent)
             }
 
             // 標題 + 副資訊
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(expense.title)
-                    .font(.subheadline.weight(.medium))
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
 
-                // 分類 + 備註
-                HStack(spacing: 0) {
+                // 分類膠囊標籤 + 備註
+                HStack(spacing: 5) {
                     Text(expense.categoryName)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(categoryAccent)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(categoryAccent.opacity(0.12))
+                        .clipShape(Capsule())
                     if !expense.note.isEmpty {
-                        Text(" · ")
-                            .foregroundStyle(Color(.tertiaryLabel))
                         Text(expense.note)
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
-                .font(.caption)
-                .lineLimit(1)
 
                 // 扣款帳戶標籤（信用卡 / 銀行）
                 if let label = deductionTargetLabel {
                     HStack(spacing: 3) {
                         Image(systemName: deductionIcon)
+                            .font(.system(size: 9, weight: .medium))
                         Text(label)
+                            .font(.system(size: 10, weight: .medium))
                     }
-                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(categoryAccent.opacity(0.85))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(categoryAccent.opacity(0.08))
+                    .clipShape(Capsule())
                     .lineLimit(1)
                 }
             }
@@ -636,25 +645,29 @@ struct ExpenseRow: View {
             Spacer(minLength: 4)
 
             // 金額 + 同行者
-            VStack(alignment: .trailing, spacing: 3) {
+            VStack(alignment: .trailing, spacing: 4) {
                 Text(formattedAmount)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28))
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.90, green: 0.25, blue: 0.25))
                     .contentTransition(.numericText())
 
                 if let member = expense.diningMember, !member.isEmpty {
-                    HStack(spacing: 2) {
+                    HStack(spacing: 3) {
                         Image(systemName: "person.2.fill")
                             .font(.system(size: 9))
                         Text(member)
                             .font(.system(size: 10, weight: .medium))
                     }
-                    .foregroundStyle(.orange.opacity(0.85))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.10))
+                    .clipShape(Capsule())
                     .lineLimit(1)
                 }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 5)
     }
 
     private var deductionIcon: String {
