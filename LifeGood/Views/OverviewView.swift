@@ -47,6 +47,13 @@ struct OverviewView: View {
                 VStack(spacing: 20) {
                     monthlyBalanceCard
                         .padding(.horizontal)
+                        .opacity(appearedCards.contains("header") ? 1 : 0)
+                        .offset(y: appearedCards.contains("header") ? 0 : 20)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                appearedCards.insert("header")
+                            }
+                        }
 
                     HStack(alignment: .top, spacing: 12) {
                         summaryCard(
@@ -225,21 +232,35 @@ struct OverviewView: View {
 
     // MARK: - 摘要小卡
 
+    private func cardDelay(_ key: String) -> Double {
+        switch key {
+        case "income":   return 0.08
+        case "variable": return 0.16
+        case "fixed":    return 0.24
+        default:         return 0.0
+        }
+    }
+
     private func summaryCard(title: String, amount: Double, icon: String, color: Color, key: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             // 彩色頂端條
             RoundedRectangle(cornerRadius: 2)
-                .fill(color)
+                .fill(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.65)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                )
                 .frame(height: 3)
                 .padding(.bottom, 10)
 
             HStack(spacing: 6) {
                 ZStack {
                     Circle()
-                        .fill(color.opacity(0.12))
-                        .frame(width: 28, height: 28)
+                        .fill(color.opacity(0.14))
+                        .frame(width: 30, height: 30)
                     Image(systemName: icon)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(color)
                 }
                 Text(title)
@@ -256,13 +277,23 @@ struct OverviewView: View {
                 .foregroundStyle(.primary)
                 .minimumScaleFactor(0.7)
                 .lineLimit(1)
+                .contentTransition(.numericText())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
-        .padding(.bottom, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: color.opacity(0.10), radius: 8, x: 0, y: 3)
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 1)
+        .opacity(appearedCards.contains(key) ? 1 : 0)
+        .offset(y: appearedCards.contains(key) ? 0 : 18)
+        .onAppear {
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.78).delay(cardDelay(key))) {
+                appearedCards.insert(key)
+            }
+        }
     }
 
     // MARK: - 今日花費
@@ -324,13 +355,37 @@ struct OverviewView: View {
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
+    // MARK: - 分類配色
+
+    private func categoryColor(_ category: VariableCategory) -> Color {
+        switch category {
+        case .food:             return Color(red: 1.00, green: 0.58, blue: 0.22)
+        case .transportation:   return Color(red: 0.27, green: 0.67, blue: 0.99)
+        case .vehicle:          return Color(red: 0.27, green: 0.67, blue: 0.99)
+        case .entertainment:    return Color(red: 0.68, green: 0.40, blue: 1.00)
+        case .shopping:         return Color(red: 1.00, green: 0.35, blue: 0.55)
+        case .dailyNecessities: return Color(red: 0.25, green: 0.80, blue: 0.62)
+        case .medical:          return Color(red: 1.00, green: 0.25, blue: 0.32)
+        case .education:        return Color(red: 0.31, green: 0.55, blue: 0.98)
+        case .social:           return Color(red: 1.00, green: 0.72, blue: 0.18)
+        case .stock:            return Color(red: 0.20, green: 0.78, blue: 0.48)
+        case .realEstate:       return Color(red: 0.47, green: 0.60, blue: 0.82)
+        case .tax, .taxSaving:  return Color(red: 0.60, green: 0.60, blue: 0.65)
+        case .other:            return Color.secondary
+        }
+    }
+
     // MARK: - 分類支出（帶比例條）
 
     private var categoryBreakdownSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
+                Rectangle()
+                    .fill(Color.green)
+                    .frame(width: 3, height: 16)
+                    .clipShape(Capsule())
                 Text("本月變動支出分類")
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
             }
             .padding(.horizontal)
@@ -367,16 +422,17 @@ struct OverviewView: View {
         let ratio = maxAmount > 0 ? item.amount / maxAmount : 0
         let totalVar = store.currentMonthVariableTotal
         let pct = totalVar > 0 ? Int(item.amount / totalVar * 100) : 0
+        let accent = categoryColor(item.category)
 
-        return VStack(spacing: 6) {
+        return VStack(spacing: 8) {
             HStack {
                 ZStack {
                     Circle()
-                        .fill(Color.green.opacity(0.10))
-                        .frame(width: 30, height: 30)
+                        .fill(accent.opacity(0.14))
+                        .frame(width: 32, height: 32)
                     Image(systemName: item.category.icon)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.green)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(accent)
                 }
                 Text(item.category.rawValue)
                     .font(.subheadline)
@@ -390,21 +446,27 @@ struct OverviewView: View {
                 }
             }
 
-            // 比例進度條
+            // 比例進度條（含動畫）
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(Color(.systemFill))
-                        .frame(height: 4)
+                        .frame(height: 5)
                     Capsule()
-                        .fill(Color.green.opacity(0.7))
-                        .frame(width: geo.size.width * ratio, height: 4)
+                        .fill(
+                            LinearGradient(
+                                colors: [accent, accent.opacity(0.65)],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .frame(width: geo.size.width * ratio, height: 5)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.78), value: ratio)
                 }
             }
-            .frame(height: 4)
+            .frame(height: 5)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
     }
 
     // MARK: - 最近交易
@@ -434,8 +496,12 @@ struct OverviewView: View {
     private var recentTransactionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
+                Rectangle()
+                    .fill(Color.green)
+                    .frame(width: 3, height: 16)
+                    .clipShape(Capsule())
                 Text("最近交易")
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
             }
             .padding(.horizontal)
@@ -548,9 +614,16 @@ struct OverviewView: View {
     }
 
     private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M/d"
-        return formatter.string(from: date)
+        let cal = Calendar.current
+        if cal.isDateInToday(date) {
+            let f = DateFormatter()
+            f.dateFormat = "HH:mm"
+            return f.string(from: date)
+        }
+        if cal.isDateInYesterday(date) { return "昨天" }
+        let f = DateFormatter()
+        f.dateFormat = "M/d"
+        return f.string(from: date)
     }
 
     private func currentMonthString() -> String {
