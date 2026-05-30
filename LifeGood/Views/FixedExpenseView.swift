@@ -319,10 +319,14 @@ struct FixedExpenseRow: View {
 
     private var formattedAmount: String {
         let code = expense.currencyCode
+        // 儲蓄險的 amount 已是原幣別存值（沒乘匯率），其他類型存的是換算後的 NT$。
+        let isSavingsIns = expense.fixedCategory == .insurance
+            && expense.insuranceSubCategory == .savings
         if code != "NT$" && code != "TWD" && !code.isEmpty {
-            // 儲存值為「換算後的台幣金額」，顯示原幣別時要除以匯率還原
             let displayAmount: Double
-            if let rate = store.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+            if isSavingsIns {
+                displayAmount = expense.amount
+            } else if let rate = store.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
                 displayAmount = expense.amount / rate.rate
             } else {
                 displayAmount = expense.amount

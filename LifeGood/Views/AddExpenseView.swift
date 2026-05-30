@@ -2321,8 +2321,12 @@ struct AddExpenseView: View {
         suppressNextCompleterUpdate = true
         photoFileNames = expense.photoFileNames
         selectedCurrencyCode = expense.currencyCode
-        // 還原為原始幣別金額顯示
-        if expense.currencyCode != "NT$",
+        // 還原為原始幣別金額顯示：儲蓄險直接用 amount（未乘匯率），其他類型要除以匯率還原
+        let editingIsSavingsIns = expense.fixedCategory == .insurance
+            && expense.insuranceSubCategory == .savings
+        if editingIsSavingsIns {
+            amountText = String(format: "%.0f", expense.amount)
+        } else if expense.currencyCode != "NT$",
            let rate = store.currencyRates.first(where: { $0.code == expense.currencyCode }),
            rate.rate > 0 {
             amountText = String(format: "%.0f", expense.amount / rate.rate)
