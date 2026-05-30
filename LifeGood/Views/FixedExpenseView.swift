@@ -64,56 +64,104 @@ struct FixedExpenseView: View {
     // MARK: - 摘要
 
     private var fixedSummaryHeader: some View {
-        VStack(spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
+        let yearlyEstimate = store.fixedExpenses.reduce(0.0) { total, expense in
+            total + expense.amount * Double(occurrencesThisYear(for: expense))
+        }
+        let count = store.fixedExpenses.count
+
+        return VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text("本月固定支出")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
                     Text(formatCurrency(store.currentMonthFixedTotal))
-                        .font(.title2.bold())
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
                 }
                 Spacer()
-                Text("\(store.fixedExpenses.count) 筆")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Text("\(count) 筆")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 5)
+                    .background(.white.opacity(0.22))
+                    .clipShape(Capsule())
+                    .foregroundStyle(.white)
             }
 
-            // 年度預估（依開始日期計算今年度剩餘期數）
-            let yearlyEstimate = store.fixedExpenses.reduce(0.0) { total, expense in
-                total + expense.amount * Double(occurrencesThisYear(for: expense))
-            }
-
-            HStack {
-                Image(systemName: "info.circle")
-                    .foregroundStyle(.blue)
-                Text("年度預估固定支出：\(formatCurrency(yearlyEstimate))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            // 年度預估列
+            HStack(spacing: 6) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                Text("年度預估 \(formatCurrency(yearlyEstimate))")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.82))
                 Spacer()
             }
-            .padding(10)
-            .background(Color.blue.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.top, 14)
+            .padding(.horizontal, 2)
         }
-        .padding()
-        .background(Color(.systemBackground))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.22, green: 0.53, blue: 0.98),
+                        Color(red: 0.10, green: 0.35, blue: 0.82)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 120, height: 120)
+                    .offset(x: 80, y: -45)
+                    .blur(radius: 12)
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 70, height: 70)
+                    .offset(x: -60, y: 40)
+                    .blur(radius: 8)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.38), radius: 14, x: 0, y: 7)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
     }
 
     // MARK: - 空狀態
 
     private var emptyStateView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             Spacer()
-            Image(systemName: "pin.slash")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text("尚無固定支出紀錄")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            Text("點擊右上角 + 新增固定支出")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(.systemFill), Color(.secondarySystemFill)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 88, height: 88)
+                Image(systemName: "pin.slash")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            VStack(spacing: 8) {
+                Text("尚無固定支出紀錄")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("點擊右上角 + 新增固定支出")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -139,21 +187,45 @@ struct FixedExpenseView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+    }
+
+    private func categoryAccentColor(_ category: FixedCategory) -> Color {
+        switch category {
+        case .rent:         return .blue
+        case .utilities:    return Color(red: 1.0, green: 0.75, blue: 0.10)
+        case .insurance:    return .green
+        case .subscription: return .purple
+        case .loan:         return Color(red: 0.90, green: 0.25, blue: 0.30)
+        case .telecom:      return .cyan
+        case .management:   return Color(red: 0.55, green: 0.45, blue: 0.35)
+        case .other:        return .secondary
+        }
     }
 
     private func categoryHeader(category: FixedCategory, expenses: [Expense]) -> some View {
         let now = Date()
         let activeExpenses = expenses.filter { $0.date <= now }
+        let accent = categoryAccentColor(category)
 
-        return HStack {
-            Image(systemName: category.icon)
+        return HStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(accent.opacity(0.14))
+                    .frame(width: 26, height: 26)
+                Image(systemName: category.icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
             Text(category.rawValue)
+                .foregroundStyle(accent)
             Spacer()
             if category == .insurance {
                 insuranceHeaderAmount(activeExpenses)
             } else {
                 Text(formatCurrency(activeExpenses.reduce(0) { $0 + monthlyEquivalent($1) }))
                     .font(.caption.bold())
+                    .foregroundStyle(accent)
             }
         }
     }
@@ -275,46 +347,80 @@ struct FixedExpenseRow: View {
         return f
     }()
 
+    private var categoryAccent: Color {
+        switch expense.fixedCategory {
+        case .rent:         return .blue
+        case .utilities:    return Color(red: 1.0, green: 0.75, blue: 0.10)
+        case .insurance:    return .green
+        case .subscription: return .purple
+        case .loan:         return Color(red: 0.90, green: 0.25, blue: 0.30)
+        case .telecom:      return .cyan
+        case .management:   return Color(red: 0.55, green: 0.45, blue: 0.35)
+        case .other, .none: return .secondary
+        }
+    }
+
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 12) {
+            // 分類圖示圓
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [categoryAccent.opacity(0.18), categoryAccent.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 40, height: 40)
+                Image(systemName: expense.fixedCategory?.icon ?? "pin.circle.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(categoryAccent)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(expense.title)
                     .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
                 HStack(spacing: 4) {
                     if let recurrence = expense.recurrence {
                         Text(recurrence.rawValue)
-                            .font(.caption2)
+                            .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.green.opacity(0.15))
-                            .foregroundStyle(.green)
+                            .background(categoryAccent.opacity(0.12))
+                            .foregroundStyle(categoryAccent)
                             .clipShape(Capsule())
                     }
                     if !expense.note.isEmpty {
                         Text(expense.note)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: .trailing, spacing: 3) {
                 Text(formattedAmount)
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.red)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28))
+                    .contentTransition(.numericText())
                 if let label = deductionTargetLabel {
                     HStack(spacing: 3) {
                         Image(systemName: deductionIcon)
-                            .font(.caption2)
-                        Text(label).font(.caption2)
+                            .font(.system(size: 9))
+                        Text(label)
+                            .font(.system(size: 10, weight: .medium))
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(categoryAccent.opacity(0.85))
+                    .lineLimit(1)
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
     private var formattedAmount: String {
