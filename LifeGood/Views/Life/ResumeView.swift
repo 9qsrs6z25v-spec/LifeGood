@@ -242,6 +242,7 @@ struct ResumeView: View {
     @State private var editingItem: LifeMilestone?
     @State private var selectedCategory: MilestoneCategory?
     @State private var showPremiumAlert = false
+    @State private var emptyStatePulse = false
 
     private var realMilestoneIDs: Set<UUID> { Set(store.milestones.map(\.id)) }
 
@@ -421,30 +422,58 @@ struct ResumeView: View {
     }
 
     private func spendingRow(_ e: Expense) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: e.variableCategory?.icon ?? "questionmark.circle")
-                .foregroundStyle(.orange)
-                .frame(width: 22)
+        HStack(alignment: .center, spacing: 10) {
+            // 分類圖示圓（帶漸層）
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.orange.opacity(0.20), Color.orange.opacity(0.07)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .stroke(Color.orange.opacity(0.20), lineWidth: 1)
+                    .frame(width: 36, height: 36)
+                Image(systemName: e.variableCategory?.icon ?? "questionmark.circle")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.orange)
+            }
+
             VStack(alignment: .leading, spacing: 3) {
                 Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
-                HStack(spacing: 6) {
-                    Text(formatExpenseDate(e.date)).font(.caption2).foregroundStyle(.tertiary)
+                HStack(spacing: 5) {
+                    Text(formatExpenseDate(e.date))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                     if let cat = e.variableCategory {
-                        Text(cat.rawValue).font(.caption2).foregroundStyle(.secondary)
+                        Text(cat.rawValue)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.10))
+                            .clipShape(Capsule())
                     }
                     if let raw = e.diningMember, !raw.isEmpty {
-                        Text(raw).font(.caption2).foregroundStyle(.orange).lineLimit(1)
+                        Text(raw)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .lineLimit(1)
                     }
                 }
             }
+
             Spacer()
+
             Text(formatCurrency(e.amount))
                 .font(.subheadline.bold())
                 .foregroundStyle(.red)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     private func formatCurrency(_ v: Double) -> String {
@@ -509,38 +538,136 @@ struct ResumeView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             Spacer()
-            Image(systemName: "trophy").font(.system(size: 48)).foregroundStyle(.secondary)
-            Text("尚無里程碑").font(.headline).foregroundStyle(.secondary)
-            Text("記錄你的人生重要時刻").font(.subheadline).foregroundStyle(.tertiary)
-            Spacer()
-        }.frame(maxWidth: .infinity)
-    }
-
-    private func milestoneRow(_ item: LifeMilestone) -> some View {
-        HStack {
-            Image(systemName: item.careerSubCategory?.icon ?? item.category.icon)
-                .font(.title3).foregroundStyle(categoryColor(item.category))
-                .frame(width: 36, height: 36)
-                .background(categoryColor(item.category).opacity(0.12))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title).font(.subheadline.weight(.medium))
-                if let sub = item.careerSubCategory {
-                    careerSubtitle(item, sub: sub)
-                } else if !item.note.isEmpty {
-                    Text(item.note)
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            ZStack {
+                // 外圍脈衝光環
+                Circle()
+                    .stroke(Color.orange.opacity(emptyStatePulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 100, height: 100)
+                    .scaleEffect(emptyStatePulse ? 1.40 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                        value: emptyStatePulse
+                    )
+                Circle()
+                    .stroke(Color.orange.opacity(emptyStatePulse ? 0 : 0.15), lineWidth: 1)
+                    .frame(width: 100, height: 100)
+                    .scaleEffect(emptyStatePulse ? 1.70 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).delay(0.25).repeatForever(autoreverses: false),
+                        value: emptyStatePulse
+                    )
+                // 主圓（漸層底）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.orange.opacity(0.16), Color.orange.opacity(0.05)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 82, height: 82)
+                    .overlay(
+                        Circle().stroke(Color.orange.opacity(0.20), lineWidth: 1.2)
+                    )
+                Image(systemName: "trophy")
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(Color.orange.opacity(0.75))
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    emptyStatePulse = true
                 }
             }
 
+            VStack(spacing: 8) {
+                Text("尚無里程碑")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.65))
+                Text("記錄你的人生重要時刻")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
             Spacer()
-
-            Text(formatDate(item.date)).font(.caption).foregroundStyle(.secondary)
         }
-        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    private func milestoneRow(_ item: LifeMilestone) -> some View {
+        let accent = categoryColor(item.category)
+        return HStack(alignment: .center, spacing: 0) {
+            // 左側彩色強調條
+            RoundedRectangle(cornerRadius: 2)
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.45)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3)
+                .padding(.vertical, 8)
+                .padding(.trailing, 12)
+
+            // 分類圖示圓（漸層 + 細邊框）
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.22), accent.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 40, height: 40)
+                Circle()
+                    .stroke(accent.opacity(0.26), lineWidth: 1.5)
+                    .frame(width: 40, height: 40)
+                Image(systemName: item.careerSubCategory?.icon ?? item.category.icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+            .padding(.trailing, 12)
+
+            // 標題 + 副資訊
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+
+                HStack(spacing: 5) {
+                    // 分類膠囊徽章
+                    Text(item.category.displayName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(accent.opacity(0.12))
+                        .clipShape(Capsule())
+
+                    if let sub = item.careerSubCategory {
+                        careerSubtitle(item, sub: sub)
+                    } else if !item.note.isEmpty {
+                        Text(item.note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+
+            Spacer(minLength: 6)
+
+            // 日期徽章
+            Text(formatDate(item.date))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(accent.opacity(0.85))
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+        }
+        .padding(.vertical, 5)
     }
 
     @ViewBuilder
