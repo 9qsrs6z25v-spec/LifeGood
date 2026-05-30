@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - 支出類型
 enum ExpenseType: String, Codable, CaseIterable {
@@ -64,6 +65,25 @@ enum VariableCategory: String, Codable, Identifiable {
         case .tax: return "OtherColor"
         case .taxSaving: return "OtherColor"
         case .other: return "OtherColor"
+        }
+    }
+
+    var accentColor: Color {
+        switch self {
+        case .food:             return Color(red: 1.00, green: 0.58, blue: 0.22)
+        case .transportation:   return Color(red: 0.27, green: 0.67, blue: 0.99)
+        case .vehicle:          return Color(red: 0.27, green: 0.67, blue: 0.99)
+        case .entertainment:    return Color(red: 0.68, green: 0.40, blue: 1.00)
+        case .shopping:         return Color(red: 1.00, green: 0.35, blue: 0.55)
+        case .dailyNecessities: return Color(red: 0.25, green: 0.80, blue: 0.62)
+        case .medical:          return Color(red: 1.00, green: 0.25, blue: 0.32)
+        case .education:        return Color(red: 0.31, green: 0.55, blue: 0.98)
+        case .social:           return Color(red: 1.00, green: 0.72, blue: 0.18)
+        case .stock:            return Color(red: 0.20, green: 0.78, blue: 0.48)
+        case .realEstate:       return Color(red: 0.47, green: 0.60, blue: 0.82)
+        case .tax:              return Color(red: 0.60, green: 0.60, blue: 0.65)
+        case .taxSaving:        return Color(red: 0.45, green: 0.72, blue: 0.55)
+        case .other:            return Color.secondary
         }
     }
 }

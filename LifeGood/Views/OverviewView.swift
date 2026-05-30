@@ -379,24 +379,9 @@ struct OverviewView: View {
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
-    // MARK: - 分類配色
-
+    // MARK: - 分類配色（委派給 VariableCategory.accentColor）
     private func categoryColor(_ category: VariableCategory) -> Color {
-        switch category {
-        case .food:             return Color(red: 1.00, green: 0.58, blue: 0.22)
-        case .transportation:   return Color(red: 0.27, green: 0.67, blue: 0.99)
-        case .vehicle:          return Color(red: 0.27, green: 0.67, blue: 0.99)
-        case .entertainment:    return Color(red: 0.68, green: 0.40, blue: 1.00)
-        case .shopping:         return Color(red: 1.00, green: 0.35, blue: 0.55)
-        case .dailyNecessities: return Color(red: 0.25, green: 0.80, blue: 0.62)
-        case .medical:          return Color(red: 1.00, green: 0.25, blue: 0.32)
-        case .education:        return Color(red: 0.31, green: 0.55, blue: 0.98)
-        case .social:           return Color(red: 1.00, green: 0.72, blue: 0.18)
-        case .stock:            return Color(red: 0.20, green: 0.78, blue: 0.48)
-        case .realEstate:       return Color(red: 0.47, green: 0.60, blue: 0.82)
-        case .tax, .taxSaving:  return Color(red: 0.60, green: 0.60, blue: 0.65)
-        case .other:            return Color.secondary
-        }
+        category.accentColor
     }
 
     // MARK: - 分類支出（帶比例條）

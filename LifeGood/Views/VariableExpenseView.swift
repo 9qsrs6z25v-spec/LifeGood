@@ -106,50 +106,99 @@ struct VariableExpenseView: View {
 
     // MARK: - 月摘要
 
+    private var monthProgress: Double {
+        let cal = Calendar.current
+        let now = Date()
+        let day = Double(cal.component(.day, from: now))
+        let total = Double(cal.range(of: .day, in: .month, for: now)?.count ?? 30)
+        return min(day / total, 1.0)
+    }
+
     private var monthSummaryHeader: some View {
         let count = store.currentMonthExpenses.filter { $0.expenseType == .variable }.count
         let total = store.currentMonthVariableTotal
         let dayOfMonth = Calendar.current.component(.day, from: Date())
         let dailyAvg = total / Double(max(dayOfMonth, 1))
 
-        return HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("本月變動支出")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.80))
-                Text(formatCurrency(total))
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .contentTransition(.numericText())
-                if total > 0 {
-                    Text("日均 " + formatCurrency(dailyAvg))
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .padding(.top, 1)
+        return VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("本月變動支出")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    Text(formatCurrency(total))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
+                    if total > 0 {
+                        Text("日均 " + formatCurrency(dailyAvg))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.top, 1)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text("\(count) 筆")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 5)
+                        .background(.white.opacity(0.22))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
                 }
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
-                Text("\(count) 筆")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                    .background(.white.opacity(0.22))
-                    .clipShape(Capsule())
-                    .foregroundStyle(.white)
+
+            // 月進度條
+            VStack(spacing: 5) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(.white.opacity(0.18))
+                            .frame(height: 5)
+                        Capsule()
+                            .fill(.white.opacity(0.80))
+                            .frame(width: geo.size.width * monthProgress, height: 5)
+                            .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
+                    }
+                }
+                .frame(height: 5)
+                HStack {
+                    Text("本月進度 \(Int(monthProgress * 100))%")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.60))
+                    Spacer()
+                    Text("剩 \(Int((1 - monthProgress) * 100))%")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.60))
+                }
             }
+            .padding(.top, 12)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
         .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 1.00, green: 0.62, blue: 0.22),
-                    Color(red: 0.86, green: 0.36, blue: 0.06)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 1.00, green: 0.62, blue: 0.22),
+                        Color(red: 0.86, green: 0.36, blue: 0.06)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 裝飾性散景圓
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 120, height: 120)
+                    .offset(x: 80, y: -45)
+                    .blur(radius: 12)
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 70, height: 70)
+                    .offset(x: -60, y: 40)
+                    .blur(radius: 8)
+            }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: Color(red: 0.86, green: 0.36, blue: 0.06).opacity(0.38), radius: 14, x: 0, y: 7)
@@ -412,51 +461,82 @@ struct ExpenseRow: View {
         return f
     }()
 
-    var body: some View {
-        HStack {
-            Image(systemName: expense.categoryIcon)
-                .font(.title3)
-                .foregroundStyle(.green)
-                .frame(width: 36, height: 36)
-                .background(Color.green.opacity(0.1))
-                .clipShape(Circle())
+    private var categoryAccent: Color {
+        expense.variableCategory?.accentColor ?? .secondary
+    }
 
-            VStack(alignment: .leading, spacing: 2) {
+    var body: some View {
+        HStack(spacing: 12) {
+            // 分類圖示圓
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [categoryAccent.opacity(0.18), categoryAccent.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 40, height: 40)
+                Image(systemName: expense.categoryIcon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(categoryAccent)
+            }
+
+            // 標題 + 副資訊
+            VStack(alignment: .leading, spacing: 3) {
                 Text(expense.title)
                     .font(.subheadline.weight(.medium))
-                HStack(spacing: 4) {
+                    .lineLimit(1)
+
+                // 分類 + 備註
+                HStack(spacing: 0) {
                     Text(expense.categoryName)
+                        .foregroundStyle(.secondary)
                     if !expense.note.isEmpty {
-                        Text("· \(expense.note)")
+                        Text(" · ")
+                            .foregroundStyle(Color(.tertiaryLabel))
+                        Text(expense.note)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
                 .lineLimit(1)
-            }
 
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(formattedAmount)
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.red)
-                if let member = expense.diningMember, !member.isEmpty {
-                    Text(member)
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
+                // 扣款帳戶標籤（信用卡 / 銀行）
                 if let label = deductionTargetLabel {
                     HStack(spacing: 3) {
                         Image(systemName: deductionIcon)
-                            .font(.caption2)
-                        Text(label).font(.caption2)
+                        Text(label)
                     }
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(categoryAccent.opacity(0.85))
+                    .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            // 金額 + 同行者
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(formattedAmount)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28))
+                    .contentTransition(.numericText())
+
+                if let member = expense.diningMember, !member.isEmpty {
+                    HStack(spacing: 2) {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 9))
+                        Text(member)
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(.orange.opacity(0.85))
+                    .lineLimit(1)
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
     private var deductionIcon: String {
