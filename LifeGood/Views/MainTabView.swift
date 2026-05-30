@@ -800,6 +800,12 @@ struct MainTabView: View {
             .padding(.vertical, 8)
         }
         .background(Color(.systemBackground))
+        .overlay(
+            Rectangle()
+                .fill(Color(.separator).opacity(0.25))
+                .frame(height: 0.5),
+            alignment: .bottom
+        )
     }
 
     /// 父功能是否處於「自身被選取」狀態（沒有任何子功能被選中）
@@ -873,7 +879,7 @@ struct MainTabView: View {
         }) {
             HStack(spacing: 4) {
                 Image(systemName: icon).font(.caption2)
-                Text(title).font(.caption.weight(.medium))
+                Text(title).font(.caption.weight(isSelected ? .semibold : .medium))
                 if locked {
                     Image(systemName: "lock.fill").font(.system(size: 9))
                 }
@@ -882,51 +888,77 @@ struct MainTabView: View {
             .background(isSelected ? tint : Color(.tertiarySystemFill))
             .foregroundStyle(isSelected ? .white : .primary)
             .clipShape(Capsule())
+            .shadow(
+                color: isSelected ? tint.opacity(0.38) : .clear,
+                radius: 6, x: 0, y: 3
+            )
+            .scaleEffect(isSelected ? 1.04 : 1.0)
         }
         .buttonStyle(.plain)
+        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
     }
 
     // MARK: - 底部四按鈕
 
     private var bottomTabBar: some View {
-        HStack {
+        HStack(spacing: 0) {
             tabButton(mode: .expense, icon: "dollarsign.circle.fill", label: "收支")
             tabButton(mode: .finance, icon: "chart.pie.fill", label: "理財")
             tabButton(mode: .life, icon: "person.fill", label: "人生")
             Button {
-                isSettingsActive = true
-            } label: {
-                VStack(spacing: 2) {
-                    Image(systemName: "gearshape.fill").font(.system(size: 20))
-                    Text("設定").font(.system(size: 10))
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+                    isSettingsActive = true
                 }
-                .foregroundStyle(isSettingsActive ? Color.green : Color.secondary)
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
+            } label: {
+                tabItemLabel(icon: "gearshape.fill", label: "設定", isActive: isSettingsActive)
             }
             .buttonStyle(.plain)
         }
-        .padding(.top, 8).padding(.bottom, 6)
+        .padding(.top, 4)
+        .padding(.bottom, 6)
         .background(
-            Color(.systemBackground).shadow(color: .black.opacity(0.08), radius: 4, y: -2)
+            Color(.systemBackground)
+                .shadow(color: .black.opacity(0.12), radius: 10, y: -3)
                 .ignoresSafeArea(edges: .bottom)
+        )
+        .overlay(
+            Rectangle()
+                .fill(Color(.separator).opacity(0.30))
+                .frame(height: 0.5),
+            alignment: .top
         )
     }
 
     private func tabButton(mode: AppMode, icon: String, label: String) -> some View {
         Button {
-            appMode = mode.rawValue
-            isSettingsActive = false
-        } label: {
-            VStack(spacing: 2) {
-                Image(systemName: icon).font(.system(size: 20))
-                Text(label).font(.system(size: 10))
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+                appMode = mode.rawValue
+                isSettingsActive = false
             }
-            .foregroundStyle(currentMode == mode && !isSettingsActive ? Color.green : Color.secondary)
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
+        } label: {
+            tabItemLabel(icon: icon, label: label, isActive: currentMode == mode && !isSettingsActive)
         }
         .buttonStyle(.plain)
+    }
+
+    private func tabItemLabel(icon: String, label: String, isActive: Bool) -> some View {
+        VStack(spacing: 3) {
+            // 選中時顯示綠色小圓點，未選時透明佔位（避免版面跳動）
+            Circle()
+                .fill(isActive ? Color.green : Color.clear)
+                .frame(width: 4, height: 4)
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .medium))
+                .scaleEffect(isActive ? 1.0 : 0.87)
+                .animation(.spring(response: 0.28, dampingFraction: 0.68), value: isActive)
+            Text(label)
+                .font(.system(size: 10, weight: isActive ? .semibold : .regular))
+        }
+        .foregroundStyle(isActive ? Color.green : Color.secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+        .animation(.spring(response: 0.28, dampingFraction: 0.70), value: isActive)
     }
 
     // MARK: - 浮動新增按鈕
