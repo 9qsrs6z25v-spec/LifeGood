@@ -293,15 +293,29 @@ struct SettingsView: View {
     ) -> some View {
         Section {
             DisclosureGroup(isExpanded: isExpanded) {
-                // 用 List Section 包出來的 content 直接內嵌
                 content()
             } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: icon)
-                        .foregroundStyle(color)
-                        .frame(width: 22)
-                    Text(title).font(.subheadline.weight(.medium))
+                HStack(spacing: 13) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [color, color.opacity(0.78)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 32, height: 32)
+                            .shadow(color: color.opacity(0.35), radius: 4, x: 0, y: 2)
+                        Image(systemName: icon)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                    Text(title)
+                        .font(.subheadline.weight(.medium))
                 }
+                .padding(.vertical, 2)
             }
         }
     }
