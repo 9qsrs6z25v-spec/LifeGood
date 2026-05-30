@@ -217,17 +217,30 @@ struct OverviewView: View {
         }
         .padding(20)
         .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.16, green: 0.74, blue: 0.50),
-                    Color(red: 0.07, green: 0.50, blue: 0.38)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.16, green: 0.74, blue: 0.50),
+                        Color(red: 0.07, green: 0.50, blue: 0.38)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 裝飾性散景圓，增加卡片層次感
+                Circle()
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 140, height: 140)
+                    .offset(x: 90, y: -55)
+                    .blur(radius: 14)
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 90, height: 90)
+                    .offset(x: -70, y: 55)
+                    .blur(radius: 10)
+            }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.40), radius: 16, x: 0, y: 8)
+        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.42), radius: 18, x: 0, y: 9)
     }
 
     // MARK: - 摘要小卡
@@ -247,17 +260,17 @@ struct OverviewView: View {
             RoundedRectangle(cornerRadius: 2)
                 .fill(
                     LinearGradient(
-                        colors: [color, color.opacity(0.65)],
+                        colors: [color, color.opacity(0.55)],
                         startPoint: .leading, endPoint: .trailing
                     )
                 )
-                .frame(height: 3)
+                .frame(height: 4)
                 .padding(.bottom, 10)
 
             HStack(spacing: 6) {
                 ZStack {
                     Circle()
-                        .fill(color.opacity(0.14))
+                        .fill(color.opacity(0.16))
                         .frame(width: 30, height: 30)
                     Image(systemName: icon)
                         .font(.system(size: 13, weight: .semibold))
@@ -283,9 +296,18 @@ struct OverviewView: View {
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .padding(.bottom, 14)
-        .background(Color(.systemBackground))
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                color.opacity(0.04)
+            }
+        )
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: color.opacity(0.10), radius: 8, x: 0, y: 3)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(color.opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: color.opacity(0.13), radius: 10, x: 0, y: 4)
         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 1)
         .opacity(appearedCards.contains(key) ? 1 : 0)
         .offset(y: appearedCards.contains(key) ? 0 : 18)
@@ -381,13 +403,18 @@ struct OverviewView: View {
 
     private var categoryBreakdownSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Rectangle()
-                    .fill(Color.green)
-                    .frame(width: 3, height: 16)
-                    .clipShape(Capsule())
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.55)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
                 Text("本月變動支出分類")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                 Spacer()
             }
             .padding(.horizontal)
@@ -497,13 +524,18 @@ struct OverviewView: View {
 
     private var recentTransactionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Rectangle()
-                    .fill(Color.green)
-                    .frame(width: 3, height: 16)
-                    .clipShape(Capsule())
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.55)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
                 Text("最近交易")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                 Spacer()
             }
             .padding(.horizontal)
