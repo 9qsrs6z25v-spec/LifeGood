@@ -117,8 +117,8 @@ final class CloudSyncManager: ObservableObject {
     @objc private func handleAccountStatusChanged() {
         let status = CloudKitManager.shared.accountStatus
         updateAccountStatus(status)
-        DispatchQueue.main.async {
-            self.lastChangeReason = .accountChange
+        DispatchQueue.main.async { [weak self] in
+            self?.lastChangeReason = .accountChange
         }
     }
 
@@ -211,8 +211,8 @@ final class CloudSyncManager: ObservableObject {
     // MARK: - Pull（被 CloudKitManager 通知）
 
     @objc private func handleKVChanges(_ note: Notification) {
-        DispatchQueue.main.async {
-            self.lastChangeReason = .serverChange
+        DispatchQueue.main.async { [weak self] in
+            self?.lastChangeReason = .serverChange
         }
         markSynced()
         // 重發舊版同名通知，所有 Store 都已監聽
@@ -220,8 +220,8 @@ final class CloudSyncManager: ObservableObject {
     }
 
     @objc private func handlePhotoChanges(_ note: Notification) {
-        DispatchQueue.main.async {
-            self.lastChangeReason = .serverChange
+        DispatchQueue.main.async { [weak self] in
+            self?.lastChangeReason = .serverChange
             // 通知 UI 重新載入照片
             NotificationCenter.default.post(name: .cloudSyncPhotosDidUpdate, object: nil)
         }
@@ -232,8 +232,8 @@ final class CloudSyncManager: ObservableObject {
 
     private func markSynced() {
         let now = Date()
-        DispatchQueue.main.async {
-            self.lastSyncDate = now
+        DispatchQueue.main.async { [weak self] in
+            self?.lastSyncDate = now
         }
         UserDefaults.standard.set(now, forKey: Self.lastSyncKey)
     }

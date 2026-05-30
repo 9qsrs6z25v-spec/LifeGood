@@ -50,7 +50,7 @@ class ExpenseStore: ObservableObject {
     }
 
     func delete(at offsets: IndexSet, from list: [Expense]) {
-        let idsToDelete = offsets.map { list[$0].id }
+        let idsToDelete = Set(offsets.map { list[$0].id })
         for exp in expenses where idsToDelete.contains(exp.id) {
             for name in exp.photoFileNames { Expense.deletePhoto(name) }
         }
@@ -70,7 +70,7 @@ class ExpenseStore: ObservableObject {
     }
 
     func deleteIncome(at offsets: IndexSet, from list: [Income]) {
-        let ids = offsets.map { list[$0].id }
+        let ids = Set(offsets.map { list[$0].id })
         incomes.removeAll { ids.contains($0.id) }
     }
 
