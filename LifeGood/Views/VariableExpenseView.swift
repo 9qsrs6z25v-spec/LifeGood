@@ -100,21 +100,55 @@ struct VariableExpenseView: View {
     // MARK: - 月摘要
 
     private var monthSummaryHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
+        let count = store.currentMonthExpenses.filter { $0.expenseType == .variable }.count
+        let total = store.currentMonthVariableTotal
+        let dayOfMonth = Calendar.current.component(.day, from: Date())
+        let dailyAvg = total / Double(max(dayOfMonth, 1))
+
+        return HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text("本月變動支出")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Text(formatCurrency(store.currentMonthVariableTotal))
-                    .font(.title2.bold())
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.80))
+                Text(formatCurrency(total))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .contentTransition(.numericText())
+                if total > 0 {
+                    Text("日均 " + formatCurrency(dailyAvg))
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .padding(.top, 1)
+                }
             }
             Spacer()
-            Text("\(store.currentMonthExpenses.filter { $0.expenseType == .variable }.count) 筆")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("\(count) 筆")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 5)
+                    .background(.white.opacity(0.22))
+                    .clipShape(Capsule())
+                    .foregroundStyle(.white)
+            }
         }
-        .padding()
-        .background(Color(.systemBackground))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 1.00, green: 0.62, blue: 0.22),
+                    Color(red: 0.86, green: 0.36, blue: 0.06)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.86, green: 0.36, blue: 0.06).opacity(0.38), radius: 14, x: 0, y: 7)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
     }
 
     // MARK: - 分類篩選
@@ -146,20 +180,33 @@ struct VariableExpenseView: View {
 
     private var emptyStateView: some View {
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
-        return VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: isSearching ? "magnifyingglass" : "tray")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text(isSearching ? "找不到符合的支出" : "尚無變動支出紀錄")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增支出")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-            Spacer()
+        return VStack(spacing: 18) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(.systemFill), Color(.secondarySystemFill)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 84, height: 84)
+                Image(systemName: isSearching ? "magnifyingglass" : "bag")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            VStack(spacing: 7) {
+                Text(isSearching ? "找不到符合的支出" : "尚無變動支出紀錄")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增第一筆支出")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, 52)
     }
 
     // MARK: - 支出列表（List sections，包在外層的 List 內）
@@ -328,14 +375,21 @@ struct FilterChip: View {
                         .font(.caption)
                 }
                 Text(title)
-                    .font(.caption)
+                    .font(.caption.weight(isSelected ? .semibold : .regular))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(isSelected ? Color.green : Color(.systemGray5))
+            .padding(.horizontal, 13)
+            .padding(.vertical, 7)
+            .background(isSelected ? Color.green : Color(.secondarySystemFill))
             .foregroundStyle(isSelected ? .white : .primary)
             .clipShape(Capsule())
+            .shadow(
+                color: isSelected ? Color.green.opacity(0.30) : .clear,
+                radius: 6, x: 0, y: 3
+            )
         }
+        .buttonStyle(.plain)
+        .scaleEffect(isSelected ? 1.04 : 1.0)
+        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
     }
 }
 
