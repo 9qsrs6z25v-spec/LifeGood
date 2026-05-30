@@ -914,16 +914,16 @@ struct MainTabView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.top, 4)
+        .padding(.top, 6)
         .padding(.bottom, 6)
         .background(
             Color(.systemBackground)
-                .shadow(color: .black.opacity(0.12), radius: 10, y: -3)
+                .shadow(color: .black.opacity(0.08), radius: 20, y: -6)
                 .ignoresSafeArea(edges: .bottom)
         )
         .overlay(
             Rectangle()
-                .fill(Color(.separator).opacity(0.30))
+                .fill(Color(.separator).opacity(0.18))
                 .frame(height: 0.5),
             alignment: .top
         )
@@ -942,21 +942,24 @@ struct MainTabView: View {
     }
 
     private func tabItemLabel(icon: String, label: String, isActive: Bool) -> some View {
-        VStack(spacing: 3) {
-            // 選中時顯示綠色小圓點，未選時透明佔位（避免版面跳動）
-            Circle()
-                .fill(isActive ? Color.green : Color.clear)
-                .frame(width: 4, height: 4)
-            Image(systemName: icon)
-                .font(.system(size: 22, weight: .medium))
-                .scaleEffect(isActive ? 1.0 : 0.87)
-                .animation(.spring(response: 0.28, dampingFraction: 0.68), value: isActive)
+        VStack(spacing: 4) {
+            ZStack {
+                // 選中時的膠囊高亮背景，彈跳進場
+                Capsule()
+                    .fill(Color.green.opacity(isActive ? 0.14 : 0))
+                    .frame(width: 54, height: 30)
+                    .scaleEffect(isActive ? 1.0 : 0.6)
+                    .animation(.spring(response: 0.34, dampingFraction: 0.64), value: isActive)
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: isActive ? .semibold : .medium))
+                    .symbolEffect(.bounce, value: isActive)
+            }
             Text(label)
                 .font(.system(size: 10, weight: isActive ? .semibold : .regular))
         }
         .foregroundStyle(isActive ? Color.green : Color.secondary)
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
         .animation(.spring(response: 0.28, dampingFraction: 0.70), value: isActive)
     }
