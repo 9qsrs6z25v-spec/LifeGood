@@ -66,11 +66,29 @@ struct LifeOverviewView: View {
         }
     }
 
+    // MARK: - 里程碑分類色彩
+
+    private func milestoneColor(_ cat: MilestoneCategory) -> Color {
+        switch cat {
+        case .marriage:    return Color(red: 1.00, green: 0.40, blue: 0.60)
+        case .family:      return Color(red: 1.00, green: 0.60, blue: 0.20)
+        case .realEstate:  return Color(red: 0.42, green: 0.58, blue: 0.80)
+        case .career:      return Color(red: 0.25, green: 0.60, blue: 0.95)
+        case .education:   return Color(red: 0.45, green: 0.75, blue: 0.40)
+        case .achievement: return Color(red: 0.20, green: 0.78, blue: 0.55)
+        case .travel:      return Color(red: 0.55, green: 0.35, blue: 0.95)
+        case .pet:         return Color(red: 0.90, green: 0.50, blue: 0.20)
+        case .health:      return Color(red: 0.95, green: 0.28, blue: 0.32)
+        case .other:       return Color.secondary
+        }
+    }
+
     // MARK: - 統計卡
 
     private var statsCard: some View {
         HStack(spacing: 12) {
-            statBadge(title: "總里程碑", count: store.combinedMilestones(realEstates: financeStore.realEstates).count,
+            statBadge(title: "總里程碑",
+                      count: store.combinedMilestones(realEstates: financeStore.realEstates).count,
                       icon: "trophy.fill", color: .orange)
             statBadge(title: "本年新增", count: milestonesThisYear,
                       icon: "calendar.badge.plus", color: .green)
@@ -81,16 +99,33 @@ struct LifeOverviewView: View {
     }
 
     private func statBadge(title: String, count: Int, icon: String, color: Color) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon).font(.title3).foregroundStyle(color)
-            Text("\(count)").font(.title3.bold())
-            Text(title).font(.caption2).foregroundStyle(.secondary)
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.14))
+                    .frame(width: 48, height: 48)
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text("\(count)")
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
+        .padding(.vertical, 16)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(color.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: color.opacity(0.14), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
     }
 
     private var milestonesThisYear: Int {
@@ -108,36 +143,94 @@ struct LifeOverviewView: View {
 
     private var milestoneTimelineSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("最近里程碑").font(.headline).padding(.horizontal)
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.orange, .orange.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("最近里程碑")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            .padding(.horizontal)
 
             let sorted = store.combinedMilestones(realEstates: financeStore.realEstates).sorted { $0.date > $1.date }
             let recent = Array(sorted.prefix(5))
             if recent.isEmpty {
-                Text("暫無里程碑").font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity).padding(.vertical, 20)
+                emptyMilestonePlaceholder
             } else {
                 VStack(spacing: 0) {
-                    ForEach(recent) { m in
-                        HStack {
-                            Image(systemName: m.category.icon)
-                                .frame(width: 30).foregroundStyle(.orange)
+                    ForEach(Array(recent.enumerated()), id: \.element.id) { idx, m in
+                        let accent = milestoneColor(m.category)
+                        HStack(alignment: .center, spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(accent.opacity(0.14))
+                                    .frame(width: 40, height: 40)
+                                Image(systemName: m.category.icon)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(accent)
+                            }
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(m.title).font(.subheadline)
-                                Text(m.category.rawValue).font(.caption).foregroundStyle(.secondary)
+                                Text(m.title)
+                                    .font(.subheadline.weight(.medium))
+                                    .lineLimit(1)
+                                Text(m.category.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text(formatDate(m.date)).font(.caption).foregroundStyle(.secondary)
+                            Text(formatDate(m.date))
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color(.secondarySystemFill))
+                                .clipShape(Capsule())
+                                .foregroundStyle(.secondary)
                         }
-                        .padding(.horizontal).padding(.vertical, 10)
-                        if m.id != recent.last?.id { Divider().padding(.leading, 50) }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+
+                        if idx < recent.count - 1 {
+                            Divider().padding(.leading, 68)
+                        }
                     }
                 }
                 .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
             }
         }
+    }
+
+    private var emptyMilestonePlaceholder: some View {
+        VStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color(.systemFill))
+                    .frame(width: 64, height: 64)
+                Image(systemName: "trophy")
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            Text("暫無里程碑")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text("新增生命中的重要時刻")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+        .padding(.horizontal)
     }
 
     // MARK: - 分類統計
@@ -149,27 +242,78 @@ struct LifeOverviewView: View {
                 guard let count = grouped[cat]?.count, count > 0 else { return nil }
                 return (cat, count)
             }
+        let maxCount = entries.map(\.1).max() ?? 1
 
         return Group {
             if !entries.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("分類統計").font(.headline).padding(.horizontal)
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [.blue, .blue.opacity(0.55)],
+                                    startPoint: .top, endPoint: .bottom
+                                )
+                            )
+                            .frame(width: 4, height: 18)
+                        Text("分類統計")
+                            .font(.subheadline.weight(.bold))
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+
                     VStack(spacing: 0) {
                         ForEach(Array(entries.enumerated()), id: \.element.0) { index, entry in
-                            HStack {
-                                Image(systemName: entry.0.icon)
-                                    .frame(width: 30).foregroundStyle(.orange)
-                                Text(entry.0.displayName).font(.subheadline)
-                                Spacer()
-                                Text("\(entry.1) 筆").font(.caption).foregroundStyle(.secondary)
+                            let accent = milestoneColor(entry.0)
+                            let ratio = maxCount > 0 ? Double(entry.1) / Double(maxCount) : 0
+
+                            VStack(spacing: 8) {
+                                HStack(spacing: 12) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(accent.opacity(0.14))
+                                            .frame(width: 36, height: 36)
+                                        Image(systemName: entry.0.icon)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(accent)
+                                    }
+                                    Text(entry.0.displayName)
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Text("\(entry.1) 筆")
+                                        .font(.subheadline.bold())
+                                        .foregroundStyle(accent)
+                                }
+
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        Capsule()
+                                            .fill(Color(.systemFill))
+                                            .frame(height: 5)
+                                        Capsule()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [accent, accent.opacity(0.65)],
+                                                    startPoint: .leading, endPoint: .trailing
+                                                )
+                                            )
+                                            .frame(width: geo.size.width * ratio, height: 5)
+                                            .animation(.spring(response: 0.6, dampingFraction: 0.78), value: ratio)
+                                    }
+                                }
+                                .frame(height: 5)
                             }
-                            .padding(.horizontal).padding(.vertical, 10)
-                            if index < entries.count - 1 { Divider().padding(.leading, 50) }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+
+                            if index < entries.count - 1 {
+                                Divider().padding(.leading, 64)
+                            }
                         }
                     }
                     .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                     .padding(.horizontal)
                 }
             }
@@ -177,6 +321,8 @@ struct LifeOverviewView: View {
     }
 
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        let f = DateFormatter()
+        f.dateFormat = "yyyy/M/d"
+        return f.string(from: date)
     }
 }
