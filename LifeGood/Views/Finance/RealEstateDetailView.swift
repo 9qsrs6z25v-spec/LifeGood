@@ -1005,6 +1005,7 @@ struct RealEstateDetailView: View {
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
                 Spacer()
+                // 新增子項目
                 Button {
                     editingFloorItemTarget = FloorItemEditTarget(
                         floorId: floor.id, parentItemId: item.id, itemId: nil, currentName: ""
@@ -1016,17 +1017,29 @@ struct RealEstateDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.leading, 6)
+                // 編輯 / 刪除 menu
+                Menu {
+                    Button {
+                        editingFloorItemTarget = FloorItemEditTarget(
+                            floorId: floor.id, parentItemId: nil, itemId: item.id, currentName: item.name
+                        )
+                    } label: { Label("重新命名", systemImage: "pencil") }
+                    Button(role: .destructive) {
+                        deleteFloorItem(floorId: floor.id, itemId: item.id)
+                    } label: { Label("刪除", systemImage: "trash") }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 4)
             }
             .contentShape(Rectangle())
             .onTapGesture {
                 editingFloorItemTarget = FloorItemEditTarget(
                     floorId: floor.id, parentItemId: nil, itemId: item.id, currentName: item.name
                 )
-            }
-            .contextMenu {
-                Button(role: .destructive) {
-                    deleteFloorItem(floorId: floor.id, itemId: item.id)
-                } label: { Label("刪除", systemImage: "trash") }
             }
 
             ForEach(Array(item.children.enumerated()), id: \.element.id) { idx, child in
