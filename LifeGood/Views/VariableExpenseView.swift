@@ -247,42 +247,100 @@ struct VariableExpenseView: View {
 
     private func daySectionHeader(dateString: String, expenses: [Expense]) -> some View {
         let dayTotal = expenses.reduce(0.0) { $0 + $1.amount }
-        return HStack(spacing: 6) {
+        let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
+        return HStack(spacing: 8) {
+            // 小方形日期標記，與左側列表色系呼應
+            RoundedRectangle(cornerRadius: 3)
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.60)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3, height: 14)
+
             Text(dateString)
-            Spacer(minLength: 8)
-            HStack(spacing: 3) {
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.primary.opacity(0.75))
+
+            Spacer(minLength: 6)
+
+            // 當日合計膠囊：帶淡橘背景 + 細邊框
+            HStack(spacing: 4) {
                 Text(formatCurrency(dayTotal))
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Color(red: 0.90, green: 0.40, blue: 0.10).opacity(0.85))
-                Text("・\(expenses.count) 筆")
-                    .foregroundStyle(.tertiary)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(accent)
+                Text("· \(expenses.count) 筆")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(accent.opacity(0.10))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(accent.opacity(0.22), lineWidth: 0.6)
+            )
         }
+        .textCase(nil)
     }
 
     // MARK: - 空狀態
 
+    @State private var emptyIconPulse = false
+
     private var emptyStateView: some View {
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
-        return VStack(spacing: 18) {
+        let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
+        return VStack(spacing: 20) {
             ZStack {
+                // 外圍脈衝光環（僅非搜尋時顯示）
+                if !isSearching {
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.25), lineWidth: 1.5)
+                        .frame(width: 100, height: 100)
+                        .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
+                }
+                // 主圓圈（漸層底）
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color(.systemFill), Color(.secondarySystemFill)],
+                            colors: isSearching
+                                ? [Color(.systemFill), Color(.secondarySystemFill)]
+                                : [accent.opacity(0.14), accent.opacity(0.05)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 84, height: 84)
+                    .frame(width: 82, height: 82)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                isSearching ? Color.clear : accent.opacity(0.20),
+                                lineWidth: 1.2
+                            )
+                    )
                 Image(systemName: isSearching ? "magnifyingglass" : "bag")
-                    .font(.system(size: 36, weight: .light))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.75))
             }
-            VStack(spacing: 7) {
+            .onAppear {
+                if !isSearching {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        emptyIconPulse = true
+                    }
+                }
+            }
+
+            VStack(spacing: 8) {
                 Text(isSearching ? "找不到符合的支出" : "尚無變動支出紀錄")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary.opacity(0.65))
                 Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增第一筆支出")
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
@@ -336,17 +394,42 @@ struct VariableExpenseView: View {
         if hiddenCount > 0 {
             Section {
                 Button {
-                    withAnimation { visibleWeeks += 1 }
-                } label: {
-                    HStack {
-                        Spacer()
-                        Image(systemName: "chevron.down").font(.caption2)
-                        Text("展開更早一週（剩 \(hiddenCount) 筆）")
-                            .font(.caption.weight(.medium))
-                        Spacer()
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                        visibleWeeks += 1
                     }
-                    .foregroundStyle(.green)
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.green.opacity(0.12))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.green)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("展開更早一週")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text("還有 \(hiddenCount) 筆隱藏中")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("\(hiddenCount)")
+                            .font(.caption.weight(.bold))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Color.green.opacity(0.12))
+                            .foregroundStyle(.green)
+                            .clipShape(Capsule())
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.green)
+                    }
+                    .padding(.vertical, 2)
                 }
+                .buttonStyle(.plain)
             }
         }
     }
