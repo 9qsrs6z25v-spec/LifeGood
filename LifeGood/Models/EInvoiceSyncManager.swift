@@ -165,10 +165,9 @@ final class EInvoiceSyncManager: ObservableObject {
         let note = "電子發票 \(header.invNum)"
 
         if splitItems && !items.isEmpty {
-            // 拆成多筆，每個品項一筆
-            var ids: [UUID] = []
-            for item in items {
-                let exp = Expense(
+            // 拆成多筆，每個品項一筆（一次性 append 避免每筆各觸發 didSet → save → CloudKit push）
+            let newExpenses = items.map { item in
+                Expense(
                     title: item.description.isEmpty ? header.sellerName : item.description,
                     amount: item.amount,
                     date: header.invDate,
@@ -176,10 +175,9 @@ final class EInvoiceSyncManager: ObservableObject {
                     variableCategory: category,
                     note: "\(note)（\(header.sellerName)）"
                 )
-                store.expenses.append(exp)
-                ids.append(exp.id)
             }
-            return ids
+            store.expenses.append(contentsOf: newExpenses)
+            return newExpenses.map(\.id)
         } else {
             // 整張一筆
             let exp = Expense(
