@@ -965,10 +965,11 @@ struct RealEstateDetailView: View {
                 .padding(.horizontal, 12).padding(.bottom, 10)
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(floor.items.enumerated()), id: \.element.id) { idx, item in
-                        floorItemRow(floor: floor, item: item, depth: 0,
-                                     isLast: idx == floor.items.count - 1,
-                                     ancestorIsLast: [])
+                    // 先把樹狀物件攤平成一維列表，再用單一 ForEach 渲染。
+                    // 避免遞迴回傳 AnyView：遞迴型別抹除在物件新增/刪除時會讓
+                    // SwiftUI AttributeGraph 崩潰（按「儲存」即閃退的根因）。
+                    ForEach(flattenedFloorItems(floor.items)) { row in
+                        floorItemRow(floor: floor, row: row)
                     }
                 }
                 .padding(.horizontal, 12).padding(.bottom, 10)
@@ -981,77 +982,90 @@ struct RealEstateDetailView: View {
         .padding(.horizontal, 8)
     }
 
-    /// 單筆物件列：用「│  ├──」風格繪製樹狀分支；同時遞迴渲染子節點。
-    /// 因 Swift 不接受 `some View` 的遞迴回傳，故 wrap 成 AnyView。
-    private func floorItemRow(
-        floor: FloorInfo,
-        item: FloorItem,
-        depth: Int,
-        isLast: Bool,
-        ancestorIsLast: [Bool]
-    ) -> AnyView {
-        AnyView(VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 0) {
-                // 把祖先的「│  / 空白」前綴 + 本層的 ├── / └──  組成單一字串渲染，
-                // 避免 ForEach(0..<dynamic, id: \.self) 在動態 Range 上的未定義行為（會閃退）。
-                Text(treePrefix(depth: depth, isLast: isLast, ancestorIsLast: ancestorIsLast))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                Image(systemName: item.children.isEmpty ? "cube" : "cube.fill")
-                    .font(.caption2)
+    /// 攤平後的單筆物件列：預先算好樹狀前綴需要的 depth / isLast / 祖先資訊，
+    /// 讓畫面層用單一 ForEach 渲染，不必遞迴。
+    fileprivate struct FlatFloorItem: Identifiable {
+        let id: UUID
+        let item: FloorItem
+        let depth: Int
+        let isLast: Bool
+        let ancestorIsLast: [Bool]
+    }
+
+    /// 將樹狀物件以深度優先攤平成一維陣列；每列帶有畫前綴所需資訊。
+    /// 以此取代「遞迴回傳 AnyView」的渲染方式，避免資料變動時的 SwiftUI 崩潰。
+    private func flattenedFloorItems(_ items: [FloorItem],
+                                     depth: Int = 0,
+                                     ancestorIsLast: [Bool] = []) -> [FlatFloorItem] {
+        var result: [FlatFloorItem] = []
+        for (idx, item) in items.enumerated() {
+            let isLast = idx == items.count - 1
+            result.append(FlatFloorItem(id: item.id, item: item, depth: depth,
+                                        isLast: isLast, ancestorIsLast: ancestorIsLast))
+            if !item.children.isEmpty {
+                result.append(contentsOf: flattenedFloorItems(item.children,
+                                                              depth: depth + 1,
+                                                              ancestorIsLast: ancestorIsLast + [isLast]))
+            }
+        }
+        return result
+    }
+
+    /// 單筆物件列：用「│  ├──」風格繪製樹狀分支。前綴由 flatten 時算好的 row 提供，
+    /// 非遞迴、回傳具體型別，徹底避開遞迴 AnyView 在資料變動時造成的閃退。
+    @ViewBuilder
+    private func floorItemRow(floor: FloorInfo, row: FlatFloorItem) -> some View {
+        let item = row.item
+        HStack(spacing: 0) {
+            // 把祖先的「│  / 空白」前綴 + 本層的 ├── / └──  組成單一字串渲染，
+            // 避免 ForEach(0..<dynamic, id: \.self) 在動態 Range 上的未定義行為（會閃退）。
+            Text(treePrefix(depth: row.depth, isLast: row.isLast, ancestorIsLast: row.ancestorIsLast))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.tertiary)
+            Image(systemName: item.children.isEmpty ? "cube" : "cube.fill")
+                .font(.caption2)
+                .foregroundStyle(Self.cyanColor)
+                .padding(.trailing, 4)
+            Text(item.name.isEmpty ? "未命名" : item.name)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+            Spacer()
+            // 新增子項目
+            Button {
+                editingFloorItemTarget = FloorItemEditTarget(
+                    floorId: floor.id, parentItemId: item.id, itemId: nil, currentName: ""
+                )
+            } label: {
+                Image(systemName: "plus.circle")
+                    .font(.subheadline)
                     .foregroundStyle(Self.cyanColor)
-                    .padding(.trailing, 4)
-                Text(item.name.isEmpty ? "未命名" : item.name)
-                    .font(.caption.weight(.medium))
-                    .lineLimit(1)
-                Spacer()
-                // 新增子項目
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 6)
+            // 編輯 / 刪除 menu
+            Menu {
                 Button {
                     editingFloorItemTarget = FloorItemEditTarget(
-                        floorId: floor.id, parentItemId: item.id, itemId: nil, currentName: ""
+                        floorId: floor.id, parentItemId: nil, itemId: item.id, currentName: item.name
                     )
-                } label: {
-                    Image(systemName: "plus.circle")
-                        .font(.subheadline)
-                        .foregroundStyle(Self.cyanColor)
-                }
-                .buttonStyle(.plain)
-                .padding(.leading, 6)
-                // 編輯 / 刪除 menu
-                Menu {
-                    Button {
-                        editingFloorItemTarget = FloorItemEditTarget(
-                            floorId: floor.id, parentItemId: nil, itemId: item.id, currentName: item.name
-                        )
-                    } label: { Label("重新命名", systemImage: "pencil") }
-                    Button(role: .destructive) {
-                        deleteFloorItem(floorId: floor.id, itemId: item.id)
-                    } label: { Label("刪除", systemImage: "trash") }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .padding(.leading, 4)
+                } label: { Label("重新命名", systemImage: "pencil") }
+                Button(role: .destructive) {
+                    deleteFloorItem(floorId: floor.id, itemId: item.id)
+                } label: { Label("刪除", systemImage: "trash") }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                editingFloorItemTarget = FloorItemEditTarget(
-                    floorId: floor.id, parentItemId: nil, itemId: item.id, currentName: item.name
-                )
-            }
-
-            ForEach(Array(item.children.enumerated()), id: \.element.id) { idx, child in
-                floorItemRow(
-                    floor: floor,
-                    item: child,
-                    depth: depth + 1,
-                    isLast: idx == item.children.count - 1,
-                    ancestorIsLast: ancestorIsLast + [isLast]
-                )
-            }
-        })
+            .buttonStyle(.plain)
+            .padding(.leading, 4)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            editingFloorItemTarget = FloorItemEditTarget(
+                floorId: floor.id, parentItemId: nil, itemId: item.id, currentName: item.name
+            )
+        }
     }
 
     // MARK: - 樓層物件 CRUD
