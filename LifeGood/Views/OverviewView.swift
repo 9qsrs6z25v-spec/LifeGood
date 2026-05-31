@@ -61,6 +61,13 @@ struct OverviewView: View {
         return min(store.currentMonthTotal / displayedIncome, 1.0)
     }
 
+    // 支出進度條配色：正常→白、超前月進度→橘、危險→紅
+    private var spendingBarColor: Color {
+        if spendingRatio > 0.9 { return Color.red.opacity(0.85) }
+        if spendingRatio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90) }
+        return .white.opacity(0.85)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -220,30 +227,64 @@ struct OverviewView: View {
                     )
             }
 
-            // 支出進度條
+            // 雙軌進度條：月進度（上）+ 支出比例（下，附月進度指示針）
             if income > 0 {
-                VStack(spacing: 6) {
+                VStack(spacing: 5) {
+                    // ① 月進度軌（薄軌，半透明白）
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(.white.opacity(0.12))
+                                .frame(height: 3)
+                            Capsule()
+                                .fill(.white.opacity(0.44))
+                                .frame(width: geo.size.width * monthProgress, height: 3)
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
+                        }
+                    }
+                    .frame(height: 3)
+
+                    // ② 支出比例軌（厚軌 + 月進度指示針）
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule()
                                 .fill(.white.opacity(0.18))
                                 .frame(height: 6)
                             Capsule()
-                                .fill(spendingRatio > 0.9 ? Color.red.opacity(0.85) : .white.opacity(0.85))
+                                .fill(spendingBarColor)
                                 .frame(width: geo.size.width * spendingRatio, height: 6)
                                 .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingRatio)
+                            // 月進度指示針（細白豎棒，指示月份走到哪）
+                            Capsule()
+                                .fill(.white.opacity(0.92))
+                                .frame(width: 2, height: 6)
+                                .shadow(color: .black.opacity(0.25), radius: 1.5, x: 0, y: 0)
+                                .offset(x: max(0, geo.size.width * monthProgress - 1))
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
                         }
                     }
                     .frame(height: 6)
 
                     HStack {
-                        Text("支出 \(Int(spendingRatio * 100))%")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.6))
+                        HStack(spacing: 3) {
+                            if spendingRatio > monthProgress + 0.08 {
+                                Image(systemName: spendingRatio > 0.9
+                                      ? "flame.fill"
+                                      : "exclamationmark.triangle.fill")
+                                    .font(.system(size: 8))
+                            }
+                            Text("支出 \(Int(spendingRatio * 100))%")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(spendingRatio > monthProgress + 0.08
+                                         ? (spendingRatio > 0.9
+                                            ? Color(red: 1.0, green: 0.78, blue: 0.75)
+                                            : Color(red: 1.0, green: 0.90, blue: 0.55))
+                                         : .white.opacity(0.60))
                         Spacer()
                         Text("月進度 \(Int(monthProgress * 100))%")
                             .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.white.opacity(0.60))
                     }
                 }
                 .padding(.top, 12)
