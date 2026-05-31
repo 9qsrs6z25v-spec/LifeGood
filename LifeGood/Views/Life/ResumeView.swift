@@ -476,14 +476,22 @@ struct ResumeView: View {
         .padding(.vertical, 4)
     }
 
-    private func formatCurrency(_ v: Double) -> String {
+    private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        return f
+    }()
+
+    private static let expenseDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
+
+    private func formatCurrency(_ v: Double) -> String {
+        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     private func formatExpenseDate(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: d)
+        Self.expenseDateFormatter.string(from: d)
     }
 
     private func sectionHeader(_ cat: MilestoneCategory, count: Int) -> some View {
@@ -691,10 +699,12 @@ struct ResumeView: View {
         }
     }
 
+    private static let milestoneDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy/M/d"
-        return f.string(from: date)
+        Self.milestoneDateFormatter.string(from: date)
     }
 }
 
@@ -1441,7 +1451,7 @@ struct AddMilestoneView: View {
 
     private var latestCompanyName: String? {
         store.milestones
-            .filter { $0.category == .career && $0.companyName != nil && !$0.companyName!.isEmpty }
+            .filter { $0.category == .career && $0.companyName?.isEmpty == false }
             .sorted { $0.date > $1.date }
             .first?.companyName
     }
@@ -1480,8 +1490,12 @@ struct AddMilestoneView: View {
         v > 0 ? String(format: "%.0f 萬", v / 10000) : "—"
     }
 
+    private static let dateOnlyFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func formatDateOnly(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
+        Self.dateOnlyFormatter.string(from: d)
     }
 
     // MARK: - 載入編輯

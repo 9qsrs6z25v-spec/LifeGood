@@ -405,13 +405,14 @@ struct ChildRecord: Identifiable, Codable {
         // 橢圓漸層遮罩：中心清晰、四周漸層到模糊
         let cx = extent.midX, cy = extent.midY
         let rx = extent.width * 0.38, ry = extent.height * 0.38
-        let gradientMask = CIFilter(name: "CIRadialGradient", parameters: [
+        guard let gradientOutput = CIFilter(name: "CIRadialGradient", parameters: [
             "inputCenter": CIVector(x: cx, y: cy),
             "inputRadius0": min(rx, ry),
             "inputRadius1": max(extent.width, extent.height) * 0.55,
             "inputColor0": CIColor.white,
             "inputColor1": CIColor.black
-        ])!.outputImage!.cropped(to: extent)
+        ])?.outputImage else { return nil }
+        let gradientMask = gradientOutput.cropped(to: extent)
 
         // 混合：遮罩白色區域顯示清晰素描，黑色區域顯示模糊素描
         let blended = sketch.applyingFilter("CIBlendWithMask", parameters: [
