@@ -590,39 +590,109 @@ struct SettingsView: View {
     // MARK: - 資料統計
 
     private var dataStatsSection: some View {
-        Section("資料統計") {
-            HStack {
-                Label("記帳", systemImage: "yensign.circle")
-                Spacer()
-                Text("\(store.expenses.count + store.incomes.count) 筆")
-                    .foregroundStyle(.secondary)
+        Section {
+            // 三模式統計徽章：橫向卡片排列
+            HStack(spacing: 10) {
+                dataStatBadge(
+                    icon: "yensign.circle.fill",
+                    color: .green,
+                    count: store.expenses.count + store.incomes.count,
+                    label: "記帳"
+                )
+                dataStatBadge(
+                    icon: "chart.pie.fill",
+                    color: .blue,
+                    count: financeStore.insurances.count + financeStore.stocks.count +
+                           financeStore.vehicles.count + financeStore.realEstates.count,
+                    label: "理財"
+                )
+                dataStatBadge(
+                    icon: "star.circle.fill",
+                    color: .orange,
+                    count: lifeStore.milestones.count + lifeStore.familyMembers.count +
+                           financeStore.realEstates.count,
+                    label: "人生"
+                )
             }
+            .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 14))
+            .listRowBackground(Color(.systemGroupedBackground))
+            .listRowSeparator(.hidden)
 
-            HStack {
-                Label("理財", systemImage: "chart.pie")
-                Spacer()
-                Text("\(financeStore.insurances.count + financeStore.stocks.count + financeStore.vehicles.count + financeStore.realEstates.count) 筆")
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Label("人生", systemImage: "star.circle")
-                Spacer()
-                Text("\(lifeStore.milestones.count + lifeStore.familyMembers.count + financeStore.realEstates.count) 筆")
-                    .foregroundStyle(.secondary)
-            }
-
+            // 支出記錄時間區間（若有資料）
             if let earliest = store.expenses.map(\.date).min(),
                let latest = store.expenses.map(\.date).max() {
-                HStack {
-                    Label("支出區間", systemImage: "calendar")
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.green.opacity(0.12))
+                            .frame(width: 32, height: 32)
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.green)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("支出記錄區間")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("\(formatDate(earliest))  →  \(formatDate(latest))")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                    }
                     Spacer()
-                    Text("\(formatDate(earliest)) ~ \(formatDate(latest))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
+        } header: {
+            Text("資料統計")
         }
+    }
+
+    private func dataStatBadge(icon: String, color: Color, count: Int, label: String) -> some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.18), color.opacity(0.07)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                Circle()
+                    .stroke(color.opacity(0.22), lineWidth: 1)
+                    .frame(width: 44, height: 44)
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            HStack(alignment: .lastTextBaseline, spacing: 2) {
+                Text("\(count)")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .contentTransition(.numericText())
+                Text("筆")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                color.opacity(0.028)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(color.opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: color.opacity(0.12), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
     }
 
     // MARK: - 復原資料
