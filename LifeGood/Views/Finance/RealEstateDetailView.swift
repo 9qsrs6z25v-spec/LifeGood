@@ -1100,8 +1100,7 @@ struct RealEstateDetailView: View {
         } else {
             estate.floors[fIdx].items.append(newItem)
         }
-        store.update(estate)
-        dataRefreshID = UUID()
+        commitFloorEstate(estate)
     }
 
     private func renameFloorItem(floorId: UUID, itemId: UUID, newName: String) {
@@ -1110,16 +1109,26 @@ struct RealEstateDetailView: View {
               var estate = store.realEstates.first(where: { $0.id == estateId }),
               let fIdx = estate.floors.firstIndex(where: { $0.id == floorId }) else { return }
         estate.floors[fIdx].items = renameInTree(estate.floors[fIdx].items, targetId: itemId, newName: trimmed)
-        store.update(estate)
-        dataRefreshID = UUID()
+        commitFloorEstate(estate)
     }
 
     private func deleteFloorItem(floorId: UUID, itemId: UUID) {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let fIdx = estate.floors.firstIndex(where: { $0.id == floorId }) else { return }
         estate.floors[fIdx].items = removeFromTree(estate.floors[fIdx].items, targetId: itemId)
-        store.update(estate)
-        dataRefreshID = UUID()
+        commitFloorEstate(estate)
+    }
+
+    /// 將樓層物件變更寫回 store。刻意延後到下一個 runloop 才改動 @Published store：
+    /// 樓層物件的新增/重新命名是在 FloorItemEditor「儲存」按鈕裡同步觸發，緊接著 sheet
+    /// 會 dismiss；刪除則來自 Menu 按鈕。若在這個 view-update 交易裡同步改動 observed
+    /// state（此 NavigationStack 疊了多個 sheet），SwiftUI 會閃退。延後一個 runloop 即可
+    /// 讓存檔脫離 sheet 關閉 / 按鈕點擊的更新交易。
+    private func commitFloorEstate(_ estate: RealEstate) {
+        DispatchQueue.main.async {
+            store.update(estate)
+            dataRefreshID = UUID()
+        }
     }
 
     private func insertChild(into items: [FloorItem], parentId: UUID, child: FloorItem) -> [FloorItem] {
