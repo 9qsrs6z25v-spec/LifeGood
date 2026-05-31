@@ -81,6 +81,10 @@ struct ChartView: View {
             }
         }
         .pickerStyle(.segmented)
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
         .padding(.horizontal)
     }
 
@@ -167,15 +171,41 @@ struct ChartView: View {
 
     private var trendChart: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(periodTitle)
-                .font(.headline)
-                .padding(.horizontal)
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 20)
+                Text(periodTitle)
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            .padding(.horizontal)
 
             if chartData.isEmpty || chartData.allSatisfy({ $0.amount == 0 }) {
-                Text("尚無資料")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 200)
+                VStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(.systemFill))
+                            .frame(width: 64, height: 64)
+                        Image(systemName: "chart.bar.xaxis")
+                            .font(.system(size: 26, weight: .light))
+                            .foregroundStyle(.secondary)
+                    }
+                    VStack(spacing: 6) {
+                        Text("尚無資料")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Text("新增支出後將顯示圖表")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 200)
             } else {
                 Chart(chartData) { dataPoint in
                     BarMark(
@@ -268,8 +298,8 @@ struct ChartView: View {
         }
         .padding(.vertical)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
@@ -278,15 +308,41 @@ struct ChartView: View {
     private var variablePieChart: some View {
         let entries = store.variableBreakdown(for: selectedPeriod)
         return VStack(alignment: .leading, spacing: 12) {
-            Text(periodPieTitle(prefix: "變動支出"))
-                .font(.headline)
-                .padding(.horizontal)
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.orange, .orange.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 20)
+                Text(periodPieTitle(prefix: "變動支出"))
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            .padding(.horizontal)
 
             if entries.isEmpty {
-                Text("尚無資料")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 200)
+                VStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(.systemFill))
+                            .frame(width: 64, height: 64)
+                        Image(systemName: "chart.bar.xaxis")
+                            .font(.system(size: 26, weight: .light))
+                            .foregroundStyle(.secondary)
+                    }
+                    VStack(spacing: 6) {
+                        Text("尚無資料")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Text("新增支出後將顯示圖表")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 200)
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
                 pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(variable: $0.category), $0.amount) }, total: total)
@@ -295,8 +351,8 @@ struct ChartView: View {
         .padding(.vertical)
         .frame(maxWidth: .infinity)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
@@ -305,15 +361,41 @@ struct ChartView: View {
     private var fixedPieChart: some View {
         let entries = store.fixedBreakdown(for: selectedPeriod)
         return VStack(alignment: .leading, spacing: 12) {
-            Text(periodPieTitle(prefix: "固定支出"))
-                .font(.headline)
-                .padding(.horizontal)
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.blue, .blue.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 20)
+                Text(periodPieTitle(prefix: "固定支出"))
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            .padding(.horizontal)
 
             if entries.isEmpty {
-                Text("尚無資料")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 200)
+                VStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(.systemFill))
+                            .frame(width: 64, height: 64)
+                        Image(systemName: "chart.bar.xaxis")
+                            .font(.system(size: 26, weight: .light))
+                            .foregroundStyle(.secondary)
+                    }
+                    VStack(spacing: 6) {
+                        Text("尚無資料")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Text("新增支出後將顯示圖表")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 200)
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
                 pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(fixed: $0.category), $0.amount) }, total: total)
@@ -322,8 +404,8 @@ struct ChartView: View {
         .padding(.vertical)
         .frame(maxWidth: .infinity)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
@@ -345,29 +427,38 @@ struct ChartView: View {
             .padding(.horizontal)
 
             // 圖例
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 ForEach(entries.prefix(6).indices, id: \.self) { i in
                     let e = entries[i]
                     let pct = total > 0 ? e.amount / total * 100 : 0
-                    HStack(spacing: 8) {
-                        Image(systemName: e.icon)
-                            .font(.caption)
-                            .foregroundStyle(e.color)
-                            .frame(width: 18)
-                        Text(e.name).font(.caption)
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(e.color.opacity(0.14))
+                                .frame(width: 28, height: 28)
+                            Image(systemName: e.icon)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(e.color)
+                        }
+                        Text(e.name)
+                            .font(.caption.weight(.medium))
                         Spacer()
                         Text(formatCurrency(e.amount))
                             .font(.caption.bold())
                         Text(String(format: "%.1f%%", pct))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                            .frame(width: 50, alignment: .trailing)
+                            .frame(width: 44, alignment: .trailing)
                     }
                 }
                 if entries.count > 6 {
-                    Text("還有 \(entries.count - 6) 個分類...")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    HStack {
+                        Spacer()
+                        Text("還有 \(entries.count - 6) 個分類…")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                    }
                 }
             }
             .padding(.horizontal)
@@ -448,19 +539,34 @@ struct ChartView: View {
             .padding(.horizontal)
 
             if total == 0 {
-                VStack(spacing: 10) {
-                    Image(systemName: "chart.pie")
-                        .font(.system(size: 28, weight: .light))
-                        .foregroundStyle(.secondary)
-                    Text("尚無支出資料")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                VStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(.systemFill), Color(.secondarySystemFill)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 68, height: 68)
+                        Image(systemName: "chart.pie")
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(.secondary)
+                    }
+                    VStack(spacing: 6) {
+                        Text("尚無支出資料")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Text("新增收支後顯示本月比例")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
+                .padding(.vertical, 28)
                 .background(Color(.systemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
             } else {
                 VStack(spacing: 14) {
