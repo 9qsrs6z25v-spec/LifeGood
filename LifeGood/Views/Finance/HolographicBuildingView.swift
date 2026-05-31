@@ -88,9 +88,10 @@ struct HolographicBuildingView: View {
                     floor: f,
                     isSelected: selectedFloorId == f.id,
                     onTap: {
-                        withAnimation(.spring(duration: 0.25)) {
-                            selectedFloorId = (selectedFloorId == f.id) ? nil : f.id
-                        }
+                        // 不在這裡用 withAnimation：交由父層 Group 的
+                        // .animation(value: selectedFloorId) 作為單一動畫來源，
+                        // 避免兩個動畫同時驅動同一個 transition 而造成閃退。
+                        selectedFloorId = (selectedFloorId == f.id) ? nil : f.id
                     }
                 )
             }

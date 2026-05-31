@@ -919,13 +919,19 @@ struct RealEstateDetailView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
 
-            if let fid = selectedFloorId,
-               let floor = estate.floors.first(where: { $0.id == fid }) {
-                floorItemsTree(for: floor)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+            // 只把動畫 / transition 限縮在「樓層物件樹」這個 Group，
+            // 不要連同上方的 3D SceneKit 視圖(HolographicBuildingView)一起包進
+            // 隱式動畫交易。否則快速點兩下切換樓層時，SCNView(UIViewRepresentable)
+            // 會被反覆捲進重疊的動畫更新而閃退。
+            Group {
+                if let fid = selectedFloorId,
+                   let floor = estate.floors.first(where: { $0.id == fid }) {
+                    floorItemsTree(for: floor)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: selectedFloorId)
         }
-        .animation(.easeInOut(duration: 0.2), value: selectedFloorId)
     }
 
     // MARK: - 樓層物件樹
