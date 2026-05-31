@@ -9,6 +9,25 @@ enum ChartMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// 收集各圖表分頁的自然高度（key = 分頁、value = 高度），給輪播容器自適應高度用。
+private struct ChartPageHeightKey: PreferenceKey {
+    static var defaultValue: [ChartMode: CGFloat] = [:]
+    static func reduce(value: inout [ChartMode: CGFloat], nextValue: () -> [ChartMode: CGFloat]) {
+        value.merge(nextValue()) { max($0, $1) }
+    }
+}
+
+private extension View {
+    /// 量測此分頁的高度並回報到 ChartPageHeightKey。
+    func reportChartPageHeight(_ mode: ChartMode) -> some View {
+        background(
+            GeometryReader { geo in
+                Color.clear.preference(key: ChartPageHeightKey.self, value: [mode: geo.size.height])
+            }
+        )
+    }
+}
+
 struct ChartView: View {
     @EnvironmentObject var store: ExpenseStore
     @State private var selectedPeriod: TimePeriod = .daily
@@ -17,6 +36,8 @@ struct ChartView: View {
     @State private var isLoading = true
     @State private var chartMode: ChartMode = .trend
     @State private var loadTask: Task<Void, Never>?
+    /// 各圖表分頁量測到的自然高度，用來讓輪播容器自適應高度（避免固定高度裁切內容）
+    @State private var chartPageHeights: [ChartMode: CGFloat] = [:]
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -184,7 +205,13 @@ struct ChartView: View {
                 fixedPieChart.tag(ChartMode.fixedPie)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: 380)
+            // .page 樣式的 TabView 不會自動依內容高度伸縮，必須給定高度。
+            // 用隱形量測層算出每一頁的自然高度，再把容器高度綁到「目前這一頁」，
+            // 達成自適應高度、避免被固定框架裁切。
+            .frame(height: currentChartPageHeight)
+            .background(alignment: .top) { chartHeightMeasuringLayer }
+            .onPreferenceChange(ChartPageHeightKey.self) { chartPageHeights = $0 }
+            .animation(.easeInOut(duration: 0.25), value: currentChartPageHeight)
 
             // 自訂指示器：模式名稱 + 圓點 + 膠囊高亮
             HStack(spacing: 6) {
@@ -220,6 +247,24 @@ struct ChartView: View {
                 }
             }
         }
+    }
+
+    /// 目前選取分頁的高度；尚未量測到時先給一個合理預設值。
+    private var currentChartPageHeight: CGFloat {
+        chartPageHeights[chartMode] ?? 380
+    }
+
+    /// 隱形量測層：把三個分頁以「自然高度」排出來量測各自高度，回報給 ChartPageHeightKey。
+    /// 用 fixedSize(vertical:) 讓它忽略容器給的（被裁切的）高度、改用內容本身的高度。
+    private var chartHeightMeasuringLayer: some View {
+        VStack(spacing: 0) {
+            trendChart.reportChartPageHeight(.trend)
+            variablePieChart.reportChartPageHeight(.variablePie)
+            fixedPieChart.reportChartPageHeight(.fixedPie)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .hidden()
+        .allowsHitTesting(false)
     }
 
     // MARK: - 趨勢圖
