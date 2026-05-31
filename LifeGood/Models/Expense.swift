@@ -471,7 +471,8 @@ struct Expense: Identifiable, Codable {
 
 extension Expense {
     static var photosDirectory: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("ExpensePhotos", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir

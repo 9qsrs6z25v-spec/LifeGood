@@ -667,7 +667,8 @@ struct ElevatorMaintenance: Identifiable, Codable {
     }
 
     static var photosDirectory: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("ElevatorPhotos", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -730,7 +731,8 @@ struct UtilityPayment: Identifiable, Codable {
     }
 
     static var photosDirectory: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("UtilityPhotos", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -893,7 +895,8 @@ struct RenovationPhoto: Identifiable, Codable {
     }
 
     static var photosDirectory: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("RenovationPhotos", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -953,7 +956,8 @@ struct RealEstateDocument: Identifiable, Codable {
     }
 
     static var folderURL: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("RealEstateDocuments", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir

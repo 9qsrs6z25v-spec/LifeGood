@@ -197,12 +197,12 @@ final class CloudSyncManager: ObservableObject {
             guard let self = self else { return }
             self.updateAccountStatus(status)
             guard status == .available, self.isEnabled else { return }
-            CloudKitManager.shared.bootstrap { ok in
-                guard ok else { return }
-                CloudKitManager.shared.fetchChanges { _ in
+            CloudKitManager.shared.bootstrap { [weak self] ok in
+                guard ok, let self else { return }
+                CloudKitManager.shared.fetchChanges { [weak self] _ in
                     CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
                     CloudKitManager.shared.uploadAllLocalPhotos()
-                    self.markSynced()
+                    self?.markSynced()
                 }
             }
         }

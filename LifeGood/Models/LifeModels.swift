@@ -223,7 +223,8 @@ struct FamilyAlbumPhoto: Identifiable, Codable, Equatable {
     }
 
     static var photosDirectory: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("FamilyAlbumPhotos", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -351,7 +352,8 @@ struct ChildRecord: Identifiable, Codable {
     }
 
     static var photosDirectory: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("ChildRecordPhotos", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -1232,7 +1234,8 @@ struct BusinessCard: Identifiable, Codable {
     // MARK: - 名片頭像照片儲存
 
     static var photosDirectory: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("BusinessCardPhotos", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -1423,7 +1426,8 @@ struct OrgPerson: Identifiable, Codable {
     }
 
     static var photosDirectory: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("OrgPersonPhotos", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
