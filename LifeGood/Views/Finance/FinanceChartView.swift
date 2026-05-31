@@ -47,16 +47,25 @@ struct FinanceChartView: View {
                 .frame(height: 220)
                 .padding(.horizontal)
 
-                // 圖例
-                HStack(spacing: 20) {
+                // 圖例：項目 / 金額分兩行
+                HStack(alignment: .top, spacing: 18) {
                     ForEach(allocations) { a in
-                        HStack(spacing: 4) {
-                            Circle().fill(colorFor(a.type)).frame(width: 8, height: 8)
-                            Text(a.type.rawValue).font(.caption)
-                            Text(fmtShort(a.value)).font(.caption.bold())
+                        HStack(alignment: .top, spacing: 6) {
+                            Circle()
+                                .fill(colorFor(a.type))
+                                .frame(width: 8, height: 8)
+                                .padding(.top, 4)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(a.type.rawValue)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(fmtShort(a.value))
+                                    .font(.caption.bold())
+                            }
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
             }
         }
@@ -77,6 +86,21 @@ struct FinanceChartView: View {
                 Text("尚無股票資料").font(.subheadline).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).padding(.vertical, 20)
             } else {
+                // 加總損益置最上方
+                let totalPL = store.stocks.reduce(0.0) { $0 + $1.profitLoss }
+                HStack {
+                    Text("加總損益")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text((totalPL >= 0 ? "+" : "") + fmt(totalPL))
+                        .font(.title3.bold())
+                        .foregroundStyle(totalPL >= 0 ? .green : .red)
+                }
+                .padding(.horizontal)
+
+                // 橫軸可左右平滑滑動的長條圖（一次顯示約 5 檔，超過可滑動）
+                let visibleCount = min(store.stocks.count, 5)
                 Chart(store.stocks) { stock in
                     BarMark(
                         x: .value("股票", stock.name),
@@ -95,28 +119,35 @@ struct FinanceChartView: View {
                         }
                     }
                 }
-                .frame(height: 200)
+                .chartScrollableAxes(.horizontal)
+                .chartXVisibleDomain(length: visibleCount)
+                .frame(height: 220)
                 .padding(.horizontal)
 
-                // 明細
-                VStack(spacing: 0) {
+                // 明細（用 Grid 把股票名稱 / 代號齊頭對齊）
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 8) {
                     ForEach(store.stocks.sorted(by: { $0.profitLoss > $1.profitLoss })) { stock in
-                        HStack {
-                            Text(stock.name).font(.caption)
-                            if !stock.symbol.isEmpty {
-                                Text(stock.symbol).font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            let pl = stock.profitLoss
+                        let pl = stock.profitLoss
+                        GridRow {
+                            Text(stock.name)
+                                .font(.caption.weight(.medium))
+                                .gridColumnAlignment(.leading)
+                            Text(stock.symbol)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .gridColumnAlignment(.leading)
                             Text((pl >= 0 ? "+" : "") + fmt(pl))
                                 .font(.caption.bold())
                                 .foregroundStyle(pl >= 0 ? .green : .red)
+                                .gridColumnAlignment(.trailing)
                             Text(String(format: "(%@%.1f%%)", stock.returnRate >= 0 ? "+" : "", stock.returnRate))
-                                .font(.caption2).foregroundStyle(.secondary)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .gridColumnAlignment(.trailing)
                         }
-                        .padding(.horizontal).padding(.vertical, 6)
                     }
                 }
+                .padding(.horizontal)
             }
         }
         .padding(.vertical)

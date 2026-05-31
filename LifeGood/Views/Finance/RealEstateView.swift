@@ -1,9 +1,57 @@
 import SwiftUI
 
+enum RealEstateSortOption: String, CaseIterable, Identifiable {
+    case purchasePrice = "購入價格"
+    case currentValue = "目前估值"
+    case appreciationRate = "增值率"
+    case monthlyRental = "月租金"
+    case purchaseDate = "購入日期"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .purchasePrice: return "tag"
+        case .currentValue: return "chart.line.uptrend.xyaxis"
+        case .appreciationRate: return "arrow.up.right"
+        case .monthlyRental: return "dollarsign.circle"
+        case .purchaseDate: return "calendar"
+        }
+    }
+}
+
 struct RealEstateView: View {
     @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingItem: RealEstate?
+    @State private var viewingItem: RealEstate?
+    @State private var sortOption: RealEstateSortOption = .purchaseDate
+    @State private var sortAscending = false
+    @State private var showPremiumAlert = false
+
+    private var activeEstates: [RealEstate] {
+        sorted(store.realEstates.filter { !$0.isSold })
+    }
+
+    private var soldEstates: [RealEstate] {
+        sorted(store.realEstates.filter { $0.isSold })
+    }
+
+    private func sorted(_ list: [RealEstate]) -> [RealEstate] {
+        list.sorted { a, b in
+            let result: Bool
+            switch sortOption {
+            case .purchasePrice: result = a.purchasePrice > b.purchasePrice
+            case .currentValue: result = a.currentValue > b.currentValue
+            case .appreciationRate: result = a.appreciationRate > b.appreciationRate
+            case .monthlyRental: result = a.monthlyRental > b.monthlyRental
+            case .purchaseDate: result = a.purchaseDate > b.purchaseDate
+            }
+            return sortAscending ? !result : result
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -13,32 +61,124 @@ struct RealEstateView: View {
                 if store.realEstates.isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(store.realEstates) { item in
-                                estateCard(item)
-                                    .onTapGesture { editingItem = item }
+                    List {
+                        ForEach(activeEstates) { item in
+                            estateCard(item)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .onTapGesture { viewingItem = item }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        if subscription.isPremium { deleteEstate(item) }
+                                        else { showPremiumAlert = true }
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
+                        }
+
+                        if !soldEstates.isEmpty {
+                            Section {
+                                ForEach(soldEstates) { item in
+                                    estateCard(item)
+                                        .listRowBackground(Color.clear)
+                                        .listRowSeparator(.hidden)
+                                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                        .onTapGesture { viewingItem = item }
+                                        .swipeActions(edge: .trailing) {
+                                            Button(role: .destructive) { deleteEstate(item) } label: {
+                                                Label("刪除", systemImage: "trash")
+                                            }
+                                        }
+                                }
+                            } header: {
+                                Text("已售出").font(.caption.weight(.semibold))
                             }
                         }
-                        .padding(.horizontal)
-                        .padding(.top, 16)
-                        .padding(.bottom, 20)
                     }
+                    .listStyle(.plain)
+                    .background(Color(.systemGroupedBackground))
+                    .scrollContentBackground(.hidden)
                 }
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("房地產")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    HStack(spacing: 12) {
+                        Menu {
+                            ForEach(RealEstateSortOption.allCases) { option in
+                                Button {
+                                    if sortOption == option {
+                                        sortAscending.toggle()
+                                    } else {
+                                        sortOption = option
+                                        sortAscending = false
+                                    }
+                                } label: {
+                                    Label {
+                                        Text(option.rawValue)
+                                    } icon: {
+                                        if sortOption == option {
+                                            Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
+                                        } else {
+                                            Image(systemName: option.icon)
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.arrow.down.circle")
+                                .font(.title3).foregroundStyle(.green)
+                        }
+
+                        Button {
+                            if subscription.isPremium { showAdd = true }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
             }
             .sheet(isPresented: $showAdd) { AddRealEstateView() }
+            .sheet(item: $viewingItem) { item in RealEstateDetailView(estate: item) }
             .sheet(item: $editingItem) { item in AddRealEstateView(editing: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
+
+    private func deleteEstate(_ item: RealEstate) {
+        for m in item.mortgageItems {
+            if let linkedId = m.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
+        for p in item.paidItems {
+            if let linkedId = p.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
+        for ve in item.variableExpenses {
+            if let linkedId = ve.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
+        for ins in item.insuranceItems {
+            if let linkedId = ins.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
+        for asset in item.propertyAssets {
+            if let linkedId = asset.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        }
+        for up in item.utilityPayments {
+            if let linkedId = up.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+            if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+        }
+        for rp in item.renovationPhotos {
+            for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
+        }
+        if let linkedId = item.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+        if let saleExpId = item.saleLinkedExpenseId { expenseStore.expenses.removeAll { $0.id == saleExpId } }
+        if let saleIncId = item.saleLinkedIncomeId { expenseStore.incomes.removeAll { $0.id == saleIncId } }
+        store.deleteRealEstate(item)
+    }
+
+    // MARK: - 摘要
 
     private var summaryHeader: some View {
         VStack(spacing: 8) {
@@ -50,8 +190,16 @@ struct RealEstateView: View {
                         .font(.title2.bold())
                 }
                 Spacer()
-                Text("\(store.realEstates.count) 筆物件")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 4) {
+                    let active = store.realEstates.filter { !$0.isSold }.count
+                    let sold = store.realEstates.filter { $0.isSold }.count
+                    Text("\(active) 筆持有")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    if sold > 0 {
+                        Text("\(sold) 筆已售")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
             }
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -80,13 +228,15 @@ struct RealEstateView: View {
         }.frame(maxWidth: .infinity)
     }
 
+    // MARK: - 卡片
+
     private func estateCard(_ item: RealEstate) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.name).font(.subheadline.weight(.semibold))
-                    if !item.address.isEmpty {
-                        Text(item.address).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    if !item.fullAddress.isEmpty {
+                        Text(item.fullAddress).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 Spacer()
@@ -100,41 +250,132 @@ struct RealEstateView: View {
 
             Divider()
 
+            if !item.mortgageItems.isEmpty {
+                // 只顯示「正在繳費中」的貸款：已開始（startDate <= 今天）且尚未繳完（elapsedPeriods < totalPeriods）。
+                // 未來才開始的接續貸款，elapsedPeriods 會被 clamp 成 0，光看 elapsedPeriods < totalPeriods 會誤判為繳費中。
+                let today = Date()
+                let activeMortgages = item.mortgageItems.filter {
+                    $0.startDate <= today && $0.elapsedPeriods < $0.totalPeriods
+                }
+                if !activeMortgages.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(activeMortgages) { m in
+                            HStack {
+                                Text(m.title.isEmpty ? "房貸" : m.title)
+                                    .font(.caption2.weight(.medium))
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.blue.opacity(0.1))
+                                    .foregroundStyle(.blue)
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                                Text("\(m.elapsedPeriods)/\(m.totalPeriods)期")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                                Spacer()
+                                Text(fmt(m.amount) + "/月").font(.caption)
+                            }
+                        }
+                        HStack {
+                            Text("已繳貸款").font(.caption2).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(fmt(item.totalMortgagePaid)).font(.caption.bold()).foregroundStyle(.blue)
+                        }
+                    }
+                }
+            }
+
+            if !item.paidItems.isEmpty {
+                HStack {
+                    Text("房屋價金")
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.purple.opacity(0.1))
+                        .foregroundStyle(.purple)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    Text("\(item.paidItems.count) 筆")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    Spacer()
+                    Text(fmt(item.totalPaid)).font(.caption.bold()).foregroundStyle(.purple)
+                }
+            }
+
+            if !item.variableExpenses.isEmpty {
+                HStack {
+                    Text("變動支出")
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.1))
+                        .foregroundStyle(.orange)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    Text("\(item.variableExpenses.count) 筆")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    Spacer()
+                    Text(fmt(item.variableTotal)).font(.caption.bold()).foregroundStyle(.orange)
+                }
+            }
+
             HStack {
                 if item.monthlyRental > 0 {
                     Label("月租 " + fmt(item.monthlyRental), systemImage: "dollarsign.circle")
                 }
                 if item.monthlyMortgage > 0 {
-                    Label("房貸 " + fmt(item.monthlyMortgage), systemImage: "creditcard")
+                    Label("月貸 " + fmt(item.monthlyMortgage), systemImage: "creditcard")
                 }
                 Spacer()
-                if item.monthlyRental > 0 {
-                    Text(String(format: "報酬率 %.1f%%", item.rentalYield))
-                        .foregroundStyle(.blue)
+                if item.totalAllPaid > 0 {
+                    Text("已付 " + fmt(item.totalAllPaid)).foregroundStyle(.red)
                 }
             }
             .font(.caption).foregroundStyle(.secondary)
+
+            if item.monthlyRental > 0 {
+                HStack {
+                    Spacer()
+                    Text(String(format: "報酬率 %.1f%%", item.rentalYield))
+                        .font(.caption).foregroundStyle(.blue)
+                }
+            }
         }
         .padding(14)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray4), lineWidth: 0.5)
+                .stroke(
+                    AngularGradient(
+                        colors: CardRarity.realEstate(price: item.purchasePrice).borderGradient,
+                        center: .center
+                    ),
+                    lineWidth: CardRarity.realEstate(price: item.purchasePrice).borderWidth
+                )
         )
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-        .contextMenu {
-            Button(role: .destructive) {
-                store.deleteRealEstate(item)
-            } label: {
-                Label("刪除", systemImage: "trash")
+        .shadow(color: CardRarity.realEstate(price: item.purchasePrice).shadowColor, radius: 6, y: 2)
+        .overlay(alignment: .topLeading) {
+            if item.isSold {
+                SoldStamp(size: 16)
+                    .offset(x: -8, y: -8)
             }
         }
     }
 
+    /// 依數字大小自動帶單位：< 1 萬顯示「元」、1 萬 ~ 1 億顯示「萬元」、≥ 1 億顯示「億元」
     private func fmt(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        let abs = Swift.abs(v)
+        let sign = v < 0 ? "-" : ""
+        let nf = NumberFormatter()
+        nf.numberStyle = .decimal
+        if abs >= 100_000_000 {
+            nf.maximumFractionDigits = 2
+            nf.minimumFractionDigits = 0
+            let s = nf.string(from: NSNumber(value: abs / 100_000_000)) ?? "0"
+            return "\(sign)NT$ \(s) 億元"
+        }
+        if abs >= 10_000 {
+            nf.maximumFractionDigits = 1
+            nf.minimumFractionDigits = 0
+            let s = nf.string(from: NSNumber(value: abs / 10_000)) ?? "0"
+            return "\(sign)NT$ \(s) 萬元"
+        }
+        nf.maximumFractionDigits = 0
+        let s = nf.string(from: NSNumber(value: abs)) ?? "0"
+        return "\(sign)NT$ \(s) 元"
     }
 }

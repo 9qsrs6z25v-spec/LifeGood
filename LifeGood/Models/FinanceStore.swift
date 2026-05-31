@@ -1,10 +1,10 @@
 import Foundation
 
 class FinanceStore: ObservableObject {
-    @Published var insurances: [SavingsInsurance] = [] { didSet { if !isLoading { save() } } }
-    @Published var stocks: [Stock] = [] { didSet { if !isLoading { save() } } }
-    @Published var vehicles: [Vehicle] = [] { didSet { if !isLoading { save() } } }
-    @Published var realEstates: [RealEstate] = [] { didSet { if !isLoading { save() } } }
+    @Published var insurances: [SavingsInsurance] = [] { didSet { if !isLoading { saveInsurances() } } }
+    @Published var stocks: [Stock] = [] { didSet { if !isLoading { saveStocks() } } }
+    @Published var vehicles: [Vehicle] = [] { didSet { if !isLoading { saveVehicles() } } }
+    @Published var realEstates: [RealEstate] = [] { didSet { if !isLoading { saveRealEstates() } } }
 
     private let insKey = "lifegood_insurances"
     private let stockKey = "lifegood_stocks"
@@ -12,7 +12,20 @@ class FinanceStore: ObservableObject {
     private let reKey = "lifegood_realestates"
     private var isLoading = false
 
-    init() { load() }
+    init() {
+        load()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reloadFromCloud),
+            name: .cloudSyncDidPullChanges,
+            object: nil
+        )
+    }
+
+    @objc private func reloadFromCloud() {
+        load()
+        objectWillChange.send()
+    }
 
     // MARK: - 儲蓄險 CRUD
 
@@ -53,16 +66,16 @@ class FinanceStore: ObservableObject {
     // MARK: - 統計
 
     var totalInsuranceValue: Double { insurances.reduce(0) { $0 + $1.currentValue } }
-    var totalStockValue: Double { stocks.reduce(0) { $0 + $1.marketValue } }
+    var totalStockValue: Double { stocks.filter { !$0.isSold }.reduce(0) { $0 + $1.marketValue } }
     var totalVehicleValue: Double { vehicles.reduce(0) { $0 + $1.currentValue } }
-    var totalRealEstateValue: Double { realEstates.reduce(0) { $0 + $1.currentValue } }
+    var totalRealEstateValue: Double { realEstates.filter { !$0.isSold }.reduce(0) { $0 + $1.currentValue } }
     var totalAssets: Double { totalInsuranceValue + totalStockValue + totalVehicleValue + totalRealEstateValue }
 
     var totalStockCost: Double { stocks.reduce(0) { $0 + $1.totalCost } }
-    var totalStockProfitLoss: Double { totalStockValue - totalStockCost }
+    var totalStockProfitLoss: Double { stocks.reduce(0) { $0 + $1.profitLoss } }
 
-    var monthlyRentalIncome: Double { realEstates.reduce(0) { $0 + $1.monthlyRental } }
-    var monthlyMortgagePayment: Double { realEstates.reduce(0) { $0 + $1.monthlyMortgage } }
+    var monthlyRentalIncome: Double { realEstates.filter { !$0.isSold }.reduce(0) { $0 + $1.monthlyRental } }
+    var monthlyMortgagePayment: Double { realEstates.filter { !$0.isSold }.reduce(0) { $0 + $1.monthlyMortgage } }
     var monthlyCashFlow: Double { monthlyRentalIncome - monthlyMortgagePayment }
 
     // MARK: - 資產配置
@@ -88,12 +101,24 @@ class FinanceStore: ObservableObject {
 
     // MARK: - 持久化
 
-    private func save() {
-        let encoder = JSONEncoder()
-        if let d = try? encoder.encode(insurances) { UserDefaults.standard.set(d, forKey: insKey) }
-        if let d = try? encoder.encode(stocks) { UserDefaults.standard.set(d, forKey: stockKey) }
-        if let d = try? encoder.encode(vehicles) { UserDefaults.standard.set(d, forKey: vehicleKey) }
-        if let d = try? encoder.encode(realEstates) { UserDefaults.standard.set(d, forKey: reKey) }
+    private func saveInsurances() {
+        if let d = try? JSONEncoder().encode(insurances) { UserDefaults.standard.set(d, forKey: insKey) }
+        CloudSyncManager.shared.push(key: insKey)
+    }
+
+    private func saveStocks() {
+        if let d = try? JSONEncoder().encode(stocks) { UserDefaults.standard.set(d, forKey: stockKey) }
+        CloudSyncManager.shared.push(key: stockKey)
+    }
+
+    private func saveVehicles() {
+        if let d = try? JSONEncoder().encode(vehicles) { UserDefaults.standard.set(d, forKey: vehicleKey) }
+        CloudSyncManager.shared.push(key: vehicleKey)
+    }
+
+    private func saveRealEstates() {
+        if let d = try? JSONEncoder().encode(realEstates) { UserDefaults.standard.set(d, forKey: reKey) }
+        CloudSyncManager.shared.push(key: reKey)
     }
 
     private func load() {

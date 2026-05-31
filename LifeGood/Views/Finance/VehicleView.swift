@@ -1,9 +1,50 @@
 import SwiftUI
 
+enum VehicleSortOption: String, CaseIterable, Identifiable {
+    case purchasePrice = "購入價格"
+    case currentValue = "估值"
+    case depreciationRate = "折舊率"
+    case yearsOwned = "持有年數"
+    case monthlyExpense = "每月養車費"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .purchasePrice: return "tag"
+        case .currentValue: return "chart.line.uptrend.xyaxis"
+        case .depreciationRate: return "arrow.down.right"
+        case .yearsOwned: return "calendar"
+        case .monthlyExpense: return "creditcard"
+        }
+    }
+}
+
 struct VehicleView: View {
     @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingItem: Vehicle?
+    @State private var viewingItem: Vehicle?
+    @State private var sortOption: VehicleSortOption = .purchasePrice
+    @State private var sortAscending = false
+    @State private var depreciationEnabled = false
+    @State private var showPremiumAlert = false
+
+    private var sortedVehicles: [Vehicle] {
+        store.vehicles.sorted { a, b in
+            let result: Bool
+            switch sortOption {
+            case .purchasePrice: result = a.purchasePrice > b.purchasePrice
+            case .currentValue: result = a.currentValue > b.currentValue
+            case .depreciationRate: result = a.depreciationRate > b.depreciationRate
+            case .yearsOwned: result = a.yearsOwned > b.yearsOwned
+            case .monthlyExpense: result = a.monthlyExpense > b.monthlyExpense
+            }
+            return sortAscending ? !result : result
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -13,31 +54,118 @@ struct VehicleView: View {
                 if store.vehicles.isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(store.vehicles) { item in
-                                vehicleCard(item)
-                                    .onTapGesture { editingItem = item }
-                            }
+                    List {
+                        ForEach(sortedVehicles) { item in
+                            vehicleCard(item)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .onTapGesture { viewingItem = item }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        guard subscription.isPremium else {
+                                            showPremiumAlert = true
+                                            return
+                                        }
+                                        for fe in item.fixedExpenses {
+                                            if let linkedId = fe.linkedExpenseId {
+                                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                                            }
+                                        }
+                                        for ve in item.variableExpenses {
+                                            if let linkedId = ve.linkedExpenseId {
+                                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                                            }
+                                        }
+                                        store.deleteVehicle(item)
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
                         }
-                        .padding(.horizontal)
-                        .padding(.top, 16)
-                        .padding(.bottom, 20)
                     }
+                    .listStyle(.plain)
+                    .background(Color(.systemGroupedBackground))
+                    .scrollContentBackground(.hidden)
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("汽車")
+            .navigationTitle("汽車、機車")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    HStack(spacing: 12) {
+                        Menu {
+                            ForEach(VehicleSortOption.allCases) { option in
+                                Button {
+                                    if sortOption == option {
+                                        sortAscending.toggle()
+                                    } else {
+                                        sortOption = option
+                                        sortAscending = false
+                                    }
+                                } label: {
+                                    Label {
+                                        Text(option.rawValue)
+                                    } icon: {
+                                        if sortOption == option {
+                                            Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
+                                        } else {
+                                            Image(systemName: option.icon)
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.up.arrow.down")
+                                Text(sortOption.rawValue)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+
+                        Button {
+                            if subscription.isPremium { showAdd = true }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
             }
             .sheet(isPresented: $showAdd) { AddVehicleView() }
+            .sheet(item: $viewingItem) { item in VehicleDetailView(vehicle: item) }
             .sheet(item: $editingItem) { item in AddVehicleView(editing: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+            .toolbar {
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        depreciationEnabled.toggle()
+                        if depreciationEnabled { applyDepreciation() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: depreciationEnabled ? "arrow.down.right.circle.fill" : "arrow.down.right.circle")
+                                .foregroundStyle(depreciationEnabled ? .orange : .secondary)
+                            Text("折舊開關")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(depreciationEnabled ? .orange : .secondary)
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    /// 自動計算折舊後估值：每年折舊 15%（定率遞減法）
+    private func applyDepreciation() {
+        var updated = store.vehicles
+        for i in updated.indices {
+            let v = updated[i]
+            guard !v.isSold, v.purchasePrice > 0 else { continue }
+            let depreciated = v.purchasePrice * pow(1 - 0.15, v.yearsOwned)
+            updated[i].currentValue = max(0, (depreciated / 10000).rounded() * 10000)
+        }
+        store.vehicles = updated
     }
 
     private var summaryHeader: some View {
@@ -46,7 +174,7 @@ struct VehicleView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("車輛總估值")
                         .font(.subheadline).foregroundStyle(.secondary)
-                    Text(fmt(store.totalVehicleValue))
+                    Text("\(fmtWan(store.totalVehicleValue)) 萬")
                         .font(.title2.bold())
                 }
                 Spacer()
@@ -56,7 +184,7 @@ struct VehicleView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("總購入成本").font(.caption).foregroundStyle(.secondary)
-                    Text(fmt(store.vehicles.reduce(0) { $0 + $1.purchasePrice })).font(.caption.bold())
+                    Text("\(fmtWan(store.vehicles.reduce(0) { $0 + $1.purchasePrice })) 萬").font(.caption.bold())
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
@@ -74,7 +202,7 @@ struct VehicleView: View {
         VStack(spacing: 16) {
             Spacer()
             Image(systemName: "car").font(.system(size: 48)).foregroundStyle(.secondary)
-            Text("尚無汽車紀錄").font(.headline).foregroundStyle(.secondary)
+            Text("尚無車輛紀錄").font(.headline).foregroundStyle(.secondary)
             Text("點擊右上角 + 新增車輛").font(.subheadline).foregroundStyle(.tertiary)
             Spacer()
         }.frame(maxWidth: .infinity)
@@ -84,26 +212,47 @@ struct VehicleView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
+                    Text(item.name).font(.subheadline.weight(.semibold))
                     HStack(spacing: 6) {
-                        Text(item.name).font(.subheadline.weight(.semibold))
-                        if !item.brand.isEmpty {
-                            Text(item.brand)
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color(.systemGray5))
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                        }
+                        Text("估值 \(fmtWan(item.currentValue)) 萬")
+                            .font(.caption)
+                        Text(String(format: "折舊 %.1f%%", item.depreciationRate))
+                            .font(.caption).foregroundStyle(.red)
+                        Text(String(format: "持有 %.1f 年", item.yearsOwned))
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text(String(format: "持有 %.1f 年", item.yearsOwned))
-                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(fmt(item.currentValue)).font(.subheadline.bold())
-                    Text(String(format: "折舊 %.1f%%", item.depreciationRate))
-                        .font(.caption.bold())
-                        .foregroundStyle(.red)
+                VStack(alignment: .trailing, spacing: 4) {
+                    if !item.brand.isEmpty {
+                        Text(item.brand)
+                            .font(.caption2.weight(.medium))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color(.systemGray5))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    HStack(spacing: 4) {
+                        Image(systemName: item.powerType.icon)
+                        Text(item.powerType.rawValue).lineLimit(1)
+                    }
+                    .font(.caption2.weight(.medium))
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(
+                        item.powerType == .electric ? Color.green.opacity(0.12) :
+                        item.powerType == .hybrid ? Color.blue.opacity(0.12) :
+                        Color.orange.opacity(0.12)
+                    )
+                    .foregroundStyle(
+                        item.powerType == .electric ? .green :
+                        item.powerType == .hybrid ? .blue : .orange
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
+                .fixedSize(horizontal: true, vertical: false)
             }
 
             Divider()
@@ -151,7 +300,7 @@ struct VehicleView: View {
             }
 
             HStack {
-                Label("購入 " + fmt(item.purchasePrice), systemImage: "tag")
+                Label("購入 \(fmtWan(item.purchasePrice)) 萬", systemImage: "tag")
                 Spacer()
                 let totalVar = item.variableTotal
                 if item.monthlyExpense > 0 || totalVar > 0 {
@@ -168,14 +317,19 @@ struct VehicleView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray4), lineWidth: 0.5)
+                .stroke(
+                    AngularGradient(
+                        colors: CardRarity(price: item.purchasePrice).borderGradient,
+                        center: .center
+                    ),
+                    lineWidth: CardRarity(price: item.purchasePrice).borderWidth
+                )
         )
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-        .contextMenu {
-            Button(role: .destructive) {
-                store.deleteVehicle(item)
-            } label: {
-                Label("刪除", systemImage: "trash")
+        .shadow(color: CardRarity(price: item.purchasePrice).shadowColor, radius: 6, y: 2)
+        .overlay(alignment: .topLeading) {
+            if item.isSold {
+                SoldStamp(size: 16)
+                    .offset(x: -8, y: -8)
             }
         }
     }
@@ -184,5 +338,9 @@ struct VehicleView: View {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: v)) ?? "NT$0"
+    }
+
+    private func fmtWan(_ v: Double) -> String {
+        String(format: "%g", v / 10000)
     }
 }

@@ -17,6 +17,9 @@
 		A01B000001000008 /* AddExpenseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000008 /* AddExpenseView.swift */; };
 		A01B000001000009 /* ChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000009 /* ChartView.swift */; };
 		A01B00000100000D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000D /* SettingsView.swift */; };
+		A01B00000100001B /* Income.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001B /* Income.swift */; };
+		A01B00000100001C /* IncomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001C /* IncomeView.swift */; };
+		A01B00000100001D /* AddIncomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001D /* AddIncomeView.swift */; };
 		A01B00000100000E /* AppMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000E /* AppMode.swift */; };
 		A01B00000100000F /* FinanceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100000F /* FinanceModels.swift */; };
 		A01B000001000010 /* FinanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000010 /* FinanceStore.swift */; };
@@ -30,6 +33,53 @@
 		A01B000001000018 /* AddRealEstateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000018 /* AddRealEstateView.swift */; };
 		A01B000001000019 /* VehicleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000019 /* VehicleView.swift */; };
 		A01B00000100001A /* AddVehicleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001A /* AddVehicleView.swift */; };
+		A01B00000100001E /* VehicleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001E /* VehicleDetailView.swift */; };
+		A01B00000100001F /* RealEstateDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001F /* RealEstateDetailView.swift */; };
+		A01B000001000020 /* LifeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000020 /* LifeModels.swift */; };
+		A01B000001000021 /* LifeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000021 /* LifeStore.swift */; };
+		A01B000001000022 /* LifeOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000022 /* LifeOverviewView.swift */; };
+		A01B000001000023 /* ResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000023 /* ResumeView.swift */; };
+		A01B000001000027 /* UnifiedExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000027 /* UnifiedExport.swift */; };
+		A01B000001000030 /* BackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000030 /* BackupManager.swift */; };
+		A01B000001000028 /* FamilyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000028 /* FamilyView.swift */; };
+		A01B000001000029 /* LifeRealEstateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000029 /* LifeRealEstateView.swift */; };
+		A01B000001000031 /* CareerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000031 /* CareerView.swift */; };
+		A01B000001000032 /* SubordinateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000032 /* SubordinateView.swift */; };
+		A01B000001000099 /* SubordinateOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000099 /* SubordinateOverviewView.swift */; };
+		A01B00000100009A /* BusinessCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100009A /* BusinessCardView.swift */; };
+		A01B00000100009B /* TaxOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100009B /* TaxOverviewView.swift */; };
+		A01B000001000033 /* CloudSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000033 /* CloudSyncManager.swift */; };
+		A01B000001000100 /* CloudKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000100 /* CloudKitManager.swift */; };
+		A01B000001000101 /* RestaurantSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000101 /* RestaurantSearch.swift */; };
+		A01B000001000102 /* FoodMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000102 /* FoodMapView.swift */; };
+		A01B000001000103 /* MultiPhotoGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000103 /* MultiPhotoGallery.swift */; };
+		A01B000001000104 /* ResumeGiftSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000104 /* ResumeGiftSection.swift */; };
+		A01B000001000105 /* OrganizationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000105 /* OrganizationView.swift */; };
+		A01B000001000106 /* AppleCalendarBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000106 /* AppleCalendarBridge.swift */; };
+		A01B000001000108 /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000108 /* AIService.swift */; };
+		A01B000001000035 /* GradeTitleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000035 /* GradeTitleView.swift */; };
+		A01B000001000036 /* SpouseResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000036 /* SpouseResumeView.swift */; };
+		A01B000001000037 /* ChildrenResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000037 /* ChildrenResumeView.swift */; };
+		A01B000001000038 /* SubordinateDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000038 /* SubordinateDetailView.swift */; };
+		A01B000001000039 /* ChildDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000039 /* ChildDetailView.swift */; };
+		A01B00000100003A /* LifeFinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003A /* LifeFinanceView.swift */; };
+		A01B00000100003B /* SubscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003B /* SubscriptionManager.swift */; };
+		A01B00000100003C /* FeatureGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003C /* FeatureGate.swift */; };
+		A01B00000100003D /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003D /* PaywallView.swift */; };
+		A01B00000100003E /* EInvoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003E /* EInvoice.swift */; };
+		A01B00000100003F /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003F /* KeychainHelper.swift */; };
+		A01B000001000040 /* EInvoiceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000040 /* EInvoiceClient.swift */; };
+		A01B000001000041 /* InvoiceCategorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000041 /* InvoiceCategorizer.swift */; };
+		A01B000001000042 /* EInvoiceSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000042 /* EInvoiceSyncManager.swift */; };
+		A01B000001000043 /* EInvoiceSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000043 /* EInvoiceSetupView.swift */; };
+		A01B000001000044 /* MacaronDatePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000044 /* MacaronDatePicker.swift */; };
+		A01B000001000045 /* MyCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000045 /* MyCalendarView.swift */; };
+		A01B000001000046 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000046 /* NotificationManager.swift */; };
+		A01B000001000047 /* StockDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000047 /* StockDetailView.swift */; };
+		A01B000001000048 /* RenovationPhotoEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000048 /* RenovationPhotoEditor.swift */; };
+		A01B000001000049 /* HolographicBuildingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000049 /* HolographicBuildingView.swift */; };
+		A01B00000100004A /* FamilyOverviewMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100004A /* FamilyOverviewMap.swift */; };
+		A01B00000100004B /* FamilyMembersResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100004B /* FamilyMembersResumeView.swift */; };
 		A01B00000100000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000A /* Assets.xcassets */; };
 		A01B00000100000B /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A00000100000B /* Preview Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -45,6 +95,9 @@
 		A01A000001000008 /* AddExpenseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddExpenseView.swift; sourceTree = "<group>"; };
 		A01A000001000009 /* ChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartView.swift; sourceTree = "<group>"; };
 		A01A00000100000D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A01A00000100001B /* Income.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Income.swift; sourceTree = "<group>"; };
+		A01A00000100001C /* IncomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomeView.swift; sourceTree = "<group>"; };
+		A01A00000100001D /* AddIncomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddIncomeView.swift; sourceTree = "<group>"; };
 		A01A00000100000E /* AppMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMode.swift; sourceTree = "<group>"; };
 		A01A00000100000F /* FinanceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceModels.swift; sourceTree = "<group>"; };
 		A01A000001000010 /* FinanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceStore.swift; sourceTree = "<group>"; };
@@ -58,6 +111,54 @@
 		A01A000001000018 /* AddRealEstateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddRealEstateView.swift; sourceTree = "<group>"; };
 		A01A000001000019 /* VehicleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleView.swift; sourceTree = "<group>"; };
 		A01A00000100001A /* AddVehicleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddVehicleView.swift; sourceTree = "<group>"; };
+		A01A00000100001E /* VehicleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleDetailView.swift; sourceTree = "<group>"; };
+		A01A00000100001F /* RealEstateDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealEstateDetailView.swift; sourceTree = "<group>"; };
+		A01A000001000020 /* LifeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeModels.swift; sourceTree = "<group>"; };
+		A01A000001000021 /* LifeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeStore.swift; sourceTree = "<group>"; };
+		A01A000001000022 /* LifeOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeOverviewView.swift; sourceTree = "<group>"; };
+		A01A000001000023 /* ResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeView.swift; sourceTree = "<group>"; };
+		A01A000001000027 /* UnifiedExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedExport.swift; sourceTree = "<group>"; };
+		A01A000001000030 /* BackupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupManager.swift; sourceTree = "<group>"; };
+		A01A000001000028 /* FamilyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyView.swift; sourceTree = "<group>"; };
+		A01A000001000029 /* LifeRealEstateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeRealEstateView.swift; sourceTree = "<group>"; };
+		A01A000001000031 /* CareerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CareerView.swift; sourceTree = "<group>"; };
+		A01A000001000032 /* SubordinateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateView.swift; sourceTree = "<group>"; };
+		A01A000001000099 /* SubordinateOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateOverviewView.swift; sourceTree = "<group>"; };
+		A01A00000100009A /* BusinessCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusinessCardView.swift; sourceTree = "<group>"; };
+		A01A00000100009B /* TaxOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaxOverviewView.swift; sourceTree = "<group>"; };
+		A01A000001000033 /* CloudSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncManager.swift; sourceTree = "<group>"; };
+		A01A000001000100 /* CloudKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitManager.swift; sourceTree = "<group>"; };
+		A01A000001000101 /* RestaurantSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestaurantSearch.swift; sourceTree = "<group>"; };
+		A01A000001000102 /* FoodMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodMapView.swift; sourceTree = "<group>"; };
+		A01A000001000103 /* MultiPhotoGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiPhotoGallery.swift; sourceTree = "<group>"; };
+		A01A000001000104 /* ResumeGiftSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeGiftSection.swift; sourceTree = "<group>"; };
+		A01A000001000105 /* OrganizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationView.swift; sourceTree = "<group>"; };
+		A01A000001000106 /* AppleCalendarBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleCalendarBridge.swift; sourceTree = "<group>"; };
+		A01A000001000108 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
+		A01A000001000034 /* LifeGood.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGood.entitlements; sourceTree = "<group>"; };
+		A01A000001000035 /* GradeTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeTitleView.swift; sourceTree = "<group>"; };
+		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
+		A01A000001000037 /* ChildrenResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildrenResumeView.swift; sourceTree = "<group>"; };
+		A01A000001000038 /* SubordinateDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateDetailView.swift; sourceTree = "<group>"; };
+		A01A000001000039 /* ChildDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildDetailView.swift; sourceTree = "<group>"; };
+		A01A00000100003A /* LifeFinanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeFinanceView.swift; sourceTree = "<group>"; };
+		A01A00000100003B /* SubscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionManager.swift; sourceTree = "<group>"; };
+		A01A00000100003C /* FeatureGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureGate.swift; sourceTree = "<group>"; };
+		A01A00000100003D /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
+		A01A00000100003E /* EInvoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EInvoice.swift; sourceTree = "<group>"; };
+		A01A00000100003F /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		A01A000001000040 /* EInvoiceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EInvoiceClient.swift; sourceTree = "<group>"; };
+		A01A000001000041 /* InvoiceCategorizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvoiceCategorizer.swift; sourceTree = "<group>"; };
+		A01A000001000042 /* EInvoiceSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EInvoiceSyncManager.swift; sourceTree = "<group>"; };
+		A01A000001000043 /* EInvoiceSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EInvoiceSetupView.swift; sourceTree = "<group>"; };
+		A01A000001000044 /* MacaronDatePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacaronDatePicker.swift; sourceTree = "<group>"; };
+		A01A000001000045 /* MyCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyCalendarView.swift; sourceTree = "<group>"; };
+		A01A000001000046 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		A01A000001000047 /* StockDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockDetailView.swift; sourceTree = "<group>"; };
+		A01A000001000048 /* RenovationPhotoEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenovationPhotoEditor.swift; sourceTree = "<group>"; };
+		A01A000001000049 /* HolographicBuildingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HolographicBuildingView.swift; sourceTree = "<group>"; };
+		A01A00000100004A /* FamilyOverviewMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyOverviewMap.swift; sourceTree = "<group>"; };
+		A01A00000100004B /* FamilyMembersResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyMembersResumeView.swift; sourceTree = "<group>"; };
 		A01A00000100000A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A01A00000100000B /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		A01A00000100000C /* LifeGood.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeGood.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -86,6 +187,7 @@
 			isa = PBXGroup;
 			children = (
 				A01A000001000001 /* LifeGoodApp.swift */,
+				A01A000001000034 /* LifeGood.entitlements */,
 				A01D000001000003 /* Models */,
 				A01D000001000004 /* Views */,
 				A01A00000100000A /* Assets.xcassets */,
@@ -99,9 +201,27 @@
 			children = (
 				A01A000001000002 /* Expense.swift */,
 				A01A000001000003 /* ExpenseStore.swift */,
+				A01A00000100001B /* Income.swift */,
 				A01A00000100000E /* AppMode.swift */,
 				A01A00000100000F /* FinanceModels.swift */,
 				A01A000001000010 /* FinanceStore.swift */,
+				A01A000001000020 /* LifeModels.swift */,
+				A01A000001000021 /* LifeStore.swift */,
+				A01A000001000027 /* UnifiedExport.swift */,
+				A01A000001000030 /* BackupManager.swift */,
+				A01A000001000033 /* CloudSyncManager.swift */,
+				A01A000001000100 /* CloudKitManager.swift */,
+				A01A000001000101 /* RestaurantSearch.swift */,
+				A01A00000100003B /* SubscriptionManager.swift */,
+				A01A00000100003C /* FeatureGate.swift */,
+				A01A00000100003E /* EInvoice.swift */,
+				A01A00000100003F /* KeychainHelper.swift */,
+				A01A000001000040 /* EInvoiceClient.swift */,
+				A01A000001000041 /* InvoiceCategorizer.swift */,
+				A01A000001000042 /* EInvoiceSyncManager.swift */,
+				A01A000001000046 /* NotificationManager.swift */,
+				A01A000001000106 /* AppleCalendarBridge.swift */,
+				A01A000001000108 /* AIService.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -115,8 +235,14 @@
 				A01A000001000007 /* FixedExpenseView.swift */,
 				A01A000001000008 /* AddExpenseView.swift */,
 				A01A000001000009 /* ChartView.swift */,
+				A01A00000100001C /* IncomeView.swift */,
+				A01A00000100001D /* AddIncomeView.swift */,
 				A01A00000100000D /* SettingsView.swift */,
+				A01A00000100003D /* PaywallView.swift */,
+				A01A000001000043 /* EInvoiceSetupView.swift */,
+				A01A000001000103 /* MultiPhotoGallery.swift */,
 				A01D000001000007 /* Finance */,
+			A01D000001000008 /* Life */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -131,11 +257,45 @@
 				A01A000001000015 /* FinanceChartView.swift */,
 				A01A000001000016 /* AddSavingsInsuranceView.swift */,
 				A01A000001000017 /* AddStockView.swift */,
+				A01A000001000047 /* StockDetailView.swift */,
 				A01A000001000019 /* VehicleView.swift */,
 				A01A00000100001A /* AddVehicleView.swift */,
+				A01A00000100001E /* VehicleDetailView.swift */,
 				A01A000001000018 /* AddRealEstateView.swift */,
+				A01A00000100001F /* RealEstateDetailView.swift */,
+				A01A000001000048 /* RenovationPhotoEditor.swift */,
+				A01A000001000049 /* HolographicBuildingView.swift */,
 			);
 			path = Finance;
+			sourceTree = "<group>";
+		};
+		A01D000001000008 /* Life */ = {
+			isa = PBXGroup;
+			children = (
+				A01A000001000022 /* LifeOverviewView.swift */,
+				A01A000001000023 /* ResumeView.swift */,
+				A01A000001000028 /* FamilyView.swift */,
+				A01A000001000029 /* LifeRealEstateView.swift */,
+				A01A000001000031 /* CareerView.swift */,
+				A01A000001000032 /* SubordinateView.swift */,
+				A01A000001000099 /* SubordinateOverviewView.swift */,
+				A01A00000100009A /* BusinessCardView.swift */,
+				A01A00000100009B /* TaxOverviewView.swift */,
+				A01A000001000035 /* GradeTitleView.swift */,
+				A01A000001000036 /* SpouseResumeView.swift */,
+				A01A000001000037 /* ChildrenResumeView.swift */,
+				A01A000001000038 /* SubordinateDetailView.swift */,
+				A01A000001000039 /* ChildDetailView.swift */,
+				A01A00000100003A /* LifeFinanceView.swift */,
+				A01A000001000044 /* MacaronDatePicker.swift */,
+				A01A000001000045 /* MyCalendarView.swift */,
+				A01A00000100004A /* FamilyOverviewMap.swift */,
+				A01A00000100004B /* FamilyMembersResumeView.swift */,
+				A01A000001000102 /* FoodMapView.swift */,
+				A01A000001000104 /* ResumeGiftSection.swift */,
+				A01A000001000105 /* OrganizationView.swift */,
+			);
+			path = Life;
 			sourceTree = "<group>";
 		};
 		A01D000001000005 /* Products */ = {
@@ -248,6 +408,56 @@
 				A01B000001000018 /* AddRealEstateView.swift in Sources */,
 				A01B000001000019 /* VehicleView.swift in Sources */,
 				A01B00000100001A /* AddVehicleView.swift in Sources */,
+				A01B00000100001E /* VehicleDetailView.swift in Sources */,
+				A01B00000100001F /* RealEstateDetailView.swift in Sources */,
+				A01B00000100001B /* Income.swift in Sources */,
+				A01B00000100001C /* IncomeView.swift in Sources */,
+				A01B00000100001D /* AddIncomeView.swift in Sources */,
+				A01B000001000020 /* LifeModels.swift in Sources */,
+				A01B000001000021 /* LifeStore.swift in Sources */,
+				A01B000001000022 /* LifeOverviewView.swift in Sources */,
+				A01B000001000023 /* ResumeView.swift in Sources */,
+				A01B000001000028 /* FamilyView.swift in Sources */,
+				A01B000001000029 /* LifeRealEstateView.swift in Sources */,
+				A01B000001000031 /* CareerView.swift in Sources */,
+				A01B000001000032 /* SubordinateView.swift in Sources */,
+				A01B000001000099 /* SubordinateOverviewView.swift in Sources */,
+				A01B00000100009A /* BusinessCardView.swift in Sources */,
+				A01B00000100009B /* TaxOverviewView.swift in Sources */,
+				A01B000001000027 /* UnifiedExport.swift in Sources */,
+				A01B000001000030 /* BackupManager.swift in Sources */,
+				A01B000001000033 /* CloudSyncManager.swift in Sources */,
+				A01B000001000100 /* CloudKitManager.swift in Sources */,
+				A01B000001000101 /* RestaurantSearch.swift in Sources */,
+				A01B000001000102 /* FoodMapView.swift in Sources */,
+				A01B000001000103 /* MultiPhotoGallery.swift in Sources */,
+				A01B000001000104 /* ResumeGiftSection.swift in Sources */,
+				A01B000001000105 /* OrganizationView.swift in Sources */,
+				A01B000001000106 /* AppleCalendarBridge.swift in Sources */,
+				A01B000001000108 /* AIService.swift in Sources */,
+				A01B000001000035 /* GradeTitleView.swift in Sources */,
+				A01B000001000036 /* SpouseResumeView.swift in Sources */,
+				A01B000001000037 /* ChildrenResumeView.swift in Sources */,
+				A01B000001000038 /* SubordinateDetailView.swift in Sources */,
+				A01B000001000039 /* ChildDetailView.swift in Sources */,
+				A01B00000100003A /* LifeFinanceView.swift in Sources */,
+				A01B00000100003B /* SubscriptionManager.swift in Sources */,
+				A01B00000100003C /* FeatureGate.swift in Sources */,
+				A01B00000100003D /* PaywallView.swift in Sources */,
+				A01B00000100003E /* EInvoice.swift in Sources */,
+				A01B00000100003F /* KeychainHelper.swift in Sources */,
+				A01B000001000040 /* EInvoiceClient.swift in Sources */,
+				A01B000001000041 /* InvoiceCategorizer.swift in Sources */,
+				A01B000001000042 /* EInvoiceSyncManager.swift in Sources */,
+				A01B000001000043 /* EInvoiceSetupView.swift in Sources */,
+				A01B000001000044 /* MacaronDatePicker.swift in Sources */,
+				A01B000001000045 /* MyCalendarView.swift in Sources */,
+				A01B000001000046 /* NotificationManager.swift in Sources */,
+				A01B000001000047 /* StockDetailView.swift in Sources */,
+				A01B000001000048 /* RenovationPhotoEditor.swift in Sources */,
+				A01B000001000049 /* HolographicBuildingView.swift in Sources */,
+				A01B00000100004A /* FamilyOverviewMap.swift in Sources */,
+				A01B00000100004B /* FamilyMembersResumeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -259,22 +469,33 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 317;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
+				INFOPLIST_KEY_NSCameraUsageDescription = "LifeGood 需要使用相機來拍攝裝潢照片或收據。";
+				INFOPLIST_KEY_NSContactsUsageDescription = "LifeGood 需要存取聯絡人，以匯入聯絡人為名片或把名片加入聯絡人。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 需要使用您的位置來推薦附近的餐廳，並在美食地圖上標示您去過的店家。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LifeGood 需要麥克風來錄製語音記帳輸入。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LifeGood 用語音辨識把你說的內容轉成文字，再交給 AI 解析成支出項目。";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "LifeGood 需要存取相簿讀取裝潢照片或收據。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.7;
+				MARKETING_VERSION = 16.77;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -288,22 +509,33 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 317;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
+				INFOPLIST_KEY_NSCameraUsageDescription = "LifeGood 需要使用相機來拍攝裝潢照片或收據。";
+				INFOPLIST_KEY_NSContactsUsageDescription = "LifeGood 需要存取聯絡人，以匯入聯絡人為名片或把名片加入聯絡人。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 需要使用您的位置來推薦附近的餐廳，並在美食地圖上標示您去過的店家。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LifeGood 需要麥克風來錄製語音記帳輸入。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LifeGood 用語音辨識把你說的內容轉成文字，再交給 AI 解析成支出項目。";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "LifeGood 需要存取相簿讀取裝潢照片或收據。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.7;
+				MARKETING_VERSION = 16.77;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

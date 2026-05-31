@@ -2,8 +2,11 @@ import SwiftUI
 
 struct SavingsInsuranceView: View {
     @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingItem: SavingsInsurance?
+    @State private var showPremiumAlert = false
 
     var body: some View {
         NavigationStack {
@@ -13,44 +16,110 @@ struct SavingsInsuranceView: View {
                 if store.insurances.isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(store.insurances) { item in
-                                insuranceCard(item)
-                                    .onTapGesture { editingItem = item }
-                            }
+                    List {
+                        ForEach(store.insurances) { item in
+                            insuranceCard(item)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .onTapGesture {
+                                    if subscription.isPremium { editingItem = item }
+                                    else { showPremiumAlert = true }
+                                }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        if subscription.isPremium {
+                                            if let linkedId = item.linkedExpenseId {
+                                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                                            }
+                                            store.deleteInsurance(item)
+                                        } else {
+                                            showPremiumAlert = true
+                                        }
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
                         }
-                        .padding(.horizontal)
-                        .padding(.top, 16)
-                        .padding(.bottom, 20)
                     }
+                    .listStyle(.plain)
+                    .background(Color(.systemGroupedBackground))
+                    .scrollContentBackground(.hidden)
                 }
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("儲蓄險")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
+                    Button {
+                        if subscription.isPremium { showAdd = true }
+                        else { showPremiumAlert = true }
+                    } label: {
                         Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                     }
                 }
             }
             .sheet(isPresented: $showAdd) { AddSavingsInsuranceView() }
             .sheet(item: $editingItem) { item in AddSavingsInsuranceView(editing: item) }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 
     private var summaryHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("保單總價值")
+        VStack(spacing: 10) {
+            HStack {
+                Text("保單總覽")
                     .font(.subheadline).foregroundStyle(.secondary)
-                Text(fmtTWD(store.totalInsuranceValue))
-                    .font(.title2.bold())
+                Spacer()
+                Text("\(store.insurances.count) 張保單")
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
-            Spacer()
-            Text("\(store.insurances.count) 張保單")
-                .font(.subheadline).foregroundStyle(.secondary)
+
+            // 依幣別分組顯示
+            let grouped = Dictionary(grouping: store.insurances, by: { $0.currencyCode })
+            let codes = grouped.keys.sorted { a, b in
+                if a == "NT$" { return true }
+                if b == "NT$" { return false }
+                return a < b
+            }
+            ForEach(codes, id: \.self) { code in
+                if let items = grouped[code], !items.isEmpty {
+                    let totalCurrent = items.reduce(0) { $0 + $1.currentValue }
+                    let totalPaid = items.reduce(0) { $0 + $1.totalPaid }
+                    let gain = totalCurrent - totalPaid
+                    let gainRate = totalPaid > 0 ? gain / totalPaid * 100 : 0
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("目前價值 (\(code))")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(fmtSmart(totalCurrent, code: code))
+                                .font(.title3.bold())
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("已繳總額")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(fmtSmart(totalPaid, code: code))
+                                .font(.subheadline)
+                        }
+                    }
+
+                    HStack {
+                        let isPositive = gain >= 0
+                        Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
+                            .font(.caption).foregroundStyle(isPositive ? .green : .red)
+                        Text((isPositive ? "+" : "") + fmtSmart(gain, code: code))
+                            .font(.caption.bold()).foregroundStyle(isPositive ? .green : .red)
+                        Text(String(format: "(%@%.2f%%)", isPositive ? "+" : "", gainRate))
+                            .font(.caption2).foregroundStyle(isPositive ? .green : .red)
+                        Spacer()
+                    }
+                    .padding(8)
+                    .background((gain >= 0 ? Color.green : Color.red).opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+            }
         }
         .padding()
         .background(Color(.systemBackground))
@@ -67,16 +136,17 @@ struct SavingsInsuranceView: View {
     }
 
     private func insuranceCard(_ item: SavingsInsurance) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let isNT = item.currencyCode == "NT$"
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(item.name).font(.subheadline.weight(.semibold))
-                        Text(item.currency.rawValue)
+                        Text(item.currencyCode)
                             .font(.caption2.weight(.medium))
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(item.currency == .usd ? Color.blue.opacity(0.12) : Color.green.opacity(0.12))
-                            .foregroundStyle(item.currency == .usd ? .blue : .green)
+                            .background(isNT ? Color.green.opacity(0.12) : Color.blue.opacity(0.12))
+                            .foregroundStyle(isNT ? .green : .blue)
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     if !item.company.isEmpty {
@@ -85,7 +155,7 @@ struct SavingsInsuranceView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(fmt(item.currentValue, currency: item.currency))
+                    Text(fmtSmart(item.currentValue, code: item.currencyCode))
                         .font(.subheadline.bold())
                     Text("目前價值").font(.caption2).foregroundStyle(.tertiary)
                 }
@@ -94,14 +164,18 @@ struct SavingsInsuranceView: View {
             Divider()
 
             HStack {
-                Label(item.paymentPeriod.rawValue + " " + fmt(item.premiumAmount, currency: item.currency), systemImage: "calendar")
+                Label(item.paymentPeriod.rawValue + " " + fmtSmart(item.premiumAmount, code: item.currencyCode), systemImage: "calendar")
                 if item.annualRate > 0 {
                     Text(String(format: "%.2f%%", item.annualRate))
                         .foregroundStyle(.blue)
                 }
                 Spacer()
-                Text("期滿 " + fmt(item.expectedReturn, currency: item.currency))
-                    .foregroundStyle(.green)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(item.elapsedPeriods)/\(item.totalPeriods) 期")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    Text("期滿 " + fmtSmart(item.expectedReturn, code: item.currencyCode))
+                        .foregroundStyle(.green)
+                }
             }
             .font(.caption).foregroundStyle(.secondary)
         }
@@ -113,26 +187,24 @@ struct SavingsInsuranceView: View {
                 .stroke(Color(.systemGray4), lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-        .contextMenu {
-            Button(role: .destructive) {
-                store.deleteInsurance(item)
-            } label: {
-                Label("刪除", systemImage: "trash")
-            }
-        }
     }
 
-    private func fmt(_ v: Double, currency: Currency) -> String {
+    private func fmt(_ v: Double, code: String) -> String {
+        let isUSD = code == "US$" || code == "USD" || code.lowercased() == "美金"
         let f = NumberFormatter()
         f.numberStyle = .currency
-        f.currencySymbol = currency.symbol
-        f.maximumFractionDigits = currency == .usd ? 2 : 0
-        return f.string(from: NSNumber(value: v)) ?? "\(currency.symbol)0"
+        f.currencySymbol = code
+        f.maximumFractionDigits = isUSD ? 2 : 0
+        return f.string(from: NSNumber(value: v)) ?? "\(code)0"
     }
 
-    private func fmtTWD(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+    private func fmtSmart(_ v: Double, code: String) -> String {
+        let isUSD = code == "US$" || code == "USD" || code.lowercased() == "美金"
+        let absV = abs(v)
+        let sign = v < 0 ? "-" : ""
+        if !isUSD && absV >= 10_000 {
+            return "\(sign)\(code)\(String(format: "%.1f", absV / 10_000))萬"
+        }
+        return fmt(v, code: code)
     }
 }

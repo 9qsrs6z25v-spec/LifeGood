@@ -2,12 +2,48 @@ import SwiftUI
 
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @State private var showAddVariable = false
+    @State private var showAddFixed = false
+    @State private var showAddStock = false
+    @State private var showAddRealEstate = false
+    @State private var showPremiumAlert = false
+    @State private var appearedCards: Set<String> = []
+    @State private var allocationBarAppeared = false
+    @State private var allocationRowsAppeared = false
+
+    private func rateForCode(_ code: String) -> Double {
+        if code == "NT$" { return 1 }
+        return expenseStore.currencyRates.first(where: { $0.code == code })?.rate ?? 1
+    }
+
+    private var insuranceValueNTD: Double {
+        store.insurances.reduce(0) { $0 + $1.currentValue * rateForCode($1.currencyCode) }
+    }
+
+    private var insurancePaidNTD: Double {
+        store.insurances.reduce(0) { $0 + $1.totalPaid * rateForCode($1.currencyCode) }
+    }
+
+    private var insuranceProfitLoss: Double {
+        insuranceValueNTD - insurancePaidNTD
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     totalAssetsCard
+                        .padding(.horizontal)
+                        .opacity(appearedCards.contains("total") ? 1 : 0)
+                        .offset(y: appearedCards.contains("total") ? 0 : 20)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                _ = appearedCards.insert("total")
+                            }
+                        }
+
                     assetCards
                     allocationSection
                     cashFlowSection
@@ -16,137 +52,467 @@ struct FinanceOverviewView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("理財總覽")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    quickAddMenu
+                }
+            }
+            .sheet(isPresented: $showAddVariable) { AddExpenseView(expenseType: .variable) }
+            .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
+            .sheet(isPresented: $showAddStock) { AddStockView() }
+            .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
 
-    // MARK: - 總資產
+    private func gated(_ action: () -> Void) {
+        if subscription.isPremium { action() } else { showPremiumAlert = true }
+    }
+
+    private var quickAddMenu: some View {
+        Menu {
+            Button { showAddVariable = true } label: { Label("變動支出", systemImage: "arrow.up.arrow.down.circle.fill") }
+            Button { showAddFixed = true } label: { Label("固定支出", systemImage: "pin.circle.fill") }
+            Button { showAddStock = true } label: { Label("股票", systemImage: "chart.line.uptrend.xyaxis") }
+            Button {
+                gated { showAddRealEstate = true }
+            } label: { Label("房地產", systemImage: "building.2.fill") }
+        } label: {
+            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+        }
+    }
+
+    private var totalAssetsNTD: Double {
+        insuranceValueNTD + store.totalStockValue + store.totalVehicleValue + store.totalRealEstateValue
+    }
+
+    private var totalAssetCount: Int {
+        store.insurances.count + store.stocks.count + store.vehicles.count +
+        store.realEstates.filter { !$0.isSold }.count
+    }
+
+    // MARK: - 總資產卡片
 
     private var totalAssetsCard: some View {
-        VStack(spacing: 8) {
-            Text("總資產").font(.subheadline).foregroundStyle(.white.opacity(0.8))
-            Text(fmt(store.totalAssets))
-                .font(.system(size: 36, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+        HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("總資產")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.80))
+                Text(fmt(totalAssetsNTD))
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .contentTransition(.numericText())
+                Text("\(totalAssetCount) 項資產")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .padding(.top, 1)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 6) {
+                Image(systemName: "chart.pie.fill")
+                    .font(.system(size: 32, weight: .light))
+                    .foregroundStyle(.white.opacity(0.30))
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
+        .padding(20)
         .background(
-            LinearGradient(colors: [.green, .green.opacity(0.7)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.14, green: 0.64, blue: 0.60),
+                        Color(red: 0.07, green: 0.46, blue: 0.42)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 140, height: 140)
+                    .offset(x: 90, y: -55)
+                    .blur(radius: 14)
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 90, height: 90)
+                    .offset(x: -70, y: 55)
+                    .blur(radius: 10)
+            }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.07, green: 0.46, blue: 0.42).opacity(0.42), radius: 18, x: 0, y: 9)
     }
 
-    // MARK: - 三大類
+    // MARK: - 資產類別卡片
+
+    private var stockProfitLoss: Double { store.totalStockProfitLoss }
 
     private var assetCards: some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
-                assetCard(title: "儲蓄險", amount: store.totalInsuranceValue,
-                          icon: "shield.fill", color: .blue, count: store.insurances.count)
+                assetCard(title: "儲蓄險", amount: insuranceValueNTD,
+                          profitLoss: insuranceProfitLoss,
+                          icon: "shield.fill", color: .blue,
+                          count: store.insurances.count, key: "insurance")
                 assetCard(title: "股票", amount: store.totalStockValue,
-                          icon: "chart.line.uptrend.xyaxis", color: .orange, count: store.stocks.count)
+                          profitLoss: stockProfitLoss,
+                          icon: "chart.line.uptrend.xyaxis", color: .orange,
+                          count: store.stocks.count, key: "stock")
             }
             HStack(spacing: 12) {
                 assetCard(title: "汽車", amount: store.totalVehicleValue,
-                          icon: "car.fill", color: .teal, count: store.vehicles.count)
+                          profitLoss: nil,
+                          icon: "car.fill", color: .teal,
+                          count: store.vehicles.count, key: "vehicle")
                 assetCard(title: "房地產", amount: store.totalRealEstateValue,
-                          icon: "building.2.fill", color: .purple, count: store.realEstates.count)
+                          profitLoss: nil,
+                          icon: "building.2.fill", color: .purple,
+                          count: store.realEstates.filter { !$0.isSold }.count, key: "realEstate")
             }
         }
         .padding(.horizontal)
     }
 
-    private func assetCard(title: String, amount: Double, icon: String, color: Color, count: Int) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon).font(.title3).foregroundStyle(color)
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(fmtShort(amount)).font(.caption.bold()).lineLimit(1).minimumScaleFactor(0.6)
-            Text("\(count) 筆").font(.caption2).foregroundStyle(.tertiary)
+    private let assetCardDelays: [String: Double] = [
+        "insurance": 0.06, "stock": 0.12, "vehicle": 0.18, "realEstate": 0.24
+    ]
+
+    private func assetCard(title: String, amount: Double, profitLoss: Double?,
+                           icon: String, color: Color, count: Int, key: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.55)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                )
+                .frame(height: 4)
+                .padding(.bottom, 10)
+
+            HStack(spacing: 7) {
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(0.15))
+                        .frame(width: 30, height: 30)
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(color)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text("\(count) 筆")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(fmtShort(amount))
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+                .contentTransition(.numericText())
+
+            if let pl = profitLoss {
+                HStack(spacing: 3) {
+                    Image(systemName: pl >= 0 ? "arrow.up.right" : "arrow.down.right")
+                        .font(.system(size: 9, weight: .bold))
+                    Text((pl >= 0 ? "+" : "") + fmtShort(pl))
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .foregroundStyle(pl >= 0 ? .green : .red)
+                .padding(.top, 2)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                color.opacity(0.04)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(color.opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: color.opacity(0.13), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 1)
+        .opacity(appearedCards.contains(key) ? 1 : 0)
+        .offset(y: appearedCards.contains(key) ? 0 : 18)
+        .onAppear {
+            let delay = assetCardDelays[key] ?? 0
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.78).delay(delay)) {
+                _ = appearedCards.insert(key)
+            }
+        }
     }
 
-    // MARK: - 配置比例
+    // MARK: - 資產配置
+
+    private var ntdAllocations: [AssetAllocation] {
+        let total = totalAssetsNTD
+        guard total > 0 else { return [] }
+        var result: [AssetAllocation] = []
+        if insuranceValueNTD > 0 {
+            result.append(AssetAllocation(type: .savingsInsurance, value: insuranceValueNTD,
+                                          percentage: insuranceValueNTD / total * 100))
+        }
+        if store.totalStockValue > 0 {
+            result.append(AssetAllocation(type: .stock, value: store.totalStockValue,
+                                          percentage: store.totalStockValue / total * 100))
+        }
+        if store.totalVehicleValue > 0 {
+            result.append(AssetAllocation(type: .vehicle, value: store.totalVehicleValue,
+                                          percentage: store.totalVehicleValue / total * 100))
+        }
+        if store.totalRealEstateValue > 0 {
+            result.append(AssetAllocation(type: .realEstate, value: store.totalRealEstateValue,
+                                          percentage: store.totalRealEstateValue / total * 100))
+        }
+        return result.sorted { $0.value > $1.value }
+    }
 
     private var allocationSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("資產配置").font(.headline).padding(.horizontal)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.purple, .purple.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("資產配置")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            .padding(.horizontal)
 
-            let allocations = store.assetAllocations
+            let allocations = ntdAllocations
             if allocations.isEmpty {
-                Text("尚無資產資料").font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity).padding(.vertical, 20)
-            } else {
-                // 比例條
-                HStack(spacing: 0) {
-                    ForEach(allocations) { a in
-                        Rectangle()
-                            .fill(colorFor(a.type))
-                            .frame(width: max(4, CGFloat(a.percentage / 100) * (UIScreen.main.bounds.width - 64)))
-                    }
-                }
-                .frame(height: 12)
-                .clipShape(Capsule())
+                emptyPlaceholder(
+                    icon: "chart.pie",
+                    title: "尚無資產資料",
+                    subtitle: "新增資產後顯示配置比例"
+                )
                 .padding(.horizontal)
-
-                // 圖例
-                VStack(spacing: 8) {
-                    ForEach(allocations) { a in
-                        HStack {
-                            Circle().fill(colorFor(a.type)).frame(width: 10, height: 10)
-                            Text(a.type.rawValue).font(.subheadline)
-                            Spacer()
-                            Text(fmt(a.value)).font(.subheadline.bold())
-                            Text(String(format: "%.1f%%", a.percentage))
-                                .font(.caption).foregroundStyle(.secondary).frame(width: 50, alignment: .trailing)
+            } else {
+                // 橫向比例彩條（從左展開進場動畫）
+                GeometryReader { geo in
+                    HStack(spacing: 2) {
+                        ForEach(allocations) { a in
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(colorFor(a.type))
+                                .frame(
+                                    width: max(4, CGFloat(a.percentage / 100) *
+                                               (geo.size.width - CGFloat(max(0, allocations.count - 1)) * 2))
+                                )
                         }
                     }
                 }
+                .frame(height: 14)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .scaleEffect(x: allocationBarAppeared ? 1.0 : 0.04, y: 1, anchor: .leading)
+                .animation(.spring(response: 0.78, dampingFraction: 0.82), value: allocationBarAppeared)
+                .padding(.horizontal)
+
+                // 各類別明細列（含圖示 + 漸層進度條 + 錯落進場）
+                VStack(spacing: 0) {
+                    ForEach(Array(allocations.enumerated()), id: \.element.id) { idx, a in
+                        let color = colorFor(a.type)
+                        let ratio = a.percentage / 100.0
+
+                        VStack(spacing: 7) {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 7)
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [color.opacity(0.22), color.opacity(0.09)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 30, height: 30)
+                                    Image(systemName: iconFor(a.type))
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(color)
+                                }
+                                Text(a.type.rawValue)
+                                    .font(.subheadline)
+                                Spacer()
+                                Text(fmtShort(a.value))
+                                    .font(.subheadline.bold())
+                                    .contentTransition(.numericText())
+                                Text(String(format: "%.1f%%", a.percentage))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(color)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(color.opacity(0.12))
+                                    .clipShape(Capsule())
+                            }
+
+                            // 漸層進度條（帶延遲動畫）
+                            GeometryReader { barGeo in
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(Color(.systemFill))
+                                        .frame(height: 4)
+                                    Capsule()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [color, color.opacity(0.55)],
+                                                startPoint: .leading, endPoint: .trailing
+                                            )
+                                        )
+                                        .frame(
+                                            width: barGeo.size.width * (allocationBarAppeared ? ratio : 0),
+                                            height: 4
+                                        )
+                                        .animation(
+                                            .spring(response: 0.70, dampingFraction: 0.78)
+                                                .delay(0.10 + 0.08 * Double(idx)),
+                                            value: allocationBarAppeared
+                                        )
+                                }
+                            }
+                            .frame(height: 4)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 13)
+                        .opacity(allocationRowsAppeared ? 1 : 0)
+                        .offset(y: allocationRowsAppeared ? 0 : 14)
+                        .animation(
+                            .spring(response: 0.50, dampingFraction: 0.80)
+                                .delay(0.06 * Double(idx)),
+                            value: allocationRowsAppeared
+                        )
+
+                        if idx < allocations.count - 1 {
+                            Divider().padding(.leading, 58)
+                        }
+                    }
+                }
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
             }
         }
-        .padding(.vertical)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
-        .padding(.horizontal)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                allocationBarAppeared = true
+            }
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.18)) {
+                allocationRowsAppeared = true
+            }
+        }
     }
 
-    // MARK: - 現金流
+    // MARK: - 每月現金流
 
     private var cashFlowSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("每月現金流").font(.headline).padding(.horizontal)
-
-            HStack(spacing: 24) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("租金收入").font(.caption).foregroundStyle(.secondary)
-                    Text(fmt(store.monthlyRentalIncome)).font(.subheadline.bold()).foregroundStyle(.green)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("房貸支出").font(.caption).foregroundStyle(.secondary)
-                    Text(fmt(store.monthlyMortgagePayment)).font(.subheadline.bold()).foregroundStyle(.red)
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("每月現金流")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("淨現金流").font(.caption).foregroundStyle(.secondary)
-                    let flow = store.monthlyCashFlow
-                    Text(fmt(flow)).font(.subheadline.bold()).foregroundStyle(flow >= 0 ? .green : .red)
-                }
             }
             .padding(.horizontal)
+
+            let flow = store.monthlyCashFlow
+            HStack(spacing: 0) {
+                cashFlowItem(label: "租金收入",
+                             value: store.monthlyRentalIncome,
+                             icon: "house.fill",
+                             color: .green)
+                Divider().frame(height: 44)
+                cashFlowItem(label: "房貸支出",
+                             value: store.monthlyMortgagePayment,
+                             icon: "building.columns.fill",
+                             color: .red)
+                Divider().frame(height: 44)
+                cashFlowItem(label: "淨現金流",
+                             value: flow,
+                             icon: flow >= 0 ? "arrow.up.circle.fill" : "arrow.down.circle.fill",
+                             color: flow >= 0 ? .green : .red)
+            }
+            .padding(.vertical, 16)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+            .padding(.horizontal)
         }
-        .padding(.vertical)
+    }
+
+    private func cashFlowItem(label: String, value: Double,
+                              icon: String, color: Color) -> some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.12))
+                    .frame(width: 34, height: 34)
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(fmtShort(value))
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - 空狀態
+
+    private func emptyPlaceholder(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color(.systemFill))
+                    .frame(width: 64, height: 64)
+                Image(systemName: icon)
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
-        .padding(.horizontal)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
     }
 
     // MARK: - Helpers
@@ -157,6 +523,15 @@ struct FinanceOverviewView: View {
         case .stock: return .orange
         case .vehicle: return .teal
         case .realEstate: return .purple
+        }
+    }
+
+    private func iconFor(_ type: AssetType) -> String {
+        switch type {
+        case .savingsInsurance: return "shield.fill"
+        case .stock: return "chart.line.uptrend.xyaxis"
+        case .vehicle: return "car.fill"
+        case .realEstate: return "building.2.fill"
         }
     }
 

@@ -3,19 +3,39 @@ import SwiftUI
 
 class ExpenseStore: ObservableObject {
     @Published var expenses: [Expense] = [] {
-        didSet {
-            if !isLoading { save() }
-        }
+        didSet { if !isLoading { save() } }
     }
+    @Published var incomes: [Income] = [] {
+        didSet { if !isLoading { save() } }
+    }
+    @Published var currencyRates: [CurrencyRate] = [] {
+        didSet { if !isLoading { saveCurrencyRates() } }
+    }
+    /// 每次 save() 或 cloud reload 後都更新，供 ChartView 偵測內容異動（含支出金額/分類/日期編輯）
+    @Published private(set) var modifyID: UUID = UUID()
 
     private let saveKey = "lifegood_expenses"
+    private let incomeKey = "lifegood_incomes"
+    private let currencyRatesKey = "lifegood_currency_rates"
     private var isLoading = false
 
     init() {
         load()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reloadFromCloud),
+            name: .cloudSyncDidPullChanges,
+            object: nil
+        )
     }
 
-    // MARK: - CRUD
+    @objc private func reloadFromCloud() {
+        load()
+        modifyID = UUID()
+        objectWillChange.send()
+    }
+
+    // MARK: - 支出 CRUD
 
     func add(_ expense: Expense) {
         expenses.append(expense)
@@ -28,12 +48,107 @@ class ExpenseStore: ObservableObject {
     }
 
     func delete(_ expense: Expense) {
+        for name in expense.photoFileNames { Expense.deletePhoto(name) }
         expenses.removeAll { $0.id == expense.id }
     }
 
     func delete(at offsets: IndexSet, from list: [Expense]) {
-        let idsToDelete = offsets.map { list[$0].id }
+        let idsToDelete = Set(offsets.map { list[$0].id })
+        for exp in expenses where idsToDelete.contains(exp.id) {
+            for name in exp.photoFileNames { Expense.deletePhoto(name) }
+        }
         expenses.removeAll { idsToDelete.contains($0.id) }
+    }
+
+    // MARK: - 收入 CRUD
+
+    func add(_ income: Income) { incomes.append(income) }
+
+    func update(_ income: Income) {
+        if let i = incomes.firstIndex(where: { $0.id == income.id }) { incomes[i] = income }
+    }
+
+    func deleteIncome(_ income: Income) {
+        incomes.removeAll { $0.id == income.id }
+    }
+
+    func deleteIncome(at offsets: IndexSet, from list: [Income]) {
+        let ids = Set(offsets.map { list[$0].id })
+        incomes.removeAll { ids.contains($0.id) }
+    }
+
+    // MARK: - 收入統計
+
+    var currentMonthIncomes: [Income] {
+        let calendar = Calendar.current
+        let now = Date()
+        return incomes.filter {
+            calendar.isDate($0.date, equalTo: now, toGranularity: .month)
+        }
+    }
+
+    /// 本月收入合計（單次收入 + 週期收入的月等效金額）
+    var currentMonthIncomeTotal: Double {
+        let calendar = Calendar.current
+        let now = Date()
+
+        // 單次收入：只計本月實際紀錄的
+        let onceTotal = incomes
+            .filter { $0.period == .once && calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
+            .reduce(0) { $0 + $1.amount }
+
+        // 週期性收入：建立日期 <= 本月的，換算為月金額
+        let recurringTotal = incomes
+            .filter { $0.period != .once && calendar.startOfDay(for: $0.date) <= calendar.startOfDay(for: now) }
+            .reduce(0) { $0 + $1.monthlyAmount }
+
+        return onceTotal + recurringTotal
+    }
+
+    /// 本月收支餘額
+    var currentMonthBalance: Double {
+        currentMonthIncomeTotal - currentMonthTotal
+    }
+
+    /// 當月是否有實際收入紀錄
+    var hasCurrentMonthIncome: Bool { currentMonthIncomeTotal > 0 }
+
+    /// 過去月份收入中位數（用於當月無收入時預估）
+    var estimatedMonthlyIncome: Double {
+        let calendar = Calendar.current
+        let now = Date()
+
+        var monthlyTotals: [Double] = []
+        for i in 1...6 {
+            guard let monthDate = calendar.date(byAdding: .month, value: -i, to: now) else { continue }
+            let total = incomeTotal(for: monthDate)
+            if total > 0 { monthlyTotals.append(total) }
+        }
+
+        guard !monthlyTotals.isEmpty else { return 0 }
+        let sorted = monthlyTotals.sorted()
+        let count = sorted.count
+        if count % 2 == 0 {
+            return (sorted[count / 2 - 1] + sorted[count / 2]) / 2
+        }
+        return sorted[count / 2]
+    }
+
+    /// 計算指定月份的收入合計
+    private func incomeTotal(for date: Date) -> Double {
+        let calendar = Calendar.current
+        guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: date)),
+              let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else { return 0 }
+
+        let onceTotal = incomes
+            .filter { $0.period == .once && calendar.isDate($0.date, equalTo: date, toGranularity: .month) }
+            .reduce(0) { $0 + $1.amount }
+
+        let recurringTotal = incomes
+            .filter { $0.period != .once && $0.date < monthEnd }
+            .reduce(0) { $0 + $1.monthlyAmount }
+
+        return onceTotal + recurringTotal
     }
 
     // MARK: - 篩選
@@ -179,9 +294,58 @@ class ExpenseStore: ObservableObject {
         }
     }
 
+    /// 取得指定時間區間的起始日期（與 chartData 視窗一致）
+    func periodStart(for period: TimePeriod, now: Date = Date(), calendar: Calendar = .current) -> Date {
+        let today = calendar.startOfDay(for: now)
+        switch period {
+        case .daily:
+            return calendar.date(byAdding: .day, value: -29, to: today) ?? today
+        case .weekly:
+            return calendar.date(byAdding: .weekOfYear, value: -11, to: today) ?? today
+        case .monthly:
+            return calendar.date(byAdding: .month, value: -11, to: today) ?? today
+        case .quarterly:
+            return calendar.date(byAdding: .month, value: -7 * 3, to: today) ?? today
+        case .yearly:
+            return calendar.date(byAdding: .year, value: -4, to: today) ?? today
+        }
+    }
+
+    /// 變動支出依分類加總（時間範圍與趨勢圖一致）
+    func variableBreakdown(for period: TimePeriod) -> [(category: VariableCategory, amount: Double)] {
+        let calendar = Calendar.current
+        let now = Date()
+        let start = periodStart(for: period, now: now, calendar: calendar)
+        var dict: [VariableCategory: Double] = [:]
+        for e in expenses where e.expenseType == .variable && e.date >= start && e.date <= now {
+            guard let cat = e.variableCategory else { continue }
+            dict[cat, default: 0] += e.amount
+        }
+        return dict.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
+    }
+
+    /// 固定支出依分類加總（用 projectedAmount 投射至所選時間單位，所以比例不受區間影響）
+    func fixedBreakdown(for period: TimePeriod) -> [(category: FixedCategory, amount: Double)] {
+        let calendar = Calendar.current
+        let now = Date()
+        var dict: [FixedCategory: Double] = [:]
+        for e in expenses where e.expenseType == .fixed && e.recurrence != nil
+            && calendar.startOfDay(for: e.date) <= calendar.startOfDay(for: now) {
+            guard let cat = e.fixedCategory else { continue }
+            dict[cat, default: 0] += projectedAmount(for: e, in: period)
+        }
+        return dict.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
+    }
+
+    private static let chartDayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
+    private static let chartMonthFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M"; return f
+    }()
+
     private func dailyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M/d"
+        let formatter = Self.chartDayFormatter
 
         var results: [ChartDataPoint] = []
         for dayOffset in (0..<30).reversed() {
@@ -206,8 +370,7 @@ class ExpenseStore: ObservableObject {
     }
 
     private func weeklyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M/d"
+        let formatter = Self.chartDayFormatter
 
         var results: [ChartDataPoint] = []
         for weekOffset in (0..<12).reversed() {
@@ -231,8 +394,7 @@ class ExpenseStore: ObservableObject {
     }
 
     private func monthlyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy/M"
+        let formatter = Self.chartMonthFormatter
 
         var results: [ChartDataPoint] = []
         for monthOffset in (0..<12).reversed() {
@@ -305,6 +467,18 @@ class ExpenseStore: ObservableObject {
         if let data = try? JSONEncoder().encode(expenses) {
             UserDefaults.standard.set(data, forKey: saveKey)
         }
+        if let data = try? JSONEncoder().encode(incomes) {
+            UserDefaults.standard.set(data, forKey: incomeKey)
+        }
+        modifyID = UUID()
+        CloudSyncManager.shared.pushAll()
+    }
+
+    private func saveCurrencyRates() {
+        if let data = try? JSONEncoder().encode(currencyRates) {
+            UserDefaults.standard.set(data, forKey: currencyRatesKey)
+        }
+        CloudSyncManager.shared.push(key: currencyRatesKey)
     }
 
     private func load() {
@@ -312,6 +486,14 @@ class ExpenseStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: saveKey),
            let decoded = try? JSONDecoder().decode([Expense].self, from: data) {
             expenses = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: incomeKey),
+           let decoded = try? JSONDecoder().decode([Income].self, from: data) {
+            incomes = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: currencyRatesKey),
+           let decoded = try? JSONDecoder().decode([CurrencyRate].self, from: data) {
+            currencyRates = decoded
         }
         isLoading = false
     }
@@ -380,6 +562,12 @@ class ExpenseStore: ObservableObject {
     // MARK: - 清除
 
     func clearAll() {
+        // 清除支出附帶的照片
+        for exp in expenses {
+            for name in exp.photoFileNames { Expense.deletePhoto(name) }
+        }
         expenses.removeAll()
+        incomes.removeAll()
+        currencyRates.removeAll()
     }
 }
