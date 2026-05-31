@@ -184,20 +184,28 @@ struct FixedExpenseView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // 右上主散景圓
                 Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 120, height: 120)
-                    .offset(x: 80, y: -45)
-                    .blur(radius: 12)
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 130, height: 130)
+                    .offset(x: 85, y: -50)
+                    .blur(radius: 14)
+                // 左下次散景圓
                 Circle()
                     .fill(.white.opacity(0.07))
-                    .frame(width: 70, height: 70)
-                    .offset(x: -60, y: 40)
-                    .blur(radius: 8)
+                    .frame(width: 75, height: 75)
+                    .offset(x: -65, y: 45)
+                    .blur(radius: 9)
+                // 右下微光（提升色彩層次）
+                Circle()
+                    .fill(.white.opacity(0.05))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 95, y: 40)
+                    .blur(radius: 10)
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.38), radius: 14, x: 0, y: 7)
+        .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.42), radius: 16, x: 0, y: 8)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)
@@ -307,31 +315,32 @@ struct FixedExpenseView: View {
         let activeExpenses = expenses.filter { $0.date <= now }
         let accent = categoryAccentColor(category)
 
-        return HStack(spacing: 8) {
-            // 分類圖示（略放大，與 DisclosureBlock icon 風格一致）
+        return HStack(spacing: 9) {
+            // 分類圖示（圓角方形，帶漸層 + 外框 + 陰影）
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [accent.opacity(0.18), accent.opacity(0.08)],
+                            colors: [accent.opacity(0.20), accent.opacity(0.09)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(accent.opacity(0.20), lineWidth: 0.75)
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(accent.opacity(0.22), lineWidth: 0.75)
                     )
+                    .shadow(color: accent.opacity(0.18), radius: 5, x: 0, y: 2)
                 Image(systemName: category.icon)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(accent)
             }
             Text(category.rawValue)
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(accent)
             Spacer()
-            // 月費用小計膠囊
+            // 月費用小計膠囊（加強邊框）
             Group {
                 if category == .insurance {
                     insuranceHeaderAmount(activeExpenses)
@@ -341,11 +350,11 @@ struct FixedExpenseView: View {
                         .font(.caption.weight(.bold))
                 }
             }
-            .padding(.horizontal, 9).padding(.vertical, 4)
+            .padding(.horizontal, 10).padding(.vertical, 4.5)
             .background(accent.opacity(0.10))
             .foregroundStyle(accent)
             .clipShape(Capsule())
-            .overlay(Capsule().stroke(accent.opacity(0.20), lineWidth: 0.6))
+            .overlay(Capsule().stroke(accent.opacity(0.25), lineWidth: 0.7))
         }
         .textCase(nil)
     }
@@ -490,21 +499,21 @@ struct FixedExpenseRow: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // 左側分類色彩強調條
-            RoundedRectangle(cornerRadius: 2)
+            // 左側分類色彩強調條（加粗至 4pt，圓角加大增加視覺重量）
+            RoundedRectangle(cornerRadius: 3)
                 .fill(
                     LinearGradient(
-                        colors: [categoryAccent, categoryAccent.opacity(0.45)],
+                        colors: [categoryAccent, categoryAccent.opacity(0.40)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
-                .frame(width: 3)
-                .padding(.vertical, 10)
-                .padding(.trailing, 13)
+                .frame(width: 4)
+                .padding(.vertical, 8)
+                .padding(.trailing, 14)
 
             HStack(spacing: 12) {
-                // 分類圖示圓（略加大、漸層更清晰）
+                // 分類圖示圓（與 ExpenseRow 對齊：44pt、陰影、18pt 圖示）
                 ZStack {
                     Circle()
                         .fill(
@@ -514,22 +523,23 @@ struct FixedExpenseRow: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .frame(width: 42, height: 42)
+                        .frame(width: 44, height: 44)
+                        .shadow(color: categoryAccent.opacity(0.22), radius: 6, x: 0, y: 3)
                     Image(systemName: expense.fixedCategory?.icon ?? "pin.circle.fill")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(categoryAccent)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(expense.title)
-                        .font(.subheadline.weight(.medium))
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     HStack(spacing: 4) {
                         if let recurrence = expense.recurrence {
                             Text(recurrence.rawValue)
                                 .font(.system(size: 10, weight: .semibold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2.5)
                                 .background(categoryAccent.opacity(0.12))
                                 .foregroundStyle(categoryAccent)
                                 .clipShape(Capsule())
@@ -559,7 +569,7 @@ struct FixedExpenseRow: View {
 
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(formattedAmount)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28))
                         .contentTransition(.numericText())
                     if let label = deductionTargetLabel {
@@ -570,11 +580,15 @@ struct FixedExpenseRow: View {
                                 .font(.system(size: 10, weight: .medium))
                         }
                         .foregroundStyle(categoryAccent.opacity(0.85))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(categoryAccent.opacity(0.08))
+                        .clipShape(Capsule())
                         .lineLimit(1)
                     }
                 }
             }
-            .padding(.vertical, 5)
+            .padding(.vertical, 7)
         }
     }
 
