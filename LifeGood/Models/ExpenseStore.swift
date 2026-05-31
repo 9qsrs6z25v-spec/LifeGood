@@ -334,9 +334,15 @@ class ExpenseStore: ObservableObject {
         return dict.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
     }
 
+    private static let chartDayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
+    private static let chartMonthFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M"; return f
+    }()
+
     private func dailyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M/d"
+        let formatter = Self.chartDayFormatter
 
         var results: [ChartDataPoint] = []
         for dayOffset in (0..<30).reversed() {
@@ -361,8 +367,7 @@ class ExpenseStore: ObservableObject {
     }
 
     private func weeklyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M/d"
+        let formatter = Self.chartDayFormatter
 
         var results: [ChartDataPoint] = []
         for weekOffset in (0..<12).reversed() {
@@ -386,8 +391,7 @@ class ExpenseStore: ObservableObject {
     }
 
     private func monthlyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy/M"
+        let formatter = Self.chartMonthFormatter
 
         var results: [ChartDataPoint] = []
         for monthOffset in (0..<12).reversed() {

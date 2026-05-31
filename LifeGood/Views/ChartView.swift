@@ -18,7 +18,7 @@ struct ChartView: View {
     @State private var chartMode: ChartMode = .trend
     @State private var loadTask: Task<Void, Never>?
 
-    private let currencyFormatter: NumberFormatter = {
+    private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = "TWD"
@@ -586,7 +586,7 @@ struct ChartView: View {
     }
 
     private func formatCurrency(_ value: Double) -> String {
-        currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 
     private func abbreviateCurrency(_ value: Double) -> String {

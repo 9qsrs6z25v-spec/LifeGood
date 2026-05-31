@@ -8,7 +8,8 @@ final class InvoiceCategorizer: ObservableObject {
 
     private let storageURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory,
-                                            in: .userDomainMask).first!
+                                           in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         if !FileManager.default.fileExists(atPath: dir.path) {
             try? FileManager.default.createDirectory(at: dir,
                                                      withIntermediateDirectories: true)
