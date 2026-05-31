@@ -10,6 +10,8 @@ struct FinanceOverviewView: View {
     @State private var showAddRealEstate = false
     @State private var showPremiumAlert = false
     @State private var appearedCards: Set<String> = []
+    @State private var allocationBarAppeared = false
+    @State private var allocationRowsAppeared = false
 
     private func rateForCode(_ code: String) -> Double {
         if code == "NT$" { return 1 }
@@ -286,7 +288,7 @@ struct FinanceOverviewView: View {
                 Capsule()
                     .fill(
                         LinearGradient(
-                            colors: [.teal, .teal.opacity(0.55)],
+                            colors: [.purple, .purple.opacity(0.55)],
                             startPoint: .top, endPoint: .bottom
                         )
                     )
@@ -306,6 +308,7 @@ struct FinanceOverviewView: View {
                 )
                 .padding(.horizontal)
             } else {
+                // 橫向比例彩條（從左展開進場動畫）
                 GeometryReader { geo in
                     HStack(spacing: 2) {
                         ForEach(allocations) { a in
@@ -318,31 +321,87 @@ struct FinanceOverviewView: View {
                         }
                     }
                 }
-                .frame(height: 12)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .frame(height: 14)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .scaleEffect(x: allocationBarAppeared ? 1.0 : 0.04, y: 1, anchor: .leading)
+                .animation(.spring(response: 0.78, dampingFraction: 0.82), value: allocationBarAppeared)
                 .padding(.horizontal)
 
+                // 各類別明細列（含圖示 + 漸層進度條 + 錯落進場）
                 VStack(spacing: 0) {
                     ForEach(Array(allocations.enumerated()), id: \.element.id) { idx, a in
-                        HStack(spacing: 12) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(colorFor(a.type))
-                                .frame(width: 12, height: 12)
-                            Text(a.type.rawValue)
-                                .font(.subheadline)
-                            Spacer()
-                            Text(fmtShort(a.value))
-                                .font(.subheadline.bold())
-                            Text(String(format: "%.1f%%", a.percentage))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 50, alignment: .trailing)
+                        let color = colorFor(a.type)
+                        let ratio = a.percentage / 100.0
+
+                        VStack(spacing: 7) {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 7)
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [color.opacity(0.22), color.opacity(0.09)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 30, height: 30)
+                                    Image(systemName: iconFor(a.type))
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(color)
+                                }
+                                Text(a.type.rawValue)
+                                    .font(.subheadline)
+                                Spacer()
+                                Text(fmtShort(a.value))
+                                    .font(.subheadline.bold())
+                                    .contentTransition(.numericText())
+                                Text(String(format: "%.1f%%", a.percentage))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(color)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(color.opacity(0.12))
+                                    .clipShape(Capsule())
+                            }
+
+                            // 漸層進度條（帶延遲動畫）
+                            GeometryReader { barGeo in
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(Color(.systemFill))
+                                        .frame(height: 4)
+                                    Capsule()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [color, color.opacity(0.55)],
+                                                startPoint: .leading, endPoint: .trailing
+                                            )
+                                        )
+                                        .frame(
+                                            width: barGeo.size.width * (allocationBarAppeared ? ratio : 0),
+                                            height: 4
+                                        )
+                                        .animation(
+                                            .spring(response: 0.70, dampingFraction: 0.78)
+                                                .delay(0.10 + 0.08 * Double(idx)),
+                                            value: allocationBarAppeared
+                                        )
+                                }
+                            }
+                            .frame(height: 4)
                         }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 11)
+                        .padding(.vertical, 13)
+                        .opacity(allocationRowsAppeared ? 1 : 0)
+                        .offset(y: allocationRowsAppeared ? 0 : 14)
+                        .animation(
+                            .spring(response: 0.50, dampingFraction: 0.80)
+                                .delay(0.06 * Double(idx)),
+                            value: allocationRowsAppeared
+                        )
 
                         if idx < allocations.count - 1 {
-                            Divider().padding(.leading, 40)
+                            Divider().padding(.leading, 58)
                         }
                     }
                 }
@@ -350,6 +409,14 @@ struct FinanceOverviewView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
+            }
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                allocationBarAppeared = true
+            }
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.18)) {
+                allocationRowsAppeared = true
             }
         }
     }
@@ -362,7 +429,7 @@ struct FinanceOverviewView: View {
                 Capsule()
                     .fill(
                         LinearGradient(
-                            colors: [.teal, .teal.opacity(0.55)],
+                            colors: [.green, .green.opacity(0.55)],
                             startPoint: .top, endPoint: .bottom
                         )
                     )
@@ -456,6 +523,15 @@ struct FinanceOverviewView: View {
         case .stock: return .orange
         case .vehicle: return .teal
         case .realEstate: return .purple
+        }
+    }
+
+    private func iconFor(_ type: AssetType) -> String {
+        switch type {
+        case .savingsInsurance: return "shield.fill"
+        case .stock: return "chart.line.uptrend.xyaxis"
+        case .vehicle: return "car.fill"
+        case .realEstate: return "building.2.fill"
         }
     }
 
