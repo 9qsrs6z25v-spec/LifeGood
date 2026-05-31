@@ -7,6 +7,8 @@ struct PaywallView: View {
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
     @State private var heroAppeared = false
+    @State private var heroPulse = false
+    @State private var benefitsAppeared = false
 
     var body: some View {
         NavigationStack {
@@ -39,6 +41,24 @@ struct PaywallView: View {
     private var header: some View {
         VStack(spacing: 0) {
             ZStack {
+                // 向外擴散的脈衝光環（兩層錯開時序，與 todayCard 同風格）
+                Circle()
+                    .stroke(Color.green.opacity(heroPulse ? 0 : 0.40), lineWidth: 1.5)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(heroPulse ? 1.55 : 1.0)
+                    .animation(
+                        .easeOut(duration: 1.8).repeatForever(autoreverses: false),
+                        value: heroPulse
+                    )
+                Circle()
+                    .stroke(Color.green.opacity(heroPulse ? 0 : 0.22), lineWidth: 1)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(heroPulse ? 1.90 : 1.0)
+                    .animation(
+                        .easeOut(duration: 1.8).delay(0.30).repeatForever(autoreverses: false),
+                        value: heroPulse
+                    )
+
                 // 光暈底層
                 Circle()
                     .fill(
@@ -85,6 +105,9 @@ struct PaywallView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     heroAppeared = true
                 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.60) {
+                    heroPulse = true
+                }
             }
 
             Text("解鎖完整人生管理")
@@ -103,18 +126,35 @@ struct PaywallView: View {
     // MARK: - 功能亮點
 
     private var benefits: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            benefitRow(icon: "shield.fill",   color: .indigo, title: "儲蓄險管理",   desc: "TWD/USD 雙幣別、複利試算、期滿領回。")
-            Divider().padding(.leading, 58)
-            benefitRow(icon: "car.fill",      color: .blue,   title: "載具與房地產", desc: "完整資產卡、貸款與支出連動、地圖呈現。")
-            Divider().padding(.leading, 58)
-            benefitRow(icon: "trophy.fill",   color: .orange, title: "人生履歷",     desc: "里程碑、家庭成員、職涯與管理工具。")
-            Divider().padding(.leading, 58)
-            benefitRow(icon: "icloud.fill",   color: .teal,   title: "資料完全離線", desc: "資料只存在你的裝置與 iCloud，不上傳伺服器。")
+        let items: [(icon: String, color: Color, title: String, desc: String)] = [
+            ("shield.fill",   .indigo, "儲蓄險管理",   "TWD/USD 雙幣別、複利試算、期滿領回。"),
+            ("car.fill",      .blue,   "載具與房地產", "完整資產卡、貸款與支出連動、地圖呈現。"),
+            ("trophy.fill",   .orange, "人生履歷",     "里程碑、家庭成員、職涯與管理工具。"),
+            ("icloud.fill",   .teal,   "資料完全離線", "資料只存在你的裝置與 iCloud，不上傳伺服器。"),
+        ]
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
+                benefitRow(icon: item.icon, color: item.color, title: item.title, desc: item.desc)
+                    .opacity(benefitsAppeared ? 1 : 0)
+                    .offset(x: benefitsAppeared ? 0 : -22)
+                    .animation(
+                        .spring(response: 0.50, dampingFraction: 0.80)
+                            .delay(0.10 * Double(idx)),
+                        value: benefitsAppeared
+                    )
+                if idx < items.count - 1 {
+                    Divider().padding(.leading, 58)
+                }
+            }
         }
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 5)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                benefitsAppeared = true
+            }
+        }
     }
 
     private func benefitRow(icon: String, color: Color, title: String, desc: String) -> some View {
@@ -266,15 +306,36 @@ struct PaywallView: View {
     // MARK: - 操作區
 
     private var actions: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             if subscription.purchaseInProgress {
-                ProgressView().tint(.green)
+                HStack(spacing: 8) {
+                    ProgressView().tint(.green).scaleEffect(0.9)
+                    Text("處理中，請稍候…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(Color.green.opacity(0.08))
+                .clipShape(Capsule())
             }
             if let err = subscription.lastError {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.09))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.orange.opacity(0.25), lineWidth: 0.75)
+                )
             }
             Button("還原購買") {
                 Task { await subscription.restorePurchases() }
@@ -287,19 +348,33 @@ struct PaywallView: View {
     // MARK: - 法律條款
 
     private var legal: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Text("訂閱會於到期前 24 小時自動續訂，可隨時於 Apple ID 設定中取消。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            HStack(spacing: 16) {
+
+            Rectangle()
+                .fill(Color(.separator).opacity(0.30))
+                .frame(height: 0.5)
+
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
                 Link("使用條款", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                Text(" · ").foregroundStyle(.tertiary)
                 Link("隱私政策", destination: URL(string: "https://www.apple.com/legal/privacy/")!)
+                Text(" · ").foregroundStyle(.tertiary)
                 Link("管理訂閱", destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
+                Spacer(minLength: 0)
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
     }
 }
 
