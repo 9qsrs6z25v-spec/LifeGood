@@ -84,8 +84,9 @@ struct IncomeView: View {
                         VStack(alignment: .trailing, spacing: 0) {
                             Text("總收入")
                                 .font(.caption2).foregroundStyle(.secondary)
-                            Text("\(fmtWan(totalIncomeAll)) 萬")
+                            Text(fmt(totalIncomeAll))
                                 .font(.subheadline.bold()).foregroundStyle(.green)
+                                .lineLimit(1).minimumScaleFactor(0.6)
                         }
                         Button { showAdd = true } label: {
                             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
@@ -119,10 +120,6 @@ struct IncomeView: View {
                 return sum + income.amount * Double(max(1, years + 1))
             }
         }
-    }
-
-    private func fmtWan(_ v: Double) -> String {
-        String(format: "%.0f", v / 10000)
     }
 
     // MARK: - 摘要
@@ -171,6 +168,8 @@ struct IncomeView: View {
                     Text(fmt(displayedIncome))
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                         .contentTransition(.numericText())
                 }
                 Spacer()
@@ -181,6 +180,8 @@ struct IncomeView: View {
                     Text((isPositive ? "+" : "") + fmt(displayedBalance))
                         .font(.title3.bold())
                         .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                         .contentTransition(.numericText())
                         .shadow(
                             color: isPositive ? .clear : Color.red.opacity(0.40),
@@ -629,7 +630,16 @@ struct IncomeView: View {
         }
     }
 
+    /// 金額格式化：未滿一萬照常顯示 NT$ 金額；達到一萬(含)以上改以「萬」為單位，
+    /// 例如 12,345 → NT$1.2萬、1,234,567 → NT$123.5萬，避免位數過多造成換行/難讀。
     private func fmt(_ v: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
+        if abs(v) >= 10000 {
+            let wan = v / 10000
+            let str = (wan == wan.rounded())
+                ? String(format: "%.0f", wan)
+                : String(format: "%.1f", wan)
+            return "NT$\(str)萬"
+        }
+        return Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 }
