@@ -168,8 +168,12 @@ struct IncomeView: View {
                         .foregroundStyle(.white.opacity(0.78))
                     Text((isPositive ? "+" : "") + fmt(displayedBalance))
                         .font(.title3.bold())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
                         .contentTransition(.numericText())
+                        .shadow(
+                            color: isPositive ? .clear : Color.red.opacity(0.40),
+                            radius: 6, x: 0, y: 2
+                        )
                 }
             }
 
@@ -287,7 +291,7 @@ struct IncomeView: View {
             Spacer(minLength: 6)
 
             HStack(spacing: 4) {
-                Text(fmt(dayTotal))
+                Text("+\(fmt(dayTotal))")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(accent)
                 Text("· \(incomes.count) 筆")
@@ -463,47 +467,53 @@ struct IncomeView: View {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [accent.opacity(0.20), accent.opacity(0.08)],
+                            colors: [accent.opacity(0.22), accent.opacity(0.09)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 42, height: 42)
+                    .frame(width: 44, height: 44)
+                    .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
                 Image(systemName: income.category.icon)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(accent)
             }
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(income.title)
-                    .font(.subheadline.weight(.medium))
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     Text(income.category.rawValue)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(accent.opacity(0.12))
+                        .clipShape(Capsule())
                     if income.period != .once {
                         Text(income.period.rawValue)
                             .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(accent.opacity(0.12))
-                            .foregroundStyle(accent)
+                            .background(accent.opacity(0.10))
+                            .foregroundStyle(accent.opacity(0.85))
                             .clipShape(Capsule())
                     }
                     if !income.note.isEmpty {
-                        Text("· \(income.note)")
-                            .foregroundStyle(Color(.tertiaryLabel))
+                        Text(income.note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
-                .font(.caption)
-                .lineLimit(1)
             }
 
             Spacer(minLength: 4)
 
-            VStack(alignment: .trailing, spacing: 3) {
+            VStack(alignment: .trailing, spacing: 4) {
                 Text(fmt(income.amount))
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(accent)
                     .contentTransition(.numericText())
                 if let label = depositBankLabel(for: income) {
@@ -514,11 +524,15 @@ struct IncomeView: View {
                             .font(.system(size: 10, weight: .medium))
                     }
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
                     .lineLimit(1)
                 }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 6)
     }
 
     private func depositBankLabel(for income: Income) -> String? {
