@@ -43,7 +43,20 @@ struct ChartView: View {
                     periodPicker
 
                     if isLoading {
-                        ProgressView().padding(.vertical, 40)
+                        VStack(spacing: 14) {
+                            ProgressView()
+                                .tint(.green)
+                                .scaleEffect(1.3)
+                            Text("載入圖表資料…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 48)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+                        .padding(.horizontal)
                     } else {
                         statisticsSummary
                         chartCarousel
@@ -75,17 +88,47 @@ struct ChartView: View {
     // MARK: - 時間選擇
 
     private var periodPicker: some View {
-        Picker("時間區間", selection: $selectedPeriod) {
-            ForEach(TimePeriod.allCases, id: \.self) { period in
-                Text(period.rawValue).tag(period)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(TimePeriod.allCases, id: \.self) { period in
+                    periodChip(period)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
-        .pickerStyle(.segmented)
-        .padding(14)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
         .padding(.horizontal)
+    }
+
+    private func periodChip(_ period: TimePeriod) -> some View {
+        let isSelected = selectedPeriod == period
+        return Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+                selectedPeriod = period
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: period.chipIcon)
+                    .font(.caption2)
+                Text(period.chipLabel)
+                    .font(.caption.weight(isSelected ? .semibold : .medium))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(isSelected ? Color.green : Color(.secondarySystemFill))
+            .foregroundStyle(isSelected ? .white : .primary)
+            .clipShape(Capsule())
+            .shadow(
+                color: isSelected ? Color.green.opacity(0.38) : .clear,
+                radius: 6, x: 0, y: 3
+            )
+            .scaleEffect(isSelected ? 1.04 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
     }
 
     // MARK: - 統計摘要
@@ -143,25 +186,37 @@ struct ChartView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: 380)
 
-            // 自訂指示器：模式名稱 + 圓點
-            HStack(spacing: 8) {
+            // 自訂指示器：模式名稱 + 圓點 + 膠囊高亮
+            HStack(spacing: 6) {
                 ForEach(ChartMode.allCases) { mode in
+                    let isActive = chartMode == mode
                     Button {
-                        withAnimation(.easeInOut(duration: 0.25)) { chartMode = mode }
+                        withAnimation(.spring(response: 0.30, dampingFraction: 0.72)) {
+                            chartMode = mode
+                        }
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 5) {
                             Circle()
-                                .fill(chartMode == mode ? Color.green : Color(.tertiaryLabel))
+                                .fill(isActive ? Color.green : Color(.tertiaryLabel))
                                 .frame(width: 6, height: 6)
-                            if chartMode == mode {
+                            if isActive {
                                 Text(mode.rawValue)
-                                    .font(.caption2.weight(.medium))
+                                    .font(.caption2.weight(.semibold))
                                     .foregroundStyle(.green)
-                                    .transition(.opacity.combined(with: .scale))
+                                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
                             }
                         }
+                        .padding(.horizontal, isActive ? 10 : 6)
+                        .padding(.vertical, 4)
+                        .background(isActive ? Color.green.opacity(0.10) : Color.clear)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(isActive ? Color.green.opacity(0.25) : Color.clear, lineWidth: 0.75)
+                        )
                     }
                     .buttonStyle(.plain)
+                    .animation(.spring(response: 0.28, dampingFraction: 0.72), value: isActive)
                 }
             }
         }
@@ -413,18 +468,33 @@ struct ChartView: View {
     private func pieChartBody(entries: [(name: String, icon: String, color: Color, amount: Double)],
                               total: Double) -> some View {
         VStack(spacing: 14) {
-            Chart(entries.indices, id: \.self) { i in
-                let e = entries[i]
-                SectorMark(
-                    angle: .value("金額", e.amount),
-                    innerRadius: .ratio(0.55),
-                    angularInset: 1.5
-                )
-                .foregroundStyle(e.color)
-                .cornerRadius(4)
+            ZStack {
+                Chart(entries.indices, id: \.self) { i in
+                    let e = entries[i]
+                    SectorMark(
+                        angle: .value("金額", e.amount),
+                        innerRadius: .ratio(0.55),
+                        angularInset: 1.5
+                    )
+                    .foregroundStyle(e.color)
+                    .cornerRadius(4)
+                }
+                .frame(height: 180)
+                .padding(.horizontal)
+
+                // 甜甜圈中心：顯示總金額
+                VStack(spacing: 2) {
+                    Text("總計")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text(formatCurrency(total))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .minimumScaleFactor(0.65)
+                        .lineLimit(1)
+                        .frame(maxWidth: 80)
+                }
             }
-            .frame(height: 180)
-            .padding(.horizontal)
 
             // 圖例
             VStack(spacing: 8) {
@@ -775,6 +845,30 @@ struct StatCard: View {
         )
         .shadow(color: color.opacity(0.13), radius: 10, x: 0, y: 4)
         .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 1)
+    }
+}
+
+// MARK: - TimePeriod chip UI helpers
+
+private extension TimePeriod {
+    var chipIcon: String {
+        switch self {
+        case .daily:     return "sun.max.fill"
+        case .weekly:    return "7.square"
+        case .monthly:   return "calendar"
+        case .quarterly: return "chart.bar.fill"
+        case .yearly:    return "sparkles"
+        }
+    }
+
+    var chipLabel: String {
+        switch self {
+        case .daily:     return "近30天"
+        case .weekly:    return "近12週"
+        case .monthly:   return "近12月"
+        case .quarterly: return "近8季"
+        case .yearly:    return "近5年"
+        }
     }
 }
 
