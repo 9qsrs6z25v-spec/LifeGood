@@ -127,6 +127,14 @@ struct IncomeView: View {
 
     // MARK: - 摘要
 
+    private var headerMonthProgress: Double {
+        let cal = Calendar.current
+        let now = Date()
+        let day = Double(cal.component(.day, from: now))
+        let total = Double(cal.range(of: .day, in: .month, for: now)?.count ?? 30)
+        return min(day / total, 1.0)
+    }
+
     private var summaryHeader: some View {
         let useEstimate = !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
         let displayedIncome = useEstimate ? store.estimatedMonthlyIncome : store.currentMonthIncomeTotal
@@ -135,8 +143,12 @@ struct IncomeView: View {
         let recurringMonthly = store.incomes
             .filter { $0.period != .once }
             .reduce(0.0) { $0 + $1.monthlyAmount }
+        let spendingRatio = displayedIncome > 0
+            ? min(store.currentMonthTotal / displayedIncome, 1.0)
+            : 0.0
 
         return VStack(spacing: 0) {
+            // 頂部：本月收入 + 收支餘額
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
@@ -189,15 +201,23 @@ struct IncomeView: View {
                 .padding(.top, 10)
             }
 
-            if recurringMonthly > 0 {
-                Rectangle()
-                    .fill(.white.opacity(0.20))
-                    .frame(height: 0.5)
-                    .padding(.vertical, 12)
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 12)
 
+            // 第二行：固定月收入（若有）+ 支出/月進度條
+            if recurringMonthly > 0 {
                 HStack(spacing: 6) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.caption2)
+                    ZStack {
+                        Circle()
+                            .fill(.white.opacity(0.18))
+                            .frame(width: 22, height: 22)
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
                     Text("固定月收入")
                         .font(.caption)
                     Spacer()
@@ -205,6 +225,51 @@ struct IncomeView: View {
                         .font(.caption.bold())
                 }
                 .foregroundStyle(.white.opacity(0.88))
+                .padding(.bottom, 10)
+            }
+
+            // 支出 / 月進度雙進度條
+            if displayedIncome > 0 {
+                VStack(spacing: 6) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(.white.opacity(0.18))
+                                .frame(height: 6)
+                            Capsule()
+                                .fill(spendingRatio > 0.9
+                                      ? Color.red.opacity(0.85)
+                                      : .white.opacity(0.82))
+                                .frame(width: geo.size.width * spendingRatio, height: 6)
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingRatio)
+                        }
+                    }
+                    .frame(height: 6)
+
+                    HStack {
+                        HStack(spacing: 4) {
+                            Image(systemName: spendingRatio > 0.9
+                                  ? "exclamationmark.triangle.fill"
+                                  : "arrow.up.arrow.down.circle.fill")
+                                .font(.system(size: 9))
+                            Text("支出 \(Int(spendingRatio * 100))%")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(spendingRatio > 0.9
+                                         ? Color(red: 1.0, green: 0.78, blue: 0.75)
+                                         : .white.opacity(0.62))
+
+                        Spacer()
+
+                        HStack(spacing: 4) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 9))
+                            Text("月進度 \(Int(headerMonthProgress * 100))%")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.62))
+                    }
+                }
             }
         }
         .padding(.horizontal, 20)
@@ -219,20 +284,28 @@ struct IncomeView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // 右上主散景圓
                 Circle()
                     .fill(.white.opacity(0.13))
                     .frame(width: 140, height: 140)
                     .offset(x: 90, y: -55)
                     .blur(radius: 14)
+                // 左下補光
                 Circle()
                     .fill(.white.opacity(0.08))
                     .frame(width: 90, height: 90)
                     .offset(x: -70, y: 55)
                     .blur(radius: 10)
+                // 中右小散景（增加層次）
+                Circle()
+                    .fill(.white.opacity(0.05))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 60, y: 40)
+                    .blur(radius: 8)
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.40), radius: 16, x: 0, y: 8)
+        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.42), radius: 16, x: 0, y: 8)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)
