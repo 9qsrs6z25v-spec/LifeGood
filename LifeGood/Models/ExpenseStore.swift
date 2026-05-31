@@ -11,6 +11,8 @@ class ExpenseStore: ObservableObject {
     @Published var currencyRates: [CurrencyRate] = [] {
         didSet { if !isLoading { saveCurrencyRates() } }
     }
+    /// 每次 save() 或 cloud reload 後都更新，供 ChartView 偵測內容異動（含支出金額/分類/日期編輯）
+    @Published private(set) var modifyID: UUID = UUID()
 
     private let saveKey = "lifegood_expenses"
     private let incomeKey = "lifegood_incomes"
@@ -29,6 +31,7 @@ class ExpenseStore: ObservableObject {
 
     @objc private func reloadFromCloud() {
         load()
+        modifyID = UUID()
         objectWillChange.send()
     }
 
@@ -467,6 +470,7 @@ class ExpenseStore: ObservableObject {
         if let data = try? JSONEncoder().encode(incomes) {
             UserDefaults.standard.set(data, forKey: incomeKey)
         }
+        modifyID = UUID()
         CloudSyncManager.shared.pushAll()
     }
 

@@ -57,7 +57,7 @@ struct ChartView: View {
             .task(id: selectedPeriod) {
                 await loadChartData()
             }
-            .onChange(of: store.expenses.count) { _, _ in
+            .onChange(of: store.modifyID) { _, _ in
                 loadTask?.cancel()
                 loadTask = Task { await loadChartData() }
             }
