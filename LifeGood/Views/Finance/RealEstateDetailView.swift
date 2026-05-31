@@ -55,7 +55,7 @@ struct RealEstateDetailView: View {
     @State private var hiInsuranceExpanded = false
     @State private var hiAssetsExpanded = false
 
-    /// 樓層 3D 目前選中的樓層；同步給 3D 與下方物件樹
+    /// 樓層 3D 目前選中的樓層（純高亮用；物件樹已移到「資產」分頁）
     @State private var selectedFloorId: UUID?
     /// 物件編輯 sheet：依（樓層 id, 項目 id, 是否為新增）開啟
     @State private var editingFloorItemTarget: FloorItemEditTarget?
@@ -70,6 +70,7 @@ struct RealEstateDetailView: View {
     enum DetailTab: String, CaseIterable {
         case finance = "理財"
         case house = "房屋資料"
+        case assets = "資產"
     }
     @State private var detailTab: DetailTab = .finance
 
@@ -91,10 +92,10 @@ struct RealEstateDetailView: View {
                 VStack(spacing: 24) {
                     flashCard
                     tabPicker
-                    if detailTab == .finance {
-                        infoSection
-                    } else {
-                        houseInfoSection
+                    switch detailTab {
+                    case .finance: infoSection
+                    case .house:   houseInfoSection
+                    case .assets:  assetsSection
                     }
                 }
                 .padding(.vertical)
@@ -908,30 +909,44 @@ struct RealEstateDetailView: View {
         return Int(s) ?? 0
     }
 
+    /// 樓層 3D 視覺化（純展示 / 點選樓層高亮）。物件樹已移到「資產」分頁，
+    /// 不再與 SceneKit 3D 視圖耦合，避免原本切換樓層 / 新增物件時的閃退。
     private var buildingVisualization: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HolographicBuildingView(
-                floors: sortedFloors,
-                isApartment: estate.buildingType != .townhouse,
-                selectedFloorId: $selectedFloorId
-            )
-            .shadow(color: Self.cyanColor.opacity(0.25), radius: 10)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+        HolographicBuildingView(
+            floors: sortedFloors,
+            isApartment: estate.buildingType != .townhouse,
+            selectedFloorId: $selectedFloorId
+        )
+        .shadow(color: Self.cyanColor.opacity(0.25), radius: 10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
 
-            // 只把動畫 / transition 限縮在「樓層物件樹」這個 Group，
-            // 不要連同上方的 3D SceneKit 視圖(HolographicBuildingView)一起包進
-            // 隱式動畫交易。否則快速點兩下切換樓層時，SCNView(UIViewRepresentable)
-            // 會被反覆捲進重疊的動畫更新而閃退。
-            Group {
-                if let fid = selectedFloorId,
-                   let floor = estate.floors.first(where: { $0.id == fid }) {
+    // MARK: - 資產分頁（依樓層分組的物件樹）
+
+    /// 「資產」分頁：依樓層分組，列出每一層可新增/重新命名/刪除的物件樹。
+    /// 從原本「樓層 3D」章節獨立出來，畫面更乾淨，也避開與 3D 視圖耦合的閃退路徑。
+    private var assetsSection: some View {
+        VStack(spacing: 16) {
+            if estate.floors.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "shippingbox")
+                        .font(.system(size: 36)).foregroundStyle(.tertiary)
+                    Text("尚未建立樓層").font(.subheadline).foregroundStyle(.secondary)
+                    Text("請先用上方「編輯」新增樓層，再回來這裡建立各樓層的資產物件")
+                        .font(.caption).foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+                .padding(.horizontal)
+            } else {
+                ForEach(sortedFloors) { floor in
                     floorItemsTree(for: floor)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: selectedFloorId)
         }
+        .padding(.vertical, 8)
     }
 
     // MARK: - 樓層物件樹
