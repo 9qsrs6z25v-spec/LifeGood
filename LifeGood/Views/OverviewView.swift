@@ -9,6 +9,8 @@ struct OverviewView: View {
     @State private var appearedCards: Set<String> = []
     @State private var ringPulse = false
     @State private var recentListAppeared = false
+    @State private var categoryListAppeared = false
+    @State private var todayCardAppeared = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -109,7 +111,12 @@ struct OverviewView: View {
 
                     todayCard
                         .padding(.horizontal)
+                        .opacity(todayCardAppeared ? 1 : 0)
+                        .offset(y: todayCardAppeared ? 0 : 16)
                         .onAppear {
+                            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.10)) {
+                                todayCardAppeared = true
+                            }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                                 ringPulse = true
                             }
@@ -544,10 +551,11 @@ struct OverviewView: View {
                 if !categoryTotals.isEmpty {
                     Text("\(categoryTotals.count) 項")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.green)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color(.tertiarySystemFill))
+                        .background(Color.green.opacity(0.10))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
                 }
             }
             .padding(.horizontal)
@@ -563,6 +571,13 @@ struct OverviewView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(categoryTotals.enumerated()), id: \.offset) { idx, item in
                         categoryRow(item: item, maxAmount: maxAmount)
+                            .opacity(categoryListAppeared ? 1 : 0)
+                            .offset(y: categoryListAppeared ? 0 : 14)
+                            .animation(
+                                .spring(response: 0.45, dampingFraction: 0.82)
+                                    .delay(0.06 * Double(idx)),
+                                value: categoryListAppeared
+                            )
 
                         if idx < categoryTotals.count - 1 {
                             Divider().padding(.leading, 46)
@@ -573,6 +588,11 @@ struct OverviewView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
+                .onAppear {
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                        categoryListAppeared = true
+                    }
+                }
             }
         }
     }
@@ -670,10 +690,11 @@ struct OverviewView: View {
                 if !recentItems.isEmpty {
                     Text("\(recentItems.count) 筆")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.green)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color(.tertiarySystemFill))
+                        .background(Color.green.opacity(0.10))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
                 }
             }
             .padding(.horizontal)
@@ -750,28 +771,40 @@ struct OverviewView: View {
     // MARK: - 空狀態元件
 
     private func emptyPlaceholder(icon: String, title: String, subtitle: String) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             ZStack {
                 Circle()
-                    .fill(Color(.systemFill))
-                    .frame(width: 64, height: 64)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(.secondarySystemFill), Color(.systemFill)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 70, height: 70)
+                Circle()
+                    .stroke(Color(.separator).opacity(0.35), lineWidth: 1)
+                    .frame(width: 70, height: 70)
                 Image(systemName: icon)
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(Color(.secondaryLabel))
             }
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+            VStack(spacing: 6) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
+        .padding(.vertical, 32)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
     }
 
     // MARK: - Helpers
