@@ -712,28 +712,108 @@ struct SettingsView: View {
     // MARK: - 關於
 
     private var aboutSection: some View {
-        Section("關於") {
-            HStack {
-                Label("版本", systemImage: "info.circle")
-                Spacer()
-                Text(appVersion)
-                    .foregroundStyle(.secondary)
-            }
+        Section {
+            // 品牌識別卡
+            VStack(spacing: 0) {
+                // 上半：圖示 + 名稱
+                VStack(spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.16, green: 0.74, blue: 0.50),
+                                        Color(red: 0.07, green: 0.50, blue: 0.38)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 72, height: 72)
+                            .shadow(
+                                color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.38),
+                                radius: 12, x: 0, y: 6
+                            )
+                        // 裝飾散景
+                        Circle()
+                            .fill(.white.opacity(0.18))
+                            .frame(width: 36, height: 36)
+                            .offset(x: 14, y: -14)
+                            .blur(radius: 6)
+                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        Image(systemName: "leaf.fill")
+                            .font(.system(size: 30, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                    VStack(spacing: 5) {
+                        Text("LifeGood")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(.primary)
+                        Text("美好人生記實")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
 
-            HStack {
-                Label("Build", systemImage: "hammer")
-                Spacer()
-                Text(appBuild)
-                    .foregroundStyle(.secondary)
-            }
+                // 三欄版本資訊
+                Rectangle()
+                    .fill(Color(.separator).opacity(0.4))
+                    .frame(height: 0.5)
+                    .padding(.horizontal, 8)
 
-            HStack {
-                Label("最低系統需求", systemImage: "iphone")
-                Spacer()
-                Text("iOS 17.0")
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 0) {
+                    aboutInfoCell(icon: "number", label: "版本", value: appVersion, color: .green)
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.4))
+                        .frame(width: 0.5, height: 48)
+                    aboutInfoCell(icon: "hammer.fill", label: "Build", value: appBuild, color: .orange)
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.4))
+                        .frame(width: 0.5, height: 48)
+                    aboutInfoCell(icon: "iphone", label: "最低需求", value: "iOS 17", color: .blue)
+                }
+                .padding(.vertical, 8)
             }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color(.systemBackground))
+        } header: {
+            Text("關於")
+        } footer: {
+            HStack {
+                Spacer()
+                Text("© 2024–2026 LifeGood · 資料僅存於本機與您的 iCloud")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                Spacer()
+            }
+            .padding(.top, 4)
         }
+    }
+
+    private func aboutInfoCell(icon: String, label: String, value: String, color: Color) -> some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.12))
+                    .frame(width: 32, height: 32)
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
     }
 
     // MARK: - 匯出
