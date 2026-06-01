@@ -7,6 +7,9 @@ struct MacaronDatePicker: View {
     var allowFuture: Bool = true
 
     private let calendar = Calendar.current
+    private static let mdFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
 
     private var relativeDays: [(label: String, offset: Int, color: Color)] {
         [
@@ -40,9 +43,7 @@ struct MacaronDatePicker: View {
     private func pillButton(label: String, offset: Int, color: Color) -> some View {
         let target = calendar.startOfDay(for: calendar.date(byAdding: .day, value: offset, to: Date()) ?? Date())
         let isSelected = calendar.isDate(selectedDate, inSameDayAs: target)
-        let dateLabel: String = {
-            let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: target)
-        }()
+        let dateLabel = Self.mdFormatter.string(from: target)
         return Button {
             withAnimation(.easeInOut(duration: 0.15)) { selectedDate = target }
         } label: {
