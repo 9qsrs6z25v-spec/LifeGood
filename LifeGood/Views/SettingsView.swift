@@ -1,6 +1,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+// MARK: - 美化紀錄（SettingsView）
+// [2026-06] 本次美化方向：
+//   1. 頂部訂閱狀態英雄卡：漸層背景 + 散景裝飾圓，對齊其他主要頁面 hero card 設計語言
+//      Premium → 綠色漸層；免費 → 藍紫漸層（視覺提示升級動機）
+//      顯示方案名稱、版本號、三模式記錄筆數 KPI 橫列
+//   2. disclosureBlock 標題字重 .medium → .semibold，強化視覺層級對比
+//   3. 英雄卡進場動畫（opacity + translateY spring），對齊 OverviewView summaryCard 規格
+
 // MARK: - Share Sheet (UIKit bridge)
 
 struct ShareSheet: UIViewControllerRepresentable {
@@ -80,10 +88,25 @@ struct SettingsView: View {
     @State private var restoreExpanded = false
     @State private var aboutExpanded = false
     @StateObject private var aiSettings = AISettingsStore.shared
+    @State private var heroCardAppeared = false
 
     var body: some View {
         NavigationStack {
             List {
+                // 英雄卡：訂閱狀態 + 三模式資料統計
+                Section {
+                    settingsHeroCard
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .opacity(heroCardAppeared ? 1 : 0)
+                        .offset(y: heroCardAppeared ? 0 : 22)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                heroCardAppeared = true
+                            }
+                        }
+                }
                 disclosureBlock("訂閱方案", icon: "crown.fill", color: .yellow, isExpanded: $subscriptionExpanded) {
                     subscriptionSection
                 }
@@ -184,6 +207,123 @@ struct SettingsView: View {
                 Text(restoreResultMessage)
             }
         }
+    }
+
+    // MARK: - 設定英雄卡片（訂閱狀態 + 三模式資料統計）
+
+    private var settingsHeroCard: some View {
+        VStack(spacing: 0) {
+            // 頂部：方案名稱 + 版本 + 皇冠 / 鎖圖示
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(subscription.isPremium ? "Premium 訂閱中" : "免費版")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.78))
+                    Text("LifeGood")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("v\(appVersion)")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.60))
+                        .padding(.top, 1)
+                }
+                Spacer()
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.20))
+                        .frame(width: 50, height: 50)
+                    Image(systemName: subscription.isPremium ? "crown.fill" : "lock.open.fill")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(subscription.isPremium
+                                         ? Color(red: 1.0, green: 0.85, blue: 0.30)
+                                         : .white.opacity(0.88))
+                }
+            }
+
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 14)
+
+            // 三模式 KPI 橫列
+            HStack(spacing: 0) {
+                settingsHeroStatCell(
+                    label: "記帳",
+                    count: store.expenses.count + store.incomes.count
+                )
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                settingsHeroStatCell(
+                    label: "理財",
+                    count: financeStore.insurances.count + financeStore.stocks.count
+                           + financeStore.vehicles.count + financeStore.realEstates.count
+                )
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                settingsHeroStatCell(
+                    label: "人生",
+                    count: lifeStore.milestones.count + lifeStore.familyMembers.count
+                )
+            }
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 20)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: subscription.isPremium
+                        ? [Color(red: 0.16, green: 0.74, blue: 0.50),
+                           Color(red: 0.07, green: 0.50, blue: 0.38)]
+                        : [Color(red: 0.38, green: 0.28, blue: 0.82),
+                           Color(red: 0.22, green: 0.14, blue: 0.60)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 右上主散景圓
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 140, height: 140)
+                    .offset(x: 90, y: -55)
+                    .blur(radius: 14)
+                // 左下補光
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 80, height: 80)
+                    .offset(x: -60, y: 50)
+                    .blur(radius: 10)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(
+            color: (subscription.isPremium
+                ? Color(red: 0.07, green: 0.50, blue: 0.38)
+                : Color(red: 0.22, green: 0.14, blue: 0.60)).opacity(0.42),
+            radius: 16, x: 0, y: 8
+        )
+    }
+
+    /// KPI 統計格（供英雄卡 KPI 橫列使用）
+    private func settingsHeroStatCell(label: String, count: Int) -> some View {
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+            Text("\(count)")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .contentTransition(.numericText())
+            Text("筆")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
     }
 
     // MARK: - 訂閱
@@ -313,7 +453,7 @@ struct SettingsView: View {
                             .symbolRenderingMode(.hierarchical)
                     }
                     Text(title)
-                        .font(.subheadline.weight(.medium))
+                        .font(.subheadline.weight(.semibold))
                 }
                 .padding(.vertical, 2)
             }
