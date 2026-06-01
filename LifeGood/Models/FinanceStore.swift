@@ -136,9 +136,15 @@ class FinanceStore: ObservableObject {
     }
 
     func clearAll() {
+        isLoading = true
         insurances.removeAll()
         stocks.removeAll()
         vehicles.removeAll()
         realEstates.removeAll()
+        isLoading = false
+        saveInsurances()
+        saveStocks()
+        saveVehicles()
+        saveRealEstates()
     }
 }

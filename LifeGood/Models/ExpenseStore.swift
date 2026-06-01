@@ -566,8 +566,12 @@ class ExpenseStore: ObservableObject {
         for exp in expenses {
             for name in exp.photoFileNames { Expense.deletePhoto(name) }
         }
+        isLoading = true
         expenses.removeAll()
         incomes.removeAll()
         currencyRates.removeAll()
+        isLoading = false
+        save()
+        saveCurrencyRates()
     }
 }
