@@ -21,10 +21,6 @@ struct RealEstateDetailView: View {
     @State private var utilityExpanded = false
     @State private var addingRenovationPhoto = false
     @State private var editingRenovationPhoto: RenovationPhoto?
-    @State private var bulkRenovationPickerItems: [PhotosPickerItem] = []
-    @State private var showBulkRenovationPicker = false
-    /// 批次匯入後等待輸入日期/標題的暫存檔名（傳給 RenovationPhotoEditor）
-    @State private var pendingBulkPhotoNames: [String]? = nil
     /// 房屋資料集錦中點任何一張照片，都用這個 cute viewer 呈現
     @State private var cutePhotoDraft: CutePhotoDraft?
     /// 文件上傳 picker
@@ -154,14 +150,6 @@ struct RealEstateDetailView: View {
             .sheet(item: $editingRenovationPhoto,
                    onDismiss: { dataRefreshID = UUID() }) { p in
                 RenovationPhotoEditor(estateId: estateId, editing: p)
-            }
-            .sheet(isPresented: Binding(
-                get: { pendingBulkPhotoNames != nil },
-                set: { if !$0 { pendingBulkPhotoNames = nil } }
-            ), onDismiss: { dataRefreshID = UUID() }) {
-                if let names = pendingBulkPhotoNames {
-                    RenovationPhotoEditor(estateId: estateId, editing: nil, preloadedFileNames: names)
-                }
             }
             .sheet(item: $cutePhotoDraft) { draft in
                 CutePhotoViewer(draft: draft)
@@ -1198,13 +1186,7 @@ struct RealEstateDetailView: View {
                 if subscription.isPremium { addingRenovationPhoto = true }
                 else { showPremiumAlert = true }
             } label: {
-                Label("新增單張照片（含描述）", systemImage: "photo")
-            }
-            Button {
-                if subscription.isPremium { showBulkRenovationPicker = true }
-                else { showPremiumAlert = true }
-            } label: {
-                Label("批次匯入多張照片", systemImage: "photo.on.rectangle.angled")
+                Label("新增照片及描述", systemImage: "photo")
             }
             Divider()
             Button {
@@ -1218,14 +1200,6 @@ struct RealEstateDetailView: View {
                 .font(.subheadline).foregroundStyle(.green)
         }
         .buttonStyle(.plain)
-        .photosPicker(isPresented: $showBulkRenovationPicker,
-                      selection: $bulkRenovationPickerItems,
-                      maxSelectionCount: 0,
-                      matching: .images)
-        .onChange(of: bulkRenovationPickerItems) { _, items in
-            guard !items.isEmpty else { return }
-            Task { await importBulkRenovationPhotos(items) }
-        }
         .fileImporter(
             isPresented: $showDocumentPicker,
             allowedContentTypes: [
@@ -1238,24 +1212,6 @@ struct RealEstateDetailView: View {
                 importDocuments(urls)
             }
         }
-    }
-
-    /// 把多選相片寫入磁碟後，開 RenovationPhotoEditor 讓使用者輸入日期/標題/備註，
-    /// 一次匯入成「一筆」RenovationPhoto，這些照片會以堆疊方式顯示。
-    @MainActor
-    private func importBulkRenovationPhotos(_ items: [PhotosPickerItem]) async {
-        var fileNames: [String] = []
-        for item in items {
-            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-            fileNames.append(RenovationPhoto.savePhoto(data, id: UUID()))
-        }
-        bulkRenovationPickerItems = []
-        guard !fileNames.isEmpty else { return }
-        // 等系統 PhotosPicker 完全關閉，再開啟 RenovationPhotoEditor sheet。
-        // 否則在 PhotosPicker 還在 dismiss 時就 present 新 sheet（此頁堆了多個 sheet /
-        // picker / fileImporter），真機上的「present while dismissing」會直接閃退。
-        try? await Task.sleep(nanoseconds: 600_000_000)
-        pendingBulkPhotoNames = fileNames
     }
 
     /// 該房地產關聯的、有附照片的支出（變動 + 固定皆含）
