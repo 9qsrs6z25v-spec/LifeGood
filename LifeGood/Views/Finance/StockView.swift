@@ -1,5 +1,19 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（StockView）
+// [2026-06] 本次美化方向：
+//   1. summaryHeader → 橙色漸層英雄卡片：總市值大字、持股計數膠囊、損益 KPI 膠囊、
+//      整體報酬率統計列，對齊 VariableExpenseView.monthSummaryHeader 規格；
+//      加入進場淡入 + 向上動畫（headerAppeared）
+//   2. emptyState → 雙層脈衝光環 + 漸層底圓 + 橙色 CTA 按鈕，
+//      對齊 SavingsInsuranceView.emptyStateView 空狀態設計規格
+//   3. stockCard → 左側 4pt 橙色強調條 + 44pt 漸層圖示圓 + 陰影，
+//      報價狀態改為圖示圓右上角角標；損益改為彩色膠囊；
+//      股票代號以彩色膠囊呈現，對齊 ExpenseRow / FixedExpenseRow 視覺規格
+//   4. 卡片列表 → 交錯淡入 + 向上進場動畫（cardsAppeared），
+//      對齊 SavingsInsuranceView insuranceCard 動畫規格
+//   5. soldStackSection 標題列 → 加入圓角方形圖示框，對齊 FixedExpenseView categoryHeader 規格
+
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -12,6 +26,9 @@ struct StockView: View {
     @State private var updateBanner: String?
     @State private var isUpdating = false
     @State private var fetchStatus: [UUID: Bool] = [:]
+    @State private var headerAppeared = false
+    @State private var cardsAppeared = false
+    @State private var emptyIconPulse = false
 
     private var activeStocks: [Stock] { store.stocks.filter { !$0.isSold } }
     private var soldStocks: [Stock] { store.stocks.filter { $0.isSold } }
@@ -53,8 +70,15 @@ struct StockView: View {
                                 )
 
                             LazyVStack(spacing: 12) {
-                                ForEach(activeStocks) { item in
+                                ForEach(Array(activeStocks.enumerated()), id: \.element.id) { idx, item in
                                     stockCard(item)
+                                        .opacity(cardsAppeared ? 1 : 0)
+                                        .offset(y: cardsAppeared ? 0 : 18)
+                                        .animation(
+                                            .spring(response: 0.45, dampingFraction: 0.82)
+                                                .delay(0.04 * Double(idx)),
+                                            value: cardsAppeared
+                                        )
                                         .onTapGesture { viewingItem = item }
                                         .contextMenu {
                                             Button { editingItem = item } label: {
@@ -72,6 +96,11 @@ struct StockView: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
+                            .onAppear {
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
+                                    cardsAppeared = true
+                                }
+                            }
                         }
                     }
                     .coordinateSpace(name: "scroll")
@@ -199,36 +228,57 @@ struct StockView: View {
                     soldExpanded.toggle()
                 }
             } label: {
-                HStack {
-                    Image(systemName: "archivebox.fill")
-                        .foregroundStyle(.orange)
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.orange.opacity(0.14))
+                            .frame(width: 32, height: 32)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.orange.opacity(0.22), lineWidth: 0.75)
+                            )
+                        Image(systemName: "archivebox.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.orange)
+                    }
                     Text("已賣出（\(soldStocks.count) 檔）")
-                        .font(.subheadline.weight(.medium))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
                     Spacer()
-                    Image(systemName: soldExpanded ? "chevron.down" : "chevron.up")
+                    Image(systemName: soldExpanded ? "chevron.up" : "chevron.down")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: soldExpanded)
                 }
-                .foregroundStyle(.primary)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+                )
+                .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
             }
             .buttonStyle(.plain)
 
             if soldExpanded {
-                ForEach(soldStocks) { item in
-                    stockCard(item)
-                        .padding(.top, 8)
-                        .onTapGesture { viewingItem = item }
-                        .contextMenu {
-                            Button { editingItem = item } label: {
-                                Label("編輯", systemImage: "pencil")
+                LazyVStack(spacing: 12) {
+                    ForEach(soldStocks) { item in
+                        stockCard(item)
+                            .onTapGesture { viewingItem = item }
+                            .contextMenu {
+                                Button { editingItem = item } label: {
+                                    Label("編輯", systemImage: "pencil")
+                                }
+                                Button(role: .destructive) { deleteStock(item) } label: {
+                                    Label("刪除", systemImage: "trash")
+                                }
                             }
-                            Button(role: .destructive) { deleteStock(item) } label: {
-                                Label("刪除", systemImage: "trash")
-                            }
-                        }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
+                .padding(.top, 10)
             } else {
                 soldStackPreview
             }
@@ -283,7 +333,6 @@ struct StockView: View {
         if let incId = item.linkedIncomeId {
             expenseStore.incomes.removeAll { $0.id == incId }
         }
-        // 同步移除連結帳戶（銀行/證券）的存款記錄
         for accId in [item.linkedBankMilestoneId, item.linkedSecuritiesMilestoneId].compactMap({ $0 }) {
             if var ms = lifeStore.milestones.first(where: { $0.id == accId }) {
                 ms.bankDeposits?.removeAll { $0.linkedStockId == item.id }
@@ -293,120 +342,322 @@ struct StockView: View {
         store.deleteStock(item)
     }
 
-    // MARK: - 摘要
+    // MARK: - 摘要（橙色漸層英雄卡片）
 
     private var summaryHeader: some View {
-        VStack(spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
+        let pl = store.totalStockProfitLoss
+        let isPositive = pl >= 0
+        let returnRate = store.totalStockCost > 0 ? (pl / store.totalStockCost * 100) : 0
+
+        return VStack(spacing: 0) {
+            // 頂部：總市值 + 持股計數 / 損益 KPI
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text("股票總市值")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
                     Text(fmt(store.totalStockValue))
-                        .font(.title2.bold())
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
+                    if store.totalStockCost > 0 {
+                        Text("總成本 " + fmtShort(store.totalStockCost))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.top, 1)
+                    }
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 6) {
+                    // 持股計數膠囊
                     Text("\(store.stocks.count) 檔")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    Text("交易總額 " + fmtShort(totalTransactionAmount))
-                        .font(.caption).foregroundStyle(.tertiary)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 11).padding(.vertical, 5)
+                        .background(.white.opacity(0.22))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
+                    // 損益 KPI 膠囊（有成本資料才顯示）
+                    if store.totalStockCost > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
+                                .font(.system(size: 10, weight: .bold))
+                            Text((isPositive ? "+" : "") + fmtShort(pl))
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                        }
+                        .foregroundStyle(isPositive
+                            ? Color(red: 0.60, green: 1.00, blue: 0.75)
+                            : Color(red: 1.0, green: 0.78, blue: 0.75))
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(.white.opacity(0.18))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(isPositive ? 0.35 : 0.25), lineWidth: 0.75))
+                    }
                 }
             }
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("總成本").font(.caption).foregroundStyle(.secondary)
-                    Text(fmt(store.totalStockCost)).font(.caption.bold())
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("總損益").font(.caption).foregroundStyle(.secondary)
-                    let pl = store.totalStockProfitLoss
-                    Text((pl >= 0 ? "+" : "") + fmt(pl))
-                        .font(.caption.bold())
-                        .foregroundStyle(pl >= 0 ? .green : .red)
+
+            // 分隔線 + 活躍持股 / 整體報酬率統計列
+            if store.totalStockCost > 0 {
+                Rectangle()
+                    .fill(.white.opacity(0.20))
+                    .frame(height: 0.5)
+                    .padding(.vertical, 14)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("活躍持股")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.62))
+                        Text("\(activeStocks.count) 檔")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("整體報酬率")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.62))
+                        Text(String(format: "%@%.2f%%", returnRate >= 0 ? "+" : "", returnRate))
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(returnRate >= 0
+                                ? Color(red: 0.60, green: 1.00, blue: 0.75)
+                                : Color(red: 1.0, green: 0.78, blue: 0.75))
+                    }
                 }
             }
         }
-        .padding()
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
         .padding(.top, 44)
-        .background(Color(.systemBackground))
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 1.00, green: 0.62, blue: 0.22),
+                        Color(red: 0.86, green: 0.36, blue: 0.06)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 裝飾性散景圓（增加卡片層次感）
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 130, height: 130)
+                    .offset(x: 90, y: -55)
+                    .blur(radius: 14)
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 80, height: 80)
+                    .offset(x: -70, y: 50)
+                    .blur(radius: 10)
+            }
+        )
+        .opacity(headerAppeared ? 1 : 0)
+        .offset(y: headerAppeared ? 0 : 20)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                headerAppeared = true
+            }
+        }
     }
+
+    // MARK: - 空狀態（雙層脈衝光環 + 橙色 CTA）
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
+        let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
+        return VStack(spacing: 24) {
             Spacer()
-            Image(systemName: "chart.line.uptrend.xyaxis").font(.system(size: 48)).foregroundStyle(.secondary)
-            Text("尚無股票紀錄").font(.headline).foregroundStyle(.secondary)
-            Text("點擊右上角 + 新增股票").font(.subheadline).foregroundStyle(.tertiary)
+
+            ZStack {
+                // 外層脈衝光環
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                        value: emptyIconPulse
+                    )
+                // 內層脈衝光環（延遲 0.3s，製造波紋層次）
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                        value: emptyIconPulse
+                    )
+                // 主圓底（漸層填色）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.14), accent.opacity(0.06)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 88, height: 88)
+                    .overlay(
+                        Circle()
+                            .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                    )
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(accent.opacity(0.70))
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    emptyIconPulse = true
+                }
+            }
+
+            VStack(spacing: 10) {
+                Text("尚無股票紀錄")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text("記錄持股成本與即時報價，掌握投資損益")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+
+            Button {
+                showAdd = true
+            } label: {
+                Label("新增第一檔股票", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 22).padding(.vertical, 12)
+                    .background(
+                        LinearGradient(
+                            colors: [accent, Color(red: 0.86, green: 0.36, blue: 0.06)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .clipShape(Capsule())
+                    .shadow(color: Color(red: 0.86, green: 0.36, blue: 0.06).opacity(0.35), radius: 10, y: 5)
+            }
+            .buttonStyle(.plain)
+
             Spacer()
-        }.frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
     }
 
-    // MARK: - 卡片
+    // MARK: - 股票卡片（左側強調條 + 漸層圖示圓 + 彩色損益膠囊）
 
     private func stockCard(_ item: Stock) -> some View {
-        VStack(spacing: 10) {
-            HStack {
+        let pl = item.profitLoss
+        let isPositive = pl >= 0
+        let plColor: Color = isPositive ? .green : .red
+        let accent: Color = item.isSold ? .secondary : Color(red: 1.00, green: 0.62, blue: 0.22)
+        let priceStr = item.isSold
+            ? String(format: "NT$%.2f（賣出）", item.soldPrice)
+            : String(format: "NT$%.2f", item.currentPrice)
+
+        return HStack(spacing: 0) {
+            // 左側 4pt 橙色強調條
+            RoundedRectangle(cornerRadius: 3)
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.40)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4)
+                .padding(.vertical, 10)
+                .padding(.trailing, 14)
+
+            HStack(spacing: 12) {
+                // 44pt 漸層圖示圓 + 報價狀態角標
+                ZStack(alignment: .topTrailing) {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 44, height: 44)
+                        .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(accent)
+                    // 報價狀態角標（成功/失敗小圓點）
+                    if let ok = fetchStatus[item.id] {
+                        Circle()
+                            .fill(ok ? Color.green : Color.red)
+                            .frame(width: 10, height: 10)
+                            .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
+                            .offset(x: 2, y: -2)
+                    }
+                }
+
+                // 名稱 + 代號膠囊 + 持股數
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        if let ok = fetchStatus[item.id] {
-                            Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .font(.caption).foregroundStyle(ok ? .green : .red)
-                        }
-                        Text(item.name).font(.subheadline.weight(.semibold))
+                    Text(item.name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
                         if !item.symbol.isEmpty {
                             Text(item.symbol)
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color(.systemGray5))
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(accent)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(accent.opacity(0.12))
+                                .clipShape(Capsule())
                         }
                         if item.isSold {
                             Text("已賣出")
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.15))
+                                .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(.orange)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.orange.opacity(0.12))
+                                .clipShape(Capsule())
                         }
-                    }
-                    if item.isSold {
-                        Text("\(Int(item.shares)) 股 x NT$\(String(format: "%.2f", item.soldPrice))")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("\(Int(item.shares)) 股 x NT$\(String(format: "%.2f", item.currentPrice))")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("\(Int(item.shares)) 股 · \(priceStr)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(fmt(item.marketValue)).font(.subheadline.bold())
-                    let pl = item.profitLoss
-                    Text(String(format: "%@%.1f%%", pl >= 0 ? "+" : "", item.returnRate))
-                        .font(.caption.bold())
-                        .foregroundStyle(pl >= 0 ? .green : .red)
+
+                Spacer(minLength: 4)
+
+                // 市值 + 報酬率膠囊
+                VStack(alignment: .trailing, spacing: 5) {
+                    Text(fmt(item.marketValue))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .contentTransition(.numericText())
+                    HStack(spacing: 3) {
+                        Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
+                            .font(.system(size: 9, weight: .bold))
+                        Text(String(format: "%@%.1f%%", isPositive ? "+" : "", item.returnRate))
+                            .font(.system(size: 11, weight: .bold))
+                    }
+                    .foregroundStyle(plColor)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(plColor.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(plColor.opacity(0.22), lineWidth: 0.6))
                 }
             }
-
-            Divider()
-
-            HStack {
-                Label("成本 " + fmt(item.totalCost), systemImage: "banknote")
-                Spacer()
-                let pl = item.profitLoss
-                Text("損益 " + (pl >= 0 ? "+" : "") + fmt(pl))
-                    .foregroundStyle(pl >= 0 ? .green : .red)
-            }
-            .font(.caption).foregroundStyle(.secondary)
+            .padding(.vertical, 8)
+            .padding(.trailing, 16)
         }
-        .padding(14)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray4), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
         )
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
     private func fmt(_ v: Double) -> String {
@@ -416,9 +667,9 @@ struct StockView: View {
     }
 
     private func fmtShort(_ v: Double) -> String {
-        let abs = abs(v)
-        if abs >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
-        if abs >= 10_000 { return String(format: "%.0f萬", v / 10_000) }
+        let absV = abs(v)
+        if absV >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
+        if absV >= 10_000 { return String(format: "%.0f萬", v / 10_000) }
         return fmt(v)
     }
 }
