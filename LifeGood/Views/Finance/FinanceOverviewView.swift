@@ -92,27 +92,102 @@ struct FinanceOverviewView: View {
     }
 
     // MARK: - 總資產卡片
+    // 【美化方向 — totalAssetsCard】
+    // ① 右側：取代裝飾圖示，改為「投資損益」KPI 膠囊（股票+儲蓄險合計），
+    //    正值顯示↑綠色、負值顯示↓紅色，資訊密度與 IncomeView hero card 保持均值。
+    // ② 頂部左側：「N 項資產」改為白色細框膠囊，視覺重量更平衡。
+    // ③ 底部：加分隔線 + mini 資產配置彩條，讓用戶一眼看出資產結構分布，
+    //    色彩邏輯與下方 allocationSection 的橫向彩條完全對應。
+
+    private var totalInvestmentPL: Double { insuranceProfitLoss + stockProfitLoss }
 
     private var totalAssetsCard: some View {
-        HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("總資產")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.80))
-                Text(fmt(totalAssetsNTD))
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .contentTransition(.numericText())
-                Text("\(totalAssetCount) 項資產")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.65))
-                    .padding(.top, 1)
+        let pl = totalInvestmentPL
+        let allocations = ntdAllocations
+
+        return VStack(spacing: 0) {
+            // 頂部：總資產 + 損益 KPI
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("總資產")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    Text(fmt(totalAssetsNTD))
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
+                    // 項目計數膠囊
+                    Text("\(totalAssetCount) 項資產")
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.white.opacity(0.20))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
+                        .padding(.top, 1)
+                }
+                Spacer()
+                // 投資損益 KPI（股票 + 儲蓄險）
+                if store.stocks.count > 0 || store.insurances.count > 0 {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("投資損益")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.62))
+                        HStack(spacing: 3) {
+                            Image(systemName: pl >= 0 ? "arrow.up.right" : "arrow.down.right")
+                                .font(.system(size: 10, weight: .bold))
+                            Text((pl >= 0 ? "+" : "") + fmtShort(pl))
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                        .foregroundStyle(pl >= 0 ? Color(red: 0.60, green: 1.00, blue: 0.75) : Color(red: 1.0, green: 0.78, blue: 0.75))
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(.white.opacity(0.18))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(pl >= 0 ? 0.35 : 0.25), lineWidth: 0.75))
+                    }
+                }
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
-                Image(systemName: "chart.pie.fill")
-                    .font(.system(size: 32, weight: .light))
-                    .foregroundStyle(.white.opacity(0.30))
+
+            // mini 資產配置彩條：分隔線 + 比例彩條 + 圖例
+            if !allocations.isEmpty {
+                Rectangle()
+                    .fill(.white.opacity(0.20))
+                    .frame(height: 0.5)
+                    .padding(.vertical, 14)
+
+                VStack(spacing: 6) {
+                    // 比例彩條
+                    GeometryReader { geo in
+                        HStack(spacing: 2) {
+                            ForEach(allocations) { a in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(colorFor(a.type).opacity(0.90))
+                                    .frame(
+                                        width: max(3, CGFloat(a.percentage / 100) *
+                                                   (geo.size.width - CGFloat(max(0, allocations.count - 1)) * 2))
+                                    )
+                            }
+                        }
+                    }
+                    .frame(height: 6)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                    // 圖例膠囊橫排
+                    HStack(spacing: 6) {
+                        ForEach(allocations) { a in
+                            HStack(spacing: 3) {
+                                Circle()
+                                    .fill(colorFor(a.type))
+                                    .frame(width: 5, height: 5)
+                                Text(a.type.rawValue)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.80))
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
             }
         }
         .padding(20)
@@ -422,6 +497,11 @@ struct FinanceOverviewView: View {
     }
 
     // MARK: - 每月現金流
+    // 【美化方向 — cashFlowSection】
+    // ① 淨現金流欄放大字體（.title3.bold），加入彩色背景膠囊，正負值一目了然。
+    // ② 租金收入 / 房貸支出欄以圓角方塊替換純文字，圖示圓擴大到 38pt。
+    // ③ 整體卡片加極細 overlay 邊框，提升精緻感與深色模式相容性。
+    // ④ 若無房地產資料顯示空狀態提示，避免三欄全為零的空洞感。
 
     private var cashFlowSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -437,53 +517,124 @@ struct FinanceOverviewView: View {
                 Text("每月現金流")
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                Text("房地產")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
             }
             .padding(.horizontal)
 
             let flow = store.monthlyCashFlow
-            HStack(spacing: 0) {
-                cashFlowItem(label: "租金收入",
-                             value: store.monthlyRentalIncome,
-                             icon: "house.fill",
-                             color: .green)
-                Divider().frame(height: 44)
-                cashFlowItem(label: "房貸支出",
-                             value: store.monthlyMortgagePayment,
-                             icon: "building.columns.fill",
-                             color: .red)
-                Divider().frame(height: 44)
-                cashFlowItem(label: "淨現金流",
-                             value: flow,
-                             icon: flow >= 0 ? "arrow.up.circle.fill" : "arrow.down.circle.fill",
-                             color: flow >= 0 ? .green : .red)
+            let income = store.monthlyRentalIncome
+            let mortgage = store.monthlyMortgagePayment
+
+            if income == 0 && mortgage == 0 {
+                // 空狀態：無房地產現金流資料
+                VStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(.systemFill))
+                            .frame(width: 52, height: 52)
+                        Image(systemName: "house.badge.questionmark")
+                            .font(.system(size: 22, weight: .light))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("新增房地產後顯示月現金流")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 22)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+                .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+                .padding(.horizontal)
+            } else {
+                HStack(spacing: 0) {
+                    // 租金收入
+                    cashFlowSideItem(label: "租金收入", value: income,
+                                     icon: "house.fill", color: .green)
+
+                    // 分隔線
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.28))
+                        .frame(width: 0.5, height: 56)
+
+                    // 房貸支出
+                    cashFlowSideItem(label: "房貸支出", value: mortgage,
+                                     icon: "building.columns.fill", color: .red)
+
+                    // 分隔線
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.28))
+                        .frame(width: 0.5, height: 56)
+
+                    // 淨現金流（強調欄）
+                    cashFlowNetItem(flow: flow)
+                }
+                .padding(.vertical, 14)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+                )
+                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+                .padding(.horizontal)
             }
-            .padding(.vertical, 16)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-            .padding(.horizontal)
         }
     }
 
-    private func cashFlowItem(label: String, value: Double,
-                              icon: String, color: Color) -> some View {
-        VStack(spacing: 6) {
+    private func cashFlowSideItem(label: String, value: Double,
+                                  icon: String, color: Color) -> some View {
+        VStack(spacing: 7) {
             ZStack {
-                Circle()
-                    .fill(color.opacity(0.12))
-                    .frame(width: 34, height: 34)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(color.opacity(0.10))
+                    .frame(width: 38, height: 38)
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(color)
             }
             Text(label)
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(fmtShort(value))
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundStyle(color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func cashFlowNetItem(flow: Double) -> some View {
+        let isPositive = flow >= 0
+        let netColor: Color = isPositive ? .green : .red
+        return VStack(spacing: 7) {
+            ZStack {
+                Circle()
+                    .fill(netColor.opacity(0.14))
+                    .frame(width: 38, height: 38)
+                Image(systemName: isPositive ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(netColor)
+            }
+            Text("淨現金流")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text((isPositive ? "+" : "") + fmtShort(flow))
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(netColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(netColor.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(netColor.opacity(0.22), lineWidth: 0.6))
         }
         .frame(maxWidth: .infinity)
     }
