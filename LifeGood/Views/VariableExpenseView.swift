@@ -528,6 +528,8 @@ struct FilterChip: View {
     let title: String
     var icon: String?
     let isSelected: Bool
+    /// 選中狀態的背景色；預設 .green，可傳入分類特有色彩（如 CareerView 的子分類色）
+    var tint: Color = .green
     let action: () -> Void
 
     var body: some View {
@@ -542,11 +544,11 @@ struct FilterChip: View {
             }
             .padding(.horizontal, 13)
             .padding(.vertical, 7)
-            .background(isSelected ? Color.green : Color(.secondarySystemFill))
+            .background(isSelected ? tint : Color(.secondarySystemFill))
             .foregroundStyle(isSelected ? .white : .primary)
             .clipShape(Capsule())
             .shadow(
-                color: isSelected ? Color.green.opacity(0.30) : .clear,
+                color: isSelected ? tint.opacity(0.30) : .clear,
                 radius: 6, x: 0, y: 3
             )
         }
