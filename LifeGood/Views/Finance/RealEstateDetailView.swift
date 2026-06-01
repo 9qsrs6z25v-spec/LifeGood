@@ -2380,8 +2380,11 @@ struct ElevatorMaintenanceEditor: View {
         } else {
             estate.elevatorMaintenances.append(record)
         }
-        store.update(estate)
+        // 先關閉 sheet，下一個 runloop 才改 @Published store，避免在 sheet 關閉的
+        // view-update 交易裡同步改 observed state（父頁堆多個 sheet）造成真機閃退。
+        let financeStore = store
         dismiss()
+        DispatchQueue.main.async { financeStore.update(estate) }
     }
 
     private func deleteRecord() {
@@ -2389,8 +2392,9 @@ struct ElevatorMaintenanceEditor: View {
               let e = editing else { return }
         if let name = e.photoFileName { ElevatorMaintenance.deletePhoto(name) }
         estate.elevatorMaintenances.removeAll { $0.id == e.id }
-        store.update(estate)
+        let financeStore = store
         dismiss()
+        DispatchQueue.main.async { financeStore.update(estate) }
     }
 }
 
@@ -2662,8 +2666,10 @@ struct UtilityPaymentEditor: View {
         } else {
             estate.utilityPayments.append(record)
         }
-        store.update(estate)
+        // 先關閉 sheet，下一個 runloop 才改 @Published store（避免真機 present/dismiss 交易期間改 observed state 閃退）
+        let financeStore = store
         dismiss()
+        DispatchQueue.main.async { financeStore.update(estate) }
     }
 
     private func deleteRecord() {
@@ -2681,8 +2687,9 @@ struct UtilityPaymentEditor: View {
             expenseStore.expenses.removeAll { $0.id == linkedId }
         }
         estate.utilityPayments.removeAll { $0.id == e.id }
-        store.update(estate)
+        let financeStore = store
         dismiss()
+        DispatchQueue.main.async { financeStore.update(estate) }
     }
 
     /// 同步銀行扣款紀錄（與 AddExpenseView 同邏輯）

@@ -157,8 +157,11 @@ struct RenovationPhotoEditor: View {
         } else {
             estate.renovationPhotos.append(record)
         }
-        store.update(estate)
+        // 先關閉 sheet，下一個 runloop 才改動 @Published store。避免在「關閉 sheet」的
+        // view-update 交易裡同步改 observed state（父頁堆了多個 sheet），真機上會閃退。
+        let financeStore = store
         dismiss()
+        DispatchQueue.main.async { financeStore.update(estate) }
     }
 
     /// 取消時若是新增模式，把已寫入的檔案清掉避免變孤兒
@@ -179,8 +182,9 @@ struct RenovationPhotoEditor: View {
             RenovationPhoto.deletePhoto(name)
         }
         estate.renovationPhotos.removeAll { $0.id == e.id }
-        store.update(estate)
+        let financeStore = store
         dismiss()
+        DispatchQueue.main.async { financeStore.update(estate) }
     }
 }
 
