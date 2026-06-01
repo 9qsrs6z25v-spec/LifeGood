@@ -1,5 +1,13 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（LifeOverviewView）
+// [2026-06] 本次美化方向：
+//   1. statsCard：為三個 statBadge 加入錯落進場動畫（對齊 OverviewView summaryCard 規格）
+//   2. 「最近里程碑」區塊標題計數徽章：改用橘色 accent（對齊其他頁面 accent 膠囊規格）
+//   3. 「分類統計」區塊標題計數徽章：改用藍色 accent（統一 badge 配色語言）
+//   4. emptyMilestonePlaceholder：升級為雙層脈衝光環 + 漸層底 icon 圓 + 橘色 accent，
+//      對齊 VariableExpenseView.emptyStateView 的空狀態設計規格
+
 struct LifeOverviewView: View {
     @EnvironmentObject var store: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -12,6 +20,8 @@ struct LifeOverviewView: View {
     @State private var showPremiumAlert = false
     @State private var timelineRowsAppeared = false
     @State private var categoryRowsAppeared = false
+    @State private var statsCardAppeared = false
+    @State private var emptyMilestonePulse = false
 
     var body: some View {
         // 計算一次，避免 statsCard / milestoneTimeline / categoryBreakdown 各自重算（共 5 次）
@@ -90,16 +100,27 @@ struct LifeOverviewView: View {
     // MARK: - 統計卡
 
     private func statsCard(_ allMS: [LifeMilestone]) -> some View {
-        HStack(spacing: 12) {
-            statBadge(title: "總里程碑",
-                      count: allMS.count,
-                      icon: "trophy.fill", color: .orange)
-            statBadge(title: "本年新增", count: milestonesThisYear(allMS),
-                      icon: "calendar.badge.plus", color: .green)
-            statBadge(title: "分類數", count: usedCategories(allMS),
-                      icon: "square.grid.2x2.fill", color: .blue)
+        let items: [(title: String, count: Int, icon: String, color: Color, delay: Double)] = [
+            ("總里程碑", allMS.count, "trophy.fill",          .orange, 0.06),
+            ("本年新增", milestonesThisYear(allMS), "calendar.badge.plus", .green,  0.14),
+            ("分類數",   usedCategories(allMS),      "square.grid.2x2.fill", .blue, 0.22),
+        ]
+        return HStack(spacing: 12) {
+            ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
+                statBadge(title: item.title, count: item.count, icon: item.icon, color: item.color)
+                    .opacity(statsCardAppeared ? 1 : 0)
+                    .offset(y: statsCardAppeared ? 0 : 18)
+                    .animation(
+                        .spring(response: 0.50, dampingFraction: 0.78)
+                            .delay(item.delay),
+                        value: statsCardAppeared
+                    )
+            }
         }
         .padding(.horizontal)
+        .onAppear {
+            withAnimation { statsCardAppeared = true }
+        }
     }
 
     private func statBadge(title: String, count: Int, icon: String, color: Color) -> some View {
@@ -181,10 +202,11 @@ struct LifeOverviewView: View {
                 if !recent.isEmpty {
                     Text("\(recent.count) / \(allMS.count) 筆")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.orange)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color(.tertiarySystemFill))
+                        .background(Color.orange.opacity(0.10))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.75))
                 }
             }
             .padding(.horizontal)
@@ -281,27 +303,66 @@ struct LifeOverviewView: View {
     }
 
     private var emptyMilestonePlaceholder: some View {
-        VStack(spacing: 12) {
+        let accent = Color.orange
+        return VStack(spacing: 20) {
             ZStack {
+                // 外層脈衝光環
                 Circle()
-                    .fill(Color(.systemFill))
-                    .frame(width: 64, height: 64)
+                    .stroke(accent.opacity(emptyMilestonePulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(emptyMilestonePulse ? 1.38 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                        value: emptyMilestonePulse
+                    )
+                // 內層脈衝光環（波紋層次）
+                Circle()
+                    .stroke(accent.opacity(emptyMilestonePulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(emptyMilestonePulse ? 1.65 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                        value: emptyMilestonePulse
+                    )
+                // 主圓底（漸層填色）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.15), accent.opacity(0.06)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 86, height: 86)
+                    .overlay(
+                        Circle()
+                            .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                    )
                 Image(systemName: "trophy")
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(accent.opacity(0.72))
             }
-            Text("暫無里程碑")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text("新增生命中的重要時刻")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    emptyMilestonePulse = true
+                }
+            }
+
+            VStack(spacing: 8) {
+                Text("暫無里程碑")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.70))
+                Text("記錄生命中每一個重要時刻")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
+        .padding(.vertical, 44)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
@@ -333,10 +394,11 @@ struct LifeOverviewView: View {
                         Spacer()
                         Text("\(entries.count) 類")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.blue)
                             .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color(.tertiarySystemFill))
+                            .background(Color.blue.opacity(0.10))
                             .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.75))
                     }
                     .padding(.horizontal)
 
