@@ -1,5 +1,14 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（FixedExpenseView）
+// [2026-06] 本次美化方向：
+//   1. 補 .navigationBarTitleDisplayMode(.large) 與其他主要列表頁對齊
+//   2. 空狀態：加入雙層脈衝光環動畫（對齊 VariableExpenseView emptyStateView 規格）
+//   3. 分類 Section：加入交錯進場動畫（對齊 OverviewView categoryRow 規格）
+//   4. categoryHeader：新增項目計數膠囊徽章，資訊密度與 daySectionHeader 對齊
+//   5. FixedExpenseRow：季繳 / 年繳項目在金額下方顯示「月均 NT$X」輔助標籤，
+//      幫助使用者快速換算月度負擔，對齊可讀性標準
+
 struct FixedExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -7,6 +16,8 @@ struct FixedExpenseView: View {
     @State private var showingAddSheet = false
     @State private var expenseToEdit: Expense?
     @State private var headerAppeared = false
+    @State private var emptyIconPulse = false
+    @State private var categoryListAppeared = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -61,6 +72,7 @@ struct FixedExpenseView: View {
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("固定支出")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -214,28 +226,51 @@ struct FixedExpenseView: View {
     // MARK: - 空狀態
 
     private var emptyStateView: some View {
-        VStack(spacing: 24) {
+        let accent = Color(red: 0.22, green: 0.53, blue: 0.98)
+        return VStack(spacing: 24) {
             Spacer()
 
             ZStack {
+                // 外層脈衝光環（對齊 VariableExpenseView emptyStateView 雙層環規格）
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                        value: emptyIconPulse
+                    )
+                // 內層脈衝光環（延遲 0.3s，製造波紋層次）
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                        value: emptyIconPulse
+                    )
+                // 主圓底（漸層填色）
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [
-                                Color(red: 0.22, green: 0.53, blue: 0.98).opacity(0.12),
-                                Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.06)
-                            ],
+                            colors: [accent.opacity(0.14), accent.opacity(0.06)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 96, height: 96)
-                Circle()
-                    .stroke(Color(red: 0.22, green: 0.53, blue: 0.98).opacity(0.18), lineWidth: 1.5)
-                    .frame(width: 96, height: 96)
+                    .frame(width: 88, height: 88)
+                    .overlay(
+                        Circle()
+                            .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                    )
                 Image(systemName: "pin.slash")
-                    .font(.system(size: 38, weight: .light))
-                    .foregroundStyle(Color(red: 0.22, green: 0.53, blue: 0.98).opacity(0.55))
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(accent.opacity(0.70))
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    emptyIconPulse = true
+                }
             }
 
             VStack(spacing: 10) {
@@ -259,10 +294,7 @@ struct FixedExpenseView: View {
                     .padding(.vertical, 12)
                     .background(
                         LinearGradient(
-                            colors: [
-                                Color(red: 0.22, green: 0.53, blue: 0.98),
-                                Color(red: 0.10, green: 0.35, blue: 0.82)
-                            ],
+                            colors: [accent, Color(red: 0.10, green: 0.35, blue: 0.82)],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
@@ -281,18 +313,32 @@ struct FixedExpenseView: View {
 
     @ViewBuilder
     private var fixedExpenseSections: some View {
-        ForEach(groupedByCategory, id: \.key) { category, expenses in
+        ForEach(Array(groupedByCategory.enumerated()), id: \.element.key) { groupIdx, pair in
+            let (category, expenses) = pair
             Section(header: categoryHeader(category: category, expenses: expenses)) {
-                ForEach(expenses) { expense in
+                ForEach(Array(expenses.enumerated()), id: \.element.id) { rowIdx, expense in
                     FixedExpenseRow(expense: expense)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             expenseToEdit = expense
                         }
+                        // 交錯進場：群組序 × 4 + 列序，確保每列入場稍有延遲
+                        .opacity(categoryListAppeared ? 1 : 0)
+                        .offset(y: categoryListAppeared ? 0 : 14)
+                        .animation(
+                            .spring(response: 0.45, dampingFraction: 0.82)
+                                .delay(0.05 * Double(groupIdx * 4 + rowIdx)),
+                            value: categoryListAppeared
+                        )
                 }
                 .onDelete { offsets in
                     deleteWithSync(offsets: offsets, from: expenses)
                 }
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                categoryListAppeared = true
             }
         }
     }
@@ -339,7 +385,18 @@ struct FixedExpenseView: View {
             Text(category.rawValue)
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(accent)
+
+            // 項目計數膠囊徽章（對齊 recentTransactionsSection 的計數規格）
+            Text("\(expenses.count) 項")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(accent.opacity(0.80))
+                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.20), lineWidth: 0.6))
+
             Spacer()
+
             // 月費用小計膠囊（加強邊框）
             Group {
                 if category == .insurance {
@@ -572,6 +629,25 @@ struct FixedExpenseRow: View {
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28))
                         .contentTransition(.numericText())
+
+                    // 季繳 / 年繳：顯示月均換算，幫助使用者快速理解月度負擔
+                    if let recurrence = expense.recurrence,
+                       recurrence != .monthly && recurrence != .none {
+                        let monthly = monthlyEquivalentAmount(expense)
+                        if monthly > 0 {
+                            HStack(spacing: 2) {
+                                Image(systemName: "arrow.down.to.line")
+                                    .font(.system(size: 8, weight: .medium))
+                                Text("月均 \(formatCurrencyCompact(monthly))")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28).opacity(0.65))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color(red: 0.92, green: 0.28, blue: 0.28).opacity(0.08))
+                            .clipShape(Capsule())
+                        }
+                    }
+
                     if let label = deductionTargetLabel {
                         HStack(spacing: 3) {
                             Image(systemName: deductionIcon)
@@ -632,6 +708,24 @@ struct FixedExpenseRow: View {
 
     private func formatCurrency(_ value: Double) -> String {
         Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+
+    /// 依週期換算月均金額（與 FixedExpenseView.monthlyEquivalent 邏輯一致）
+    private func monthlyEquivalentAmount(_ expense: Expense) -> Double {
+        switch expense.recurrence {
+        case .monthly:   return expense.amount
+        case .quarterly: return expense.amount / 3
+        case .yearly:    return expense.amount / 12
+        case .none:      return 0
+        }
+    }
+
+    /// 金額緊湊格式：≥1萬顯示「N.N萬」，否則顯示「NT$X」
+    private func formatCurrencyCompact(_ value: Double) -> String {
+        if abs(value) >= 10_000 {
+            return String(format: "%.1f萬", value / 10_000)
+        }
+        return Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 }
 
