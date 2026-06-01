@@ -80,17 +80,8 @@ struct IncomeView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 8) {
-                        VStack(alignment: .trailing, spacing: 0) {
-                            Text("總收入")
-                                .font(.caption2).foregroundStyle(.secondary)
-                            Text(fmt(totalIncomeAll))
-                                .font(.subheadline.bold()).foregroundStyle(.green)
-                                .lineLimit(1).minimumScaleFactor(0.6)
-                        }
-                        Button { showAdd = true } label: {
-                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
-                        }
+                    Button { showAdd = true } label: {
+                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                     }
                 }
             }
@@ -132,6 +123,32 @@ struct IncomeView: View {
         return min(day / total, 1.0)
     }
 
+    /// 累計收入 + 歷史月均收入（從最早一筆到現在）
+    private var monthlyStats: (cumulative: Double, average: Double) {
+        let total = totalIncomeAll
+        guard !store.incomes.isEmpty,
+              let earliest = store.incomes.min(by: { $0.date < $1.date })?.date else {
+            return (total, total)
+        }
+        let monthCount = max(1, (Calendar.current.dateComponents([.month], from: earliest, to: Date()).month ?? 0) + 1)
+        return (total, total / Double(monthCount))
+    }
+
+    private func kpiCell(label: String, value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
+    }
+
     private var summaryHeader: some View {
         let useEstimate = !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
         let displayedIncome = useEstimate ? store.estimatedMonthlyIncome : store.currentMonthIncomeTotal
@@ -143,6 +160,7 @@ struct IncomeView: View {
         let spendingRatio = displayedIncome > 0
             ? min(store.currentMonthTotal / displayedIncome, 1.0)
             : 0.0
+        let stats = monthlyStats
 
         return VStack(spacing: 0) {
             // 頂部：本月收入 + 收支餘額
@@ -202,36 +220,49 @@ struct IncomeView: View {
                 .padding(.top, 10)
             }
 
+            // KPI 橫列：累計收入 / 月均收入 / 固定月收
+            HStack(spacing: 0) {
+                kpiCell(label: "累計收入", value: fmt(stats.cumulative))
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                kpiCell(label: "月均收入", value: fmt(stats.average))
+                if recurringMonthly > 0 {
+                    Rectangle()
+                        .fill(.white.opacity(0.25))
+                        .frame(width: 0.5, height: 28)
+                    kpiCell(label: "固定月收", value: fmt(recurringMonthly))
+                }
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 12)
+
             // 分隔線
             Rectangle()
                 .fill(.white.opacity(0.20))
                 .frame(height: 0.5)
                 .padding(.vertical, 12)
 
-            // 第二行：固定月收入（若有）+ 支出/月進度條
-            if recurringMonthly > 0 {
-                HStack(spacing: 6) {
-                    ZStack {
-                        Circle()
-                            .fill(.white.opacity(0.18))
-                            .frame(width: 22, height: 22)
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    Text("固定月收入")
-                        .font(.caption)
-                    Spacer()
-                    Text(fmt(recurringMonthly))
-                        .font(.caption.bold())
-                }
-                .foregroundStyle(.white.opacity(0.88))
-                .padding(.bottom, 10)
-            }
-
-            // 支出 / 月進度雙進度條
+            // 雙軌進度條：月進度（上，薄軌）+ 支出比例（下，厚軌 + 針）
             if displayedIncome > 0 {
-                VStack(spacing: 6) {
+                VStack(spacing: 5) {
+                    // ① 月進度軌（薄軌，半透明白）
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(.white.opacity(0.12))
+                                .frame(height: 3)
+                            Capsule()
+                                .fill(.white.opacity(0.44))
+                                .frame(width: geo.size.width * headerMonthProgress, height: 3)
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: headerMonthProgress)
+                        }
+                    }
+                    .frame(height: 3)
+
+                    // ② 支出比例軌（厚軌 + 月進度指示針）
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule()
@@ -243,32 +274,31 @@ struct IncomeView: View {
                                       : .white.opacity(0.82))
                                 .frame(width: geo.size.width * spendingRatio, height: 6)
                                 .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingRatio)
+                            // 月進度指示針（細白豎棒，指示月份走到哪）
+                            Capsule()
+                                .fill(.white.opacity(0.92))
+                                .frame(width: 2, height: 6)
+                                .shadow(color: .black.opacity(0.25), radius: 1.5, x: 0, y: 0)
+                                .offset(x: max(0, geo.size.width * headerMonthProgress - 1))
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: headerMonthProgress)
                         }
                     }
                     .frame(height: 6)
 
                     HStack {
-                        HStack(spacing: 4) {
-                            Image(systemName: spendingRatio > 0.9
-                                  ? "exclamationmark.triangle.fill"
-                                  : "arrow.up.arrow.down.circle.fill")
-                                .font(.system(size: 9))
+                        HStack(spacing: 3) {
+                            Image(systemName: spendingRatio > 0.9 ? "flame.fill" : "arrow.up.arrow.down.circle.fill")
+                                .font(.system(size: spendingRatio > 0.9 ? 8 : 9))
                             Text("支出 \(Int(spendingRatio * 100))%")
                         }
                         .font(.caption2)
                         .foregroundStyle(spendingRatio > 0.9
                                          ? Color(red: 1.0, green: 0.78, blue: 0.75)
                                          : .white.opacity(0.62))
-
                         Spacer()
-
-                        HStack(spacing: 4) {
-                            Image(systemName: "calendar")
-                                .font(.system(size: 9))
-                            Text("月進度 \(Int(headerMonthProgress * 100))%")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.62))
+                        Text("月進度 \(Int(headerMonthProgress * 100))%")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.60))
                     }
                 }
             }
