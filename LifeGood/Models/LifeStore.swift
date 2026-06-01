@@ -90,19 +90,28 @@ class LifeStore: ObservableObject {
     // MARK: - 部屬 CRUD
 
     func add(_ item: Subordinate) {
+        isLoading = true
         subordinates.append(item)
         syncOrgPersonFor(subordinate: item)
+        isLoading = false
+        save()
     }
     func update(_ item: Subordinate) {
+        isLoading = true
         if let i = subordinates.firstIndex(where: { $0.id == item.id }) { subordinates[i] = item }
         syncOrgPersonFor(subordinate: item)
+        isLoading = false
+        save()
     }
     func deleteSubordinate(_ item: Subordinate) {
+        isLoading = true
         subordinates.removeAll { $0.id == item.id }
         // 解除與公司組織人員的連結（保留人員資料以維持歷史）
         if let i = orgPeople.firstIndex(where: { $0.linkedSubordinateId == item.id }) {
             orgPeople[i].linkedSubordinateId = nil
         }
+        isLoading = false
+        save()
     }
 
     /// 把部屬資料同步到公司組織人員：
@@ -215,6 +224,7 @@ class LifeStore: ObservableObject {
     }
     func deleteOrgPerson(_ item: OrgPerson) {
         if let name = item.photoFileName { OrgPerson.deletePhoto(name) }
+        isLoading = true
         // 解除名片反向連結
         if let cid = item.linkedBusinessCardId,
            let i = businessCards.firstIndex(where: { $0.id == cid }),
@@ -222,6 +232,8 @@ class LifeStore: ObservableObject {
             businessCards[i].linkedOrgPersonId = nil
         }
         orgPeople.removeAll { $0.id == item.id }
+        isLoading = false
+        save()
     }
 
     func add(_ item: BusinessCard) { businessCards.append(item) }
@@ -230,6 +242,7 @@ class LifeStore: ObservableObject {
     }
     func deleteBusinessCard(_ item: BusinessCard) {
         if let name = item.photoFileName { BusinessCard.deletePhoto(name) }
+        isLoading = true
         // 解除組織人員反向連結
         if let pid = item.linkedOrgPersonId,
            let i = orgPeople.firstIndex(where: { $0.id == pid }),
@@ -237,6 +250,8 @@ class LifeStore: ObservableObject {
             orgPeople[i].linkedBusinessCardId = nil
         }
         businessCards.removeAll { $0.id == item.id }
+        isLoading = false
+        save()
     }
 
     // MARK: - 家庭衍生里程碑
