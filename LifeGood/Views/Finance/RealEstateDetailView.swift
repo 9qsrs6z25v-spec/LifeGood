@@ -43,7 +43,6 @@ struct RealEstateDetailView: View {
 
     // MARK: - 收合狀態（房屋資料分頁）
     @State private var hiBasicExpanded = false
-    @State private var hiFloorsExpanded = false
     /// 集錦預設展開（房屋資料分頁的主視覺）
     @State private var hiGalleryExpanded = true
     @State private var hiElevatorExpanded = false
@@ -51,8 +50,6 @@ struct RealEstateDetailView: View {
     @State private var hiInsuranceExpanded = false
     @State private var hiAssetsExpanded = false
 
-    /// 樓層 3D 目前選中的樓層（純高亮用；物件樹已移到「資產」分頁）
-    @State private var selectedFloorId: UUID?
     /// 物件編輯 sheet：依（樓層 id, 項目 id, 是否為新增）開啟
     @State private var editingFloorItemTarget: FloorItemEditTarget?
 
@@ -623,18 +620,6 @@ struct RealEstateDetailView: View {
                 }
             }
 
-            // 2. 樓層 3D
-            if !estate.floors.isEmpty {
-                collapsibleSection(
-                    title: "樓層 3D",
-                    summary: "\(estate.floors.count) 層",
-                    summaryColor: Self.cyanColor,
-                    isExpanded: $hiFloorsExpanded
-                ) {
-                    buildingVisualization
-                }
-            }
-
             // 3. 房屋資料集錦（預設展開；右側 + Menu）
             collapsibleSection(
                 title: "房屋資料集錦",
@@ -909,19 +894,6 @@ struct RealEstateDetailView: View {
             .trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("B") { return -(Int(s.dropFirst()) ?? 0) }
         return Int(s) ?? 0
-    }
-
-    /// 樓層 3D 視覺化（純展示 / 點選樓層高亮）。物件樹已移到「資產」分頁，
-    /// 不再與 SceneKit 3D 視圖耦合，避免原本切換樓層 / 新增物件時的閃退。
-    private var buildingVisualization: some View {
-        HolographicBuildingView(
-            floors: sortedFloors,
-            isApartment: estate.buildingType != .townhouse,
-            selectedFloorId: $selectedFloorId
-        )
-        .shadow(color: Self.cyanColor.opacity(0.25), radius: 10)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
     }
 
     // MARK: - 資產分頁（依樓層分組的物件樹）
