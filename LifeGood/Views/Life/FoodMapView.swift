@@ -444,7 +444,7 @@ struct FoodMapView: View {
             && (selectedCompanion == nil || (exp.diningMember ?? "")
                 .components(separatedBy: ",")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
-                .contains(selectedCompanion!))
+                .contains(selectedCompanion ?? ""))
         }
     }
 

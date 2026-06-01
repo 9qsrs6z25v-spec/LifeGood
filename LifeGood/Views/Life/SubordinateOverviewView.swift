@@ -20,7 +20,7 @@ struct SubordinateOverviewView: View {
                     let start = rec.date
                     let end = rec.endDate ?? start
                     return selectedDate >= calendar.startOfDay(for: start)
-                        && selectedDate < calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: end))!
+                        && selectedDate < (calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: end)) ?? .distantFuture)
                 }
                 .map { (sub, $0) }
         }
