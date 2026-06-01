@@ -154,6 +154,20 @@ struct RealEstateDetailView: View {
             .sheet(item: $cutePhotoDraft) { draft in
                 CutePhotoViewer(draft: draft)
             }
+            // fileImporter 掛在穩定的 NavigationStack 上（不要掛在 galleryAddMenu 的
+            // Menu label，那是暫態 view，關閉檔案選單時回寫 binding 會閃退）。
+            .fileImporter(
+                isPresented: $showDocumentPicker,
+                allowedContentTypes: [
+                    .pdf, .presentation, .spreadsheet, .text, .commaSeparatedText,
+                    .plainText, .rtf, .image, .data
+                ],
+                allowsMultipleSelection: true
+            ) { result in
+                if case .success(let urls) = result {
+                    importDocuments(urls)
+                }
+            }
             .sheet(item: $previewingDocumentURL) { wrapper in
                 DocumentQuickLookView(url: wrapper.url)
             }
@@ -1200,18 +1214,6 @@ struct RealEstateDetailView: View {
                 .font(.subheadline).foregroundStyle(.green)
         }
         .buttonStyle(.plain)
-        .fileImporter(
-            isPresented: $showDocumentPicker,
-            allowedContentTypes: [
-                .pdf, .presentation, .spreadsheet, .text, .commaSeparatedText,
-                .plainText, .rtf, .image, .data
-            ],
-            allowsMultipleSelection: true
-        ) { result in
-            if case .success(let urls) = result {
-                importDocuments(urls)
-            }
-        }
     }
 
     /// 該房地產關聯的、有附照片的支出（變動 + 固定皆含）
