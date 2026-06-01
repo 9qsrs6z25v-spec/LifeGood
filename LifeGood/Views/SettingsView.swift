@@ -594,10 +594,11 @@ struct SettingsView: View {
         return "已同步"
     }
 
+    private static let syncDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
     private func formatSyncDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy/M/d HH:mm"
-        return formatter.string(from: date)
+        Self.syncDateFormatter.string(from: date)
     }
 
     // MARK: - 語音 AI 助手
@@ -851,7 +852,7 @@ struct SettingsView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("復原一小時前的資料")
-                        if let candidate = BackupManager.shared.findRestoreCandidate() {
+                        if let candidate = restoreCandidate {
                             Text("可用快照：\(formatRestoreDate(candidate.date))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -867,6 +868,10 @@ struct SettingsView: View {
                 }
             }
             .foregroundStyle(.primary)
+            .onAppear {
+                // 預先查詢，避免在 label closure（每次 render）執行 filesystem I/O
+                restoreCandidate = BackupManager.shared.findRestoreCandidate()
+            }
         } header: {
             Text("資料復原")
         } footer: {
@@ -888,10 +893,11 @@ struct SettingsView: View {
         showRestoreResult = true
     }
 
+    private static let restoreDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
     private func formatRestoreDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy/M/d HH:mm"
-        return formatter.string(from: date)
+        Self.restoreDateFormatter.string(from: date)
     }
 
     // MARK: - 危險區域
@@ -1099,17 +1105,15 @@ struct SettingsView: View {
 
     // MARK: - Helpers
 
-    private func dateStamp() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
-        return formatter.string(from: Date())
-    }
+    private static let dateStampFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd"; return f
+    }()
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
 
-    private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy/M/d"
-        return formatter.string(from: date)
-    }
+    private func dateStamp() -> String { Self.dateStampFormatter.string(from: Date()) }
+    private func formatDate(_ date: Date) -> String { Self.shortDateFormatter.string(from: date) }
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"

@@ -191,8 +191,8 @@ struct RealEstateView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
-                    let active = store.realEstates.filter { !$0.isSold }.count
-                    let sold = store.realEstates.filter { $0.isSold }.count
+                    let active = activeEstates.count
+                    let sold = soldEstates.count
                     Text("\(active) 筆持有")
                         .font(.subheadline).foregroundStyle(.secondary)
                     if sold > 0 {

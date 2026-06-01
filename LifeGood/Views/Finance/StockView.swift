@@ -153,18 +153,19 @@ struct StockView: View {
 
     @MainActor
     private func refreshAllPrices() async {
+        guard !isUpdating else { return }
         let targets = activeStocks.filter { !$0.symbol.isEmpty }
         guard !targets.isEmpty else { return }
 
         withAnimation { isUpdating = true; fetchStatus = [:] }
         var success = 0
         var fail = 0
-        var updatedStocks = store.stocks
 
         for stock in targets {
             if let price = await fetchPrice(symbol: stock.symbol) {
-                if let idx = updatedStocks.firstIndex(where: { $0.id == stock.id }) {
-                    updatedStocks[idx].currentPrice = price
+                // 每次 await 後直接更新對應條目，避免 snapshot 覆蓋期間其他人（CloudKit sync）的修改
+                if let idx = store.stocks.firstIndex(where: { $0.id == stock.id }) {
+                    store.stocks[idx].currentPrice = price
                 }
                 fetchStatus[stock.id] = true
                 success += 1
@@ -173,7 +174,6 @@ struct StockView: View {
                 fail += 1
             }
         }
-        store.stocks = updatedStocks
 
         withAnimation { isUpdating = false }
 
