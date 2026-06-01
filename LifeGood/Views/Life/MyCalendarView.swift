@@ -14,6 +14,14 @@ struct MyCalendarView: View {
 
     private let calendar = Calendar.current
 
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    }()
+    private static let calendarDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d (EEE)"
+        f.locale = Locale(identifier: "zh_TW"); return f
+    }()
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -280,10 +288,7 @@ struct MyCalendarView: View {
     /// 當前選定日期顯示用（今天 → 「當日事件」、其他日 → 「2025/5/15 (Wed) 事件」）
     private var selectedDayHeaderTitle: String {
         if calendar.isDateInToday(selectedDate) { return "當日事件" }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_Hant_TW")
-        f.dateFormat = "M/d (EEE)"
-        return "\(f.string(from: selectedDate)) 事件"
+        return "\(Self.calendarDateFormatter.string(from: selectedDate)) 事件"
     }
 
     private var todayEventsSection: some View {
@@ -348,16 +353,19 @@ struct MyCalendarView: View {
     // MARK: - 本週快覽（以選取日為中心向後 7 天）
 
     private var weekPreviewSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // 先計算一次，sectionHeader count 與 weekDayCard 共用，避免 eventsOn 被呼叫兩輪（共14次→7次）
+        let weekEvents = Dictionary(uniqueKeysWithValues: weekDates.map { ($0, eventsOn($0)) })
+        let totalCount = weekEvents.values.reduce(0) { $0 + $1.count }
+        return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("接下來 7 天",
                           icon: "calendar",
                           color: Color(red: 0.78, green: 0.71, blue: 0.89),
-                          count: weekDates.reduce(0) { $0 + eventsOn($1).count })
+                          count: totalCount)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(weekDates, id: \.self) { date in
-                        weekDayCard(date: date, events: eventsOn(date))
+                        weekDayCard(date: date, events: weekEvents[date] ?? [])
                     }
                 }
                 .padding(.horizontal)
@@ -476,15 +484,8 @@ struct MyCalendarView: View {
             .padding(.horizontal).padding(.bottom, 12)
     }
 
-    private func fmtTime(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d)
-    }
-
-    private func fmtDate(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "M/d (EEE)"
-        f.locale = Locale(identifier: "zh_TW")
-        return f.string(from: d)
-    }
+    private func fmtTime(_ d: Date) -> String { Self.timeFormatter.string(from: d) }
+    private func fmtDate(_ d: Date) -> String { Self.calendarDateFormatter.string(from: d) }
 
     private func daysUntil(_ d: Date) -> String {
         let now = calendar.startOfDay(for: Date())
@@ -504,6 +505,13 @@ struct PersonalEventEditor: View {
 
     let initialDate: Date
     let editing: PersonalEvent?
+
+    private static let mdhmFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d HH:mm"; return f
+    }()
+    private static let hmFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    }()
 
     @State private var title: String = ""
     @State private var kind: PersonalEventKind = .meeting
@@ -911,12 +919,11 @@ struct PersonalEventEditor: View {
         guard reminder != .none else { return "" }
         let cal = Calendar.current
         let fire = cal.date(byAdding: .minute, value: -reminder.rawValue, to: date) ?? date
-        let f = DateFormatter()
-        f.dateFormat = "M/d HH:mm"
+        let timeStr = Self.mdhmFormatter.string(from: fire)
         if recurrence == .none {
-            return "首次提醒：\(f.string(from: fire))"
+            return "首次提醒：\(timeStr)"
         } else {
-            return "首次提醒：\(f.string(from: fire))，之後依「\(recurrence.rawValue)」重複"
+            return "首次提醒：\(timeStr)，之後依「\(recurrence.rawValue)」重複"
         }
     }
 
@@ -991,13 +998,7 @@ struct PersonalEventEditor: View {
 
     private func formatEnd(date: Date, minutes: Int) -> String {
         let end = Calendar.current.date(byAdding: .minute, value: minutes, to: date) ?? date
-        let f = DateFormatter()
-        let cal = Calendar.current
-        if cal.isDate(end, inSameDayAs: date) {
-            f.dateFormat = "HH:mm"
-        } else {
-            f.dateFormat = "M/d HH:mm"
-        }
+        let f = Calendar.current.isDate(end, inSameDayAs: date) ? Self.hmFormatter : Self.mdhmFormatter
         return f.string(from: end)
     }
 }
