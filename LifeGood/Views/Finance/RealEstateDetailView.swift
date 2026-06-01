@@ -1251,6 +1251,10 @@ struct RealEstateDetailView: View {
         }
         bulkRenovationPickerItems = []
         guard !fileNames.isEmpty else { return }
+        // 等系統 PhotosPicker 完全關閉，再開啟 RenovationPhotoEditor sheet。
+        // 否則在 PhotosPicker 還在 dismiss 時就 present 新 sheet（此頁堆了多個 sheet /
+        // picker / fileImporter），真機上的「present while dismissing」會直接閃退。
+        try? await Task.sleep(nanoseconds: 600_000_000)
         pendingBulkPhotoNames = fileNames
     }
 
