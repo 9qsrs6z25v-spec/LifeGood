@@ -1,5 +1,15 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（IncomeView）
+// [2026-06] 本次美化方向：
+//   1. emptyState：單層脈衝光環升級為雙層（外環延遲 0.3s 製造波紋），
+//      主圓尺寸從 82pt 對齊至 88pt，脈衝環從 100pt 對齊至 108pt，
+//      加入綠色 CTA 按鈕「新增第一筆收入」，對齊 VariableExpenseView.emptyStateView 設計規格
+//   2. incomeListSections：加入交錯淡入 + 向上進場動畫，
+//      對齊 VariableExpenseView.expenseListSections 規格
+//   3. summaryHeader：本月收入下方加入「日均收入」輔助文字，
+//      對齊 FixedExpenseView.fixedSummaryHeader 的日均顯示規格
+
 struct IncomeView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -9,6 +19,7 @@ struct IncomeView: View {
     @State private var selectedCategory: IncomeCategory?
     @State private var searchText: String = ""
     @State private var headerAppeared = false
+    @State private var listRowsAppeared = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -189,6 +200,14 @@ struct IncomeView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
                         .contentTransition(.numericText())
+                    // 日均收入：對齊 FixedExpenseView.fixedSummaryHeader 輔助文字規格
+                    if displayedIncome > 0 {
+                        let day = Calendar.current.component(.day, from: Date())
+                        Text("日均 " + fmt(displayedIncome / Double(max(day, 1))))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.top, 1)
+                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
@@ -421,39 +440,50 @@ struct IncomeView: View {
     private var emptyState: some View {
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
         let accent = Color(red: 0.16, green: 0.74, blue: 0.50)
-        return VStack(spacing: 20) {
+        return VStack(spacing: 24) {
             ZStack {
                 if !isSearching {
+                    // 外層脈衝光環（對齊 VariableExpenseView emptyStateView 雙層環規格）
                     Circle()
                         .stroke(accent.opacity(emptyIconPulse ? 0 : 0.25), lineWidth: 1.5)
-                        .frame(width: 100, height: 100)
+                        .frame(width: 108, height: 108)
                         .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
                         .animation(
                             .easeOut(duration: 2.0).repeatForever(autoreverses: false),
                             value: emptyIconPulse
                         )
+                    // 內層脈衝光環（延遲 0.3s，製造波紋層次）
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
                 }
+                // 主圓底（漸層填色 + 細邊框，尺寸對齊至 88pt）
                 Circle()
                     .fill(
                         LinearGradient(
                             colors: isSearching
                                 ? [Color(.systemFill), Color(.secondarySystemFill)]
-                                : [accent.opacity(0.14), accent.opacity(0.05)],
+                                : [accent.opacity(0.15), accent.opacity(0.06)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 82, height: 82)
+                    .frame(width: 88, height: 88)
                     .overlay(
                         Circle()
                             .stroke(
-                                isSearching ? Color.clear : accent.opacity(0.20),
+                                isSearching ? Color.clear : accent.opacity(0.22),
                                 lineWidth: 1.2
                             )
                     )
                 Image(systemName: isSearching ? "magnifyingglass" : "banknote")
-                    .font(.system(size: 34, weight: .light))
-                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.75))
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.72))
             }
             .onAppear {
                 if !isSearching {
@@ -463,27 +493,53 @@ struct IncomeView: View {
                 }
             }
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 Text(isSearching ? "找不到符合的收入" : "尚無收入紀錄")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.primary.opacity(0.65))
-                Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增收入")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text(isSearching ? "換個關鍵字試試" : "薪資、獎金、投資收益等\n各類收入都可以記錄在這裡")
                     .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+
+            // 非搜尋狀態下顯示 CTA 按鈕，對齊 VariableExpenseView 空狀態設計規格
+            if !isSearching {
+                Button {
+                    showAdd = true
+                } label: {
+                    Label("新增第一筆收入", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                colors: [accent, Color(red: 0.07, green: 0.50, blue: 0.38)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.35), radius: 10, y: 5)
+                }
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 52)
+        .padding(.vertical, 44)
     }
 
     // MARK: - 列表（List sections，包在外層的 List 內）
 
     @ViewBuilder
     private var incomeListSections: some View {
-        ForEach(groupedByDate(), id: \.key) { dateString, incomes in
+        let groups = groupedByDate()
+        ForEach(Array(groups.enumerated()), id: \.element.key) { groupIdx, pair in
+            let (dateString, incomes) = pair
             Section(header: daySectionHeader(dateString: dateString, incomes: incomes)) {
-                ForEach(incomes) { income in
+                ForEach(Array(incomes.enumerated()), id: \.element.id) { rowIdx, income in
                     incomeRow(income)
                         .contentShape(Rectangle())
                         .onTapGesture { editingItem = income }
@@ -499,7 +555,20 @@ struct IncomeView: View {
                             } label: { Label("複製", systemImage: "doc.on.doc") }
                             .tint(.blue)
                         }
+                        // 交錯淡入 + 向上進場，對齊 VariableExpenseView 規格
+                        .opacity(listRowsAppeared ? 1 : 0)
+                        .offset(y: listRowsAppeared ? 0 : 12)
+                        .animation(
+                            .spring(response: 0.44, dampingFraction: 0.82)
+                                .delay(0.04 * Double(min(groupIdx * 3 + rowIdx, 14))),
+                            value: listRowsAppeared
+                        )
                 }
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                listRowsAppeared = true
             }
         }
     }
