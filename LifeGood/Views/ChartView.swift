@@ -61,7 +61,11 @@ struct ChartView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    periodPicker
+                    // 【美化方向】統一英雄卡片設計語言：漸層背景 + 週期篩選 pill 嵌入卡片，
+                    // 取代原本平面的 periodPicker + statisticsSummary 雙區塊，
+                    // 與 OverviewView / VariableExpenseView / IncomeView 設計語言保持均值。
+                    chartHeroCard
+                        .padding(.horizontal)
 
                     if isLoading {
                         VStack(spacing: 14) {
@@ -79,12 +83,14 @@ struct ChartView: View {
                         .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
                         .padding(.horizontal)
                     } else {
-                        statisticsSummary
                         chartCarousel
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                         expenseTypeBreakdown
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
                 .padding(.vertical)
+                .animation(.spring(response: 0.45, dampingFraction: 0.80), value: isLoading)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("圖表")
@@ -106,25 +112,115 @@ struct ChartView: View {
         isLoading = false
     }
 
-    // MARK: - 時間選擇
+    // MARK: - 圖表英雄摘要卡（含週期選擇器）
+    // 【美化方向】統一英雄卡片設計語言：漸層綠色背景 + 裝飾散景圓，
+    // 週期篩選 pill 嵌入卡片底部（白色系），總計/最高一目了然。
+    // 取代舊版分離的 periodPicker（白底卡片）+ statisticsSummary（三個獨立 StatCard），
+    // 視覺密度降低、層次感提升，與其他主要頁面的 hero card 設計保持均值。
 
-    private var periodPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(TimePeriod.allCases, id: \.self) { period in
-                    periodChip(period)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+    private var periodHeroLabel: String {
+        switch selectedPeriod {
+        case .daily:     return "近30天支出總計"
+        case .weekly:    return "近12週支出總計"
+        case .monthly:   return "近12個月支出總計"
+        case .quarterly: return "近8季支出總計"
+        case .yearly:    return "近5年支出總計"
         }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
-        .padding(.horizontal)
     }
 
-    private func periodChip(_ period: TimePeriod) -> some View {
+    private var chartHeroCard: some View {
+        let maxAmount = chartData.map(\.amount).max() ?? 0
+
+        return VStack(spacing: 0) {
+            // 頂部：區間總計 + 最高值徽章
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(periodHeroLabel)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.78))
+                        if isLoading {
+                            ProgressView()
+                                .tint(.white.opacity(0.80))
+                                .scaleEffect(0.65)
+                        }
+                    }
+                    Text(isLoading ? "---" : formatCurrency(totalForPeriod))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
+                    if !isLoading && averageForPeriod > 0 {
+                        Text("期均 " + formatCurrency(averageForPeriod))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.top, 1)
+                    }
+                }
+                Spacer()
+                if !isLoading && maxAmount > 0 {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("最高")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.62))
+                        Text(formatCurrency(maxAmount))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .contentTransition(.numericText())
+                    }
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.20))
+                    .clipShape(Capsule())
+                }
+            }
+
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 14)
+
+            // 週期篩選 pill（在卡片底部，白色系）
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(TimePeriod.allCases, id: \.self) { period in
+                        heroPeriodChip(period)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.16, green: 0.74, blue: 0.50),
+                        Color(red: 0.07, green: 0.50, blue: 0.38)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 右上主散景圓
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 140, height: 140)
+                    .offset(x: 90, y: -55)
+                    .blur(radius: 14)
+                // 左下補光
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 90, height: 90)
+                    .offset(x: -70, y: 55)
+                    .blur(radius: 10)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.42), radius: 18, x: 0, y: 9)
+    }
+
+    private func heroPeriodChip(_ period: TimePeriod) -> some View {
         let isSelected = selectedPeriod == period
         return Button {
             withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
@@ -138,61 +234,22 @@ struct ChartView: View {
                     .font(.caption.weight(isSelected ? .semibold : .medium))
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(isSelected ? Color.green : Color(.secondarySystemFill))
-            .foregroundStyle(isSelected ? .white : .primary)
+            .padding(.vertical, 7)
+            .background(isSelected ? .white.opacity(0.28) : .white.opacity(0.10))
+            .foregroundStyle(.white)
             .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(.white.opacity(isSelected ? 0.55 : 0.22), lineWidth: 1)
+            )
             .shadow(
-                color: isSelected ? Color.green.opacity(0.38) : .clear,
-                radius: 6, x: 0, y: 3
+                color: isSelected ? .white.opacity(0.22) : .clear,
+                radius: 4, x: 0, y: 2
             )
             .scaleEffect(isSelected ? 1.04 : 1.0)
         }
         .buttonStyle(.plain)
         .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
-    }
-
-    // MARK: - 統計摘要
-
-    private var statisticsSummary: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [.green, .green.opacity(0.55)],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 4, height: 20)
-                Text("區間統計")
-                    .font(.subheadline.weight(.bold))
-                Spacer()
-            }
-            .padding(.horizontal)
-
-            HStack(spacing: 12) {
-                StatCard(
-                    title: "總計",
-                    value: formatCurrency(totalForPeriod),
-                    icon: "sum",
-                    color: .green
-                )
-                StatCard(
-                    title: "平均",
-                    value: formatCurrency(averageForPeriod),
-                    icon: "divide",
-                    color: .blue
-                )
-                StatCard(
-                    title: "最高",
-                    value: formatCurrency(chartData.map(\.amount).max() ?? 0),
-                    icon: "arrow.up",
-                    color: .red
-                )
-            }
-            .padding(.horizontal)
-        }
     }
 
     // MARK: - 圖表輪播（左右滑動切換）
@@ -887,72 +944,6 @@ struct ChartView: View {
             return String(label.suffix(4))
         }
         return label
-    }
-}
-
-// MARK: - 統計卡片
-
-struct StatCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // 彩色頂端條（與 OverviewView summaryCard 一致）
-            RoundedRectangle(cornerRadius: 2)
-                .fill(
-                    LinearGradient(
-                        colors: [color, color.opacity(0.55)],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                )
-                .frame(height: 4)
-                .padding(.bottom, 10)
-
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.16))
-                    .frame(width: 30, height: 30)
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-
-            Spacer(minLength: 8)
-
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            Spacer(minLength: 4)
-
-            Text(value)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .minimumScaleFactor(0.7)
-                .lineLimit(1)
-                .contentTransition(.numericText())
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
-        .background(
-            ZStack {
-                Color(.systemBackground)
-                color.opacity(0.04)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(color.opacity(0.12), lineWidth: 0.75)
-        )
-        .shadow(color: color.opacity(0.13), radius: 10, x: 0, y: 4)
-        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 1)
     }
 }
 
