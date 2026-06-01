@@ -19,8 +19,9 @@ class LifeStore: ObservableObject {
     init() {
         load()
         isLoading = true
-        backfillOrgPeopleFromSubordinates()
+        let didBackfill = backfillOrgPeopleFromSubordinates()
         isLoading = false
+        if didBackfill { save() }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(reloadFromCloud),
@@ -33,8 +34,10 @@ class LifeStore: ObservableObject {
         load()
         // backfill 期間暫停 save()，避免剛從雲端拉取就立刻回寫
         isLoading = true
-        backfillOrgPeopleFromSubordinates()
+        let didBackfill = backfillOrgPeopleFromSubordinates()
         isLoading = false
+        // 若 backfill 新建了 OrgPerson/BusinessCard，立即持久化避免重啟後消失
+        if didBackfill { save() }
         objectWillChange.send()
     }
 
@@ -124,10 +127,13 @@ class LifeStore: ObservableObject {
         let careers = milestones
             .filter { $0.category == .career }
             .sorted { $0.date > $1.date }
+        // 最近事件為離職 → 目前無業，直接用個人資料的公司欄位
+        if careers.first?.careerSubCategory == .resign {
+            return profile.company.trimmingCharacters(in: .whitespaces)
+        }
+        // 找最近一筆非離職且有公司名稱的紀錄
         for m in careers {
-            if m.careerSubCategory == .resign {
-                return profile.company.trimmingCharacters(in: .whitespaces)
-            }
+            if m.careerSubCategory == .resign { continue }
             if let name = m.companyName?.trimmingCharacters(in: .whitespaces),
                !name.isEmpty {
                 return name
@@ -192,12 +198,16 @@ class LifeStore: ObservableObject {
         orgPeople.append(person)
     }
 
-    /// 一次性 backfill：把舊有部屬補出對應的公司組織人員（之前沒有同步過的）
-    func backfillOrgPeopleFromSubordinates() {
+    /// 一次性 backfill：把舊有部屬補出對應的公司組織人員（之前沒有同步過的）。
+    /// 回傳值表示是否有新建立任何條目（供呼叫端決定是否需要額外 save）。
+    @discardableResult
+    func backfillOrgPeopleFromSubordinates() -> Bool {
+        let before = orgPeople.count
         let linked = Set(orgPeople.compactMap(\.linkedSubordinateId))
         for sub in subordinates where !linked.contains(sub.id) {
             syncOrgPersonFor(subordinate: sub)
         }
+        return orgPeople.count > before
     }
 
     // MARK: - 部門 CRUD
@@ -460,6 +470,7 @@ class LifeStore: ObservableObject {
     // MARK: - 清除
 
     func clearAll() {
+        isLoading = true
         profile = UserProfile()
         familyMembers.removeAll()
         milestones.removeAll()
@@ -472,5 +483,7 @@ class LifeStore: ObservableObject {
         businessCards.removeAll()
         personalEvents.removeAll()
         orgPeople.removeAll()
+        isLoading = false
+        save()
     }
 }
