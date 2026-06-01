@@ -231,6 +231,16 @@ struct EditProfileView: View {
     }
 }
 
+// MARK: - 美化紀錄（ResumeView）
+// [2026-06] 本次美化方向：
+//   1. categoryFilter：補底部細分隔線 overlay，對齊 VariableExpenseView / IncomeView 分類篩選列規格
+//   2. sectionHeader：加入 Capsule 側條 + 圖示圓角方形（圓角 7pt）+ 計數膠囊改用彩色文字與細邊框，
+//      完整對齊 daySectionHeader / allocationSection / careerView 的 section header 標準格式
+//   3. milestoneRow：圖示圓從 40pt 升至 44pt + 補 categoryAccent 陰影，對齊 ExpenseRow / CareerView 圖示圓規格
+//   4. groupedList / filteredList：補 .scrollContentBackground(.hidden) + .background(systemGroupedBackground)，
+//      深色模式下不再顯示白色 List 背景
+//   5. 列表行：加入交錯淡入 + 向上進場動畫（rowsAppeared 旗標），對齊 FamilyView / FixedExpenseView 規格
+
 // MARK: - 履歷頁面
 
 struct ResumeView: View {
@@ -243,6 +253,7 @@ struct ResumeView: View {
     @State private var selectedCategory: MilestoneCategory?
     @State private var showPremiumAlert = false
     @State private var emptyStatePulse = false
+    @State private var rowsAppeared = false
 
     private var realMilestoneIDs: Set<UUID> { Set(store.milestones.map(\.id)) }
 
@@ -289,6 +300,10 @@ struct ResumeView: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
+            // 切換篩選分類時重置進場動畫旗標
+            .onChange(of: selectedCategory) { _, _ in
+                rowsAppeared = false
+            }
             .navigationTitle("我的履歷")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -310,15 +325,23 @@ struct ResumeView: View {
 
     private var groupedList: some View {
         List {
-            ForEach(groupedSections, id: \.category) { section in
+            ForEach(Array(groupedSections.enumerated()), id: \.element.category) { sectionIdx, section in
                 Section {
-                    ForEach(section.items) { item in
+                    ForEach(Array(section.items.enumerated()), id: \.element.id) { rowIdx, item in
                         milestoneRow(item)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 guard subscription.isPremium else { showPremiumAlert = true; return }
                                 if realMilestoneIDs.contains(item.id) { editingItem = item }
                             }
+                            // 交錯進場動畫：群組序 × 4 + 列序，對齊 FixedExpenseView 規格
+                            .opacity(rowsAppeared ? 1 : 0)
+                            .offset(y: rowsAppeared ? 0 : 14)
+                            .animation(
+                                .spring(response: 0.45, dampingFraction: 0.82)
+                                    .delay(0.05 * Double(sectionIdx * 4 + rowIdx)),
+                                value: rowsAppeared
+                            )
                     }
                     .onDelete { offsets in
                         guard subscription.isPremium else { showPremiumAlert = true; return }
@@ -333,6 +356,13 @@ struct ResumeView: View {
             mySpendingSection
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                rowsAppeared = true
+            }
+        }
     }
 
     private func filteredList(category: MilestoneCategory) -> some View {
@@ -343,13 +373,21 @@ struct ResumeView: View {
                     .foregroundStyle(.secondary).font(.subheadline)
             } else {
                 Section {
-                    ForEach(items) { item in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { rowIdx, item in
                         milestoneRow(item)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 guard subscription.isPremium else { showPremiumAlert = true; return }
                                 if realMilestoneIDs.contains(item.id) { editingItem = item }
                             }
+                            // 交錯進場動畫，對齊 groupedList 規格
+                            .opacity(rowsAppeared ? 1 : 0)
+                            .offset(y: rowsAppeared ? 0 : 14)
+                            .animation(
+                                .spring(response: 0.45, dampingFraction: 0.82)
+                                    .delay(0.05 * Double(rowIdx)),
+                                value: rowsAppeared
+                            )
                     }
                     .onDelete { offsets in
                         guard subscription.isPremium else { showPremiumAlert = true; return }
@@ -363,6 +401,13 @@ struct ResumeView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                rowsAppeared = true
+            }
+        }
     }
 
     // MARK: - 我的消費（變動支出 diningMember 含本人名字）
@@ -495,18 +540,46 @@ struct ResumeView: View {
     }
 
     private func sectionHeader(_ cat: MilestoneCategory, count: Int) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: cat.icon)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(categoryColor(cat))
+        let accent = categoryColor(cat)
+        return HStack(spacing: 8) {
+            // 標準側條：對齊 daySectionHeader / FinanceOverviewView.allocationSection 規格
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3, height: 16)
+            // 圖示圓角方塊：對齊 FixedExpenseView.categoryHeader 規格
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.20), accent.opacity(0.09)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 26, height: 26)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(accent.opacity(0.22), lineWidth: 0.75)
+                    )
+                Image(systemName: cat.icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
             Text(cat.displayName)
-                .font(.subheadline.weight(.semibold))
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
-            Text("\(count)")
+            // 計數膠囊：彩色文字 + 透明底 + 細邊框，對齊 FixedExpenseView.categoryHeader 項目計數徽章
+            Text("\(count) 項")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(categoryColor(cat), in: Capsule())
+                .foregroundStyle(accent.opacity(0.85))
+                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
             Spacer()
         }
         .textCase(nil)
@@ -543,6 +616,18 @@ struct ResumeView: View {
             .padding(.horizontal).padding(.vertical, 10)
         }
         .background(Color(.systemBackground))
+        // 底部細分隔線：對齊 VariableExpenseView / IncomeView 分類篩選列規格
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(.separator).opacity(0.22), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: 1)
+        }
     }
 
     private var emptyState: some View {
@@ -619,22 +704,20 @@ struct ResumeView: View {
                 .padding(.vertical, 8)
                 .padding(.trailing, 12)
 
-            // 分類圖示圓（漸層 + 細邊框）
+            // 分類圖示圓：44pt 漸層底 + 陰影，對齊 ExpenseRow / CareerView.careerRow 圖示圓規格
             ZStack {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [accent.opacity(0.22), accent.opacity(0.08)],
+                            colors: [accent.opacity(0.22), accent.opacity(0.09)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 40, height: 40)
-                Circle()
-                    .stroke(accent.opacity(0.26), lineWidth: 1.5)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
+                    .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
                 Image(systemName: item.careerSubCategory?.icon ?? item.category.icon)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(accent)
             }
             .padding(.trailing, 12)
