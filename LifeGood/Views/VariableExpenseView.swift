@@ -1,5 +1,15 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（VariableExpenseView）
+// [2026-06] 本次美化方向：
+//   1. monthSummaryHeader：移除頂部內嵌「日均」文字，改以 KPI 橫列統一展示，
+//      三格：今日花費 / 日均支出 / 近3月均值，對齊 IncomeView.kpiCell 規格
+//   2. monthSummaryHeader：KPI 橫列與月進度條之間加入分隔線，提升視覺層次
+//   3. emptyStateView：單層脈衝光環升級為雙層（外環延遲 0.3s 製造波紋），
+//      並加入橘色 CTA 按鈕，對齊 FixedExpenseView.emptyStateView 設計規格
+//   4. expenseListSections：加入交錯淡入 + 向上進場動畫，
+//      對齊 FixedExpenseView.fixedExpenseSections 規格
+
 struct VariableExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -9,6 +19,7 @@ struct VariableExpenseView: View {
     @State private var expenseToEdit: Expense?
     @State private var visibleWeeks = 1
     @State private var searchText: String = ""
+    @State private var listRowsAppeared = false
 
     private static let groupDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -104,6 +115,45 @@ struct VariableExpenseView: View {
         }
     }
 
+    // MARK: - KPI 計算輔助
+
+    private var todayVariableTotal: Double {
+        store.variableExpenses
+            .filter { Calendar.current.isDateInToday($0.date) }
+            .reduce(0) { $0 + $1.amount }
+    }
+
+    private var trailingMonthlyAverageVariable: Double {
+        let calendar = Calendar.current
+        let now = Date()
+        var totals: [Double] = []
+        for i in 1...3 {
+            guard let base = calendar.date(byAdding: .month, value: -i, to: now),
+                  let interval = calendar.dateInterval(of: .month, for: base) else { continue }
+            let total = store.variableExpenses
+                .filter { $0.date >= interval.start && $0.date < interval.end }
+                .reduce(0) { $0 + $1.amount }
+            totals.append(total)
+        }
+        guard !totals.isEmpty else { return 0 }
+        return totals.reduce(0, +) / Double(totals.count)
+    }
+
+    private func kpiCell(label: String, value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
+    }
+
     // MARK: - 月摘要
 
     private var monthProgress: Double {
@@ -130,12 +180,6 @@ struct VariableExpenseView: View {
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
-                    if total > 0 {
-                        Text("日均 " + formatCurrency(dailyAvg))
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .padding(.top, 1)
-                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 6) {
@@ -148,6 +192,29 @@ struct VariableExpenseView: View {
                         .foregroundStyle(.white)
                 }
             }
+
+            // KPI 橫列：今日花費 / 日均支出 / 近3月均值
+            HStack(spacing: 0) {
+                kpiCell(label: "今日花費", value: formatCurrency(todayVariableTotal))
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                kpiCell(label: "日均支出", value: formatCurrency(dailyAvg))
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                kpiCell(label: "近3月均值", value: formatCurrency(trailingMonthlyAverageVariable))
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 12)
+
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 12)
 
             // 月進度條
             VStack(spacing: 5) {
@@ -173,7 +240,6 @@ struct VariableExpenseView: View {
                         .foregroundStyle(.white.opacity(0.60))
                 }
             }
-            .padding(.top, 12)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
@@ -293,41 +359,50 @@ struct VariableExpenseView: View {
     private var emptyStateView: some View {
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
         let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
-        return VStack(spacing: 20) {
+        return VStack(spacing: 24) {
             ZStack {
-                // 外圍脈衝光環（僅非搜尋時顯示）
                 if !isSearching {
+                    // 外層脈衝光環
                     Circle()
                         .stroke(accent.opacity(emptyIconPulse ? 0 : 0.25), lineWidth: 1.5)
-                        .frame(width: 100, height: 100)
+                        .frame(width: 108, height: 108)
                         .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
                         .animation(
                             .easeOut(duration: 2.0).repeatForever(autoreverses: false),
                             value: emptyIconPulse
                         )
+                    // 內層脈衝光環（延遲 0.3s，製造波紋層次）
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
                 }
-                // 主圓圈（漸層底）
+                // 主圓圈（漸層底 + 細邊框）
                 Circle()
                     .fill(
                         LinearGradient(
                             colors: isSearching
                                 ? [Color(.systemFill), Color(.secondarySystemFill)]
-                                : [accent.opacity(0.14), accent.opacity(0.05)],
+                                : [accent.opacity(0.15), accent.opacity(0.06)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 82, height: 82)
+                    .frame(width: 88, height: 88)
                     .overlay(
                         Circle()
                             .stroke(
-                                isSearching ? Color.clear : accent.opacity(0.20),
+                                isSearching ? Color.clear : accent.opacity(0.22),
                                 lineWidth: 1.2
                             )
                     )
                 Image(systemName: isSearching ? "magnifyingglass" : "bag")
-                    .font(.system(size: 34, weight: .light))
-                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.75))
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.72))
             }
             .onAppear {
                 if !isSearching {
@@ -337,18 +412,42 @@ struct VariableExpenseView: View {
                 }
             }
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 Text(isSearching ? "找不到符合的支出" : "尚無變動支出紀錄")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.primary.opacity(0.65))
-                Text(isSearching ? "換個關鍵字試試" : "點擊右上角 + 新增第一筆支出")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text(isSearching ? "換個關鍵字試試" : "變動支出包含日常消費、飲食、\n娛樂、購物等非固定費用")
                     .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(3)
             }
+
+            if !isSearching {
+                Button {
+                    showingAddSheet = true
+                } label: {
+                    Label("新增第一筆支出", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                colors: [accent, Color(red: 0.86, green: 0.36, blue: 0.06)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                        .shadow(color: Color(red: 0.86, green: 0.36, blue: 0.06).opacity(0.35), radius: 10, y: 5)
+                }
+                .buttonStyle(.plain)
+            }
+
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 52)
+        .padding(.vertical, 44)
     }
 
     // MARK: - 支出列表（List sections，包在外層的 List 內）
@@ -369,9 +468,10 @@ struct VariableExpenseView: View {
         }
         let hiddenCount = hiddenGroups.reduce(0) { $0 + $1.value.count }
 
-        ForEach(visibleGroups, id: \.key) { dateString, expenses in
+        ForEach(Array(visibleGroups.enumerated()), id: \.element.key) { groupIdx, group in
+            let (dateString, expenses) = group
             Section(header: daySectionHeader(dateString: dateString, expenses: expenses)) {
-                ForEach(expenses) { expense in
+                ForEach(Array(expenses.enumerated()), id: \.element.id) { rowIdx, expense in
                     ExpenseRow(expense: expense)
                         .contentShape(Rectangle())
                         .onTapGesture { expenseToEdit = expense }
@@ -387,7 +487,19 @@ struct VariableExpenseView: View {
                             } label: { Label("複製", systemImage: "doc.on.doc") }
                             .tint(.blue)
                         }
+                        .opacity(listRowsAppeared ? 1 : 0)
+                        .offset(y: listRowsAppeared ? 0 : 12)
+                        .animation(
+                            .spring(response: 0.44, dampingFraction: 0.82)
+                                .delay(0.04 * Double(min(groupIdx * 3 + rowIdx, 14))),
+                            value: listRowsAppeared
+                        )
                 }
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                listRowsAppeared = true
             }
         }
 
