@@ -632,7 +632,7 @@ struct FixedExpenseRow: View {
 
                     // 季繳 / 年繳：顯示月均換算，幫助使用者快速理解月度負擔
                     if let recurrence = expense.recurrence,
-                       recurrence != .monthly && recurrence != .none {
+                       recurrence != .monthly {
                         let monthly = monthlyEquivalentAmount(expense)
                         if monthly > 0 {
                             HStack(spacing: 2) {
