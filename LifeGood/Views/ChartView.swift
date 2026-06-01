@@ -512,71 +512,131 @@ struct ChartView: View {
     /// 共用的圓餅圖 body
     private func pieChartBody(entries: [(name: String, icon: String, color: Color, amount: Double)],
                               total: Double) -> some View {
-        VStack(spacing: 14) {
+        let displayCount = min(entries.count, 6)
+        return VStack(spacing: 16) {
+            // 環形圖（加大內徑與間距，讓圓餅更精緻）
             ZStack {
                 Chart(entries.indices, id: \.self) { i in
                     let e = entries[i]
                     SectorMark(
                         angle: .value("金額", e.amount),
-                        innerRadius: .ratio(0.55),
-                        angularInset: 1.5
+                        innerRadius: .ratio(0.58),
+                        angularInset: 2.0
                     )
                     .foregroundStyle(e.color)
-                    .cornerRadius(4)
+                    .cornerRadius(5)
                 }
-                .frame(height: 180)
+                .frame(height: 192)
                 .padding(.horizontal)
 
-                // 甜甜圈中心：顯示總金額
-                VStack(spacing: 2) {
+                // 甜甜圈中心：分類總金額 + 項目數
+                VStack(spacing: 3) {
                     Text("總計")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Text(formatCurrency(total))
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(.primary)
-                        .minimumScaleFactor(0.65)
+                        .minimumScaleFactor(0.58)
                         .lineLimit(1)
-                        .frame(maxWidth: 80)
+                        .frame(maxWidth: 94)
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(Color(.tertiaryLabel))
+                            .frame(width: 3, height: 3)
+                        Text("\(entries.count) 類")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
 
-            // 圖例
-            VStack(spacing: 8) {
-                ForEach(entries.prefix(6).indices, id: \.self) { i in
-                    let e = entries[i]
-                    let pct = total > 0 ? e.amount / total * 100 : 0
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(e.color.opacity(0.14))
-                                .frame(width: 28, height: 28)
-                            Image(systemName: e.icon)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(e.color)
+            // 圖例與圖表的分隔線
+            Rectangle()
+                .fill(Color(.separator).opacity(0.22))
+                .frame(height: 0.5)
+                .padding(.horizontal, 8)
+
+            // 圖例（每項加上比例進度條，強化視覺層次）
+            VStack(spacing: 0) {
+                ForEach(Array(entries.prefix(6).enumerated()), id: \.offset) { i, e in
+                    let pct = total > 0 ? e.amount / total : 0
+
+                    VStack(spacing: 6) {
+                        HStack(spacing: 10) {
+                            // 圖示圓（加細邊框，與其他頁面元件一致）
+                            ZStack {
+                                Circle()
+                                    .fill(e.color.opacity(0.15))
+                                    .frame(width: 32, height: 32)
+                                Circle()
+                                    .stroke(e.color.opacity(0.22), lineWidth: 1)
+                                    .frame(width: 32, height: 32)
+                                Image(systemName: e.icon)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(e.color)
+                            }
+                            Text(e.name)
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(formatCurrency(e.amount))
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.primary)
+                                // 百分比以分類主色顯示，強調比例感
+                                Text(String(format: "%.1f%%", pct * 100))
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(e.color)
+                            }
                         }
-                        Text(e.name)
-                            .font(.caption.weight(.medium))
-                        Spacer()
-                        Text(formatCurrency(e.amount))
-                            .font(.caption.bold())
-                        Text(String(format: "%.1f%%", pct))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .trailing)
+                        // 比例進度條：寬度對應佔總額的比例
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule()
+                                    .fill(Color(.systemFill))
+                                    .frame(height: 4)
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [e.color, e.color.opacity(0.60)],
+                                            startPoint: .leading, endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: geo.size.width * pct, height: 4)
+                                    .animation(
+                                        .spring(response: 0.65, dampingFraction: 0.78)
+                                            .delay(Double(i) * 0.07),
+                                        value: pct
+                                    )
+                            }
+                        }
+                        .frame(height: 4)
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 16)
+
+                    if i < displayCount - 1 {
+                        Divider().padding(.leading, 58)
                     }
                 }
+
                 if entries.count > 6 {
-                    HStack {
-                        Spacer()
-                        Text("還有 \(entries.count - 6) 個分類…")
+                    HStack(spacing: 5) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Circle()
+                                .fill(Color(.tertiaryLabel))
+                                .frame(width: 4, height: 4)
+                        }
+                        Text("還有 \(entries.count - 6) 個分類")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                         Spacer()
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                 }
             }
-            .padding(.horizontal)
         }
     }
 
@@ -702,10 +762,10 @@ struct ChartView: View {
                                 )
                             }
                         }
-                        .frame(height: 12)
+                        .frame(height: 14)
                         .clipShape(Capsule())
                     }
-                    .frame(height: 12)
+                    .frame(height: 14)
 
                     // 圖例
                     HStack(spacing: 20) {
@@ -736,16 +796,19 @@ struct ChartView: View {
     }
 
     private func breakdownLegendItem(color: Color, icon: String, label: String, amount: Double, total: Double) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             ZStack {
                 Circle()
                     .fill(color.opacity(0.14))
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
+                Circle()
+                    .stroke(color.opacity(0.22), lineWidth: 1)
+                    .frame(width: 32, height: 32)
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(color)
             }
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(label)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -753,8 +816,8 @@ struct ChartView: View {
                     .font(.subheadline.bold())
                     .contentTransition(.numericText())
                 Text(String(format: "%.1f%%", total > 0 ? amount / total * 100 : 0))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(color.opacity(0.80))
             }
         }
     }
