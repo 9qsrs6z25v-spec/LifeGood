@@ -59,11 +59,10 @@ struct FinanceChartView: View {
 
                 // 圖例：彩色圓形圖示 + 類別名 + 金額
                 VStack(spacing: 8) {
+                    let grandTotal = allocations.reduce(0) { $0 + $1.value }
                     ForEach(allocations) { a in
                         let color = colorFor(a.type)
-                        let pct = allocations.reduce(0) { $0 + $1.value } > 0
-                            ? a.value / allocations.reduce(0) { $0 + $1.value } * 100
-                            : 0
+                        let pct = grandTotal > 0 ? a.value / grandTotal * 100 : 0
                         HStack(spacing: 10) {
                             ZStack {
                                 Circle()
@@ -176,9 +175,9 @@ struct FinanceChartView: View {
                 .padding(.horizontal)
 
                 // 明細列
+                let sortedStocks = store.stocks.sorted { $0.profitLoss > $1.profitLoss }
                 VStack(spacing: 0) {
-                    ForEach(store.stocks.sorted(by: { $0.profitLoss > $1.profitLoss }).indices, id: \.self) { i in
-                        let stock = store.stocks.sorted(by: { $0.profitLoss > $1.profitLoss })[i]
+                    ForEach(Array(sortedStocks.enumerated()), id: \.element.id) { i, stock in
                         let pl = stock.profitLoss
                         let plC: Color = pl >= 0 ? .green : .red
 
@@ -213,7 +212,7 @@ struct FinanceChartView: View {
                         .padding(.horizontal)
                         .padding(.vertical, 10)
 
-                        if i < store.stocks.count - 1 {
+                        if i < sortedStocks.count - 1 {
                             Divider().padding(.leading, 60)
                         }
                     }
@@ -237,8 +236,7 @@ struct FinanceChartView: View {
                 emptyPlaceholder(icon: "building.2", title: "尚無房地產資料", subtitle: "新增房地產後顯示績效")
             } else {
                 VStack(spacing: 0) {
-                    ForEach(store.realEstates.indices, id: \.self) { i in
-                        let item = store.realEstates[i]
+                    ForEach(Array(store.realEstates.enumerated()), id: \.element.id) { i, item in
                         let appColor: Color = item.appreciationRate >= 0 ? .green : .red
 
                         HStack(spacing: 12) {
@@ -300,6 +298,7 @@ struct FinanceChartView: View {
                         if i < store.realEstates.count - 1 {
                             Divider().padding(.leading, 64)
                         }
+
                     }
                 }
             }
@@ -321,8 +320,7 @@ struct FinanceChartView: View {
                 emptyPlaceholder(icon: "shield", title: "尚無儲蓄險資料", subtitle: "新增儲蓄險後顯示摘要")
             } else {
                 VStack(spacing: 0) {
-                    ForEach(store.insurances.indices, id: \.self) { i in
-                        let item = store.insurances[i]
+                    ForEach(Array(store.insurances.enumerated()), id: \.element.id) { i, item in
                         let rateColor: Color = item.returnRate >= 0 ? .green : .red
 
                         HStack(spacing: 12) {

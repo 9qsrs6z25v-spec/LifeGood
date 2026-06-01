@@ -211,21 +211,21 @@ final class CloudSyncManager: ObservableObject {
     // MARK: - Pull（被 CloudKitManager 通知）
 
     @objc private func handleKVChanges(_ note: Notification) {
+        // 必須在主執行緒發送通知，避免各 Store 的 reloadFromCloud 在背景執行緒
+        // 修改 @Published 屬性造成競態條件
         DispatchQueue.main.async { [weak self] in
             self?.lastChangeReason = .serverChange
+            self?.markSynced()
+            NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
         }
-        markSynced()
-        // 重發舊版同名通知，所有 Store 都已監聽
-        NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
     }
 
     @objc private func handlePhotoChanges(_ note: Notification) {
         DispatchQueue.main.async { [weak self] in
             self?.lastChangeReason = .serverChange
-            // 通知 UI 重新載入照片
+            self?.markSynced()
             NotificationCenter.default.post(name: .cloudSyncPhotosDidUpdate, object: nil)
         }
-        markSynced()
     }
 
     // MARK: - Helpers

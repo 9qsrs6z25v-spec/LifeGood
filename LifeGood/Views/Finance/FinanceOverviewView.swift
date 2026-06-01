@@ -686,10 +686,14 @@ struct FinanceOverviewView: View {
         }
     }
 
-    private func fmt(_ v: Double) -> String {
+    private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        return f
+    }()
+
+    private func fmt(_ v: Double) -> String {
+        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     private func fmtShort(_ v: Double) -> String {

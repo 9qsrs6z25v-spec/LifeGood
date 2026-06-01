@@ -243,8 +243,8 @@ final class CloudKitManager {
         queue.async {
             let pathKey = "\(directory)/\(fileName)"
             let recID = CKRecord.ID(recordName: "photo_\(self.sanitize(pathKey))", zoneID: self.zoneID)
-            self.privateDB.delete(withRecordID: recID) { _, _ in
-                completion?(true)
+            self.privateDB.delete(withRecordID: recID) { _, error in
+                completion?(error == nil)
             }
         }
     }

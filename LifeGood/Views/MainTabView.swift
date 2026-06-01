@@ -187,13 +187,12 @@ struct MainTabView: View {
     }
 
     private var isCurrentlyManagerial: Bool {
-        lifeStore.milestones
-            .filter { $0.category == .career }
-            .sorted { $0.date > $1.date }
-            .first(where: {
-                let sub = $0.careerSubCategory
-                return sub == .join || sub == .promote || sub == .transfer || sub == .demote
-            })?.isManagerial == true
+        let relevant = lifeStore.milestones.filter {
+            $0.category == .career &&
+            ($0.careerSubCategory == .join || $0.careerSubCategory == .promote ||
+             $0.careerSubCategory == .transfer || $0.careerSubCategory == .demote)
+        }
+        return relevant.max(by: { $0.date < $1.date })?.isManagerial == true
     }
 
     private var familyMgmtFeature: FamilyMgmtFeature? {

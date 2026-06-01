@@ -117,6 +117,8 @@ final class EInvoiceSyncManager: ObservableObject {
         var failed = 0
         var errors: [String] = []
         let alreadyImported = Set(importHistory.map { $0.invNum })
+        // 收集所有待寫入的支出，迴圈結束後一次 append，只觸發一次 save() → CloudKit push
+        var pendingExpenses: [Expense] = []
 
         do {
             let headers = try await client.fetchHeaders(carrier: carrier, from: start, to: end)
@@ -129,8 +131,9 @@ final class EInvoiceSyncManager: ObservableObject {
                     let items = try await client.fetchDetail(carrier: carrier, header: header)
                     let category = InvoiceCategorizer.shared.categorize(seller: header.sellerName,
                                                                         items: items)
-                    let expenseIds = writeExpenses(header: header, items: items,
-                                                    category: category, store: expenseStore)
+                    let newExpenses = buildExpenses(header: header, items: items, category: category)
+                    let expenseIds = newExpenses.map(\.id)
+                    pendingExpenses.append(contentsOf: newExpenses)
                     let record = EInvoiceImportRecord(
                         invNum: header.invNum, invDate: header.invDate,
                         sellerName: header.sellerName, amount: header.amount,
@@ -147,6 +150,11 @@ final class EInvoiceSyncManager: ObservableObject {
             errors.append(error.localizedDescription)
         }
 
+        // 一次性 append，只觸發一次 didSet → save() → CloudKit push
+        if !pendingExpenses.isEmpty {
+            expenseStore.expenses.append(contentsOf: pendingExpenses)
+        }
+
         // Trim history to most recent 500
         if importHistory.count > 500 {
             importHistory = Array(importHistory.prefix(500))
@@ -161,13 +169,13 @@ final class EInvoiceSyncManager: ObservableObject {
         UserDefaults.standard.set(result.timestamp, forKey: Self.lastSyncDateKey)
     }
 
-    private func writeExpenses(header: EInvoiceHeader, items: [EInvoiceItem],
-                                category: VariableCategory, store: ExpenseStore) -> [UUID] {
+    /// 將單張發票建成 Expense 物件列表，不直接寫入 store（由 performSync 統一批次寫入）
+    private func buildExpenses(header: EInvoiceHeader, items: [EInvoiceItem],
+                                category: VariableCategory) -> [Expense] {
         let note = "電子發票 \(header.invNum)"
 
         if splitItems && !items.isEmpty {
-            // 拆成多筆，每個品項一筆（一次性 append 避免每筆各觸發 didSet → save → CloudKit push）
-            let newExpenses = items.map { item in
+            return items.map { item in
                 Expense(
                     title: item.description.isEmpty ? header.sellerName : item.description,
                     amount: item.amount,
@@ -177,20 +185,15 @@ final class EInvoiceSyncManager: ObservableObject {
                     note: "\(note)（\(header.sellerName)）"
                 )
             }
-            store.expenses.append(contentsOf: newExpenses)
-            return newExpenses.map(\.id)
         } else {
-            // 整張一筆
-            let exp = Expense(
+            return [Expense(
                 title: header.sellerName,
                 amount: header.amount,
                 date: header.invDate,
                 expenseType: .variable,
                 variableCategory: category,
                 note: note
-            )
-            store.expenses.append(exp)
-            return [exp.id]
+            )]
         }
     }
 
