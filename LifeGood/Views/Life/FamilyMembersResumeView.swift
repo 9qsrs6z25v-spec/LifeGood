@@ -267,7 +267,9 @@ struct FamilyMemberDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal).padding(.bottom, 12)
             } else {
-                ForEach(member.familyEvents.sorted { $0.date > $1.date }) { ev in
+                let sortedEvents = member.familyEvents.sorted { $0.date > $1.date }
+                let lastEventId = sortedEvents.last?.id
+                ForEach(sortedEvents) { ev in
                     Button { editingEvent = ev } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
@@ -290,7 +292,7 @@ struct FamilyMemberDetailView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    if ev.id != member.familyEvents.sorted(by: { $0.date > $1.date }).last?.id {
+                    if ev.id != lastEventId {
                         Divider().padding(.leading)
                     }
                 }

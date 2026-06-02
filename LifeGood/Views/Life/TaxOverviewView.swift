@@ -519,9 +519,10 @@ struct TaxOverviewView: View {
             ("全年", "二代健保補充保費",    estimatedAnnualIncome > 0,  .green),
         ]
 
+        let relevantCount = items.filter(\.relevant).count
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("年度稅務檢核", icon: "checkmark.square.fill", color: .green,
-                          count: items.filter(\.relevant).count > 0 ? items.filter(\.relevant).count : nil)
+                          count: relevantCount > 0 ? relevantCount : nil)
 
             ForEach(items.indices, id: \.self) { i in
                 let item = items[i]
