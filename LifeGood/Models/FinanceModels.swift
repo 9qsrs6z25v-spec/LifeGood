@@ -4,13 +4,19 @@ import SwiftUI
 // MARK: - 金額顯示（過萬以「萬」為單位）
 
 extension Double {
-    /// 台幣金額顯示：達 1 萬(含)以上以「萬」為單位（例 12,345 → NT$1.2萬，整數不帶小數），
-    /// 未滿一萬維持 NT$ 整數。理財/收支各頁共用，確保「萬」顯示規則一致。
+    /// 台幣金額顯示：≥1000萬以「千萬」、≥1萬以「萬」為單位（整數不帶小數，否則一位小數），
+    /// 未滿一萬維持 NT$ 整數。例：12,345 → NT$1.2萬；50,000,000 → NT$5千萬。
+    /// 理財/收支各頁共用，確保顯示規則一致。
     var ntdWanString: String {
-        if Swift.abs(self) >= 10000 {
-            let wan = self / 10000
-            let str = (wan == wan.rounded()) ? String(format: "%.0f", wan) : String(format: "%.1f", wan)
-            return "NT$\(str)萬"
+        func trimmed(_ x: Double) -> String {
+            (x == x.rounded()) ? String(format: "%.0f", x) : String(format: "%.1f", x)
+        }
+        let a = Swift.abs(self)
+        if a >= 10_000_000 {            // ≥ 1000 萬 → 千萬
+            return "NT$\(trimmed(self / 10_000_000))千萬"
+        }
+        if a >= 10_000 {                // ≥ 1 萬 → 萬
+            return "NT$\(trimmed(self / 10_000))萬"
         }
         let f = NumberFormatter()
         f.numberStyle = .currency
