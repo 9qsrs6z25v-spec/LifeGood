@@ -1,5 +1,18 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（SubordinateView）
+// [2026-06] 本次美化方向：
+//   1. summaryStatsBar：頂部加入三格統計膠囊橫列（總人數 / 平均評分 / 優秀人數），
+//      藍色漸層 hero card，散景裝飾圓 + spring 進場動畫（summaryAppeared）；
+//      對齊 VariableExpenseView.monthSummaryHeader 設計語言。
+//   2. subordinateRow：圓圈從 36pt 升至 44pt；改用 LinearGradient 填色 + 陰影；
+//      左側加入 4pt 評分色彩強調條；評分數值移入右側 Capsule 膠囊；
+//      部門名稱 + 職等以彩色 Capsule 呈現，對齊 ExpenseRow / FixedExpenseRow 規格。
+//   3. emptyState：從純文字升級為雙層脈衝光環 + 漸層底圓 + 說明文字 + 藍色 CTA 按鈕，
+//      對齊 VariableExpenseView.emptyStateView 設計規格。
+//   4. 列表進場：加入交錯淡入 + 向上進場動畫（rowsAppeared），
+//      對齊 FixedExpenseView.fixedExpenseSections 規格。
+
 enum SubordinateSortOption: String, CaseIterable, Identifiable {
     case name = "姓名"
     case department = "部門"
@@ -31,6 +44,11 @@ struct SubordinateView: View {
     @State private var showPremiumAlert = false
     @AppStorage("subordinateSortOption") private var sortOptionRaw = SubordinateSortOption.dateAdded.rawValue
     @AppStorage("subordinateSortAscending") private var sortAscending = false
+
+    // 進場動畫旗標
+    @State private var summaryAppeared = false
+    @State private var rowsAppeared = false
+    @State private var emptyIconPulse = false
 
     private var sortOption: SubordinateSortOption {
         get { SubordinateSortOption(rawValue: sortOptionRaw) ?? .dateAdded }
@@ -79,37 +97,61 @@ struct SubordinateView: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(sortedSubordinates) { sub in
-                    subordinateRow(sub)
-                        .contentShape(Rectangle())
-                        .onTapGesture { viewingItem = sub }
+                // 頂部統計摘要卡（有部屬才顯示）
+                if !lifeStore.subordinates.isEmpty {
+                    Section {
+                        summaryStatsCard
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .opacity(summaryAppeared ? 1 : 0)
+                            .offset(y: summaryAppeared ? 0 : 20)
+                            .onAppear {
+                                withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                    summaryAppeared = true
+                                }
+                            }
+                    }
                 }
-                .onDelete { offsets in
-                    guard subscription.isPremium else { showPremiumAlert = true; return }
-                    let items = offsets.map { sortedSubordinates[$0] }
-                    items.forEach { lifeStore.deleteSubordinate($0) }
-                }
-                .onMove { from, to in
-                    guard subscription.isPremium else { showPremiumAlert = true; return }
-                    guard sortOption == .manual else { return }
-                    lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
+
+                if lifeStore.subordinates.isEmpty {
+                    Section {
+                        emptyStateView
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                } else {
+                    ForEach(Array(sortedSubordinates.enumerated()), id: \.element.id) { idx, sub in
+                        subordinateRow(sub)
+                            .contentShape(Rectangle())
+                            .onTapGesture { viewingItem = sub }
+                            .opacity(rowsAppeared ? 1 : 0)
+                            .offset(y: rowsAppeared ? 0 : 14)
+                            .animation(
+                                .spring(response: 0.45, dampingFraction: 0.82)
+                                    .delay(0.05 * Double(min(idx, 12))),
+                                value: rowsAppeared
+                            )
+                    }
+                    .onDelete { offsets in
+                        guard subscription.isPremium else { showPremiumAlert = true; return }
+                        let items = offsets.map { sortedSubordinates[$0] }
+                        items.forEach { lifeStore.deleteSubordinate($0) }
+                    }
+                    .onMove { from, to in
+                        guard subscription.isPremium else { showPremiumAlert = true; return }
+                        guard sortOption == .manual else { return }
+                        lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
+                    }
                 }
             }
             .environment(\.editMode, sortOption == .manual ? .constant(.active) : .constant(.inactive))
             .listStyle(.insetGrouped)
-            .overlay {
-                if lifeStore.subordinates.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.badge.plus")
-                            .font(.system(size: 48)).foregroundStyle(.secondary)
-                        Text("尚無部屬").font(.headline).foregroundStyle(.secondary)
-                        Text("點擊右上角 + 新增部屬")
-                            .font(.subheadline).foregroundStyle(.tertiary)
-                    }
-                }
-            }
+            .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("部屬")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
@@ -148,6 +190,11 @@ struct SubordinateView: View {
                     }
                 }
             }
+            .onAppear {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
+                    rowsAppeared = true
+                }
+            }
             .sheet(isPresented: $showAdd) { AddSubordinateView() }
             .sheet(item: $editingItem) { item in AddSubordinateView(editing: item) }
             .sheet(item: $viewingItem) { item in SubordinateDetailView(subordinate: item) }
@@ -155,54 +202,358 @@ struct SubordinateView: View {
         }
     }
 
+    // MARK: - 統計摘要卡
+
+    private var averageScore: Int {
+        let list = lifeStore.subordinates
+        guard !list.isEmpty else { return 0 }
+        let total = list.map { subordinateScore($0) }.reduce(0, +)
+        return total / list.count
+    }
+
+    private var excellentCount: Int {
+        lifeStore.subordinates.filter { subordinateScore($0) >= 90 }.count
+    }
+
+    private func summaryKpiCell(label: String, value: String, icon: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+    }
+
+    private var summaryStatsCard: some View {
+        let total = lifeStore.subordinates.count
+        let avg = averageScore
+        let excellent = excellentCount
+        let avgColor: Color = avg >= 90 ? .green : avg >= 80 ? .blue : avg >= 70 ? .orange : .red
+
+        return VStack(spacing: 0) {
+            // 頂部：部屬人數 + 當前排序方式
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("部屬總覽")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    Text("\(total) 位部屬")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
+                }
+                Spacer()
+                // 當前排序膠囊
+                HStack(spacing: 4) {
+                    Image(systemName: sortOption.icon)
+                        .font(.system(size: 9))
+                    Text(sortOption.rawValue)
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(.white.opacity(0.20))
+                .clipShape(Capsule())
+                .foregroundStyle(.white)
+            }
+
+            // KPI 橫列：平均評分 / 優秀人數 / 整體分布
+            HStack(spacing: 0) {
+                summaryKpiCell(label: "平均評分", value: "\(avg)",
+                               icon: "chart.bar.fill")
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                summaryKpiCell(label: "優秀（90+）", value: "\(excellent) 位",
+                               icon: "star.fill")
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                summaryKpiCell(label: "待提升（<70）",
+                               value: "\(lifeStore.subordinates.filter { subordinateScore($0) < 70 }.count) 位",
+                               icon: "exclamationmark.triangle.fill")
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 12)
+
+            // 評分進度條（視覺化當前平均評分）
+            VStack(spacing: 5) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(.white.opacity(0.18))
+                            .frame(height: 5)
+                        Capsule()
+                            .fill(.white.opacity(0.80))
+                            .frame(width: geo.size.width * CGFloat(avg) / 100.0, height: 5)
+                            .animation(.spring(response: 0.7, dampingFraction: 0.8),
+                                       value: avg)
+                    }
+                }
+                .frame(height: 5)
+                HStack {
+                    Text("團隊平均 \(avg) 分")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.60))
+                    Spacer()
+                    Text(avg >= 90 ? "表現優秀" : avg >= 80 ? "表現良好" : avg >= 70 ? "尚可改善" : "需要關注")
+                        .font(.caption2)
+                        .foregroundStyle(avgColor.opacity(0.90))
+                }
+            }
+            .padding(.top, 10)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.22, green: 0.53, blue: 0.98),
+                        Color(red: 0.10, green: 0.35, blue: 0.82)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 右上主散景圓
+                Circle()
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 130, height: 130)
+                    .offset(x: 85, y: -50)
+                    .blur(radius: 14)
+                // 左下次散景圓
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 80, height: 80)
+                    .offset(x: -65, y: 50)
+                    .blur(radius: 10)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.42), radius: 16, x: 0, y: 8)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    // MARK: - 空狀態
+
+    private var emptyStateView: some View {
+        let accent = Color(red: 0.22, green: 0.53, blue: 0.98)
+        return VStack(spacing: 24) {
+            ZStack {
+                // 外層脈衝光環
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                        value: emptyIconPulse
+                    )
+                // 內層脈衝光環（延遲 0.3s，製造波紋層次）
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                    .animation(
+                        .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                        value: emptyIconPulse
+                    )
+                // 主圓底（漸層填色 + 細邊框）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.15), accent.opacity(0.06)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 88, height: 88)
+                    .overlay(
+                        Circle()
+                            .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                    )
+                Image(systemName: "person.badge.plus")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(accent.opacity(0.72))
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    emptyIconPulse = true
+                }
+            }
+
+            VStack(spacing: 10) {
+                Text("尚無部屬紀錄")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text("新增部屬後，可追蹤每位成員的\n評分、職等、到職日期與部門資訊")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+
+            Button {
+                if subscription.isPremium { showAdd = true }
+                else { showPremiumAlert = true }
+            } label: {
+                Label("新增第一位部屬", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+                    .background(
+                        LinearGradient(
+                            colors: [accent, Color(red: 0.10, green: 0.35, blue: 0.82)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .clipShape(Capsule())
+                    .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.35), radius: 10, y: 5)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 44)
+    }
+
+    // MARK: - 部屬列
+
     private func subordinateRow(_ sub: Subordinate) -> some View {
         let score = subordinateScore(sub)
-        let scoreColor = scoreColor(score)
-        return HStack(spacing: 12) {
+        let accent = scoreColor(score)
+
+        return HStack(spacing: 0) {
+            // 左側評分色彩強調條（4pt，對齊 ExpenseRow / FixedExpenseRow 規格）
+            RoundedRectangle(cornerRadius: 3)
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.40)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4)
+                .padding(.vertical, 8)
+                .padding(.trailing, 14)
+
+            // 頭像圓（44pt 漸層填色 + 評分數字，對齊 ExpenseRow 規格）
             ZStack {
                 Circle()
-                    .fill(scoreColor.opacity(0.15))
-                    .frame(width: 36, height: 36)
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                    .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
                 Circle()
-                    .stroke(scoreColor, lineWidth: 2)
-                    .frame(width: 36, height: 36)
+                    .stroke(accent.opacity(0.30), lineWidth: 1.5)
+                    .frame(width: 44, height: 44)
                 Text("\(score)")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(scoreColor)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(accent)
             }
+            .padding(.trailing, 12)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(sub.name).font(.subheadline.weight(.medium))
-                if let gt = lifeStore.gradeTitles.first(where: { $0.id == sub.gradeTitleId }) {
-                    Text("\(gt.grade) — \(gt.title)")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                } else if !sub.jobTitle.isEmpty {
-                    Text(sub.jobTitle)
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            // 姓名 + 職等 + 到職年數
+            VStack(alignment: .leading, spacing: 4) {
+                Text(sub.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+
+                // 職等 + 部門膠囊橫列
+                HStack(spacing: 5) {
+                    if let gt = lifeStore.gradeTitles.first(where: { $0.id == sub.gradeTitleId }) {
+                        Text("\(gt.grade) \(gt.title)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(accent)
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(accent.opacity(0.12))
+                            .clipShape(Capsule())
+                    } else if !sub.jobTitle.isEmpty {
+                        Text(sub.jobTitle)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(accent)
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(accent.opacity(0.12))
+                            .clipShape(Capsule())
+                            .lineLimit(1)
+                    }
+
+                    // 部門名稱膠囊
+                    let deptName = resolvedDeptName(sub)
+                    if !deptName.isEmpty {
+                        Text(deptName)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6).padding(.vertical, 2.5)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
+                            .lineLimit(1)
+                    }
                 }
+
+                // 到職日 / 年資
                 if let jd = sub.joinDate {
-                    Text("到職 \(formatDate(jd))")
-                        .font(.caption2).foregroundStyle(.tertiary)
+                    HStack(spacing: 3) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 9, weight: .medium))
+                        Text("到職 \(formatDate(jd))")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.tertiary)
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            if let dept = lifeStore.departments.first(where: { $0.id == sub.departmentId }) {
-                VStack(alignment: .trailing, spacing: 2) {
-                    if !dept.code.isEmpty {
-                        Text(dept.code).font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    if !dept.name.isEmpty {
-                        Text(dept.name).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            } else if !sub.department.isEmpty {
-                Text(sub.department)
-                    .font(.caption).foregroundStyle(.secondary)
+            // 右側：評分等級膠囊
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(scoreLevelLabel(score))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(accent.opacity(0.12))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color(.tertiaryLabel))
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 6)
+    }
+
+    private func resolvedDeptName(_ sub: Subordinate) -> String {
+        if let dept = lifeStore.departments.first(where: { $0.id == sub.departmentId }) {
+            return dept.code.isEmpty ? dept.name : "\(dept.code) \(dept.name)"
+        }
+        return sub.department
+    }
+
+    private func scoreLevelLabel(_ score: Int) -> String {
+        switch score {
+        case 90...: return "優秀"
+        case 80...: return "良好"
+        case 70...: return "尚可"
+        default:    return "需關注"
+        }
     }
 
     private func formatDate(_ date: Date) -> String {
