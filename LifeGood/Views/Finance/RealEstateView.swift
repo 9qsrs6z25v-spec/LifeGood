@@ -1,5 +1,16 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（RealEstateView）
+// [2026-06] 美化重點：
+// • summaryHeader 升級為紫色 / 深紫 LinearGradient 英雄卡，與 FinanceOverview 房產色系一致
+// • 英雄卡加入 bokeh 裝飾圓圈、物件數膠囊標籤、月租金／月現金流／平均增值率 KPI 橫排
+// • 英雄卡加入 headerAppeared spring 入場動畫（透明度 + Y 位移）
+// • emptyState 升級：雙環脈動動畫 + 56pt 漸層圓圈圖示 + 紫色膠囊 CTA 按鈕
+// • body 重構為單一 List（.insetGrouped），與 IncomeView / FixedExpenseView 架構一致
+// • navigationBarTitleDisplayMode 改為 .large
+// • 卡片列表加入 cardsAppeared spring 錯位入場動畫（間隔 0.05s）
+// • Toolbar 排序與新增按鈕配色改為紫色，與英雄卡主色統一
+
 enum RealEstateSortOption: String, CaseIterable, Identifiable {
     case purchasePrice = "購入價格"
     case currentValue = "目前估值"
@@ -30,6 +41,9 @@ struct RealEstateView: View {
     @State private var sortOption: RealEstateSortOption = .purchaseDate
     @State private var sortAscending = false
     @State private var showPremiumAlert = false
+    @State private var headerAppeared = false
+    @State private var cardsAppeared = false
+    @State private var emptyIconPulse = false
 
     private var activeEstates: [RealEstate] {
         sorted(store.realEstates.filter { !$0.isSold })
@@ -55,58 +69,84 @@ struct RealEstateView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                summaryHeader
+            List {
+                Section {
+                    summaryHeader
+                        .offset(y: headerAppeared ? 0 : -20)
+                        .opacity(headerAppeared ? 1 : 0)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: headerAppeared)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
 
                 if store.realEstates.isEmpty {
-                    emptyState
+                    Section {
+                        emptyState
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets())
+                    }
                 } else {
-                    List {
-                        ForEach(activeEstates) { item in
-                            estateCard(item)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                .onTapGesture { viewingItem = item }
-                                .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) {
-                                        if subscription.isPremium { deleteEstate(item) }
-                                        else { showPremiumAlert = true }
-                                    } label: {
-                                        Label("刪除", systemImage: "trash")
-                                    }
+                    ForEach(Array(activeEstates.enumerated()), id: \.element.id) { idx, item in
+                        estateCard(item)
+                            .offset(y: cardsAppeared ? 0 : 30)
+                            .opacity(cardsAppeared ? 1 : 0)
+                            .animation(
+                                .spring(response: 0.5, dampingFraction: 0.8).delay(Double(idx) * 0.05),
+                                value: cardsAppeared
+                            )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .onTapGesture { viewingItem = item }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    if subscription.isPremium { deleteEstate(item) }
+                                    else { showPremiumAlert = true }
+                                } label: {
+                                    Label("刪除", systemImage: "trash")
                                 }
-                        }
-
-                        if !soldEstates.isEmpty {
-                            Section {
-                                ForEach(soldEstates) { item in
-                                    estateCard(item)
-                                        .listRowBackground(Color.clear)
-                                        .listRowSeparator(.hidden)
-                                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                        .onTapGesture { viewingItem = item }
-                                        .swipeActions(edge: .trailing) {
-                                            Button(role: .destructive) {
-                                                if subscription.isPremium { deleteEstate(item) }
-                                                else { showPremiumAlert = true }
-                                            } label: {
-                                                Label("刪除", systemImage: "trash")
-                                            }
-                                        }
-                                }
-                            } header: {
-                                Text("已售出").font(.caption.weight(.semibold))
                             }
+                    }
+
+                    if !soldEstates.isEmpty {
+                        Section {
+                            ForEach(Array(soldEstates.enumerated()), id: \.element.id) { idx, item in
+                                estateCard(item)
+                                    .offset(y: cardsAppeared ? 0 : 30)
+                                    .opacity(cardsAppeared ? 1 : 0)
+                                    .animation(
+                                        .spring(response: 0.5, dampingFraction: 0.8)
+                                            .delay(Double(activeEstates.count + idx) * 0.05),
+                                        value: cardsAppeared
+                                    )
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                    .onTapGesture { viewingItem = item }
+                                    .swipeActions(edge: .trailing) {
+                                        Button(role: .destructive) {
+                                            if subscription.isPremium { deleteEstate(item) }
+                                            else { showPremiumAlert = true }
+                                        } label: {
+                                            Label("刪除", systemImage: "trash")
+                                        }
+                                    }
+                            }
+                        } header: {
+                            Text("已售出")
+                                .font(.caption.weight(.semibold))
+                                .textCase(nil)
                         }
                     }
-                    .listStyle(.plain)
-                    .background(Color(.systemGroupedBackground))
-                    .scrollContentBackground(.hidden)
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("房地產")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
@@ -133,14 +173,14 @@ struct RealEstateView: View {
                             }
                         } label: {
                             Image(systemName: "arrow.up.arrow.down.circle")
-                                .font(.title3).foregroundStyle(.green)
+                                .font(.title3).foregroundStyle(.purple)
                         }
 
                         Button {
                             if subscription.isPremium { showAdd = true }
                             else { showPremiumAlert = true }
                         } label: {
-                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.purple)
                         }
                     }
                 }
@@ -149,6 +189,17 @@ struct RealEstateView: View {
             .sheet(item: $viewingItem) { item in RealEstateDetailView(estate: item) }
             .sheet(item: $editingItem) { item in AddRealEstateView(editing: item) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+            .onAppear {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                    headerAppeared = true
+                }
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.2)) {
+                    cardsAppeared = true
+                }
+                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                    emptyIconPulse = true
+                }
+            }
         }
     }
 
@@ -181,54 +232,191 @@ struct RealEstateView: View {
         store.deleteRealEstate(item)
     }
 
-    // MARK: - 摘要
+    // MARK: - 摘要（英雄卡）
 
     private var summaryHeader: some View {
-        VStack(spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("房產總估值")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    Text(fmt(store.totalRealEstateValue))
-                        .font(.title2.bold())
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    let active = activeEstates.count
-                    let sold = soldEstates.count
-                    Text("\(active) 筆持有")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    if sold > 0 {
-                        Text("\(sold) 筆已售")
-                            .font(.caption).foregroundStyle(.orange)
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.48, green: 0.25, blue: 0.80),
+                    Color(red: 0.25, green: 0.15, blue: 0.60)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            // Bokeh 裝飾圓圈
+            Circle()
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 140, height: 140)
+                .offset(x: 100, y: -40)
+            Circle()
+                .fill(Color.white.opacity(0.05))
+                .frame(width: 80, height: 80)
+                .offset(x: -90, y: 50)
+            Circle()
+                .fill(Color.white.opacity(0.06))
+                .frame(width: 60, height: 60)
+                .offset(x: 60, y: 50)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("房產總估值")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.75))
+                        Text(fmt(store.totalRealEstateValue))
+                            .font(.title.bold())
+                            .foregroundStyle(.white)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 6) {
+                        let active = activeEstates.count
+                        HStack(spacing: 4) {
+                            Image(systemName: "building.2.fill").font(.caption2)
+                            Text("\(active) 筆持有").font(.caption.weight(.semibold))
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.white.opacity(0.2))
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+
+                        let sold = soldEstates.count
+                        if sold > 0 {
+                            Text("\(sold) 筆已售")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
                     }
                 }
-            }
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("月租金收入").font(.caption).foregroundStyle(.secondary)
-                    Text(fmt(store.monthlyRentalIncome)).font(.caption.bold()).foregroundStyle(.green)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("月淨現金流").font(.caption).foregroundStyle(.secondary)
+
+                // KPI 橫排
+                HStack(spacing: 0) {
+                    kpiItem(label: "月租金", value: fmt(store.monthlyRentalIncome), color: .white)
+                    Rectangle()
+                        .fill(Color.white.opacity(0.25))
+                        .frame(width: 1, height: 28)
                     let flow = store.monthlyCashFlow
-                    Text(fmt(flow)).font(.caption.bold()).foregroundStyle(flow >= 0 ? .green : .red)
+                    kpiItem(
+                        label: "月現金流",
+                        value: fmt(flow),
+                        color: flow >= 0 ? Color(red: 0.5, green: 1.0, blue: 0.5) : .red
+                    )
+                    Rectangle()
+                        .fill(Color.white.opacity(0.25))
+                        .frame(width: 1, height: 28)
+                    let avgRate = activeEstates.isEmpty
+                        ? 0.0
+                        : activeEstates.map(\.appreciationRate).reduce(0, +) / Double(activeEstates.count)
+                    kpiItem(
+                        label: "平均增值",
+                        value: String(format: "%@%.1f%%", avgRate >= 0 ? "+" : "", avgRate),
+                        color: avgRate >= 0 ? Color(red: 0.5, green: 1.0, blue: 0.5) : .red
+                    )
                 }
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
+            .padding(20)
         }
-        .padding()
-        .background(Color(.systemBackground))
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 170)
+        .clipped()
     }
 
+    private func kpiItem(label: String, value: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(label).font(.caption2).foregroundStyle(.white.opacity(0.7))
+            Text(value).font(.caption.bold()).foregroundStyle(color)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - 空狀態
+
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "building.2").font(.system(size: 48)).foregroundStyle(.secondary)
-            Text("尚無房地產紀錄").font(.headline).foregroundStyle(.secondary)
-            Text("點擊右上角 + 新增物件").font(.subheadline).foregroundStyle(.tertiary)
-            Spacer()
-        }.frame(maxWidth: .infinity)
+        VStack(spacing: 24) {
+            Spacer(minLength: 40)
+
+            ZStack {
+                Circle()
+                    .stroke(Color.purple.opacity(0.15), lineWidth: 1.5)
+                    .frame(
+                        width: emptyIconPulse ? 110 : 90,
+                        height: emptyIconPulse ? 110 : 90
+                    )
+                    .animation(
+                        .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                        value: emptyIconPulse
+                    )
+
+                Circle()
+                    .stroke(Color.purple.opacity(0.25), lineWidth: 1.5)
+                    .frame(
+                        width: emptyIconPulse ? 82 : 70,
+                        height: emptyIconPulse ? 82 : 70
+                    )
+                    .animation(
+                        .easeInOut(duration: 1.2).repeatForever(autoreverses: true).delay(0.2),
+                        value: emptyIconPulse
+                    )
+
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.55, green: 0.30, blue: 0.90),
+                                Color(red: 0.30, green: 0.18, blue: 0.68)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 56, height: 56)
+                    .shadow(color: Color.purple.opacity(0.4), radius: 8, y: 4)
+
+                Image(systemName: "building.2.fill")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.white)
+            }
+
+            VStack(spacing: 6) {
+                Text("尚無房地產紀錄")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text("新增物件，掌握房產投資組合")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            Button {
+                if subscription.isPremium { showAdd = true }
+                else { showPremiumAlert = true }
+            } label: {
+                Label("新增第一筆房產", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 24).padding(.vertical, 10)
+                    .background(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.55, green: 0.30, blue: 0.90),
+                                Color(red: 0.30, green: 0.18, blue: 0.68)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .clipShape(Capsule())
+                    .shadow(color: Color.purple.opacity(0.35), radius: 6, y: 3)
+            }
+
+            Spacer(minLength: 40)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
     }
 
     // MARK: - 卡片
