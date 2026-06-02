@@ -185,7 +185,7 @@ struct VehicleView: View {
                 }
             }
             .sheet(isPresented: $showAdd) { AddVehicleView() }
-            .sheet(item: $viewingItem) { item in VehicleDetailView(vehicle: item) }
+            .sheet(item: $viewingItem) { item in VehicleDetailView(vehicleId: item.id) }
             .sheet(item: $editingItem) { item in AddVehicleView(editing: item) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .toolbar {

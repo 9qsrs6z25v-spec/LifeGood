@@ -87,7 +87,10 @@ struct RealEstateView: View {
                                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                         .onTapGesture { viewingItem = item }
                                         .swipeActions(edge: .trailing) {
-                                            Button(role: .destructive) { deleteEstate(item) } label: {
+                                            Button(role: .destructive) {
+                                                if subscription.isPremium { deleteEstate(item) }
+                                                else { showPremiumAlert = true }
+                                            } label: {
                                                 Label("刪除", systemImage: "trash")
                                             }
                                         }

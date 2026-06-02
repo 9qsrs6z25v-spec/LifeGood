@@ -750,8 +750,7 @@ struct SettingsView: View {
                 dataStatBadge(
                     icon: "star.circle.fill",
                     color: .orange,
-                    count: lifeStore.milestones.count + lifeStore.familyMembers.count +
-                           financeStore.realEstates.count,
+                    count: lifeStore.milestones.count + lifeStore.familyMembers.count,
                     label: "人生"
                 )
             }

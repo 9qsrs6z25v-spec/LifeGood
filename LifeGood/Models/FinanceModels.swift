@@ -288,7 +288,7 @@ struct StockDividend: Identifiable, Codable, Equatable {
         lots = (try? c.decode(Double.self, forKey: .lots)) ?? 0
         perShare = (try? c.decode(Double.self, forKey: .perShare)) ?? 0
         sharesAtEvent = (try? c.decode(Double.self, forKey: .sharesAtEvent)) ?? 0
-        linkedIncomeId = try? c.decodeIfPresent(UUID.self, forKey: .linkedIncomeId)
+        linkedIncomeId = try c.decodeIfPresent(UUID.self, forKey: .linkedIncomeId)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
     }
 
@@ -470,8 +470,9 @@ struct Stock: Identifiable, Codable {
                 // 已賣完且 shares=0：以 soldPrice 推不出，給 0
                 return 0
             }()
-            if baseLots > 0 || isSold {
-                let lots = baseLots > 0 ? baseLots : 1  // fallback
+            if baseLots > 0 {
+                // 已售光（shares==0）時歷史張數無法推算，跳過偽造，保留舊欄位為元資料
+                let lots = baseLots
                 seeds.append(StockTransaction(
                     id: UUID(), date: purchaseDate,
                     kind: .buy,

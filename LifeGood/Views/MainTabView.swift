@@ -243,6 +243,7 @@ struct MainTabView: View {
     @StateObject private var aiSettings = AISettingsStore.shared
     @StateObject private var speechRecognizer = SpeechRecognizer()
     @State private var aiToast: AIToastInfo?
+    @State private var toastDismissTask: Task<Void, Never>?
     @State private var aiBusy = false
     /// 同步守門旗標：DragGesture.onChanged 在按住期間會反覆觸發，
     /// 但 aiStartRecording 是 async，從觸發到 speechRecognizer.isRecording=true 之間有空窗，
@@ -717,8 +718,11 @@ struct MainTabView: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
             aiToast = AIToastInfo(title: title, detail: detail, isError: isError)
         }
-        Task {
+        // 取消前一個倒數計時，避免連續呼叫時多個 Task 同時競爭清除 toast
+        toastDismissTask?.cancel()
+        toastDismissTask = Task {
             try? await Task.sleep(nanoseconds: 3_500_000_000)
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     aiToast = nil

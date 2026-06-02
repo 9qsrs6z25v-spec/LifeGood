@@ -164,11 +164,11 @@ struct RenovationPhotoEditor: View {
         DispatchQueue.main.async { financeStore.update(estate) }
     }
 
-    /// 取消時若是新增模式，把已寫入的檔案清掉避免變孤兒
+    /// 取消時若是新增模式，只清除本次 session 新增的檔案；preloadedFileNames 是呼叫方傳入的，不刪
     private func cancel() {
         if editing == nil {
-            // 編輯既有時不清，因為原本就在硬碟上
-            for name in photoFileNames {
+            let preloaded = Set(preloadedFileNames)
+            for name in photoFileNames where !preloaded.contains(name) {
                 RenovationPhoto.deletePhoto(name)
             }
         }
@@ -264,7 +264,11 @@ struct RenovationStackViewer: View {
         }
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.dateFormatter.string(from: date)
     }
 }

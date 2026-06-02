@@ -344,9 +344,15 @@ class LifeStore: ObservableObject {
     }
 
     private func deriveID(_ base: UUID, suffix: String) -> UUID {
-        let data = (base.uuidString + ":" + suffix).data(using: .utf8) ?? Data()
+        // 使用 FNV-1a 雜湊完整字串（含 suffix），避免 prefix(16) 截掉 suffix 造成所有衍生 ID 相同
+        let fullString = base.uuidString + ":" + suffix
+        var h: UInt64 = 14_695_981_039_346_656_037
+        for b in fullString.utf8 { h = (h ^ UInt64(b)) &* 1_099_511_628_211 }
+        let lo = h
+        let hi = (h >> 32) ^ (h << 17) ^ 0xA5A5_A5A5_A5A5_A5A5
         var bytes = [UInt8](repeating: 0, count: 16)
-        for (i, b) in data.prefix(16).enumerated() { bytes[i] = b }
+        for i in 0..<8 { bytes[i]     = UInt8((lo >> (i * 8)) & 0xff) }
+        for i in 0..<8 { bytes[i + 8] = UInt8((hi >> (i * 8)) & 0xff) }
         return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3],
                           bytes[4], bytes[5], bytes[6], bytes[7],
                           bytes[8], bytes[9], bytes[10], bytes[11],

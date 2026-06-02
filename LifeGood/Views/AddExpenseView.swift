@@ -555,10 +555,14 @@ struct AddExpenseView: View {
         }
     }
 
-    private func fmtCurrency(_ v: Double) -> String {
+    private static let fmtCurrencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        return f
+    }()
+
+    private func fmtCurrency(_ v: Double) -> String {
+        Self.fmtCurrencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     // MARK: - 多張照片 Section
@@ -2044,9 +2048,9 @@ struct AddExpenseView: View {
 
             let inferredType: UtilityType = {
                 let lower = title.lowercased()
-                if title.contains("水") { return .water }
-                if title.contains("電") || lower.contains("electric") { return .electricity }
-                if title.contains("瓦斯") || lower.contains("gas") { return .gas }
+                if lower.contains("水") || lower.contains("water") { return .water }
+                if lower.contains("電") || lower.contains("electric") { return .electricity }
+                if lower.contains("瓦斯") || lower.contains("gas") { return .gas }
                 return .electricity
             }()
 
