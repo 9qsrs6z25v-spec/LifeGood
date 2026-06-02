@@ -643,7 +643,7 @@ struct FinanceCardView: View {
     /// 信用卡樣式（仿真實信用卡 banner）
     private var creditCardHeader: some View {
         let disabled = item.isDisabled == true
-        let cardName = item.cardName?.isEmpty == false ? item.cardName! : item.title
+        let cardName = item.cardName.flatMap { $0.isEmpty ? nil : $0 } ?? item.title
         let last4 = item.cardLastFour ?? "----"
         let bankName: String? = {
             guard let bid = item.linkedBankMilestoneId,
@@ -736,7 +736,7 @@ struct FinanceCardView: View {
 
     /// 銀行存摺樣式
     private var bankPassbookHeader: some View {
-        let bn = item.bankName?.isEmpty == false ? item.bankName! : item.title
+        let bn = item.bankName.flatMap { $0.isEmpty ? nil : $0 } ?? item.title
         let branch = item.branchName ?? ""
         let acc = item.accountNumber ?? ""
         let accType = item.bankAccountType?.rawValue ?? ""
