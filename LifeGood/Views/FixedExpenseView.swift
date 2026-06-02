@@ -33,10 +33,11 @@ struct FixedExpenseView: View {
         let grouped = Dictionary(grouping: store.fixedExpenses) { expense in
             expense.fixedCategory ?? .other
         }
-        return grouped.sorted {
-            $0.value.filter { $0.date <= now }.reduce(0) { $0 + $1.amount }
-            > $1.value.filter { $0.date <= now }.reduce(0) { $0 + $1.amount }
+        // 先把每組總額算好一次，避免排序比較函式內重複執行 filter+reduce
+        let sums = grouped.mapValues { exps in
+            exps.filter { $0.date <= now }.reduce(0) { $0 + $1.amount }
         }
+        return grouped.sorted { sums[$0.key, default: 0] > sums[$1.key, default: 0] }
     }
 
     var body: some View {
