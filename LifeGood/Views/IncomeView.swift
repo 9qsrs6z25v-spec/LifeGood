@@ -732,13 +732,6 @@ struct IncomeView: View {
     /// 金額格式化：未滿一萬照常顯示 NT$ 金額；達到一萬(含)以上改以「萬」為單位，
     /// 例如 12,345 → NT$1.2萬、1,234,567 → NT$123.5萬，避免位數過多造成換行/難讀。
     private func fmt(_ v: Double) -> String {
-        if abs(v) >= 10000 {
-            let wan = v / 10000
-            let str = (wan == wan.rounded())
-                ? String(format: "%.0f", wan)
-                : String(format: "%.1f", wan)
-            return "NT$\(str)萬"
-        }
-        return Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
+        v.ntdWanString
     }
 }

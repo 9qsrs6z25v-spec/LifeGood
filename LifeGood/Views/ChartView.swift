@@ -935,13 +935,7 @@ struct ChartView: View {
     }
 
     private func formatCurrency(_ value: Double) -> String {
-        // 金額達 1 萬(含)以上改以「萬」為單位（例 12,345 → NT$1.2萬），未滿一萬維持原樣
-        if abs(value) >= 10000 {
-            let wan = value / 10000
-            let str = (wan == wan.rounded()) ? String(format: "%.0f", wan) : String(format: "%.1f", wan)
-            return "NT$\(str)萬"
-        }
-        return Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+        value.ntdWanString
     }
 
     private func abbreviateCurrency(_ value: Double) -> String {
