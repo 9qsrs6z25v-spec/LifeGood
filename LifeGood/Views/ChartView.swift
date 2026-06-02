@@ -109,6 +109,9 @@ struct ChartView: View {
 
     @MainActor
     private func loadChartData() async {
+        // 短暫等待讓 Task 取消有機會生效，避免快速連續更新時全部執行
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        guard !Task.isCancelled else { return }
         isLoading = true
         let period = selectedPeriod
         chartData = store.chartData(for: period)

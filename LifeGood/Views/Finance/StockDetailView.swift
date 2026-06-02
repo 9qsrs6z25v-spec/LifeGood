@@ -1140,13 +1140,17 @@ struct StockDividendEditor: View {
     }
 
     private func stableDepositId(seed: String) -> UUID {
-        var hasher = Hasher()
-        hasher.combine(seed)
-        let h = UInt64(bitPattern: Int64(hasher.finalize()))
+        // Swift.Hasher 每次啟動種子不同，改用 FNV-1a 確保跨啟動穩定
+        var h: UInt64 = 14_695_981_039_346_656_037
+        for b in seed.utf8 { h = (h ^ UInt64(b)) &* 1_099_511_628_211 }
+        let lo = h
+        let hi = (h >> 32) ^ (h << 17) ^ 0xB3B3_B3B3_B3B3_B3B3
         var bytes = [UInt8](repeating: 0, count: 16)
-        for i in 0..<8 { bytes[i] = UInt8((h >> (i * 8)) & 0xff) }
-        for i in 8..<16 { bytes[i] = UInt8((h >> ((i - 8) * 8)) & 0xff) }
-        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-                          bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
+        for i in 0..<8 { bytes[i]     = UInt8((lo >> (i * 8)) & 0xff) }
+        for i in 0..<8 { bytes[i + 8] = UInt8((hi >> (i * 8)) & 0xff) }
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3],
+                          bytes[4], bytes[5], bytes[6], bytes[7],
+                          bytes[8], bytes[9], bytes[10], bytes[11],
+                          bytes[12], bytes[13], bytes[14], bytes[15]))
     }
 }

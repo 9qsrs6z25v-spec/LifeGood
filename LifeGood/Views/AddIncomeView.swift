@@ -578,9 +578,13 @@ struct AddIncomeView: View {
         }
     }
 
-    private func formatCurrency(_ value: Double) -> String {
+    private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: value)) ?? "NT$0"
+        return f
+    }()
+
+    private func formatCurrency(_ value: Double) -> String {
+        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 }

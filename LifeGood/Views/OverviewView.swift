@@ -661,11 +661,12 @@ struct OverviewView: View {
     }
 
     private var recentItems: [RecentItem] {
-        let recentExp = store.expenses.suffix(5).map { e in
+        // 用日期排序後取前 5，避免 suffix(5) 依插入順序而非日期導致顯示錯誤
+        let recentExp = store.expenses.sorted { $0.date > $1.date }.prefix(5).map { e in
             RecentItem(id: e.id, title: e.title, icon: e.categoryIcon,
                        category: e.categoryName, amount: e.amount, date: e.date, isIncome: false)
         }
-        let recentInc = store.incomes.suffix(5).map { i in
+        let recentInc = store.incomes.sorted { $0.date > $1.date }.prefix(5).map { i in
             RecentItem(id: i.id, title: i.title, icon: i.category.icon,
                        category: i.category.rawValue, amount: i.amount, date: i.date, isIncome: true)
         }

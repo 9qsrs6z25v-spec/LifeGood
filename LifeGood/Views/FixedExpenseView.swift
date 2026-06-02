@@ -497,7 +497,8 @@ struct FixedExpenseView: View {
         let now = Date()
         let year = calendar.component(.year, from: now)
         guard let yearStart = calendar.date(from: DateComponents(year: year, month: 1, day: 1)),
-              let yearEnd = calendar.date(from: DateComponents(year: year, month: 12, day: 31)) else {
+              let yearEndDay = calendar.date(from: DateComponents(year: year, month: 12, day: 31)),
+              let yearEnd = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: yearEndDay) else {
             return 0
         }
         let effectiveStart = max(expense.date, yearStart)

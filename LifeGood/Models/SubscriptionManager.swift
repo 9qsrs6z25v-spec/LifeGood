@@ -46,8 +46,8 @@ final class SubscriptionManager: ObservableObject {
     /// 是否享有完整功能。包含：StoreKit 解鎖、開發旗標。
     var isPremium: Bool {
         if devOverride { return true }
-        if let exp = entitlementExpiresAt, exp > Date() { return true }
-        return entitledProductID != nil
+        guard let exp = entitlementExpiresAt else { return false }
+        return exp > Date()
     }
 
     private var transactionListener: Task<Void, Never>?

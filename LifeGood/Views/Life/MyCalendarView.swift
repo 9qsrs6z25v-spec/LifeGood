@@ -158,6 +158,9 @@ struct MyCalendarView: View {
     private func annualOccurrence(of date: Date, year: Int) -> Date {
         var comp = calendar.dateComponents([.month, .day], from: date)
         comp.year = year
+        if let result = calendar.date(from: comp) { return result }
+        // 2/29 在非閏年不存在時，改用 2/28，避免回傳原始日期造成跨年錯誤
+        comp.day = (comp.day ?? 1) - 1
         return calendar.date(from: comp) ?? date
     }
 

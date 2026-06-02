@@ -119,6 +119,8 @@ final class EInvoiceSyncManager: ObservableObject {
         let alreadyImported = Set(importHistory.map { $0.invNum })
         // 收集所有待寫入的支出，迴圈結束後一次 append，只觸發一次 save() → CloudKit push
         var pendingExpenses: [Expense] = []
+        // 同樣收集新紀錄，避免在迴圈內每次 insert(at:0) 造成 O(n²) 移位與 N 次 @Published 通知
+        var newHistoryRecords: [EInvoiceImportRecord] = []
 
         do {
             let headers = try await client.fetchHeaders(carrier: carrier, from: start, to: end)
@@ -138,7 +140,7 @@ final class EInvoiceSyncManager: ObservableObject {
                         invNum: header.invNum, invDate: header.invDate,
                         sellerName: header.sellerName, amount: header.amount,
                         expenseIds: expenseIds, assignedCategory: category)
-                    importHistory.insert(record, at: 0)
+                    newHistoryRecords.append(record)
                     imported += 1
                 } catch {
                     failed += 1
@@ -148,6 +150,11 @@ final class EInvoiceSyncManager: ObservableObject {
         } catch {
             failed += 1
             errors.append(error.localizedDescription)
+        }
+
+        // 一次性 prepend，只觸發一次 @Published 通知
+        if !newHistoryRecords.isEmpty {
+            importHistory.insert(contentsOf: newHistoryRecords, at: 0)
         }
 
         // 一次性 append，只觸發一次 didSet → save() → CloudKit push

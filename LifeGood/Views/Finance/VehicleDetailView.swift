@@ -139,7 +139,11 @@ struct VehicleDetailView: View {
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
-    let vehicle: Vehicle
+    let vehicleId: UUID
+    /// 每次 body 重算時從 store 取最新值，確保編輯後立即反映
+    private var vehicle: Vehicle {
+        store.vehicles.first(where: { $0.id == vehicleId }) ?? Vehicle(name: "")
+    }
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
     @State private var showPremiumAlert = false
