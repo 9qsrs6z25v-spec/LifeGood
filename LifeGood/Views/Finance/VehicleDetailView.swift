@@ -361,9 +361,7 @@ struct VehicleDetailView: View {
     }
 
     private func fmt(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        v.ntdWanString
     }
 
     private func fmtWan(_ v: Double) -> String {

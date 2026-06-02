@@ -693,7 +693,7 @@ struct FinanceOverviewView: View {
     }()
 
     private func fmt(_ v: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
+        v.ntdWanString
     }
 
     private func fmtShort(_ v: Double) -> String {

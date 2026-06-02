@@ -471,6 +471,8 @@ struct SavingsInsuranceView: View {
     // MARK: - 格式化
 
     private func fmt(_ v: Double, code: String) -> String {
+        // 台幣套用「萬」規則；外幣維持原幣別與小數位
+        if code == "NT$" || code == "TWD" || code.isEmpty { return v.ntdWanString }
         let isUSD = code == "US$" || code == "USD" || code.lowercased() == "美金"
         let f = NumberFormatter()
         f.numberStyle = .currency
