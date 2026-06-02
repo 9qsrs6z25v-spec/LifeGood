@@ -482,7 +482,8 @@ extension Expense {
     static func savePhoto(_ data: Data, expenseId: UUID, photoId: UUID = UUID()) -> String {
         let name = "\(expenseId.uuidString)_\(photoId.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        try? data.write(to: url)
+        // 只有寫入成功才觸發 CloudKit 上傳，避免上傳不存在的檔案
+        guard (try? data.write(to: url)) != nil else { return name }
         PhotoCloudSync.upload(directory: "ExpensePhotos", fileName: name)
         return name
     }
