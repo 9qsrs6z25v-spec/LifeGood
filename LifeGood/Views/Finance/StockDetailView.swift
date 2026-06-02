@@ -1,5 +1,20 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（StockDetailView）
+// [2026-06] 本次美化方向：
+//   1. transactionsSection / dividendsSection 標題列：
+//      升級為 Capsule 漸層色條 + subheadline.bold + 計數膠囊徽章，
+//      對齊 VariableExpenseView / IncomeView 區塊標題設計語言。
+//   2. transactionRow：加入 38pt 買賣方向圓形圖示（買入紅色 / 賣出綠色），
+//      對齊 ExpenseRow / incomeRow 的 44pt 圓形圖示視覺規格，整體 padding 加大。
+//   3. dividendRow：圖示圓從 30pt 純色升級為 38pt 漸層圓，對齊 transactionRow 規格。
+//   4. summaryFooter / dividendsFooter：數值改用帶色彩背景的膠囊徽章，
+//      視覺重量與卡片底部圖例一致。
+//   5. accountSection：圖示改用彩色圓形背景，加 overlay 邊框，對齊 FinanceOverviewView 卡片規格。
+//   6. noteCard：加入 Capsule 色條 + 圖示的段落標題，對齊其他卡片標題設計語言。
+//   7. transactionsSection / dividendsSection：加入交錯淡入進場動畫，
+//      對齊 OverviewView / VariableExpenseView 的 stagger animation 規格。
+
 struct StockDetailView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -15,6 +30,9 @@ struct StockDetailView: View {
     @State private var editingTransaction: StockTransaction?
     @State private var addingDividend = false
     @State private var editingDividend: StockDividend?
+    // 進場動畫：交易紀錄 / 股利紀錄各自獨立控制
+    @State private var transactionsAppeared = false
+    @State private var dividendsAppeared = false
 
     init(stock: Stock) {
         self.stockId = stock.id
@@ -262,12 +280,26 @@ struct StockDetailView: View {
     @ViewBuilder
     private var transactionsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "list.bullet.rectangle").foregroundStyle(.indigo)
-                Text("交易紀錄").font(.headline)
+            // 【美化】Capsule 色條 + subheadline.bold + 計數膠囊，對齊其他頁面區塊標題設計語言
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(LinearGradient(
+                        colors: [.indigo, .indigo.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .frame(width: 4, height: 20)
+                Text("交易紀錄")
+                    .font(.subheadline.weight(.bold))
+                if !sortedTransactions.isEmpty {
+                    Text("\(sortedTransactions.count) 筆")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.indigo)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.indigo.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.75))
+                }
                 Spacer()
-                Text("\(sortedTransactions.count) 筆")
-                    .font(.caption2).foregroundStyle(.secondary)
                 Button {
                     if subscription.isPremium { addingTransaction = true }
                     else { showPremiumAlert = true }
@@ -275,73 +307,126 @@ struct StockDetailView: View {
                     Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                 }
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 6)
+            .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
 
             if sortedTransactions.isEmpty {
                 Text("尚無交易紀錄，按右上角 + 新增買入或賣出。新增第一筆時會以股票卡的「購入日期 / 張數 / 買入價」作為初始買入。")
                     .font(.caption).foregroundStyle(.tertiary)
-                    .padding(.horizontal).padding(.bottom, 12)
+                    .padding(.horizontal, 16).padding(.bottom, 14)
             } else {
-                ForEach(sortedTransactions) { tx in
+                // 【美化】交錯淡入 + 向上進場動畫，對齊 VariableExpenseView 規格
+                ForEach(Array(sortedTransactions.enumerated()), id: \.element.id) { idx, tx in
                     Button {
                         editingTransaction = tx
                     } label: {
                         transactionRow(tx)
                     }
                     .buttonStyle(.plain)
-                    Divider().padding(.leading, 14)
+                    .opacity(transactionsAppeared ? 1 : 0)
+                    .offset(y: transactionsAppeared ? 0 : 12)
+                    .animation(
+                        .spring(response: 0.44, dampingFraction: 0.82)
+                            .delay(0.06 * Double(min(idx, 8))),
+                        value: transactionsAppeared
+                    )
+                    Divider().padding(.leading, 66)
                 }
                 summaryFooter
             }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
+                transactionsAppeared = true
+            }
+        }
     }
 
     private func transactionRow(_ tx: StockTransaction) -> some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+        let accent: Color = tx.kind == .buy ? .red : .green
+        // 【美化】加入 38pt 方向圖示圓（買入紅 / 賣出綠），對齊 ExpenseRow / incomeRow 視覺規格
+        return HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 38, height: 38)
+                    .shadow(color: accent.opacity(0.18), radius: 5, x: 0, y: 2)
+                Image(systemName: tx.kind == .buy ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(tx.kind.rawValue)
-                        .font(.caption2.weight(.semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background((tx.kind == .buy ? Color.red : Color.green).opacity(0.15))
-                        .foregroundStyle(tx.kind == .buy ? Color.red : Color.green)
+                        .background(accent.opacity(0.12))
+                        .foregroundStyle(accent)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                     Text(fmtDate(tx.date)).font(.caption).foregroundStyle(.secondary)
                 }
                 Text("\(formatLots(tx.lots)) 張 × \(formatPrice(tx.price))")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
+
             Spacer()
+
             Text(fmt(tx.amount))
-                .font(.subheadline.weight(.bold))
+                .font(.system(size: 15, weight: .bold, design: .rounded))
                 .foregroundStyle(tx.kind == .buy ? Color.primary : Color.green)
+                .contentTransition(.numericText())
         }
-        .padding(.horizontal).padding(.vertical, 8)
+        .padding(.horizontal, 14).padding(.vertical, 10)
         .contentShape(Rectangle())
     }
 
     /// 顯示成本均價（不一定 = 最新一筆買入價）
+    // 【美化】數值改用帶色彩背景的膠囊徽章，視覺重量與卡片整體一致
     private var summaryFooter: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 0) {
             Divider()
             HStack {
-                Text("目前持股").font(.caption2).foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Image(systemName: "chart.bar.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.indigo)
+                    Text("目前持股")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Text("\(formatLots(stock.shares / 1000)) 張")
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Color.indigo.opacity(0.09))
+                    .foregroundStyle(.indigo)
+                    .clipShape(Capsule())
             }
+            .padding(.horizontal, 14).padding(.vertical, 7)
+
             HStack {
-                Text("成本均價").font(.caption2).foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Image(systemName: "dollarsign.circle.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.blue)
+                    Text("成本均價")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Text(formatPrice(stock.purchasePrice))
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.bold))
                     .foregroundStyle(.blue)
             }
+            .padding(.horizontal, 14).padding(.vertical, 7)
         }
-        .padding(.horizontal).padding(.vertical, 8)
     }
 
     // MARK: - 股利章節
@@ -352,12 +437,26 @@ struct StockDetailView: View {
 
     private var dividendsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "gift.fill").foregroundStyle(.pink)
-                Text("股票股利 / 現金股利").font(.headline)
+            // 【美化】Capsule 色條 + subheadline.bold + 計數膠囊，對齊 transactionsSection 設計語言
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(LinearGradient(
+                        colors: [.pink, .pink.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .frame(width: 4, height: 20)
+                Text("股票股利 / 現金股利")
+                    .font(.subheadline.weight(.bold))
+                if !sortedDividends.isEmpty {
+                    Text(dividendsSummaryLabel)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.pink)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.pink.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.pink.opacity(0.22), lineWidth: 0.75))
+                }
                 Spacer()
-                Text(dividendsSummaryLabel)
-                    .font(.caption2).foregroundStyle(.secondary)
                 Button {
                     if subscription.isPremium { addingDividend = true }
                     else { showPremiumAlert = true }
@@ -366,28 +465,42 @@ struct StockDetailView: View {
                         .font(.title3).foregroundStyle(.green)
                 }
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 6)
+            .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
 
             if sortedDividends.isEmpty {
                 Text("尚無股利紀錄，按右上角 + 新增配股或配息。")
                     .font(.caption).foregroundStyle(.tertiary)
-                    .padding(.horizontal).padding(.bottom, 12)
+                    .padding(.horizontal, 16).padding(.bottom, 14)
             } else {
-                ForEach(sortedDividends) { div in
+                // 【美化】交錯淡入 + 向上進場動畫
+                ForEach(Array(sortedDividends.enumerated()), id: \.element.id) { idx, div in
                     Button {
                         editingDividend = div
                     } label: {
                         dividendRow(div)
                     }
                     .buttonStyle(.plain)
-                    Divider().padding(.leading, 14)
+                    .opacity(dividendsAppeared ? 1 : 0)
+                    .offset(y: dividendsAppeared ? 0 : 12)
+                    .animation(
+                        .spring(response: 0.44, dampingFraction: 0.82)
+                            .delay(0.06 * Double(min(idx, 8))),
+                        value: dividendsAppeared
+                    )
+                    Divider().padding(.leading, 66)
                 }
                 dividendsFooter
             }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.12)) {
+                dividendsAppeared = true
+            }
+        }
     }
 
     private var dividendsSummaryLabel: String {
@@ -402,34 +515,43 @@ struct StockDetailView: View {
     }
 
     private func dividendRow(_ div: StockDividend) -> some View {
-        HStack(spacing: 10) {
+        let accent: Color = div.kind == .stock ? .green : .pink
+        // 【美化】圖示圓從 30pt 純色升級為 38pt 漸層圓，對齊 transactionRow 規格
+        return HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill((div.kind == .stock ? Color.green : Color.pink).opacity(0.15))
-                    .frame(width: 30, height: 30)
+                    .fill(LinearGradient(
+                        colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 38, height: 38)
+                    .shadow(color: accent.opacity(0.18), radius: 5, x: 0, y: 2)
                 Image(systemName: div.kind.icon)
-                    .foregroundStyle(div.kind == .stock ? Color.green : Color.pink)
-                    .font(.subheadline)
+                    .foregroundStyle(accent)
+                    .font(.system(size: 15, weight: .semibold))
             }
-            VStack(alignment: .leading, spacing: 2) {
+
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(div.kind.rawValue)
-                        .font(.caption2.weight(.semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background((div.kind == .stock ? Color.green : Color.pink).opacity(0.15))
-                        .foregroundStyle(div.kind == .stock ? Color.green : Color.pink)
+                        .background(accent.opacity(0.12))
+                        .foregroundStyle(accent)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                     Text(fmtDate(div.date)).font(.caption).foregroundStyle(.secondary)
                 }
                 Text(dividendSubtitle(div))
                     .font(.caption2).foregroundStyle(.tertiary)
             }
+
             Spacer()
+
             Text(dividendRightLabel(div))
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(div.kind == .stock ? Color.green : Color.pink)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(accent)
         }
-        .padding(.horizontal).padding(.vertical, 8)
+        .padding(.horizontal, 14).padding(.vertical, 10)
         .contentShape(Rectangle())
     }
 
@@ -457,28 +579,43 @@ struct StockDetailView: View {
         let cashTotal = stock.dividends
             .filter { $0.kind == .cash }
             .reduce(0.0) { $0 + $1.cashTotal }
-        return VStack(spacing: 4) {
+        // 【美化】數值改用帶色彩背景的膠囊徽章，視覺重量與卡片整體一致
+        return VStack(spacing: 0) {
             Divider()
             if stockTotal > 0 {
                 HStack {
-                    Text("累計配股").font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "chart.bar.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.green)
+                        Text("累計配股").font(.caption2).foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Text("\(formatLots(stockTotal / 1000)) 張 (\(Int(stockTotal)) 股)")
-                        .font(.caption.weight(.semibold))
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.green.opacity(0.09))
                         .foregroundStyle(.green)
+                        .clipShape(Capsule())
                 }
+                .padding(.horizontal, 14).padding(.vertical, 7)
             }
             if cashTotal > 0 {
                 HStack {
-                    Text("累計配息").font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "banknote.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.pink)
+                        Text("累計配息").font(.caption2).foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Text(fmt(cashTotal))
-                        .font(.caption.weight(.semibold))
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(.pink)
                 }
+                .padding(.horizontal, 14).padding(.vertical, 7)
             }
         }
-        .padding(.horizontal).padding(.vertical, 8)
     }
 
     private func formatLots(_ v: Double) -> String {
@@ -508,30 +645,67 @@ struct StockDetailView: View {
         return ms.title
     }
 
+    // 【美化】圖示改用彩色圓形背景，加 overlay 邊框，對齊 FinanceOverviewView 卡片規格
     private func accountSection(label: String, icon: String, value: String, color: Color) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon).foregroundStyle(color).frame(width: 22)
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [color.opacity(0.20), color.opacity(0.08)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 38, height: 38)
+                    .shadow(color: color.opacity(0.15), radius: 5, x: 0, y: 2)
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(color)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(label).font(.caption).foregroundStyle(.secondary)
                 Text(value).font(.subheadline.weight(.medium))
             }
             Spacer()
         }
-        .padding(14)
+        .padding(.horizontal, 14).padding(.vertical, 12)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(color.opacity(0.10), lineWidth: 0.75)
+        )
+        .shadow(color: color.opacity(0.10), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
+    // 【美化】加入 Capsule 色條 + 圖示的段落標題，對齊其他卡片標題設計語言
     private var noteCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("備註").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Text(stock.note).font(.subheadline)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(
+                        colors: [.brown, .brown.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .frame(width: 4, height: 16)
+                Image(systemName: "text.quote")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("備註")
+                    .font(.subheadline.weight(.bold))
+            }
+            Text(stock.note)
+                .font(.subheadline)
+                .foregroundStyle(.primary.opacity(0.80))
+                .lineSpacing(2)
         }
-        .padding(14)
+        .padding(.horizontal, 14).padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
         .padding(.horizontal)
     }
 
@@ -555,12 +729,20 @@ struct StockDetailView: View {
 
     // MARK: - Helpers
 
+    // 【美化】從 .caption 灰色文字升級為 Capsule 色條 + subheadline.bold，對齊全 App 區塊標題設計語言
     private func sectionHeader(_ title: String) -> some View {
-        HStack {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Capsule()
+                .fill(LinearGradient(
+                    colors: [.gray.opacity(0.60), .gray.opacity(0.30)],
+                    startPoint: .top, endPoint: .bottom
+                ))
+                .frame(width: 4, height: 18)
+            Text(title)
+                .font(.subheadline.weight(.bold))
             Spacer()
         }
-        .padding(.horizontal).padding(.top, 12).padding(.bottom, 6)
+        .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
     }
 
     private func infoRow(label: String, value: String, color: Color) -> some View {
