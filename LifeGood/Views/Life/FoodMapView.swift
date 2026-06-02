@@ -1,6 +1,23 @@
 import SwiftUI
 import MapKit
 
+// MARK: - 美化紀錄（FoodMapView）
+// [2026-06] 本次美化方向：
+//   1. statsCard（清單 sheet 頂部）：升級為橘色漸層英雄卡片（食物主題配色），
+//      含散景裝飾圓 + KPI 格（造訪次數 / 平均每次 / 最常光顧），
+//      對齊 VariableExpenseView.monthSummaryHeader 設計規格；
+//      加入進場 spring 動畫（statsCardAppeared）
+//   2. emptyOverlay：升級為雙層脈衝光環 + 橘色漸層底圓 + 圖示 + 引導說明，
+//      對齊 VariableExpenseView.emptyStateView 空狀態設計規格
+//   3. restaurantRow：圖示圓升至 44pt + LinearGradient 漸層填色 + 陰影，
+//      造訪次數改為彩色膠囊；金額右對齊帶「均」輔助文字，對齊 ExpenseRow 視覺規格
+//   4. chip：選中時加入投影（shadow） + scaleEffect(1.04)，對齊 FilterChip 規格
+//   5. RestaurantDetailSheet.headerCard：升級為橘色漸層英雄卡片（含散景裝飾圓），
+//      stat 改為三格 KPI（含圖示圓），對齊 FinanceOverviewView.totalAssetsCard 規格
+//   6. RestaurantDetailSheet.visitsSection：Capsule 側條標題 + 計數膠囊；
+//      每列加入 34pt 漸層圖示圓 + 日期膠囊徽章 + 同行者粉紅膠囊，
+//      金額右對齊 .rounded 字體，對齊 IncomeView.incomeRow 規格
+
 // MARK: - 餐廳聚合資料
 
 struct RestaurantAggregate: Identifiable {
@@ -79,6 +96,8 @@ struct FoodMapView: View {
     @State private var hasCenteredInitially = false
     @State private var showListSheet = false
     @State private var photoOnly = false
+    @State private var emptyIconPulse = false
+    @State private var statsCardAppeared = false
 
     var body: some View {
         NavigationStack {
@@ -232,27 +251,78 @@ struct FoodMapView: View {
         }
     }
 
-    // MARK: - 空狀態 overlay
+    // MARK: - 空狀態 overlay（雙層脈衝光環 + 橘色漸層底圓）
 
     private var emptyOverlay: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "map")
-                .font(.system(size: 56))
-                .foregroundStyle(.tertiary)
-            Text("還沒有任何餐廳記錄")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text(photoOnly ? "目前沒有附照片的餐廳，請關閉「照片」開關。"
-                 : "在「變動支出」分類選「飲食」並選擇店家後，這裡會顯示地圖。")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.18)
+        let isPhotoFilter = photoOnly
+        return VStack(spacing: 16) {
+            ZStack {
+                if !isPhotoFilter {
+                    // 外層脈衝光環（對齊 VariableExpenseView emptyStateView 雙層環規格）
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.25), lineWidth: 1.5)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
+                    // 內層脈衝光環（延遲 0.3s，製造波紋層次）
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
+                }
+                // 主圓底（漸層填色 + 細邊框）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: isPhotoFilter
+                                ? [Color(.systemFill), Color(.secondarySystemFill)]
+                                : [accent.opacity(0.15), accent.opacity(0.06)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 88, height: 88)
+                    .overlay(
+                        Circle()
+                            .stroke(isPhotoFilter ? Color.clear : accent.opacity(0.22), lineWidth: 1.2)
+                    )
+                Image(systemName: isPhotoFilter ? "photo" : "fork.knife.circle")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(isPhotoFilter ? .secondary : accent.opacity(0.72))
+            }
+            .onAppear {
+                if !isPhotoFilter {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        emptyIconPulse = true
+                    }
+                }
+            }
+
+            VStack(spacing: 8) {
+                Text(isPhotoFilter ? "目前沒有附照片的餐廳" : "還沒有任何餐廳記錄")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text(isPhotoFilter
+                     ? "關閉右上角「照片」開關可查看全部餐廳"
+                     : "在「變動支出」分類選「飲食」\n並選擇店家後，這裡會顯示地圖")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
         }
-        .padding(.vertical, 24).padding(.horizontal, 16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+        .padding(.vertical, 32)
+        .padding(.horizontal, 24)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.14), radius: 14, y: 4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -299,18 +369,21 @@ struct FoodMapView: View {
         .presentationDetents([.medium, .large])
     }
 
-    // MARK: - 篩選 chip 共用
+    // MARK: - 篩選 chip（對齊 FilterChip 規格：shadow + scaleEffect）
 
     private func chip(_ label: String, isSelected: Bool, tint: Color = .green, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.caption.weight(.medium))
+                .font(.caption.weight(isSelected ? .semibold : .medium))
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(isSelected ? tint : Color(.tertiarySystemFill))
                 .foregroundStyle(isSelected ? .white : .primary)
                 .clipShape(Capsule())
+                .shadow(color: isSelected ? tint.opacity(0.32) : .clear, radius: 6, x: 0, y: 3)
         }
         .buttonStyle(.plain)
+        .scaleEffect(isSelected ? 1.04 : 1.0)
+        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
     }
 
     // MARK: - 地圖
@@ -360,7 +433,7 @@ struct FoodMapView: View {
         hasCenteredInitially = true
     }
 
-    // MARK: - 統計卡
+    // MARK: - 統計卡（橘色漸層英雄卡片）
 
     private var statsCard: some View {
         let total = aggregates.reduce(0) { $0 + $1.totalSpent }
@@ -368,68 +441,156 @@ struct FoodMapView: View {
         let avg = visits > 0 ? total / Double(visits) : 0
         let mostVisited = aggregates.max(by: { $0.visitCount < $1.visitCount })
 
-        return HStack(spacing: 0) {
-            statBox(value: "\(aggregates.count)", label: "餐廳", color: .blue)
-            Divider().frame(height: 36)
-            statBox(value: "NT$ \(fmtShort(total))", label: "總花費", color: .red)
-            Divider().frame(height: 36)
-            statBox(value: "NT$ \(fmtShort(avg))", label: "每次", color: .orange)
-            Divider().frame(height: 36)
-            statBox(value: mostVisited?.name ?? "—", label: "最常去", color: .green, lineLimit: 1)
+        return VStack(spacing: 0) {
+            // 頂部：餐廳總數 + 總花費大字
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("美食探索紀錄")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    Text("NT$ \(fmtShort(total))")
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
+                }
+                Spacer()
+                Text("\(aggregates.count) 間")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 11).padding(.vertical, 5)
+                    .background(.white.opacity(0.22))
+                    .clipShape(Capsule())
+                    .foregroundStyle(.white)
+            }
+
+            // KPI 橫列：造訪次數 / 平均每次 / 最常光顧
+            HStack(spacing: 0) {
+                foodKpiCell(label: "造訪總次", value: "\(visits) 次")
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                foodKpiCell(label: "平均每次", value: "NT$ \(fmtShort(avg))")
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                foodKpiCell(label: "最常光顧", value: mostVisited?.name ?? "—")
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 12)
         }
-        .padding(.vertical, 12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 1.00, green: 0.55, blue: 0.18),
+                        Color(red: 0.85, green: 0.32, blue: 0.05)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 裝飾性散景圓，增加卡片層次感
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 120, height: 120)
+                    .offset(x: 80, y: -40)
+                    .blur(radius: 12)
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 70, height: 70)
+                    .offset(x: -55, y: 42)
+                    .blur(radius: 8)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.85, green: 0.32, blue: 0.05).opacity(0.38), radius: 14, x: 0, y: 7)
+        .padding(.horizontal, 16)
         .padding(.top, 8)
+        .padding(.bottom, 4)
+        .opacity(statsCardAppeared ? 1 : 0)
+        .offset(y: statsCardAppeared ? 0 : 20)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                statsCardAppeared = true
+            }
+        }
     }
 
-    private func statBox(value: String, label: String, color: Color, lineLimit: Int = 1) -> some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(color)
-                .lineLimit(lineLimit)
-                .minimumScaleFactor(0.7)
+    private func foodKpiCell(label: String, value: String) -> some View {
+        VStack(spacing: 3) {
             Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
     }
 
-    // MARK: - 餐廳列
+    // MARK: - 餐廳列（44pt 漸層圖示圓 + 彩色膠囊標籤）
 
     private func restaurantRow(_ agg: RestaurantAggregate) -> some View {
-        HStack(spacing: 12) {
+        let accent = pinColor(for: agg)
+        return HStack(spacing: 12) {
+            // 44pt 漸層圖示圓（對齊 ExpenseRow 規格）
             ZStack {
                 Circle()
-                    .fill(pinColor(for: agg).opacity(0.18))
-                    .frame(width: 38, height: 38)
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                    .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
                 Image(systemName: "fork.knife")
-                    .foregroundStyle(pinColor(for: agg))
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(accent)
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(agg.name).font(.subheadline.weight(.medium)).lineLimit(1)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(agg.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
                 if !agg.address.isEmpty {
-                    Text(agg.address).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                    Text(agg.address)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
-                HStack(spacing: 6) {
+                // 造訪次數膠囊 + 最近造訪日
+                HStack(spacing: 5) {
                     Text("造訪 \(agg.visitCount) 次")
-                        .font(.caption2).foregroundStyle(.secondary)
-                    Text("·").foregroundStyle(.tertiary)
-                    Text("NT$ \(fmtShort(agg.totalSpent))")
-                        .font(.caption2).foregroundStyle(.red)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(accent.opacity(0.12))
+                        .clipShape(Capsule())
                     if let last = agg.lastVisit {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(fmtRelative(last)).font(.caption2).foregroundStyle(.secondary)
+                        Text(fmtRelative(last))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            Spacer()
-            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+
+            Spacer(minLength: 4)
+
+            // 右側：總花費 + 平均
+            VStack(alignment: .trailing, spacing: 3) {
+                Text("NT$ \(fmtShort(agg.totalSpent))")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.85, green: 0.32, blue: 0.05))
+                    .contentTransition(.numericText())
+                Text("均 NT$ \(fmtShort(agg.averageSpent))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     // MARK: - 資料聚合
@@ -584,36 +745,81 @@ struct RestaurantDetailSheet: View {
         }
     }
 
+    // 餐廳詳情英雄卡（橘色漸層，對齊 FinanceOverviewView.totalAssetsCard 設計語言）
     private var headerCard: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 0) {
+            // 地址列
             if !aggregate.address.isEmpty {
-                Label(aggregate.address, systemImage: "mappin")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 5) {
+                    Image(systemName: "mappin.circle.fill")
+                        .font(.caption)
+                    Text(aggregate.address)
+                        .font(.caption)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.white.opacity(0.82))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 12)
             }
+
+            // KPI 三格：造訪次數 / 總花費 / 平均每次
             HStack(spacing: 0) {
-                statCol("造訪", "\(aggregate.visitCount) 次", .blue)
-                Divider().frame(height: 36)
-                statCol("總花費", "NT$ \(fmtNum(aggregate.totalSpent))", .red)
-                Divider().frame(height: 36)
-                statCol("平均", "NT$ \(fmtNum(aggregate.averageSpent))", .orange)
+                detailKpiCell(icon: "calendar.circle.fill", label: "造訪次數",
+                              value: "\(aggregate.visitCount) 次")
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                detailKpiCell(icon: "yensign.circle.fill", label: "總花費",
+                              value: "NT$ \(fmtNum(aggregate.totalSpent))")
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                detailKpiCell(icon: "chart.bar.fill", label: "平均每次",
+                              value: "NT$ \(fmtNum(aggregate.averageSpent))")
             }
         }
-        .padding()
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
         .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 1.00, green: 0.55, blue: 0.18),
+                        Color(red: 0.85, green: 0.32, blue: 0.05)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 110, height: 110)
+                    .offset(x: 70, y: -35)
+                    .blur(radius: 12)
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 65, height: 65)
+                    .offset(x: -50, y: 35)
+                    .blur(radius: 8)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.85, green: 0.32, blue: 0.05).opacity(0.38), radius: 14, x: 0, y: 7)
         .padding(.horizontal)
     }
 
-    private func statCol(_ label: String, _ value: String, _ color: Color) -> some View {
+    private func detailKpiCell(icon: String, label: String, value: String) -> some View {
         VStack(spacing: 4) {
-            Text(value).font(.subheadline.weight(.bold)).foregroundStyle(color)
-                .lineLimit(1).minimumScaleFactor(0.7)
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundStyle(.white.opacity(0.85))
+            Text(value)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.68))
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
     }
 
     /// 此餐廳所有造訪所累積的照片檔名
@@ -672,32 +878,90 @@ struct RestaurantDetailSheet: View {
         }
     }
 
+    // 造訪紀錄（Capsule 側條標題 + 34pt 漸層圖示圓 + 日期膠囊 + 同行者粉紅膠囊）
     private var visitsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("造訪紀錄").font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.18)
+        let sorted = aggregate.visits.sorted { $0.date > $1.date }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            // Section header（Capsule 側條 + 計數膠囊，對齊 milestoneTimelineSection 規格）
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(LinearGradient(
+                        colors: [accent, accent.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .frame(width: 4, height: 18)
+                Text("造訪紀錄")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("\(sorted.count) 筆")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(accent.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.75))
+            }
+            .padding(.horizontal)
+
             VStack(spacing: 0) {
-                ForEach(aggregate.visits.sorted { $0.date > $1.date }) { exp in
-                    HStack {
-                        Text(fmtDate(exp.date)).font(.caption).foregroundStyle(.secondary)
-                        if let raw = exp.diningMember, !raw.isEmpty {
-                            Text(raw).font(.caption2)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.pink.opacity(0.12))
-                                .foregroundStyle(.pink)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                ForEach(Array(sorted.enumerated()), id: \.element.id) { idx, exp in
+                    HStack(spacing: 10) {
+                        // 34pt 漸層圖示圓
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [accent.opacity(0.18), accent.opacity(0.07)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 34, height: 34)
+                            Image(systemName: "fork.knife")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(accent.opacity(0.85))
                         }
-                        Spacer()
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            // 日期膠囊徽章
+                            Text(fmtDate(exp.date))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(accent)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(accent.opacity(0.10))
+                                .clipShape(Capsule())
+                            // 同行者粉紅膠囊
+                            if let raw = exp.diningMember, !raw.isEmpty {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "person.2.fill")
+                                        .font(.system(size: 9))
+                                    Text(raw)
+                                        .font(.system(size: 10, weight: .medium))
+                                }
+                                .foregroundStyle(.pink)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.pink.opacity(0.10))
+                                .clipShape(Capsule())
+                            }
+                        }
+
+                        Spacer(minLength: 4)
+
                         Text("NT$ \(fmtNum(exp.amount))")
-                            .font(.subheadline.weight(.medium))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(red: 0.85, green: 0.32, blue: 0.05))
+                            .contentTransition(.numericText())
                     }
-                    .padding(.horizontal).padding(.vertical, 8)
-                    Divider().padding(.leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+
+                    if idx < sorted.count - 1 {
+                        Divider().padding(.leading, 58)
+                    }
                 }
             }
             .background(Color(.systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
             .padding(.horizontal)
         }
     }
