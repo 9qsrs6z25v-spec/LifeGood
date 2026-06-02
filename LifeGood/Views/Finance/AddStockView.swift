@@ -622,9 +622,7 @@ struct AddStockView: View {
     }
 
     private func formatCurrency(_ value: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: value)) ?? "NT$0"
+        value.ntdWanString
     }
 
     private func formatShares(_ value: Double) -> String {

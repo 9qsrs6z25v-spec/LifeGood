@@ -1,6 +1,25 @@
 import Foundation
 import SwiftUI
 
+// MARK: - 金額顯示（過萬以「萬」為單位）
+
+extension Double {
+    /// 台幣金額顯示：達 1 萬(含)以上以「萬」為單位（例 12,345 → NT$1.2萬，整數不帶小數），
+    /// 未滿一萬維持 NT$ 整數。理財/收支各頁共用，確保「萬」顯示規則一致。
+    var ntdWanString: String {
+        if Swift.abs(self) >= 10000 {
+            let wan = self / 10000
+            let str = (wan == wan.rounded()) ? String(format: "%.0f", wan) : String(format: "%.1f", wan)
+            return "NT$\(str)萬"
+        }
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencySymbol = "NT$"
+        f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: self)) ?? "NT$0"
+    }
+}
+
 // MARK: - 幣別
 
 enum Currency: String, Codable, CaseIterable {

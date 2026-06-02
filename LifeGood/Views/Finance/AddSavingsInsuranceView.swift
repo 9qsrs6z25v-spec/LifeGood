@@ -306,6 +306,10 @@ struct AddSavingsInsuranceView: View {
     }
 
     private func formatCurrency(_ value: Double) -> String {
+        // 台幣套用「萬」規則；外幣維持原幣別與小數位
+        if !isUSD && (currencySymbol == "NT$" || currencySymbol == "TWD") {
+            return value.ntdWanString
+        }
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencySymbol = currencySymbol
