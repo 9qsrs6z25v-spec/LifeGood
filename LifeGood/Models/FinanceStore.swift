@@ -24,7 +24,6 @@ class FinanceStore: ObservableObject {
 
     @objc private func reloadFromCloud() {
         load()
-        objectWillChange.send()
     }
 
     // MARK: - 儲蓄險 CRUD

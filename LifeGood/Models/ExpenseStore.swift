@@ -32,7 +32,6 @@ class ExpenseStore: ObservableObject {
     @objc private func reloadFromCloud() {
         load()
         modifyID = UUID()
-        objectWillChange.send()
     }
 
     // MARK: - 支出 CRUD
