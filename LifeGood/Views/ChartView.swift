@@ -38,6 +38,9 @@ struct ChartView: View {
     @State private var loadTask: Task<Void, Never>?
     /// 各圖表分頁量測到的自然高度，用來讓輪播容器自適應高度（避免固定高度裁切內容）
     @State private var chartPageHeights: [ChartMode: CGFloat] = [:]
+    /// 快取圓餅圖資料，避免 chartCarousel 與隱藏量測層各算一次（每次都是 O(n) 掃描）
+    @State private var variableBreakdownCache: [(category: VariableCategory, amount: Double)] = []
+    @State private var fixedBreakdownCache: [(category: FixedCategory, amount: Double)] = []
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -107,8 +110,10 @@ struct ChartView: View {
     @MainActor
     private func loadChartData() async {
         isLoading = true
-        let data = store.chartData(for: selectedPeriod)
-        chartData = data
+        let period = selectedPeriod
+        chartData = store.chartData(for: period)
+        variableBreakdownCache = store.variableBreakdown(for: period)
+        fixedBreakdownCache = store.fixedBreakdown(for: period)
         isLoading = false
     }
 
@@ -463,7 +468,7 @@ struct ChartView: View {
     // MARK: - 變動支出圓餅圖
 
     private var variablePieChart: some View {
-        let entries = store.variableBreakdown(for: selectedPeriod)
+        let entries = variableBreakdownCache
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Capsule()
@@ -516,7 +521,7 @@ struct ChartView: View {
     // MARK: - 固定支出圓餅圖
 
     private var fixedPieChart: some View {
-        let entries = store.fixedBreakdown(for: selectedPeriod)
+        let entries = fixedBreakdownCache
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Capsule()

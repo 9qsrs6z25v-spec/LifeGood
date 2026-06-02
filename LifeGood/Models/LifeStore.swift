@@ -38,7 +38,6 @@ class LifeStore: ObservableObject {
         isLoading = false
         // 若 backfill 新建了 OrgPerson/BusinessCard，立即持久化避免重啟後消失
         if didBackfill { save() }
-        objectWillChange.send()
     }
 
     // MARK: - 個人檔案
