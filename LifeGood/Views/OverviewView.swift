@@ -675,6 +675,7 @@ struct OverviewView: View {
 
     private var recentTransactionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            let items = recentItems
             HStack(spacing: 10) {
                 Capsule()
                     .fill(
@@ -688,8 +689,8 @@ struct OverviewView: View {
                 Text("最近交易")
                     .font(.subheadline.weight(.bold))
                 Spacer()
-                if !recentItems.isEmpty {
-                    Text("\(recentItems.count) 筆")
+                if !items.isEmpty {
+                    Text("\(items.count) 筆")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.green)
                         .padding(.horizontal, 8).padding(.vertical, 3)
@@ -700,7 +701,7 @@ struct OverviewView: View {
             }
             .padding(.horizontal)
 
-            if recentItems.isEmpty {
+            if items.isEmpty {
                 emptyPlaceholder(
                     icon: "list.bullet.rectangle",
                     title: "尚無交易紀錄",
@@ -709,7 +710,7 @@ struct OverviewView: View {
                 .padding(.horizontal)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(recentItems.enumerated()), id: \.element.id) { idx, item in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                         recentRow(item)
                             .opacity(recentListAppeared ? 1 : 0)
                             .offset(y: recentListAppeared ? 0 : 14)
@@ -719,7 +720,7 @@ struct OverviewView: View {
                                 value: recentListAppeared
                             )
 
-                        if idx < recentItems.count - 1 {
+                        if idx < items.count - 1 {
                             Divider().padding(.leading, 56)
                         }
                     }
