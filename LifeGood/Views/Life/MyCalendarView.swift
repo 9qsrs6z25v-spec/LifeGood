@@ -2,6 +2,15 @@ import SwiftUI
 import EventKit
 import MapKit
 
+// MARK: - UI美化方向（MyCalendarView）
+// ① sectionHeader：改用漸層膠囊色條 + 計數膠囊，與 OverviewView / IncomeView 設計語言保持均值。
+// ② eventRow：圖示圓加大至 36pt、加細 stroke 邊框；類型標籤改圓角膠囊；加入 shadow，提升卡片立體感。
+// ③ weekDayCard：選中日加 shadow、寬度放大到 54pt 更好點選；今日在背景下方加小綠點標記；
+//    事件彩色圓點從 6pt 縮為 5pt 並加 shadow，視覺更精緻。
+// ④ 空狀態：emptyHint 升級為帶圓形圖示的 emptyPlaceholder 卡片，與其他頁面一致。
+// ⑤ appleCalendarBanner：加 overlay 邊框 + icon 背景圓 + 陰影，與整體設計語言一致。
+// ⑥ 進場動畫：各區塊加 .opacity + .offset 彈跳進場（錯落延遲），與 OverviewView 保持均值。
+
 /// 我的行事曆：彙整當日家庭紀念日、工作會議與任務、本週快覽、未來里程碑、Apple 行事曆事件。
 struct MyCalendarView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -11,6 +20,11 @@ struct MyCalendarView: View {
     @State private var selectedDate = Date()
     @State private var showAdd = false
     @State private var editingEvent: PersonalEvent?
+
+    // 進場動畫旗標
+    @State private var todayCardAppeared = false
+    @State private var weekCardAppeared = false
+    @State private var milestonesCardAppeared = false
 
     private let calendar = Calendar.current
 
@@ -29,8 +43,29 @@ struct MyCalendarView: View {
                     MacaronDatePicker(selectedDate: $selectedDate)
                     appleCalendarBanner
                     todayEventsSection
+                        .opacity(todayCardAppeared ? 1 : 0)
+                        .offset(y: todayCardAppeared ? 0 : 18)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.08)) {
+                                todayCardAppeared = true
+                            }
+                        }
                     weekPreviewSection
+                        .opacity(weekCardAppeared ? 1 : 0)
+                        .offset(y: weekCardAppeared ? 0 : 18)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.16)) {
+                                weekCardAppeared = true
+                            }
+                        }
                     upcomingMilestonesSection
+                        .opacity(milestonesCardAppeared ? 1 : 0)
+                        .offset(y: milestonesCardAppeared ? 0 : 18)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.24)) {
+                                milestonesCardAppeared = true
+                            }
+                        }
                 }
                 .padding(.vertical)
             }
@@ -64,8 +99,16 @@ struct MyCalendarView: View {
     @ViewBuilder
     private var appleCalendarBanner: some View {
         if appleCal.authorizationStatus == .notDetermined {
-            HStack(spacing: 10) {
-                Image(systemName: "calendar.badge.plus").foregroundStyle(.blue)
+            HStack(spacing: 12) {
+                // 圖示背景圓
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.12))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "calendar.badge.plus")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.blue)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("連動 Apple 行事曆")
                         .font(.subheadline.weight(.semibold))
@@ -76,16 +119,32 @@ struct MyCalendarView: View {
                 Button("開啟") {
                     Task { await appleCal.requestAccess() }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.blue)
+                .clipShape(Capsule())
             }
-            .padding(12)
+            .padding(14)
             .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.blue.opacity(0.12), lineWidth: 0.75)
+            )
+            .shadow(color: Color.blue.opacity(0.08), radius: 8, x: 0, y: 3)
+            .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
             .padding(.horizontal)
         } else if appleCal.isDenied {
-            HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.orange.opacity(0.12))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.orange)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Apple 行事曆權限被拒")
                         .font(.subheadline.weight(.semibold))
@@ -98,12 +157,21 @@ struct MyCalendarView: View {
                         UIApplication.shared.open(url)
                     }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.orange)
+                .clipShape(Capsule())
             }
-            .padding(12)
+            .padding(14)
             .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.orange.opacity(0.15), lineWidth: 0.75)
+            )
+            .shadow(color: Color.orange.opacity(0.10), radius: 8, x: 0, y: 3)
+            .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
             .padding(.horizontal)
         }
     }
@@ -302,9 +370,13 @@ struct MyCalendarView: View {
                           count: todayEvents.count)
 
             if todayEvents.isEmpty {
-                emptyHint("這天沒有特別事件")
+                emptyPlaceholder(
+                    icon: "calendar",
+                    title: "這天沒有特別事件",
+                    subtitle: "新增事件或等待紀念日、里程碑到來"
+                )
             } else {
-                ForEach(todayEvents) { ev in
+                ForEach(Array(todayEvents.enumerated()), id: \.element.id) { idx, ev in
                     if let pid = ev.personalEventId,
                        let pe = lifeStore.personalEvents.first(where: { $0.id == pid }) {
                         Button { editingEvent = pe } label: { eventRow(ev) }
@@ -312,51 +384,84 @@ struct MyCalendarView: View {
                     } else {
                         eventRow(ev)
                     }
+                    if idx < todayEvents.count - 1 {
+                        Divider().padding(.leading, 60)
+                    }
                 }
             }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
     private func eventRow(_ ev: CalendarEvent) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: ev.type.icon)
-                .font(.caption)
-                .foregroundStyle(ev.type.color)
-                .frame(width: 22, height: 22)
-                .background(ev.type.color.opacity(0.18))
-                .clipShape(Circle())
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .top, spacing: 12) {
+            // 圖示圓（加大至 36pt，加細 stroke 邊框）
+            ZStack {
+                Circle()
+                    .fill(ev.type.color.opacity(0.16))
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .stroke(ev.type.color.opacity(0.28), lineWidth: 0.75)
+                    .frame(width: 36, height: 36)
+                Image(systemName: ev.type.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(ev.type.color)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                // 標題 + 類型膠囊
                 HStack(spacing: 6) {
-                    Text(ev.title).font(.subheadline.weight(.medium))
-                    Text(ev.type.name).font(.caption2.weight(.medium))
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(ev.type.color.opacity(0.18))
+                    Text(ev.title)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    Text(ev.type.name)
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(ev.type.color.opacity(0.15))
                         .foregroundStyle(ev.type.color)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .clipShape(Capsule())
                 }
+                // 時間 + 詳情
                 HStack(spacing: 6) {
                     if let t = ev.time {
-                        Text(fmtTime(t)).font(.caption2).foregroundStyle(.tertiary)
+                        HStack(spacing: 3) {
+                            Image(systemName: "clock")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                            Text(fmtTime(t))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                     } else {
-                        Text("全日").font(.caption2).foregroundStyle(.tertiary)
+                        HStack(spacing: 3) {
+                            Image(systemName: "sun.max")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                            Text("全日")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                     if !ev.detail.isEmpty {
-                        Text(ev.detail).font(.caption2).foregroundStyle(.secondary)
+                        Text("·").font(.caption2).foregroundStyle(.quaternary)
+                        Text(ev.detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
             }
             Spacer()
         }
-        .padding(.horizontal).padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 
     // MARK: - 本週快覽（以選取日為中心向後 7 天）
 
     private var weekPreviewSection: some View {
-        // 先計算一次，sectionHeader count 與 weekDayCard 共用，避免 eventsOn 被呼叫兩輪（共14次→7次）
         let weekEvents = Dictionary(uniqueKeysWithValues: weekDates.map { ($0, eventsOn($0)) })
         let totalCount = weekEvents.values.reduce(0) { $0 + $1.count }
         return VStack(alignment: .leading, spacing: 0) {
@@ -372,11 +477,12 @@ struct MyCalendarView: View {
                     }
                 }
                 .padding(.horizontal)
-                .padding(.bottom, 12)
+                .padding(.bottom, 14)
             }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
@@ -392,29 +498,70 @@ struct MyCalendarView: View {
         let isToday = calendar.isDateInToday(date)
         let weekday = ["日", "一", "二", "三", "四", "五", "六"][calendar.component(.weekday, from: date) - 1]
         let day = calendar.component(.day, from: date)
+
         return Button {
-            selectedDate = date
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.70)) {
+                selectedDate = date
+            }
         } label: {
-            VStack(spacing: 4) {
-                Text(weekday).font(.caption2).foregroundStyle(isSelected ? .white : .secondary)
+            VStack(spacing: 5) {
+                Text(weekday)
+                    .font(.system(size: 10, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? .white : .secondary)
                 Text("\(day)")
-                    .font(.title3.weight(.semibold))
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(isSelected ? .white : (isToday ? .green : .primary))
-                if events.isEmpty {
-                    Circle().fill(Color.clear).frame(width: 6, height: 6)
+
+                // 今日標記：選中時不顯示（已有白色背景），未選中時顯示小綠點
+                if isToday && !isSelected {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 4, height: 4)
+                        .shadow(color: .green.opacity(0.5), radius: 2)
+                } else if events.isEmpty {
+                    Circle().fill(Color.clear).frame(width: 4, height: 4)
                 } else {
+                    // 事件彩點（最多 3 個）
                     HStack(spacing: 2) {
                         ForEach(0..<min(events.count, 3), id: \.self) { i in
                             Circle()
-                                .fill(events[i].type.color)
-                                .frame(width: 6, height: 6)
+                                .fill(isSelected ? .white.opacity(0.90) : events[i].type.color)
+                                .frame(width: 5, height: 5)
+                                .shadow(
+                                    color: isSelected ? .clear : events[i].type.color.opacity(0.45),
+                                    radius: 1.5
+                                )
                         }
                     }
                 }
             }
-            .frame(width: 50, height: 70)
-            .background(isSelected ? Color.green : Color(.tertiarySystemFill))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .frame(width: 54, height: 74)
+            .background(
+                ZStack {
+                    if isSelected {
+                        // 選中：綠色漸層底 + 輕微散景高光
+                        LinearGradient(
+                            colors: [Color.green, Color(red: 0.07, green: 0.52, blue: 0.38)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        Circle()
+                            .fill(.white.opacity(0.14))
+                            .frame(width: 38, height: 38)
+                            .offset(x: 14, y: -20)
+                            .blur(radius: 8)
+                    } else {
+                        Color(.tertiarySystemFill)
+                    }
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(
+                color: isSelected ? Color.green.opacity(0.42) : .clear,
+                radius: 8, x: 0, y: 4
+            )
+            .scaleEffect(isSelected ? 1.04 : 1.0)
+            .animation(.spring(response: 0.30, dampingFraction: 0.72), value: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -430,61 +577,159 @@ struct MyCalendarView: View {
     }
 
     private var upcomingMilestonesSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let accentColor = Color(red: 0.99, green: 0.65, blue: 0.30)
+        return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("未來 30 天里程碑",
                           icon: "flag.fill",
-                          color: Color(red: 0.99, green: 0.80, blue: 0.65),
+                          color: accentColor,
                           count: upcomingMilestones.count)
 
             if upcomingMilestones.isEmpty {
-                emptyHint("尚無排程的里程碑")
+                emptyPlaceholder(
+                    icon: "flag",
+                    title: "尚無排程的里程碑",
+                    subtitle: "在人生頁新增里程碑後顯示於此"
+                )
             } else {
-                ForEach(upcomingMilestones.prefix(8)) { ms in
-                    HStack(spacing: 10) {
-                        Image(systemName: ms.category.icon)
-                            .font(.caption).foregroundStyle(.orange).frame(width: 20)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(ms.title).font(.subheadline.weight(.medium))
-                            HStack(spacing: 6) {
-                                Text(fmtDate(ms.date)).font(.caption2).foregroundStyle(.tertiary)
-                                Text(ms.category.rawValue).font(.caption2).foregroundStyle(.secondary)
+                ForEach(Array(upcomingMilestones.prefix(8).enumerated()), id: \.element.id) { idx, ms in
+                    HStack(spacing: 12) {
+                        // 圖示圓（加大至 36pt，帶細邊框）
+                        ZStack {
+                            Circle()
+                                .fill(accentColor.opacity(0.14))
+                                .frame(width: 36, height: 36)
+                            Circle()
+                                .stroke(accentColor.opacity(0.28), lineWidth: 0.75)
+                                .frame(width: 36, height: 36)
+                            Image(systemName: ms.category.icon)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(accentColor)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(ms.title)
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
+                            HStack(spacing: 5) {
+                                Text(fmtDate(ms.date))
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                Text("·").font(.caption2).foregroundStyle(.quaternary)
+                                Text(ms.category.rawValue)
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.secondary)
                             }
                         }
                         Spacer()
+                        // 倒數天數膠囊
                         Text(daysUntil(ms.date))
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(accentColor)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(accentColor.opacity(0.12))
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(accentColor.opacity(0.25), lineWidth: 0.6)
+                            )
                     }
-                    .padding(.horizontal).padding(.vertical, 8)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+
+                    if idx < min(upcomingMilestones.count, 8) - 1 {
+                        Divider().padding(.leading, 62)
+                    }
                 }
                 if upcomingMilestones.count > 8 {
-                    Text("還有 \(upcomingMilestones.count - 8) 個...")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                        .padding(.horizontal).padding(.bottom, 12)
+                    HStack(spacing: 5) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Circle()
+                                .fill(Color(.tertiaryLabel))
+                                .frame(width: 3, height: 3)
+                        }
+                        Text("還有 \(upcomingMilestones.count - 8) 個里程碑")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                 }
             }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
-    // MARK: - 輔助
+    // MARK: - 輔助元件
 
+    // sectionHeader：漸層膠囊色條 + 計數膠囊，與 OverviewView 設計語言一致
     private func sectionHeader(_ title: String, icon: String, color: Color, count: Int) -> some View {
-        HStack {
-            Image(systemName: icon).foregroundStyle(color)
-            Text(title).font(.headline)
+        HStack(spacing: 10) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.50)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 20)
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.bold))
             Spacer()
-            Text("\(count)").font(.caption).foregroundStyle(.tertiary)
+            if count > 0 {
+                Text("\(count) 筆")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(color.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.75))
+            }
         }
-        .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
-    private func emptyHint(_ text: String) -> some View {
-        Text(text).font(.caption).foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal).padding(.bottom, 12)
+    // emptyPlaceholder：帶圓形圖示的完整空狀態卡片，與 OverviewView emptyPlaceholder 一致
+    private func emptyPlaceholder(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(.secondarySystemFill), Color(.systemFill)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 60, height: 60)
+                Circle()
+                    .stroke(Color(.separator).opacity(0.30), lineWidth: 0.75)
+                    .frame(width: 60, height: 60)
+                Image(systemName: icon)
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(Color(.secondaryLabel))
+            }
+            VStack(spacing: 5) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .padding(.horizontal)
     }
 
     private func fmtTime(_ d: Date) -> String { Self.timeFormatter.string(from: d) }
