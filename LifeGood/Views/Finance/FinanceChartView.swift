@@ -182,6 +182,7 @@ struct FinanceChartView: View {
 
     private var allocationChart: some View {
         let allocations = store.assetAllocations
+        let grandTotal = allocations.reduce(0) { $0 + $1.value }
         return VStack(alignment: .leading, spacing: 14) {
             sectionHeader("資產配置分布", icon: "chart.pie.fill",
                           color: .purple, count: allocations.count)
@@ -208,7 +209,7 @@ struct FinanceChartView: View {
                         Text("總資產")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.secondary)
-                        Text(fmtShort(allocations.reduce(0) { $0 + $1.value }))
+                        Text(fmtShort(grandTotal))
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(.primary)
                             .minimumScaleFactor(0.65)
@@ -219,7 +220,6 @@ struct FinanceChartView: View {
 
                 // 圖例：彩色圓形圖示 + 類別名 + 金額 + 比例進度條
                 VStack(spacing: 0) {
-                    let grandTotal = allocations.reduce(0) { $0 + $1.value }
                     ForEach(Array(allocations.enumerated()), id: \.element.id) { idx, a in
                         let color = colorFor(a.type)
                         let pct = grandTotal > 0 ? a.value / grandTotal : 0
