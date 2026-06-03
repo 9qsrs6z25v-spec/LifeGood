@@ -474,7 +474,7 @@ struct SavingsInsuranceView: View {
     /// 把某幣別金額換算成 NT$（依設定匯率；NT$/TWD 不換）。無匯率時回傳原值避免歸零。
     private func ntEquivalent(_ value: Double, code: String) -> Double {
         if code == "NT$" || code == "TWD" || code.isEmpty { return value }
-        if let rate = store.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+        if let rate = expenseStore.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
             return value * rate.rate
         }
         return value

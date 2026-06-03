@@ -59,7 +59,7 @@ struct SubordinateOverviewView: View {
             sub.tasks
                 .filter { t in
                     isSameDay(t.date, selectedDate)
-                    || (t.dueDate != nil && isSameDay(t.dueDate!, selectedDate))
+                    || t.dueDate.map({ isSameDay($0, selectedDate) }) == true
                 }
                 .map { (sub, $0) }
         }
