@@ -423,7 +423,7 @@ struct SubordinateOverviewView: View {
             // 計數徽章膠囊
             Text(count > 0 ? "\(count) 筆" : "無")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(count > 0 ? color : .tertiary)
+                .foregroundStyle(count > 0 ? color : Color(.tertiaryLabel))
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(count > 0 ? color.opacity(0.10) : Color(.tertiarySystemFill))
                 .clipShape(Capsule())
