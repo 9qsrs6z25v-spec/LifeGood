@@ -38,7 +38,10 @@ class BackupManager {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
                 try data.write(to: url, options: .atomic)
-            } catch {}
+            } catch {
+                // 寫入失敗時重置時間戳，讓下次 createSnapshotIfNeeded 能再試一次
+                self?.lastSnapshotDate = nil
+            }
             self?.cleanOldBackups()
         }
         return url
