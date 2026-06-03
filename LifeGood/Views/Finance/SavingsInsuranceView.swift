@@ -139,13 +139,14 @@ struct SavingsInsuranceView: View {
     // MARK: - 摘要英雄卡片
 
     private var summaryHeader: some View {
-        let ntItems = store.insurances.filter { $0.currencyCode == "NT$" }
+        // 把所有保單（含外幣）換算成 NT$ 後加總；否則只有外幣保單時看板會顯示 NT$0
         let otherItems = store.insurances.filter { $0.currencyCode != "NT$" }
-        let ntCurrent = ntItems.reduce(0.0) { $0 + $1.currentValue }
-        let ntPaid = ntItems.reduce(0.0) { $0 + $1.totalPaid }
-        let ntGain = ntCurrent - ntPaid
-        let ntGainRate = ntPaid > 0 ? ntGain / ntPaid * 100 : 0.0
-        let isPositive = ntGain >= 0
+        let totalCurrentNT = store.insurances.reduce(0.0) { $0 + ntEquivalent($1.currentValue, code: $1.currencyCode) }
+        let totalPaidNT = store.insurances.reduce(0.0) { $0 + ntEquivalent($1.totalPaid, code: $1.currencyCode) }
+        let totalGainNT = totalCurrentNT - totalPaidNT
+        let ntGainRate = totalPaidNT > 0 ? totalGainNT / totalPaidNT * 100 : 0.0
+        let isPositive = totalGainNT >= 0
+        let hasItems = !store.insurances.isEmpty
 
         return VStack(spacing: 0) {
             HStack(alignment: .top) {
@@ -153,12 +154,12 @@ struct SavingsInsuranceView: View {
                     Text("保單總覽")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
-                    Text(store.insurances.isEmpty ? "NT$0" : fmtSmart(ntCurrent, code: "NT$"))
+                    Text(hasItems ? fmtSmart(totalCurrentNT, code: "NT$") : "NT$0")
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
-                    if !ntItems.isEmpty {
-                        Text("NT$ 保單目前估值")
+                    if hasItems {
+                        Text(otherItems.isEmpty ? "保單目前估值" : "保單目前估值（含外幣換算）")
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.white.opacity(0.65))
                             .padding(.top, 1)
@@ -173,7 +174,7 @@ struct SavingsInsuranceView: View {
                         .background(.white.opacity(0.22))
                         .clipShape(Capsule())
                         .foregroundStyle(.white)
-                    if !ntItems.isEmpty {
+                    if hasItems {
                         HStack(spacing: 4) {
                             Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
                                 .font(.system(size: 9))
@@ -188,13 +189,13 @@ struct SavingsInsuranceView: View {
                 }
             }
 
-            if !ntItems.isEmpty {
+            if hasItems {
                 HStack(spacing: 0) {
-                    kpiCell(label: "已繳總額", value: fmtSmart(ntPaid, code: "NT$"))
+                    kpiCell(label: "已繳總額", value: fmtSmart(totalPaidNT, code: "NT$"))
                     Rectangle()
                         .fill(.white.opacity(0.25))
                         .frame(width: 0.5, height: 28)
-                    kpiCell(label: "帳面損益", value: (isPositive ? "+" : "") + fmtSmart(ntGain, code: "NT$"))
+                    kpiCell(label: "帳面損益", value: (isPositive ? "+" : "") + fmtSmart(totalGainNT, code: "NT$"))
                     if !otherItems.isEmpty {
                         Rectangle()
                             .fill(.white.opacity(0.25))
@@ -469,6 +470,15 @@ struct SavingsInsuranceView: View {
     }
 
     // MARK: - 格式化
+
+    /// 把某幣別金額換算成 NT$（依設定匯率；NT$/TWD 不換）。無匯率時回傳原值避免歸零。
+    private func ntEquivalent(_ value: Double, code: String) -> Double {
+        if code == "NT$" || code == "TWD" || code.isEmpty { return value }
+        if let rate = store.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+            return value * rate.rate
+        }
+        return value
+    }
 
     private func fmt(_ v: Double, code: String) -> String {
         // 台幣套用「萬」規則；外幣維持原幣別與小數位
