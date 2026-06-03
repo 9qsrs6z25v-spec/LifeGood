@@ -687,10 +687,10 @@ struct AddRealEstateView: View {
 
                     Spacer()
 
-                    if item.photoFileName != nil {
+                    if let photoFileName = item.photoFileName {
                         Button {
                             let url = ElevatorMaintenance.photosDirectory
-                                .appendingPathComponent(item.photoFileName!)
+                                .appendingPathComponent(photoFileName)
                             viewingPhotoURL = url
                         } label: {
                             Image(systemName: "photo.fill")

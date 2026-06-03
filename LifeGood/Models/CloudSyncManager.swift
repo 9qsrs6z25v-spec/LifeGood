@@ -53,6 +53,8 @@ final class CloudSyncManager: ObservableObject {
 
     // 防抖：2 秒內多次 pushAll() 合併為一次
     private var pushDebounceTimer: Timer?
+    // 防止並行 sync：syncNow + onChange(scenePhase) 同時觸發時只執行一次
+    private var isSyncing = false
 
     @Published private(set) var isAccountAvailable: Bool = false
     @Published private(set) var lastSyncDate: Date?
@@ -188,20 +190,29 @@ final class CloudSyncManager: ObservableObject {
     }
 
     private func performSync(force: Bool) {
+        guard !isSyncing else { return }
         if !force, let last = lastSyncDate,
            Date().timeIntervalSince(last) < 30 {
             // 30 秒內已同步，跳過
             return
         }
+        isSyncing = true
         CloudKitManager.shared.refreshAccountStatus { [weak self] status in
             guard let self = self else { return }
             self.updateAccountStatus(status)
-            guard status == .available, self.isEnabled else { return }
+            guard status == .available, self.isEnabled else {
+                self.isSyncing = false
+                return
+            }
             CloudKitManager.shared.bootstrap { [weak self] ok in
-                guard ok, let self else { return }
+                guard ok, let self else {
+                    self?.isSyncing = false
+                    return
+                }
                 CloudKitManager.shared.fetchChanges { [weak self] _ in
                     CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
                     CloudKitManager.shared.uploadAllLocalPhotos()
+                    self?.isSyncing = false
                     self?.markSynced()
                 }
             }
