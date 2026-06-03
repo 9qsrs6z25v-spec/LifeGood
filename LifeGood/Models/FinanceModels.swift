@@ -3,6 +3,16 @@ import SwiftUI
 
 // MARK: - 金額顯示（過萬以「萬」為單位）
 
+/// 共用靜態實例，避免每次 ntdWanString 呼叫都重新分配 NumberFormatter（昂貴操作）。
+/// SwiftUI body 均在主執行緒執行，此共用實例不存在競態條件。
+private let _ntdCurrencyFormatter: NumberFormatter = {
+    let f = NumberFormatter()
+    f.numberStyle = .currency
+    f.currencySymbol = "NT$"
+    f.maximumFractionDigits = 0
+    return f
+}()
+
 extension Double {
     /// 台幣金額顯示：≥1000萬以「千萬」、≥1萬以「萬」為單位（整數不帶小數，否則一位小數），
     /// 未滿一萬維持 NT$ 整數。例：12,345 → NT$1.2萬；50,000,000 → NT$5千萬。
@@ -18,11 +28,7 @@ extension Double {
         if a >= 10_000 {                // ≥ 1 萬 → 萬
             return "NT$\(trimmed(self / 10_000))萬"
         }
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencySymbol = "NT$"
-        f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: self)) ?? "NT$0"
+        return _ntdCurrencyFormatter.string(from: NSNumber(value: self)) ?? "NT$0"
     }
 }
 

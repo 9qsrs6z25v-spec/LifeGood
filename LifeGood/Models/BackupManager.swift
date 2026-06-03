@@ -29,17 +29,19 @@ class BackupManager {
 
     @discardableResult
     func createSnapshot(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> URL? {
+        // JSON 編碼需存取 @Published 屬性，必須在呼叫端（主執行緒）完成
         let data = UnifiedExporter.exportJSON(expense: expense, finance: finance, life: life)
         let ts = Int(Date().timeIntervalSince1970)
         let url = backupDir.appendingPathComponent("backup_\(ts).json")
-        do {
-            try data.write(to: url, options: .atomic)
-            lastSnapshotDate = Date()
-            cleanOldBackups()
-            return url
-        } catch {
-            return nil
+        lastSnapshotDate = Date()
+        // 檔案寫入與清理移到背景佇列，避免阻塞主執行緒造成 UI 卡頓
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            do {
+                try data.write(to: url, options: .atomic)
+            } catch {}
+            self?.cleanOldBackups()
         }
+        return url
     }
 
     // MARK: - 查詢可用快照
