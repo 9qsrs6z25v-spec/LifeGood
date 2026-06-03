@@ -33,7 +33,10 @@ extension Double {
             return "NT$\(trimmed(self / 100_000_000))億"
         }
         if a >= 10_000 {                // ≥ 1 萬 → 萬
-            return "NT$\(trimmed(self / 10_000))萬"
+            let wan = self / 10_000
+            // %.1f 格式化後若捨入到 10000，改以億顯示，避免「10000.0萬」
+            if Swift.abs(wan) >= 9_999.95 { return "NT$\(trimmed(self / 100_000_000))億" }
+            return "NT$\(trimmed(wan))萬"
         }
         return _ntdCurrencyFormatter.string(from: NSNumber(value: self)) ?? "NT$0"
     }
