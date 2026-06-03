@@ -1,5 +1,19 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（LifeFinanceView）
+// [2026-06] 本次美化方向：
+//   1. summaryHeader → 升級為藍色漸層英雄卡片（對齊 SavingsInsuranceView summaryHeader 規格）：
+//      銀行總餘額台幣等值大字 + 計數膠囊 + 餘額正負色 + 散景裝飾圓；
+//      底部四欄 KPI（銀行 / 信用卡 / 證券 / 保險），對齊 FinanceChartView 英雄卡 KPI 規格；
+//      headerAppeared spring 進場動畫（透明度 + Y 位移）。
+//   2. filterChips → 加入底部分隔線 overlay + padding 對齊 IncomeView.categoryFilter 規格；
+//      chip 樣式從純綠改為依選取分類主色動態著色，對齊 StockView / SavingsInsuranceView filter 規格。
+//   3. milestoneRow → 圖示從 36pt 純色升級為 44pt 雙層漸層圓（LinearGradient 底色 + stroke），
+//      對齊 IncomeView.incomeRow / StockView.stockCard 圖示視覺規格；
+//      加入列表交錯淡入 + 向上進場動畫（rowsAppeared），對齊 VariableExpenseView 規格。
+//   4. creditCardSubRow → 圖示從 24pt 升級為 32pt 漸層圓，對齊 milestoneRow 規格；
+//      停用卡以 .tertiary 淡化，視覺上更一目了然。
+
 // MARK: - 固定支出週期展開（共用）
 
 /// 把連結到指定銀行 milestone 的「直接扣款 + 週期性」固定支出，
@@ -172,6 +186,9 @@ struct LifeFinanceView: View {
     @State private var viewingItem: LifeMilestone?
     @State private var showAdd = false
     @State private var showPremiumAlert = false
+    // 進場動畫旗標
+    @State private var headerAppeared = false
+    @State private var rowsAppeared = false
 
     private var financeMilestones: [LifeMilestone] {
         lifeStore.milestones
@@ -195,6 +212,13 @@ struct LifeFinanceView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 summaryHeader
+                    .opacity(headerAppeared ? 1 : 0)
+                    .offset(y: headerAppeared ? 0 : 22)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                            headerAppeared = true
+                        }
+                    }
                 filterChips
                 milestoneList
             }
@@ -227,29 +251,121 @@ struct LifeFinanceView: View {
         }
     }
 
-    // MARK: - 摘要
+    // MARK: - 摘要（英雄卡）
+
+    private let heroAccent     = Color(red: 0.22, green: 0.53, blue: 0.98)
+    private let heroAccentDark = Color(red: 0.10, green: 0.35, blue: 0.82)
 
     private var summaryHeader: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("理財帳戶總覽").font(.subheadline).foregroundStyle(.secondary)
+        let balance = allBankBalanceInTWD
+        let isPositive = balance >= 0
+        let totalCount = allFinanceMilestones.count
+
+        return VStack(spacing: 0) {
+            // 頂部：銀行總餘額 + 計數膠囊
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text("銀行帳戶總餘額（台幣等值）")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.78))
+                    }
+                    Text(formatTwdShort(balance))
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .contentTransition(.numericText())
+                        .shadow(
+                            color: isPositive ? .clear : Color.red.opacity(0.40),
+                            radius: 6, x: 0, y: 2
+                        )
+                }
                 Spacer()
-                Text("\(allFinanceMilestones.count) 筆").font(.subheadline).foregroundStyle(.secondary)
+                // 帳戶計數膠囊
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("帳戶總計")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                    Text("\(totalCount) 筆")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                }
+                .padding(.horizontal, 11).padding(.vertical, 6)
+                .background(.white.opacity(0.20))
+                .clipShape(Capsule())
+                .foregroundStyle(.white)
             }
-            HStack(spacing: 16) {
-                ForEach(FinanceSubCategory.allCases) { sub in
+
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 14)
+
+            // 四欄 KPI：銀行 / 信用卡 / 證券 / 保險
+            HStack(spacing: 0) {
+                ForEach(Array(FinanceSubCategory.allCases.enumerated()), id: \.element) { i, sub in
                     let count = allFinanceMilestones.filter { $0.financeSubCategory == sub }.count
-                    VStack(spacing: 2) {
-                        Image(systemName: sub.icon).font(.title3).foregroundStyle(colorFor(sub))
-                        Text("\(count)").font(.caption.bold())
-                        Text(sub.rawValue).font(.caption2).foregroundStyle(.secondary)
+                    VStack(spacing: 5) {
+                        ZStack {
+                            Circle()
+                                .fill(.white.opacity(0.16))
+                                .frame(width: 30, height: 30)
+                            Image(systemName: sub.icon)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                        Text("\(count)")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text(sub.rawValue)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
                     }
                     .frame(maxWidth: .infinity)
+
+                    if i < FinanceSubCategory.allCases.count - 1 {
+                        Rectangle()
+                            .fill(.white.opacity(0.22))
+                            .frame(width: 0.5, height: 36)
+                    }
                 }
             }
+            .padding(.vertical, 6)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
-        .padding()
-        .background(Color(.systemBackground))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 20)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [heroAccent, heroAccentDark],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 右上主散景圓
+                Circle()
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 140, height: 140)
+                    .offset(x: 90, y: -55)
+                    .blur(radius: 14)
+                // 左下補光
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 90, height: 90)
+                    .offset(x: -70, y: 55)
+                    .blur(radius: 10)
+                // 右下小散景（增加層次）
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 60, y: 40)
+                    .blur(radius: 8)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 0))
+        .shadow(color: heroAccentDark.opacity(0.35), radius: 12, x: 0, y: 6)
     }
 
     // MARK: - 篩選
@@ -257,27 +373,47 @@ struct LifeFinanceView: View {
     private var filterChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                chipButton(label: "全部", isSelected: selectedSub == nil) { selectedSub = nil }
+                chipButton(label: "全部", icon: "tray.full.fill",
+                           tint: heroAccent, isSelected: selectedSub == nil) { selectedSub = nil }
                 ForEach(FinanceSubCategory.allCases) { sub in
                     let count = financeMilestones.filter { $0.financeSubCategory == sub }.count
                     if count > 0 {
-                        chipButton(label: "\(sub.rawValue) \(count)", isSelected: selectedSub == sub) { selectedSub = sub }
+                        chipButton(label: "\(sub.rawValue) \(count)", icon: sub.icon,
+                                   tint: colorFor(sub), isSelected: selectedSub == sub) { selectedSub = sub }
                     }
                 }
             }
-            .padding(.horizontal).padding(.vertical, 8)
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+        }
+        .background(Color(.systemBackground))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(.separator).opacity(0.22), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: 1)
         }
     }
 
-    private func chipButton(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    private func chipButton(label: String, icon: String, tint: Color, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(label).font(.caption.weight(.medium))
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(isSelected ? Color.green : Color(.tertiarySystemFill))
-                .foregroundStyle(isSelected ? .white : .primary)
-                .clipShape(Capsule())
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.caption2)
+                Text(label).font(.caption.weight(isSelected ? .semibold : .medium))
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(isSelected ? tint : Color(.tertiarySystemFill))
+            .foregroundStyle(isSelected ? .white : .primary)
+            .clipShape(Capsule())
+            .shadow(color: isSelected ? tint.opacity(0.35) : .clear, radius: 5, x: 0, y: 2)
         }
         .buttonStyle(.plain)
+        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
     }
 
     // MARK: - 列表
@@ -290,7 +426,7 @@ struct LifeFinanceView: View {
 
     private var milestoneList: some View {
         List {
-            ForEach(filteredMilestones) { item in
+            ForEach(Array(filteredMilestones.enumerated()), id: \.element.id) { idx, item in
                 VStack(spacing: 0) {
                     milestoneRow(item)
                         .contentShape(Rectangle())
@@ -307,33 +443,60 @@ struct LifeFinanceView: View {
                         }
                     }
                 }
+                // 交錯淡入 + 向上進場，對齊 VariableExpenseView / IncomeView 規格
+                .opacity(rowsAppeared ? 1 : 0)
+                .offset(y: rowsAppeared ? 0 : 12)
+                .animation(
+                    .spring(response: 0.44, dampingFraction: 0.82)
+                        .delay(0.04 * Double(min(idx, 12))),
+                    value: rowsAppeared
+                )
             }
         }
         .listStyle(.insetGrouped)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
+                rowsAppeared = true
+            }
+        }
     }
 
     private func creditCardSubRow(_ card: LifeMilestone) -> some View {
         let disabled = card.isDisabled == true
-        return HStack(spacing: 8) {
-            Rectangle().fill(Color.clear).frame(width: 20)
-            Image(systemName: "creditcard.fill")
-                .font(.caption)
-                .foregroundStyle(disabled ? Color.secondary : .orange)
-                .frame(width: 24, height: 24)
-                .background((disabled ? Color.secondary : Color.orange).opacity(0.12))
-                .clipShape(Circle())
+        let accent: Color = disabled ? .secondary : .orange
+        return HStack(spacing: 10) {
+            // 縮排 + 32pt 漸層圓（對齊 milestoneRow 子層規格）
+            Rectangle().fill(Color.clear).frame(width: 16)
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.18), accent.opacity(0.07)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 32, height: 32)
+                Circle()
+                    .stroke(accent.opacity(disabled ? 0.08 : 0.18), lineWidth: 0.75)
+                    .frame(width: 32, height: 32)
+                Image(systemName: "creditcard.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(card.cardName ?? card.title)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(disabled ? .secondary : .primary)
+                        .lineLimit(1)
                     if disabled {
                         Text("已停用")
-                            .font(.caption2.weight(.medium))
-                            .padding(.horizontal, 6).padding(.vertical, 1)
-                            .background(Color.secondary.opacity(0.18))
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.14))
                             .foregroundStyle(.secondary)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .clipShape(Capsule())
                     }
                 }
                 HStack(spacing: 4) {
@@ -348,22 +511,35 @@ struct LifeFinanceView: View {
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.caption2).foregroundStyle(.tertiary)
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
-        .opacity(disabled ? 0.7 : 1.0)
+        .opacity(disabled ? 0.65 : 1.0)
     }
 
     private func milestoneRow(_ item: LifeMilestone) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: item.financeSubCategory?.icon ?? "banknote.fill")
-                .font(.title3)
-                .foregroundStyle(colorFor(item.financeSubCategory ?? .bank))
-                .frame(width: 36, height: 36)
-                .background(colorFor(item.financeSubCategory ?? .bank).opacity(0.12))
-                .clipShape(Circle())
+        let accent = colorFor(item.financeSubCategory ?? .bank)
+        return HStack(spacing: 12) {
+            // 44pt 漸層圖示圓（對齊 IncomeView.incomeRow 規格）
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                Circle()
+                    .stroke(accent.opacity(0.20), lineWidth: 1)
+                    .frame(width: 44, height: 44)
+                Image(systemName: item.financeSubCategory?.icon ?? "banknote.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title).font(.subheadline.weight(.medium))
+                Text(item.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                 subtitle(for: item)
             }
             Spacer()
@@ -374,14 +550,15 @@ struct LifeFinanceView: View {
                     let balances = bankBalances(for: item)
                     let display = bankBalanceDisplay(balances: balances)
                     Text(display.text)
-                        .font(.caption.bold())
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(display.amount >= 0 ? Color.blue : Color.red)
+                        .contentTransition(.numericText())
                 }
             } else {
                 Text(formatDate(item.date)).font(.caption).foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     /// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 股票交易 + 固定支出週期展開）
