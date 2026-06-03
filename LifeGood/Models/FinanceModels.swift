@@ -1,7 +1,13 @@
 import Foundation
 import SwiftUI
 
-// MARK: - 金額顯示（過萬以「萬」為單位）
+// MARK: - 金額顯示（萬 / 億 量級單位）
+// 【美化方向 — ntdWanString 共用金額格式元件】
+// ① 量級單位從「千萬」改為「億」，統一全 App 僅使用「萬」與「億」兩個量級，
+//    符合繁體中文金融慣例且與 FinanceOverviewView.fmtShort 保持一致。
+//    舊：≥1000萬 → "NT$X千萬"
+//    新：≥1億   → "NT$X億"；≥1萬 → "NT$X萬"；<1萬 → NT$X
+// ② trimmed() 邏輯不變：整數不帶小數、有小數則保留一位，大字不換行、節省空間。
 
 /// 共用靜態實例，避免每次 ntdWanString 呼叫都重新分配 NumberFormatter（昂貴操作）。
 /// SwiftUI body 均在主執行緒執行，此共用實例不存在競態條件。
@@ -14,16 +20,17 @@ private let _ntdCurrencyFormatter: NumberFormatter = {
 }()
 
 extension Double {
-    /// 台幣金額顯示：≥1000萬以「千萬」、≥1萬以「萬」為單位（整數不帶小數，否則一位小數），
-    /// 未滿一萬維持 NT$ 整數。例：12,345 → NT$1.2萬；50,000,000 → NT$5千萬。
+    /// 台幣金額顯示：≥1億以「億」、≥1萬以「萬」為單位（整數不帶小數，否則一位小數），
+    /// 未滿一萬維持 NT$ 整數。
+    /// 例：12,345 → NT$1.2萬；150,000,000 → NT$1.5億。
     /// 理財/收支各頁共用，確保顯示規則一致。
     var ntdWanString: String {
         func trimmed(_ x: Double) -> String {
             (x == x.rounded()) ? String(format: "%.0f", x) : String(format: "%.1f", x)
         }
         let a = Swift.abs(self)
-        if a >= 10_000_000 {            // ≥ 1000 萬 → 千萬
-            return "NT$\(trimmed(self / 10_000_000))千萬"
+        if a >= 100_000_000 {           // ≥ 1億 → 億
+            return "NT$\(trimmed(self / 100_000_000))億"
         }
         if a >= 10_000 {                // ≥ 1 萬 → 萬
             return "NT$\(trimmed(self / 10_000))萬"

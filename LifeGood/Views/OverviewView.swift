@@ -1,5 +1,13 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（OverviewView）
+// [2026-06] 本次美化方向：
+//   1. smartCurrency：新增億量級支援（≥1億 → "X.X 億"），對齊 ntdWanString 與
+//      FinanceOverviewView.fmtShort 的「萬、億」顯示規格，避免「10000.0 萬」截斷大字。
+//      閾值：<1萬→NT$X，≥1萬<1億→"X.X 萬"，≥1億→"X.X 億"。
+//   2. 保留現有 hero card / todayCard / categoryBreakdown / recentTransactions 既有美化成果，
+//      本次僅做金額格式精度修正，不改動任何視覺元件。
+
 struct OverviewView: View {
     @EnvironmentObject var store: ExpenseStore
     @State private var showAddVariable = false
@@ -815,14 +823,15 @@ struct OverviewView: View {
         Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 
+    // 【美化 2026-06】加入億量級：≥1億 → "X.X 億"；≥1萬 → "X.X 萬"；<1萬 → NT$X
     private func smartCurrency(_ value: Double) -> String {
-        if abs(value) >= 10000 {
-            let wan = value / 10000
-            if abs(wan) >= 10 {
-                return String(format: "%.1f 萬", wan)
-            } else {
-                return String(format: "%.2f 萬", wan)
-            }
+        let absVal = abs(value)
+        if absVal >= 100_000_000 {                               // ≥ 1億
+            return String(format: "%.1f 億", value / 100_000_000)
+        }
+        if absVal >= 10_000 {                                    // ≥ 1萬
+            let wan = value / 10_000
+            return String(format: abs(wan) >= 10 ? "%.1f 萬" : "%.2f 萬", wan)
         }
         return formatCurrency(value)
     }
