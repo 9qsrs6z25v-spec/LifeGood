@@ -831,6 +831,8 @@ struct OverviewView: View {
         }
         if absVal >= 10_000 {                                    // ≥ 1萬
             let wan = value / 10_000
+            // %.1f 格式化後若捨入到 10000，改以億顯示，避免「10000.0萬」
+            if abs(wan) >= 9_999.95 { return String(format: "%.1f 億", value / 100_000_000) }
             return String(format: abs(wan) >= 10 ? "%.1f 萬" : "%.2f 萬", wan)
         }
         return formatCurrency(value)
