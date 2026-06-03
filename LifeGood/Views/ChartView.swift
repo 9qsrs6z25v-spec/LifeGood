@@ -1,6 +1,18 @@
 import SwiftUI
 import Charts
 
+// MARK: - 美化紀錄（ChartView）
+// [2026-06] 本次美化方向：
+//   1. expenseTypeBreakdown：比例條升級為雙段圓角分色條 + 段間 4pt 空隙 + 比例百分比標注列
+//      + 進場 spring 動畫（typeBreakdownAppeared），對齊 FinanceOverviewView.allocationSection 規格
+//   2. breakdownLegendItem：圖示圓從 32pt 升至 36pt、金額改為 .system(size:15) rounded bold、
+//      百分比改為彩色膠囊（含細邊框），對齊 OverviewView.categoryRow 設計
+//   3. 三種圖表空狀態（趨勢 / 變動圓餅 / 固定圓餅）：升級為雙層脈衝光環（pieEmptyPulse）
+//      + 漸層底圓 + 細邊框 + 圖示顏色同分類 accent，
+//      對齊 IncomeView.emptyState 雙環脈衝設計規格
+//   4. expenseTypeBreakdown 空狀態同步升級雙層脈衝光環，
+//      對齊 VariableExpenseView.emptyStateView 規格
+
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
     case variablePie = "變動支出比例"
@@ -41,6 +53,8 @@ struct ChartView: View {
     /// 快取圓餅圖資料，避免 chartCarousel 與隱藏量測層各算一次（每次都是 O(n) 掃描）
     @State private var variableBreakdownCache: [(category: VariableCategory, amount: Double)] = []
     @State private var fixedBreakdownCache: [(category: FixedCategory, amount: Double)] = []
+    @State private var typeBreakdownAppeared = false
+    @State private var pieEmptyPulse = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -352,25 +366,47 @@ struct ChartView: View {
             .padding(.horizontal)
 
             if chartData.isEmpty || chartData.allSatisfy({ $0.amount == 0 }) {
-                VStack(spacing: 14) {
+                VStack(spacing: 18) {
                     ZStack {
+                        // 外層脈衝光環
                         Circle()
-                            .fill(Color(.systemFill))
-                            .frame(width: 64, height: 64)
+                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(pieEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                        // 內層脈衝光環（延遲 0.3s 製造波紋）
+                        Circle()
+                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(pieEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                        // 漸層底圓 + 細邊框
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(.secondarySystemFill), Color(.systemFill)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 72, height: 72)
+                            .overlay(Circle().stroke(Color.green.opacity(0.18), lineWidth: 1))
                         Image(systemName: "chart.bar.xaxis")
-                            .font(.system(size: 26, weight: .light))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(Color.green.opacity(0.55))
+                    }
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text("新增支出後將顯示圖表")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 200)
+                .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 Chart(chartData) { dataPoint in
                     BarMark(
@@ -489,25 +525,47 @@ struct ChartView: View {
             .padding(.horizontal)
 
             if entries.isEmpty {
-                VStack(spacing: 14) {
+                VStack(spacing: 18) {
                     ZStack {
+                        // 外層脈衝光環
                         Circle()
-                            .fill(Color(.systemFill))
-                            .frame(width: 64, height: 64)
+                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(pieEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                        // 內層脈衝光環（延遲 0.3s 製造波紋）
+                        Circle()
+                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(pieEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                        // 漸層底圓 + 細邊框
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(.secondarySystemFill), Color(.systemFill)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 72, height: 72)
+                            .overlay(Circle().stroke(Color.green.opacity(0.18), lineWidth: 1))
                         Image(systemName: "chart.bar.xaxis")
-                            .font(.system(size: 26, weight: .light))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(Color.green.opacity(0.55))
+                    }
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text("新增支出後將顯示圖表")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 200)
+                .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
                 pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(variable: $0.category), $0.amount) }, total: total)
@@ -542,25 +600,47 @@ struct ChartView: View {
             .padding(.horizontal)
 
             if entries.isEmpty {
-                VStack(spacing: 14) {
+                VStack(spacing: 18) {
                     ZStack {
+                        // 外層脈衝光環
                         Circle()
-                            .fill(Color(.systemFill))
-                            .frame(width: 64, height: 64)
+                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(pieEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                        // 內層脈衝光環（延遲 0.3s 製造波紋）
+                        Circle()
+                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(pieEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                        // 漸層底圓 + 細邊框
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(.secondarySystemFill), Color(.systemFill)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 72, height: 72)
+                            .overlay(Circle().stroke(Color.green.opacity(0.18), lineWidth: 1))
                         Image(systemName: "chart.bar.xaxis")
-                            .font(.system(size: 26, weight: .light))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(Color.green.opacity(0.55))
+                    }
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text("新增支出後將顯示圖表")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 200)
+                .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
                 pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(fixed: $0.category), $0.amount) }, total: total)
@@ -779,23 +859,37 @@ struct ChartView: View {
             .padding(.horizontal)
 
             if total == 0 {
-                VStack(spacing: 14) {
+                VStack(spacing: 18) {
                     ZStack {
+                        Circle()
+                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.22), lineWidth: 1.5)
+                            .frame(width: 88, height: 88)
+                            .scaleEffect(pieEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                        Circle()
+                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.11), lineWidth: 1)
+                            .frame(width: 88, height: 88)
+                            .scaleEffect(pieEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pieEmptyPulse)
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [Color(.systemFill), Color(.secondarySystemFill)],
+                                    colors: [Color(.secondarySystemFill), Color(.systemFill)],
                                     startPoint: .topLeading, endPoint: .bottomTrailing
                                 )
                             )
-                            .frame(width: 68, height: 68)
+                            .frame(width: 70, height: 70)
+                            .overlay(Circle().stroke(Color.green.opacity(0.16), lineWidth: 1))
                         Image(systemName: "chart.pie")
                             .font(.system(size: 28, weight: .light))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.green.opacity(0.55))
+                    }
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
                         Text("尚無支出資料")
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text("新增收支後顯示本月比例")
                             .font(.caption)
@@ -810,30 +904,55 @@ struct ChartView: View {
                 .padding(.horizontal)
             } else {
                 VStack(spacing: 14) {
-                    // 比例條：用 GeometryReader 取動態寬度，避免 UIScreen 相依
-                    GeometryReader { geo in
-                        HStack(spacing: 0) {
-                            if variableTotal > 0 {
-                                LinearGradient(
-                                    colors: [.orange, .orange.opacity(0.75)],
-                                    startPoint: .leading, endPoint: .trailing
-                                )
-                                .frame(width: max(6, geo.size.width * CGFloat(variableTotal / total)))
-                            }
-                            if fixedTotal > 0 {
-                                LinearGradient(
-                                    colors: [Color.blue.opacity(0.80), .blue],
-                                    startPoint: .leading, endPoint: .trailing
-                                )
+                    // 雙段圓角比例條（帶進場動畫 + 段間空隙）
+                    VStack(spacing: 5) {
+                        GeometryReader { geo in
+                            let gapW: CGFloat = 4
+                            let totalW = geo.size.width - gapW
+                            let varW = max(10, totalW * CGFloat(variableTotal / total))
+                            let fixW = max(10, totalW - varW)
+                            HStack(spacing: gapW) {
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.orange, .orange.opacity(0.78)],
+                                            startPoint: .leading, endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: typeBreakdownAppeared ? varW : 0, height: 14)
+                                    .animation(.spring(response: 0.68, dampingFraction: 0.82), value: typeBreakdownAppeared)
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color(red: 0.20, green: 0.50, blue: 0.95), .blue],
+                                            startPoint: .leading, endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: typeBreakdownAppeared ? fixW : 0, height: 14)
+                                    .animation(.spring(response: 0.68, dampingFraction: 0.82).delay(0.07), value: typeBreakdownAppeared)
                             }
                         }
                         .frame(height: 14)
-                        .clipShape(Capsule())
-                    }
-                    .frame(height: 14)
 
-                    // 圖例
-                    HStack(spacing: 20) {
+                        // 比例百分比標注列
+                        HStack {
+                            Text(String(format: "%.1f%%", variableTotal / total * 100))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.orange)
+                            Spacer()
+                            Text(String(format: "%.1f%%", fixedTotal / total * 100))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.blue)
+                        }
+                    }
+
+                    // 分隔線
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.20))
+                        .frame(height: 0.5)
+
+                    // 圖例（升級：大字金額 + 彩色百分比膠囊）
+                    HStack(spacing: 14) {
                         breakdownLegendItem(
                             color: .orange,
                             icon: "arrow.up.arrow.down.circle.fill",
@@ -848,7 +967,6 @@ struct ChartView: View {
                             amount: fixedTotal,
                             total: total
                         )
-                        Spacer()
                     }
                 }
                 .padding(16)
@@ -856,34 +974,54 @@ struct ChartView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
+                .onAppear {
+                    withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.10)) {
+                        typeBreakdownAppeared = true
+                    }
+                }
+            }
+        }
+        .opacity(typeBreakdownAppeared || total == 0 ? 1 : 0)
+        .offset(y: typeBreakdownAppeared || total == 0 ? 0 : 14)
+        .onAppear {
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.12)) {
+                typeBreakdownAppeared = true
             }
         }
     }
 
     private func breakdownLegendItem(color: Color, icon: String, label: String, amount: Double, total: Double) -> some View {
-        HStack(spacing: 10) {
+        let pct = total > 0 ? amount / total * 100 : 0
+        return HStack(spacing: 10) {
             ZStack {
                 Circle()
                     .fill(color.opacity(0.14))
-                    .frame(width: 32, height: 32)
+                    .frame(width: 36, height: 36)
                 Circle()
                     .stroke(color.opacity(0.22), lineWidth: 1)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 36, height: 36)
                 Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(color)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(.caption)
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
                 Text(formatCurrency(amount))
-                    .font(.subheadline.bold())
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
                     .contentTransition(.numericText())
-                Text(String(format: "%.1f%%", total > 0 ? amount / total * 100 : 0))
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(color.opacity(0.80))
             }
+            Spacer(minLength: 2)
+            Text(String(format: "%.1f%%", pct))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(color.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(color.opacity(0.20), lineWidth: 0.6))
         }
     }
 
