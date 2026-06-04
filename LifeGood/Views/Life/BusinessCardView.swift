@@ -386,6 +386,20 @@ extension BusinessCard {
     }
 }
 
+// MARK: - 美化紀錄（BusinessCardView）
+// [2026-06] 本次美化方向：
+//   1. summaryHeader：新增橘粉漸層英雄卡（總名片數 + 公司數 + 聯絡人數），
+//      對齊 VehicleView.summaryHeader / StockView.summaryHeader 設計語言；
+//      加入 heroCardAppeared spring 進場動畫
+//   2. emptyState：純圖示升級為雙層脈衝光環 + 漸層底圓 + 橘色 CTA 按鈕，
+//      搜尋無結果時改用搜尋圖示，對齊 IncomeView.emptyState 規格
+//   3. companyHeader：公司分組標題從 plain Text 升級為橘色 Capsule 強調條 +
+//      計數膠囊，對齊 IncomeView.daySectionHeader 規格
+//   4. cardRow：頭像從 48pt 升至 52pt + 職稱標籤改用 Capsule + 加入分隔色線，
+//      對齊 IncomeView.incomeRow 視覺規格
+//   5. 卡片列表加入 cardsAppeared 交錯淡入 + 向上進場動畫，
+//      對齊 IncomeView.incomeListSections 進場動畫規格
+
 struct BusinessCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
@@ -404,6 +418,10 @@ struct BusinessCardView: View {
     @State private var selectedIds: Set<UUID> = []
     @State private var showExportConfirm = false
     @State private var exportAlertMessage: String?
+    // 美化進場動畫旗標
+    @State private var heroCardAppeared = false
+    @State private var cardsAppeared = false
+    @State private var emptyIconPulse = false
 
     fileprivate struct ScannedCardDraft: Identifiable {
         let id = UUID()
@@ -431,36 +449,286 @@ struct BusinessCardView: View {
         return grouped.sorted { $0.key < $1.key }
     }
 
+    // MARK: - 英雄摘要卡片（橘粉漸層）
+
+    private var summaryHeader: some View {
+        let totalCards = lifeStore.businessCards.count
+        let companyCount = Set(lifeStore.businessCards.map { $0.company }.filter { !$0.isEmpty }).count
+        let contactCount = lifeStore.businessCards.filter { !$0.phones.isEmpty || !$0.emails.isEmpty }.count
+        let accentTop = Color(red: 1.00, green: 0.58, blue: 0.28)
+        let accentBot = Color(red: 0.90, green: 0.28, blue: 0.55)
+
+        return VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("名片總覽")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    Text("\(totalCards) 張名片")
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
+                    if companyCount > 0 {
+                        Text("涵蓋 \(companyCount) 家公司")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.top, 1)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text("\(totalCards) 張")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 11).padding(.vertical, 5)
+                        .background(.white.opacity(0.22))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
+                    if contactCount > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "phone.fill")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("\(contactCount) 有聯絡方式")
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(.white.opacity(0.88))
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(.white.opacity(0.16))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.75))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [accentTop, accentBot],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 130, height: 130)
+                    .offset(x: 85, y: -50)
+                    .blur(radius: 14)
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 75, height: 75)
+                    .offset(x: -65, y: 45)
+                    .blur(radius: 9)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: accentBot.opacity(0.42), radius: 16, x: 0, y: 8)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+        .opacity(heroCardAppeared ? 1 : 0)
+        .offset(y: heroCardAppeared ? 0 : 22)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                heroCardAppeared = true
+            }
+        }
+    }
+
+    // MARK: - 公司分組標題列（橘色強調條 + 計數膠囊）
+
+    private func companyHeader(_ company: String, _ cards: [BusinessCard]) -> some View {
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
+        return HStack(spacing: 8) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3, height: 14)
+            Text(company)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.primary.opacity(0.75))
+            Spacer(minLength: 6)
+            HStack(spacing: 4) {
+                Text("\(cards.count) 張")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(accent)
+                Text("·")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("名片")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(accent.opacity(0.10))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+        }
+        .textCase(nil)
+    }
+
+    // MARK: - 空狀態（雙層脈衝光環 + 橘色 CTA）
+
+    private var emptyStateView: some View {
+        let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
+        return VStack(spacing: 24) {
+            Spacer()
+
+            ZStack {
+                if !isSearching {
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                        .frame(width: 108, height: 108)
+                        .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
+                        .animation(
+                            .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
+                            value: emptyIconPulse
+                        )
+                }
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: isSearching
+                                ? [Color(.systemFill), Color(.secondarySystemFill)]
+                                : [accent.opacity(0.14), accent.opacity(0.06)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 88, height: 88)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                isSearching ? Color.clear : accent.opacity(0.22),
+                                lineWidth: 1.2
+                            )
+                    )
+                Image(systemName: isSearching ? "magnifyingglass" : "person.crop.rectangle.stack")
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(isSearching ? .secondary : accent.opacity(0.72))
+            }
+            .onAppear {
+                if !isSearching {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        emptyIconPulse = true
+                    }
+                }
+            }
+
+            VStack(spacing: 10) {
+                Text(isSearching ? "找不到符合的名片" : "尚無名片紀錄")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text(isSearching ? "換個關鍵字試試" : "收集名片、拍照辨識\n或從聯絡人一鍵匯入")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+
+            if !isSearching {
+                Button {
+                    if subscription.isPremium { showAdd = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Label("新增第一張名片", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 1.00, green: 0.58, blue: 0.28),
+                                    Color(red: 0.90, green: 0.28, blue: 0.55)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                        .shadow(color: Color(red: 0.90, green: 0.28, blue: 0.55).opacity(0.38), radius: 10, y: 5)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                // 有名片時顯示搜尋列（帶圖示 + 圓角背景，對齊其他 searchable 頁面規格）
                 if !lifeStore.businessCards.isEmpty {
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
                         TextField("搜尋姓名、公司、職稱、主要業務", text: $searchText)
                             .textFieldStyle(.plain)
+                            .font(.subheadline)
+                        if !searchText.isEmpty {
+                            Button {
+                                searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.scale.combined(with: .opacity))
+                        }
                     }
-                    .padding(10)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
                     .background(Color(.tertiarySystemFill))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding(.horizontal)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+                    )
+                    .padding(.horizontal, 16)
                     .padding(.vertical, 8)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: searchText.isEmpty)
                 }
 
                 if filteredCards.isEmpty {
-                    Spacer()
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.crop.rectangle.stack")
-                            .font(.system(size: 48)).foregroundStyle(.secondary)
-                        Text("尚無名片").font(.headline).foregroundStyle(.secondary)
-                        Text("點擊右上角 + 新增名片").font(.subheadline).foregroundStyle(.tertiary)
-                    }
-                    Spacer()
+                    // 改版空狀態（雙層脈衝光環 + CTA 按鈕）
+                    emptyStateView
                 } else {
                     List {
-                        ForEach(groupedByCompany, id: \.key) { company, cards in
-                            Section(header: Text(company)) {
-                                ForEach(cards) { card in
+                        // 英雄摘要卡（僅在非搜尋狀態 + 有名片時顯示）
+                        if searchText.isEmpty {
+                            Section {
+                                summaryHeader
+                                    .listRowInsets(EdgeInsets())
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                            }
+                        }
+
+                        // 各公司分組（加入交錯進場動畫）
+                        ForEach(Array(groupedByCompany.enumerated()), id: \.element.key) { sectionIdx, pair in
+                            let (company, cards) = pair
+                            Section(header: companyHeader(company, cards)) {
+                                ForEach(Array(cards.enumerated()), id: \.element.id) { rowIdx, card in
                                     HStack(spacing: 12) {
                                         if isMultiSelect {
                                             Image(systemName: selectedIds.contains(card.id)
@@ -501,11 +769,25 @@ struct BusinessCardView: View {
                                             .tint(.blue)
                                         }
                                     }
+                                    // 交錯淡入 + 向上進場動畫
+                                    .opacity(cardsAppeared ? 1 : 0)
+                                    .offset(y: cardsAppeared ? 0 : 12)
+                                    .animation(
+                                        .spring(response: 0.44, dampingFraction: 0.82)
+                                            .delay(0.04 * Double(min(sectionIdx * 3 + rowIdx, 14))),
+                                        value: cardsAppeared
+                                    )
                                 }
                             }
                         }
                     }
                     .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                            cardsAppeared = true
+                        }
+                    }
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -668,84 +950,107 @@ struct BusinessCardView: View {
         }
     }
 
-    /// 列表 row：頭像 + 姓名/職稱 + 公司/部門 + 聯絡方式列 + 日期
+    /// 列表 row：52pt 頭像圓角方形 + 姓名 / Capsule 職稱 / 公司部門 / 聯絡方式 + 日期
     private func cardRow(_ card: BusinessCard) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
+        let hasContact = !card.phones.isEmpty || !card.emails.isEmpty
+        let primaryPhone = card.phones.first ?? card.phone
+        let primaryEmail = card.emails.first ?? card.email
+
+        return HStack(alignment: .top, spacing: 12) {
             avatarView(card)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
+                // 姓名 + 職稱 Capsule 膠囊
                 HStack(spacing: 6) {
                     Text(card.name.isEmpty ? "未命名" : card.name)
                         .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
                     if !card.jobTitle.isEmpty {
                         Text(card.jobTitle)
-                            .font(.caption2)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.12))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.blue)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .padding(.horizontal, 6).padding(.vertical, 2.5)
+                            .background(Color.blue.opacity(0.10))
+                            .clipShape(Capsule())
+                            .lineLimit(1)
                     }
                 }
+
+                // 公司 · 部門
                 if !card.company.isEmpty || !card.department.isEmpty {
                     HStack(spacing: 4) {
                         if !card.company.isEmpty {
-                            Text(card.company).font(.caption)
+                            Text(card.company)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                         if !card.company.isEmpty && !card.department.isEmpty {
-                            Text("·").foregroundStyle(.tertiary)
+                            Text("·").font(.caption).foregroundStyle(.tertiary)
                         }
                         if !card.department.isEmpty {
-                            Text(card.department).font(.caption)
+                            Text(card.department)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                     }
                 }
-                if !card.phone.isEmpty || !card.email.isEmpty {
-                    HStack(spacing: 10) {
-                        if !card.phone.isEmpty {
-                            HStack(spacing: 3) {
+
+                // 聯絡方式（phone + email 各一行）
+                if hasContact || !card.address.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !primaryPhone.isEmpty {
+                            HStack(spacing: 4) {
                                 Image(systemName: "phone.fill")
                                     .font(.system(size: 9))
-                                Text(card.phone).font(.caption2)
+                                Text(primaryPhone)
+                                    .font(.caption2)
+                                    .lineLimit(1)
                             }
                             .foregroundStyle(.green)
                         }
-                        if !card.email.isEmpty {
-                            HStack(spacing: 3) {
+                        if !primaryEmail.isEmpty {
+                            HStack(spacing: 4) {
                                 Image(systemName: "envelope.fill")
                                     .font(.system(size: 9))
-                                Text(card.email).font(.caption2).lineLimit(1)
+                                Text(primaryEmail)
+                                    .font(.caption2)
+                                    .lineLimit(1)
                             }
                             .foregroundStyle(.indigo)
                         }
-                    }
-                }
-                if !card.address.isEmpty {
-                    HStack(spacing: 3) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 9))
-                        Text(card.address).font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
+                        if !card.address.isEmpty && primaryPhone.isEmpty && primaryEmail.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "mappin.and.ellipse")
+                                    .font(.system(size: 9))
+                                Text(card.address)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                            }
+                        }
                     }
                 }
             }
-            Spacer()
+
+            Spacer(minLength: 4)
+
+            // 右側：日期 + 箭頭
             VStack(alignment: .trailing, spacing: 4) {
                 Text(fmtDate(card.date))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                 Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(.tertiaryLabel))
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 
+    // 52pt 圓角頭像：有照片則顯示照片 + 細邊框；無照片則顯示首字母漸層圓角方塊
     @ViewBuilder
     private func avatarView(_ card: BusinessCard) -> some View {
         if let url = card.photoURL,
@@ -753,20 +1058,31 @@ struct BusinessCardView: View {
             Image(uiImage: img)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 48, height: 48)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .frame(width: 52, height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color(.separator).opacity(0.25), lineWidth: 0.75)
+                )
+                .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
         } else {
             let initial = String((card.name.isEmpty ? card.company : card.name).prefix(1))
             ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(LinearGradient(
-                        colors: [.orange, .pink.opacity(0.8)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 48, height: 48)
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 1.00, green: 0.62, blue: 0.32),
+                                Color(red: 0.90, green: 0.30, blue: 0.60)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 52, height: 52)
+                    .shadow(color: Color(red: 0.90, green: 0.30, blue: 0.60).opacity(0.28), radius: 6, x: 0, y: 3)
                 Text(initial)
-                    .font(.title3.bold())
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
             }
         }
