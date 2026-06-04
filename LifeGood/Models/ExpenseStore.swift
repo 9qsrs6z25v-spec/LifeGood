@@ -271,7 +271,11 @@ class ExpenseStore: ObservableObject {
 
     /// 計算某個時間點的固定支出投射總額（只計入建立日期 <= periodDate 的固定支出）
     private func projectedFixedTotal(for periodDate: Date, period: TimePeriod, calendar: Calendar) -> Double {
-        return projectedFixedTotal(from: expenses, for: periodDate, period: period, calendar: calendar)
+        // 只計入「固定且有週期」的支出；過去這裡誤傳整個 expenses，導致每筆變動支出的
+        // 全額被當成固定支出累加（projectedAmount 對非固定項目會直接回傳 amount），
+        // 使「本月固定支出」看板灌入全部變動消費而暴增。
+        let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
+        return projectedFixedTotal(from: allFixed, for: periodDate, period: period, calendar: calendar)
     }
 
     /// 同上，但接受已預先篩選（expenseType == .fixed && recurrence != nil）的子集合，
