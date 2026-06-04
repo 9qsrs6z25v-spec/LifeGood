@@ -569,6 +569,14 @@ struct SettingsView: View {
                     .foregroundStyle(cloudSync.isAccountAvailable ? Color.blue : Color.secondary)
             }
             .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled)
+
+            Button {
+                cloudSync.repromptInitialSync()
+            } label: {
+                Label("重新選擇同步方式", systemImage: "arrow.triangle.merge")
+                    .foregroundStyle(cloudSync.isAccountAvailable ? Color.blue : Color.secondary)
+            }
+            .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled)
         } header: {
             Text("iCloud 同步")
         } footer: {

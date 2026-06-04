@@ -180,6 +180,12 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
+    /// 手動再跑一次「覆蓋／合併」選擇流程（即使已啟用同步），方便日後重新統一兩端資料
+    func repromptInitialSync() {
+        guard isAccountAvailable else { return }
+        beginInitialSync()
+    }
+
     /// 開啟同步時：建立 zone/subscription，非破壞性預讀雲端。
     /// - 雲端沒資料 → 直接把本機推上去（種子）。
     /// - 雲端已有資料 → 設定 pendingInitialSync，由 UI 詢問使用者要覆蓋還是合併。
