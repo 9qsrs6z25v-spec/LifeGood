@@ -574,6 +574,26 @@ struct SettingsView: View {
         } footer: {
             Text("啟用後，記帳/理財/人生三模式的資料會透過 iCloud 在相同 Apple ID 的裝置間自動同步。資料完全儲存於你的 iCloud，LifeGood 不會收集或上傳任何資料。未登入 iCloud 帳號時無法啟用。")
         }
+        .confirmationDialog(
+            "iCloud 已有資料",
+            isPresented: Binding(
+                get: { cloudSync.pendingInitialSync != nil },
+                set: { newVal in
+                    // 點擊外部關閉（仍處於待決狀態）→ 視為取消、關回開關
+                    if !newVal, cloudSync.pendingInitialSync != nil { cloudSync.cancelInitialSync() }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: cloudSync.pendingInitialSync
+        ) { _ in
+            Button("以這台覆蓋雲端", role: .destructive) { cloudSync.resolveInitialSync(.overwriteCloud) }
+            Button("以雲端覆蓋這台", role: .destructive) { cloudSync.resolveInitialSync(.overwriteLocal) }
+            Button("合併（重複以本機為準）") { cloudSync.resolveInitialSync(.mergeLocalWins) }
+            Button("合併（重複以雲端為準）") { cloudSync.resolveInitialSync(.mergeCloudWins) }
+            Button("取消", role: .cancel) { cloudSync.cancelInitialSync() }
+        } message: { info in
+            Text("iCloud 目前約有 \(info.cloudItemCount) 筆資料。要如何與這台裝置的資料整合？\n\n・覆蓋會清掉其中一邊\n・合併會保留兩邊，重複的依你選的為準")
+        }
     }
 
     private var syncStatusIcon: String {
