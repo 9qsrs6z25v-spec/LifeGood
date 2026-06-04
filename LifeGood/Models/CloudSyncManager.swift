@@ -164,15 +164,22 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
-    /// 開啟同步時：建立 zone/subscription、把本地全推上去、首次拉取
+    /// 開啟同步時：建立 zone/subscription、先把 iCloud 既有資料拉下來、再把本機推上去
     private func bootstrapAndPushAll() {
         CloudKitManager.shared.bootstrap { [weak self] ok in
             guard let self = self, ok else { return }
-            CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
-            CloudKitManager.shared.uploadAllLocalPhotos()
-            self.markSynced()
-            DispatchQueue.main.async {
-                self.lastChangeReason = .initialSync
+            // 先「拉」再「推」：首次啟用時要把另一台裝置（或雲端）既有的資料同步下來。
+            // 否則只推不拉 —— 新裝置啟用後不僅拿不到舊資料，還會把空白的本機狀態
+            // 推上去覆蓋雲端既有資料。fetchChanges 會把雲端資料寫回 UserDefaults 並
+            // 通知各 Store 重新載入，之後再 push 把（合併後的）本機資料補回雲端。
+            CloudKitManager.shared.fetchChanges { [weak self] _ in
+                guard let self = self else { return }
+                CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
+                CloudKitManager.shared.uploadAllLocalPhotos()
+                self.markSynced()
+                DispatchQueue.main.async {
+                    self.lastChangeReason = .initialSync
+                }
             }
         }
     }
