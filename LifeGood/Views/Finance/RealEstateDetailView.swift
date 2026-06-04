@@ -3,6 +3,21 @@ import PhotosUI
 import UniformTypeIdentifiers
 import QuickLook
 
+// MARK: - 美化紀錄（RealEstateDetailView）
+// [2026-06] 本次美化方向：
+//   1. flashCard：加入 cardAppeared spring 進場動畫（透明度 + Y 位移），
+//      對齊 SavingsInsuranceView / StockDetailView 閃卡進場規格。
+//   2. tabPicker：從系統 .segmented 升級為自訂彩色 Capsule Pill 列（@Namespace + matchedGeometryEffect），
+//      理財 → 紫色、房屋 → teal、資產 → 藍色，對齊 MainTabView bottomTabBar 動畫規格；
+//      每個 tab 搭配對應 SF Symbol，提升識別性。
+//   3. collapsibleSection header：加入彩色 Capsule 側條（summaryColor 對應色）+
+//      標題升至 .subheadline.semibold；summary 改為彩色膠囊（帶細邊框），
+//      對齊 OverviewView / FinanceOverviewView section 標題設計語言；
+//      chevron 改為與 summaryColor 同色（透明度 0.6），視覺層次更一致。
+//   4. sectionHeader：補 Capsule 側條（.secondary 色），對齊 collapsibleSection 規格。
+//   5. emptySectionRow：加入 tray 圖示，對齊 FixedExpenseView 空狀態佔位規格，
+//      避免空白感。
+
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -32,6 +47,11 @@ struct RealEstateDetailView: View {
     @State private var expandedVariableExpenseIds: Set<UUID> = []
     /// 用於在子 sheet 關閉後強制刷新水電瓦斯區塊（解決 SwiftUI 巢狀 sheet 偶爾不更新的問題）
     @State private var dataRefreshID = UUID()
+
+    // 美化：閃卡進場動畫旗標（對齊 SavingsInsuranceView headerAppeared 規格）
+    @State private var cardAppeared = false
+    // 美化：自訂 tabPicker matchedGeometryEffect namespace
+    @Namespace private var tabNamespace
 
     // MARK: - 收合狀態（理財分頁）
     /// 試算章節預設展開
@@ -84,6 +104,13 @@ struct RealEstateDetailView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     flashCard
+                        .opacity(cardAppeared ? 1 : 0)
+                        .offset(y: cardAppeared ? 0 : 22)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                cardAppeared = true
+                            }
+                        }
                     tabPicker
                     switch detailTab {
                     case .finance: infoSection
@@ -580,24 +607,77 @@ struct RealEstateDetailView: View {
         }
     }
 
+    // 【美化】emptySectionRow 加 tray 圖示，對齊 FixedExpenseView 空狀態佔位規格
     private func emptySectionRow(_ text: String) -> some View {
-        HStack {
-            Text(text).font(.caption).foregroundStyle(.tertiary)
+        HStack(spacing: 8) {
+            Image(systemName: "tray")
+                .font(.system(size: 12, weight: .light))
+                .foregroundStyle(.quaternary)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
             Spacer()
         }
-        .padding(.horizontal).padding(.vertical, 6)
+        .padding(.horizontal, 14).padding(.vertical, 9)
     }
 
     // MARK: - 分頁選擇器
+    // 【美化】從 .segmented 升級為彩色 Capsule Pill 列，帶 matchedGeometryEffect 滑動指示器
 
     private var tabPicker: some View {
-        Picker("", selection: $detailTab) {
+        HStack(spacing: 8) {
             ForEach(DetailTab.allCases, id: \.self) { tab in
-                Text(tab.rawValue).tag(tab)
+                let isActive = detailTab == tab
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                        detailTab = tab
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: tabIcon(tab))
+                            .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                        Text(tab.rawValue)
+                            .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                    }
+                    .foregroundStyle(isActive ? .white : .primary)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background {
+                        if isActive {
+                            Capsule()
+                                .fill(tabAccent(tab))
+                                .matchedGeometryEffect(id: "detailTabIndicator", in: tabNamespace)
+                                .shadow(color: tabAccent(tab).opacity(0.38), radius: 7, x: 0, y: 3)
+                        } else {
+                            Capsule()
+                                .fill(Color(.tertiarySystemFill))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .scaleEffect(isActive ? 1.03 : 1.0)
+                .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isActive)
             }
         }
-        .pickerStyle(.segmented)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
+    }
+
+    /// 每個分頁對應的 SF Symbol 圖示
+    private func tabIcon(_ tab: DetailTab) -> String {
+        switch tab {
+        case .finance: return "chart.bar.xaxis"
+        case .house:   return "house.fill"
+        case .assets:  return "shippingbox.fill"
+        }
+    }
+
+    /// 每個分頁的主題色（理財紫 / 房屋 teal / 資產藍）
+    private func tabAccent(_ tab: DetailTab) -> Color {
+        switch tab {
+        case .finance: return Color(red: 0.50, green: 0.25, blue: 0.85)
+        case .house:   return Color(red: 0.18, green: 0.62, blue: 0.62)
+        case .assets:  return Color(red: 0.22, green: 0.50, blue: 0.90)
+        }
     }
 
     // MARK: - 房屋資料（人生）
@@ -1802,12 +1882,23 @@ struct RealEstateDetailView: View {
         }
     }
 
+    // 【美化】sectionHeader 加 Capsule 側條，對齊 collapsibleSection 標題規格
     private func sectionHeader(_ title: String) -> some View {
-        HStack {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.secondary.opacity(0.7), Color.secondary.opacity(0.30)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3, height: 12)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
     }
 
     /// 可收合區塊：未展開時顯示摘要金額；點 header 切換展開
@@ -1828,6 +1919,7 @@ struct RealEstateDetailView: View {
     }
 
     /// 可收合區塊（含右側自訂按鈕，例：「+」新增鈕、Menu 等）
+    // 【美化】header 加彩色 Capsule 側條 + subheadline.semibold 標題；summary 改為帶細邊框膠囊
     @ViewBuilder
     private func collapsibleSection<Content: View, Trailing: View>(
         title: String,
@@ -1839,28 +1931,44 @@ struct RealEstateDetailView: View {
     ) -> some View {
         HStack(spacing: 8) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
                     isExpanded.wrappedValue.toggle()
                 }
             } label: {
-                HStack {
-                    Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    // 左側彩色 Capsule 側條（對齊 OverviewView / FinanceOverviewView 分節標題規格）
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [summaryColor, summaryColor.opacity(0.45)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 3, height: 16)
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
                     Spacer()
                     if let summary, !isExpanded.wrappedValue {
                         Text(summary)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(summaryColor)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(summaryColor.opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(summaryColor.opacity(0.22), lineWidth: 0.6))
+                            .lineLimit(1)
                     }
                     Image(systemName: isExpanded.wrappedValue ? "chevron.up" : "chevron.down")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(summaryColor.opacity(0.60))
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             trailing()
         }
-        .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
 
         if isExpanded.wrappedValue {
             content()
