@@ -125,6 +125,11 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
 }
 
 // MARK: - 主畫面
+// UI美化方向（MainTabView）：
+//   • 底部 Tab Bar：@Namespace + matchedGeometryEffect 讓選中膠囊在頁籤間平滑滑動
+//   • 頂部子功能列：兩側疊加漸層遮罩（allowsHitTesting false）暗示可橫向捲動
+//   • 浮動新增按鈕：選單按鈕加強陰影／彈跳曲線，主 FAB 加雙層 shadow 綠色光暈
+//   • Tab 圖示：active 時輕微放大 (scaleEffect 1.05) 強化點擊回饋
 
 struct MainTabView: View {
     @AppStorage("appMode") private var appMode: String = AppMode.expense.rawValue
@@ -136,6 +141,8 @@ struct MainTabView: View {
     /// 家庭子功能；空字串代表選的是「家庭」本身
     @AppStorage("family_mgmt_feature") private var familyMgmtFeatureRaw: String = ""
     @State private var isSettingsActive: Bool = false
+    // UI美化：matchedGeometryEffect 讓底部 Tab Bar 選中指示器在頁籤間滑動而非消失/出現
+    @Namespace private var tabBarNamespace
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -756,6 +763,7 @@ struct MainTabView: View {
 
     // MARK: - 頂部子功能列
 
+    // UI美化：兩側漸層遮罩暗示橫向可捲動；allowsHitTesting false 確保捲動手勢不被阻擋
     private var topSubFeatureBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -803,6 +811,23 @@ struct MainTabView: View {
             .padding(.vertical, 8)
         }
         .background(Color(.systemBackground))
+        // 左右兩側漸層遮罩，提示橫向可捲動
+        .overlay(
+            HStack(spacing: 0) {
+                LinearGradient(
+                    colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 14)
+                Spacer()
+                LinearGradient(
+                    colors: [Color(.systemBackground).opacity(0), Color(.systemBackground)],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 14)
+            }
+            .allowsHitTesting(false)
+        )
         .overlay(
             Rectangle()
                 .fill(Color(.separator).opacity(0.25))
@@ -903,25 +928,26 @@ struct MainTabView: View {
 
     // MARK: - 底部四按鈕
 
+    // UI美化：傳入 tabBarNamespace 給各頁籤，讓 matchedGeometryEffect 可跨按鈕滑動
     private var bottomTabBar: some View {
         HStack(spacing: 0) {
-            tabButton(mode: .expense, icon: "dollarsign.circle.fill", label: "收支")
-            tabButton(mode: .finance, icon: "chart.pie.fill", label: "理財")
-            tabButton(mode: .life, icon: "person.fill", label: "人生")
+            tabButton(mode: .expense, icon: "dollarsign.circle.fill", label: "收支", namespace: tabBarNamespace)
+            tabButton(mode: .finance, icon: "chart.pie.fill", label: "理財", namespace: tabBarNamespace)
+            tabButton(mode: .life, icon: "person.fill", label: "人生", namespace: tabBarNamespace)
             Button {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
                     isSettingsActive = true
                 }
             } label: {
-                tabItemLabel(icon: "gearshape.fill", label: "設定", isActive: isSettingsActive)
+                tabItemLabel(icon: "gearshape.fill", label: "設定", isActive: isSettingsActive, namespace: tabBarNamespace)
             }
             .buttonStyle(.plain)
         }
-        .padding(.top, 6)
+        .padding(.top, 8)
         .padding(.bottom, 6)
         .background(
             Color(.systemBackground)
-                .shadow(color: .black.opacity(0.08), radius: 20, y: -6)
+                .shadow(color: .black.opacity(0.10), radius: 24, y: -8)
                 .ignoresSafeArea(edges: .bottom)
         )
         .overlay(
@@ -932,39 +958,49 @@ struct MainTabView: View {
         )
     }
 
-    private func tabButton(mode: AppMode, icon: String, label: String) -> some View {
+    private func tabButton(mode: AppMode, icon: String, label: String, namespace: Namespace.ID) -> some View {
         Button {
             withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
                 appMode = mode.rawValue
                 isSettingsActive = false
             }
         } label: {
-            tabItemLabel(icon: icon, label: label, isActive: currentMode == mode && !isSettingsActive)
+            tabItemLabel(icon: icon, label: label, isActive: currentMode == mode && !isSettingsActive, namespace: namespace)
         }
         .buttonStyle(.plain)
     }
 
-    private func tabItemLabel(icon: String, label: String, isActive: Bool) -> some View {
-        VStack(spacing: 4) {
+    // UI美化：matchedGeometryEffect(id:"activeTabIndicator") 讓選中膠囊背景在頁籤間平滑位移；
+    //         active 圖示輕放大 1.05 增強視覺回饋；字級從 10 → 10.5 改善小字可讀性
+    private func tabItemLabel(icon: String, label: String, isActive: Bool, namespace: Namespace.ID) -> some View {
+        VStack(spacing: 3) {
             ZStack {
-                // 選中時的膠囊高亮背景，彈跳進場
-                Capsule()
-                    .fill(Color.green.opacity(isActive ? 0.14 : 0))
-                    .frame(width: 54, height: 30)
-                    .scaleEffect(isActive ? 1.0 : 0.6)
-                    .animation(.spring(response: 0.34, dampingFraction: 0.64), value: isActive)
+                if isActive {
+                    // 選中時的膠囊指示器：使用 matchedGeometryEffect 跨頁籤滑動
+                    Capsule()
+                        .fill(Color.green.opacity(0.15))
+                        .frame(width: 54, height: 30)
+                        .matchedGeometryEffect(id: "activeTabIndicator", in: namespace)
+                } else {
+                    // 佔位透明膠囊，確保圖示對齊不跳動
+                    Capsule()
+                        .fill(Color.clear)
+                        .frame(width: 54, height: 30)
+                }
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: isActive ? .semibold : .medium))
+                    .font(.system(size: 21, weight: isActive ? .semibold : .medium))
                     .symbolEffect(.bounce, value: isActive)
+                    .scaleEffect(isActive ? 1.05 : 1.0)
+                    .animation(.spring(response: 0.28, dampingFraction: 0.7), value: isActive)
             }
             Text(label)
-                .font(.system(size: 10, weight: isActive ? .semibold : .regular))
+                .font(.system(size: 10.5, weight: isActive ? .semibold : .regular))
         }
         .foregroundStyle(isActive ? Color.green : Color.secondary)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .animation(.spring(response: 0.28, dampingFraction: 0.70), value: isActive)
+        .animation(.spring(response: 0.3, dampingFraction: 0.72), value: isActive)
     }
 
     // MARK: - 浮動新增按鈕
@@ -1016,6 +1052,8 @@ struct MainTabView: View {
         .ignoresSafeArea(.keyboard)
     }
 
+    // UI美化：彈出選單加粗字重 + 更大內距 + 強化彩色陰影；主 FAB 雙層 shadow 加綠色光暈；
+    //         transition 改用 asymmetric scale(anchor:.bottom) 讓選單從 FAB 方向彈出/縮回
     /// FAB + 彈出選單，獨立出來方便閱讀
     private var fabStack: some View {
         ZStack(alignment: .bottom) {
@@ -1029,12 +1067,12 @@ struct MainTabView: View {
                             Image(systemName: "plus.circle.fill")
                             Text("新增收入")
                         }
-                        .font(.subheadline.weight(.medium))
-                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18).padding(.vertical, 12)
                         .background(Color.green)
                         .foregroundStyle(.white)
                         .clipShape(Capsule())
-                        .shadow(color: .green.opacity(0.3), radius: 6, y: 3)
+                        .shadow(color: .green.opacity(0.45), radius: 10, y: 5)
                     }
 
                     Button {
@@ -1045,25 +1083,29 @@ struct MainTabView: View {
                             Image(systemName: "minus.circle.fill")
                             Text("新增支出")
                         }
-                        .font(.subheadline.weight(.medium))
-                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18).padding(.vertical, 12)
                         .background(Color.red)
                         .foregroundStyle(.white)
                         .clipShape(Capsule())
-                        .shadow(color: .red.opacity(0.3), radius: 6, y: 3)
+                        .shadow(color: .red.opacity(0.45), radius: 10, y: 5)
                     }
                 }
-                .transition(.scale.combined(with: .opacity))
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity),
+                    removal: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity)
+                ))
                 .padding(.bottom, 64)
             }
 
             Button {
-                withAnimation(.spring(duration: 0.3)) { showQuickAdd.toggle() }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showQuickAdd.toggle() }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: showQuickAdd ? "xmark" : "plus")
                         .font(.title3.weight(.bold))
                         .rotationEffect(.degrees(showQuickAdd ? 45 : 0))
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showQuickAdd)
                     if !showQuickAdd {
                         Text("新增收支")
                             .font(.subheadline.weight(.semibold))
@@ -1074,7 +1116,9 @@ struct MainTabView: View {
                 .frame(minWidth: 52, minHeight: 52)
                 .background(showQuickAdd ? Color.secondary : Color.green)
                 .clipShape(Capsule())
-                .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                // 深色基礎陰影 + 綠色光暈（展開時光暈消隱）
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+                .shadow(color: showQuickAdd ? .clear : Color.green.opacity(0.38), radius: 14, y: 6)
             }
         }
     }
