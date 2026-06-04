@@ -1,6 +1,16 @@
 import SwiftUI
 import MapKit
 
+// MARK: - 美化紀錄（AddExpenseView）
+// [2026-06] 本次美化方向：
+//   1. basicInfoSection header：補左側 Capsule 漸層色條 + .subheadline.weight(.semibold) 標題，
+//      進階 Toggle 前加彩色 Label 圖示，對齊 VariableExpenseView / IncomeView 的 section 標題規格。
+//   2. 驗證錯誤提示：從裸紅字升級為帶圖示的彩色錯誤卡片，
+//      加入 opacity + move(edge:.top) 組合 transition，視覺回饋更清晰不突兀。
+//   3. loanCalcRow：數值列改用彩色膠囊搭配圓角背景，
+//      對齊 SavingsInsuranceView savingsCalcSection 卡片規格。
+//   4. savingsCalcSection header：補 Capsule 色條，對齊 section 標題規格。
+
 struct AddExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -268,8 +278,30 @@ struct AddExpenseView: View {
 
                 if showValidationError {
                     Section {
-                        Text("請輸入名稱和有效金額").foregroundStyle(.red).font(.caption)
+                        // 美化：帶圖示的錯誤卡片，比裸紅字更明確且不突兀
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.red.opacity(0.12))
+                                    .frame(width: 34, height: 34)
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(.red)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("無法儲存")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.red)
+                                Text("請輸入有效的名稱與金額（大於 0）。")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
+                    .listRowBackground(Color.red.opacity(0.05))
                 }
             }
             .navigationTitle(isEditing ? "編輯\(expenseType.rawValue)" : "新增\(expenseType.rawValue)")
@@ -489,14 +521,31 @@ struct AddExpenseView: View {
                 TextField("備註", text: $note, axis: .vertical).lineLimit(3)
             }
         } header: {
-            HStack {
+            // 美化：左側 Capsule 色條 + 強化標題字重，進階 Toggle 加圖示
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [expenseType == .variable ? Color.orange : Color.blue,
+                                     expenseType == .variable ? Color.orange.opacity(0.55) : Color.blue.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 16)
                 Text("基本資訊")
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 if expenseType == .variable {
-                    Toggle("進階", isOn: $advancedMode.animation())
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .font(.caption2)
+                    HStack(spacing: 4) {
+                        Image(systemName: advancedMode ? "slider.horizontal.3" : "slider.horizontal.below.rectangle")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(advancedMode ? .orange : .secondary)
+                        Toggle("進階", isOn: $advancedMode.animation())
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                            .font(.caption2)
+                            .tint(.orange)
+                    }
                 }
             }
             .textCase(.none)
@@ -534,25 +583,37 @@ struct AddExpenseView: View {
             let totalPaid = monthly * 12 * years
             let totalInterest = totalPaid - total
             let avgAnnualRate = (totalInterest / total / years) * 100
-            VStack(spacing: 6) {
-                HStack {
-                    Text("貸款總繳").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(fmtCurrency(totalPaid)).font(.caption.bold())
-                }
-                HStack {
-                    Text("利息總額").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(fmtCurrency(totalInterest)).font(.caption.bold()).foregroundStyle(.orange)
-                }
-                HStack {
-                    Text("實際年利率（估算）").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(String(format: "%.2f%%", avgAnnualRate)).font(.caption.bold()).foregroundStyle(.blue)
-                }
+            // 美化：三欄 KPI 小卡，彩色膠囊數值，對齊 savingsCalcSection 卡片規格
+            VStack(spacing: 0) {
+                loanKpiRow(label: "貸款總繳", value: fmtCurrency(totalPaid), valueColor: .primary)
+                Divider().padding(.leading, 8)
+                loanKpiRow(label: "利息總額", value: fmtCurrency(totalInterest), valueColor: .orange)
+                Divider().padding(.leading, 8)
+                loanKpiRow(label: "實際年利率（估算）",
+                           value: String(format: "%.2f%%", avgAnnualRate),
+                           valueColor: .blue)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
         }
+    }
+
+    /// 美化：貸款試算 KPI 橫列（label + 彩色膠囊值）
+    private func loanKpiRow(label: String, value: String, valueColor: Color) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(valueColor)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(valueColor.opacity(0.10))
+                .clipShape(Capsule())
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 2)
     }
 
     private static let fmtCurrencyFormatter: NumberFormatter = {
@@ -1705,44 +1766,75 @@ struct AddExpenseView: View {
 
     private var savingsCalcSection: some View {
         Group {
-            Section("繳費資訊") {
+            // 美化：加 Capsule 色條 section header，對齊 basicInfoSection 規格
+            Section {
                 row("繳費期數", "\(insTotalPeriods) 期")
                 row("已繳期數", "\(insElapsedPeriods) 期")
                 row("已繳總額", formatCurrency(insPremium * Double(insElapsedPeriods)))
+            } header: {
+                sectionHeader(title: "繳費資訊", accentColor: .blue)
             }
             Section {
-                HStack {
-                    Text("目前帳戶價值"); Spacer()
-                    Text(formatCurrency(insCurrentValue)).font(.body.bold()).foregroundStyle(.blue)
-                }
-                HStack {
-                    Text("期滿預估領回"); Spacer()
-                    Text(formatCurrency(insExpectedReturn)).font(.body.bold()).foregroundStyle(.green)
-                }
+                // 美化：數值改用彩色膠囊，視覺層次更清晰
+                savingsKpiRow(label: "目前帳戶價值", value: formatCurrency(insCurrentValue), color: .blue)
+                savingsKpiRow(label: "期滿預估領回", value: formatCurrency(insExpectedReturn), color: .green)
                 if insTotalPeriods > 0 {
                     let totalPremium = insPremium * Double(insTotalPeriods)
                     let gain = insExpectedReturn - totalPremium
-                    HStack {
-                        Text("複利增值"); Spacer()
-                        Text((gain >= 0 ? "+" : "") + formatCurrency(gain))
-                            .foregroundStyle(gain >= 0 ? .green : .red)
-                    }
+                    savingsKpiRow(
+                        label: "複利增值",
+                        value: (gain >= 0 ? "+" : "") + formatCurrency(gain),
+                        color: gain >= 0 ? .green : .red
+                    )
                     if totalPremium > 0 {
-                        HStack {
-                            Text("預估總報酬率"); Spacer()
-                            Text(String(format: "%.2f%%", gain / totalPremium * 100))
-                                .font(.body.bold()).foregroundStyle(gain >= 0 ? .green : .red)
-                        }
+                        savingsKpiRow(
+                            label: "預估總報酬率",
+                            value: String(format: "%.2f%%", gain / totalPremium * 100),
+                            color: gain >= 0 ? .green : .red
+                        )
                     }
                 }
             } header: {
-                Text("自動計算結果")
+                sectionHeader(title: "自動計算結果", accentColor: .green)
             } footer: {
                 if insRate > 0, insPremium > 0 {
                     Text("以年利率 \(String(format: "%.2f%%", insRate)) 複利計算，\(selectedRecurrence.rawValue)繳 \(formatCurrency(insPremium))，共 \(insTotalPeriods) 期。")
                 }
             }
         }
+    }
+
+    /// 美化：儲蓄險 KPI 橫列（label + 彩色膠囊值），對齊 loanKpiRow 規格
+    private func savingsKpiRow(label: String, value: String, color: Color) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.body.weight(.bold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(color.opacity(0.10))
+                .clipShape(Capsule())
+        }
+    }
+
+    /// 美化：帶 Capsule 漸層色條的 Section header，對齊全 App 其他頁面 section 標題規格
+    private func sectionHeader(title: String, accentColor: Color) -> some View {
+        HStack(spacing: 10) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [accentColor, accentColor.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 16)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+        }
+        .textCase(.none)
     }
 
     // MARK: - 固定支出關聯資產
@@ -1831,7 +1923,10 @@ struct AddExpenseView: View {
 
         guard !trimmedTitle.isEmpty,
               let rawAmount = Double(finalAmountText), rawAmount > 0 else {
-            showValidationError = true
+            // 美化：withAnimation 讓錯誤卡片的 transition 動畫生效
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showValidationError = true
+            }
             return
         }
 
