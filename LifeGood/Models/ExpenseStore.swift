@@ -29,6 +29,10 @@ class ExpenseStore: ObservableObject {
         )
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     @objc private func reloadFromCloud() {
         load()
         modifyID = UUID()
