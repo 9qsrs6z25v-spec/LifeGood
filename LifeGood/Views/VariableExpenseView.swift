@@ -20,6 +20,7 @@ struct VariableExpenseView: View {
     @State private var visibleWeeks = 1
     @State private var searchText: String = ""
     @State private var listRowsAppeared = false
+    @State private var cachedTrailingMonthlyAvg: Double = 0
 
     private static let groupDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -112,10 +113,29 @@ struct VariableExpenseView: View {
                 placement: .navigationBarDrawer(displayMode: .always),
                 prompt: "搜尋名稱 / 備註 / 分類 / 地點"
             )
+            .task(id: store.modifyID) {
+                cachedTrailingMonthlyAvg = computeTrailingMonthlyAvg()
+            }
         }
     }
 
     // MARK: - KPI 計算輔助
+
+    private func computeTrailingMonthlyAvg() -> Double {
+        let calendar = Calendar.current
+        let now = Date()
+        var totals: [Double] = []
+        for i in 1...3 {
+            guard let base = calendar.date(byAdding: .month, value: -i, to: now),
+                  let interval = calendar.dateInterval(of: .month, for: base) else { continue }
+            let total = store.expenses
+                .filter { $0.expenseType == .variable && $0.date >= interval.start && $0.date < interval.end }
+                .reduce(0) { $0 + $1.amount }
+            totals.append(total)
+        }
+        guard !totals.isEmpty else { return 0 }
+        return totals.reduce(0, +) / Double(totals.count)
+    }
 
     private var todayVariableTotal: Double {
         store.variableExpenses
@@ -123,21 +143,7 @@ struct VariableExpenseView: View {
             .reduce(0) { $0 + $1.amount }
     }
 
-    private var trailingMonthlyAverageVariable: Double {
-        let calendar = Calendar.current
-        let now = Date()
-        var totals: [Double] = []
-        for i in 1...3 {
-            guard let base = calendar.date(byAdding: .month, value: -i, to: now),
-                  let interval = calendar.dateInterval(of: .month, for: base) else { continue }
-            let total = store.variableExpenses
-                .filter { $0.date >= interval.start && $0.date < interval.end }
-                .reduce(0) { $0 + $1.amount }
-            totals.append(total)
-        }
-        guard !totals.isEmpty else { return 0 }
-        return totals.reduce(0, +) / Double(totals.count)
-    }
+    private var trailingMonthlyAverageVariable: Double { cachedTrailingMonthlyAvg }
 
     private func kpiCell(label: String, value: String) -> some View {
         VStack(spacing: 3) {
