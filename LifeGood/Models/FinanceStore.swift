@@ -22,6 +22,10 @@ class FinanceStore: ObservableObject {
         )
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     @objc private func reloadFromCloud() {
         load()
     }

@@ -30,6 +30,10 @@ class LifeStore: ObservableObject {
         )
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     @objc private func reloadFromCloud() {
         load()
         // backfill 期間暫停 save()，避免剛從雲端拉取就立刻回寫
