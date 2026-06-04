@@ -386,9 +386,10 @@ class ExpenseStore: ObservableObject {
         // 預先計算每週的起訖時間（O(12)），再 O(n) 掃描所有支出指派到對應的週
         var weekRanges: [(start: Date, end: Date)] = []
         for weekOffset in (0..<12).reversed() {
-            guard let ws = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: now),
-                  let we = calendar.date(byAdding: .day, value: 7, to: ws) else { continue }
-            weekRanges.append((calendar.startOfDay(for: ws), we))
+            guard let ws = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: now) else { continue }
+            let startOfWs = calendar.startOfDay(for: ws)
+            guard let we = calendar.date(byAdding: .day, value: 7, to: startOfWs) else { continue }
+            weekRanges.append((startOfWs, we))
         }
         var variableByWeek: [Date: Double] = [:]
         for e in expenses where e.expenseType == .variable {
