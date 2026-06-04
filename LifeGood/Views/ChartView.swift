@@ -111,12 +111,16 @@ struct ChartView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("圖表")
-            .task(id: selectedPeriod) {
-                await loadChartData()
+            .onChange(of: selectedPeriod, initial: true) { _, _ in
+                loadTask?.cancel()
+                loadTask = Task { await loadChartData() }
             }
             .onChange(of: store.modifyID) { _, _ in
                 loadTask?.cancel()
                 loadTask = Task { await loadChartData() }
+            }
+            .onDisappear {
+                loadTask?.cancel()
             }
         }
     }
