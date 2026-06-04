@@ -1,15 +1,19 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（RealEstateView）
-// [2026-06] 美化重點：
-// • summaryHeader 升級為紫色 / 深紫 LinearGradient 英雄卡，與 FinanceOverview 房產色系一致
-// • 英雄卡加入 bokeh 裝飾圓圈、物件數膠囊標籤、月租金／月現金流／平均增值率 KPI 橫排
-// • 英雄卡加入 headerAppeared spring 入場動畫（透明度 + Y 位移）
-// • emptyState 升級：雙環脈動動畫 + 56pt 漸層圓圈圖示 + 紫色膠囊 CTA 按鈕
-// • body 重構為單一 List（.insetGrouped），與 IncomeView / FixedExpenseView 架構一致
-// • navigationBarTitleDisplayMode 改為 .large
-// • 卡片列表加入 cardsAppeared spring 錯位入場動畫（間隔 0.05s）
-// • Toolbar 排序與新增按鈕配色改為紫色，與英雄卡主色統一
+// [2026-06-v1] 初次美化：英雄卡、emptyState、卡片入場動畫、toolbar 配色
+// [2026-06-v2] 本次美化方向：
+//   1. summaryHeader：由 ZStack+.clipped() 改為 VStack+.background+.clipShape+.shadow，
+//      對齊 SavingsInsuranceView / VehicleView 英雄卡結構；
+//      散景圓加入 .blur(radius:) 效果（原本無模糊，圓形邊緣太硬）；
+//      字型由 .title.bold() 統一為 .system(size:32,weight:.bold,design:.rounded)；
+//      右側加入月現金流 KPI 膠囊（正值綠、負值紅），資訊密度對齊 FinanceOverviewView.totalAssetsCard。
+//   2. kpiItem → kpiCell：移除 color 參數改為統一白色，對齊 IncomeView / VehicleView kpiCell 規格。
+//   3. emptyState：改用 scaleEffect + easeOut(duration:2.0).repeatForever(autoreverses: false)
+//      雙層脈衝環，對齊 SavingsInsuranceView / StockView emptyStateView 標準動畫模式；
+//      主圓由 56pt 漸層實心圓升級為 88pt 半透明漸層底 + 細邊框，圖示調大至 36pt light。
+//   4. 「已售出」Section header：純文字升級為彩色強調條 + 計數膠囊徽章，
+//      對齊 VariableExpenseView.daySectionHeader 設計規格。
 
 enum RealEstateSortOption: String, CaseIterable, Identifiable {
     case purchasePrice = "購入價格"
@@ -135,9 +139,29 @@ struct RealEstateView: View {
                                     }
                             }
                         } header: {
-                            Text("已售出")
-                                .font(.caption.weight(.semibold))
-                                .textCase(nil)
+                            // 已售出 Section header：彩色強調條 + 計數膠囊（對齊 daySectionHeader 規格）
+                            HStack(spacing: 8) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.purple, .purple.opacity(0.55)],
+                                            startPoint: .top, endPoint: .bottom
+                                        )
+                                    )
+                                    .frame(width: 3, height: 14)
+                                Text("已售出")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(.primary.opacity(0.75))
+                                Spacer(minLength: 6)
+                                Text("\(soldEstates.count) 筆")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.purple)
+                                    .padding(.horizontal, 8).padding(.vertical, 3)
+                                    .background(Color.purple.opacity(0.10))
+                                    .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(Color.purple.opacity(0.22), lineWidth: 0.6))
+                            }
+                            .textCase(nil)
                         }
                     }
                 }
@@ -196,9 +220,7 @@ struct RealEstateView: View {
                 withAnimation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.2)) {
                     cardsAppeared = true
                 }
-                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                    emptyIconPulse = true
-                }
+                // emptyIconPulse 由 emptyState ZStack .onAppear 觸發，不在此設定
             }
         }
     }
@@ -233,162 +255,194 @@ struct RealEstateView: View {
     }
 
     // MARK: - 摘要（英雄卡）
+    // 【美化 v2】VStack+.background+.clipShape+.shadow 結構，對齊 SavingsInsuranceView 規格；
+    //   散景圓加入 .blur；右側增月現金流 KPI 膠囊；kpiItem 改為統一白色 kpiCell。
 
     private var summaryHeader: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.48, green: 0.25, blue: 0.80),
-                    Color(red: 0.25, green: 0.15, blue: 0.60)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        let active = activeEstates.count
+        let sold = soldEstates.count
+        let flow = store.monthlyCashFlow
+        let avgRate = activeEstates.isEmpty
+            ? 0.0
+            : activeEstates.map(\.appreciationRate).reduce(0, +) / Double(activeEstates.count)
 
-            // Bokeh 裝飾圓圈
-            Circle()
-                .fill(Color.white.opacity(0.08))
-                .frame(width: 140, height: 140)
-                .offset(x: 100, y: -40)
-            Circle()
-                .fill(Color.white.opacity(0.05))
-                .frame(width: 80, height: 80)
-                .offset(x: -90, y: 50)
-            Circle()
-                .fill(Color.white.opacity(0.06))
-                .frame(width: 60, height: 60)
-                .offset(x: 60, y: 50)
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("房產總估值")
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.75))
-                        Text(fmt(store.totalRealEstateValue))
-                            .font(.title.bold())
-                            .foregroundStyle(.white)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 6) {
-                        let active = activeEstates.count
-                        HStack(spacing: 4) {
-                            Image(systemName: "building.2.fill").font(.caption2)
-                            Text("\(active) 筆持有").font(.caption.weight(.semibold))
-                        }
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.white.opacity(0.2))
+        return VStack(spacing: 0) {
+            // 頂部：總估值 + 右側計數膠囊 / 月現金流 KPI
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("房產總估值")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    Text(fmt(store.totalRealEstateValue))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                        .clipShape(Capsule())
-
-                        let sold = soldEstates.count
-                        if sold > 0 {
-                            Text("\(sold) 筆已售")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.7))
-                        }
+                        .contentTransition(.numericText())
+                    if store.totalRealEstateValue > 0 {
+                        Text("\(active) 筆持有" + (sold > 0 ? " · \(sold) 筆已售" : ""))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .padding(.top, 1)
                     }
                 }
-
-                // KPI 橫排
-                HStack(spacing: 0) {
-                    kpiItem(label: "月租金", value: fmt(store.monthlyRentalIncome), color: .white)
-                    Rectangle()
-                        .fill(Color.white.opacity(0.25))
-                        .frame(width: 1, height: 28)
-                    let flow = store.monthlyCashFlow
-                    kpiItem(
-                        label: "月現金流",
-                        value: fmt(flow),
-                        color: flow >= 0 ? Color(red: 0.5, green: 1.0, blue: 0.5) : .red
-                    )
-                    Rectangle()
-                        .fill(Color.white.opacity(0.25))
-                        .frame(width: 1, height: 28)
-                    let avgRate = activeEstates.isEmpty
-                        ? 0.0
-                        : activeEstates.map(\.appreciationRate).reduce(0, +) / Double(activeEstates.count)
-                    kpiItem(
-                        label: "平均增值",
-                        value: String(format: "%@%.1f%%", avgRate >= 0 ? "+" : "", avgRate),
-                        color: avgRate >= 0 ? Color(red: 0.5, green: 1.0, blue: 0.5) : .red
-                    )
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    // 持有計數膠囊
+                    HStack(spacing: 4) {
+                        Image(systemName: "building.2.fill").font(.caption2)
+                        Text("\(active) 筆持有").font(.caption.weight(.semibold))
+                    }
+                    .padding(.horizontal, 11).padding(.vertical, 5)
+                    .background(.white.opacity(0.22))
+                    .clipShape(Capsule())
+                    .foregroundStyle(.white)
+                    // 月現金流 KPI 膠囊（正值綠、負值紅，對齊 totalAssetsCard 損益膠囊規格）
+                    if active > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: flow >= 0 ? "arrow.up.right" : "arrow.down.right")
+                                .font(.system(size: 9, weight: .bold))
+                            Text((flow >= 0 ? "+" : "") + fmt(flow))
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                        .foregroundStyle(flow >= 0
+                            ? Color(red: 0.60, green: 1.00, blue: 0.75)
+                            : Color(red: 1.0, green: 0.78, blue: 0.75))
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(.white.opacity(0.18))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(flow >= 0 ? 0.35 : 0.25), lineWidth: 0.75))
+                    }
                 }
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            .padding(20)
+
+            // KPI 橫列：月租金 / 月現金流 / 平均增值率（統一白色，對齊 kpiCell 規格）
+            HStack(spacing: 0) {
+                kpiCell(label: "月租金", value: fmt(store.monthlyRentalIncome))
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                kpiCell(label: "月現金流", value: (flow >= 0 ? "+" : "") + fmt(flow))
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                kpiCell(label: "平均增值", value: String(format: "%@%.1f%%", avgRate >= 0 ? "+" : "", avgRate))
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 14)
         }
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: 170)
-        .clipped()
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.48, green: 0.25, blue: 0.80),
+                        Color(red: 0.25, green: 0.15, blue: 0.60)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 散景裝飾圓（加入 .blur 讓邊緣柔和，與其他英雄卡一致）
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 130, height: 130)
+                    .offset(x: 90, y: -50)
+                    .blur(radius: 14)
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 78, height: 78)
+                    .offset(x: -72, y: 48)
+                    .blur(radius: 10)
+                Circle()
+                    .fill(.white.opacity(0.05))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 80, y: 42)
+                    .blur(radius: 8)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.25, green: 0.15, blue: 0.60).opacity(0.42), radius: 16, x: 0, y: 8)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
     }
 
-    private func kpiItem(label: String, value: String, color: Color) -> some View {
+    // kpiCell：統一白色 KPI 格（對齊 IncomeView / VehicleView / SavingsInsuranceView 規格）
+    private func kpiCell(label: String, value: String) -> some View {
         VStack(spacing: 3) {
-            Text(label).font(.caption2).foregroundStyle(.white.opacity(0.7))
-            Text(value).font(.caption.bold()).foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
     }
 
     // MARK: - 空狀態
+    // 【美化 v2】scaleEffect + easeOut.repeatForever(autoreverses:false) 雙層脈衝環，
+    //   對齊 SavingsInsuranceView / StockView emptyStateView 標準動畫模式。
+    //   主圓升級為 88pt 半透明漸層底 + 細邊框，圖示調大至 36pt light。
 
     private var emptyState: some View {
-        VStack(spacing: 24) {
+        let purpleAccent = Color(red: 0.48, green: 0.25, blue: 0.80)
+        let purpleDark   = Color(red: 0.25, green: 0.15, blue: 0.60)
+
+        return VStack(spacing: 24) {
             Spacer(minLength: 40)
 
             ZStack {
+                // 外層脈衝光環（easeOut + repeatForever 向外擴散淡出）
                 Circle()
-                    .stroke(Color.purple.opacity(0.15), lineWidth: 1.5)
-                    .frame(
-                        width: emptyIconPulse ? 110 : 90,
-                        height: emptyIconPulse ? 110 : 90
-                    )
+                    .stroke(purpleAccent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
                     .animation(
-                        .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                        .easeOut(duration: 2.0).repeatForever(autoreverses: false),
                         value: emptyIconPulse
                     )
-
+                // 內層脈衝光環（延遲 0.3s，製造波紋層次感）
                 Circle()
-                    .stroke(Color.purple.opacity(0.25), lineWidth: 1.5)
-                    .frame(
-                        width: emptyIconPulse ? 82 : 70,
-                        height: emptyIconPulse ? 82 : 70
-                    )
+                    .stroke(purpleAccent.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
                     .animation(
-                        .easeInOut(duration: 1.2).repeatForever(autoreverses: true).delay(0.2),
+                        .easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false),
                         value: emptyIconPulse
                     )
-
+                // 主圓底（88pt 半透明漸層 + 細邊框，對齊 SavingsInsuranceView 規格）
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [
-                                Color(red: 0.55, green: 0.30, blue: 0.90),
-                                Color(red: 0.30, green: 0.18, blue: 0.68)
-                            ],
+                            colors: [purpleAccent.opacity(0.18), purpleAccent.opacity(0.07)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 56, height: 56)
-                    .shadow(color: Color.purple.opacity(0.4), radius: 8, y: 4)
-
+                    .frame(width: 88, height: 88)
+                    .overlay(Circle().stroke(purpleAccent.opacity(0.25), lineWidth: 1.2))
                 Image(systemName: "building.2.fill")
-                    .font(.system(size: 24))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(purpleAccent.opacity(0.72))
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    emptyIconPulse = true
+                }
             }
 
-            VStack(spacing: 6) {
+            VStack(spacing: 10) {
                 Text("尚無房地產紀錄")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Text("新增物件，掌握房產投資組合")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text("新增物件，掌握房產投資組合\n租金、房貸與增值一目了然")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(3)
             }
 
             Button {
@@ -398,20 +452,18 @@ struct RealEstateView: View {
                 Label("新增第一筆房產", systemImage: "plus.circle.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 24).padding(.vertical, 10)
+                    .padding(.horizontal, 24).padding(.vertical, 12)
                     .background(
                         LinearGradient(
-                            colors: [
-                                Color(red: 0.55, green: 0.30, blue: 0.90),
-                                Color(red: 0.30, green: 0.18, blue: 0.68)
-                            ],
+                            colors: [purpleAccent, purpleDark],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
                     )
                     .clipShape(Capsule())
-                    .shadow(color: Color.purple.opacity(0.35), radius: 6, y: 3)
+                    .shadow(color: purpleDark.opacity(0.38), radius: 10, y: 5)
             }
+            .buttonStyle(.plain)
 
             Spacer(minLength: 40)
         }
