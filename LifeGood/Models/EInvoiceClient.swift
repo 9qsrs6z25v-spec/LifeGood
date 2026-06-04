@@ -54,14 +54,6 @@ final class EInvoiceClient {
         return f
     }()
 
-    private static let twDateParser: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "Asia/Taipei")
-        f.dateFormat = "yyyy/MM/dd"
-        return f
-    }()
-
     // MARK: - 公開方法
 
     /// 查詢載具發票標頭（指定日期範圍）
@@ -179,7 +171,7 @@ final class EInvoiceClient {
     private func parseHeader(_ raw: [String: Any]) -> EInvoiceHeader? {
         guard let invNum = raw["invNum"] as? String,
               let dateStr = raw["invDate"] as? String,
-              let date = Self.twDateParser.date(from: dateStr) else { return nil }
+              let date = Self.dateFormatter.date(from: dateStr) else { return nil }
         let seller = (raw["sellerName"] as? String) ?? ""
         let amount = parseDouble(raw["amount"]) ?? 0
         let status = (raw["invStatus"] as? String) ?? "開立"
