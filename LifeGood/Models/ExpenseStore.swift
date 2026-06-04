@@ -355,17 +355,21 @@ class ExpenseStore: ObservableObject {
         let formatter = Self.chartDayFormatter
         let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
 
+        // 預先將 30 天內的變動支出依「當日 startOfDay」分組（O(n) 一次掃描），
+        // 避免原本 O(30×n) 的逐日 filter
+        let cutoff = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -29, to: now) ?? now)
+        var variableByDay: [Date: Double] = [:]
+        for e in expenses where e.expenseType == .variable {
+            let day = calendar.startOfDay(for: e.date)
+            if day >= cutoff { variableByDay[day, default: 0] += e.amount }
+        }
+
         var results: [ChartDataPoint] = []
         for dayOffset in (0..<30).reversed() {
             guard let date = calendar.date(byAdding: .day, value: -dayOffset, to: now) else { continue }
             let startOfDay = calendar.startOfDay(for: date)
-
-            let variableTotal = expenses
-                .filter { $0.expenseType == .variable && calendar.isDate($0.date, inSameDayAs: startOfDay) }
-                .reduce(0) { $0 + $1.amount }
-
+            let variableTotal = variableByDay[startOfDay] ?? 0
             let fixedTotal = projectedFixedTotal(from: allFixed, for: startOfDay, period: .daily, calendar: calendar)
-
             results.append(ChartDataPoint(
                 label: formatter.string(from: date),
                 amount: variableTotal + fixedTotal,
@@ -379,22 +383,29 @@ class ExpenseStore: ObservableObject {
         let formatter = Self.chartDayFormatter
         let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
 
-        var results: [ChartDataPoint] = []
+        // 預先計算每週的起訖時間（O(12)），再 O(n) 掃描所有支出指派到對應的週
+        var weekRanges: [(start: Date, end: Date)] = []
         for weekOffset in (0..<12).reversed() {
-            guard let weekStart = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: now),
-                  let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) else { continue }
-            let startOfWeek = calendar.startOfDay(for: weekStart)
+            guard let ws = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: now),
+                  let we = calendar.date(byAdding: .day, value: 7, to: ws) else { continue }
+            weekRanges.append((calendar.startOfDay(for: ws), we))
+        }
+        var variableByWeek: [Date: Double] = [:]
+        for e in expenses where e.expenseType == .variable {
+            for range in weekRanges where e.date >= range.start && e.date < range.end {
+                variableByWeek[range.start, default: 0] += e.amount
+                break
+            }
+        }
 
-            let variableTotal = expenses
-                .filter { $0.expenseType == .variable && $0.date >= startOfWeek && $0.date < weekEnd }
-                .reduce(0) { $0 + $1.amount }
-
-            let fixedTotal = projectedFixedTotal(from: allFixed, for: startOfWeek, period: .weekly, calendar: calendar)
-
+        var results: [ChartDataPoint] = []
+        for range in weekRanges {
+            let variableTotal = variableByWeek[range.start] ?? 0
+            let fixedTotal = projectedFixedTotal(from: allFixed, for: range.start, period: .weekly, calendar: calendar)
             results.append(ChartDataPoint(
-                label: formatter.string(from: startOfWeek),
+                label: formatter.string(from: range.start),
                 amount: variableTotal + fixedTotal,
-                date: startOfWeek
+                date: range.start
             ))
         }
         return results
@@ -404,16 +415,24 @@ class ExpenseStore: ObservableObject {
         let formatter = Self.chartMonthFormatter
         let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
 
-        var results: [ChartDataPoint] = []
+        // 預先建立月份對照（year*100+month → representative Date），O(n) 分組
+        var monthDates: [(key: Int, date: Date)] = []
         for monthOffset in (0..<12).reversed() {
-            guard let date = calendar.date(byAdding: .month, value: -monthOffset, to: now) else { continue }
+            guard let d = calendar.date(byAdding: .month, value: -monthOffset, to: now) else { continue }
+            let key = calendar.component(.year, from: d) * 100 + calendar.component(.month, from: d)
+            monthDates.append((key, d))
+        }
+        let validKeys = Set(monthDates.map(\.key))
+        var variableByMonth: [Int: Double] = [:]
+        for e in expenses where e.expenseType == .variable {
+            let k = calendar.component(.year, from: e.date) * 100 + calendar.component(.month, from: e.date)
+            if validKeys.contains(k) { variableByMonth[k, default: 0] += e.amount }
+        }
 
-            let variableTotal = expenses
-                .filter { $0.expenseType == .variable && calendar.isDate($0.date, equalTo: date, toGranularity: .month) }
-                .reduce(0) { $0 + $1.amount }
-
+        var results: [ChartDataPoint] = []
+        for (key, date) in monthDates {
+            let variableTotal = variableByMonth[key] ?? 0
             let fixedTotal = projectedFixedTotal(from: allFixed, for: date, period: .monthly, calendar: calendar)
-
             results.append(ChartDataPoint(
                 label: formatter.string(from: date),
                 amount: variableTotal + fixedTotal,
@@ -426,24 +445,31 @@ class ExpenseStore: ObservableObject {
     private func quarterlyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
         let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
 
-        var results: [ChartDataPoint] = []
+        // 預先建立季度對照（year*10+quarter），O(n) 分組
+        var quarterInfo: [(key: Int, year: Int, quarter: Int, date: Date)] = []
         for quarterOffset in (0..<8).reversed() {
-            guard let date = calendar.date(byAdding: .month, value: -quarterOffset * 3, to: now) else { continue }
-            let quarter = (calendar.component(.month, from: date) - 1) / 3 + 1
-            let year = calendar.component(.year, from: date)
+            guard let d = calendar.date(byAdding: .month, value: -quarterOffset * 3, to: now) else { continue }
+            let y = calendar.component(.year, from: d)
+            let q = (calendar.component(.month, from: d) - 1) / 3 + 1
+            quarterInfo.append((y * 10 + q, y, q, d))
+        }
+        let validKeys = Set(quarterInfo.map(\.key))
+        var variableByQuarter: [Int: Double] = [:]
+        for e in expenses where e.expenseType == .variable {
+            let y = calendar.component(.year, from: e.date)
+            let q = (calendar.component(.month, from: e.date) - 1) / 3 + 1
+            let k = y * 10 + q
+            if validKeys.contains(k) { variableByQuarter[k, default: 0] += e.amount }
+        }
 
-            let variableTotal = expenses.filter { expense in
-                expense.expenseType == .variable &&
-                (calendar.component(.month, from: expense.date) - 1) / 3 + 1 == quarter &&
-                calendar.component(.year, from: expense.date) == year
-            }.reduce(0) { $0 + $1.amount }
-
-            let fixedTotal = projectedFixedTotal(from: allFixed, for: date, period: .quarterly, calendar: calendar)
-
+        var results: [ChartDataPoint] = []
+        for info in quarterInfo {
+            let variableTotal = variableByQuarter[info.key] ?? 0
+            let fixedTotal = projectedFixedTotal(from: allFixed, for: info.date, period: .quarterly, calendar: calendar)
             results.append(ChartDataPoint(
-                label: "\(year)Q\(quarter)",
+                label: "\(info.year)Q\(info.quarter)",
                 amount: variableTotal + fixedTotal,
-                date: date
+                date: info.date
             ))
         }
         return results
@@ -452,18 +478,24 @@ class ExpenseStore: ObservableObject {
     private func yearlyData(calendar: Calendar, now: Date) -> [ChartDataPoint] {
         let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
 
-        var results: [ChartDataPoint] = []
+        // 預先建立年份清單，O(n) 分組後直接查字典
+        var yearDates: [(year: Int, date: Date)] = []
         for yearOffset in (0..<5).reversed() {
-            guard let date = calendar.date(byAdding: .year, value: -yearOffset, to: now) else { continue }
+            guard let d = calendar.date(byAdding: .year, value: -yearOffset, to: now) else { continue }
+            yearDates.append((calendar.component(.year, from: d), d))
+        }
+        let validYears = Set(yearDates.map(\.year))
+        var variableByYear: [Int: Double] = [:]
+        for e in expenses where e.expenseType == .variable {
+            let y = calendar.component(.year, from: e.date)
+            if validYears.contains(y) { variableByYear[y, default: 0] += e.amount }
+        }
 
-            let variableTotal = expenses
-                .filter { $0.expenseType == .variable && calendar.isDate($0.date, equalTo: date, toGranularity: .year) }
-                .reduce(0) { $0 + $1.amount }
-
+        var results: [ChartDataPoint] = []
+        for (year, date) in yearDates {
+            let variableTotal = variableByYear[year] ?? 0
             // 固定支出：依週期換算成年度金額（每月×12、每季×4、每年×1）
             let fixedTotal = projectedFixedTotal(from: allFixed, for: date, period: .yearly, calendar: calendar)
-
-            let year = calendar.component(.year, from: date)
             results.append(ChartDataPoint(
                 label: "\(year)",
                 amount: variableTotal + fixedTotal,
@@ -490,7 +522,9 @@ class ExpenseStore: ObservableObject {
         if let data = try? JSONEncoder().encode(currencyRates) {
             UserDefaults.standard.set(data, forKey: currencyRatesKey)
         }
-        CloudSyncManager.shared.push(key: currencyRatesKey)
+        // 使用 pushAll() 而非 push(key:)，統一走 2 秒防抖，
+        // 避免匯率連續更新時繞過節流直接打 CloudKit
+        CloudSyncManager.shared.pushAll()
     }
 
     private func load() {

@@ -201,19 +201,27 @@ final class CloudSyncManager: ObservableObject {
             guard let self = self else { return }
             self.updateAccountStatus(status)
             guard status == .available, self.isEnabled else {
+                // refreshAccountStatus 已確保回到主執行緒
                 self.isSyncing = false
                 return
             }
             CloudKitManager.shared.bootstrap { [weak self] ok in
-                guard ok, let self else {
-                    self?.isSyncing = false
-                    return
-                }
-                CloudKitManager.shared.fetchChanges { [weak self] _ in
-                    CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
-                    CloudKitManager.shared.uploadAllLocalPhotos()
-                    self?.isSyncing = false
-                    self?.markSynced()
+                // bootstrap completion 可能由 CloudKit 背景佇列呼叫，
+                // 強制回主執行緒再修改 isSyncing，避免競態條件
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    guard ok else {
+                        self.isSyncing = false
+                        return
+                    }
+                    CloudKitManager.shared.fetchChanges { [weak self] _ in
+                        CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
+                        CloudKitManager.shared.uploadAllLocalPhotos()
+                        DispatchQueue.main.async { [weak self] in
+                            self?.isSyncing = false
+                            self?.markSynced()
+                        }
+                    }
                 }
             }
         }
