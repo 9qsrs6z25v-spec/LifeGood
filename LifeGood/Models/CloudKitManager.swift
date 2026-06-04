@@ -395,7 +395,40 @@ final class CloudKitManager {
         }
     }
 
-    // MARK: - 接收靜默推播後
+    /// 非破壞性地把雲端所有 KVBlob 讀進記憶體：不寫入本機 UserDefaults、也不更新 change token。
+    /// 給「首次開啟同步」的覆蓋／合併決策使用（需要先知道雲端有什麼、有多少）。
+    func fetchAllKVToMemory(completion: @escaping ([String: Data]) -> Void) {
+        guard isAvailable else { completion([:]); return }
+        queue.async {
+            self.ensureZoneExists { ok in
+                guard ok else { DispatchQueue.main.async { completion([:]) }; return }
+                // previousServerChangeToken: nil → 整批拉取；且刻意不保存回傳 token，保持非破壞性
+                let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration(
+                    previousServerChangeToken: nil, resultsLimit: nil, desiredKeys: nil)
+                let op = CKFetchRecordZoneChangesOperation(
+                    recordZoneIDs: [self.zoneID],
+                    configurationsByRecordZoneID: [self.zoneID: config])
+                op.qualityOfService = .userInitiated
+                op.fetchAllChanges = true
+                var result: [String: Data] = [:]
+                let lock = NSLock()
+                op.recordWasChangedBlock = { _, res in
+                    if case .success(let record) = res,
+                       record.recordType == Self.kvBlobRecordType,
+                       let key = record["keyName"] as? String,
+                       let asset = record["payload"] as? CKAsset,
+                       let url = asset.fileURL,
+                       let data = try? Data(contentsOf: url) {
+                        lock.lock(); result[key] = data; lock.unlock()
+                    }
+                }
+                op.fetchRecordZoneChangesResultBlock = { _ in
+                    DispatchQueue.main.async { completion(result) }
+                }
+                self.privateDB.add(op)
+            }
+        }
+    }
 
     /// 由 AppDelegate / SwiftUI 接到 silent push 時呼叫
     func handleRemoteNotification(userInfo: [AnyHashable: Any], completion: @escaping (UIBackgroundFetchResult) -> Void) {

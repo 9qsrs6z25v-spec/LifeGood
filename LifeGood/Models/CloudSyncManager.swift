@@ -46,9 +46,25 @@ final class CloudSyncManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
             if isEnabled {
-                bootstrapAndPushAll()
+                beginInitialSync()
             }
         }
+    }
+
+    /// 首次開啟同步、且雲端已有資料時的待決狀態（由 SettingsView 跳出選項詢問使用者）
+    @Published var pendingInitialSync: InitialSyncInfo? = nil
+
+    struct InitialSyncInfo: Identifiable {
+        let id = UUID()
+        let cloudItemCount: Int        // 雲端目前約有幾筆資料（給使用者參考）
+        let cloudBlobs: [String: Data] // 預讀到的雲端資料（用於覆蓋／合併）
+    }
+
+    enum InitialSyncChoice {
+        case overwriteCloud   // 以這台覆蓋雲端
+        case overwriteLocal   // 以雲端覆蓋這台
+        case mergeLocalWins   // 合併，重複以本機為準
+        case mergeCloudWins   // 合併，重複以雲端為準
     }
 
     // 防抖：2 秒內多次 pushAll() 合併為一次
@@ -164,24 +180,105 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
-    /// 開啟同步時：建立 zone/subscription、先把 iCloud 既有資料拉下來、再把本機推上去
-    private func bootstrapAndPushAll() {
+    /// 開啟同步時：建立 zone/subscription，非破壞性預讀雲端。
+    /// - 雲端沒資料 → 直接把本機推上去（種子）。
+    /// - 雲端已有資料 → 設定 pendingInitialSync，由 UI 詢問使用者要覆蓋還是合併。
+    private func beginInitialSync() {
         CloudKitManager.shared.bootstrap { [weak self] ok in
             guard let self = self, ok else { return }
-            // 先「拉」再「推」：首次啟用時要把另一台裝置（或雲端）既有的資料同步下來。
-            // 否則只推不拉 —— 新裝置啟用後不僅拿不到舊資料，還會把空白的本機狀態
-            // 推上去覆蓋雲端既有資料。fetchChanges 會把雲端資料寫回 UserDefaults 並
-            // 通知各 Store 重新載入，之後再 push 把（合併後的）本機資料補回雲端。
-            CloudKitManager.shared.fetchChanges { [weak self] _ in
+            CloudKitManager.shared.fetchAllKVToMemory { [weak self] cloudBlobs in
                 guard let self = self else { return }
-                CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
-                CloudKitManager.shared.uploadAllLocalPhotos()
-                self.markSynced()
-                DispatchQueue.main.async {
-                    self.lastChangeReason = .initialSync
+                let count = Self.itemCount(cloudBlobs)
+                if count == 0 {
+                    // 雲端沒資料：把本機推上去當種子，不需詢問
+                    CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
+                    CloudKitManager.shared.uploadAllLocalPhotos()
+                    self.markSynced()
+                    DispatchQueue.main.async { self.lastChangeReason = .initialSync }
+                } else {
+                    DispatchQueue.main.async {
+                        self.pendingInitialSync = InitialSyncInfo(cloudItemCount: count, cloudBlobs: cloudBlobs)
+                    }
                 }
             }
         }
+    }
+
+    /// 使用者在首次同步選項中做出選擇後執行
+    func resolveInitialSync(_ choice: InitialSyncChoice) {
+        let cloudBlobs = pendingInitialSync?.cloudBlobs ?? [:]
+        pendingInitialSync = nil
+        let defaults = UserDefaults.standard
+
+        switch choice {
+        case .overwriteCloud:
+            // 用本機覆蓋雲端：本機不動，下方直接 push 即可
+            break
+        case .overwriteLocal:
+            // 用雲端覆蓋本機：把預讀到的雲端資料寫回本機，再通知各 Store 重載
+            for (key, data) in cloudBlobs { defaults.set(data, forKey: key) }
+            NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
+        case .mergeLocalWins, .mergeCloudWins:
+            let localWins = (choice == .mergeLocalWins)
+            let keys = Set(Self.syncKeys).union(cloudBlobs.keys)
+            for key in keys {
+                if let merged = Self.mergeBlob(local: defaults.data(forKey: key),
+                                               cloud: cloudBlobs[key],
+                                               localWins: localWins) {
+                    defaults.set(merged, forKey: key)
+                }
+            }
+            NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
+        }
+
+        // 把（覆蓋／合併後的）本機資料推回雲端，並上傳本機照片
+        CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
+        CloudKitManager.shared.uploadAllLocalPhotos()
+        markSynced()
+        DispatchQueue.main.async { self.lastChangeReason = .initialSync }
+    }
+
+    /// 使用者在首次同步選項中取消 → 關回同步開關
+    func cancelInitialSync() {
+        pendingInitialSync = nil
+        isEnabled = false
+    }
+
+    /// 計算一批 KV blob 內的資料筆數（陣列型 blob 的元素數加總）
+    static func itemCount(_ blobs: [String: Data]) -> Int {
+        var n = 0
+        for (_, data) in blobs {
+            if let arr = (try? JSONSerialization.jsonObject(with: data)) as? [Any] {
+                n += arr.count
+            }
+        }
+        return n
+    }
+
+    /// 以 id 為鍵合併兩個陣列型 KV blob；重複的同一筆由 localWins 決定以哪邊為準。
+    /// 非陣列（設定類）blob 無法逐筆合併，直接採用勝方版本。
+    static func mergeBlob(local: Data?, cloud: Data?, localWins: Bool) -> Data? {
+        func arr(_ d: Data?) -> [[String: Any]]? {
+            guard let d else { return nil }
+            return (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]]
+        }
+        guard let localArr = arr(local), let cloudArr = arr(cloud) else {
+            // 其中一邊不是物件陣列 → 用勝方資料
+            return localWins ? (local ?? cloud) : (cloud ?? local)
+        }
+        func idOf(_ o: [String: Any]) -> String? {
+            if let s = o["id"] as? String { return s }
+            if let n = o["id"] as? NSNumber { return n.stringValue }
+            return nil
+        }
+        var byId: [String: [String: Any]] = [:]
+        var order: [String] = []
+        let loserFirst = localWins ? cloudArr : localArr
+        let winnerSecond = localWins ? localArr : cloudArr
+        for o in loserFirst { if let i = idOf(o) { if byId[i] == nil { order.append(i) }; byId[i] = o } }
+        for o in winnerSecond { if let i = idOf(o) { if byId[i] == nil { order.append(i) }; byId[i] = o } }
+        let merged = order.compactMap { byId[$0] }
+        return try? JSONSerialization.data(withJSONObject: merged)
     }
 
     /// 手動觸發同步：刷新帳號狀態 → 拉取 → 推送
