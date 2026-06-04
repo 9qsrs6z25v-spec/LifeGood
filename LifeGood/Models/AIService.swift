@@ -419,7 +419,9 @@ final class AIExpenseParserService {
         var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if cleaned.hasPrefix("```") {
             let lines = cleaned.split(separator: "\n", omittingEmptySubsequences: false)
-            cleaned = lines.dropFirst().dropLast().joined(separator: "\n")
+            let inner = lines.dropFirst()
+            cleaned = (inner.last?.hasPrefix("```") == true ? inner.dropLast() : inner)
+                .joined(separator: "\n")
         }
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         // 嘗試找 { ... } 區塊
