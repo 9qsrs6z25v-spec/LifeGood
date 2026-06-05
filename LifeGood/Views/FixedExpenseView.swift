@@ -633,40 +633,49 @@ struct FixedExpenseRow: View {
                         .contentTransition(.numericText())
 
                     // 季繳 / 年繳：顯示月均換算，幫助使用者快速理解月度負擔
-                    if let recurrence = expense.recurrence,
-                       recurrence != .monthly {
-                        let monthly = monthlyEquivalentAmount(expense)
-                        if monthly > 0 {
-                            HStack(spacing: 2) {
-                                Image(systemName: "arrow.down.to.line")
-                                    .font(.system(size: 8, weight: .medium))
-                                Text("月均 \(formatCurrencyCompact(monthly))")
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                            .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28).opacity(0.65))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color(red: 0.92, green: 0.28, blue: 0.28).opacity(0.08))
-                            .clipShape(Capsule())
-                        }
-                    }
+                    monthlyAverageBadge
 
-                    if let label = deductionTargetLabel {
-                        HStack(spacing: 3) {
-                            Image(systemName: deductionIcon)
-                                .font(.system(size: 9))
-                            Text(label)
-                                .font(.system(size: 10, weight: .medium))
-                        }
-                        .foregroundStyle(categoryAccent.opacity(0.85))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(categoryAccent.opacity(0.08))
-                        .clipShape(Capsule())
-                        .lineLimit(1)
-                    }
+                    deductionLabelBadge
                 }
             }
             .padding(.vertical, 7)
+        }
+    }
+
+    /// 季繳 / 年繳的「月均」膠囊（抽出以降低主 body 型別檢查複雜度）
+    @ViewBuilder
+    private var monthlyAverageBadge: some View {
+        let monthly = monthlyEquivalentAmount(expense)
+        if let recurrence = expense.recurrence, recurrence != .monthly, monthly > 0 {
+            HStack(spacing: 2) {
+                Image(systemName: "arrow.down.to.line")
+                    .font(.system(size: 8, weight: .medium))
+                Text("月均 \(formatCurrencyCompact(monthly))")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28).opacity(0.65))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color(red: 0.92, green: 0.28, blue: 0.28).opacity(0.08))
+            .clipShape(Capsule())
+        }
+    }
+
+    /// 扣款對象（信用卡 / 銀行）標籤膠囊
+    @ViewBuilder
+    private var deductionLabelBadge: some View {
+        if let label = deductionTargetLabel {
+            HStack(spacing: 3) {
+                Image(systemName: deductionIcon)
+                    .font(.system(size: 9))
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(categoryAccent.opacity(0.85))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(categoryAccent.opacity(0.08))
+            .clipShape(Capsule())
+            .lineLimit(1)
         }
     }
 

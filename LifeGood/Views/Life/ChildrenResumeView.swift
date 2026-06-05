@@ -137,21 +137,12 @@ struct ChildrenResumeView: View {
                     }
 
                     // 紀錄徽章列
-                    let badges: [(ChildRecordType, Int)] = [
-                        (.vaccination, child.childRecords.filter { $0.type == .vaccination }.count),
-                        (.allergy,     child.childRecords.filter { $0.type == .allergy }.count),
-                        (.growth,      child.childRecords.filter { $0.type == .growth }.count),
-                        (.medical,     child.childRecords.filter { $0.type == .medical }.count),
-                        (.education,   child.childRecords.filter { $0.type == .education }.count),
-                        (.hobby,       child.childRecords.filter { $0.type == .hobby }.count),
-                        (.memorable,   child.childRecords.filter { $0.type == .memorable }.count),
-                    ].filter { $0.1 > 0 }
-
+                    let badges = recordBadges(for: child)
                     if !badges.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 5) {
-                                ForEach(badges, id: \.0) { type, count in
-                                    recordBadge(type: type, count: count)
+                                ForEach(badges, id: \.type) { item in
+                                    recordBadge(type: item.type, count: item.count)
                                 }
                             }
                         }
@@ -178,6 +169,18 @@ struct ChildrenResumeView: View {
     }
 
     // MARK: - 紀錄徽章（微型彩色膠囊）
+
+    /// 一次掃描算出各類紀錄筆數（取代原本 7 個 inline filter，降低 body 型別檢查負擔），
+    /// 依固定顯示順序回傳「筆數 > 0」的類別。
+    private func recordBadges(for child: FamilyMember) -> [(type: ChildRecordType, count: Int)] {
+        var counts: [ChildRecordType: Int] = [:]
+        for r in child.childRecords { counts[r.type, default: 0] += 1 }
+        let order: [ChildRecordType] = [.vaccination, .allergy, .growth, .medical, .education, .hobby, .memorable]
+        return order.compactMap { t in
+            let n = counts[t] ?? 0
+            return n > 0 ? (type: t, count: n) : nil
+        }
+    }
 
     private func recordBadge(type: ChildRecordType, count: Int) -> some View {
         let c = colorFor(type)
