@@ -75,6 +75,8 @@ final class CloudSyncManager: ObservableObject {
     @Published private(set) var isAccountAvailable: Bool = false
     @Published private(set) var lastSyncDate: Date?
     @Published private(set) var lastChangeReason: ChangeReason = .none
+    /// 最近一次 CloudKit 失敗的可讀訊息（成功同步後清空）；給 SettingsView 顯示
+    @Published private(set) var lastErrorMessage: String?
 
     enum ChangeReason: String {
         case none = ""
@@ -108,6 +110,12 @@ final class CloudSyncManager: ObservableObject {
             self,
             selector: #selector(handlePhotoChanges(_:)),
             name: CloudKitManager.didPullPhotoChangesNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSyncError(_:)),
+            name: CloudKitManager.didEncounterErrorNotification,
             object: nil
         )
 
@@ -349,6 +357,13 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
+    @objc private func handleSyncError(_ note: Notification) {
+        let msg = note.userInfo?["message"] as? String
+        DispatchQueue.main.async { [weak self] in
+            self?.lastErrorMessage = msg
+        }
+    }
+
     @objc private func handlePhotoChanges(_ note: Notification) {
         DispatchQueue.main.async { [weak self] in
             self?.lastChangeReason = .serverChange
@@ -363,6 +378,7 @@ final class CloudSyncManager: ObservableObject {
         let now = Date()
         DispatchQueue.main.async { [weak self] in
             self?.lastSyncDate = now
+            self?.lastErrorMessage = nil   // 成功同步即清掉先前錯誤
         }
         UserDefaults.standard.set(now, forKey: Self.lastSyncKey)
     }
