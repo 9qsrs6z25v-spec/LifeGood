@@ -815,8 +815,17 @@ struct PersonalEventEditor: View {
                 }
 
                 Section("時間") {
-                    DatePicker("開始", selection: $date,
-                               displayedComponents: durationMinutes == 0 ? [.date] : [.date, .hourAndMinute])
+                    if durationMinutes == 0 {
+                        // 全天事件：只選日期
+                        DatePicker("開始", selection: $date, displayedComponents: .date)
+                    } else {
+                        // 有長度：日期 + 時間（分鐘 5 倍數、24 小時制）
+                        HStack {
+                            Text("開始")
+                            Spacer()
+                            FiveMinuteDateTimePicker(selection: $date).fixedSize()
+                        }
+                    }
                     Picker("長度", selection: $durationMinutes) {
                         ForEach(durationOptions, id: \.minutes) { opt in
                             Text(opt.label).tag(opt.minutes)
@@ -911,10 +920,10 @@ struct PersonalEventEditor: View {
                     syncToAppleCalendar = e.syncToAppleCalendar
                     selectedAppleCalendarId = e.appleCalendarId
                 } else {
-                    // 新事件：時間 = 使用者選的日期 + 當下時間
-                    let now = Date()
+                    // 新事件：日期用使用者選的那天，時間用排程時段（整點/半點，過 18:00 則 09:30）
                     let cal = Calendar.current
-                    let timeComp = cal.dateComponents([.hour, .minute], from: now)
+                    let sched = FiveMinuteDateTimePicker.defaultSchedulingTime()
+                    let timeComp = cal.dateComponents([.hour, .minute], from: sched)
                     var dayComp = cal.dateComponents([.year, .month, .day], from: initialDate)
                     dayComp.hour = timeComp.hour
                     dayComp.minute = timeComp.minute
