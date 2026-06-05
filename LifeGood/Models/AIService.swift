@@ -309,7 +309,9 @@ final class AIExpenseParserService {
     // MARK: Anthropic
 
     private func callAnthropic(prompt: String, apiKey: String) async throws -> String {
-        let url = URL(string: "https://api.anthropic.com/v1/messages")!
+        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+            throw AIParseError.invalidResponse("internal: malformed Anthropic URL")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
@@ -336,7 +338,9 @@ final class AIExpenseParserService {
     // MARK: OpenAI
 
     private func callOpenAI(prompt: String, apiKey: String) async throws -> String {
-        let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+            throw AIParseError.invalidResponse("internal: malformed OpenAI URL")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

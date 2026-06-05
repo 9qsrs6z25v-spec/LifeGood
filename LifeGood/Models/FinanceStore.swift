@@ -140,6 +140,7 @@ class FinanceStore: ObservableObject {
 
     private func load() {
         isLoading = true
+        defer { isLoading = false }
         let decoder = JSONDecoder()
         if let d = UserDefaults.standard.data(forKey: insKey),
            let v = try? decoder.decode([SavingsInsurance].self, from: d) { insurances = v }
@@ -149,7 +150,6 @@ class FinanceStore: ObservableObject {
            let v = try? decoder.decode([Vehicle].self, from: d) { vehicles = v }
         if let d = UserDefaults.standard.data(forKey: reKey),
            let v = try? decoder.decode([RealEstate].self, from: d) { realEstates = v }
-        isLoading = false
     }
 
     func clearAll() {
