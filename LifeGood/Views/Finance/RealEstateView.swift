@@ -2,18 +2,19 @@ import SwiftUI
 
 // MARK: - 美化紀錄（RealEstateView）
 // [2026-06-v1] 初次美化：英雄卡、emptyState、卡片入場動畫、toolbar 配色
-// [2026-06-v2] 本次美化方向：
-//   1. summaryHeader：由 ZStack+.clipped() 改為 VStack+.background+.clipShape+.shadow，
-//      對齊 SavingsInsuranceView / VehicleView 英雄卡結構；
-//      散景圓加入 .blur(radius:) 效果（原本無模糊，圓形邊緣太硬）；
-//      字型由 .title.bold() 統一為 .system(size:32,weight:.bold,design:.rounded)；
-//      右側加入月現金流 KPI 膠囊（正值綠、負值紅），資訊密度對齊 FinanceOverviewView.totalAssetsCard。
-//   2. kpiItem → kpiCell：移除 color 參數改為統一白色，對齊 IncomeView / VehicleView kpiCell 規格。
-//   3. emptyState：改用 scaleEffect + easeOut(duration:2.0).repeatForever(autoreverses: false)
-//      雙層脈衝環，對齊 SavingsInsuranceView / StockView emptyStateView 標準動畫模式；
-//      主圓由 56pt 漸層實心圓升級為 88pt 半透明漸層底 + 細邊框，圖示調大至 36pt light。
-//   4. 「已售出」Section header：純文字升級為彩色強調條 + 計數膠囊徽章，
-//      對齊 VariableExpenseView.daySectionHeader 設計規格。
+// [2026-06-v2] summaryHeader 重構、emptyState 雙層脈衝環、kpiCell 統一白色、已售出 header 升級
+// [2026-06-v3] 本次美化方向（estateCard）：
+//   1. 左側加入 4pt 紫色漸層強調條，對齊 VehicleView / SavingsInsuranceView / StockView 卡片規格
+//   2. 加入 44pt 漸層圖示圓（building.2.fill），對齊 VehicleView vehicleCard 圖示圓規格
+//   3. 標題列改為 圖示圓 + 名稱/地址 + 估值大字 + 增值率彩色膠囊 的一致佈局，
+//      估值字型升級為 .system(size:16,weight:.bold,design:.rounded)，對齊 StockView.stockCard
+//   4. 貸款 / 房屋價金 / 變動支出 小標籤從 RoundedRectangle(cornerRadius:3) 升級為 Capsule 膠囊，
+//      padding 從 (.horizontal,5)(.vertical,1) 統一為 (.horizontal,7)(.vertical,2.5)，
+//      與 VehicleView vehicleCard 固定/變動支出膠囊規格一致
+//   5. 底部月租 / 月貸 行加入彩色圖示（dollarsign.circle.fill/creditcard.fill），
+//      文字改 .caption2.weight(.medium) 並區分綠色（租金）/ 藍色（貸款）/ 紅色（已付）顯色
+//   6. 分隔線從 Divider() 改為 Rectangle().fill(.separator.opacity(0.20)).frame(height:0.5)，
+//      視覺更細緻，對齊 VehicleView vehicleCard 分隔線規格
 
 enum RealEstateSortOption: String, CaseIterable, Identifiable {
     case purchasePrice = "購入價格"
@@ -471,117 +472,224 @@ struct RealEstateView: View {
         .padding(.horizontal, 20)
     }
 
-    // MARK: - 卡片
+    // MARK: - 卡片（v3 美化：左側強調條 + 44pt 圖示圓 + Capsule 膠囊標籤 + 彩色底部行）
 
     private func estateCard(_ item: RealEstate) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.name).font(.subheadline.weight(.semibold))
-                    if !item.fullAddress.isEmpty {
-                        Text(item.fullAddress).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        let purpleAccent = Color(red: 0.48, green: 0.25, blue: 0.80)
+        let appRate = item.appreciationRate
+        let isUp = appRate >= 0
+
+        return HStack(spacing: 0) {
+            // 左側 4pt 紫色漸層強調條（對齊 VehicleView / SavingsInsuranceView / StockView 規格）
+            RoundedRectangle(cornerRadius: 3)
+                .fill(
+                    LinearGradient(
+                        colors: [purpleAccent, purpleAccent.opacity(0.40)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4)
+                .padding(.vertical, 10)
+                .padding(.trailing, 14)
+
+            VStack(alignment: .leading, spacing: 10) {
+                // ① 頂部：44pt 圖示圓 + 名稱/地址 + 估值大字 + 增值率膠囊
+                HStack(spacing: 12) {
+                    // 44pt 漸層圖示圓（對齊 VehicleView vehicleCard 規格）
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [purpleAccent.opacity(0.22), purpleAccent.opacity(0.09)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                            .shadow(color: purpleAccent.opacity(0.22), radius: 6, x: 0, y: 3)
+                        Image(systemName: "building.2.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(purpleAccent)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.name)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        if !item.fullAddress.isEmpty {
+                            Text(item.fullAddress)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer(minLength: 4)
+
+                    // 右側：估值大字 + 增值率彩色膠囊（對齊 StockView.stockCard 規格）
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(fmt(item.currentValue))
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundStyle(.primary)
+                            .contentTransition(.numericText())
+                        HStack(spacing: 3) {
+                            Image(systemName: isUp ? "arrow.up.right" : "arrow.down.right")
+                                .font(.system(size: 9, weight: .bold))
+                            Text(String(format: "%@%.1f%%", isUp ? "+" : "", appRate))
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundStyle(isUp ? .green : .red)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background((isUp ? Color.green : Color.red).opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke((isUp ? Color.green : Color.red).opacity(0.22), lineWidth: 0.6))
                     }
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(fmt(item.currentValue)).font(.subheadline.bold())
-                    Text(String(format: "%@%.1f%%", item.appreciationRate >= 0 ? "+" : "", item.appreciationRate))
-                        .font(.caption.bold())
-                        .foregroundStyle(item.appreciationRate >= 0 ? .green : .red)
-                }
-            }
 
-            Divider()
+                // ② 分隔線（細線，對齊 VehicleView vehicleCard 規格）
+                Rectangle()
+                    .fill(Color(.separator).opacity(0.20))
+                    .frame(height: 0.5)
 
-            if !item.mortgageItems.isEmpty {
-                // 只顯示「正在繳費中」的貸款：已開始（startDate <= 今天）且尚未繳完（elapsedPeriods < totalPeriods）。
-                // 未來才開始的接續貸款，elapsedPeriods 會被 clamp 成 0，光看 elapsedPeriods < totalPeriods 會誤判為繳費中。
-                let today = Date()
-                let activeMortgages = item.mortgageItems.filter {
-                    $0.startDate <= today && $0.elapsedPeriods < $0.totalPeriods
-                }
-                if !activeMortgages.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(activeMortgages) { m in
+                // ③ 貸款明細（只顯示繳費中者）
+                // 已開始（startDate <= 今天）且尚未繳完（elapsedPeriods < totalPeriods）的貸款才顯示。
+                if !item.mortgageItems.isEmpty {
+                    let today = Date()
+                    let activeMortgages = item.mortgageItems.filter {
+                        $0.startDate <= today && $0.elapsedPeriods < $0.totalPeriods
+                    }
+                    if !activeMortgages.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(activeMortgages) { m in
+                                HStack {
+                                    HStack(spacing: 5) {
+                                        // Capsule 膠囊標籤（對齊 vehicleCard 固定支出膠囊規格）
+                                        Text(m.title.isEmpty ? "房貸" : m.title)
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundStyle(.blue)
+                                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                            .background(Color.blue.opacity(0.10))
+                                            .clipShape(Capsule())
+                                        Text("\(m.elapsedPeriods)/\(m.totalPeriods)期")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    Spacer()
+                                    Text(fmt(m.amount) + "/月")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                }
+                            }
                             HStack {
-                                Text(m.title.isEmpty ? "房貸" : m.title)
-                                    .font(.caption2.weight(.medium))
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(Color.blue.opacity(0.1))
-                                    .foregroundStyle(.blue)
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                                Text("\(m.elapsedPeriods)/\(m.totalPeriods)期")
-                                    .font(.caption2).foregroundStyle(.tertiary)
+                                Text("已繳貸款")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                                 Spacer()
-                                Text(fmt(m.amount) + "/月").font(.caption)
+                                Text(fmt(item.totalMortgagePaid))
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.blue)
                             }
                         }
-                        HStack {
-                            Text("已繳貸款").font(.caption2).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(fmt(item.totalMortgagePaid)).font(.caption.bold()).foregroundStyle(.blue)
+                    }
+                }
+
+                // ④ 房屋價金
+                if !item.paidItems.isEmpty {
+                    HStack {
+                        HStack(spacing: 5) {
+                            Text("房屋價金")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.purple)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.purple.opacity(0.10))
+                                .clipShape(Capsule())
+                            Text("\(item.paidItems.count) 筆")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Text(fmt(item.totalPaid))
+                            .font(.caption.bold())
+                            .foregroundStyle(.purple)
+                    }
+                }
+
+                // ⑤ 變動支出
+                if !item.variableExpenses.isEmpty {
+                    HStack {
+                        HStack(spacing: 5) {
+                            Text("變動支出")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.orange.opacity(0.10))
+                                .clipShape(Capsule())
+                            Text("\(item.variableExpenses.count) 筆")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Text(fmt(item.variableTotal))
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+                // ⑥ 底部：月租（綠）/ 月貸（藍）/ 已付（紅）+ 報酬率
+                let hasBottomRow = item.monthlyRental > 0 || item.monthlyMortgage > 0 || item.totalAllPaid > 0
+                if hasBottomRow {
+                    HStack(spacing: 8) {
+                        if item.monthlyRental > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "dollarsign.circle.fill")
+                                    .font(.system(size: 10))
+                                Text("月租 " + fmt(item.monthlyRental))
+                            }
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.green)
+                        }
+                        if item.monthlyMortgage > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "creditcard.fill")
+                                    .font(.system(size: 10))
+                                Text("月貸 " + fmt(item.monthlyMortgage))
+                            }
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.blue)
+                        }
+                        Spacer()
+                        if item.totalAllPaid > 0 {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 9))
+                                Text("已付 " + fmt(item.totalAllPaid))
+                            }
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.red)
                         }
                     }
                 }
-            }
 
-            if !item.paidItems.isEmpty {
-                HStack {
-                    Text("房屋價金")
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.purple.opacity(0.1))
-                        .foregroundStyle(.purple)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                    Text("\(item.paidItems.count) 筆")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                    Spacer()
-                    Text(fmt(item.totalPaid)).font(.caption.bold()).foregroundStyle(.purple)
-                }
-            }
-
-            if !item.variableExpenses.isEmpty {
-                HStack {
-                    Text("變動支出")
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.1))
-                        .foregroundStyle(.orange)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                    Text("\(item.variableExpenses.count) 筆")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                    Spacer()
-                    Text(fmt(item.variableTotal)).font(.caption.bold()).foregroundStyle(.orange)
-                }
-            }
-
-            HStack {
+                // ⑦ 租金報酬率（有租金才顯示）
                 if item.monthlyRental > 0 {
-                    Label("月租 " + fmt(item.monthlyRental), systemImage: "dollarsign.circle")
-                }
-                if item.monthlyMortgage > 0 {
-                    Label("月貸 " + fmt(item.monthlyMortgage), systemImage: "creditcard")
-                }
-                Spacer()
-                if item.totalAllPaid > 0 {
-                    Text("已付 " + fmt(item.totalAllPaid)).foregroundStyle(.red)
-                }
-            }
-            .font(.caption).foregroundStyle(.secondary)
-
-            if item.monthlyRental > 0 {
-                HStack {
-                    Spacer()
-                    Text(String(format: "報酬率 %.1f%%", item.rentalYield))
-                        .font(.caption).foregroundStyle(.blue)
+                    HStack(spacing: 4) {
+                        Spacer()
+                        Image(systemName: "percent")
+                            .font(.system(size: 9))
+                        Text(String(format: "報酬率 %.1f%%", item.rentalYield))
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(purpleAccent.opacity(0.80))
                 }
             }
+            .padding(.vertical, 12)
         }
-        .padding(14)
+        .padding(.horizontal, 14)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(
                     AngularGradient(
                         colors: CardRarity.realEstate(price: item.purchasePrice).borderGradient,
