@@ -616,8 +616,8 @@ struct MeetingEditorSheet: View {
                     if let r = e.recurrence { hasRecurrence = true; recurrence = r }
                     items = e.items; note = e.note
                 } else {
-                    // 新會議：預設時間先對齊到 5 分鐘倍數，與選擇器一致
-                    date = FiveMinuteDateTimePicker.roundedToFiveMinutes(Date())
+                    // 新會議：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
+                    date = FiveMinuteDateTimePicker.defaultSchedulingTime()
                 }
             }
         }
@@ -713,8 +713,8 @@ struct TaskEditorSheet: View {
                     isCompleted = e.isCompleted
                     if let d = e.dueDate { hasDueDate = true; dueDate = d }
                 } else {
-                    // 新任務：預設時間先對齊到 5 分鐘倍數，與選擇器一致
-                    date = FiveMinuteDateTimePicker.roundedToFiveMinutes(Date())
+                    // 新任務：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
+                    date = FiveMinuteDateTimePicker.defaultSchedulingTime()
                     dueDate = date
                 }
             }
@@ -795,13 +795,33 @@ struct FiveMinuteDateTimePicker: UIViewRepresentable {
         return Locale(components: components)
     }
 
-    /// 把時間對齊到最接近的 5 分鐘倍數（秒歸零）
-    static func roundedToFiveMinutes(_ date: Date) -> Date {
+    /// 新增任務 / 會議的預設時間：
+    /// 1. 無條件進位到下一個整點或半點（:00 / :30）
+    /// 2. 若不在 09:00–18:00 範圍內 → 改用 09:30（晚上 18:00 後用「隔天」09:30，清晨太早用「當天」09:30）
+    static func defaultSchedulingTime(from now: Date = Date()) -> Date {
         let cal = Calendar.current
-        let minute = cal.component(.minute, from: date)
-        let second = cal.component(.second, from: date)
-        let target = Int((Double(minute) / 5.0).rounded()) * 5   // 0...60
-        let base = cal.date(byAdding: .second, value: -second, to: date) ?? date
-        return cal.date(byAdding: .minute, value: target - minute, to: base) ?? date
+        let hourNow = cal.component(.hour, from: now)
+        let minuteNow = cal.component(.minute, from: now)
+
+        // 進位到下一個 :00 / :30
+        let rounded: Date
+        if minuteNow == 0 {
+            rounded = cal.date(bySettingHour: hourNow, minute: 0, second: 0, of: now) ?? now
+        } else if minuteNow <= 30 {
+            rounded = cal.date(bySettingHour: hourNow, minute: 30, second: 0, of: now) ?? now
+        } else {
+            let base = cal.date(bySettingHour: hourNow, minute: 0, second: 0, of: now) ?? now
+            rounded = cal.date(byAdding: .hour, value: 1, to: base) ?? now
+        }
+
+        // 落在 09:00–18:00（含邊界）就直接用
+        let h = cal.component(.hour, from: rounded)
+        let m = cal.component(.minute, from: rounded)
+        let withinWindow = h >= 9 && (h < 18 || (h == 18 && m == 0))
+        if withinWindow { return rounded }
+
+        // 否則改用 09:30：晚上（now 已過 18:00）用隔天，清晨太早用當天
+        let dayAnchor = hourNow >= 18 ? (cal.date(byAdding: .day, value: 1, to: now) ?? now) : now
+        return cal.date(bySettingHour: 9, minute: 30, second: 0, of: dayAnchor) ?? now
     }
 }
