@@ -972,6 +972,83 @@ enum LeaveType: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// MARK: - 班別（部屬班表）
+
+enum ShiftType: String, Codable, CaseIterable, Identifiable {
+    case nightShift = "大夜班"
+    case eveningShift = "小夜班"
+    case holidayDuty = "假日值班"
+    case jetLagLeave = "時差假"
+    case restDay = "休息"
+
+    var id: String { rawValue }
+
+    /// 是否有上下班時間（時差假 / 休息沒有）
+    var hasWorkTime: Bool {
+        self == .nightShift || self == .eveningShift || self == .holidayDuty
+    }
+
+    /// 班表格子上的精簡標示
+    var shortLabel: String {
+        switch self {
+        case .nightShift:  return "大夜"
+        case .eveningShift: return "小夜"
+        case .holidayDuty:  return "假值"
+        case .jetLagLeave:  return "時差"
+        case .restDay:      return "休"
+        }
+    }
+}
+
+/// 某位部屬在某一天的班別指派（以 date 的當日比對）
+struct SubordinateShift: Identifiable, Codable {
+    let id: UUID
+    var date: Date
+    var type: ShiftType
+
+    init(id: UUID = UUID(), date: Date, type: ShiftType) {
+        self.id = id; self.date = date; self.type = type
+    }
+}
+
+/// 班別時間（以「距離午夜的分鐘數」儲存，0...1439；跨夜時 end 可能小於 start）
+struct ShiftTimeRange: Codable, Equatable {
+    var startMinutes: Int
+    var endMinutes: Int
+
+    static func hhmm(_ minutes: Int) -> String {
+        let m = ((minutes % 1440) + 1440) % 1440
+        return String(format: "%02d:%02d", m / 60, m % 60)
+    }
+    var display: String { "\(Self.hhmm(startMinutes))–\(Self.hhmm(endMinutes))" }
+}
+
+/// 可自訂的班別時間表（平日 / 假日各一組；僅 hasWorkTime 的班別需要）
+struct ShiftSchedule: Codable {
+    var weekday: [String: ShiftTimeRange]   // key = ShiftType.rawValue
+    var holiday: [String: ShiftTimeRange]
+
+    func range(for type: ShiftType, isHoliday: Bool) -> ShiftTimeRange? {
+        (isHoliday ? holiday : weekday)[type.rawValue]
+    }
+    mutating func set(_ range: ShiftTimeRange, for type: ShiftType, isHoliday: Bool) {
+        if isHoliday { holiday[type.rawValue] = range } else { weekday[type.rawValue] = range }
+    }
+
+    static let `default` = ShiftSchedule(
+        weekday: [
+            ShiftType.nightShift.rawValue:   ShiftTimeRange(startMinutes: 0,    endMinutes: 8 * 60 + 30),   // 00:00–08:30
+            ShiftType.eveningShift.rawValue: ShiftTimeRange(startMinutes: 16 * 60, endMinutes: 0),          // 16:00–00:00
+            ShiftType.holidayDuty.rawValue:  ShiftTimeRange(startMinutes: 8 * 60 + 30, endMinutes: 17 * 60 + 30) // 08:30–17:30
+        ],
+        holiday: [
+            ShiftType.nightShift.rawValue:   ShiftTimeRange(startMinutes: 20 * 60 + 30, endMinutes: 8 * 60 + 30), // 20:30–08:30
+            ShiftType.eveningShift.rawValue: ShiftTimeRange(startMinutes: 12 * 60, endMinutes: 20 * 60 + 30),     // 12:00–20:30
+            ShiftType.holidayDuty.rawValue:  ShiftTimeRange(startMinutes: 8 * 60 + 30, endMinutes: 20 * 60 + 30)  // 08:30–20:30
+        ]
+    )
+}
+
 // MARK: - 部屬記錄
 
 struct SubordinateRecord: Identifiable, Codable {
@@ -1088,15 +1165,17 @@ struct Subordinate: Identifiable, Codable {
     var joinDate: Date?
     var meetings: [SubordinateMeeting]
     var tasks: [SubordinateTask]
+    var shifts: [SubordinateShift]
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
          department: String = "", note: String = "", gradeTitleId: UUID? = nil,
          departmentId: UUID? = nil, records: [SubordinateRecord] = [], joinDate: Date? = nil,
-         meetings: [SubordinateMeeting] = [], tasks: [SubordinateTask] = []) {
+         meetings: [SubordinateMeeting] = [], tasks: [SubordinateTask] = [],
+         shifts: [SubordinateShift] = []) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
         self.departmentId = departmentId; self.records = records; self.joinDate = joinDate
-        self.meetings = meetings; self.tasks = tasks
+        self.meetings = meetings; self.tasks = tasks; self.shifts = shifts
     }
 
     init(from decoder: Decoder) throws {
@@ -1112,6 +1191,7 @@ struct Subordinate: Identifiable, Codable {
         joinDate = try c.decodeIfPresent(Date.self, forKey: .joinDate)
         meetings = (try? c.decode([SubordinateMeeting].self, forKey: .meetings)) ?? []
         tasks = (try? c.decode([SubordinateTask].self, forKey: .tasks)) ?? []
+        shifts = (try? c.decode([SubordinateShift].self, forKey: .shifts)) ?? []
     }
 }
 

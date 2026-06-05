@@ -61,6 +61,7 @@
 		A01B000001000036 /* SpouseResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000036 /* SpouseResumeView.swift */; };
 		A01B000001000037 /* ChildrenResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000037 /* ChildrenResumeView.swift */; };
 		A01B000001000038 /* SubordinateDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000038 /* SubordinateDetailView.swift */; };
+		A01B000077000038 /* SubordinateRosterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000077000038 /* SubordinateRosterView.swift */; };
 		A01B000001000039 /* ChildDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000039 /* ChildDetailView.swift */; };
 		A01B00000100003A /* LifeFinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003A /* LifeFinanceView.swift */; };
 		A01B00000100003B /* SubscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100003B /* SubscriptionManager.swift */; };
@@ -140,6 +141,7 @@
 		A01A000001000036 /* SpouseResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpouseResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000037 /* ChildrenResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildrenResumeView.swift; sourceTree = "<group>"; };
 		A01A000001000038 /* SubordinateDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateDetailView.swift; sourceTree = "<group>"; };
+		A01A000077000038 /* SubordinateRosterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateRosterView.swift; sourceTree = "<group>"; };
 		A01A000001000039 /* ChildDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildDetailView.swift; sourceTree = "<group>"; };
 		A01A00000100003A /* LifeFinanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeFinanceView.swift; sourceTree = "<group>"; };
 		A01A00000100003B /* SubscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionManager.swift; sourceTree = "<group>"; };
@@ -285,6 +287,7 @@
 				A01A000001000036 /* SpouseResumeView.swift */,
 				A01A000001000037 /* ChildrenResumeView.swift */,
 				A01A000001000038 /* SubordinateDetailView.swift */,
+				A01A000077000038 /* SubordinateRosterView.swift */,
 				A01A000001000039 /* ChildDetailView.swift */,
 				A01A00000100003A /* LifeFinanceView.swift */,
 				A01A000001000044 /* MacaronDatePicker.swift */,
@@ -439,6 +442,7 @@
 				A01B000001000036 /* SpouseResumeView.swift in Sources */,
 				A01B000001000037 /* ChildrenResumeView.swift in Sources */,
 				A01B000001000038 /* SubordinateDetailView.swift in Sources */,
+				A01B000077000038 /* SubordinateRosterView.swift in Sources */,
 				A01B000001000039 /* ChildDetailView.swift in Sources */,
 				A01B00000100003A /* LifeFinanceView.swift in Sources */,
 				A01B00000100003B /* SubscriptionManager.swift in Sources */,
@@ -471,7 +475,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 379;
+				CURRENT_PROJECT_VERSION = 380;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -495,7 +499,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 17.76;
+				MARKETING_VERSION = 17.77;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -511,7 +515,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 379;
+				CURRENT_PROJECT_VERSION = 380;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -535,7 +539,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 17.76;
+				MARKETING_VERSION = 17.77;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

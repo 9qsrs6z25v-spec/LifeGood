@@ -131,6 +131,37 @@ class LifeStore: ObservableObject {
         save()
     }
 
+    // MARK: - 班表（班別指派）
+
+    /// 設定某位部屬某一天的班別；type 傳 nil 表示清除該天班別。
+    func setShift(subordinateId: UUID, date: Date, type: ShiftType?) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }) else { return }
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: date)
+        subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: day) }
+        if let type = type {
+            subordinates[si].shifts.append(SubordinateShift(date: day, type: type))
+        }
+        save()
+    }
+
+    /// 套用大夜班輪班範本（一次 8 天、不循環）：
+    /// 第 1 天時差假 → 第 2–7 天大夜班（6 天）→ 第 8 天休息。
+    func applyNightShiftRotation(subordinateId: UUID, startDate: Date) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }) else { return }
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: startDate)
+        var plan: [(Int, ShiftType)] = [(0, .jetLagLeave)]
+        for d in 1...6 { plan.append((d, .nightShift)) }
+        plan.append((7, .restDay))
+        for (offset, type) in plan {
+            guard let day = cal.date(byAdding: .day, value: offset, to: start) else { continue }
+            subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: day) }
+            subordinates[si].shifts.append(SubordinateShift(date: day, type: type))
+        }
+        save()
+    }
+
     /// 把部屬資料同步到公司組織人員：
     /// - 已連結 → 更新姓名/職稱/部門
     /// - 未連結但有部門 → 新建 OrgPerson + 自動連動產生 BusinessCard
