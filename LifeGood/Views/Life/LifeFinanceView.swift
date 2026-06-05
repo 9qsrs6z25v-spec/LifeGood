@@ -259,7 +259,12 @@ struct LifeFinanceView: View {
     private var summaryHeader: some View {
         let balance = allBankBalanceInTWD
         let isPositive = balance >= 0
-        let totalCount = allFinanceMilestones.count
+        // 一次取出，避免 ForEach 內 4 次重複 O(n) filter
+        let milestones = allFinanceMilestones
+        let totalCount = milestones.count
+        let countBySub: [FinanceSubCategory: Int] = milestones.reduce(into: [:]) { dict, m in
+            if let sub = m.financeSubCategory { dict[sub, default: 0] += 1 }
+        }
 
         return VStack(spacing: 0) {
             // 頂部：銀行總餘額 + 計數膠囊
@@ -305,7 +310,7 @@ struct LifeFinanceView: View {
             // 四欄 KPI：銀行 / 信用卡 / 證券 / 保險
             HStack(spacing: 0) {
                 ForEach(Array(FinanceSubCategory.allCases.enumerated()), id: \.element) { i, sub in
-                    let count = allFinanceMilestones.filter { $0.financeSubCategory == sub }.count
+                    let count = countBySub[sub, default: 0]
                     VStack(spacing: 5) {
                         ZStack {
                             Circle()

@@ -496,7 +496,9 @@ struct MyCalendarView: View {
     private func weekDayCard(date: Date, events: [CalendarEvent]) -> some View {
         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
         let isToday = calendar.isDateInToday(date)
-        let weekday = ["日", "一", "二", "三", "四", "五", "六"][calendar.component(.weekday, from: date) - 1]
+        let weekdayNames = ["日", "一", "二", "三", "四", "五", "六"]
+        let weekdayIdx = calendar.component(.weekday, from: date) - 1
+        let weekday = weekdayNames.indices.contains(weekdayIdx) ? weekdayNames[weekdayIdx] : ""
         let day = calendar.component(.day, from: date)
 
         return Button {
