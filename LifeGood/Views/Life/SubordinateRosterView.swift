@@ -128,7 +128,7 @@ struct SubordinateRosterView: View {
                 }
             }
             .sheet(item: $detail) { cell in
-                RosterCellDetailSheet(cell: cell, scheduleStore: scheduleStore)
+                RosterCellDetailSheet(scheduleStore: scheduleStore, cell: cell)
             }
             .sheet(isPresented: $showSettings) {
                 ShiftScheduleSettingsView(scheduleStore: scheduleStore)
