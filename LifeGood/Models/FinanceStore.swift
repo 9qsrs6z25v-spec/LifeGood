@@ -106,22 +106,23 @@ class FinanceStore: ObservableObject {
 
     private func saveInsurances() {
         if let d = try? JSONEncoder().encode(insurances) { UserDefaults.standard.set(d, forKey: insKey) }
-        CloudSyncManager.shared.push(key: insKey)
+        // 使用 pushAll() 統一走 2 秒防抖，避免連續編輯時繞過節流直接打 CloudKit
+        CloudSyncManager.shared.pushAll()
     }
 
     private func saveStocks() {
         if let d = try? JSONEncoder().encode(stocks) { UserDefaults.standard.set(d, forKey: stockKey) }
-        CloudSyncManager.shared.push(key: stockKey)
+        CloudSyncManager.shared.pushAll()
     }
 
     private func saveVehicles() {
         if let d = try? JSONEncoder().encode(vehicles) { UserDefaults.standard.set(d, forKey: vehicleKey) }
-        CloudSyncManager.shared.push(key: vehicleKey)
+        CloudSyncManager.shared.pushAll()
     }
 
     private func saveRealEstates() {
         if let d = try? JSONEncoder().encode(realEstates) { UserDefaults.standard.set(d, forKey: reKey) }
-        CloudSyncManager.shared.push(key: reKey)
+        CloudSyncManager.shared.pushAll()
     }
 
     private func load() {

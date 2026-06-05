@@ -81,8 +81,8 @@ struct AddIncomeView: View {
     // MARK: - 金額解析
 
     private var parsedAmount: Double? {
-        let v = Double(amountText.trimmingCharacters(in: .whitespaces))
-        return (v != nil && v! > 0) ? v : nil
+        guard let v = Double(amountText.trimmingCharacters(in: .whitespaces)), v > 0 else { return nil }
+        return v
     }
 
     // MARK: - bankPicker
