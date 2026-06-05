@@ -17,6 +17,7 @@ struct SubordinateOverviewView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var selectedDate = Date()
     @State private var sectionAppeared = false
+    @State private var showCompleted = false
 
     private var calendar: Calendar { Calendar.current }
 
@@ -58,12 +59,34 @@ struct SubordinateOverviewView: View {
         lifeStore.subordinates.flatMap { sub in
             sub.tasks
                 .filter { t in
-                    isSameDay(t.date, selectedDate)
-                    || t.dueDate.map({ isSameDay($0, selectedDate) }) == true
+                    !t.isCompleted && (
+                        isSameDay(t.date, selectedDate)
+                        || t.dueDate.map({ isSameDay($0, selectedDate) }) == true
+                    )
                 }
                 .map { (sub, $0) }
         }
         .sorted { $0.task.date < $1.task.date }
+    }
+
+    /// 所有部屬、所有日期的「未完成」任務總清單（逾期排最前，再依截止日 / 日期）
+    private var incompleteTasks: [(sub: Subordinate, task: SubordinateTask)] {
+        lifeStore.subordinates.flatMap { sub in
+            sub.tasks.filter { !$0.isCompleted }.map { (sub, $0) }
+        }
+        .sorted { a, b in
+            let keyA = a.task.dueDate ?? a.task.date
+            let keyB = b.task.dueDate ?? b.task.date
+            return keyA < keyB
+        }
+    }
+
+    /// 所有「已完成」任務（依完成時間新到舊，無完成時間者退用日期）
+    private var completedTasks: [(sub: Subordinate, task: SubordinateTask)] {
+        lifeStore.subordinates.flatMap { sub in
+            sub.tasks.filter { $0.isCompleted }.map { (sub, $0) }
+        }
+        .sorted { ($0.task.completedAt ?? $0.task.date) > ($1.task.completedAt ?? $1.task.date) }
     }
 
     var body: some View {
@@ -158,29 +181,96 @@ struct SubordinateOverviewView: View {
     // MARK: - 任務
 
     private var taskSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("任務", icon: "checklist", color: .cyan, count: todayTasks.count)
+        VStack(spacing: 16) {
+            // 當日任務（選取日期、未完成）
+            taskGroupCard(title: "當日任務", icon: "checklist", color: .cyan,
+                          items: todayTasks, emptyText: "當日無任務")
 
-            if todayTasks.isEmpty {
-                emptyHint("當日無任務", icon: "checklist", color: .cyan)
-            } else {
-                ForEach(Array(todayTasks.enumerated()), id: \.element.task.id) { idx, item in
-                    taskRow(item.sub, item.task)
+            // 未完成任務（跨所有日期 / 部屬的待辦總清單，逾期排最前）
+            taskGroupCard(title: "未完成任務", icon: "tray.full.fill", color: .orange,
+                          items: incompleteTasks, emptyText: "沒有未完成任務")
 
-                    if idx < todayTasks.count - 1 {
-                        Divider().padding(.leading, 62)
+            // 已完成（可收合；無已完成時不顯示）
+            if !completedTasks.isEmpty {
+                completedCard
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func taskGroupCard(title: String, icon: String, color: Color,
+                               items: [(sub: Subordinate, task: SubordinateTask)],
+                               emptyText: String) -> some View {
+        cardWrap {
+            VStack(alignment: .leading, spacing: 0) {
+                sectionHeader(title, icon: icon, color: color, count: items.count)
+                if items.isEmpty {
+                    emptyHint(emptyText, icon: icon, color: color)
+                } else {
+                    ForEach(Array(items.enumerated()), id: \.element.task.id) { idx, item in
+                        taskRow(item.sub, item.task)
+                        if idx < items.count - 1 { Divider().padding(.leading, 62) }
                     }
                 }
             }
         }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
-        )
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
-        .padding(.horizontal)
+    }
+
+    private var completedCard: some View {
+        cardWrap {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { showCompleted.toggle() }
+                } label: {
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [.green, .green.opacity(0.55)],
+                                                 startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4, height: 18)
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(colors: [Color.green.opacity(0.20), Color.green.opacity(0.08)],
+                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 28, height: 28)
+                            Circle().stroke(Color.green.opacity(0.22), lineWidth: 0.75).frame(width: 28, height: 28)
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.green)
+                        }
+                        Text("已完成").font(.subheadline.weight(.bold)).foregroundStyle(.primary)
+                        Spacer()
+                        Text("\(completedTasks.count) 筆")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.green)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.green.opacity(0.10)).clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
+                        Image(systemName: showCompleted ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14).padding(.top, 13).padding(.bottom, 9)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if showCompleted {
+                    ForEach(Array(completedTasks.enumerated()), id: \.element.task.id) { idx, item in
+                        taskRow(item.sub, item.task)
+                        if idx < completedTasks.count - 1 { Divider().padding(.leading, 62) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 任務卡片外框（三個任務分組共用：底色 + 圓角 + 細邊框 + 陰影）
+    private func cardWrap<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+            )
+            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
     // MARK: - 列元件
@@ -313,32 +403,40 @@ struct SubordinateOverviewView: View {
     }
 
     private func taskRow(_ sub: Subordinate, _ task: SubordinateTask) -> some View {
-        let isOverdue = task.dueDate.map { $0 < Date() } ?? false
-        let taskAccent: Color = isOverdue ? .red : .cyan
+        let isOverdue = !task.isCompleted && (task.dueDate.map { $0 < Date() } ?? false)
+        let taskAccent: Color = task.isCompleted ? .green : (isOverdue ? .red : .cyan)
 
         return HStack(alignment: .center, spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [taskAccent.opacity(0.22), taskAccent.opacity(0.08)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
+            // 可點打勾圓圈：直接切換完成狀態
+            Button {
+                lifeStore.toggleTaskCompletion(subordinateId: sub.id, taskId: task.id)
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [taskAccent.opacity(0.22), taskAccent.opacity(0.08)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .frame(width: 36, height: 36)
-                Circle()
-                    .stroke(taskAccent.opacity(0.22), lineWidth: 1)
-                    .frame(width: 36, height: 36)
-                Image(systemName: isOverdue ? "exclamationmark.circle.fill" : "checklist")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(taskAccent)
+                        .frame(width: 36, height: 36)
+                    Circle()
+                        .stroke(taskAccent.opacity(0.22), lineWidth: 1)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: task.isCompleted ? "checkmark.circle.fill" : (isOverdue ? "exclamationmark.circle.fill" : "circle"))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(taskAccent)
+                }
             }
+            .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(task.topic.isEmpty ? "未命名任務" : task.topic)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                        .strikethrough(task.isCompleted, color: .secondary)
+                        .foregroundStyle(task.isCompleted ? .secondary : .primary)
                     Text(sub.name)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
@@ -377,6 +475,7 @@ struct SubordinateOverviewView: View {
             }
             Spacer(minLength: 4)
         }
+        .opacity(task.isCompleted ? 0.6 : 1)
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
     }
