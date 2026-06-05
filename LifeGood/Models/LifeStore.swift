@@ -15,6 +15,7 @@ class LifeStore: ObservableObject {
     @Published var orgPeople: [OrgPerson] = [] { didSet { if !isLoading { save() } } }
 
     private var isLoading = false
+    private let saveQueue = DispatchQueue(label: "com.lifegood.lifestore.save", qos: .utility)
 
     init() {
         load()
@@ -381,44 +382,30 @@ class LifeStore: ObservableObject {
     // MARK: - 持久化
 
     private func save() {
-        let encoder = JSONEncoder()
-        if let data = try? encoder.encode(profile) {
-            UserDefaults.standard.set(data, forKey: "life_profile")
+        // 捕捉 struct 快照（值型別複製，安全傳入背景執行緒），避免主執行緒同步序列化 12 份資料
+        let snap = (
+            profile: profile, familyMembers: familyMembers, milestones: milestones,
+            relationships: relationships, pets: pets, schedules: schedules,
+            subordinates: subordinates, departments: departments, gradeTitles: gradeTitles,
+            businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople
+        )
+        saveQueue.async {
+            let encoder = JSONEncoder()
+            let ud = UserDefaults.standard
+            if let d = try? encoder.encode(snap.profile)        { ud.set(d, forKey: "life_profile") }
+            if let d = try? encoder.encode(snap.familyMembers)  { ud.set(d, forKey: "life_family") }
+            if let d = try? encoder.encode(snap.milestones)     { ud.set(d, forKey: "life_milestones") }
+            if let d = try? encoder.encode(snap.relationships)  { ud.set(d, forKey: "life_relationships") }
+            if let d = try? encoder.encode(snap.pets)           { ud.set(d, forKey: "life_pets") }
+            if let d = try? encoder.encode(snap.schedules)      { ud.set(d, forKey: "life_schedules") }
+            if let d = try? encoder.encode(snap.subordinates)   { ud.set(d, forKey: "life_subordinates") }
+            if let d = try? encoder.encode(snap.departments)    { ud.set(d, forKey: "life_departments") }
+            if let d = try? encoder.encode(snap.gradeTitles)    { ud.set(d, forKey: "life_grade_titles") }
+            if let d = try? encoder.encode(snap.businessCards)  { ud.set(d, forKey: "life_business_cards") }
+            if let d = try? encoder.encode(snap.personalEvents) { ud.set(d, forKey: "life_personal_events") }
+            if let d = try? encoder.encode(snap.orgPeople)      { ud.set(d, forKey: "life_org_people") }
+            CloudSyncManager.shared.pushAll()
         }
-        if let data = try? encoder.encode(familyMembers) {
-            UserDefaults.standard.set(data, forKey: "life_family")
-        }
-        if let data = try? encoder.encode(milestones) {
-            UserDefaults.standard.set(data, forKey: "life_milestones")
-        }
-        if let data = try? encoder.encode(relationships) {
-            UserDefaults.standard.set(data, forKey: "life_relationships")
-        }
-        if let data = try? encoder.encode(pets) {
-            UserDefaults.standard.set(data, forKey: "life_pets")
-        }
-        if let data = try? encoder.encode(schedules) {
-            UserDefaults.standard.set(data, forKey: "life_schedules")
-        }
-        if let data = try? encoder.encode(subordinates) {
-            UserDefaults.standard.set(data, forKey: "life_subordinates")
-        }
-        if let data = try? encoder.encode(departments) {
-            UserDefaults.standard.set(data, forKey: "life_departments")
-        }
-        if let data = try? encoder.encode(gradeTitles) {
-            UserDefaults.standard.set(data, forKey: "life_grade_titles")
-        }
-        if let data = try? encoder.encode(businessCards) {
-            UserDefaults.standard.set(data, forKey: "life_business_cards")
-        }
-        if let data = try? encoder.encode(personalEvents) {
-            UserDefaults.standard.set(data, forKey: "life_personal_events")
-        }
-        if let data = try? encoder.encode(orgPeople) {
-            UserDefaults.standard.set(data, forKey: "life_org_people")
-        }
-        CloudSyncManager.shared.pushAll()
     }
 
     private func load() {
