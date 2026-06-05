@@ -549,6 +549,7 @@ class ExpenseStore: ObservableObject {
 
     private func load() {
         isLoading = true
+        defer { isLoading = false }
         if let data = UserDefaults.standard.data(forKey: saveKey),
            let decoded = try? JSONDecoder().decode([Expense].self, from: data) {
             expenses = decoded
@@ -561,7 +562,6 @@ class ExpenseStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([CurrencyRate].self, from: data) {
             currencyRates = decoded
         }
-        isLoading = false
     }
 
     // MARK: - 匯出

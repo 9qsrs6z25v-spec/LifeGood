@@ -200,7 +200,7 @@ final class CloudSyncManager: ObservableObject {
                     CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
                     CloudKitManager.shared.uploadAllLocalPhotos()
                     self.markSynced()
-                    DispatchQueue.main.async { self.lastChangeReason = .initialSync }
+                    DispatchQueue.main.async { [weak self] in self?.lastChangeReason = .initialSync }
                 } else {
                     DispatchQueue.main.async {
                         self.pendingInitialSync = InitialSyncInfo(cloudItemCount: count, cloudBlobs: cloudBlobs)
@@ -241,7 +241,7 @@ final class CloudSyncManager: ObservableObject {
         CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
         CloudKitManager.shared.uploadAllLocalPhotos()
         markSynced()
-        DispatchQueue.main.async { self.lastChangeReason = .initialSync }
+        DispatchQueue.main.async { [weak self] in self?.lastChangeReason = .initialSync }
     }
 
     /// 使用者在首次同步選項中取消 → 關回同步開關

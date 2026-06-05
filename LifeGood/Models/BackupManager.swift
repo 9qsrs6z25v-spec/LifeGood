@@ -40,7 +40,8 @@ class BackupManager {
                 try data.write(to: url, options: .atomic)
             } catch {
                 // 寫入失敗時重置時間戳，讓下次 createSnapshotIfNeeded 能再試一次
-                self?.lastSnapshotDate = nil
+                // 回主執行緒寫入，與 createSnapshotIfNeeded 的讀取保持同一執行緒
+                DispatchQueue.main.async { self?.lastSnapshotDate = nil }
             }
             self?.cleanOldBackups()
         }
