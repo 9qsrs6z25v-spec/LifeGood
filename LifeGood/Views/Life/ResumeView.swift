@@ -57,6 +57,16 @@ struct HolographicWatermark: View {
 }
 
 // MARK: - 個人檔案閃卡
+// [2026-06] 本次美化方向（ProfileFlashCard）：
+//   1. fmtWan → 升級為 fmtAssets：加入億量級支援（≥1億顯示 "X.X 億"，≥1萬顯示 "X.X 萬"，
+//      其餘顯示 "NT$X"），對齊 OverviewView.smartCurrency 與 FinanceOverviewView.fmtShort 規格，
+//      避免資產達億時出現五位數尷尬顯示。
+//   2. 總資產大字：加入 minimumScaleFactor(0.52) + lineLimit(1)，防止超長數字溢出；
+//      字型從固定 48pt 調整為 46pt，搭配自適應仍可維持視覺衝擊力。
+//   3. 底部資訊欄：每欄加入半透明白色圓角背景框，強化深色模式下的邊界感與視覺層次，
+//      對齊 OverviewView.summaryCard 的內嵌資訊排版語言。
+//   4. 散景裝飾圓：在卡片右上 + 左下加入兩顆白色高亮 blur 圓，增加卡片立體層次，
+//      對齊 FinanceOverviewView.totalAssetsCard / OverviewView.monthlyBalanceCard 設計規格。
 
 struct ProfileFlashCard: View {
     let profile: UserProfile
@@ -98,34 +108,42 @@ struct ProfileFlashCard: View {
                     Text(profile.chineseName.isEmpty ? "未設定姓名" : profile.chineseName)
                         .font(.title.weight(.bold))
                         .foregroundStyle(.white)
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
                     if !profile.englishName.isEmpty {
                         Text(profile.englishName)
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.white.opacity(0.7))
+                            .minimumScaleFactor(0.75)
+                            .lineLimit(1)
                     }
                 }
                 .padding(.top, 14)
 
-                // 財富總計
-                VStack(spacing: 4) {
-                    Text(fmtWan(totalAssets))
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                // 財富總計：萬／億自適應顯示，避免億量級出現五位數
+                VStack(spacing: 5) {
+                    Text(fmtAssets(totalAssets))
+                        .font(.system(size: 46, weight: .bold, design: .rounded))
                         .foregroundStyle(rarity.textColor)
-                    Text("萬元 總資產")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .minimumScaleFactor(0.52)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                    Text("總資產")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.58))
+                        .padding(.horizontal, 10).padding(.vertical, 3)
+                        .background(.white.opacity(0.12))
+                        .clipShape(Capsule())
                 }
                 .padding(.vertical, 16)
 
-                // 底部資訊列
-                HStack {
+                // 底部資訊列：每欄加半透明圓角背景框，提升深色模式下的邊界感
+                HStack(spacing: 8) {
                     infoColumn("公司", profile.company.isEmpty ? "—" : profile.company)
-                    Spacer()
                     infoColumn("職稱", profile.jobTitle.isEmpty ? "—" : profile.jobTitle)
-                    Spacer()
                     infoColumn("配偶", spouseDisplay)
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 14)
                 .padding(.bottom, 16)
             }
             .zIndex(1)
@@ -134,6 +152,23 @@ struct ProfileFlashCard: View {
             if !profile.englishName.isEmpty {
                 HolographicWatermark(text: profile.englishName)
             }
+
+            // 散景裝飾圓：增加卡片立體層次感（對齊 FinanceOverviewView.totalAssetsCard 規格）
+            GeometryReader { geo in
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.10))
+                        .frame(width: 120, height: 120)
+                        .offset(x: geo.size.width - 40, y: -40)
+                        .blur(radius: 14)
+                    Circle()
+                        .fill(.white.opacity(0.07))
+                        .frame(width: 80, height: 80)
+                        .offset(x: -20, y: geo.size.height - 20)
+                        .blur(radius: 10)
+                }
+            }
+            .allowsHitTesting(false)
         }
         .background(
             LinearGradient(colors: rarity.bgGradient,
@@ -153,19 +188,39 @@ struct ProfileFlashCard: View {
     }
 
     private func infoColumn(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 3) {
             Text(label)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.5))
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.50))
             Text(value)
-                .font(.caption.bold())
-                .foregroundStyle(.white.opacity(0.8))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.85))
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 7)
+        .background(.white.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(.white.opacity(0.18), lineWidth: 0.6)
+        )
     }
 
-    private func fmtWan(_ v: Double) -> String {
-        String(format: "%.0f", v / 10000)
+    // 億量級格式：≥1億 → "X.X 億"，≥1萬 → "X.X 萬"，其餘 → "NT$X"
+    private func fmtAssets(_ v: Double) -> String {
+        let absV = abs(v)
+        if absV >= 100_000_000 {
+            return String(format: "%.1f 億", v / 100_000_000)
+        }
+        if absV >= 10_000 {
+            let wan = v / 10_000
+            // 避免 9999.95 萬四捨五入到「10000.0 萬」
+            if abs(wan) >= 9_999.95 { return String(format: "%.1f 億", v / 100_000_000) }
+            return String(format: abs(wan) >= 100 ? "%.1f 萬" : "%.2f 萬", wan)
+        }
+        return String(format: "NT$%.0f", v)
     }
 }
 
