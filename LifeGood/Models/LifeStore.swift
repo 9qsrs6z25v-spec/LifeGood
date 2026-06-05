@@ -121,6 +121,16 @@ class LifeStore: ObservableObject {
         save()
     }
 
+    /// 切換某位部屬底下某筆任務的完成狀態（總覽頁與詳情頁的快速打勾共用）。
+    /// 標記完成時記下 completedAt，取消完成則清空。
+    func toggleTaskCompletion(subordinateId: UUID, taskId: UUID) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
+              let ti = subordinates[si].tasks.firstIndex(where: { $0.id == taskId }) else { return }
+        subordinates[si].tasks[ti].isCompleted.toggle()
+        subordinates[si].tasks[ti].completedAt = subordinates[si].tasks[ti].isCompleted ? Date() : nil
+        save()
+    }
+
     /// 把部屬資料同步到公司組織人員：
     /// - 已連結 → 更新姓名/職稱/部門
     /// - 未連結但有部門 → 新建 OrgPerson + 自動連動產生 BusinessCard

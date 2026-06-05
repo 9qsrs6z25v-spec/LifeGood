@@ -210,37 +210,56 @@ struct SubordinateDetailView: View {
                     Image(systemName: "plus.circle.fill").foregroundStyle(.cyan)
                 }
             }
-            let items = subordinate.tasks.sorted { $0.date > $1.date }
+            // 未完成在前、已完成在後；各自再依日期新到舊
+            let items = subordinate.tasks.sorted {
+                $0.isCompleted != $1.isCompleted ? (!$0.isCompleted && $1.isCompleted) : ($0.date > $1.date)
+            }
             if items.isEmpty {
                 emptyHint
             } else {
                 ForEach(items) { t in
-                    Button {
-                        if subscription.isPremium { editingTask = t }
-                        else { showPremiumAlert = true }
-                    } label: {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "checklist").font(.caption).foregroundStyle(.cyan).frame(width: 20)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(t.topic.isEmpty ? "未命名任務" : t.topic)
-                                    .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                                HStack(spacing: 6) {
-                                    Text(formatDateTime(t.date)).font(.caption2).foregroundStyle(.tertiary)
-                                    if let due = t.dueDate {
-                                        Text("截止 \(formatDate(due))").font(.caption2)
-                                            .padding(.horizontal, 5).padding(.vertical, 1)
-                                            .background(due < Date() ? Color.red.opacity(0.12) : Color.cyan.opacity(0.12))
-                                            .foregroundStyle(due < Date() ? .red : .cyan)
-                                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    HStack(alignment: .top, spacing: 10) {
+                        // 左側可點打勾圓圈：直接切換完成，不進編輯頁
+                        Button {
+                            lifeStore.toggleTaskCompletion(subordinateId: subordinateId, taskId: t.id)
+                        } label: {
+                            Image(systemName: t.isCompleted ? "checkmark.circle.fill" : "circle")
+                                .font(.body)
+                                .foregroundStyle(t.isCompleted ? Color.green : Color.cyan)
+                                .frame(width: 24)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            if subscription.isPremium { editingTask = t }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(t.topic.isEmpty ? "未命名任務" : t.topic)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(t.isCompleted ? .secondary : .primary)
+                                        .strikethrough(t.isCompleted, color: .secondary)
+                                    HStack(spacing: 6) {
+                                        Text(formatDateTime(t.date)).font(.caption2).foregroundStyle(.tertiary)
+                                        if let due = t.dueDate {
+                                            Text("截止 \(formatDate(due))").font(.caption2)
+                                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                                .background(due < Date() && !t.isCompleted ? Color.red.opacity(0.12) : Color.cyan.opacity(0.12))
+                                                .foregroundStyle(due < Date() && !t.isCompleted ? .red : .cyan)
+                                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                        }
                                     }
                                 }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                             }
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.horizontal).padding(.vertical, 8).contentShape(Rectangle())
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                    .opacity(t.isCompleted ? 0.6 : 1)
+                    .padding(.horizontal).padding(.vertical, 8)
                 }
             }
         }
@@ -632,6 +651,7 @@ struct TaskEditorSheet: View {
     @State private var hasDueDate = false
     @State private var dueDate = Date()
     @State private var note = ""
+    @State private var isCompleted = false
 
     var body: some View {
         NavigationStack {
@@ -644,6 +664,13 @@ struct TaskEditorSheet: View {
                     if hasDueDate {
                         DatePicker("截止日期", selection: $dueDate)
                     }
+                }
+                Section {
+                    Toggle(isOn: $isCompleted) {
+                        Label("標記為已完成", systemImage: isCompleted ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(isCompleted ? .green : .primary)
+                    }
+                    .tint(.green)
                 }
                 Section("備註") {
                     TextField("選填", text: $note, axis: .vertical).lineLimit(2...5)
@@ -667,6 +694,7 @@ struct TaskEditorSheet: View {
             .onAppear {
                 if let e = editing {
                     topic = e.topic; content = e.content; date = e.date; note = e.note
+                    isCompleted = e.isCompleted
                     if let d = e.dueDate { hasDueDate = true; dueDate = d }
                 }
             }
@@ -675,12 +703,15 @@ struct TaskEditorSheet: View {
 
     private func save() {
         guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        // 完成時間：原本未完成→改完成時記下現在；維持完成則沿用舊時間；取消完成則清空
+        let completedAt: Date? = isCompleted ? (editing?.completedAt ?? Date()) : nil
         let task = SubordinateTask(
             id: editing?.id ?? UUID(),
             topic: topic.trimmingCharacters(in: .whitespaces),
             content: content.trimmingCharacters(in: .whitespaces),
             date: date, dueDate: hasDueDate ? dueDate : nil,
-            note: note.trimmingCharacters(in: .whitespaces)
+            note: note.trimmingCharacters(in: .whitespaces),
+            isCompleted: isCompleted, completedAt: completedAt
         )
         if let idx = sub.tasks.firstIndex(where: { $0.id == task.id }) { sub.tasks[idx] = task }
         else { sub.tasks.append(task) }

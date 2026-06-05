@@ -1044,11 +1044,33 @@ struct SubordinateTask: Identifiable, Codable {
     var date: Date
     var dueDate: Date?
     var note: String
+    var isCompleted: Bool
+    var completedAt: Date?
 
     init(id: UUID = UUID(), topic: String = "", content: String = "",
-         date: Date = Date(), dueDate: Date? = nil, note: String = "") {
+         date: Date = Date(), dueDate: Date? = nil, note: String = "",
+         isCompleted: Bool = false, completedAt: Date? = nil) {
         self.id = id; self.topic = topic; self.content = content
         self.date = date; self.dueDate = dueDate; self.note = note
+        self.isCompleted = isCompleted; self.completedAt = completedAt
+    }
+
+    // 自訂解碼：isCompleted / completedAt 為後加欄位，舊存檔沒有這兩個 key。
+    // 用 decodeIfPresent 容錯，避免單筆缺欄位導致整個 subordinates 陣列解碼失敗、資料消失。
+    enum CodingKeys: String, CodingKey {
+        case id, topic, content, date, dueDate, note, isCompleted, completedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        topic = try c.decodeIfPresent(String.self, forKey: .topic) ?? ""
+        content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
+        date = try c.decodeIfPresent(Date.self, forKey: .date) ?? Date()
+        dueDate = try c.decodeIfPresent(Date.self, forKey: .dueDate)
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        isCompleted = try c.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+        completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
     }
 }
 
