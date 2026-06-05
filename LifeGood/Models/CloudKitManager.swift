@@ -25,6 +25,8 @@ final class CloudKitManager {
     static let didPullKVChangesNotification = Notification.Name("CloudKitManager.didPullKVChanges")
     static let didPullPhotoChangesNotification = Notification.Name("CloudKitManager.didPullPhotoChanges")
     static let accountStatusDidChangeNotification = Notification.Name("CloudKitManager.accountStatusDidChange")
+    /// 任何 CloudKit 操作失敗時發送，userInfo["message"] 為可讀錯誤字串（給 SettingsView 顯示）
+    static let didEncounterErrorNotification = Notification.Name("CloudKitManager.didEncounterError")
 
     /// 已知的本地照片資料夾（與 LifeModels / FinanceModels / Expense 中 photosDirectory 對應）
     static let photoDirectories: [String] = [
@@ -119,7 +121,8 @@ final class CloudKitManager {
                     self.defaults.set(true, forKey: self.zoneCreatedKey)
                 }
                 completion(true)
-            case .failure:
+            case .failure(let error):
+                self?.report(error, context: "建立 iCloud 資料區")
                 completion(false)
             }
         }
@@ -144,7 +147,8 @@ final class CloudKitManager {
                     self.defaults.set(true, forKey: self.subscriptionCreatedKey)
                 }
                 completion(true)
-            case .failure:
+            case .failure(let error):
+                self?.report(error, context: "建立 iCloud 訂閱")
                 completion(false)
             }
         }
@@ -164,11 +168,16 @@ final class CloudKitManager {
         }
     }
 
-    private func modifyKV(key: String, data: Data, completion: ((Bool) -> Void)?) {
+    private func modifyKV(key: String, data: Data, retriesLeft: Int = 1, completion: ((Bool) -> Void)?) {
         let recID = CKRecord.ID(recordName: "kv_\(key)", zoneID: zoneID)
         // 先抓既有 record（為了拿 recordChangeTag 避免 conflict），再覆蓋
-        privateDB.fetch(withRecordID: recID) { [weak self] existing, _ in
+        privateDB.fetch(withRecordID: recID) { [weak self] existing, fetchError in
             guard let self = self else { return }
+            // fetch 失敗但「不是查無此筆」→ 真錯誤，回報後結束
+            if existing == nil, let fe = fetchError as? CKError, fe.code != .unknownItem {
+                self.report(fe, context: "上傳 \(key)")
+                completion?(false); return
+            }
             let record = existing ?? CKRecord(recordType: Self.kvBlobRecordType, recordID: recID)
 
             // JSON 寫到暫存檔做為 CKAsset
@@ -177,6 +186,7 @@ final class CloudKitManager {
             do {
                 try data.write(to: tmp, options: .atomic)
             } catch {
+                self.report(error, context: "上傳 \(key)")
                 completion?(false); return
             }
             record["payload"] = CKAsset(fileURL: tmp)
@@ -186,11 +196,19 @@ final class CloudKitManager {
             let op = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
             op.savePolicy = .changedKeys
             op.qualityOfService = .utility
-            op.modifyRecordsResultBlock = { result in
+            op.modifyRecordsResultBlock = { [weak self] result in
                 try? FileManager.default.removeItem(at: tmp)
                 switch result {
-                case .success: completion?(true)
-                case .failure: completion?(false)
+                case .success:
+                    completion?(true)
+                case .failure(let error):
+                    // 兩台同時改同一筆 → 重新抓最新版本再覆蓋一次（整份快照，last-writer-wins）
+                    if Self.isServerRecordChanged(error), retriesLeft > 0 {
+                        self?.modifyKV(key: key, data: data, retriesLeft: retriesLeft - 1, completion: completion)
+                    } else {
+                        self?.report(error, context: "上傳 \(key)")
+                        completion?(false)
+                    }
                 }
             }
             self.privateDB.add(op)
@@ -225,10 +243,12 @@ final class CloudKitManager {
                     let op = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
                     op.savePolicy = .changedKeys
                     op.qualityOfService = .utility
-                    op.modifyRecordsResultBlock = { result in
+                    op.modifyRecordsResultBlock = { [weak self] result in
                         switch result {
                         case .success: completion?(true)
-                        case .failure: completion?(false)
+                        case .failure(let error):
+                            self?.report(error, context: "上傳照片 \(fileName)")
+                            completion?(false)
                         }
                     }
                     self.privateDB.add(op)
@@ -355,7 +375,15 @@ final class CloudKitManager {
                     if let ck = err as? CKError, ck.code == .changeTokenExpired {
                         self.clearChangeToken()
                         self.fetchChanges(completion: completion)
+                    } else if let ck = err as? CKError, ck.code == .zoneNotFound || ck.code == .userDeletedZone {
+                        // zone 被刪 → 清掉本地旗標讓下次重建
+                        self.defaults.removeObject(forKey: self.zoneCreatedKey)
+                        self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
+                        self.clearChangeToken()
+                        self.report(err, context: "拉取雲端變更")
+                        completion?(false)
                     } else {
+                        self.report(err, context: "拉取雲端變更")
                         completion?(false)
                     }
                 }
@@ -446,6 +474,57 @@ final class CloudKitManager {
         defaults.removeObject(forKey: subscriptionCreatedKey)
         defaults.removeObject(forKey: serverChangeTokenKey)
         defaults.removeObject(forKey: initialPullDoneKey)
+    }
+
+    // MARK: - 錯誤回報（把過去被吞掉的 CloudKit 失敗變成可見訊息）
+
+    /// 把錯誤翻成可讀中文並廣播 + DEBUG console 印出。nil 代表沒有錯誤。
+    func report(_ error: Error?, context: String) {
+        guard let error = error else { return }
+        let msg = Self.describe(error)
+        #if DEBUG
+        print("☁️ CloudKit 錯誤[\(context)]：\(msg)　原始：\(error)")
+        #endif
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: Self.didEncounterErrorNotification, object: nil,
+                userInfo: ["message": "\(context)：\(msg)"]
+            )
+        }
+    }
+
+    /// 把 CKError 轉成使用者看得懂的描述
+    static func describe(_ error: Error) -> String {
+        guard let ck = error as? CKError else { return error.localizedDescription }
+        switch ck.code {
+        case .networkUnavailable, .networkFailure:        return "網路無法連線"
+        case .notAuthenticated:                           return "未登入 iCloud，或 iCloud Drive 未開啟"
+        case .quotaExceeded:                              return "iCloud 儲存空間不足"
+        case .zoneNotFound, .userDeletedZone:             return "iCloud 資料區不存在（將重建）"
+        case .changeTokenExpired:                         return "同步標記過期（將重新整批拉取）"
+        case .serverRecordChanged:                        return "兩台裝置同時修改了同一筆資料"
+        case .permissionFailure:                          return "iCloud 權限不足"
+        case .managedAccountRestricted:                   return "此 iCloud 帳號受限制"
+        case .requestRateLimited, .serviceUnavailable, .zoneBusy:
+                                                          return "iCloud 暫時忙碌，稍後會自動重試"
+        case .partialFailure:
+            if let first = ck.partialErrorsByItemID?.values.compactMap({ $0 as? CKError }).first {
+                return describe(first)
+            }
+            return "部分資料同步失敗"
+        default:                                          return ck.localizedDescription
+        }
+    }
+
+    /// 是否為「伺服器上的版本較新」衝突（含 partialFailure 內層）
+    static func isServerRecordChanged(_ error: Error) -> Bool {
+        guard let ck = error as? CKError else { return false }
+        if ck.code == .serverRecordChanged { return true }
+        if ck.code == .partialFailure,
+           let byID = ck.partialErrorsByItemID {
+            return byID.values.contains { ($0 as? CKError)?.code == .serverRecordChanged }
+        }
+        return false
     }
 
     // MARK: - Helpers

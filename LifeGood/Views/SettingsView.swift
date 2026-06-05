@@ -562,6 +562,18 @@ struct SettingsView: View {
                 }
             }
 
+            if let err = cloudSync.lastErrorMessage {
+                HStack(alignment: .top) {
+                    Label("同步錯誤", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                    Spacer()
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+
             Button {
                 cloudSync.syncNow()
             } label: {
