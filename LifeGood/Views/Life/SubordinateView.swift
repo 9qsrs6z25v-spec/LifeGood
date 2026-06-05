@@ -42,6 +42,7 @@ struct SubordinateView: View {
     @State private var editingItem: Subordinate?
     @State private var viewingItem: Subordinate?
     @State private var showPremiumAlert = false
+    @State private var showRoster = false
     @AppStorage("subordinateSortOption") private var sortOptionRaw = SubordinateSortOption.dateAdded.rawValue
     @AppStorage("subordinateSortAscending") private var sortAscending = false
 
@@ -155,6 +156,13 @@ struct SubordinateView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
+                        Button {
+                            showRoster = true
+                        } label: {
+                            Image(systemName: "calendar.day.timeline.left")
+                                .font(.title3).foregroundStyle(.blue)
+                        }
+
                         Menu {
                             ForEach(SubordinateSortOption.allCases) { option in
                                 Button {
@@ -198,6 +206,7 @@ struct SubordinateView: View {
             .sheet(isPresented: $showAdd) { AddSubordinateView() }
             .sheet(item: $editingItem) { item in AddSubordinateView(editing: item) }
             .sheet(item: $viewingItem) { item in SubordinateDetailView(subordinate: item) }
+            .sheet(isPresented: $showRoster) { SubordinateRosterView() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
