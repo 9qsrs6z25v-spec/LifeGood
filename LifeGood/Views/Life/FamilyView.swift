@@ -310,8 +310,11 @@ struct FamilyView: View {
         }
     }
 
+    private static let _dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self._dateFmt.string(from: date)
     }
 
     private func spouseDisplayName(for member: FamilyMember) -> String? {

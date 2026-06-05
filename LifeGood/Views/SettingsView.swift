@@ -787,8 +787,8 @@ struct SettingsView: View {
             .listRowSeparator(.hidden)
 
             // 支出記錄時間區間（若有資料）
-            if let earliest = store.expenses.map(\.date).min(),
-               let latest = store.expenses.map(\.date).max() {
+            let expDates = store.expenses.map(\.date)
+            if let earliest = expDates.min(), let latest = expDates.max() {
                 HStack(spacing: 12) {
                     ZStack {
                         Circle()

@@ -623,10 +623,12 @@ struct StockDetailView: View {
         return String(format: "%g", v)
     }
 
-    private func formatPrice(_ v: Double) -> String {
+    private static let _priceFmt: NumberFormatter = {
         let f = NumberFormatter(); f.numberStyle = .decimal
-        f.minimumFractionDigits = 2; f.maximumFractionDigits = 2
-        return (stock.linkedBankCurrency ?? "NT$") + (f.string(from: NSNumber(value: v)) ?? "0")
+        f.minimumFractionDigits = 2; f.maximumFractionDigits = 2; return f
+    }()
+    private func formatPrice(_ v: Double) -> String {
+        (stock.linkedBankCurrency ?? "NT$") + (Self._priceFmt.string(from: NSNumber(value: v)) ?? "0")
     }
 
     // MARK: - 連結帳戶
@@ -763,10 +765,11 @@ struct StockDetailView: View {
         return String(format: "%.1f", wan)
     }
 
+    private static let _dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
     private func fmtDate(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy/M/d"
-        return f.string(from: d)
+        Self._dateFmt.string(from: d)
     }
 }
 
@@ -953,16 +956,19 @@ struct StockTransactionEditor: View {
         return String(format: "%g", v)
     }
 
-    private func formatNT(_ v: Double) -> String {
+    private static let _ntFmt: NumberFormatter = {
         let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0; return f
+    }()
+    private func formatNT(_ v: Double) -> String {
+        Self._ntFmt.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
+    private static let _tradeDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/MM/dd"; return f
+    }()
     private func formatTradeDate(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy/MM/dd"
-        return f.string(from: d)
+        Self._tradeDateFmt.string(from: d)
     }
 }
 
@@ -1171,10 +1177,12 @@ struct StockDividendEditor: View {
         }
     }
 
-    private func formatCash(_ v: Double) -> String {
+    private static let _cashFmt: NumberFormatter = {
         let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0; return f
+    }()
+    private func formatCash(_ v: Double) -> String {
+        Self._cashFmt.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     // MARK: - Save / Delete

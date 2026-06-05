@@ -978,17 +978,12 @@ struct ChartView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
-                .onAppear {
-                    withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.10)) {
-                        typeBreakdownAppeared = true
-                    }
-                }
             }
         }
         .opacity(typeBreakdownAppeared || total == 0 ? 1 : 0)
         .offset(y: typeBreakdownAppeared || total == 0 ? 0 : 14)
         .onAppear {
-            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.12)) {
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.10)) {
                 typeBreakdownAppeared = true
             }
         }
