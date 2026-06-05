@@ -2047,9 +2047,10 @@ struct RealEstateDetailView: View {
         String(format: "%g", v / 10000)
     }
 
-    private func fmtDate(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
-    }
+    private static let _dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private func fmtDate(_ d: Date) -> String { Self._dateFmt.string(from: d) }
 
     // MARK: - 章節項目：點擊編輯 / 複製 / 刪除
 
@@ -2941,9 +2942,10 @@ struct ExpensePhotoStackViewer: View {
         .padding(.bottom, 32)
     }
 
-    private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
-    }
+    private static let _dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private func fmtDate(_ date: Date) -> String { Self._dateFmt.string(from: date) }
 }
 
 // MARK: - 房屋資料集錦：可愛風照片瀏覽器
@@ -3229,12 +3231,13 @@ struct CutePhotoViewer: View {
         .padding(.bottom, 18)
     }
 
-    private func fmtDate(_ d: Date) -> String {
+    private static let _dateFmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy 年 M 月 d 日"
         f.locale = Locale(identifier: "zh_TW")
-        return f.string(from: d)
-    }
+        return f
+    }()
+    private func fmtDate(_ d: Date) -> String { Self._dateFmt.string(from: d) }
 }
 
 // MARK: - 文件預覽（QuickLook 包裝）
