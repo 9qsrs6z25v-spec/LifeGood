@@ -546,7 +546,11 @@ struct MeetingEditorSheet: View {
             Form {
                 Section("會議資訊") {
                     TextField("會議主題", text: $topic)
-                    DatePicker("日期時間", selection: $date)
+                    HStack {
+                        Text("日期時間")
+                        Spacer()
+                        FiveMinuteDateTimePicker(selection: $date).fixedSize()
+                    }
                     HStack {
                         TextField("會議長度", text: $durationText).keyboardType(.numberPad)
                         Text("分鐘").foregroundStyle(.secondary)
@@ -611,6 +615,9 @@ struct MeetingEditorSheet: View {
                     durationText = "\(e.durationMinutes)"
                     if let r = e.recurrence { hasRecurrence = true; recurrence = r }
                     items = e.items; note = e.note
+                } else {
+                    // 新會議：預設時間先對齊到 5 分鐘倍數，與選擇器一致
+                    date = FiveMinuteDateTimePicker.roundedToFiveMinutes(Date())
                 }
             }
         }
@@ -707,7 +714,7 @@ struct TaskEditorSheet: View {
                     if let d = e.dueDate { hasDueDate = true; dueDate = d }
                 } else {
                     // 新任務：預設時間先對齊到 5 分鐘倍數，與選擇器一致
-                    date = Self.roundedToFiveMinutes(Date())
+                    date = FiveMinuteDateTimePicker.roundedToFiveMinutes(Date())
                     dueDate = date
                 }
             }
@@ -735,16 +742,6 @@ struct TaskEditorSheet: View {
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
         sub.tasks.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
-    }
-
-    /// 把時間對齊到最接近的 5 分鐘倍數（秒歸零）
-    private static func roundedToFiveMinutes(_ date: Date) -> Date {
-        let cal = Calendar.current
-        let minute = cal.component(.minute, from: date)
-        let second = cal.component(.second, from: date)
-        let target = Int((Double(minute) / 5.0).rounded()) * 5   // 0...60
-        let base = cal.date(byAdding: .second, value: -second, to: date) ?? date
-        return cal.date(byAdding: .minute, value: target - minute, to: base) ?? date
     }
 }
 
@@ -789,5 +786,15 @@ struct FiveMinuteDateTimePicker: UIViewRepresentable {
         var components = Locale.Components(locale: Locale(identifier: "zh_Hant_TW"))
         components.hourCycle = .zeroToTwentyThree
         return Locale(components: components)
+    }
+
+    /// 把時間對齊到最接近的 5 分鐘倍數（秒歸零）
+    static func roundedToFiveMinutes(_ date: Date) -> Date {
+        let cal = Calendar.current
+        let minute = cal.component(.minute, from: date)
+        let second = cal.component(.second, from: date)
+        let target = Int((Double(minute) / 5.0).rounded()) * 5   // 0...60
+        let base = cal.date(byAdding: .second, value: -second, to: date) ?? date
+        return cal.date(byAdding: .minute, value: target - minute, to: base) ?? date
     }
 }
