@@ -104,50 +104,7 @@ struct ChildrenResumeView: View {
                         .foregroundStyle(accent)
                 }
 
-                VStack(alignment: .leading, spacing: 5) {
-                    // 姓名 + 角色 Capsule
-                    HStack(spacing: 6) {
-                        Text(childDisplayName(child))
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                        Text(child.role.rawValue)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(accent)
-                            .padding(.horizontal, 7).padding(.vertical, 2.5)
-                            .background(accent.opacity(0.12))
-                            .clipShape(Capsule())
-                    }
-
-                    // 生日 + 年齡膠囊
-                    if let bd = child.birthday {
-                        HStack(spacing: 5) {
-                            Image(systemName: "birthday.cake.fill")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(accent.opacity(0.70))
-                            Text(Self.dateFormatter.string(from: bd))
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                            Text(ageString(from: bd))
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(accent)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(accent.opacity(0.10))
-                                .clipShape(Capsule())
-                        }
-                    }
-
-                    // 紀錄徽章列
-                    let badges = recordBadges(for: child)
-                    if !badges.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 5) {
-                                ForEach(badges, id: \.type) { item in
-                                    recordBadge(type: item.type, count: item.count)
-                                }
-                            }
-                        }
-                    }
-                }
+                childCardInfo(child, accent: accent)
 
                 Spacer(minLength: 4)
 
@@ -166,6 +123,63 @@ struct ChildrenResumeView: View {
                 .stroke(accent.opacity(0.10), lineWidth: 0.75)
         )
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    // MARK: - 兒女卡片：中央資訊欄（姓名 / 生日 / 徽章）
+
+    @ViewBuilder
+    private func childCardInfo(_ child: FamilyMember, accent: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            childCardNameRow(child, accent: accent)
+            if let bd = child.birthday {
+                childCardBirthdayRow(bd, accent: accent)
+            }
+            let badges = recordBadges(for: child)
+            if !badges.isEmpty {
+                childCardBadgesRow(badges)
+            }
+        }
+    }
+
+    private func childCardNameRow(_ child: FamilyMember, accent: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(childDisplayName(child))
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+            Text(child.role.rawValue)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(accent)
+                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                .background(accent.opacity(0.12))
+                .clipShape(Capsule())
+        }
+    }
+
+    private func childCardBirthdayRow(_ bd: Date, accent: Color) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "birthday.cake.fill")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(accent.opacity(0.70))
+            Text(Self.dateFormatter.string(from: bd))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Text(ageString(from: bd))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(accent)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+        }
+    }
+
+    private func childCardBadgesRow(_ badges: [(type: ChildRecordType, count: Int)]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 5) {
+                ForEach(badges, id: \.type) { item in
+                    recordBadge(type: item.type, count: item.count)
+                }
+            }
+        }
     }
 
     // MARK: - 紀錄徽章（微型彩色膠囊）
