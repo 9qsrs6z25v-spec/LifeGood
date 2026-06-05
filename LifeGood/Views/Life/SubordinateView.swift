@@ -708,7 +708,10 @@ struct AddSubordinateView: View {
             gradeTitleId: selectedGradeTitleId,
             departmentId: selectedDepartmentId,
             records: existingRecords,
-            joinDate: hasJoinDate ? joinDate : nil
+            joinDate: hasJoinDate ? joinDate : nil,
+            // 編輯時務必帶回既有的會議與任務，否則 update() 會以空陣列覆蓋而導致消失
+            meetings: editing?.meetings ?? [],
+            tasks: editing?.tasks ?? []
         )
         if editing != nil { lifeStore.update(item) } else { lifeStore.add(item) }
         dismiss()
