@@ -18,6 +18,7 @@ class ExpenseStore: ObservableObject {
     private let incomeKey = "lifegood_incomes"
     private let currencyRatesKey = "lifegood_currency_rates"
     private var isLoading = false
+    private let saveQueue = DispatchQueue(label: "com.lifegood.expensestore.save", qos: .utility)
 
     init() {
         load()
@@ -517,23 +518,33 @@ class ExpenseStore: ObservableObject {
     // MARK: - 持久化
 
     private func save() {
-        if let data = try? JSONEncoder().encode(expenses) {
-            UserDefaults.standard.set(data, forKey: saveKey)
-        }
-        if let data = try? JSONEncoder().encode(incomes) {
-            UserDefaults.standard.set(data, forKey: incomeKey)
-        }
         modifyID = UUID()
-        CloudSyncManager.shared.pushAll()
+        let expSnap = expenses
+        let incSnap = incomes
+        let expKey = saveKey
+        let incKey = incomeKey
+        saveQueue.async {
+            if let data = try? JSONEncoder().encode(expSnap) {
+                UserDefaults.standard.set(data, forKey: expKey)
+            }
+            if let data = try? JSONEncoder().encode(incSnap) {
+                UserDefaults.standard.set(data, forKey: incKey)
+            }
+            CloudSyncManager.shared.pushAll()
+        }
     }
 
     private func saveCurrencyRates() {
-        if let data = try? JSONEncoder().encode(currencyRates) {
-            UserDefaults.standard.set(data, forKey: currencyRatesKey)
-        }
+        let snap = currencyRates
+        let key = currencyRatesKey
         // 使用 pushAll() 而非 push(key:)，統一走 2 秒防抖，
         // 避免匯率連續更新時繞過節流直接打 CloudKit
-        CloudSyncManager.shared.pushAll()
+        saveQueue.async {
+            if let data = try? JSONEncoder().encode(snap) {
+                UserDefaults.standard.set(data, forKey: key)
+            }
+            CloudSyncManager.shared.pushAll()
+        }
     }
 
     private func load() {

@@ -11,6 +11,7 @@ class FinanceStore: ObservableObject {
     private let vehicleKey = "lifegood_vehicles"
     private let reKey = "lifegood_realestates"
     private var isLoading = false
+    private let saveQueue = DispatchQueue(label: "com.lifegood.financestore.save", qos: .utility)
 
     init() {
         load()
@@ -105,24 +106,36 @@ class FinanceStore: ObservableObject {
     // MARK: - 持久化
 
     private func saveInsurances() {
-        if let d = try? JSONEncoder().encode(insurances) { UserDefaults.standard.set(d, forKey: insKey) }
+        let snap = insurances; let key = insKey
         // 使用 pushAll() 統一走 2 秒防抖，避免連續編輯時繞過節流直接打 CloudKit
-        CloudSyncManager.shared.pushAll()
+        saveQueue.async {
+            if let d = try? JSONEncoder().encode(snap) { UserDefaults.standard.set(d, forKey: key) }
+            CloudSyncManager.shared.pushAll()
+        }
     }
 
     private func saveStocks() {
-        if let d = try? JSONEncoder().encode(stocks) { UserDefaults.standard.set(d, forKey: stockKey) }
-        CloudSyncManager.shared.pushAll()
+        let snap = stocks; let key = stockKey
+        saveQueue.async {
+            if let d = try? JSONEncoder().encode(snap) { UserDefaults.standard.set(d, forKey: key) }
+            CloudSyncManager.shared.pushAll()
+        }
     }
 
     private func saveVehicles() {
-        if let d = try? JSONEncoder().encode(vehicles) { UserDefaults.standard.set(d, forKey: vehicleKey) }
-        CloudSyncManager.shared.pushAll()
+        let snap = vehicles; let key = vehicleKey
+        saveQueue.async {
+            if let d = try? JSONEncoder().encode(snap) { UserDefaults.standard.set(d, forKey: key) }
+            CloudSyncManager.shared.pushAll()
+        }
     }
 
     private func saveRealEstates() {
-        if let d = try? JSONEncoder().encode(realEstates) { UserDefaults.standard.set(d, forKey: reKey) }
-        CloudSyncManager.shared.pushAll()
+        let snap = realEstates; let key = reKey
+        saveQueue.async {
+            if let d = try? JSONEncoder().encode(snap) { UserDefaults.standard.set(d, forKey: key) }
+            CloudSyncManager.shared.pushAll()
+        }
     }
 
     private func load() {
