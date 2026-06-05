@@ -542,20 +542,20 @@ struct DailyRecordEditorSheet: View {
                 switch type {
                 case .milk:
                     Section("喝奶記錄") {
-                        DatePicker("時間", selection: $date)
+                        HStack { Text("時間"); Spacer(); FiveMinuteDateTimePicker(selection: $date).fixedSize() }
                         TextField("奶粉品牌（選填）", text: $milkBrand)
                         HStack { TextField("ml 數", text: $mlText).keyboardType(.numberPad); Text("ml").foregroundStyle(.secondary) }
                     }
                 case .food:
                     Section("食物記錄") {
-                        DatePicker("時間", selection: $date)
+                        HStack { Text("時間"); Spacer(); FiveMinuteDateTimePicker(selection: $date).fixedSize() }
                         TextField("食物名稱", text: $foodName)
                         HStack { TextField("ml 數（選填）", text: $mlText).keyboardType(.numberPad); Text("ml").foregroundStyle(.secondary) }
                     }
                 case .sleep:
                     Section("睡眠記錄") {
-                        DatePicker("入睡時間", selection: $date)
-                        DatePicker("起床時間", selection: $sleepEnd)
+                        HStack { Text("入睡時間"); Spacer(); FiveMinuteDateTimePicker(selection: $date).fixedSize() }
+                        HStack { Text("起床時間"); Spacer(); FiveMinuteDateTimePicker(selection: $sleepEnd, minimumDate: date).fixedSize() }
                         if sleepEnd > date {
                             let hours = sleepEnd.timeIntervalSince(date) / 3600
                             HStack {
@@ -589,7 +589,12 @@ struct DailyRecordEditorSheet: View {
     }
 
     private func loadEditing() {
-        guard let e = editing else { return }
+        guard let e = editing else {
+            // 新育兒記錄屬「即時紀錄」：預設用當下時間對齊到 5 分鐘，不套排程 09:30 規則
+            date = FiveMinuteDateTimePicker.roundedToFiveMinutes(Date())
+            sleepEnd = date
+            return
+        }
         date = e.date
         milkBrand = e.milkBrand ?? ""
         mlText = e.mlAmount.map { $0 > 0 ? String(format: "%.0f", $0) : "" } ?? ""

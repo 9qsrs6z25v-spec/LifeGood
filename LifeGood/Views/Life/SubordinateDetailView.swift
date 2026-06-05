@@ -436,8 +436,16 @@ struct RecordEditorSheet: View {
                         }
                     }
                     Section("日期") {
-                        DatePicker("開始時間", selection: $date)
-                        DatePicker("結束時間", selection: $endDate, in: date...)
+                        HStack {
+                            Text("開始時間")
+                            Spacer()
+                            FiveMinuteDateTimePicker(selection: $date).fixedSize()
+                        }
+                        HStack {
+                            Text("結束時間")
+                            Spacer()
+                            FiveMinuteDateTimePicker(selection: $endDate, minimumDate: date).fixedSize()
+                        }
                         HStack {
                             Text("請假時數").foregroundStyle(.secondary)
                             Spacer()
@@ -492,7 +500,14 @@ struct RecordEditorSheet: View {
     }
 
     private func loadEditing() {
-        guard let e = editing else { return }
+        guard let e = editing else {
+            // 新請假：預設用排程時段（整點/半點，過 18:00 則隔天 09:30），結束預設 +1 小時
+            if type == .leave {
+                date = FiveMinuteDateTimePicker.defaultSchedulingTime()
+                endDate = Calendar.current.date(byAdding: .hour, value: 1, to: date) ?? date
+            }
+            return
+        }
         content = e.content; date = e.date; note = e.note
         endDate = e.endDate ?? Calendar.current.date(byAdding: .hour, value: 8, to: e.date) ?? e.date
         severity = e.severity ?? .normal
@@ -751,6 +766,8 @@ struct TaskEditorSheet: View {
 /// SwiftUI 原生 DatePicker 無法設定 minuteInterval，故以 UIViewRepresentable 實作。
 struct FiveMinuteDateTimePicker: UIViewRepresentable {
     @Binding var selection: Date
+    var minimumDate: Date? = nil
+    var maximumDate: Date? = nil
 
     func makeUIView(context: Context) -> UIDatePicker {
         let picker = UIDatePicker()
@@ -758,6 +775,8 @@ struct FiveMinuteDateTimePicker: UIViewRepresentable {
         picker.preferredDatePickerStyle = .compact
         picker.minuteInterval = 5
         picker.locale = Self.hour24Locale
+        picker.minimumDate = minimumDate
+        picker.maximumDate = maximumDate
         picker.date = selection
         picker.addTarget(context.coordinator,
                          action: #selector(Coordinator.valueChanged(_:)),
@@ -770,6 +789,8 @@ struct FiveMinuteDateTimePicker: UIViewRepresentable {
     func updateUIView(_ picker: UIDatePicker, context: Context) {
         picker.minuteInterval = 5
         picker.locale = Self.hour24Locale
+        picker.minimumDate = minimumDate
+        picker.maximumDate = maximumDate
         if picker.date != selection { picker.date = selection }
     }
 
@@ -823,5 +844,16 @@ struct FiveMinuteDateTimePicker: UIViewRepresentable {
         // 否則改用 09:30：晚上（now 已過 18:00）用隔天，清晨太早用當天
         let dayAnchor = hourNow >= 18 ? (cal.date(byAdding: .day, value: 1, to: now) ?? now) : now
         return cal.date(bySettingHour: 9, minute: 30, second: 0, of: dayAnchor) ?? now
+    }
+
+    /// 把時間對齊到最接近的 5 分鐘倍數（秒歸零）。用於「即時紀錄」類（如育兒）的預設值，
+    /// 這類是記錄當下發生的事，不適合套用排程用的 09:30 規則。
+    static func roundedToFiveMinutes(_ date: Date) -> Date {
+        let cal = Calendar.current
+        let minute = cal.component(.minute, from: date)
+        let second = cal.component(.second, from: date)
+        let target = Int((Double(minute) / 5.0).rounded()) * 5
+        let base = cal.date(byAdding: .second, value: -second, to: date) ?? date
+        return cal.date(byAdding: .minute, value: target - minute, to: base) ?? date
     }
 }
