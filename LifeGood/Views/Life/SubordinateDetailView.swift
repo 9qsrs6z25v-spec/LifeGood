@@ -773,6 +773,13 @@ struct FiveMinuteDateTimePicker: UIViewRepresentable {
         if picker.date != selection { picker.date = selection }
     }
 
+    /// 回報固有大小，避免在 Form 的 HStack 中被 Spacer 壓縮到幾乎消失
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIDatePicker, context: Context) -> CGSize? {
+        let intrinsic = uiView.intrinsicContentSize
+        if intrinsic.width > 0 && intrinsic.height > 0 { return intrinsic }
+        return uiView.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject {
