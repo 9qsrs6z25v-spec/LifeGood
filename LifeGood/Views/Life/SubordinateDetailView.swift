@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SubordinateDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -659,10 +660,18 @@ struct TaskEditorSheet: View {
                 Section("任務資訊") {
                     TextField("任務主題", text: $topic)
                     TextField("任務內容", text: $content, axis: .vertical).lineLimit(2...5)
-                    DatePicker("任務日期", selection: $date)
+                    HStack {
+                        Text("任務日期")
+                        Spacer()
+                        FiveMinuteDateTimePicker(selection: $date).fixedSize()
+                    }
                     Toggle("設定截止日", isOn: $hasDueDate)
                     if hasDueDate {
-                        DatePicker("截止日期", selection: $dueDate)
+                        HStack {
+                            Text("截止日期")
+                            Spacer()
+                            FiveMinuteDateTimePicker(selection: $dueDate).fixedSize()
+                        }
                     }
                 }
                 Section {
@@ -696,6 +705,10 @@ struct TaskEditorSheet: View {
                     topic = e.topic; content = e.content; date = e.date; note = e.note
                     isCompleted = e.isCompleted
                     if let d = e.dueDate { hasDueDate = true; dueDate = d }
+                } else {
+                    // 新任務：預設時間先對齊到 5 分鐘倍數，與選擇器一致
+                    date = Self.roundedToFiveMinutes(Date())
+                    dueDate = date
                 }
             }
         }
@@ -722,5 +735,59 @@ struct TaskEditorSheet: View {
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
         sub.tasks.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
+    }
+
+    /// 把時間對齊到最接近的 5 分鐘倍數（秒歸零）
+    private static func roundedToFiveMinutes(_ date: Date) -> Date {
+        let cal = Calendar.current
+        let minute = cal.component(.minute, from: date)
+        let second = cal.component(.second, from: date)
+        let target = Int((Double(minute) / 5.0).rounded()) * 5   // 0...60
+        let base = cal.date(byAdding: .second, value: -second, to: date) ?? date
+        return cal.date(byAdding: .minute, value: target - minute, to: base) ?? date
+    }
+}
+
+// MARK: - 5 分鐘間隔 + 24 小時制日期時間選擇器
+
+/// 包裝 UIDatePicker：分鐘只允許 5 的倍數，並強制 24 小時制（維持繁體中文）。
+/// SwiftUI 原生 DatePicker 無法設定 minuteInterval，故以 UIViewRepresentable 實作。
+struct FiveMinuteDateTimePicker: UIViewRepresentable {
+    @Binding var selection: Date
+
+    func makeUIView(context: Context) -> UIDatePicker {
+        let picker = UIDatePicker()
+        picker.datePickerMode = .dateAndTime
+        picker.preferredDatePickerStyle = .compact
+        picker.minuteInterval = 5
+        picker.locale = Self.hour24Locale
+        picker.date = selection
+        picker.addTarget(context.coordinator,
+                         action: #selector(Coordinator.valueChanged(_:)),
+                         for: .valueChanged)
+        picker.setContentHuggingPriority(.required, for: .horizontal)
+        picker.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return picker
+    }
+
+    func updateUIView(_ picker: UIDatePicker, context: Context) {
+        picker.minuteInterval = 5
+        picker.locale = Self.hour24Locale
+        if picker.date != selection { picker.date = selection }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject {
+        let parent: FiveMinuteDateTimePicker
+        init(_ parent: FiveMinuteDateTimePicker) { self.parent = parent }
+        @objc func valueChanged(_ sender: UIDatePicker) { parent.selection = sender.date }
+    }
+
+    /// 維持繁中、但強制 0–23 小時制
+    private static var hour24Locale: Locale {
+        var components = Locale.Components(locale: Locale(identifier: "zh_Hant_TW"))
+        components.hourCycle = .zeroToTwentyThree
+        return Locale(components: components)
     }
 }
