@@ -577,7 +577,7 @@ struct OverviewView: View {
                 .padding(.horizontal)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(categoryTotals.enumerated()), id: \.offset) { idx, item in
+                    ForEach(Array(categoryTotals.enumerated()), id: \.element.category.rawValue) { idx, item in
                         categoryRow(item: item, maxAmount: maxAmount)
                             .opacity(categoryListAppeared ? 1 : 0)
                             .offset(y: categoryListAppeared ? 0 : 14)

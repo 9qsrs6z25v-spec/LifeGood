@@ -708,7 +708,7 @@ struct ChartView: View {
 
             // 圖例（每項加上比例進度條，強化視覺層次）
             VStack(spacing: 0) {
-                ForEach(Array(entries.prefix(6).enumerated()), id: \.offset) { i, e in
+                ForEach(Array(entries.prefix(6).enumerated()), id: \.element.name) { i, e in
                     let pct = total > 0 ? e.amount / total : 0
 
                     VStack(spacing: 6) {
