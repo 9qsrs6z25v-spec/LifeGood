@@ -296,6 +296,10 @@ struct FinanceChartView: View {
         .padding(.horizontal)
     }
 
+    private var stocksSortedByProfitLoss: [Stock] {
+        store.stocks.sorted { $0.profitLoss > $1.profitLoss }
+    }
+
     // MARK: - 股票績效
 
     private var stockPerformanceSection: some View {
@@ -380,9 +384,8 @@ struct FinanceChartView: View {
                 .padding(.horizontal)
 
                 // 明細列
-                let sortedStocks = store.stocks.sorted { $0.profitLoss > $1.profitLoss }
                 VStack(spacing: 0) {
-                    ForEach(Array(sortedStocks.enumerated()), id: \.element.id) { i, stock in
+                    ForEach(Array(stocksSortedByProfitLoss.enumerated()), id: \.element.id) { i, stock in
                         let pl = stock.profitLoss
                         let plC: Color = pl >= 0 ? .green : .red
 
