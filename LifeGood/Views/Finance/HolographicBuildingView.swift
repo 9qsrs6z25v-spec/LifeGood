@@ -530,14 +530,15 @@ struct BuildingSceneView: UIViewRepresentable {
             let p = gesture.location(in: view)
             let hits = view.hitTest(p, options: [SCNHitTestOption.searchMode: SCNHitTestSearchMode.closest.rawValue])
             guard let hit = hits.first else {
-                Task { @MainActor in self.parent.selectedFloorId = nil }
+                Task { @MainActor [weak self] in self?.parent.selectedFloorId = nil }
                 return
             }
             // 找到對應的使用者樓層
             for entry in floorNodes {
                 if hit.node == entry.node {
                     let id = entry.id
-                    Task { @MainActor in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
                         self.parent.selectedFloorId = (self.parent.selectedFloorId == id) ? nil : id
                     }
                     return
