@@ -1,6 +1,26 @@
 import SwiftUI
 import UIKit
 
+// MARK: - 美化紀錄（SubordinateDetailView）
+// [2026-06] 本次美化方向：
+//   1. headerCard：升級為藍色漸層英雄卡片，含縮寫頭像圓、姓名大字、
+//      職等/部門白色膠囊徽章、入職日期 + spring 進場動畫（headerAppeared）；
+//      statBadge 改為分隔線 KPI 橫列（白底半透明背景 + 計數大字），
+//      對齊 SubordinateView.summaryStatsBar 設計語言
+//   2. sectionHeader：升級為「漸層 Capsule 左側條 + 30pt 漸層圖示圓 +
+//      .subheadline.weight(.bold) 標題 + 計數膠囊徽章」，
+//      對齊 LifeOverviewView / CareerView section header 規格
+//   3. recordRow：圖示從裸 `.caption` 升級為 36pt 漸層圓（含陰影），
+//      所有標籤從 RoundedRectangle(cornerRadius:3) 改為 Capsule，
+//      加入日期膠囊徽章，對齊 ExpenseRow / IncomeView.incomeRow 規格
+//   4. meetingSection 列：圖示升級為 36pt 漸層圓，時長膠囊改 Capsule，
+//      對齊 recordRow 規格；列間加 Divider 視覺分隔
+//   5. taskSection 列：截止日標籤改 Capsule，列間加 Divider
+//   6. emptyHint：從純文字升級為 40pt 圖示圓 + 文字，
+//      對齊 SubordinateOverviewView.emptyHint 視覺規格
+//   7. 所有 section 容器：加 shadow + 極細 overlay 邊框，
+//      提升深色模式下的邊界感，對齊 OverviewView.categoryBreakdownSection
+
 struct SubordinateDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
@@ -15,6 +35,9 @@ struct SubordinateDetailView: View {
     @State private var addingTask = false
     @State private var editingTask: SubordinateTask?
     @State private var showPremiumAlert = false
+
+    // 進場動畫旗標
+    @State private var headerAppeared = false
 
     enum DetailTab: String, CaseIterable { case daily = "日常"; case rating = "評分系統" }
     @State private var detailTab: DetailTab = .daily
@@ -100,45 +123,145 @@ struct SubordinateDetailView: View {
         }
     }
 
-    // MARK: - 頭部
+    // MARK: - 英雄頭部卡片
 
     private var headerCard: some View {
-        VStack(spacing: 8) {
-            Text(subordinate.name).font(.title2.bold())
-            if !gradeTitleText.isEmpty {
-                Text(gradeTitleText).font(.subheadline).foregroundStyle(.secondary)
+        let initials = String(subordinate.name.prefix(2))
+        return VStack(spacing: 0) {
+            // 頂部：縮寫頭像 + 姓名 + 職等/部門膠囊
+            HStack(alignment: .center, spacing: 14) {
+                // 縮寫頭像圓（白色半透明底）
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.25))
+                        .frame(width: 54, height: 54)
+                    Circle()
+                        .stroke(.white.opacity(0.40), lineWidth: 1.5)
+                        .frame(width: 54, height: 54)
+                    Text(initials)
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(subordinate.name)
+                        .font(.title3.bold())
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    // 職等 + 部門膠囊
+                    HStack(spacing: 5) {
+                        if !gradeTitleText.isEmpty {
+                            Text(gradeTitleText)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(.white.opacity(0.22))
+                                .clipShape(Capsule())
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        if !departmentText.isEmpty {
+                            Text(departmentText)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.88))
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(.white.opacity(0.14))
+                                .clipShape(Capsule())
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
             }
-            if !departmentText.isEmpty {
-                Text(departmentText).font(.caption).foregroundStyle(.tertiary)
-            }
+
+            // 入職日期列
             if let jd = subordinate.joinDate {
                 HStack(spacing: 4) {
-                    Image(systemName: "calendar").font(.caption2)
-                    Text("入職 \(formatDate(jd))").font(.caption).foregroundStyle(.tertiary)
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.system(size: 10))
+                    Text("入職 \(formatDate(jd))")
+                        .font(.caption2.weight(.medium))
+                    Spacer()
                 }
+                .foregroundStyle(.white.opacity(0.78))
+                .padding(.top, 10)
             }
-            HStack(spacing: 10) {
-                statBadge(count: countFor([.pro]), label: "優點", color: .green)
-                statBadge(count: countFor([.con]), label: "缺點", color: .red)
-                statBadge(count: countFor([.achievement]), label: "成就", color: .orange)
+
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 14)
+
+            // KPI 橫列：優點 / 缺點 / 成就 / Miss / 請假
+            HStack(spacing: 0) {
+                statBadge(count: countFor([.pro]),           label: "優點", color: .green)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                statBadge(count: countFor([.con]),           label: "缺點", color: .red)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                statBadge(count: countFor([.achievement]),   label: "成就", color: .orange)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
                 statBadge(count: countFor([.missOperation]), label: "Miss", color: .purple)
-                statBadge(count: countFor([.leave]), label: "請假", color: .teal)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                statBadge(count: countFor([.leave]),         label: "請假", color: .teal)
             }
-            .padding(.top, 4)
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(20)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.22, green: 0.53, blue: 0.98),
+                        Color(red: 0.10, green: 0.35, blue: 0.82)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 右上主散景圓
+                Circle()
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 130, height: 130)
+                    .offset(x: 85, y: -50)
+                    .blur(radius: 14)
+                // 左下次散景圓
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 80, height: 80)
+                    .offset(x: -60, y: 50)
+                    .blur(radius: 10)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.42), radius: 18, x: 0, y: 9)
         .padding(.horizontal)
+        .opacity(headerAppeared ? 1 : 0)
+        .offset(y: headerAppeared ? 0 : 20)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                headerAppeared = true
+            }
+        }
     }
 
+    // KPI 單格：白色大數字 + 小標籤（對齊 FixedExpenseView 英雄卡 KPI 橫列規格）
     private func statBadge(count: Int, label: String, color: Color) -> some View {
-        VStack(spacing: 2) {
-            Text("\(count)").font(.headline).foregroundStyle(color)
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+        VStack(spacing: 4) {
+            Text("\(count)")
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.white.opacity(0.75))
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
     }
 
     private func countFor(_ types: [SubordinateRecordType]) -> Int {
@@ -148,86 +271,138 @@ struct SubordinateDetailView: View {
     // MARK: - 會議章節
 
     private var meetingSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("會議", icon: "person.3.fill", color: .indigo) {
+        let items = subordinate.meetings.sorted { $0.date > $1.date }
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("會議", icon: "person.3.fill", color: .indigo, count: items.count) {
                 Button {
                     if subscription.isPremium { addingMeeting = true }
                     else { showPremiumAlert = true }
                 } label: {
-                    Image(systemName: "plus.circle.fill").foregroundStyle(.indigo)
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.indigo)
                 }
             }
-            let items = subordinate.meetings.sorted { $0.date > $1.date }
             if items.isEmpty {
                 emptyHint
             } else {
-                ForEach(items) { m in
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, m in
                     Button {
                         if subscription.isPremium { editingMeeting = m }
                         else { showPremiumAlert = true }
                     } label: {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "person.3.fill").font(.caption).foregroundStyle(.indigo).frame(width: 20)
+                        HStack(alignment: .center, spacing: 12) {
+                            // 36pt 漸層圖示圓（對齊 recordRow 規格）
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.indigo.opacity(0.20), Color.indigo.opacity(0.08)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 36, height: 36)
+                                    .shadow(color: Color.indigo.opacity(0.18), radius: 5, x: 0, y: 2)
+                                Image(systemName: "person.3.fill")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.indigo)
+                            }
+
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(m.topic.isEmpty ? "未命名會議" : m.topic)
-                                    .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                                HStack(spacing: 6) {
-                                    Text(formatDateTime(m.date)).font(.caption2).foregroundStyle(.tertiary)
-                                    Text("\(m.durationMinutes) 分鐘").font(.caption2)
-                                        .padding(.horizontal, 5).padding(.vertical, 1)
-                                        .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
-                                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                HStack(spacing: 5) {
+                                    // 日期膠囊
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "calendar")
+                                            .font(.system(size: 8))
+                                        Text(formatDateTime(m.date))
+                                    }
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color(.tertiarySystemFill))
+                                    .clipShape(Capsule())
+
+                                    // 時長 Capsule
+                                    Text("\(m.durationMinutes) 分鐘")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color.indigo.opacity(0.12))
+                                        .foregroundStyle(.indigo)
+                                        .clipShape(Capsule())
+
                                     if let r = m.recurrence {
-                                        Text(r.rawValue).font(.caption2).foregroundStyle(.secondary)
+                                        Text(r.rawValue)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if !m.items.isEmpty {
+                                        Text("\(m.items.count) 個項目")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
-                                if !m.items.isEmpty {
-                                    Text("\(m.items.count) 個項目").font(.caption2).foregroundStyle(.secondary)
-                                }
                             }
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
                         }
-                        .padding(.horizontal).padding(.vertical, 8).contentShape(Rectangle())
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+
+                    if idx < items.count - 1 {
+                        Divider().padding(.leading, 64)
+                    }
                 }
             }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
     // MARK: - 任務章節
 
     private var taskSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("任務", icon: "checklist", color: .cyan) {
+        // 未完成在前、已完成在後；各自再依日期新到舊
+        let items = subordinate.tasks.sorted {
+            $0.isCompleted != $1.isCompleted ? (!$0.isCompleted && $1.isCompleted) : ($0.date > $1.date)
+        }
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("任務", icon: "checklist", color: .cyan, count: items.count) {
                 Button {
                     if subscription.isPremium { addingTask = true }
                     else { showPremiumAlert = true }
                 } label: {
-                    Image(systemName: "plus.circle.fill").foregroundStyle(.cyan)
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.cyan)
                 }
-            }
-            // 未完成在前、已完成在後；各自再依日期新到舊
-            let items = subordinate.tasks.sorted {
-                $0.isCompleted != $1.isCompleted ? (!$0.isCompleted && $1.isCompleted) : ($0.date > $1.date)
             }
             if items.isEmpty {
                 emptyHint
             } else {
-                ForEach(items) { t in
-                    HStack(alignment: .top, spacing: 10) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, t in
+                    HStack(alignment: .center, spacing: 10) {
                         // 左側可點打勾圓圈：直接切換完成，不進編輯頁
                         Button {
                             lifeStore.toggleTaskCompletion(subordinateId: subordinateId, taskId: t.id)
                         } label: {
                             Image(systemName: t.isCompleted ? "checkmark.circle.fill" : "circle")
-                                .font(.body)
+                                .font(.title3)
                                 .foregroundStyle(t.isCompleted ? Color.green : Color.cyan)
-                                .frame(width: 24)
                         }
                         .buttonStyle(.plain)
 
@@ -235,45 +410,73 @@ struct SubordinateDetailView: View {
                             if subscription.isPremium { editingTask = t }
                             else { showPremiumAlert = true }
                         } label: {
-                            HStack(alignment: .top, spacing: 10) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(t.topic.isEmpty ? "未命名任務" : t.topic)
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(t.isCompleted ? .secondary : .primary)
-                                        .strikethrough(t.isCompleted, color: .secondary)
-                                    HStack(spacing: 6) {
-                                        Text(formatDateTime(t.date)).font(.caption2).foregroundStyle(.tertiary)
-                                        if let due = t.dueDate {
-                                            Text("截止 \(formatDate(due))").font(.caption2)
-                                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                                .background(due < Date() && !t.isCompleted ? Color.red.opacity(0.12) : Color.cyan.opacity(0.12))
-                                                .foregroundStyle(due < Date() && !t.isCompleted ? .red : .cyan)
-                                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(t.topic.isEmpty ? "未命名任務" : t.topic)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(t.isCompleted ? .secondary : .primary)
+                                    .strikethrough(t.isCompleted, color: .secondary)
+                                    .lineLimit(1)
+                                HStack(spacing: 5) {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "calendar")
+                                            .font(.system(size: 8))
+                                        Text(formatDateTime(t.date))
+                                    }
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color(.tertiarySystemFill))
+                                    .clipShape(Capsule())
+
+                                    if let due = t.dueDate {
+                                        HStack(spacing: 3) {
+                                            Image(systemName: "flag.fill")
+                                                .font(.system(size: 7))
+                                            Text("截止 \(formatDate(due))")
                                         }
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(due < Date() && !t.isCompleted ? Color.red.opacity(0.12) : Color.cyan.opacity(0.12))
+                                        .foregroundStyle(due < Date() && !t.isCompleted ? .red : .cyan)
+                                        .clipShape(Capsule())
                                     }
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
                     }
                     .opacity(t.isCompleted ? 0.6 : 1)
-                    .padding(.horizontal).padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+
+                    if idx < items.count - 1 {
+                        Divider().padding(.leading, 56)
+                    }
                 }
             }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
     // MARK: - 優缺點
 
     private var proConSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("優缺點", icon: "hand.thumbsup.fill", color: .green) {
+        let items = subordinate.records.filter { $0.type == .pro || $0.type == .con }.sorted { $0.date > $1.date }
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("優缺點", icon: "hand.thumbsup.fill", color: .green, count: items.count) {
                 Menu {
                     Button {
                         if subscription.isPremium { addingType = .pro }
@@ -284,96 +487,231 @@ struct SubordinateDetailView: View {
                         else { showPremiumAlert = true }
                     } label: { Label("缺點", systemImage: "hand.thumbsdown.fill") }
                 } label: {
-                    Image(systemName: "plus.circle.fill").foregroundStyle(.green)
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.green)
                 }
             }
-            let items = subordinate.records.filter { $0.type == .pro || $0.type == .con }.sorted { $0.date > $1.date }
-            if items.isEmpty { emptyHint } else { ForEach(items) { recordRow($0) } }
+            if items.isEmpty {
+                emptyHint
+            } else {
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, rec in
+                    recordRow(rec)
+                    if idx < items.count - 1 {
+                        Divider().padding(.leading, 64)
+                    }
+                }
+            }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
     // MARK: - 通用記錄章節
 
     private func recordSection(_ type: SubordinateRecordType) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader(type.rawValue, icon: type.icon, color: colorFor(type)) {
+        let items = subordinate.records.filter { $0.type == type }.sorted { $0.date > $1.date }
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader(type.rawValue, icon: type.icon, color: colorFor(type), count: items.count) {
                 Button {
                     if subscription.isPremium { addingType = type }
                     else { showPremiumAlert = true }
                 } label: {
-                    Image(systemName: "plus.circle.fill").foregroundStyle(colorFor(type))
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(colorFor(type))
                 }
             }
-            let items = subordinate.records.filter { $0.type == type }.sorted { $0.date > $1.date }
-            if items.isEmpty { emptyHint } else { ForEach(items) { recordRow($0) } }
+            if items.isEmpty {
+                emptyHint
+            } else {
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, rec in
+                    recordRow(rec)
+                    if idx < items.count - 1 {
+                        Divider().padding(.leading, 64)
+                    }
+                }
+            }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
-    private func sectionHeader<Action: View>(_ title: String, icon: String, color: Color, @ViewBuilder action: () -> Action) -> some View {
-        HStack {
-            Image(systemName: icon).foregroundStyle(color)
-            Text(title).font(.headline)
+    // MARK: - Section Header（漸層側條 + 漸層圖示圓 + 計數膠囊）
+
+    private func sectionHeader<Action: View>(
+        _ title: String,
+        icon: String,
+        color: Color,
+        count: Int? = nil,
+        @ViewBuilder action: () -> Action
+    ) -> some View {
+        HStack(spacing: 10) {
+            // 漸層 Capsule 側條
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 18)
+            // 30pt 漸層圖示圓
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.20), color.opacity(0.08)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 30, height: 30)
+                Circle()
+                    .stroke(color.opacity(0.20), lineWidth: 1)
+                    .frame(width: 30, height: 30)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(title)
+                .font(.subheadline.weight(.bold))
             Spacer()
+            // 計數膠囊（有資料時顯示）
+            if let c = count, c > 0 {
+                Text("\(c) 筆")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(color.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.75))
+            }
             action()
         }
-        .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
+    // MARK: - 通用記錄列（36pt 漸層圖示圓 + Capsule 標籤）
+
     private func recordRow(_ rec: SubordinateRecord) -> some View {
-        Button {
+        let color = colorFor(rec.type)
+        return Button {
             if subscription.isPremium { editingRecord = rec }
             else { showPremiumAlert = true }
         } label: {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: rec.type.icon).font(.caption).foregroundStyle(colorFor(rec.type)).frame(width: 20)
+            HStack(alignment: .center, spacing: 12) {
+                // 36pt 漸層圖示圓 + 陰影
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.22), color.opacity(0.09)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                        .shadow(color: color.opacity(0.20), radius: 5, x: 0, y: 2)
+                    Image(systemName: rec.type.icon)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(color)
+                }
+
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(rec.content).font(.subheadline).foregroundStyle(.primary)
+                    Text(rec.content)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                    HStack(spacing: 5) {
+                        // 日期膠囊
+                        HStack(spacing: 3) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 8))
+                            Text(formatDate(rec.date))
+                        }
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+
+                        // 嚴重度 Capsule（失誤操作）
                         if rec.type == .missOperation, let sev = rec.severity {
-                            Text(sev.rawValue).font(.caption2.weight(.medium))
-                                .padding(.horizontal, 5).padding(.vertical, 1)
+                            Text(sev.rawValue)
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(severityColor(sev).opacity(0.15))
                                 .foregroundStyle(severityColor(sev))
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .clipShape(Capsule())
                         }
+                        // 假別 + 時數（請假）
                         if rec.type == .leave {
                             if let lt = rec.leaveType {
-                                Text(lt.rawValue).font(.caption2.weight(.medium))
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(Color.teal.opacity(0.15)).foregroundStyle(.teal)
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                                Text(lt.rawValue)
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.teal.opacity(0.15))
+                                    .foregroundStyle(.teal)
+                                    .clipShape(Capsule())
                             }
                             if let h = rec.leaveHours, h > 0 {
-                                Text(h.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(h))h" : String(format: "%.1fh", h))
-                                    .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                                Text(h.truncatingRemainder(dividingBy: 1) == 0
+                                     ? "\(Int(h))h" : String(format: "%.1fh", h))
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
                             }
                         }
-                        Spacer()
-                    }
-                    HStack(spacing: 6) {
-                        Text(formatDate(rec.date)).font(.caption2).foregroundStyle(.tertiary)
+                        // 備註指示圖示
                         if !rec.note.isEmpty {
-                            Text("·").foregroundStyle(.tertiary)
-                            Text(rec.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Image(systemName: "note.text")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
                         }
                     }
                 }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal).padding(.vertical, 8).contentShape(Rectangle())
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
+    // MARK: - 空狀態提示（40pt 圖示圓 + 文字，對齊 SubordinateOverviewView.emptyHint 規格）
+
     private var emptyHint: some View {
-        Text("尚無記錄").font(.caption).foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal).padding(.bottom, 12)
+        VStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(Color(.tertiarySystemFill))
+                    .frame(width: 40, height: 40)
+                Image(systemName: "tray")
+                    .font(.system(size: 16, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            Text("尚無記錄")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
     }
 
     private func colorFor(_ type: SubordinateRecordType) -> Color {
