@@ -542,6 +542,9 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: 10) {
             let categoryTotals = store.variableCategoryTotals()
             let maxAmount = categoryTotals.map(\.amount).max() ?? 1
+            // variableCategoryTotals() 已過濾本月變動支出，直接加總即可，
+            // 避免在每個 categoryRow 內重複呼叫 currentMonthVariableTotal（O(n)×列數）
+            let totalVar = categoryTotals.reduce(0) { $0 + $1.amount }
 
             HStack(spacing: 10) {
                 Capsule()
@@ -578,7 +581,7 @@ struct OverviewView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(categoryTotals.enumerated()), id: \.element.category.rawValue) { idx, item in
-                        categoryRow(item: item, maxAmount: maxAmount)
+                        categoryRow(item: item, maxAmount: maxAmount, totalVar: totalVar)
                             .opacity(categoryListAppeared ? 1 : 0)
                             .offset(y: categoryListAppeared ? 0 : 14)
                             .animation(
@@ -605,9 +608,8 @@ struct OverviewView: View {
         }
     }
 
-    private func categoryRow(item: (category: VariableCategory, amount: Double), maxAmount: Double) -> some View {
+    private func categoryRow(item: (category: VariableCategory, amount: Double), maxAmount: Double, totalVar: Double) -> some View {
         let ratio = maxAmount > 0 ? item.amount / maxAmount : 0
-        let totalVar = store.currentMonthVariableTotal
         let pct = totalVar > 0 ? Int(item.amount / totalVar * 100) : 0
         let accent = categoryColor(item.category)
 
