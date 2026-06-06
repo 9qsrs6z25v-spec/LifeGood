@@ -2,6 +2,23 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 
+// MARK: - 美化紀錄（OrganizationView）
+// [2026-06] 本次美化方向：
+//   1. statsHeader：statBox 純文字升級為圓形圖示底圓 + 粗體數值 + 雙層 shadow 卡片，
+//      對齊 FinanceOverviewView.allocationSection kpiRow 設計規格
+//   2. emptyState：平面圖示升級為雙層脈衝光環（indigo）+ 漸層底圓 + 細邊框，
+//      對齊 IncomeView.emptyState 規格
+//   3. departmentCard：人員計數改為彩色膠囊、陰影升級雙層、code 膠囊加細邊框，
+//      進一步對齊 GradeTitleView 組織節點卡規格
+//   4. DepartmentDetailView.headerCard：升級為圖示底色 + Capsule 色條 section 標題，
+//      對齊 LifeRealEstateView detail card 設計語言
+//   5. OrgPersonDetailView.headerCard：頭像加 overlay 邊框 + indigo 光暈陰影；
+//      部門標籤改為 Capsule 小膠囊，對齊 IncomeView incomeRow 設計
+//   6. OrgPersonDetailView.sectionCard：加左側漸層 Capsule 色條 section 標題，
+//      對齊 OverviewView / IncomeView 全 App section 標題規格
+//   7. OrgPersonDetailView.linkedCardButton：加圖示底圓 + overlay 邊框 + orange 光暈陰影，
+//      對齊 LifeFinanceView 連結按鈕設計規格
+
 // MARK: - 公司組織頁
 
 /// 依 Department.upstreamIds / downstreamIds 計算組織樹，
@@ -12,6 +29,8 @@ struct OrganizationView: View {
     @State private var viewingDeptId: UUID?
     @State private var showPremiumAlert = false
     @State private var pdfURL: URL?
+    // 美化：空狀態脈衝光環動畫旗標
+    @State private var orgEmptyPulse = false
 
     private var rootDepartments: [Department] {
         // root = 沒有 upstream 的部門；若全部都有 upstream（可能成環），退而求其次抓部門裡的全部，
@@ -74,44 +93,104 @@ struct OrganizationView: View {
     }
 
     /// 頁面內統計列：部門數 / 在職人員 / 離職人員
+    // 美化：升級為圓形圖示底圓 + 粗體數值 + 雙層 shadow 卡片
     private var statsHeader: some View {
-        HStack(spacing: 24) {
-            statBox(value: "\(lifeStore.departments.count)", label: "部門", icon: "building.2.fill", color: .indigo)
-            Divider().frame(height: 36)
-            let active = lifeStore.orgPeople.filter { !$0.isInactive }.count
-            statBox(value: "\(active)", label: "在職人員", icon: "person.2.fill", color: .green)
-            let inactive = lifeStore.orgPeople.filter { $0.isInactive }.count
+        let active = lifeStore.orgPeople.filter { !$0.isInactive }.count
+        let inactive = lifeStore.orgPeople.filter { $0.isInactive }.count
+
+        return HStack(spacing: 0) {
+            statPill(value: "\(lifeStore.departments.count)", label: "部門", icon: "building.2.fill", color: .indigo)
+            statSeparator
+            statPill(value: "\(active)", label: "在職人員", icon: "person.2.fill", color: .green)
             if inactive > 0 {
-                Divider().frame(height: 36)
-                statBox(value: "\(inactive)", label: "離職", icon: "person.fill.xmark", color: .gray)
+                statSeparator
+                statPill(value: "\(inactive)", label: "離職", icon: "person.fill.xmark", color: .gray)
             }
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.07), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
     }
 
-    private func statBox(value: String, label: String, icon: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon).font(.subheadline).foregroundStyle(color)
-            Text(value).font(.headline).foregroundStyle(color)
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+    // 美化：KPI 格：圓形圖示底圓（對齊 FinanceOverviewView allocationRow 圖示規格）
+    private func statPill(value: String, label: String, icon: String, color: Color) -> some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.12))
+                    .frame(width: 34, height: 34)
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
     }
 
+    private var statSeparator: some View {
+        Rectangle()
+            .fill(Color(.separator).opacity(0.28))
+            .frame(width: 0.5, height: 44)
+    }
+
+    // 美化：空狀態升級為雙層脈衝光環 + 漸層底圓，對齊 IncomeView.emptyState 規格
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "building.2.crop.circle")
-                .font(.system(size: 56)).foregroundStyle(.tertiary)
-            Text("尚無部門資料").font(.headline).foregroundStyle(.secondary)
-            Text("到「部門職等」頁新增部門，並設定上下游關係，組織圖會自動繪製。")
-                .font(.caption).foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+        VStack(spacing: 26) {
+            ZStack {
+                // 外層脈衝光環
+                Circle()
+                    .stroke(Color.indigo.opacity(orgEmptyPulse ? 0 : 0.22), lineWidth: 1.5)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(orgEmptyPulse ? 1.38 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: orgEmptyPulse)
+                // 內層脈衝光環（延遲 0.3s，波紋層次）
+                Circle()
+                    .stroke(Color.indigo.opacity(orgEmptyPulse ? 0 : 0.11), lineWidth: 1)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(orgEmptyPulse ? 1.68 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: orgEmptyPulse)
+                // 主圓底（漸層填色 + 細邊框）
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.indigo.opacity(0.15), Color.indigo.opacity(0.06)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 88, height: 88)
+                    .overlay(Circle().stroke(Color.indigo.opacity(0.22), lineWidth: 1.2))
+                Image(systemName: "building.2.crop.circle")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(Color.indigo.opacity(0.72))
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    orgEmptyPulse = true
+                }
+            }
+
+            VStack(spacing: 10) {
+                Text("尚無部門資料")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text("到「部門職等」頁新增部門\n並設定上下游關係，組織圖會自動繪製。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .padding(.horizontal, 24)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 60)
     }
 
     // MARK: - PDF 匯出
@@ -199,26 +278,46 @@ struct OrganizationView: View {
         )
     }
 
+    // 美化：人員計數改為彩色膠囊、陰影升級雙層、code 膠囊加細邊框
     private func departmentCard(_ dept: Department) -> some View {
         let peopleCount = lifeStore.orgPeople.filter { $0.departmentId == dept.id && !$0.isInactive }.count
         let peerNames = dept.peerIds.compactMap { id in
             lifeStore.departments.first(where: { $0.id == id })?.name
         }.filter { !$0.isEmpty }
         return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Image(systemName: "building.2.fill").foregroundStyle(.indigo)
+            HStack(spacing: 5) {
+                ZStack {
+                    Circle()
+                        .fill(Color.indigo.opacity(0.12))
+                        .frame(width: 22, height: 22)
+                    Image(systemName: "building.2.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.indigo)
+                }
                 if !dept.code.isEmpty {
                     Text(dept.code)
-                        .font(.caption2)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.indigo.opacity(0.15))
+                        .font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(Color.indigo.opacity(0.12))
                         .foregroundStyle(.indigo)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
                 }
-                Spacer()
-                Text("\(peopleCount) 人")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                // 美化：人員計數改為彩色膠囊
+                if peopleCount > 0 {
+                    Text("\(peopleCount) 人")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
+                } else {
+                    Text("0 人")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
             }
             Text(dept.name.isEmpty ? "未命名部門" : dept.name)
                 .font(.subheadline.weight(.semibold))
@@ -242,19 +341,21 @@ struct OrganizationView: View {
                 .padding(.top, 2)
             }
         }
-        .padding(10)
-        .frame(width: 160)
+        .padding(11)
+        .frame(width: 168)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(
                     style: StrokeStyle(lineWidth: dept.peerIds.isEmpty ? 1 : 1.5,
                                        dash: dept.peerIds.isEmpty ? [] : [4])
                 )
-                .foregroundStyle(dept.peerIds.isEmpty ? Color.indigo.opacity(0.3) : Color.purple.opacity(0.6))
+                .foregroundStyle(dept.peerIds.isEmpty ? Color.indigo.opacity(0.28) : Color.purple.opacity(0.55))
         )
-        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+        // 美化：雙層陰影（品牌色光暈 + 自然陰影），提升卡片立體感
+        .shadow(color: Color.indigo.opacity(0.12), radius: 8, x: 0, y: 3)
+        .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
     }
 }
 
@@ -327,33 +428,69 @@ struct DepartmentDetailView: View {
         }
     }
 
+    // 美化：加大圖示底圓、Capsule 色條 section 標題、雙層陰影（對齊 LifeRealEstateView detail card）
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "building.2.fill")
-                    .font(.title2).foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 13) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(LinearGradient(
+                            colors: [.indigo, .purple],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 50, height: 50)
+                        .shadow(color: Color.indigo.opacity(0.30), radius: 6, x: 0, y: 3)
+                    Image(systemName: "building.2.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 4) {
                     if !dept.code.isEmpty {
-                        Text(dept.code).font(.caption2).foregroundStyle(.secondary)
+                        Text(dept.code)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.indigo)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Color.indigo.opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
                     }
                     Text(dept.name.isEmpty ? "未命名部門" : dept.name)
                         .font(.title3.bold())
+                    Text("\(people.count) 人")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
+
             if !dept.function.isEmpty {
-                Divider().padding(.vertical, 4)
-                Text("部門功能").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Rectangle()
+                    .fill(Color(.separator).opacity(0.22))
+                    .frame(height: 0.5)
+                    .padding(.vertical, 13)
+
+                HStack(spacing: 8) {
+                    // 美化：Capsule 漸層色條 section 標題，對齊全 App section header 規格
+                    Capsule()
+                        .fill(LinearGradient(
+                            colors: [.indigo, .indigo.opacity(0.50)],
+                            startPoint: .top, endPoint: .bottom
+                        ))
+                        .frame(width: 3, height: 14)
+                    Text("部門功能")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 5)
                 Text(dept.function).font(.subheadline)
             }
         }
-        .padding()
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .shadow(color: Color.indigo.opacity(0.10), radius: 12, x: 0, y: 5)
+        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
         .padding(.horizontal)
     }
 
@@ -998,19 +1135,33 @@ struct OrgPersonDetailView: View {
         }
     }
 
+    // 美化：加圖示底圓 + overlay 邊框 + orange 光暈陰影，對齊 LifeFinanceView 連結按鈕規格
     private var linkedCardButton: some View {
         Button {
             viewingLinkedCardId = person.linkedBusinessCardId
         } label: {
-            HStack {
-                Image(systemName: "person.crop.rectangle.fill").foregroundStyle(.orange)
-                Text("查看對應名片").font(.subheadline.weight(.medium))
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.orange.opacity(0.12))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "person.crop.rectangle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.orange)
+                }
+                Text("查看對應名片")
+                    .font(.subheadline.weight(.medium))
                 Spacer()
-                Image(systemName: "arrow.up.right.square").font(.caption).foregroundStyle(.tertiary)
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
-            .padding()
+            .padding(16)
             .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.15), lineWidth: 0.75))
+            .shadow(color: Color.orange.opacity(0.10), radius: 8, x: 0, y: 3)
+            .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
             .padding(.horizontal)
         }
         .buttonStyle(.plain)
@@ -1060,8 +1211,10 @@ struct OrgPersonDetailView: View {
         }
     }
 
+    // 美化：頭像加 overlay 邊框 + indigo 光暈陰影；部門標籤改 Capsule 小膠囊，
+    // 對齊 IncomeView incomeRow / BusinessCardView 頭像設計規格
     private var headerCard: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             Group {
                 if let url = person.photoURL, let img = UIImage(contentsOfFile: url.path) {
                     Image(uiImage: img).resizable().scaledToFill()
@@ -1075,34 +1228,57 @@ struct OrgPersonDetailView: View {
             }
             .frame(width: 72, height: 72)
             .clipShape(Circle())
+            // 美化：邊框 + indigo 光暈陰影，強化頭像層次感
+            .overlay(Circle().stroke(Color.indigo.opacity(0.28), lineWidth: 1.5))
+            .shadow(color: Color.indigo.opacity(0.22), radius: 10, x: 0, y: 4)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
                     Text(person.name.isEmpty ? "未命名" : person.name)
                         .font(.title3.bold())
                     if person.isInactive {
                         Text("離職")
-                            .font(.caption2)
-                            .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(Color.gray.opacity(0.15))
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.gray.opacity(0.10))
                             .foregroundStyle(.gray)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.gray.opacity(0.20), lineWidth: 0.6))
                     }
                 }
                 if !person.jobTitle.isEmpty {
-                    Text(person.jobTitle).font(.subheadline).foregroundStyle(.secondary)
+                    Text(person.jobTitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                Text(deptName).font(.caption).foregroundStyle(.tertiary)
+                // 美化：部門標籤改為 Capsule 膠囊，對齊 IncomeView categoryTag 規格
+                HStack(spacing: 4) {
+                    Image(systemName: "building.2.fill")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.indigo.opacity(0.72))
+                    Text(deptName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.indigo.opacity(0.88))
+                }
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.indigo.opacity(0.08))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.indigo.opacity(0.18), lineWidth: 0.6))
+
                 if let bd = person.birthday {
-                    Text("生日：\(formatDate(bd))").font(.caption2).foregroundStyle(.tertiary)
+                    Text("生日：\(formatDate(bd))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding()
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .shadow(color: Color.indigo.opacity(0.08), radius: 12, x: 0, y: 5)
+        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
         .padding(.horizontal)
     }
 
@@ -1158,6 +1334,7 @@ struct OrgPersonDetailView: View {
         }
     }
 
+    // 美化：加左側漸層 Capsule 色條 section 標題，對齊 OverviewView / IncomeView 全 App section header 規格
     @ViewBuilder
     private func sectionCard<Content: View>(
         _ title: String,
@@ -1165,18 +1342,30 @@ struct OrgPersonDetailView: View {
         color: Color,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: systemImage).foregroundStyle(color)
-                Text(title).font(.headline)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                // 美化：漸層 Capsule 色條，對齊全 App section header 一致性
+                Capsule()
+                    .fill(LinearGradient(
+                        colors: [color, color.opacity(0.50)],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .frame(width: 3, height: 18)
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(color)
+                Text(title)
+                    .font(.headline)
                 Spacer()
             }
             content()
         }
-        .padding()
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: color.opacity(0.07), radius: 8, x: 0, y: 3)
+        .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
         .padding(.horizontal)
     }
 
