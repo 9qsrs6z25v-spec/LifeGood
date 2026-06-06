@@ -232,7 +232,8 @@ final class CloudKitManager {
                 let pathKey = "\(directory)/\(fileName)"
                 let recID = CKRecord.ID(recordName: "photo_\(self.sanitize(pathKey))", zoneID: self.zoneID)
 
-                self.privateDB.fetch(withRecordID: recID) { existing, _ in
+                self.privateDB.fetch(withRecordID: recID) { [weak self] existing, _ in
+                    guard let self else { completion?(false); return }
                     let record = existing ?? CKRecord(recordType: Self.photoRecordType, recordID: recID)
                     record["pathKey"] = pathKey as NSString
                     record["directory"] = directory as NSString

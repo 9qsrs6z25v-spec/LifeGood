@@ -73,6 +73,10 @@ struct SubordinateView: View {
     private var sortedSubordinates: [Subordinate] {
         let list = lifeStore.subordinates
         if sortOption == .manual { return list }
+        // 預先建立 id→index 對照，避免 sort closure 內部重複呼叫 firstIndex 造成 O(n² log n)
+        let indexMap: [UUID: Int] = sortOption == .dateAdded
+            ? Dictionary(uniqueKeysWithValues: list.indices.map { (list[$0].id, $0) })
+            : [:]
         let sorted = list.sorted { a, b in
             let result: Bool
             switch sortOption {
@@ -84,9 +88,7 @@ struct SubordinateView: View {
                 let bd = b.joinDate ?? Date.distantFuture
                 result = ad < bd
             case .dateAdded:
-                let ai = list.firstIndex(where: { $0.id == a.id }) ?? 0
-                let bi = list.firstIndex(where: { $0.id == b.id }) ?? 0
-                result = ai < bi
+                result = (indexMap[a.id] ?? 0) < (indexMap[b.id] ?? 0)
             case .manual:
                 result = false
             }
