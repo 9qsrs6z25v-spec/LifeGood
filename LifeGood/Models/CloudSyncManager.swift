@@ -162,10 +162,10 @@ final class CloudSyncManager: ObservableObject {
     }
 
     /// 任何 Store 的 save() 都會觸發：2 秒防抖後將所有 sync key 一次推送
+    /// 可從任意執行緒呼叫；@Published 屬性的讀寫統一在主執行緒完成，避免資料競態。
     func pushAll() {
-        guard isEnabled, isAccountAvailable else { return }
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self = self, self.isEnabled, self.isAccountAvailable else { return }
             self.pushDebounceTimer?.invalidate()
             self.pushDebounceTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
                 self?.flushPushAll()
@@ -210,8 +210,8 @@ final class CloudSyncManager: ObservableObject {
                     self.markSynced()
                     DispatchQueue.main.async { [weak self] in self?.lastChangeReason = .initialSync }
                 } else {
-                    DispatchQueue.main.async {
-                        self.pendingInitialSync = InitialSyncInfo(cloudItemCount: count, cloudBlobs: cloudBlobs)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.pendingInitialSync = InitialSyncInfo(cloudItemCount: count, cloudBlobs: cloudBlobs)
                     }
                 }
             }
