@@ -154,6 +154,7 @@ struct AddExpenseView: View {
     @State private var suppressNextCompleterUpdate = false
     /// 是否展開所有候選地點（預設僅顯示 20 個）
     @State private var expandedSuggestions: Bool = false
+    @State private var completerDebounceTask: Task<Void, Never>?
 
     // MARK: - 條件判斷
 
@@ -707,11 +708,16 @@ struct AddExpenseView: View {
                 suppressNextCompleterUpdate = false
                 return
             }
-            restaurantCompleter.queryFragment = newValue
             expandedSuggestions = false
-            // 重新輸入時清掉之前選定的座標 / 地址
             if placeLatitude != nil || placeLongitude != nil || placeAddress != nil {
                 clearPlace()
+            }
+            // 防抖：300ms 後才真正送出查詢，避免每次按鍵都觸發 MKLocalSearchCompleter
+            completerDebounceTask?.cancel()
+            completerDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+                restaurantCompleter.queryFragment = newValue
             }
         }
         .onChange(of: locationProvider.lastLocation) { _, _ in
