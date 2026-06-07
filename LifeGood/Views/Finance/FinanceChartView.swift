@@ -74,7 +74,7 @@ struct FinanceChartView: View {
     // MARK: - 英雄卡片
 
     private var totalAssetsValue: Double {
-        store.assetAllocations.reduce(0) { $0 + $1.value }
+        store.totalAssets
     }
 
     private var financeChartHeroCard: some View {
