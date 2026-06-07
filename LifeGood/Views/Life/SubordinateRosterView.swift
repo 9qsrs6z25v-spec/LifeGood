@@ -91,11 +91,15 @@ struct SubordinateRosterView: View {
         return range.compactMap { cal.date(byAdding: .day, value: $0 - 1, to: first) }
     }
 
-    private var monthTitle: String {
+    private static let monthTitleFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_Hant_TW")
         f.dateFormat = "yyyy 年 M 月"
-        return f.string(from: month)
+        return f
+    }()
+
+    private var monthTitle: String {
+        Self.monthTitleFormatter.string(from: month)
     }
 
     private var selectedDeptName: String {
@@ -346,11 +350,15 @@ private struct RosterCellDetailSheet: View {
         return sub?.shifts.first { cal.isDate($0.date, inSameDayAs: cell.date) }?.type
     }
 
-    private var headerTitle: String {
+    private static let headerDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_Hant_TW")
         f.dateFormat = "M/d（EEE）"
-        return "\(sub?.name ?? "")　\(f.string(from: cell.date))"
+        return f
+    }()
+
+    private var headerTitle: String {
+        "\(sub?.name ?? "")　\(Self.headerDateFormatter.string(from: cell.date))"
     }
 
     var body: some View {
@@ -378,7 +386,7 @@ private struct RosterCellDetailSheet: View {
                 Text("目前班別")
                 Spacer()
                 Text(currentShift?.rawValue ?? "未排班")
-                    .foregroundStyle(currentShift == nil ? .secondary : rosterShiftColor(currentShift!))
+                    .foregroundStyle(currentShift.map { rosterShiftColor($0) } ?? .secondary)
                     .bold()
             }
             if let s = currentShift, s.hasWorkTime,

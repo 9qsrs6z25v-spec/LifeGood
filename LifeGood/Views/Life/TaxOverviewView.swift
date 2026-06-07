@@ -869,7 +869,11 @@ struct TaxOverviewView: View {
         return fmt(v)
     }
 
+    private static let fmtDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
+
     private func fmtDate(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: d)
+        Self.fmtDateFormatter.string(from: d)
     }
 }
