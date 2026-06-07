@@ -85,21 +85,17 @@ class FinanceStore: ObservableObject {
     // MARK: - 資產配置
 
     var assetAllocations: [AssetAllocation] {
-        let total = totalAssets
+        let ins = totalInsuranceValue
+        let stk = totalStockValue
+        let veh = totalVehicleValue
+        let re  = totalRealEstateValue
+        let total = ins + stk + veh + re
         guard total > 0 else { return [] }
         var result: [AssetAllocation] = []
-        if totalInsuranceValue > 0 {
-            result.append(AssetAllocation(type: .savingsInsurance, value: totalInsuranceValue, percentage: totalInsuranceValue / total * 100))
-        }
-        if totalStockValue > 0 {
-            result.append(AssetAllocation(type: .stock, value: totalStockValue, percentage: totalStockValue / total * 100))
-        }
-        if totalVehicleValue > 0 {
-            result.append(AssetAllocation(type: .vehicle, value: totalVehicleValue, percentage: totalVehicleValue / total * 100))
-        }
-        if totalRealEstateValue > 0 {
-            result.append(AssetAllocation(type: .realEstate, value: totalRealEstateValue, percentage: totalRealEstateValue / total * 100))
-        }
+        if ins > 0 { result.append(AssetAllocation(type: .savingsInsurance, value: ins, percentage: ins / total * 100)) }
+        if stk > 0 { result.append(AssetAllocation(type: .stock,            value: stk, percentage: stk / total * 100)) }
+        if veh > 0 { result.append(AssetAllocation(type: .vehicle,          value: veh, percentage: veh / total * 100)) }
+        if re  > 0 { result.append(AssetAllocation(type: .realEstate,       value: re,  percentage: re  / total * 100)) }
         return result.sorted { $0.value > $1.value }
     }
 
