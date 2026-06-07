@@ -13,12 +13,20 @@ import Charts
 //      對齊 VariableExpenseView.emptyStateView 空狀態設計規格
 //   4. 四個資產區塊加入交錯淡入 + 向上進場動畫（sectionsAppeared），
 //      對齊 LifeOverviewView.categoryBreakdownSection 進場動畫規格
+// [2026-06-v2] 本次美化方向：
+//   5. 統一圖示圓大小為 44pt 標準規格，對齊 StockView.stockCard / VehicleView.vehicleCard /
+//      SavingsInsuranceView.insuranceCard 設計語言（原股票明細列 38pt、房地產/儲蓄險 42pt → 全數升至 44pt）
+//   6. 各明細列加入交錯進場動畫（rowsAppeared + Double(i)*0.04 delay），
+//      讓每個 section 展開時有波紋式行列進場效果
+//   7. 修正股票明細列 Divider 分隔線的 padding leading 從 62 → 68（對齊 44pt 圖示）
+//   8. 修正股票加總損益摘要卡圖示圓從 42pt → 44pt 與明細列統一
 
 struct FinanceChartView: View {
     @EnvironmentObject var store: FinanceStore
 
     @State private var heroCardAppeared = false
     @State private var sectionsAppeared = false
+    @State private var rowsAppeared = false
     @State private var emptyPulse = false
 
     var body: some View {
@@ -63,6 +71,9 @@ struct FinanceChartView: View {
             .onAppear {
                 withAnimation(.spring(response: 0.52, dampingFraction: 0.82).delay(0.12)) {
                     sectionsAppeared = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    withAnimation { rowsAppeared = true }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     emptyPulse = true
@@ -323,12 +334,12 @@ struct FinanceChartView: View {
                                     startPoint: .topLeading, endPoint: .bottomTrailing
                                 )
                             )
-                            .frame(width: 42, height: 42)
+                            .frame(width: 44, height: 44)
                         Circle()
                             .stroke(plColor.opacity(0.22), lineWidth: 1.5)
-                            .frame(width: 42, height: 42)
+                            .frame(width: 44, height: 44)
                         Image(systemName: totalPL >= 0 ? "arrow.up.right" : "arrow.down.right")
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 17, weight: .bold))
                             .foregroundStyle(plColor)
                     }
                     VStack(alignment: .leading, spacing: 2) {
@@ -398,12 +409,12 @@ struct FinanceChartView: View {
                                             startPoint: .topLeading, endPoint: .bottomTrailing
                                         )
                                     )
-                                    .frame(width: 38, height: 38)
+                                    .frame(width: 44, height: 44)
                                 Circle()
                                     .stroke(plC.opacity(0.22), lineWidth: 1)
-                                    .frame(width: 38, height: 38)
+                                    .frame(width: 44, height: 44)
                                 Image(systemName: "chart.line.uptrend.xyaxis")
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.system(size: 16, weight: .semibold))
                                     .foregroundStyle(plC)
                             }
                             VStack(alignment: .leading, spacing: 3) {
@@ -440,9 +451,16 @@ struct FinanceChartView: View {
                         }
                         .padding(.horizontal)
                         .padding(.vertical, 10)
+                        .opacity(rowsAppeared ? 1 : 0)
+                        .offset(y: rowsAppeared ? 0 : 10)
+                        .animation(
+                            .spring(response: 0.45, dampingFraction: 0.80)
+                                .delay(0.10 + Double(i) * 0.04),
+                            value: rowsAppeared
+                        )
 
-                        if i < sortedStocks.count - 1 {
-                            Divider().padding(.leading, 62)
+                        if i < stocksSortedByProfitLoss.count - 1 {
+                            Divider().padding(.leading, 68)
                         }
                     }
                 }
@@ -472,19 +490,19 @@ struct FinanceChartView: View {
 
                         HStack(spacing: 12) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
                                     .fill(
                                         LinearGradient(
                                             colors: [Color.indigo.opacity(0.20), Color.indigo.opacity(0.08)],
                                             startPoint: .topLeading, endPoint: .bottomTrailing
                                         )
                                     )
-                                    .frame(width: 42, height: 42)
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .frame(width: 44, height: 44)
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
                                     .stroke(Color.indigo.opacity(0.22), lineWidth: 1)
-                                    .frame(width: 42, height: 42)
+                                    .frame(width: 44, height: 44)
                                 Image(systemName: "building.2.fill")
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: 17, weight: .semibold))
                                     .foregroundStyle(.indigo)
                             }
 
@@ -529,9 +547,16 @@ struct FinanceChartView: View {
                         }
                         .padding(.horizontal)
                         .padding(.vertical, 12)
+                        .opacity(rowsAppeared ? 1 : 0)
+                        .offset(y: rowsAppeared ? 0 : 10)
+                        .animation(
+                            .spring(response: 0.45, dampingFraction: 0.80)
+                                .delay(0.10 + Double(i) * 0.04),
+                            value: rowsAppeared
+                        )
 
                         if i < store.realEstates.count - 1 {
-                            Divider().padding(.leading, 66)
+                            Divider().padding(.leading, 68)
                         }
                     }
                 }
@@ -568,12 +593,12 @@ struct FinanceChartView: View {
                                             startPoint: .topLeading, endPoint: .bottomTrailing
                                         )
                                     )
-                                    .frame(width: 42, height: 42)
+                                    .frame(width: 44, height: 44)
                                 Circle()
                                     .stroke(Color.blue.opacity(0.22), lineWidth: 1.5)
-                                    .frame(width: 42, height: 42)
+                                    .frame(width: 44, height: 44)
                                 Image(systemName: "shield.fill")
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: 17, weight: .semibold))
                                     .foregroundStyle(.blue)
                             }
 
@@ -608,9 +633,16 @@ struct FinanceChartView: View {
                         }
                         .padding(.horizontal)
                         .padding(.vertical, 12)
+                        .opacity(rowsAppeared ? 1 : 0)
+                        .offset(y: rowsAppeared ? 0 : 10)
+                        .animation(
+                            .spring(response: 0.45, dampingFraction: 0.80)
+                                .delay(0.10 + Double(i) * 0.04),
+                            value: rowsAppeared
+                        )
 
                         if i < store.insurances.count - 1 {
-                            Divider().padding(.leading, 66)
+                            Divider().padding(.leading, 68)
                         }
                     }
                 }
