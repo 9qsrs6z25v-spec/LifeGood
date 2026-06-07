@@ -544,8 +544,9 @@ final class SpeechRecognizer: NSObject, ObservableObject {
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.request?.append(buffer)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [req] buffer, _ in
+            // 直接捕捉 req 物件，避免從音訊執行緒存取 @MainActor 隔離的 self.request 屬性
+            req.append(buffer)
         }
         audioEngine.prepare()
         try audioEngine.start()
