@@ -1,5 +1,15 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（AddSavingsInsuranceView）
+// [2026-06] 本次美化方向：
+//   1. sectionHeader：統一升級為「4pt Capsule 漸層色條 + 彩色圖示 + .subheadline.bold 標題」，
+//      對齊 AddVehicleView / AddExpenseView section header 設計語言。
+//   2. calcPreviewCard：在表單頂部加入綠色漸層試算預覽卡，即時顯示「目前帳戶價值 / 期滿預估領回 /
+//      預估總報酬率」三欄 KPI；大數字套用 ntdWanString 萬/億格式；
+//      加入 spring 進場動畫（cardAppeared），對齊 AddExpenseView.loanCalcRow 設計語言。
+//   3. errorBanner：從純紅文字升級為帶圖示的橘色警告膠囊卡，對齊 AddExpenseView 驗證錯誤規格。
+//   4. Form tint 套用 .tint(.green)，與儲蓄險整體綠色主題一致。
+
 struct AddSavingsInsuranceView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -17,6 +27,7 @@ struct AddSavingsInsuranceView: View {
     @State private var maturityDate = Calendar.current.date(byAdding: .year, value: 6, to: Date()) ?? Date()
     @State private var note = ""
     @State private var showError = false
+    @State private var cardAppeared = false
 
     // MARK: - 自動計算
 
@@ -67,12 +78,26 @@ struct AddSavingsInsuranceView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
-                    TextField("保單名稱", text: $name)
-                    TextField("保險公司", text: $company)
+                // 試算預覽卡（有保費金額時顯示）
+                if premium > 0 {
+                    Section {
+                        calcPreviewCard
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                 }
 
-                Section("繳費設定") {
+                Section {
+                    TextField("保單名稱", text: $name)
+                    TextField("保險公司", text: $company)
+                } header: {
+                    sectionHeader("基本資訊", icon: "shield.fill",
+                                  gradient: [Color(red: 0.18, green: 0.62, blue: 0.40),
+                                             Color(red: 0.12, green: 0.82, blue: 0.52)])
+                }
+
+                Section {
                     HStack {
                         Text("幣別")
                         Spacer()
@@ -133,6 +158,10 @@ struct AddSavingsInsuranceView: View {
 
                     DatePicker("起始日", selection: $startDate, displayedComponents: .date)
                     DatePicker("到期日", selection: $maturityDate, displayedComponents: .date)
+                } header: {
+                    sectionHeader("繳費設定", icon: "creditcard.fill",
+                                  gradient: [Color(red: 0.22, green: 0.42, blue: 0.88),
+                                             Color(red: 0.32, green: 0.62, blue: 1.00)])
                 }
 
                 Section {
@@ -155,7 +184,9 @@ struct AddSavingsInsuranceView: View {
                             .foregroundStyle(.secondary)
                     }
                 } header: {
-                    Text("繳費資訊")
+                    sectionHeader("繳費資訊", icon: "chart.bar.fill",
+                                  gradient: [Color(red: 0.42, green: 0.22, blue: 0.82),
+                                             Color(red: 0.62, green: 0.42, blue: 1.00)])
                 }
 
                 Section {
@@ -191,26 +222,33 @@ struct AddSavingsInsuranceView: View {
                         }
                     }
                 } header: {
-                    Text("自動計算結果")
+                    sectionHeader("自動計算結果", icon: "sparkles",
+                                  gradient: [Color(red: 0.10, green: 0.68, blue: 0.48),
+                                             Color(red: 0.18, green: 0.88, blue: 0.38)])
                 } footer: {
                     if annualRate > 0 {
                         Text("以年利率 \(String(format: "%.2f%%", annualRate)) 複利計算，\(paymentPeriod.rawValue)繳 \(formatCurrency(premium))，共 \(totalPeriods) 期。")
                     }
                 }
 
-                Section("備註") {
+                Section {
                     TextField("選填備註", text: $note, axis: .vertical)
                         .lineLimit(3)
+                } header: {
+                    sectionHeader("備註", icon: "pencil",
+                                  gradient: [Color.gray, Color.gray.opacity(0.65)])
                 }
 
                 if showError {
                     Section {
-                        Text("請輸入保單名稱和有效保費金額")
-                            .foregroundStyle(.red)
-                            .font(.caption)
+                        errorBanner
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
                 }
             }
+            .tint(.green)
             .navigationTitle(editing != nil ? "編輯儲蓄險" : "新增儲蓄險")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -234,9 +272,143 @@ struct AddSavingsInsuranceView: View {
                     maturityDate = e.maturityDate
                     note = e.note
                 }
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.78).delay(0.12)) {
+                    cardAppeared = true
+                }
             }
         }
     }
+
+    // MARK: - 子視圖
+
+    /// 統一 section header：4pt 漸層 Capsule 色條 + 彩色圖示 + 粗體標題
+    private func sectionHeader(_ title: String, icon: String, gradient: [Color]) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: gradient, startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.caption.bold())
+                .foregroundStyle(gradient.first ?? .primary)
+            Text(title)
+                .font(.subheadline.bold())
+                .foregroundStyle(.primary)
+            Spacer()
+        }
+        .padding(.vertical, 2)
+        .textCase(nil)
+    }
+
+    /// 即時試算預覽卡（綠色漸層英雄卡）
+    private var calcPreviewCard: some View {
+        ZStack(alignment: .topTrailing) {
+            // 散景裝飾圓
+            Circle()
+                .fill(Color.white.opacity(0.10))
+                .frame(width: 90, height: 90)
+                .offset(x: 12, y: -24)
+            Circle()
+                .fill(Color.white.opacity(0.07))
+                .frame(width: 55, height: 55)
+                .offset(x: -18, y: 14)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "leaf.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white.opacity(0.90))
+                    Text("保單試算預覽")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white.opacity(0.90))
+                    Spacer()
+                    if annualRate > 0 {
+                        Text("年利率 \(String(format: "%.2f%%", annualRate))")
+                            .font(.caption2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.white.opacity(0.22))
+                            .clipShape(Capsule())
+                            .foregroundStyle(.white)
+                    }
+                }
+
+                HStack(spacing: 0) {
+                    previewKpiCell(label: "目前帳戶", value: formatCurrency(calculatedCurrentValue))
+                    Rectangle()
+                        .fill(Color.white.opacity(0.28))
+                        .frame(width: 0.5, height: 36)
+                    previewKpiCell(label: "期滿預估", value: formatCurrency(calculatedExpectedReturn))
+                    if totalPaid > 0 {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.28))
+                            .frame(width: 0.5, height: 36)
+                        let roi = (calculatedExpectedReturn - premium * Double(totalPeriods)) / (premium * Double(totalPeriods)) * 100
+                        previewKpiCell(
+                            label: "預估報酬率",
+                            value: String(format: "%.1f%%", roi),
+                            tint: roi >= 0 ? Color(red: 0.78, green: 1.00, blue: 0.60) : Color(red: 1.00, green: 0.68, blue: 0.68)
+                        )
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .background(
+            LinearGradient(
+                colors: [Color(red: 0.10, green: 0.64, blue: 0.44),
+                         Color(red: 0.16, green: 0.82, blue: 0.34)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color(red: 0.10, green: 0.64, blue: 0.44).opacity(0.32), radius: 10, y: 4)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .opacity(cardAppeared ? 1 : 0)
+        .offset(y: cardAppeared ? 0 : 14)
+        .animation(.spring(response: 0.50, dampingFraction: 0.80), value: cardAppeared)
+    }
+
+    private func previewKpiCell(label: String, value: String, tint: Color = .white) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+                .minimumScaleFactor(0.70)
+                .lineLimit(1)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(Color.white.opacity(0.80))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// 驗證失敗橘色錯誤卡
+    private var errorBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.white)
+                .font(.subheadline.bold())
+            Text("請輸入保單名稱和有效保費金額")
+                .font(.subheadline.bold())
+                .foregroundStyle(.white)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            LinearGradient(
+                colors: [Color.orange, Color(red: 1.0, green: 0.60, blue: 0.15)],
+                startPoint: .leading, endPoint: .trailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - 商業邏輯（不變動）
 
     private func save() {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
