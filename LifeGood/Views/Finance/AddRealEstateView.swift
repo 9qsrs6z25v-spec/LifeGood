@@ -499,8 +499,12 @@ struct AddRealEstateView: View {
         }
     }
 
+    private static let fmtDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func fmtDate(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
+        Self.fmtDateFormatter.string(from: d)
     }
 
     // MARK: - 變動支出
