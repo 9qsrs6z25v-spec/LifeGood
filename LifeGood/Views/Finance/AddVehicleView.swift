@@ -1,5 +1,18 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（AddVehicleView）
+// [2026-06] 本次美化方向：
+//   1. Section header 統一升級：4pt Capsule 漸層色條 + 彩色圖示 + .subheadline.semibold + 計數膠囊，
+//      對齊全 App section header 設計語言（OverviewView / IncomeView / FixedExpenseView）。
+//   2. fixedExpenseSection 列行：加入 36pt 藍色漸層圓形圖示 + 類別標籤從 RoundedRectangle 升級
+//      為 Capsule 週期徽章，對齊 FixedExpenseRow / ExpenseRow 視覺規格。
+//   3. variableExpenseSection 列行：加入 36pt 橘色漸層圓形圖示 + 類別標籤改 Capsule + 日期膠囊，
+//      對齊 ExpenseRow 視覺規格。
+//   4. calcSection 升級：每列加入彩色 32pt 圖示圓，數值以彩色 Capsule 徽章呈現，
+//      對齊 AddExpenseView.calcPreviewRows 設計語言。
+//   5. noteSection：加入 Capsule 色條標題，提升視覺一致性。
+//   6. 輔助函式 vehicleSectionHeader / calcRow 集中維護，方便日後均值對齊。
+
 struct AddVehicleView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -141,7 +154,7 @@ struct AddVehicleView: View {
     }
 
     private var vehicleInfoSection: some View {
-        Section("車輛資訊") {
+        Section {
             TextField("車名（如 Model Y）", text: $name)
             TextField("品牌（如 Tesla）", text: $brand)
 
@@ -166,6 +179,8 @@ struct AddVehicleView: View {
             if isSold {
                 DatePicker("售出日期", selection: $soldDate, in: purchaseDate..., displayedComponents: .date)
             }
+        } header: {
+            vehicleSectionHeader("車輛資訊", icon: "car.fill", color: .teal)
         }
     }
 
@@ -180,7 +195,7 @@ struct AddVehicleView: View {
                 Text("萬元").foregroundStyle(.secondary)
             }
         } header: {
-            Text("價值")
+            vehicleSectionHeader("價值", icon: "yensign.circle.fill", color: .green)
         } footer: {
             Text("以萬元為單位輸入，例如輸入 80 代表 NT$800,000。")
         }
@@ -197,17 +212,35 @@ struct AddVehicleView: View {
                         editingFixedExpense = exp
                     }
                 } label: {
-                    HStack {
-                        Text(fe.category.rawValue)
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.blue.opacity(0.12))
-                            .foregroundStyle(.blue)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        Text(fe.period == .monthly ? "每月" : "每年")
-                            .font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [Color.blue.opacity(0.22), Color.blue.opacity(0.09)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 36, height: 36)
+                            Circle()
+                                .stroke(Color.blue.opacity(0.18), lineWidth: 1)
+                                .frame(width: 36, height: 36)
+                            Image(systemName: "calendar.badge.checkmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.blue)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(fe.category.rawValue)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(fe.period == .monthly ? "每月" : "每年")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.blue)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.blue.opacity(0.10))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.blue.opacity(0.18), lineWidth: 0.5))
+                        }
                         Spacer()
-                        Text(fe.amount > 0 ? formatCurrency(fe.amount) : "未填金額")
+                        Text(fe.amount > 0 ? formatCurrency(fe.amount) : "未填")
                             .font(.subheadline.bold())
                             .foregroundStyle(fe.amount > 0 ? .primary : .secondary)
                         Image(systemName: "chevron.right")
@@ -226,7 +259,7 @@ struct AddVehicleView: View {
                     .foregroundStyle(.green)
             }
         } header: {
-            Text("定期支出")
+            vehicleSectionHeader("定期支出", icon: "calendar.badge.checkmark", color: .blue, count: fixedExpenses.count)
         } footer: {
             if !fixedExpenses.isEmpty {
                 let monthlyTotal = fixedExpenses.reduce(0.0) { $0 + $1.period.toMonthly($1.amount) }
@@ -246,18 +279,34 @@ struct AddVehicleView: View {
                         editingVariableExpense = exp
                     }
                 } label: {
-                    HStack {
-                        Label(ve.category.rawValue, systemImage: ve.category.icon)
-                            .font(.subheadline.weight(.medium))
-                            .labelStyle(.titleAndIcon)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.orange.opacity(0.12))
-                            .foregroundStyle(.orange)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        Text(formatShortDate(ve.date))
-                            .font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [Color.orange.opacity(0.22), Color.orange.opacity(0.09)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 36, height: 36)
+                            Circle()
+                                .stroke(Color.orange.opacity(0.18), lineWidth: 1)
+                                .frame(width: 36, height: 36)
+                            Image(systemName: ve.category.icon)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.orange)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(ve.category.rawValue)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(formatShortDate(ve.date))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color(.systemGray5))
+                                .clipShape(Capsule())
+                        }
                         Spacer()
-                        Text(ve.amount > 0 ? formatCurrency(ve.amount) : "未填金額")
+                        Text(ve.amount > 0 ? formatCurrency(ve.amount) : "未填")
                             .font(.subheadline.bold())
                             .foregroundStyle(ve.amount > 0 ? .primary : .secondary)
                         Image(systemName: "chevron.right")
@@ -276,7 +325,7 @@ struct AddVehicleView: View {
                     .foregroundStyle(.green)
             }
         } header: {
-            Text("變動支出")
+            vehicleSectionHeader("變動支出", icon: "arrow.triangle.2.circlepath", color: .orange, count: variableExpenses.count)
         } footer: {
             if !variableExpenses.isEmpty {
                 let total = variableExpenses.reduce(0.0) { $0 + $1.amount }
@@ -297,36 +346,32 @@ struct AddVehicleView: View {
         let variableTotal = variableExpenses.reduce(0.0) { $0 + $1.amount }
 
         if purchase > 0 || fixedMonthly > 0 {
-            Section("試算") {
+            Section {
                 if purchase > 0, current > 0 {
-                    HStack {
-                        Text("折舊金額"); Spacer()
-                        Text(formatCurrency(purchase - current)).foregroundStyle(.red)
-                    }
-                    HStack {
-                        Text("折舊率"); Spacer()
-                        Text(String(format: "%.1f%%", (purchase - current) / purchase * 100)).foregroundStyle(.red)
-                    }
+                    calcRow(icon: "arrow.down.circle.fill", label: "折舊金額",
+                            value: formatCurrency(purchase - current), color: .red)
+                    calcRow(icon: "percent", label: "折舊率",
+                            value: String(format: "%.1f%%", (purchase - current) / purchase * 100), color: .red)
                 }
                 if fixedMonthly > 0 {
-                    HStack {
-                        Text("每月定期支出"); Spacer()
-                        Text(formatCurrency(fixedMonthly)).font(.body.bold()).foregroundStyle(.orange)
-                    }
+                    calcRow(icon: "calendar.circle.fill", label: "每月定期支出",
+                            value: formatCurrency(fixedMonthly), color: .orange)
                 }
                 if variableTotal > 0 {
-                    HStack {
-                        Text("變動支出累計"); Spacer()
-                        Text(formatCurrency(variableTotal)).foregroundStyle(.orange)
-                    }
+                    calcRow(icon: "arrow.triangle.2.circlepath.circle.fill", label: "變動支出累計",
+                            value: formatCurrency(variableTotal), color: .orange)
                 }
+            } header: {
+                vehicleSectionHeader("試算", icon: "chart.bar.fill", color: .purple)
             }
         }
     }
 
     private var noteSection: some View {
-        Section("備註") {
+        Section {
             TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+        } header: {
+            vehicleSectionHeader("備註", icon: "text.bubble.fill", color: .secondary)
         }
     }
 
@@ -502,6 +547,63 @@ struct AddVehicleView: View {
         purchasePriceText = e.purchasePrice > 0 ? String(format: "%g", e.purchasePrice / 10000) : ""
         currentValueText = e.currentValue > 0 ? String(format: "%g", e.currentValue / 10000) : ""
         note = e.note
+    }
+
+    // MARK: - 美化輔助元件
+
+    @ViewBuilder
+    private func vehicleSectionHeader(_ title: String, icon: String, color: Color, count: Int? = nil) -> some View {
+        HStack(spacing: 7) {
+            Capsule()
+                .fill(LinearGradient(
+                    colors: [color, color.opacity(0.70)],
+                    startPoint: .top, endPoint: .bottom
+                ))
+                .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+            if let n = count, n > 0 {
+                Text("\(n)")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(color.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+            Spacer()
+        }
+        .textCase(nil)
+    }
+
+    private func calcRow(icon: String, label: String, value: String, color: Color) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [color.opacity(0.18), color.opacity(0.08)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 32, height: 32)
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(color.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(color.opacity(0.20), lineWidth: 0.5))
+        }
     }
 
     private func formatCurrency(_ value: Double) -> String {
