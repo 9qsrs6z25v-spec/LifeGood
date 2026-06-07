@@ -343,6 +343,7 @@ struct LifeOverviewView: View {
                     .foregroundStyle(accent.opacity(0.72))
             }
             .onAppear {
+                emptyMilestonePulse = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     emptyMilestonePulse = true
                 }
