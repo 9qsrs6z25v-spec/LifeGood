@@ -1,12 +1,32 @@
 import SwiftUI
 import PhotosUI
 
+// MARK: - 美化紀錄
+// 版本：v1（2026-06）
+// 美化方向：
+//   • FamilyMembersResumeView（列表）
+//       - Capsule 側條 sectionHeader（4pt 漸層） + 計數 Capsule 徽章
+//       - 44pt 漸層圖示圓（role 對應色） + shadow；角色徽章改 Capsule
+//       - familySide 顯示 Capsule 小標籤
+//       - stagger 入場動畫（rowsAppeared + 0.06s delay/row）
+//       - 全空 empty state（雙脈衝擴散環 + figure.2.and.child.holdinghands）
+//   • FamilyMemberDetailView（詳細頁）
+//       - role 漸層 hero card + bokeh 裝飾 + cardAppeared spring 動畫
+//       - sectionHeaderWithAdd：Capsule 側條 + .subheadline.weight(.bold) + 計數徽章 + icon 參數
+//       - 靜態 dateFormatter / currencyFormatter（效能優化，避免每次 render 重新建立）
+//       - eventsSection 每行加 34pt 日曆圖示圓（橘色漸層）
+//       - memberGiftsSection 標頭改 Capsule 側條；禮金行加 32pt 圖示圓
+//       - 空狀態：emptyPlaceholder helper（icon + 說明文字）
+// ─────────────────────────────────────────────
+
 // MARK: - 家人履歷 列表
 
 /// 顯示直系（爸媽）+ 二等親屬（兄弟姐妹 / 其他親屬）的列表，點選進入個人詳細頁。
 struct FamilyMembersResumeView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var viewingMember: FamilyMember?
+    @State private var rowsAppeared = false
+    @State private var emptyIconPulse = false
 
     private var directRelatives: [FamilyMember] {
         lifeStore.familyMembers
@@ -27,35 +47,58 @@ struct FamilyMembersResumeView: View {
             .filter { $0.role == .otherRelative }
     }
 
+    private var allMembers: [FamilyMember] { directRelatives + siblings + others }
+
     var body: some View {
         NavigationStack {
-            List {
-                if !directRelatives.isEmpty {
-                    Section("直系親屬") {
-                        ForEach(directRelatives) { m in
-                            Button { viewingMember = m } label: { memberRow(m) }
-                                .buttonStyle(.plain)
+            Group {
+                if allMembers.isEmpty {
+                    emptyState
+                } else {
+                    List {
+                        if !directRelatives.isEmpty {
+                            Section {
+                                ForEach(Array(directRelatives.enumerated()), id: \.element.id) { idx, m in
+                                    Button { viewingMember = m } label: {
+                                        memberRow(m, index: idx)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            } header: {
+                                sectionHeader("直系親屬", count: directRelatives.count, color: .orange)
+                            }
+                        }
+                        if !siblings.isEmpty {
+                            Section {
+                                ForEach(Array(siblings.enumerated()), id: \.element.id) { idx, m in
+                                    Button { viewingMember = m } label: {
+                                        memberRow(m, index: directRelatives.count + idx)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            } header: {
+                                sectionHeader("兄弟姐妹", count: siblings.count, color: .pink)
+                            }
+                        }
+                        if !others.isEmpty {
+                            Section {
+                                ForEach(Array(others.enumerated()), id: \.element.id) { idx, m in
+                                    Button { viewingMember = m } label: {
+                                        memberRow(m, index: directRelatives.count + siblings.count + idx)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            } header: {
+                                sectionHeader("其他親屬", count: others.count, color: .indigo)
+                            }
                         }
                     }
-                }
-                if !siblings.isEmpty {
-                    Section("兄弟姐妹") {
-                        ForEach(siblings) { m in
-                            Button { viewingMember = m } label: { memberRow(m) }
-                                .buttonStyle(.plain)
-                        }
-                    }
-                }
-                if !others.isEmpty {
-                    Section("其他親屬") {
-                        ForEach(others) { m in
-                            Button { viewingMember = m } label: { memberRow(m) }
-                                .buttonStyle(.plain)
-                        }
+                    .listStyle(.insetGrouped)
+                    .onAppear {
+                        withAnimation(.easeOut(duration: 0.5).delay(0.1)) { rowsAppeared = true }
                     }
                 }
             }
-            .listStyle(.insetGrouped)
             .navigationTitle("家人履歷")
             .sheet(item: $viewingMember) { member in
                 FamilyMemberDetailView(memberId: member.id)
@@ -63,25 +106,63 @@ struct FamilyMembersResumeView: View {
         }
     }
 
-    private func memberRow(_ m: FamilyMember) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: m.role.icon)
-                .font(.title3)
-                .foregroundStyle(.pink)
-                .frame(width: 38, height: 38)
-                .background(Color.pink.opacity(0.12))
-                .clipShape(Circle())
+    // MARK: Section Header（Capsule 側條 + 計數徽章）
+    private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.6)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Capsule()
+                .fill(color.opacity(0.15))
+                .frame(width: 32, height: 18)
+                .overlay(
+                    Text("\(count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(color)
+                )
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+        .textCase(nil)
+    }
+
+    // MARK: Member Row（44pt 漸層圓 + Capsule 角色徽章 + stagger）
+    private func memberRow(_ m: FamilyMember, index: Int) -> some View {
+        let roleColor = accentColor(for: m.role)
+        return HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [roleColor, roleColor.opacity(0.7)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 44, height: 44)
+                    .shadow(color: roleColor.opacity(0.35), radius: 5, x: 0, y: 3)
+                Image(systemName: m.role.icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.white)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(m.chineseName.isEmpty ? m.role.rawValue : m.chineseName)
-                        .font(.subheadline.weight(.medium))
+                        .font(.subheadline.weight(.semibold))
                     Text(m.role.rawValue)
-                        .font(.caption2)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color.pink.opacity(0.12))
-                        .foregroundStyle(.pink)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(roleColor.opacity(0.12))
+                        .foregroundStyle(roleColor)
+                        .clipShape(Capsule())
+                    if let side = m.familySide {
+                        Text(side.rawValue)
+                            .font(.caption2)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.10))
+                            .foregroundStyle(.secondary)
+                            .clipShape(Capsule())
+                    }
                 }
                 HStack(spacing: 8) {
                     if !m.familyEvents.isEmpty {
@@ -100,7 +181,57 @@ struct FamilyMembersResumeView: View {
             Spacer()
             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+        .opacity(rowsAppeared ? 1 : 0)
+        .offset(y: rowsAppeared ? 0 : 14)
+        .animation(.spring(response: 0.45, dampingFraction: 0.8).delay(0.06 * Double(index)),
+                   value: rowsAppeared)
+    }
+
+    // MARK: Empty State（雙脈衝環）
+    private var emptyState: some View {
+        VStack(spacing: 24) {
+            ZStack {
+                Circle()
+                    .stroke(Color.pink.opacity(emptyIconPulse ? 0 : 0.3), lineWidth: 2)
+                    .frame(width: emptyIconPulse ? 90 : 60, height: emptyIconPulse ? 90 : 60)
+                Circle()
+                    .stroke(Color.pink.opacity(emptyIconPulse ? 0 : 0.15), lineWidth: 2)
+                    .frame(width: emptyIconPulse ? 120 : 80, height: emptyIconPulse ? 120 : 80)
+                Circle()
+                    .fill(LinearGradient(colors: [.pink, .pink.opacity(0.7)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 56, height: 56)
+                    .shadow(color: .pink.opacity(0.3), radius: 8, x: 0, y: 4)
+                Image(systemName: "figure.2.and.child.holdinghands")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+            .onAppear {
+                withAnimation(.easeOut(duration: 2.0).repeatForever(autoreverses: false)) {
+                    emptyIconPulse = true
+                }
+            }
+
+            VStack(spacing: 6) {
+                Text("尚未新增家人").font(.title3.bold())
+                Text("在「家庭」頁面新增家人後，這裡會顯示他們的履歷")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: Role Accent Color
+    private func accentColor(for role: FamilyMemberRole) -> Color {
+        switch role {
+        case .spouse:                                            return .pink
+        case .father, .elderBrother, .youngerBrother, .son:    return .orange
+        case .mother, .elderSister, .youngerSister, .daughter: return .pink
+        case .otherRelative:                                    return .indigo
+        }
     }
 }
 
@@ -116,11 +247,32 @@ struct FamilyMemberDetailView: View {
     @State private var addingPhoto = false
     @State private var editingPhoto: FamilyAlbumPhoto?
     @State private var viewingPhotoURL: URL?
+    @State private var cardAppeared = false
     @EnvironmentObject var expenseStore: ExpenseStore
+
+    // 靜態格式化器（避免每次 render 重新建立）
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    private static let currencyFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f
+    }()
 
     private var member: FamilyMember {
         lifeStore.familyMembers.first(where: { $0.id == memberId })
             ?? FamilyMember(role: .otherRelative)
+    }
+
+    private var roleColor: Color {
+        switch member.role {
+        case .spouse:                                            return .pink
+        case .father, .elderBrother, .youngerBrother, .son:    return .orange
+        case .mother, .elderSister, .youngerSister, .daughter: return .pink
+        case .otherRelative:                                    return .indigo
+        }
     }
 
     /// 變動支出 .social 中將此家人列為收受人的紀錄
@@ -140,21 +292,36 @@ struct FamilyMemberDetailView: View {
 
     private var memberGiftsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "gift.fill").foregroundStyle(.pink)
-                Text("收到的禮金").font(.headline)
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.pink, .pink.opacity(0.6)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 18)
+                Image(systemName: "gift.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.pink)
+                Text("收到的禮金")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
                 Text(formatGiftTotal(memberGifts.reduce(0) { $0 + $1.amount }))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.pink)
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
 
             ForEach(SocialSubCategory.allCases) { sub in
                 let items = memberGifts.filter { $0.socialSubCategory == sub }
                 if !items.isEmpty {
-                    HStack(spacing: 8) {
-                        Image(systemName: sub.icon).foregroundStyle(.pink).frame(width: 22)
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(colors: [.pink.opacity(0.8), .pink.opacity(0.5)],
+                                                      startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 32, height: 32)
+                            Image(systemName: sub.icon)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.white)
+                        }
                         Text(sub.rawValue).font(.subheadline)
                         Spacer()
                         Text("\(items.count) 筆")
@@ -164,7 +331,7 @@ struct FamilyMemberDetailView: View {
                             .foregroundStyle(.red)
                     }
                     .padding(.horizontal).padding(.vertical, 6)
-                    Divider().padding(.leading, 44)
+                    Divider().padding(.leading, 54)
                 }
             }
         }
@@ -174,9 +341,7 @@ struct FamilyMemberDetailView: View {
     }
 
     private func formatGiftTotal(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .currency
-        f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     var body: some View {
@@ -222,78 +387,128 @@ struct FamilyMemberDetailView: View {
         return member.role.rawValue
     }
 
-    // MARK: 頂部資訊
+    // MARK: 頂部資訊 - 漸層 Hero Card + Bokeh + Spring 動畫
 
     private var headerCard: some View {
-        VStack(spacing: 8) {
-            Image(systemName: member.role.icon)
-                .font(.system(size: 40))
-                .foregroundStyle(.pink)
-                .frame(width: 78, height: 78)
-                .background(Color.pink.opacity(0.12))
-                .clipShape(Circle())
-            Text(displayName).font(.title3.bold())
-            Text(member.role.rawValue).font(.caption).foregroundStyle(.secondary)
+        ZStack {
+            RoundedRectangle(cornerRadius: 20)
+                .fill(
+                    LinearGradient(
+                        colors: [roleColor, roleColor.opacity(0.65)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
 
-            if let bd = member.birthday {
-                Label(formatDate(bd), systemImage: "birthday.cake.fill")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else if let by = member.birthYear {
-                Label("\(by) 年生", systemImage: "birthday.cake.fill")
-                    .font(.caption).foregroundStyle(.secondary)
+            // Bokeh decoration
+            Circle()
+                .fill(.white.opacity(0.12))
+                .blur(radius: 20)
+                .frame(width: 110, height: 110)
+                .offset(x: -70, y: -40)
+            Circle()
+                .fill(.white.opacity(0.07))
+                .blur(radius: 28)
+                .frame(width: 150, height: 150)
+                .offset(x: 80, y: 50)
+
+            VStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.2))
+                        .frame(width: 82, height: 82)
+                    Circle()
+                        .strokeBorder(.white.opacity(0.4), lineWidth: 2)
+                        .frame(width: 82, height: 82)
+                    Image(systemName: member.role.icon)
+                        .font(.system(size: 34, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+
+                Text(displayName)
+                    .font(.title3.bold())
+                    .foregroundStyle(.white)
+                Text(member.role.rawValue)
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .background(.white.opacity(0.2))
+                    .foregroundStyle(.white)
+                    .clipShape(Capsule())
+
+                if let bd = member.birthday {
+                    Label(Self.dateFormatter.string(from: bd), systemImage: "birthday.cake.fill")
+                        .font(.caption).foregroundStyle(.white.opacity(0.85))
+                } else if let by = member.birthYear {
+                    Label("\(by) 年生", systemImage: "birthday.cake.fill")
+                        .font(.caption).foregroundStyle(.white.opacity(0.85))
+                }
+                if let note = member.relativeNote, !note.isEmpty {
+                    Text(note).font(.caption2).foregroundStyle(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                }
             }
-            if let note = member.relativeNote, !note.isEmpty {
-                Text(note).font(.caption2).foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 24)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: roleColor.opacity(0.3), radius: 12, x: 0, y: 6)
         .padding(.horizontal)
+        .scaleEffect(cardAppeared ? 1 : 0.96)
+        .opacity(cardAppeared ? 1 : 0)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) { cardAppeared = true }
+        }
     }
 
     // MARK: 紀錄章節
 
     private var eventsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeaderWithAdd("紀錄", count: member.familyEvents.count) {
+            sectionHeaderWithAdd("紀錄", count: member.familyEvents.count,
+                                 icon: "doc.text.fill", color: .orange) {
                 addingEvent = true
             }
 
             if member.familyEvents.isEmpty {
-                Text("尚無紀錄").font(.caption).foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal).padding(.bottom, 12)
+                emptyPlaceholder(icon: "doc.text", text: "尚無紀錄", color: .orange)
             } else {
                 let sortedEvents = member.familyEvents.sorted { $0.date > $1.date }
                 let lastEventId = sortedEvents.last?.id
                 ForEach(sortedEvents) { ev in
                     Button { editingEvent = ev } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(LinearGradient(colors: [.orange.opacity(0.8), .orange.opacity(0.5)],
+                                                          startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .frame(width: 34, height: 34)
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.white)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text(ev.title.isEmpty ? "未命名紀錄" : ev.title)
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(.primary)
-                                Spacer()
-                                Text(formatDate(ev.date))
-                                    .font(.caption2).foregroundStyle(.tertiary)
+                                if !ev.content.isEmpty {
+                                    Text(ev.content)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
                             }
-                            if !ev.content.isEmpty {
-                                Text(ev.content)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(3)
-                            }
+                            Spacer()
+                            Text(Self.dateFormatter.string(from: ev.date))
+                                .font(.caption2).foregroundStyle(.tertiary)
                         }
-                        .padding(.horizontal).padding(.vertical, 8)
+                        .padding(.horizontal).padding(.vertical, 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     if ev.id != lastEventId {
-                        Divider().padding(.leading)
+                        Divider().padding(.leading, 58)
                     }
                 }
             }
@@ -307,14 +522,13 @@ struct FamilyMemberDetailView: View {
 
     private var photosSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeaderWithAdd("相簿", count: member.familyPhotos.count) {
+            sectionHeaderWithAdd("相簿", count: member.familyPhotos.count,
+                                 icon: "photo.fill", color: .blue) {
                 addingPhoto = true
             }
 
             if member.familyPhotos.isEmpty {
-                Text("尚無照片").font(.caption).foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal).padding(.bottom, 12)
+                emptyPlaceholder(icon: "photo", text: "尚無照片", color: .blue)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
@@ -361,7 +575,7 @@ struct FamilyMemberDetailView: View {
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
                 .frame(width: 130, alignment: .leading)
-            Text(formatDate(p.date))
+            Text(Self.dateFormatter.string(from: p.date))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -372,22 +586,49 @@ struct FamilyMemberDetailView: View {
 
     // MARK: Helpers
 
-    private func sectionHeaderWithAdd(_ title: String, count: Int, action: @escaping () -> Void) -> some View {
-        HStack {
-            Text(title).font(.headline)
-            Text("\(count)").font(.caption).foregroundStyle(.tertiary)
+    private func sectionHeaderWithAdd(
+        _ title: String, count: Int, icon: String, color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.6)],
+                                      startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+            Text(title).font(.subheadline.weight(.bold))
+            Capsule()
+                .fill(color.opacity(0.12))
+                .frame(width: 32, height: 18)
+                .overlay(
+                    Text("\(count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(color)
+                )
             Spacer()
             Button(action: action) {
                 Image(systemName: "plus.circle.fill")
                     .foregroundStyle(.green)
+                    .font(.title3)
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
     }
 
+    private func emptyPlaceholder(icon: String, text: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).font(.caption).foregroundStyle(color.opacity(0.5))
+            Text(text).font(.caption).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal).padding(.bottom, 12)
+    }
+
     private func formatDate(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
+        Self.dateFormatter.string(from: d)
     }
 }
 
