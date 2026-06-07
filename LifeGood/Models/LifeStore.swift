@@ -126,8 +126,12 @@ class LifeStore: ObservableObject {
     func toggleTaskCompletion(subordinateId: UUID, taskId: UUID) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
               let ti = subordinates[si].tasks.firstIndex(where: { $0.id == taskId }) else { return }
+        // isLoading = true 防止兩次 subscript 寫回各自觸發 didSet → save()，
+        // 避免「isCompleted 已翻轉但 completedAt 尚未設定」的中間態被持久化。
+        isLoading = true
         subordinates[si].tasks[ti].isCompleted.toggle()
         subordinates[si].tasks[ti].completedAt = subordinates[si].tasks[ti].isCompleted ? Date() : nil
+        isLoading = false
         save()
     }
 
@@ -138,10 +142,13 @@ class LifeStore: ObservableObject {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }) else { return }
         let cal = Calendar.current
         let day = cal.startOfDay(for: date)
+        // 以 isLoading 批次保護：removeAll 與 append 之間的中間態（班別已刪但未寫入）不應被持久化。
+        isLoading = true
         subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: day) }
         if let type = type {
             subordinates[si].shifts.append(SubordinateShift(date: day, type: type))
         }
+        isLoading = false
         save()
     }
 
@@ -154,11 +161,15 @@ class LifeStore: ObservableObject {
         var plan: [(Int, ShiftType)] = [(0, .jetLagLeave)]
         for d in 1...6 { plan.append((d, .nightShift)) }
         plan.append((7, .restDay))
+        // 以 isLoading 批次保護整個迴圈：8 次 removeAll+append 否則每次都觸發 didSet → save()，
+        // 共產生 16 次不必要的背景序列化，且各次中間態（部分班別已寫、部分尚未）也會被持久化。
+        isLoading = true
         for (offset, type) in plan {
             guard let day = cal.date(byAdding: .day, value: offset, to: start) else { continue }
             subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: day) }
             subordinates[si].shifts.append(SubordinateShift(date: day, type: type))
         }
+        isLoading = false
         save()
     }
 
