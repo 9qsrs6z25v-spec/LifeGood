@@ -473,13 +473,15 @@ private struct RosterCellDetailSheet: View {
             }
             Button {
                 lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: cell.date)
+                dismiss()   // 套用後關閉彈窗回班表，明確回饋已排班成功
             } label: {
                 Label("從這天套用大夜班輪班（8 天）", systemImage: "arrow.triangle.2.circlepath")
             }
             Button {
                 lifeStore.applyEveningShiftWeekdays(subordinateId: cell.subId, startDate: cell.date)
+                dismiss()   // 套用後關閉彈窗回班表
             } label: {
-                Label("套用小夜班（週一至週五 5 天）", systemImage: "moon.stars")
+                Label("套用小夜班（整週一至五 5 天）", systemImage: "moon.stars")
             }
             Button(role: .destructive) {
                 lifeStore.setShift(subordinateId: cell.subId, date: cell.date, type: nil)
