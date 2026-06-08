@@ -499,6 +499,7 @@ struct CareerView: View {
                     emptyIconPulse = true
                 }
             }
+            .onDisappear { emptyIconPulse = false }
 
             VStack(spacing: 8) {
                 Text(selectedSub == nil ? "尚無職涯里程碑" : "此分類尚無紀錄")
