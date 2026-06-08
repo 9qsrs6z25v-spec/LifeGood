@@ -7,6 +7,16 @@ final class NotificationManager {
     static let shared = NotificationManager()
     private init() {}
 
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    }()
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
+    private static let dateTimeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d HH:mm"; return f
+    }()
+
     // MARK: - 權限
 
     /// 請求通知權限（已授權則直接 true，被拒絕則 false）
@@ -153,16 +163,13 @@ final class NotificationManager {
             if event.durationMinutes == 0 {
                 timeStr = pattern
             } else {
-                let f = DateFormatter()
-                f.dateFormat = "HH:mm"
-                timeStr = "\(pattern) · \(f.string(from: event.date))"
+                timeStr = "\(pattern) · \(Self.timeFormatter.string(from: event.date))"
             }
         } else {
             // 一次性事件，或重複事件已展開成多筆 → 用該筆實際的觸發時間
             let dateToShow = fireDate ?? event.date
-            let f = DateFormatter()
-            f.dateFormat = event.durationMinutes == 0 ? "M/d" : "M/d HH:mm"
-            timeStr = f.string(from: dateToShow)
+            let fmt = event.durationMinutes == 0 ? Self.dateFormatter : Self.dateTimeFormatter
+            timeStr = fmt.string(from: dateToShow)
         }
 
         let pieces = [kindLabel, timeStr, durStr] + (event.note.isEmpty ? [] : [event.note])
