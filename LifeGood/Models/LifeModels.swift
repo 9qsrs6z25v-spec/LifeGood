@@ -1166,16 +1166,19 @@ struct Subordinate: Identifiable, Codable {
     var meetings: [SubordinateMeeting]
     var tasks: [SubordinateTask]
     var shifts: [SubordinateShift]
+    /// 廠區（選填，例如 A / B、P1 / P2）；空字串代表未分廠區
+    var plantArea: String
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
          department: String = "", note: String = "", gradeTitleId: UUID? = nil,
          departmentId: UUID? = nil, records: [SubordinateRecord] = [], joinDate: Date? = nil,
          meetings: [SubordinateMeeting] = [], tasks: [SubordinateTask] = [],
-         shifts: [SubordinateShift] = []) {
+         shifts: [SubordinateShift] = [], plantArea: String = "") {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
         self.departmentId = departmentId; self.records = records; self.joinDate = joinDate
         self.meetings = meetings; self.tasks = tasks; self.shifts = shifts
+        self.plantArea = plantArea
     }
 
     init(from decoder: Decoder) throws {
@@ -1192,6 +1195,7 @@ struct Subordinate: Identifiable, Codable {
         meetings = (try? c.decode([SubordinateMeeting].self, forKey: .meetings)) ?? []
         tasks = (try? c.decode([SubordinateTask].self, forKey: .tasks)) ?? []
         shifts = (try? c.decode([SubordinateShift].self, forKey: .shifts)) ?? []
+        plantArea = (try? c.decode(String.self, forKey: .plantArea)) ?? ""
     }
 }
 

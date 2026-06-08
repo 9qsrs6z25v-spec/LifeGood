@@ -625,6 +625,8 @@ struct AddSubordinateView: View {
     @State private var selectedDepartmentId: UUID?
     @State private var department = ""
     @State private var note = ""
+    @State private var hasPlantArea = false
+    @State private var plantArea = ""
 
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
@@ -641,6 +643,7 @@ struct AddSubordinateView: View {
                     }
                     gradeTitlePicker
                     departmentPicker
+                    plantAreaField
                 }
                 Section("備註") {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
@@ -676,6 +679,36 @@ struct AddSubordinateView: View {
                 Text("未選擇").tag(UUID?.none)
                 ForEach(lifeStore.gradeTitles) { gt in
                     Text("\(gt.grade) — \(gt.title)").tag(UUID?.some(gt.id))
+                }
+            }
+        }
+    }
+
+    /// 既有部屬已用過的廠區名稱（給快速選取，避免打錯字導致分組不一致）
+    private var existingPlantAreas: [String] {
+        Array(Set(lifeStore.subordinates.map { $0.plantArea }.filter { !$0.isEmpty })).sorted()
+    }
+
+    @ViewBuilder
+    private var plantAreaField: some View {
+        Toggle("分廠區", isOn: $hasPlantArea.animation())
+        if hasPlantArea {
+            TextField("廠區名稱（例如 A、B、P1、P2）", text: $plantArea)
+            if !existingPlantAreas.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(existingPlantAreas, id: \.self) { area in
+                            Button { plantArea = area } label: {
+                                Text(area)
+                                    .font(.caption)
+                                    .padding(.horizontal, 10).padding(.vertical, 4)
+                                    .background(plantArea == area ? Color.blue.opacity(0.15) : Color(.secondarySystemBackground))
+                                    .foregroundStyle(plantArea == area ? Color.blue : Color.primary)
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
             }
         }
@@ -726,7 +759,10 @@ struct AddSubordinateView: View {
             joinDate: hasJoinDate ? joinDate : nil,
             // 編輯時務必帶回既有的會議與任務，否則 update() 會以空陣列覆蓋而導致消失
             meetings: editing?.meetings ?? [],
-            tasks: editing?.tasks ?? []
+            tasks: editing?.tasks ?? [],
+            // 帶回既有班別，避免編輯部屬後排好的班被清掉
+            shifts: editing?.shifts ?? [],
+            plantArea: hasPlantArea ? plantArea.trimmingCharacters(in: .whitespaces) : ""
         )
         if editing != nil { lifeStore.update(item) } else { lifeStore.add(item) }
         dismiss()
@@ -739,6 +775,8 @@ struct AddSubordinateView: View {
         selectedDepartmentId = e.departmentId
         department = e.department
         note = e.note
+        plantArea = e.plantArea
+        hasPlantArea = !e.plantArea.isEmpty
         if let jd = e.joinDate {
             hasJoinDate = true
             joinDate = jd

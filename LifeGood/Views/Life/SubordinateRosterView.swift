@@ -84,6 +84,7 @@ struct SubordinateRosterView: View {
     private let cellW: CGFloat = 40
     private let cellH: CGFloat = 42
     private let headerH: CGFloat = 38
+    private let groupHeaderH: CGFloat = 26
 
     // MARK: 資料
 
@@ -91,6 +92,37 @@ struct SubordinateRosterView: View {
         lifeStore.subordinates
             .filter { selectedDeptId == nil || $0.departmentId == selectedDeptId }
             .sorted { $0.name < $1.name }
+    }
+
+    /// 班表列：依廠區分組後的展開列（廠區標題 + 各部屬）
+    private enum RosterRow: Identifiable {
+        case header(String)
+        case person(Subordinate)
+        var id: String {
+            switch self {
+            case .header(let s):  return "h_\(s)"
+            case .person(let p):  return "p_\(p.id.uuidString)"
+            }
+        }
+    }
+
+    /// 把 people 依廠區分組：有分廠區者各自成段（前面加標題），未分廠區者收在最後。
+    /// 完全沒有人分廠區時，回傳純名單（不顯示任何標題）。
+    private var rosterRows: [RosterRow] {
+        let ppl = people
+        let grouped = Dictionary(grouping: ppl) { $0.plantArea }
+        let areas = grouped.keys.filter { !$0.isEmpty }.sorted()
+        if areas.isEmpty { return ppl.map { .person($0) } }
+        var rows: [RosterRow] = []
+        for area in areas {
+            rows.append(.header(area))
+            rows.append(contentsOf: (grouped[area] ?? []).map { .person($0) })
+        }
+        if let unassigned = grouped[""], !unassigned.isEmpty {
+            rows.append(.header("未分廠區"))
+            rows.append(contentsOf: unassigned.map { .person($0) })
+        }
+        return rows
     }
 
     private var days: [Date] {
@@ -284,14 +316,22 @@ struct SubordinateRosterView: View {
                 // 凍結姓名欄
                 VStack(spacing: 0) {
                     Color.clear.frame(width: nameColWidth, height: headerH)
-                    ForEach(people) { p in nameCell(p) }
+                    ForEach(rosterRows) { row in
+                        switch row {
+                        case .header(let area): nameHeaderCell(area)
+                        case .person(let p):    nameCell(p)
+                        }
+                    }
                 }
                 // 可水平捲動的整月格
                 ScrollView(.horizontal, showsIndicators: true) {
                     VStack(spacing: 0) {
                         HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
-                        ForEach(people) { p in
-                            HStack(spacing: 0) { ForEach(days, id: \.self) { d in cell(p, d) } }
+                        ForEach(rosterRows) { row in
+                            switch row {
+                            case .header:        gridHeaderRow()
+                            case .person(let p): HStack(spacing: 0) { ForEach(days, id: \.self) { d in cell(p, d) } }
+                            }
                         }
                     }
                 }
@@ -315,6 +355,28 @@ struct SubordinateRosterView: View {
         .padding(.leading, 8)
         .frame(width: nameColWidth, height: cellH)
         .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
+    }
+
+    /// 廠區分段：姓名欄上的標題格
+    private func nameHeaderCell(_ area: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "building.2.fill").font(.system(size: 9))
+            Text(area).font(.system(size: 11, weight: .bold)).lineLimit(1).minimumScaleFactor(0.6)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.blue)
+        .padding(.leading, 8)
+        .frame(width: nameColWidth, height: groupHeaderH, alignment: .leading)
+        .background(Color.blue.opacity(0.10))
+        .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
+    }
+
+    /// 廠區分段：日格區對齊的整列底色橫條
+    private func gridHeaderRow() -> some View {
+        Rectangle()
+            .fill(Color.blue.opacity(0.10))
+            .frame(width: CGFloat(days.count) * cellW, height: groupHeaderH)
+            .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
     }
 
     private func dayHeader(_ day: Date) -> some View {
