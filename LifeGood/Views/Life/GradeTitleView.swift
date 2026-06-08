@@ -68,8 +68,8 @@ struct GradeTitleView: View {
 
                 // ── 職等設定 ──
                 Section {
-                    ForEach(Array(lifeStore.gradeTitles.enumerated()), id: \.element.id) { index, _ in
-                        gradeTitleRow(index: index)
+                    ForEach(Array(lifeStore.gradeTitles.enumerated()), id: \.element.id) { index, gt in
+                        gradeTitleRow(item: gt)
                             .opacity(rowsAppeared ? 1 : 0)
                             .offset(y: rowsAppeared ? 0 : 12)
                             .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04 * Double(index)), value: rowsAppeared)
@@ -277,18 +277,21 @@ struct GradeTitleView: View {
     // MARK: - Grade Title Row
 
     @ViewBuilder
-    private func gradeTitleRow(index: Int) -> some View {
+    private func gradeTitleRow(item gt: GradeTitle) -> some View {
         HStack(spacing: 10) {
             // 職等編號欄
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.purple.opacity(0.10))
                     .frame(width: 56, height: 36)
-                TextField("職等", text: $lifeStore.gradeTitles[index].grade)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.purple)
-                    .multilineTextAlignment(.center)
-                    .frame(width: 52)
+                TextField("職等", text: Binding(
+                    get: { lifeStore.gradeTitles.first(where: { $0.id == gt.id })?.grade ?? gt.grade },
+                    set: { if let i = lifeStore.gradeTitles.firstIndex(where: { $0.id == gt.id }) { lifeStore.gradeTitles[i].grade = $0 } }
+                ))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.purple)
+                .multilineTextAlignment(.center)
+                .frame(width: 52)
             }
 
             // 職稱欄
@@ -296,13 +299,16 @@ struct GradeTitleView: View {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color(.systemGray6))
                     .frame(height: 36)
-                TextField("職稱", text: $lifeStore.gradeTitles[index].title)
-                    .font(.subheadline)
-                    .padding(.horizontal, 10)
+                TextField("職稱", text: Binding(
+                    get: { lifeStore.gradeTitles.first(where: { $0.id == gt.id })?.title ?? gt.title },
+                    set: { if let i = lifeStore.gradeTitles.firstIndex(where: { $0.id == gt.id }) { lifeStore.gradeTitles[i].title = $0 } }
+                ))
+                .font(.subheadline)
+                .padding(.horizontal, 10)
             }
 
             Button(role: .destructive) {
-                lifeStore.deleteGradeTitle(lifeStore.gradeTitles[index])
+                lifeStore.deleteGradeTitle(gt)
             } label: {
                 Image(systemName: "minus.circle.fill")
                     .foregroundStyle(.red.opacity(0.80))
