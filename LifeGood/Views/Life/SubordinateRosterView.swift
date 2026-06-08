@@ -1,5 +1,13 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（SubordinateRosterView）
+// v1 美化方向：
+//   filterBar  — 月份切換箭頭升級為 36pt 填充圓形按鈕（對齊 TaxOverviewView.yearPicker 規格）；
+//                部門 Menu 膠囊加動態 tint（選取時藍底/邊框，預設次要背景）
+//   legendChip — 色塊從 12pt 方形改 8pt Circle；加 color.opacity(0.10) 膠囊背景 + stroke 邊框
+//   emptyHint  — 升級雙層脈衝光環 + 靛藍漸層底圓 + icon 尺寸 36pt（對齊 SubordinateView.emptyState）；
+//                加細說明文字，兩種狀態（全空 vs 本部門空）分別顯示
+
 // MARK: - 班別時間設定（可自訂，存於本機 UserDefaults）
 
 final class ShiftScheduleStore: ObservableObject {
@@ -70,6 +78,7 @@ struct SubordinateRosterView: View {
     @State private var selectedDeptId: UUID? = nil
     @State private var detail: RosterCell?
     @State private var showSettings = false
+    @State private var emptyIconPulse = false
 
     private let nameColWidth: CGFloat = 88
     private let cellW: CGFloat = 40
@@ -143,17 +152,34 @@ struct SubordinateRosterView: View {
     // MARK: 篩選列
 
     private var filterBar: some View {
-        VStack(spacing: 8) {
-            HStack {
+        VStack(spacing: 10) {
+            HStack(spacing: 0) {
                 Button { shiftMonth(-1) } label: {
-                    Image(systemName: "chevron.left").font(.headline).foregroundStyle(.blue)
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.12))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
                 }
+                .buttonStyle(.plain)
                 Spacer()
-                Text(monthTitle).font(.headline)
+                Text(monthTitle)
+                    .font(.title3.weight(.semibold))
                 Spacer()
                 Button { shiftMonth(1) } label: {
-                    Image(systemName: "chevron.right").font(.headline).foregroundStyle(.blue)
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.12))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
                 }
+                .buttonStyle(.plain)
             }
             Menu {
                 Button("全部部門") { selectedDeptId = nil }
@@ -163,14 +189,18 @@ struct SubordinateRosterView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle")
-                    Text(selectedDeptName)
+                        .foregroundStyle(selectedDeptId == nil ? .secondary : .blue)
+                    Text(selectedDeptName).lineLimit(1)
                     Image(systemName: "chevron.down").font(.caption2)
                 }
-                .font(.subheadline)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Color(.secondarySystemBackground))
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(selectedDeptId == nil ? .primary : .blue)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(selectedDeptId == nil ? Color(.secondarySystemBackground) : Color.blue.opacity(0.10))
                 .clipShape(Capsule())
+                .overlay(Capsule().stroke(selectedDeptId == nil ? Color.clear : Color.blue.opacity(0.22), lineWidth: 0.75))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal)
     }
@@ -191,22 +221,58 @@ struct SubordinateRosterView: View {
 
     private func legendChip(_ text: String, _ color: Color) -> some View {
         HStack(spacing: 4) {
-            RoundedRectangle(cornerRadius: 3).fill(color).frame(width: 12, height: 12)
-            Text(text).font(.caption2)
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(text).font(.caption2.weight(.medium))
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Color(.secondarySystemBackground))
+        .background(color.opacity(0.10))
         .clipShape(Capsule())
+        .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
     }
 
     private var emptyHint: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 24) {
             Spacer()
-            Image(systemName: "person.2.slash").font(.system(size: 40, weight: .light)).foregroundStyle(.secondary)
-            Text(selectedDeptId == nil ? "尚無部屬資料" : "此部門沒有部屬").foregroundStyle(.secondary)
+            ZStack {
+                Circle()
+                    .stroke(Color.indigo.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .stroke(Color.indigo.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 110, height: 110)
+                    .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.indigo.opacity(0.14), Color.indigo.opacity(0.06)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 88, height: 88)
+                    .overlay(Circle().stroke(Color.indigo.opacity(0.22), lineWidth: 1.2))
+                Image(systemName: "person.2.slash")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(Color.indigo.opacity(0.70))
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyIconPulse = true }
+            }
+            VStack(spacing: 8) {
+                Text(selectedDeptId == nil ? "尚無部屬資料" : "此部門沒有部屬")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary.opacity(0.75))
+                Text(selectedDeptId == nil
+                     ? "在部屬頁新增成員，即可在此管理班表"
+                     : "切換為「全部部門」或新增部屬後即可查看班表")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
     }
 
     // MARK: 棋盤格
