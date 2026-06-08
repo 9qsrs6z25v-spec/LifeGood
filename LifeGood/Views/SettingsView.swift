@@ -744,6 +744,24 @@ struct SettingsView: View {
             }
             .foregroundStyle(.primary)
 
+            // 匯出部屬資料（含班表 / 任務 / 會議 / 請假）
+            Button {
+                exportSubordinates()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("匯出部屬資料")
+                        Text("僅部屬，含班表/任務/會議/請假，可合併匯入")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "person.2.fill")
+                        .foregroundStyle(.green)
+                }
+            }
+            .foregroundStyle(.primary)
+
             // 匯入
             Button {
                 showImporter = true
@@ -751,7 +769,7 @@ struct SettingsView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("匯入資料")
-                        Text("從 JSON 備份檔案匯入")
+                        Text("從 JSON 備份檔案匯入（自動辨識完整備份或部屬資料）")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -764,7 +782,7 @@ struct SettingsView: View {
         } header: {
             Text("資料管理")
         } footer: {
-            Text("匯出會一次包含「記帳/理財/人生」三個模式的完整資料。JSON 可做完整備份與還原，CSV 則分區節顯示各類資料方便在試算表檢視。")
+            Text("「匯出 JSON」會一次包含記帳/理財/人生三模式的完整資料；「匯出部屬資料」只含部屬（連同班表、任務、會議、請假紀錄），方便單獨在裝置間搬移。匯入時會自動辨識檔案類型，可選擇合併或取代。")
         }
     }
 
@@ -1099,6 +1117,19 @@ struct SettingsView: View {
         }
     }
 
+    private func exportSubordinates() {
+        let data = SubordinateExporter.exportJSON(life: lifeStore)
+        let filename = "LifeGood_部屬_\(dateStamp()).json"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try data.write(to: url)
+            activeShareItem = .json(url)
+        } catch {
+            exportErrorMessage = error.localizedDescription
+            showExportError = true
+        }
+    }
+
     // MARK: - 匯入
 
     private func handleFileImport(_ result: Result<[URL], Error>) {
@@ -1128,15 +1159,21 @@ struct SettingsView: View {
 
     private func performImport(mode: UnifiedImporter.Mode) {
         guard let data = pendingImportData else { return }
-        let result = UnifiedImporter.importData(
-            data: data, mode: mode,
-            expense: store, finance: financeStore, life: lifeStore
-        )
-        switch mode {
-        case .merge:
-            importResultMessage = "成功合併匯入：\(result.summary)"
-        case .replace:
-            importResultMessage = "已取代為匯入資料：\(result.summary)"
+        // 自動辨識：部屬資料檔走部屬匯入，否則走三模式完整匯入
+        if SubordinateImporter.isSubordinateExport(data) {
+            let r = SubordinateImporter.importData(data: data, mode: mode, life: lifeStore)
+            importResultMessage = (mode == .merge ? "已合併匯入部屬資料：" : "已取代部屬資料：") + r.summary
+        } else {
+            let result = UnifiedImporter.importData(
+                data: data, mode: mode,
+                expense: store, finance: financeStore, life: lifeStore
+            )
+            switch mode {
+            case .merge:
+                importResultMessage = "成功合併匯入：\(result.summary)"
+            case .replace:
+                importResultMessage = "已取代為匯入資料：\(result.summary)"
+            }
         }
         pendingImportData = nil
         showImportResult = true
