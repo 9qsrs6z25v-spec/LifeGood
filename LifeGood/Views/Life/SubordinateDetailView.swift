@@ -727,12 +727,20 @@ struct SubordinateDetailView: View {
         switch s { case .minor: return .yellow; case .normal: return .orange; case .severe: return .red }
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    private static let dateTimeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
+
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.dateFormatter.string(from: date)
     }
 
     private func formatDateTime(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d HH:mm"; return f.string(from: date)
+        Self.dateTimeFormatter.string(from: date)
     }
 }
 

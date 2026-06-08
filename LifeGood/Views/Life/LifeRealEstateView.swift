@@ -594,7 +594,11 @@ struct LifeRealEstateView: View {
         }
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func formatDate(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: d)
+        Self.dateFormatter.string(from: d)
     }
 }
