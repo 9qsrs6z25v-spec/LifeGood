@@ -1,5 +1,21 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（AddStockView）
+// [2026-06] 本次美化方向：
+//   1. amountPreviewCard：頂部橘色漸層英雄卡，即時顯示持倉市值/損益 + 張數/買入均價/報酬率 KPI，
+//      數字用 .contentTransition(.numericText()) 動畫，散景裝飾圓，
+//      對齊 AddIncomeView.amountPreviewCard / FinanceOverviewView.totalAssetsCard 規格
+//   2. quoteHeroCard：即時行情改為漸層英雄卡（漲綠跌紅動態配色），股價大字 +
+//      漲跌幅膠囊 + OHLC KPI 橫列，對齊 FinanceOverviewView.totalAssetsCard 設計語言
+//   3. calcSection：試算升級為「投入成本 / 目前市值」雙欄卡 + 損益大字 + 報酬率膠囊，
+//      對齊 AddIncomeView.calcPreviewRows 規格
+//   4. sectionHeader：各 Section 加 Capsule 漸層側條 + 圖示 + .subheadline.weight(.semibold) 標題，
+//      對齊 AddExpenseView.basicInfoSection header 規格
+//   5. 錯誤訊息：從紅字升級為橘色圓角橫幅（帶警告圖示），視覺更醒目但不突兀
+//   6. .tint(.orange)：股票主題色統一套用，Toggle/DatePicker 等系統元件配色一致
+//   7. 儲存/新增按鈕：改為橘色，對齊股票主題色
+//   8. fetchButton：查詢圖示保留 .orange，與主題色一致
+
 // MARK: - 台股報價資料
 
 struct StockQuote {
@@ -50,10 +66,28 @@ struct AddStockView: View {
     @State private var fetchError = ""
     @State private var quote: StockQuote?
 
+    // 進場動畫旗標
+    @State private var cardAppeared = false
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("股票資訊") {
+                // 頂部即時預覽卡（橘色漸層英雄卡）
+                Section {
+                    amountPreviewCard
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .opacity(cardAppeared ? 1 : 0)
+                        .offset(y: cardAppeared ? 0 : 20)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                cardAppeared = true
+                            }
+                        }
+                }
+
+                Section {
                     HStack {
                         TextField("股票代號（如 2330）", text: $symbol)
                             .keyboardType(.numberPad)
@@ -61,8 +95,14 @@ struct AddStockView: View {
                     }
                     TextField("股票名稱", text: $name)
                     if !fetchError.isEmpty {
-                        Text(fetchError)
-                            .font(.caption).foregroundStyle(.red)
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                            Text(fetchError)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
                     }
                     if !bankMilestones.isEmpty || !securitiesMilestones.isEmpty {
                         accountPicker
@@ -86,6 +126,8 @@ struct AddStockView: View {
                     if isSold {
                         DatePicker("賣出日期", selection: $soldDate, in: purchaseDate..., displayedComponents: .date)
                     }
+                } header: {
+                    sectionHeader("股票資訊", icon: "chart.line.uptrend.xyaxis")
                 }
 
                 Section {
@@ -113,7 +155,7 @@ struct AddStockView: View {
                             .keyboardType(.decimalPad)
                     }
                 } header: {
-                    Text("持股資訊")
+                    sectionHeader("持股資訊", icon: "chart.bar.fill")
                 } footer: {
                     Text("台股 1 張 = 1000 股，可輸入小數（例：0.5 = 500 股零股）")
                 }
@@ -124,18 +166,23 @@ struct AddStockView: View {
                     quoteDetailSection(q)
                 }
 
-                Section("備註") {
+                Section {
                     TextField("選填備註", text: $note, axis: .vertical)
                         .lineLimit(3)
+                } header: {
+                    sectionHeader("備註", icon: "note.text")
                 }
 
                 if showError {
                     Section {
-                        Text("請輸入股票名稱、張數和買入價格")
-                            .foregroundStyle(.red).font(.caption)
+                        errorBanner("請輸入股票名稱、張數和買入價格")
+                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
                 }
             }
+            .tint(.orange)
             .navigationTitle(editing != nil ? "編輯股票" : "新增股票")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -144,11 +191,212 @@ struct AddStockView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
+                        .bold()
+                        .foregroundStyle(.orange)
                 }
             }
             .onAppear { loadEditing() }
         }
+    }
+
+    // MARK: - Section Header（Capsule 側條 + 圖示 + 粗體標題）
+
+    private func sectionHeader(_ title: String, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [.orange, .orange.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.orange)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .textCase(nil)
+        .padding(.bottom, 2)
+    }
+
+    // MARK: - 錯誤橫幅（橘色圓角，帶警告圖示）
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .font(.footnote.weight(.semibold))
+            Text(message)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.orange)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Color.orange.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.orange.opacity(0.25), lineWidth: 0.75))
+        .padding(.horizontal, 16)
+    }
+
+    // MARK: - KPI 格（白底英雄卡片內使用，白字白輔助文）
+
+    private func kpiCell(_ label: String, value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - 頂部即時預覽英雄卡
+
+    private var amountPreviewCard: some View {
+        let lots = Double(lotsText) ?? 0
+        let purchasePrice = Double(purchasePriceText) ?? 0
+        let currentPrice = Double(currentPriceText) ?? 0
+        let shares = lots * 1000
+        let totalCost = shares * purchasePrice
+        let marketValue = shares * currentPrice
+        let pl = marketValue - totalCost
+        let returnRate = totalCost > 0 ? pl / totalCost * 100 : 0
+        let hasData = lots > 0 && purchasePrice > 0
+        let hasCurrentPrice = currentPrice > 0
+
+        return VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(hasData ? "持倉概覽" : "股票持倉")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    if hasData && hasCurrentPrice {
+                        Text(formatCurrency(marketValue))
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .contentTransition(.numericText())
+                            .minimumScaleFactor(0.55)
+                            .lineLimit(1)
+                        Text("目前市值")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(.white.opacity(0.20))
+                            .clipShape(Capsule())
+                            .foregroundStyle(.white)
+                    } else if hasData {
+                        Text(formatCurrency(totalCost))
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .contentTransition(.numericText())
+                            .minimumScaleFactor(0.55)
+                            .lineLimit(1)
+                        Text("投入成本")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(.white.opacity(0.20))
+                            .clipShape(Capsule())
+                            .foregroundStyle(.white)
+                    } else {
+                        Text(name.isEmpty ? "輸入股票資訊" : name)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(name.isEmpty ? 0.45 : 1.0))
+                            .minimumScaleFactor(0.7)
+                            .lineLimit(1)
+                        Text(name.isEmpty ? "填入後即時預覽" : "輸入張數與股價預覽")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(.white.opacity(0.20))
+                            .clipShape(Capsule())
+                            .foregroundStyle(.white)
+                    }
+                }
+                Spacer()
+                // 損益 KPI 膠囊（有輸入成本和市值時顯示）
+                if hasData && hasCurrentPrice {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("投資損益")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.62))
+                        HStack(spacing: 3) {
+                            Image(systemName: pl >= 0 ? "arrow.up.right" : "arrow.down.right")
+                                .font(.system(size: 10, weight: .bold))
+                            Text((pl >= 0 ? "+" : "") + formatCurrency(pl))
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .contentTransition(.numericText())
+                        }
+                        .foregroundStyle(pl >= 0
+                            ? Color(red: 0.60, green: 1.00, blue: 0.75)
+                            : Color(red: 1.0, green: 0.78, blue: 0.75))
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(.white.opacity(0.18))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(pl >= 0 ? 0.35 : 0.25), lineWidth: 0.75))
+                    }
+                }
+            }
+
+            // KPI 底列（張數 / 買入均價 / 報酬率）
+            if hasData {
+                Rectangle()
+                    .fill(.white.opacity(0.20))
+                    .frame(height: 0.5)
+                    .padding(.vertical, 12)
+
+                HStack(spacing: 0) {
+                    kpiCell("張數", value: "\(lotsText) 張")
+                    Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                    kpiCell("買入均價", value: "NT$\(purchasePriceText)")
+                    if hasCurrentPrice && totalCost > 0 {
+                        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                        kpiCell("報酬率", value: String(format: "%@%.1f%%",
+                                                        returnRate >= 0 ? "+" : "", returnRate))
+                    }
+                }
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 20)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.95, green: 0.55, blue: 0.15),
+                        Color(red: 0.72, green: 0.33, blue: 0.05)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 右上散景圓，增加卡片層次感
+                Circle()
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 140, height: 140)
+                    .offset(x: 90, y: -55)
+                    .blur(radius: 14)
+                // 左下補光
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 90, height: 90)
+                    .offset(x: -70, y: 55)
+                    .blur(radius: 10)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.72, green: 0.33, blue: 0.05).opacity(0.42), radius: 18, x: 0, y: 9)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     // MARK: - 帳戶選擇器（銀行 / 證券）
@@ -292,10 +540,11 @@ struct AddStockView: View {
             if isFetching {
                 ProgressView()
                     .controlSize(.small)
+                    .tint(.orange)
             } else {
                 Image(systemName: "arrow.clockwise.circle.fill")
                     .font(.title3)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.orange)
             }
         }
         .buttonStyle(.plain)
@@ -368,43 +617,140 @@ struct AddStockView: View {
         }
     }
 
-    // MARK: - 行情資訊
+    // MARK: - 即時行情英雄卡
 
     private func quoteDetailSection(_ q: StockQuote) -> some View {
         Section {
-            row("交易所", q.exchange)
+            quoteHeroCard(q)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
 
-            HStack {
-                Text("漲跌")
-                Spacer()
-                let sign = q.isUp ? "+" : ""
-                Text(String(format: "%@%.2f（%@%.2f%%）", sign, q.changeAmount, sign, q.changePercent))
-                    .foregroundStyle(q.isUp ? .red : .green)
+            if !q.volume.isEmpty {
+                row("成交量", "\(q.volume) 張")
             }
-
-            if q.openPrice > 0 { row("開盤", String(format: "%.2f", q.openPrice)) }
-
-            if q.highPrice > 0 || q.lowPrice > 0 {
-                HStack {
-                    Text("最高 / 最低")
-                    Spacer()
-                    Text(String(format: "%.2f / %.2f", q.highPrice, q.lowPrice))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if q.yesterdayClose > 0 { row("昨收", String(format: "%.2f", q.yesterdayClose)) }
-
-            if !q.volume.isEmpty { row("成交量", "\(q.volume) 張") }
-
             if !q.date.isEmpty || !q.time.isEmpty {
                 row("更新時間", "\(q.date) \(q.time)")
             }
         } header: {
-            Text("即時行情")
+            sectionHeader("即時行情", icon: "waveform.path.ecg.rectangle")
         } footer: {
             Text("資料來源：臺灣證券交易所。盤中為即時報價，收盤後為收盤價。")
         }
+    }
+
+    private func quoteHeroCard(_ q: StockQuote) -> some View {
+        let displayPrice = q.lastPrice > 0 ? q.lastPrice : q.yesterdayClose
+        let isUp = q.isUp
+        let plColor: Color = isUp
+            ? Color(red: 0.60, green: 1.00, blue: 0.75)
+            : Color(red: 1.0, green: 0.78, blue: 0.75)
+        let sign = isUp ? "+" : ""
+
+        return VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    if !q.exchange.isEmpty {
+                        Text(q.exchange)
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(.white.opacity(0.22))
+                            .clipShape(Capsule())
+                            .foregroundStyle(.white)
+                    }
+                    Text(displayPrice > 0 ? String(format: "%.2f", displayPrice) : "—")
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(q.name.isEmpty ? symbol : q.name)
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.white.opacity(0.20))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+                Spacer()
+                // 漲跌幅 KPI 膠囊
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("漲跌")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                    HStack(spacing: 3) {
+                        Image(systemName: isUp ? "arrow.up.right" : "arrow.down.right")
+                            .font(.system(size: 10, weight: .bold))
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(String(format: "%@%.2f", sign, q.changeAmount))
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                            Text(String(format: "%@%.2f%%", sign, q.changePercent))
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        }
+                    }
+                    .foregroundStyle(plColor)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(.white.opacity(0.18))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
+                }
+            }
+
+            // OHLC KPI 橫列
+            if q.openPrice > 0 || q.highPrice > 0 || q.yesterdayClose > 0 {
+                Rectangle()
+                    .fill(.white.opacity(0.20))
+                    .frame(height: 0.5)
+                    .padding(.vertical, 10)
+
+                HStack(spacing: 0) {
+                    if q.openPrice > 0 {
+                        kpiCell("開盤", value: String(format: "%.2f", q.openPrice))
+                    }
+                    if q.highPrice > 0 {
+                        if q.openPrice > 0 {
+                            Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                        }
+                        kpiCell("最高", value: String(format: "%.2f", q.highPrice))
+                    }
+                    if q.lowPrice > 0 {
+                        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                        kpiCell("最低", value: String(format: "%.2f", q.lowPrice))
+                    }
+                    if q.yesterdayClose > 0 {
+                        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                        kpiCell("昨收", value: String(format: "%.2f", q.yesterdayClose))
+                    }
+                }
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: isUp
+                        ? [Color(red: 0.15, green: 0.60, blue: 0.30), Color(red: 0.07, green: 0.40, blue: 0.20)]
+                        : [Color(red: 0.65, green: 0.18, blue: 0.22), Color(red: 0.42, green: 0.08, blue: 0.12)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 120, height: 120)
+                    .offset(x: 80, y: -40)
+                    .blur(radius: 12)
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 70, height: 70)
+                    .offset(x: -55, y: 45)
+                    .blur(radius: 8)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: (isUp ? Color.green : Color.red).opacity(0.35), radius: 16, x: 0, y: 7)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     private func row(_ label: String, _ value: String) -> some View {
@@ -415,36 +761,126 @@ struct AddStockView: View {
         }
     }
 
-    // MARK: - 試算
+    // MARK: - 試算卡片（投入成本 / 市值雙欄 + 損益大字 + 報酬率膠囊）
 
     @ViewBuilder
     private var calcSection: some View {
         if let lots = Double(lotsText), let cost = Double(purchasePriceText),
            let current = Double(currentPriceText), lots > 0, cost > 0 {
             let shares = lots * 1000
-            Section("試算") {
-                HStack {
-                    Text("投入成本"); Spacer()
-                    Text(formatCurrency(shares * cost)).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Text("目前市值"); Spacer()
-                    Text(formatCurrency(shares * current)).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Text("損益"); Spacer()
-                    let pl = shares * (current - cost)
-                    Text(formatCurrency(pl)).foregroundStyle(pl >= 0 ? .green : .red)
-                }
+            let totalCost = shares * cost
+            let marketValue = shares * current
+            let pl = marketValue - totalCost
+            let returnRate = totalCost > 0 ? pl / totalCost * 100 : 0
+
+            Section {
+                calcCard(totalCost: totalCost, marketValue: marketValue, pl: pl, returnRate: returnRate)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
+                // 賣出損益（已賣出時額外顯示）
                 if isSold, let sp = Double(soldPriceText), sp > 0 {
+                    let soldPL = shares * (sp - cost)
+                    let soldRR = totalCost > 0 ? soldPL / totalCost * 100 : 0
                     HStack {
-                        Text("賣出損益"); Spacer()
-                        let soldPL = shares * (sp - cost)
-                        Text(formatCurrency(soldPL)).foregroundStyle(soldPL >= 0 ? .green : .red)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("賣出損益")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text((soldPL >= 0 ? "+" : "") + formatCurrency(soldPL))
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundStyle(soldPL >= 0 ? .green : .red)
+                                .contentTransition(.numericText())
+                        }
+                        Spacer()
+                        Text(String(format: "%@%.1f%%", soldRR >= 0 ? "+" : "", soldRR))
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .padding(.horizontal, 9).padding(.vertical, 4)
+                            .background((soldPL >= 0 ? Color.green : Color.red).opacity(0.12))
+                            .foregroundStyle(soldPL >= 0 ? .green : .red)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(
+                                (soldPL >= 0 ? Color.green : Color.red).opacity(0.22), lineWidth: 0.75
+                            ))
                     }
                 }
+            } header: {
+                sectionHeader("試算", icon: "function")
             }
         }
+    }
+
+    private func calcCard(totalCost: Double, marketValue: Double, pl: Double, returnRate: Double) -> some View {
+        VStack(spacing: 10) {
+            // 投入成本 / 目前市值雙欄
+            HStack(spacing: 10) {
+                calcKPICell(label: "投入成本", value: formatCurrency(totalCost), color: .blue)
+                calcKPICell(label: "目前市值", value: formatCurrency(marketValue), color: .orange)
+            }
+
+            // 損益大字 + 報酬率膠囊
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("損益")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text((pl >= 0 ? "+" : "") + formatCurrency(pl))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(pl >= 0 ? .green : .red)
+                        .contentTransition(.numericText())
+                }
+                Spacer()
+                Text(String(format: "%@%.1f%%", returnRate >= 0 ? "+" : "", returnRate))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background((pl >= 0 ? Color.green : Color.red).opacity(0.12))
+                    .foregroundStyle(pl >= 0 ? .green : .red)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(
+                        (pl >= 0 ? Color.green : Color.red).opacity(0.25), lineWidth: 0.75
+                    ))
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(.secondarySystemGroupedBackground))
+    }
+
+    private func calcKPICell(label: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(color.opacity(0.18))
+                    .frame(width: 7, height: 7)
+                Text(label)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(color)
+            }
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                color.opacity(0.04)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.12), lineWidth: 0.75))
+        .shadow(color: color.opacity(0.12), radius: 6, y: 2)
     }
 
     // MARK: - 儲存
