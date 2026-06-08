@@ -173,6 +173,28 @@ class LifeStore: ObservableObject {
         save()
     }
 
+    /// 套用小夜班（5 天，僅週一至週五）：從 startDate 起算往後填滿 5 個平日，
+    /// 遇週六日自動跳過、不覆蓋週末。
+    func applyEveningShiftWeekdays(subordinateId: UUID, startDate: Date) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }) else { return }
+        let cal = Calendar.current
+        var day = cal.startOfDay(for: startDate)
+        var filled = 0
+        var safety = 0
+        while filled < 5 && safety < 21 {
+            let wd = cal.component(.weekday, from: day)   // 1 = 週日, 7 = 週六
+            if wd != 1 && wd != 7 {
+                subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: day) }
+                subordinates[si].shifts.append(SubordinateShift(date: day, type: .eveningShift))
+                filled += 1
+            }
+            guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+            safety += 1
+        }
+        save()
+    }
+
     /// 把部屬資料同步到公司組織人員：
     /// - 已連結 → 更新姓名/職稱/部門
     /// - 未連結但有部門 → 新建 OrgPerson + 自動連動產生 BusinessCard

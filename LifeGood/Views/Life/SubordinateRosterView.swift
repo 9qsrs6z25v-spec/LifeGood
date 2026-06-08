@@ -468,17 +468,23 @@ private struct RosterCellDetailSheet: View {
                 ForEach(ShiftType.allCases) { t in
                     Button(t.rawValue) { lifeStore.setShift(subordinateId: cell.subId, date: cell.date, type: t) }
                 }
-                Divider()
-                Button("清除班別", role: .destructive) {
-                    lifeStore.setShift(subordinateId: cell.subId, date: cell.date, type: nil)
-                }
             } label: {
                 Label("設定 / 變更班別", systemImage: "calendar.badge.clock")
             }
             Button {
                 lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: cell.date)
             } label: {
-                Label("從今天套用大夜班輪班（8 天）", systemImage: "arrow.triangle.2.circlepath")
+                Label("從這天套用大夜班輪班（8 天）", systemImage: "arrow.triangle.2.circlepath")
+            }
+            Button {
+                lifeStore.applyEveningShiftWeekdays(subordinateId: cell.subId, startDate: cell.date)
+            } label: {
+                Label("套用小夜班（週一至週五 5 天）", systemImage: "moon.stars")
+            }
+            Button(role: .destructive) {
+                lifeStore.setShift(subordinateId: cell.subId, date: cell.date, type: nil)
+            } label: {
+                Label("清除這天班別", systemImage: "xmark.circle")
             }
         }
     }
