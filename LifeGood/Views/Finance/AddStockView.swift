@@ -449,13 +449,16 @@ struct AddStockView: View {
         return total
     }
 
+    private static let balanceFormatter: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+    }()
+
     private func fmtBalance(_ value: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
         if abs(value) >= 10000 {
-            let str = f.string(from: NSNumber(value: value / 10000)) ?? "0"
+            let str = Self.balanceFormatter.string(from: NSNumber(value: value / 10000)) ?? "0"
             return "NT$ \(str)萬"
         } else {
-            let str = f.string(from: NSNumber(value: value)) ?? "0"
+            let str = Self.balanceFormatter.string(from: NSNumber(value: value)) ?? "0"
             return "NT$ \(str)"
         }
     }
@@ -1061,9 +1064,11 @@ struct AddStockView: View {
         value.ntdWanString
     }
 
+    private static let sharesFormatter: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+    }()
+
     private func formatShares(_ value: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: value)) ?? "0"
+        Self.sharesFormatter.string(from: NSNumber(value: value)) ?? "0"
     }
 }

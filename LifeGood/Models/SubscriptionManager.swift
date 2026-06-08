@@ -42,6 +42,9 @@ final class SubscriptionManager: ObservableObject {
     }
 
     private static let devOverrideKey = "subscription_dev_override"
+    private static let expirationDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
 
     /// 是否享有完整功能。包含：StoreKit 解鎖、開發旗標。
     var isPremium: Bool {
@@ -165,8 +168,6 @@ final class SubscriptionManager: ObservableObject {
 
     var expirationText: String? {
         guard let date = entitlementExpiresAt else { return nil }
-        let f = DateFormatter()
-        f.dateFormat = "yyyy/M/d"
-        return "下次續訂：\(f.string(from: date))"
+        return "下次續訂：\(Self.expirationDateFormatter.string(from: date))"
     }
 }
