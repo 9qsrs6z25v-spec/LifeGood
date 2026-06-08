@@ -926,23 +926,23 @@ struct MeetingEditorSheet: View {
                 }
 
                 Section {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, _ in
+                    ForEach($items) { $item in
                         VStack(spacing: 8) {
-                            if index > 0 { Divider() }
+                            if items.first?.id != item.id { Divider() }
                             HStack {
-                                TextField("項目內容", text: $items[index].content)
-                                Button(role: .destructive) { items.remove(at: index) } label: {
+                                TextField("項目內容", text: $item.content)
+                                Button(role: .destructive) { items.removeAll { $0.id == item.id } } label: {
                                     Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                                 }
                                 .buttonStyle(.plain)
                             }
-                            Picker("負責人", selection: $items[index].assigneeId) {
+                            Picker("負責人", selection: $item.assigneeId) {
                                 Text("未指定").tag(nil as UUID?)
                                 ForEach(allSubordinates) { s in Text(s.name).tag(s.id as UUID?) }
                             }
                             DatePicker("截止日", selection: Binding(
-                                get: { items[index].dueDate ?? Date() },
-                                set: { items[index].dueDate = $0 }
+                                get: { item.dueDate ?? Date() },
+                                set: { $item.wrappedValue.dueDate = $0 }
                             ), displayedComponents: .date)
                         }
                     }
