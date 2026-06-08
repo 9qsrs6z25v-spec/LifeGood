@@ -305,6 +305,7 @@ struct FoodMapView: View {
                     }
                 }
             }
+            .onDisappear { emptyIconPulse = false }
 
             VStack(spacing: 8) {
                 Text(isPhotoFilter ? "目前沒有附照片的餐廳" : "還沒有任何餐廳記錄")

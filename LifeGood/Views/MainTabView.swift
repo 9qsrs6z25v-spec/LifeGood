@@ -1243,10 +1243,8 @@ struct MainTabView: View {
     /// 任一稅費 / 節稅紀錄、有房產或車輛（會產生年度稅）→ 顯示稅務頁
     private var hasTaxData: Bool {
         if expenseStore.expenses.contains(where: {
-            $0.variableCategory == .tax || $0.variableCategory == .taxSaving
-        }) { return true }
-        if expenseStore.expenses.contains(where: {
-            $0.expenseType == .fixed && $0.effectivelyTaxDeductible
+            $0.variableCategory == .tax || $0.variableCategory == .taxSaving ||
+            ($0.expenseType == .fixed && $0.effectivelyTaxDeductible)
         }) { return true }
         if !financeStore.realEstates.isEmpty || !financeStore.vehicles.isEmpty { return true }
         return false
