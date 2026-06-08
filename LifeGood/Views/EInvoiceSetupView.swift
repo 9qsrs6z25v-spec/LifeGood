@@ -817,7 +817,7 @@ struct EInvoiceHistoryView: View {
     }
 
     // 美化：36pt 漸層圖示圓 + 分類 Capsule 膠囊
-    private func historyRow(_ record: ImportedInvoice) -> some View {
+    private func historyRow(_ record: EInvoiceImportRecord) -> some View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()

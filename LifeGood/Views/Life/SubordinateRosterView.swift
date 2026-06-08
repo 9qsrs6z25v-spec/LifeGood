@@ -189,12 +189,12 @@ struct SubordinateRosterView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle")
-                        .foregroundStyle(selectedDeptId == nil ? .secondary : .blue)
+                        .foregroundStyle(selectedDeptId == nil ? Color.secondary : Color.blue)
                     Text(selectedDeptName).lineLimit(1)
                     Image(systemName: "chevron.down").font(.caption2)
                 }
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(selectedDeptId == nil ? .primary : .blue)
+                .foregroundStyle(selectedDeptId == nil ? Color.primary : Color.blue)
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(selectedDeptId == nil ? Color(.secondarySystemBackground) : Color.blue.opacity(0.10))
                 .clipShape(Capsule())
