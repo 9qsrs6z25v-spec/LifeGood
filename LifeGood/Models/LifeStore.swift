@@ -176,29 +176,25 @@ class LifeStore: ObservableObject {
         save()
     }
 
-    /// 套用小夜班（5 天，僅週一至週五）：從 startDate 起算往後填滿 5 個平日，
-    /// 遇週六日自動跳過、不覆蓋週末。
+    /// 套用小夜班：一律對齊 startDate 所在「整週的週一至週五」共 5 天，
+    /// 不論點到該週哪一天，都填同一週的一~五（不覆蓋週末）。
     func applyEveningShiftWeekdays(subordinateId: UUID, startDate: Date) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }) else { return }
         let cal = Calendar.current
-        // 以中午為錨點，避開午夜 / 時區邊界造成的整天位移（含起算日本身，若它是平日）
-        var day = cal.date(bySettingHour: 12, minute: 0, second: 0,
-                           of: cal.startOfDay(for: startDate)) ?? startDate
-        var filled = 0
-        var safety = 0
+        // 以中午為錨點，避開午夜 / 時區邊界造成的整天位移
+        let anchor = cal.date(bySettingHour: 12, minute: 0, second: 0,
+                              of: cal.startOfDay(for: startDate)) ?? startDate
+        // 找到該週的週一：weekday 1=日…7=六，距離週一的天數 = (wd + 5) % 7
+        let wd = cal.component(.weekday, from: anchor)
+        let offsetToMonday = (wd + 5) % 7
+        guard let monday = cal.date(byAdding: .day, value: -offsetToMonday, to: anchor) else { return }
         // 批次保護：避免迴圈中每次 append 都觸發 didSet → save()
         isLoading = true
-        while filled < 5 && safety < 21 {
-            let wd = cal.component(.weekday, from: day)   // 1 = 週日, 7 = 週六
-            if wd != 1 && wd != 7 {
-                let d = cal.startOfDay(for: day)
-                subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: d) }
-                subordinates[si].shifts.append(SubordinateShift(date: d, type: .eveningShift))
-                filled += 1
-            }
-            guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
-            day = next
-            safety += 1
+        for i in 0..<5 {
+            guard let noon = cal.date(byAdding: .day, value: i, to: monday) else { continue }
+            let d = cal.startOfDay(for: noon)
+            subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: d) }
+            subordinates[si].shifts.append(SubordinateShift(date: d, type: .eveningShift))
         }
         isLoading = false
         save()
