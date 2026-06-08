@@ -567,8 +567,12 @@ struct SubordinateView: View {
         }
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.dateFormatter.string(from: date)
     }
 
     /// 自動評分：基礎 80，依記錄加減，範圍 0~100

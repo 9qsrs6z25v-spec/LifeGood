@@ -642,7 +642,11 @@ struct CareerView: View {
         }
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.dateFormatter.string(from: date)
     }
 }

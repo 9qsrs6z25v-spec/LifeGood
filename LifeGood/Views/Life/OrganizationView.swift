@@ -1369,13 +1369,21 @@ struct OrgPersonDetailView: View {
         .padding(.horizontal)
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    private static let currencyFormatter: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .currency
+        f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
+        return f
+    }()
+
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.dateFormatter.string(from: date)
     }
 
     private func formatCurrency(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .currency
-        f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 }
