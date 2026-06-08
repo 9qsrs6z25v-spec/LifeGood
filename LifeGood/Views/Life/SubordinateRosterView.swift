@@ -257,6 +257,7 @@ struct SubordinateRosterView: View {
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyIconPulse = true }
             }
+            .onDisappear { emptyIconPulse = false }
             VStack(spacing: 8) {
                 Text(selectedDeptId == nil ? "尚無部屬資料" : "此部門沒有部屬")
                     .font(.title3.weight(.semibold))
