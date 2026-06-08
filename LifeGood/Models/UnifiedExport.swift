@@ -402,3 +402,116 @@ enum UnifiedImporter {
         return incoming.filter { !existingIDs.contains($0.id) }
     }
 }
+
+// MARK: - 單獨匯出：部屬資料（含班表 / 任務 / 會議 / 請假等紀錄）
+
+struct SubordinateExport: Codable {
+    var kind: String = "subordinates"   // 供匯入時辨識檔案類型
+    var version: String = "1"
+    var exportDate: Date = Date()
+    var subordinates: [Subordinate]
+    var departments: [Department]?      // 一併帶出被參照的部門 / 職等，匯入後仍能正確顯示
+    var gradeTitles: [GradeTitle]?
+}
+
+enum SubordinateExporter {
+    static func exportJSON(life: LifeStore) -> Data {
+        let payload = SubordinateExport(
+            subordinates: life.subordinates,
+            departments: life.departments,
+            gradeTitles: life.gradeTitles
+        )
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        enc.dateEncodingStrategy = .iso8601
+        return (try? enc.encode(payload)) ?? Data()
+    }
+}
+
+enum SubordinateImporter {
+    struct Result {
+        var added = 0
+        var updated = 0
+        var recordsMerged = 0
+        var meetingsMerged = 0
+        var tasksMerged = 0
+        var shiftsMerged = 0
+        var departmentsAdded = 0
+        var gradeTitlesAdded = 0
+        var summary: String {
+            "新增 \(added) 人、更新 \(updated) 人；班別 +\(shiftsMerged)、任務 +\(tasksMerged)、會議 +\(meetingsMerged)、紀錄 +\(recordsMerged)"
+        }
+    }
+
+    /// 從 JSON 內容判斷是否為「部屬資料」匯出檔（kind == "subordinates"）
+    static func isSubordinateExport(_ data: Data) -> Bool {
+        struct Probe: Codable { var kind: String? }
+        return (try? JSONDecoder().decode(Probe.self, from: data))?.kind == "subordinates"
+    }
+
+    static func importData(data: Data, mode: UnifiedImporter.Mode, life: LifeStore) -> Result {
+        var r = Result()
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        guard let payload = try? dec.decode(SubordinateExport.self, from: data) else { return r }
+
+        // 部門 / 職等：補進缺少的（依 id），讓部屬參照能正確顯示
+        if let depts = payload.departments {
+            let ids = Set(life.departments.map(\.id))
+            let add = depts.filter { !ids.contains($0.id) }
+            if !add.isEmpty { life.departments.append(contentsOf: add); r.departmentsAdded = add.count }
+        }
+        if let gts = payload.gradeTitles {
+            let ids = Set(life.gradeTitles.map(\.id))
+            let add = gts.filter { !ids.contains($0.id) }
+            if !add.isEmpty { life.gradeTitles.append(contentsOf: add); r.gradeTitlesAdded = add.count }
+        }
+
+        switch mode {
+        case .replace:
+            life.subordinates = payload.subordinates
+            r.added = payload.subordinates.count
+
+        case .merge:
+            var subs = life.subordinates
+            for inc in payload.subordinates {
+                // 對應現有部屬：先比 id，再退而求其次比「同名同部門」
+                let idx = subs.firstIndex(where: { $0.id == inc.id })
+                    ?? subs.firstIndex(where: { !inc.name.isEmpty && $0.name == inc.name && $0.department == inc.department })
+                if let idx = idx {
+                    var s = subs[idx]
+                    r.recordsMerged  += appendNew(&s.records,  inc.records)
+                    r.meetingsMerged += appendNew(&s.meetings, inc.meetings)
+                    r.tasksMerged    += appendNew(&s.tasks,    inc.tasks)
+                    r.shiftsMerged   += appendNewShifts(&s.shifts, inc.shifts)
+                    if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
+                    if s.joinDate == nil { s.joinDate = inc.joinDate }
+                    subs[idx] = s
+                    r.updated += 1
+                } else {
+                    subs.append(inc); r.added += 1
+                }
+            }
+            life.subordinates = subs   // 單次指派 → 單次存檔
+        }
+        return r
+    }
+
+    /// 依 id 加入現有陣列中尚未存在的項目，回傳新增筆數
+    private static func appendNew<T: Identifiable>(_ arr: inout [T], _ incoming: [T]) -> Int {
+        let ids = Set(arr.map(\.id))
+        let add = incoming.filter { !ids.contains($0.id) }
+        arr.append(contentsOf: add)
+        return add.count
+    }
+
+    /// 班別以「同一天」去重：該天已有班別就保留現有、不覆蓋
+    private static func appendNewShifts(_ arr: inout [SubordinateShift], _ incoming: [SubordinateShift]) -> Int {
+        let cal = Calendar.current
+        var added = 0
+        for sh in incoming where !arr.contains(where: { cal.isDate($0.date, inSameDayAs: sh.date) }) {
+            arr.append(sh); added += 1
+        }
+        return added
+    }
+}
