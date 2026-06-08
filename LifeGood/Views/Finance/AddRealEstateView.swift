@@ -1,6 +1,22 @@
 import SwiftUI
 import PhotosUI
 
+// MARK: - 美化紀錄（AddRealEstateView）
+// [2026-06] 本次美化方向：
+//   1. reSectionHeader：統一升級所有 Section header 為「4pt Capsule 漸層側條 + 彩色圖示
+//      + .subheadline.bold 標題」，對齊全 App section header 設計語言（AddVehicleView / AddStockView）。
+//      各 section 配色：物件資訊(purple) / 價值(indigo) / 租金(green) / 貸款(blue) /
+//      已支出(green) / 變動支出(orange) / 試算(teal) / 備註(secondary)。
+//   2. reIconCircle：貸款/已支出列的圖示從 caption 小圖示升級為 32pt 漸層圓形底圖，
+//      對齊 FixedExpenseRow / StockDetailView transactionRow 的圖示圓規格。
+//   3. 變動支出列：類別標籤從 RoundedRectangle(cornerRadius:6) 改為 Capsule，
+//      圖示同步升級為 32pt 漸層圓，對齊 ExpenseRow / variableExpenseSection 設計語言。
+//   4. 錯誤驗證：從裸紅字 Text 升級為帶圖示的橘色警告橫幅卡，
+//      對齊 AddExpenseView / AddStockView 的錯誤卡片規格；listRowBackground 透明。
+//   5. calcSection 數值列：加入彩色 Capsule 背景標籤，使正負值（綠/紅）更一目了然，
+//      對齊 RealEstateDetailView cashFlow 的正負色彩規格。
+//   6. Form 整體套用 .tint(.purple)，DatePicker / Toggle 等系統元件統一房地產主題色。
+
 struct AddRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -173,7 +189,7 @@ struct AddRealEstateView: View {
                     if showVariable { variableExpenseSection }
                     calcSection
 
-                    Section("備註") {
+                    Section(header: reSectionHeader("備註", icon: "text.bubble.fill", color: Color.secondary)) {
                         TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                     }
                 } else {
@@ -188,10 +204,28 @@ struct AddRealEstateView: View {
 
                 if showError {
                     Section {
-                        Text("請輸入物件名稱和購入價格").foregroundStyle(.red).font(.caption)
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.orange)
+                            Text("請輸入物件名稱和購入價格")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.09))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.orange.opacity(0.25), lineWidth: 0.75)
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
                     }
                 }
             }
+            .tint(.purple)
             .navigationTitle((editing != nil || hasAutoSaved) ? "編輯房地產" : "新增房地產")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -317,7 +351,7 @@ struct AddRealEstateView: View {
     // MARK: - 物件資訊
 
     private var infoSection: some View {
-        Section("物件資訊") {
+        Section(header: reSectionHeader("物件資訊", icon: "house.fill", color: .purple)) {
             TextField("物件名稱", text: $name)
 
             Picker("縣市", selection: $city) {
@@ -374,7 +408,7 @@ struct AddRealEstateView: View {
                 }
             }
         } header: {
-            Text("價值")
+            reSectionHeader("價值", icon: "tag.fill", color: .indigo)
         } footer: {
             Text("以萬元為單位輸入，例如輸入 1500 代表 NT$15,000,000。")
         }
@@ -383,7 +417,7 @@ struct AddRealEstateView: View {
     // MARK: - 租金收入
 
     private var rentalSection: some View {
-        Section("租金收入") {
+        Section(header: reSectionHeader("租金收入", icon: "dollarsign.circle.fill", color: .green)) {
             HStack {
                 Text("NT$").foregroundStyle(.secondary)
                 TextField("月租金收入", text: $monthlyRentalText).keyboardType(.decimalPad)
@@ -402,25 +436,30 @@ struct AddRealEstateView: View {
                         editingExpense = exp
                     }
                 } label: {
-                    HStack {
-                        Image(systemName: "building.columns.fill")
-                            .font(.caption).foregroundStyle(.blue)
-                        VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 12) {
+                        reIconCircle(icon: "building.columns.fill", color: .blue)
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(m.title.isEmpty ? "房貸" : m.title)
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.primary)
-                            HStack(spacing: 6) {
+                                .lineLimit(1)
+                            HStack(spacing: 5) {
                                 if m.totalPeriods > 0 {
                                     Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
-                                        .font(.caption2).foregroundStyle(.secondary)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(.blue)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color.blue.opacity(0.10))
+                                        .clipShape(Capsule())
                                 }
-                                Text(formatCurrency(m.paidAmount))
-                                    .font(.caption2).foregroundStyle(.blue)
+                                Text("已繳 \(formatCurrency(m.paidAmount))")
+                                    .font(.caption2).foregroundStyle(.secondary)
                             }
                         }
                         Spacer()
                         Text(formatCurrency(m.amount))
-                            .font(.subheadline.bold())
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(red: 0.22, green: 0.53, blue: 0.98))
                         Image(systemName: "chevron.right")
                             .font(.caption2).foregroundStyle(.tertiary)
                     }
@@ -434,10 +473,10 @@ struct AddRealEstateView: View {
                 guard ensureRealEstateSavedInStore() else { return }
                 addingMortgage = true
             } label: {
-                Label("新增貸款項目", systemImage: "plus.circle").foregroundStyle(.green)
+                Label("新增貸款項目", systemImage: "plus.circle").foregroundStyle(.blue)
             }
         } header: {
-            Text("貸款項目")
+            reSectionHeader("貸款項目", icon: "building.columns.fill", color: .blue)
         } footer: {
             if !storeMortgageItems.isEmpty {
                 let monthlyTotal = storeMortgageItems.reduce(0.0) { $0 + $1.amount }
@@ -459,19 +498,24 @@ struct AddRealEstateView: View {
                         editingExpense = exp
                     }
                 } label: {
-                    HStack {
-                        Image(systemName: "banknote.fill")
-                            .font(.caption).foregroundStyle(.green)
-                        VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 12) {
+                        reIconCircle(icon: "banknote.fill", color: .green)
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(p.title.isEmpty ? "房屋價金" : p.title)
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.primary)
+                                .lineLimit(1)
                             Text(fmtDate(p.date))
-                                .font(.caption2).foregroundStyle(.secondary)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color(.tertiarySystemFill))
+                                .clipShape(Capsule())
                         }
                         Spacer()
                         Text(formatCurrency(p.amount))
-                            .font(.subheadline.bold())
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(.green)
                         Image(systemName: "chevron.right")
                             .font(.caption2).foregroundStyle(.tertiary)
                     }
@@ -488,7 +532,7 @@ struct AddRealEstateView: View {
                 Label("新增已支出項目", systemImage: "plus.circle").foregroundStyle(.green)
             }
         } header: {
-            Text("已支出房屋金額")
+            reSectionHeader("已支出房屋金額", icon: "banknote.fill", color: .green)
         } footer: {
             if !storePaidItems.isEmpty {
                 let total = storePaidItems.reduce(0.0) { $0 + $1.amount }
@@ -518,24 +562,27 @@ struct AddRealEstateView: View {
                         editingExpense = exp
                     }
                 } label: {
-                    HStack {
-                        Label(ve.category.rawValue, systemImage: ve.category.icon)
-                            .font(.subheadline.weight(.medium))
-                            .labelStyle(.titleAndIcon)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.orange.opacity(0.12))
-                            .foregroundStyle(.orange)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        VStack(alignment: .leading, spacing: 2) {
-                            if !ve.name.isEmpty {
-                                Text(ve.name).font(.caption).foregroundStyle(.primary)
+                    HStack(spacing: 12) {
+                        reIconCircle(icon: ve.category.icon, color: .orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(ve.category.rawValue)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.orange.opacity(0.12))
+                                .clipShape(Capsule())
+                            HStack(spacing: 5) {
+                                if !ve.name.isEmpty {
+                                    Text(ve.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                                }
+                                Text(fmtDate(ve.date))
+                                    .font(.caption2).foregroundStyle(.secondary)
                             }
-                            Text(fmtDate(ve.date))
-                                .font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Text(formatCurrency(ve.amount))
-                            .font(.subheadline.bold())
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(red: 0.86, green: 0.36, blue: 0.06))
                         Image(systemName: "chevron.right")
                             .font(.caption2).foregroundStyle(.tertiary)
                     }
@@ -549,10 +596,10 @@ struct AddRealEstateView: View {
                 guard ensureRealEstateSavedInStore() else { return }
                 showVariableCategoryPicker = true
             } label: {
-                Label("新增變動支出", systemImage: "plus.circle").foregroundStyle(.green)
+                Label("新增變動支出", systemImage: "plus.circle").foregroundStyle(.orange)
             }
         } header: {
-            Text("變動支出")
+            reSectionHeader("變動支出", icon: "cart.fill", color: .orange)
         } footer: {
             if !storeVariableItems.isEmpty {
                 let total = storeVariableItems.reduce(0.0) { $0 + $1.amount }
@@ -1044,42 +1091,77 @@ struct AddRealEstateView: View {
         let allPaid = paidTotal + mortgagePaidTotal + varTotal
 
         if rental > 0 || mortgageMonthly > 0 || paidTotal > 0 || varTotal > 0 {
-            Section("試算") {
+            Section(header: reSectionHeader("試算", icon: "function", color: .teal)) {
                 if rental > 0 || mortgageMonthly > 0 {
+                    let netFlow = rental - mortgageMonthly
+                    let flowColor: Color = netFlow >= 0 ? .green : .red
                     HStack {
-                        Text("每月淨現金流"); Spacer()
-                        Text(formatCurrency(rental - mortgageMonthly))
-                            .foregroundStyle(rental - mortgageMonthly >= 0 ? .green : .red)
+                        Text("每月淨現金流")
+                            .font(.subheadline)
+                        Spacer()
+                        Text(formatCurrency(netFlow))
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(flowColor)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(flowColor.opacity(0.10))
+                            .clipShape(Capsule())
                     }
                 }
                 if mortgageTotal > 0 {
                     HStack {
-                        Text("貸款總額"); Spacer()
-                        Text(formatCurrency(mortgageTotal)).foregroundStyle(.secondary)
+                        Text("貸款總額").font(.subheadline)
+                        Spacer()
+                        Text(formatCurrency(mortgageTotal))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
                     }
                 }
                 if mortgagePaidTotal > 0 {
                     HStack {
-                        Text("已繳貸款金額"); Spacer()
-                        Text(formatCurrency(mortgagePaidTotal)).foregroundStyle(.blue)
+                        Text("已繳貸款金額").font(.subheadline)
+                        Spacer()
+                        Text(formatCurrency(mortgagePaidTotal))
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(red: 0.22, green: 0.53, blue: 0.98))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.blue.opacity(0.08))
+                            .clipShape(Capsule())
                     }
                 }
                 if paidTotal > 0 {
                     HStack {
-                        Text("已支出房屋金額"); Spacer()
-                        Text(formatCurrency(paidTotal)).foregroundStyle(.purple)
+                        Text("已支出房屋金額").font(.subheadline)
+                        Spacer()
+                        Text(formatCurrency(paidTotal))
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.purple)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.purple.opacity(0.08))
+                            .clipShape(Capsule())
                     }
                 }
                 if varTotal > 0 {
                     HStack {
-                        Text("變動支出累計"); Spacer()
-                        Text(formatCurrency(varTotal)).foregroundStyle(.orange)
+                        Text("變動支出累計").font(.subheadline)
+                        Spacer()
+                        Text(formatCurrency(varTotal))
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.08))
+                            .clipShape(Capsule())
                     }
                 }
                 HStack {
-                    Text("房屋總已支出"); Spacer()
+                    Text("房屋總已支出")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
                     Text(formatCurrency(allPaid))
-                        .font(.body.bold()).foregroundStyle(.red)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color(red: 0.90, green: 0.25, blue: 0.25))
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(Capsule())
                 }
             }
         }
@@ -1437,6 +1519,47 @@ struct AddRealEstateView: View {
 
     private func formatCurrency(_ value: Double) -> String {
         value.ntdWanString
+    }
+
+    // MARK: - 美化輔助：Section Header（Capsule 側條 + 彩色圖示 + 粗體標題）
+
+    private func reSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 9) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+        }
+        .textCase(nil)
+    }
+
+    // MARK: - 美化輔助：漸層圖示圓（32pt，對齊 FixedExpenseRow 規格）
+
+    private func reIconCircle(icon: String, color: Color) -> some View {
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [color.opacity(0.22), color.opacity(0.09)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 32, height: 32)
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(color)
+        }
     }
 }
 
