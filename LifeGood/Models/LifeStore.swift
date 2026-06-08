@@ -157,7 +157,9 @@ class LifeStore: ObservableObject {
     func applyNightShiftRotation(subordinateId: UUID, startDate: Date) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }) else { return }
         let cal = Calendar.current
-        let start = cal.startOfDay(for: startDate)
+        // 以中午為錨點往後加天數，避開午夜 / 時區邊界造成的整天位移
+        let start = cal.date(bySettingHour: 12, minute: 0, second: 0,
+                             of: cal.startOfDay(for: startDate)) ?? startDate
         var plan: [(Int, ShiftType)] = [(0, .jetLagLeave)]
         for d in 1...6 { plan.append((d, .nightShift)) }
         plan.append((7, .restDay))
@@ -165,7 +167,8 @@ class LifeStore: ObservableObject {
         // 共產生 16 次不必要的背景序列化，且各次中間態（部分班別已寫、部分尚未）也會被持久化。
         isLoading = true
         for (offset, type) in plan {
-            guard let day = cal.date(byAdding: .day, value: offset, to: start) else { continue }
+            guard let noon = cal.date(byAdding: .day, value: offset, to: start) else { continue }
+            let day = cal.startOfDay(for: noon)
             subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: day) }
             subordinates[si].shifts.append(SubordinateShift(date: day, type: type))
         }
@@ -178,20 +181,26 @@ class LifeStore: ObservableObject {
     func applyEveningShiftWeekdays(subordinateId: UUID, startDate: Date) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }) else { return }
         let cal = Calendar.current
-        var day = cal.startOfDay(for: startDate)
+        // 以中午為錨點，避開午夜 / 時區邊界造成的整天位移（含起算日本身，若它是平日）
+        var day = cal.date(bySettingHour: 12, minute: 0, second: 0,
+                           of: cal.startOfDay(for: startDate)) ?? startDate
         var filled = 0
         var safety = 0
+        // 批次保護：避免迴圈中每次 append 都觸發 didSet → save()
+        isLoading = true
         while filled < 5 && safety < 21 {
             let wd = cal.component(.weekday, from: day)   // 1 = 週日, 7 = 週六
             if wd != 1 && wd != 7 {
-                subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: day) }
-                subordinates[si].shifts.append(SubordinateShift(date: day, type: .eveningShift))
+                let d = cal.startOfDay(for: day)
+                subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: d) }
+                subordinates[si].shifts.append(SubordinateShift(date: d, type: .eveningShift))
                 filled += 1
             }
             guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
             day = next
             safety += 1
         }
+        isLoading = false
         save()
     }
 
