@@ -1,12 +1,20 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（LifeOverviewView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. statsCard：為三個 statBadge 加入錯落進場動畫（對齊 OverviewView summaryCard 規格）
 //   2. 「最近里程碑」區塊標題計數徽章：改用橘色 accent（對齊其他頁面 accent 膠囊規格）
 //   3. 「分類統計」區塊標題計數徽章：改用藍色 accent（統一 badge 配色語言）
 //   4. emptyMilestonePlaceholder：升級為雙層脈衝光環 + 漸層底 icon 圓 + 橘色 accent，
 //      對齊 VariableExpenseView.emptyStateView 的空狀態設計規格
+// [2026-06 v2] categoryBreakdownSection 精修：
+//   5. 分類圖示圓 36pt → 40pt、圖示字體 14pt → 16pt（對齊 app 標準 44pt 系統，
+//      統計情境取中間值 40pt，避免與 44pt 列表行視覺重量衝突）
+//   6. 筆數徽章加入佔比百分比：「N 筆 · X%」（以總里程碑數為分母，提升資訊密度）
+//   7. 進度條改用佔總數比率（total ratio）取代最大值相對比率（max ratio），
+//      讓長條能直觀反映各分類實際份額
+//   8. categoryRowsAppeared 觸發動畫加入 0.05s 延遲，確保 view 完成佈局後再啟動，
+//      對齊 milestoneTimelineSection 的觸發規格
 
 struct LifeOverviewView: View {
     @EnvironmentObject var store: LifeStore
@@ -376,7 +384,8 @@ struct LifeOverviewView: View {
                 guard let count = grouped[cat]?.count, count > 0 else { return nil }
                 return (cat, count)
             }
-        let maxCount = entries.map(\.1).max() ?? 1
+        // 改用總數計算佔比（絕對份額），讓進度條直觀反映各分類實際比例
+        let totalCount = max(allMS.count, 1)
 
         return Group {
             if !entries.isEmpty {
@@ -406,10 +415,13 @@ struct LifeOverviewView: View {
                     VStack(spacing: 0) {
                         ForEach(Array(entries.enumerated()), id: \.element.0) { index, entry in
                             let accent = milestoneColor(entry.0)
-                            let ratio = maxCount > 0 ? Double(entry.1) / Double(maxCount) : 0
+                            // 改用佔總數比率，條寬直接等於實際份額百分比
+                            let totalRatio = Double(entry.1) / Double(totalCount)
+                            let pct = Int((totalRatio * 100).rounded())
 
                             VStack(spacing: 8) {
                                 HStack(spacing: 12) {
+                                    // 圖示圓升級至 40pt（統計情境中間值，對齊 app 標準體系）
                                     ZStack {
                                         Circle()
                                             .fill(
@@ -419,19 +431,19 @@ struct LifeOverviewView: View {
                                                     endPoint: .bottomTrailing
                                                 )
                                             )
-                                            .frame(width: 36, height: 36)
+                                            .frame(width: 40, height: 40)
                                         Circle()
-                                            .stroke(accent.opacity(0.22), lineWidth: 1)
-                                            .frame(width: 36, height: 36)
+                                            .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                                            .frame(width: 40, height: 40)
                                         Image(systemName: entry.0.icon)
-                                            .font(.system(size: 14, weight: .semibold))
+                                            .font(.system(size: 16, weight: .semibold))
                                             .foregroundStyle(accent)
                                     }
                                     Text(entry.0.displayName)
                                         .font(.subheadline)
                                     Spacer()
-                                    // 筆數徽章
-                                    Text("\(entry.1) 筆")
+                                    // 筆數 + 佔比膠囊徽章（提升資訊密度）
+                                    Text("\(entry.1) 筆 · \(pct)%")
                                         .font(.system(size: 12, weight: .bold))
                                         .padding(.horizontal, 9).padding(.vertical, 4)
                                         .background(accent.opacity(0.12))
@@ -451,15 +463,15 @@ struct LifeOverviewView: View {
                                                     startPoint: .leading, endPoint: .trailing
                                                 )
                                             )
-                                            .frame(width: geo.size.width * ratio, height: 5)
-                                            .animation(.spring(response: 0.6, dampingFraction: 0.78), value: ratio)
+                                            .frame(width: geo.size.width * totalRatio, height: 5)
+                                            .animation(.spring(response: 0.6, dampingFraction: 0.78), value: totalRatio)
                                     }
                                 }
                                 .frame(height: 5)
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
-                            // 錯落淡入動畫
+                            // 錯落淡入動畫（0.05s 延遲確保佈局完成後再啟動）
                             .opacity(categoryRowsAppeared ? 1 : 0)
                             .offset(y: categoryRowsAppeared ? 0 : 12)
                             .animation(
@@ -469,7 +481,7 @@ struct LifeOverviewView: View {
                             )
 
                             if index < entries.count - 1 {
-                                Divider().padding(.leading, 64)
+                                Divider().padding(.leading, 68)
                             }
                         }
                     }
@@ -478,7 +490,10 @@ struct LifeOverviewView: View {
                     .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                     .padding(.horizontal)
                     .onAppear {
-                        withAnimation { categoryRowsAppeared = true }
+                        // 0.05s 延遲確保 view 完成佈局後再啟動動畫（對齊 milestoneTimelineSection）
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            withAnimation { categoryRowsAppeared = true }
+                        }
                     }
                 }
             }
