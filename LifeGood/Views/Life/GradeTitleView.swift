@@ -44,7 +44,8 @@ struct GradeTitleView: View {
                         .buttonStyle(.plain)
                     }
                     .onDelete { offsets in
-                        let items = offsets.map { lifeStore.departments[$0] }
+                        let snapshot = lifeStore.departments
+                        let items = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
                         for item in items { deleteDepartment(item) }
                     }
 
