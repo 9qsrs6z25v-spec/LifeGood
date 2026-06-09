@@ -3005,7 +3005,7 @@ struct CutePhotoViewer: View {
 
     var body: some View {
         ZStack {
-            photoBackground
+            backgroundGradient
             decorativeOrbs
 
             VStack(spacing: 0) {
@@ -3024,31 +3024,6 @@ struct CutePhotoViewer: View {
     }
 
     // MARK: 背景
-
-    /// 目前正在看的那張照片
-    private var currentURL: URL? {
-        guard draft.urls.indices.contains(currentIndex) else { return draft.urls.first }
-        return draft.urls[currentIndex]
-    }
-
-    /// 背景＝同一張照片放大填滿 + 高斯模糊（顏色取自照片，不再是死的固定漸層）；
-    /// 載入失敗時退回淡色漸層。
-    private var photoBackground: some View {
-        ZStack {
-            backgroundGradient
-            if let url = currentURL, let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    .blur(radius: 60, opaque: true)
-                    .overlay(Color.black.opacity(0.12))     // 輕微壓暗，讓白框照片浮起
-                    .ignoresSafeArea()
-                    .animation(.easeInOut(duration: 0.35), value: currentIndex)
-            }
-        }
-    }
 
     private var backgroundGradient: some View {
         LinearGradient(
@@ -3141,34 +3116,51 @@ struct CutePhotoViewer: View {
     }
 
     private func photoCard(url: URL) -> some View {
-        Group {
-            if let img = UIImage(contentsOfFile: url.path) {
-                ZoomableImageView(image: img)
+        GeometryReader { geo in
+            Group {
+                if let img = UIImage(contentsOfFile: url.path) {
+                    ZStack {
+                        // 模糊填底：填滿卡片、補滿留白；裁切在白框內不外溢
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .blur(radius: 18, opaque: true)
+                            .overlay(Color.black.opacity(0.06))
+
+                        // 原圖：完整顯示（橫圖也不會超出，可雙指縮放）
+                        ZoomableImageView(image: img)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
                             .stroke(Color.white, lineWidth: 4)
                     )
                     .shadow(color: Color.black.opacity(0.15), radius: 14, y: 6)
-            } else {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        VStack(spacing: 10) {
-                            Image(systemName: "photo.fill.on.rectangle.fill")
-                                .font(.system(size: 40))
-                                .foregroundStyle(draft.kind.accent.opacity(0.6))
-                            Text("找不到照片")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.secondary)
-                        }
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(Color.white, lineWidth: 4)
-                    )
-                    .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
+                } else {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            VStack(spacing: 10) {
+                                Image(systemName: "photo.fill.on.rectangle.fill")
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(draft.kind.accent.opacity(0.6))
+                                Text("找不到照片")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .stroke(Color.white, lineWidth: 4)
+                        )
+                        .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 
