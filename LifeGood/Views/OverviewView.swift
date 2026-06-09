@@ -1,12 +1,18 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（OverviewView）
-// [2026-06] 本次美化方向：
-//   1. smartCurrency：新增億量級支援（≥1億 → "X.X 億"），對齊 ntdWanString 與
-//      FinanceOverviewView.fmtShort 的「萬、億」顯示規格，避免「10000.0 萬」截斷大字。
-//      閾值：<1萬→NT$X，≥1萬<1億→"X.X 萬"，≥1億→"X.X 億"。
-//   2. 保留現有 hero card / todayCard / categoryBreakdown / recentTransactions 既有美化成果，
-//      本次僅做金額格式精度修正，不改動任何視覺元件。
+// [2026-06 v1] smartCurrency：新增億量級支援（≥1億 → "X.X 億"），對齊 ntdWanString 與
+//   FinanceOverviewView.fmtShort 的「萬、億」顯示規格，避免「10000.0 萬」截斷大字。
+//   閾值：<1萬→NT$X，≥1萬<1億→"X.X 萬"，≥1億→"X.X 億"。
+// [2026-06 v2] recentRow + categoryRow 對齊標準設計語言：
+//   1. recentRow：圖示圓 40pt → 44pt + LinearGradient 漸層填充 + 陰影（對齊 incomeRow / ExpenseRow 規格）；
+//      分類標籤從純文字升級為彩色 Capsule 膠囊（對齊 incomeRow.category Capsule 規格）；
+//      金額字型升為 .system(size:15, design:.rounded) + contentTransition；
+//      日期改為小型 Capsule 膠囊（tertiarySystemFill 底），提升視覺層次。
+//   2. categoryRow：圖示圓 32pt → 40pt + LinearGradient 漸層填充 + 細邊框（對齊
+//      LifeOverviewView.categoryBreakdownSection 40pt 標準統計圖示規格）；
+//      百分比從純 caption2 文字升為彩色 Capsule 膠囊（含細邊框），對齊 LifeOverviewView 規格；
+//      金額字型升為 .system(size:14, design:.rounded)，與列表行整體加重一致。
 
 struct OverviewView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -614,48 +620,65 @@ struct OverviewView: View {
         let accent = categoryColor(item.category)
 
         return VStack(spacing: 8) {
-            HStack {
+            HStack(spacing: 12) {
+                // 40pt 漸層圖示圓 + 細邊框（對齊 LifeOverviewView.categoryBreakdownSection 統計情境規格）
                 ZStack {
                     Circle()
-                        .fill(accent.opacity(0.14))
-                        .frame(width: 32, height: 32)
+                        .fill(
+                            LinearGradient(
+                                colors: [accent.opacity(0.20), accent.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 40, height: 40)
+                    Circle()
+                        .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                        .frame(width: 40, height: 40)
                     Image(systemName: item.category.icon)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(accent)
                 }
                 Text(item.category.rawValue)
                     .font(.subheadline)
                 Spacer()
-                VStack(alignment: .trailing, spacing: 1) {
+                // 金額 + 百分比彩色膠囊（對齊 LifeOverviewView categoryBreakdownSection 規格）
+                HStack(spacing: 8) {
                     Text(smartCurrency(item.amount))
-                        .font(.subheadline.bold())
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
                     Text("\(pct)%")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(accent.opacity(0.12))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                 }
             }
 
-            // 比例進度條（含動畫）
+            // 漸層比例進度條（高度 6pt，圓角 3pt，對齊 FinanceOverviewView.allocationSection 規格）
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(Color(.systemFill))
-                        .frame(height: 5)
+                        .frame(height: 6)
                     Capsule()
                         .fill(
                             LinearGradient(
-                                colors: [accent, accent.opacity(0.65)],
+                                colors: [accent, accent.opacity(0.55)],
                                 startPoint: .leading, endPoint: .trailing
                             )
                         )
-                        .frame(width: geo.size.width * ratio, height: 5)
+                        .frame(width: geo.size.width * ratio, height: 6)
                         .animation(.spring(response: 0.6, dampingFraction: 0.78), value: ratio)
                 }
             }
-            .frame(height: 5)
+            .frame(height: 6)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.vertical, 12)
     }
 
     // MARK: - 最近交易
@@ -744,40 +767,60 @@ struct OverviewView: View {
     }
 
     private func recentRow(_ item: RecentItem) -> some View {
-        let accentColor: Color = item.isIncome ? .green : .red
+        // 收入用綠色，支出用紅色（與其他列表頁配色一致）
+        let accentColor: Color = item.isIncome ? .green : Color(red: 0.90, green: 0.25, blue: 0.25)
 
         return HStack(spacing: 12) {
+            // 44pt 漸層圖示圓 + 陰影（對齊 incomeRow / ExpenseRow 圖示圓規格）
             ZStack {
                 Circle()
-                    .fill(accentColor.opacity(0.12))
-                    .frame(width: 40, height: 40)
+                    .fill(
+                        LinearGradient(
+                            colors: [accentColor.opacity(0.22), accentColor.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                    .shadow(color: accentColor.opacity(0.22), radius: 6, x: 0, y: 3)
                 Image(systemName: item.icon)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(accentColor)
             }
 
-            VStack(alignment: .leading, spacing: 2) {
+            // 標題 + 彩色分類膠囊（對齊 incomeRow.category Capsule 規格）
+            VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
-                    .font(.subheadline.weight(.medium))
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                 Text(item.category)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(accentColor.opacity(0.10))
+                    .clipShape(Capsule())
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            VStack(alignment: .trailing, spacing: 2) {
+            // 金額 + 日期小膠囊
+            VStack(alignment: .trailing, spacing: 4) {
                 Text("\(item.isIncome ? "+" : "-")\(smartCurrency(item.amount))")
-                    .font(.subheadline.bold())
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(accentColor)
+                    .contentTransition(.numericText())
                 Text(formatDate(item.date))
-                    .font(.caption2)
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
     }
 
     // MARK: - 空狀態元件
