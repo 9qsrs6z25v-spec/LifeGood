@@ -35,26 +35,22 @@ struct LifeOverviewView: View {
         // 計算一次，避免 statsCard / milestoneTimeline / categoryBreakdown 各自重算（共 5 次）
         let allMS = store.combinedMilestones(realEstates: financeStore.realEstates)
         return NavigationStack {
-            VStack(spacing: 0) {
-                ProfileFlashCard(
-                    profile: store.profile,
-                    totalAssets: financeStore.totalAssets,
-                    spouse: store.spouse,
-                    onEdit: {
-                        if subscription.isPremium { showEditProfile = true }
-                        else { showPremiumAlert = true }
-                    }
-                )
-                .padding(.bottom, 8)
-
-                ScrollView {
-                    VStack(spacing: 20) {
-                        statsCard(allMS)
-                        milestoneTimelineSection(allMS)
-                        categoryBreakdownSection(allMS)
-                    }
-                    .padding(.vertical)
+            ScrollView {
+                VStack(spacing: 20) {
+                    ProfileFlashCard(
+                        profile: store.profile,
+                        totalAssets: financeStore.totalAssets,
+                        spouse: store.spouse,
+                        onEdit: {
+                            if subscription.isPremium { showEditProfile = true }
+                            else { showPremiumAlert = true }
+                        }
+                    )
+                    statsCard(allMS)
+                    milestoneTimelineSection(allMS)
+                    categoryBreakdownSection(allMS)
                 }
+                .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("人生總覽")
