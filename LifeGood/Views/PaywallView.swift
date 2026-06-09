@@ -16,8 +16,12 @@ struct PaywallView: View {
                 VStack(spacing: 28) {
                     header
                     benefits
-                    productList
-                    actions
+                    if subscription.remoteAllFree {
+                        limitedFreeNotice
+                    } else {
+                        productList
+                        actions
+                    }
                     legal
                 }
                 .padding(.horizontal, 20)
@@ -110,17 +114,40 @@ struct PaywallView: View {
                 }
             }
 
-            Text("解鎖完整人生管理")
+            Text(subscription.remoteAllFree ? "全功能限時免費中" : "解鎖完整人生管理")
                 .font(.title2.weight(.bold))
                 .padding(.bottom, 10)
 
-            Text("免費版本可使用記帳全部功能與理財模式的股票管理。訂閱後可解鎖儲蓄險、載具、房地產、人生履歷、家庭、管理等完整體驗。")
+            Text(subscription.remoteAllFree
+                 ? "推廣期間，所有進階功能（儲蓄險、載具、房地產、人生履歷、家庭、管理等）全部免費開放，無需訂閱即可使用。"
+                 : "免費版本可使用記帳全部功能與理財模式的股票管理。訂閱後可解鎖儲蓄險、載具、房地產、人生履歷、家庭、管理等完整體驗。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
         }
         .padding(.top, 8)
+    }
+
+    // MARK: - 限時免費提示（推廣期間取代購買區）
+
+    private var limitedFreeNotice: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "gift.fill").foregroundStyle(.green)
+                Text("限時免費，全功能已解鎖").font(.headline)
+            }
+            Text("推廣期間無需訂閱即可使用所有功能。現在開始使用的你，未來恢復訂閱後仍永久保留完整功能（早鳥回饋）。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(2)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity)
+        .background(Color.green.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.green.opacity(0.25), lineWidth: 1))
     }
 
     // MARK: - 功能亮點
