@@ -12,6 +12,10 @@ import Charts
 //      對齊 IncomeView.emptyState 雙環脈衝設計規格
 //   4. expenseTypeBreakdown 空狀態同步升級雙層脈衝光環，
 //      對齊 VariableExpenseView.emptyStateView 規格
+//   5. pieChartBody 圖例項目：圖示圓從 32pt 升至 36pt（icon size 13→15），
+//      金額改為 .system(size:15, weight:.bold, design:.rounded) + minimumScaleFactor(0.72)
+//      + contentTransition(.numericText())，百分比改為彩色膠囊（含細邊框 0.5pt），
+//      對齊 breakdownLegendItem 統一規格，確保變動/固定圓餅兩頁圖例一致
 
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
@@ -716,30 +720,42 @@ struct ChartView: View {
 
                     VStack(spacing: 6) {
                         HStack(spacing: 10) {
-                            // 圖示圓（加細邊框，與其他頁面元件一致）
+                            // 圖示圓：36pt + 細邊框，對齊 breakdownLegendItem 規格
                             ZStack {
                                 Circle()
                                     .fill(e.color.opacity(0.15))
-                                    .frame(width: 32, height: 32)
+                                    .frame(width: 36, height: 36)
                                 Circle()
                                     .stroke(e.color.opacity(0.22), lineWidth: 1)
-                                    .frame(width: 32, height: 32)
+                                    .frame(width: 36, height: 36)
                                 Image(systemName: e.icon)
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .font(.system(size: 15, weight: .semibold))
                                     .foregroundStyle(e.color)
                             }
                             Text(e.name)
                                 .font(.subheadline)
                                 .foregroundStyle(.primary)
                             Spacer()
-                            VStack(alignment: .trailing, spacing: 1) {
+                            VStack(alignment: .trailing, spacing: 3) {
+                                // 金額：rounded bold 15pt + 自適應縮放 + 數字過渡動畫
                                 Text(formatCurrency(e.amount))
-                                    .font(.caption.bold())
+                                    .font(.system(size: 15, weight: .bold, design: .rounded))
                                     .foregroundStyle(.primary)
-                                // 百分比以分類主色顯示，強調比例感
+                                    .minimumScaleFactor(0.72)
+                                    .lineLimit(1)
+                                    .contentTransition(.numericText())
+                                // 百分比彩色膠囊（含細邊框），對齊 breakdownLegendItem 規格
                                 Text(String(format: "%.1f%%", pct * 100))
-                                    .font(.caption2.weight(.semibold))
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
                                     .foregroundStyle(e.color)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(e.color.opacity(0.12))
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(e.color.opacity(0.30), lineWidth: 0.5)
+                                    )
+                                    .clipShape(Capsule())
                             }
                         }
                         // 比例進度條：寬度對應佔總額的比例
