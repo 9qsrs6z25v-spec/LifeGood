@@ -477,6 +477,7 @@ struct SettingsView: View {
                     Text("元")
                         .foregroundStyle(.secondary)
                     Button(role: .destructive) {
+                        guard index < store.currencyRates.count else { return }
                         store.currencyRates.remove(at: index)
                     } label: {
                         Image(systemName: "minus.circle.fill")

@@ -333,12 +333,11 @@ final class CloudSyncManager: ObservableObject {
                         return
                     }
                     CloudKitManager.shared.fetchChanges { [weak self] _ in
+                        // fetchChanges completion 已保證在主執行緒執行，直接重置旗標
                         CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
                         CloudKitManager.shared.uploadAllLocalPhotos()
-                        DispatchQueue.main.async { [weak self] in
-                            self?.isSyncing = false
-                            self?.markSynced()
-                        }
+                        self?.isSyncing = false
+                        self?.markSynced()
                     }
                 }
             }
