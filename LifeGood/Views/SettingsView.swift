@@ -90,6 +90,11 @@ struct SettingsView: View {
     @StateObject private var aiSettings = AISettingsStore.shared
     @State private var heroCardAppeared = false
 
+    // 隱藏管理控制台（關於頁連點 20 下）
+    @StateObject private var remoteAdmin = RemoteAdminManager.shared
+    @State private var aboutTapCount = 0
+    @State private var showAdminConsole = false
+
     var body: some View {
         NavigationStack {
             List {
@@ -145,6 +150,10 @@ struct SettingsView: View {
             // 匯出分享
             .sheet(item: $activeShareItem) { item in
                 ShareSheet(items: [item.url])
+            }
+            // 隱藏管理控制台
+            .sheet(isPresented: $showAdminConsole) {
+                AdminConsoleView()
             }
             // 匯出錯誤
             .alert("匯出失敗", isPresented: $showExportError) {
@@ -1049,7 +1058,23 @@ struct SettingsView: View {
                     aboutInfoCell(icon: "iphone", label: "最低需求", value: "iOS 17", color: .blue)
                 }
                 .padding(.vertical, 8)
+
+                // 對外人數（達門檻才顯示）
+                if remoteAdmin.shouldShowPublicCount {
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.4))
+                        .frame(height: 0.5)
+                        .padding(.horizontal, 8)
+                    Text("已有 \(remoteAdmin.userCount) 位使用者一起記錄美好人生")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { handleAboutTap() }
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color(.systemBackground))
         } header: {
@@ -1191,6 +1216,15 @@ struct SettingsView: View {
 
     private func dateStamp() -> String { Self.dateStampFormatter.string(from: Date()) }
     private func formatDate(_ date: Date) -> String { Self.shortDateFormatter.string(from: date) }
+
+    /// 關於頁連點計數：累積 20 下開啟隱藏管理控制台
+    private func handleAboutTap() {
+        aboutTapCount += 1
+        if aboutTapCount >= 20 {
+            aboutTapCount = 0
+            showAdminConsole = true
+        }
+    }
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"

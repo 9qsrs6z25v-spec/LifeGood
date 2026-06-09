@@ -41,22 +41,50 @@ final class SubscriptionManager: ObservableObject {
         }
     }
 
+    /// 遠端「全功能免費」總開關（由 RemoteAdminManager 套用，預設 true）
+    @Published private(set) var remoteAllFree: Bool
+
     private static let devOverrideKey = "subscription_dev_override"
+    private static let remoteAllFreeKey = "ra_all_free"
+    private static let founderKey = "subscription_founder_unlocked"
     private static let expirationDateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
     }()
 
-    /// 是否享有完整功能。包含：StoreKit 解鎖、開發旗標。
+    /// 是否享有完整功能：開發旗標 / 早鳥永久解鎖 / 遠端全免費 / 有效訂閱
     var isPremium: Bool {
         if devOverride { return true }
+        if isFounderUnlocked { return true }
+        if remoteAllFree { return true }
         guard let exp = entitlementExpiresAt else { return false }
         return exp > Date()
+    }
+
+    /// 早鳥永久解鎖標記（本機 + iCloud KV，重裝 / 換機保留）
+    var isFounderUnlocked: Bool {
+        UserDefaults.standard.bool(forKey: Self.founderKey)
+            || NSUbiquitousKeyValueStore.default.bool(forKey: Self.founderKey)
+    }
+
+    /// 由 RemoteAdminManager 在「伺服器確認」免費狀態後呼叫。
+    /// 免費中 → 蓋早鳥章（日後收回時這些早期使用者永久保留解鎖）。
+    func applyRemoteFreeAccess(_ free: Bool) {
+        UserDefaults.standard.set(free, forKey: Self.remoteAllFreeKey)
+        remoteAllFree = free
+        if free, !isFounderUnlocked {
+            UserDefaults.standard.set(true, forKey: Self.founderKey)
+            NSUbiquitousKeyValueStore.default.set(true, forKey: Self.founderKey)
+            NSUbiquitousKeyValueStore.default.synchronize()
+        }
+        objectWillChange.send()
     }
 
     private var transactionListener: Task<Void, Never>?
 
     private init() {
         self.devOverride = UserDefaults.standard.bool(forKey: Self.devOverrideKey)
+        // 預設全功能免費（在伺服器回覆前先採樂觀值，避免免費期間短暫被鎖）
+        self.remoteAllFree = UserDefaults.standard.object(forKey: Self.remoteAllFreeKey) as? Bool ?? true
         transactionListener = listenForTransactions()
     }
 

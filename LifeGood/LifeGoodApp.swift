@@ -59,6 +59,8 @@ struct LifeGoodApp: App {
                         expense: expenseStore, finance: financeStore, life: lifeStore
                     )
                     cloudSync.syncNow()
+                    // 拉取遠端訂閱總開關 + 人數，並（必要時）註冊本使用者
+                    RemoteAdminManager.shared.bootstrap()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {
