@@ -1,5 +1,19 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（FinanceOverviewView）
+// [2026-06 v1] 本次美化方向：
+//   1. 頂部加入正式美化紀錄文件，方便後續美化時快速掌握均值規格。
+//   2. totalAssetsCard：已有「投資損益 KPI 膠囊」+ 「mini 資產配置彩條」+ 進場動畫，
+//      設計語言對齊 OverviewView.monthlyBalanceCard 規格。
+//   3. cashFlowSection：補入缺少的進場動畫（cashFlowSectionAppeared 旗標）；
+//      入場效果為 opacity + Y 位移 spring，與 allocationSection 動畫規格一致。
+//   4. emptyPlaceholder：主圓底從純 Color(.systemFill) 升級為 LinearGradient 漸層填色
+//      + 細邊框 stroke，對齊 OverviewView.emptyPlaceholder 設計規格；
+//      圖示尺寸從 26pt → 28pt，與 OverviewView 統一。
+// [待續方向]
+//   • allocationSection 的「橫向彩條」可考慮加入 glow overlay 強化層次感。
+//   • 若資產為零時的整頁空狀態可升級為雙層脈衝光環，對齊 StockView.emptyState。
+
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -12,6 +26,8 @@ struct FinanceOverviewView: View {
     @State private var appearedCards: Set<String> = []
     @State private var allocationBarAppeared = false
     @State private var allocationRowsAppeared = false
+    // 每月現金流區塊進場動畫旗標（補齊前三區塊均有動畫、現金流缺失的均值差距）
+    @State private var cashFlowSectionAppeared = false
 
     private func rateForCode(_ code: String) -> Double {
         if code == "NT$" { return 1 }
@@ -47,6 +63,13 @@ struct FinanceOverviewView: View {
                     assetCards
                     allocationSection
                     cashFlowSection
+                        .opacity(cashFlowSectionAppeared ? 1 : 0)
+                        .offset(y: cashFlowSectionAppeared ? 0 : 18)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.28)) {
+                                cashFlowSectionAppeared = true
+                            }
+                        }
                 }
                 .padding(.vertical)
             }
@@ -641,29 +664,45 @@ struct FinanceOverviewView: View {
 
     // MARK: - 空狀態
 
+    // 【美化 v1】emptyPlaceholder 升級：
+    //   主圓底 Color(.systemFill) → LinearGradient 漸層填色（對齊 OverviewView.emptyPlaceholder）
+    //   加細邊框 stroke（Color(.separator).opacity(0.35)），增加精緻感與深色模式相容性
+    //   圖示從 26pt → 28pt，與 OverviewView 統一視覺重量
     private func emptyPlaceholder(icon: String, title: String, subtitle: String) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             ZStack {
                 Circle()
-                    .fill(Color(.systemFill))
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(.secondarySystemFill), Color(.systemFill)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 64, height: 64)
+                Circle()
+                    .stroke(Color(.separator).opacity(0.35), lineWidth: 1)
                     .frame(width: 64, height: 64)
                 Image(systemName: icon)
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(Color(.secondaryLabel))
             }
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+            VStack(spacing: 5) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 28)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
     }
 
     // MARK: - Helpers
