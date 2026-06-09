@@ -552,12 +552,13 @@ final class SpeechRecognizer: NSObject, ObservableObject {
         try audioEngine.start()
 
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                Task { @MainActor [weak self] in self?.transcript = result.bestTranscription.formattedString }
-            }
-            if let error {
-                Task { @MainActor [weak self] in self?.errorMessage = error.localizedDescription }
+            // 先在背景執行緒提取值型別，避免對 @MainActor 隔離的 self 建立強引用
+            let text = result?.bestTranscription.formattedString
+            let errMsg = error?.localizedDescription
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let text { self.transcript = text }
+                if let errMsg { self.errorMessage = errMsg }
             }
         }
         isRecording = true
