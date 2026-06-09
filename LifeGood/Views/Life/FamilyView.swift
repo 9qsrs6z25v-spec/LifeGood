@@ -61,7 +61,8 @@ struct FamilyView: View {
                         }
                         .onDelete { offsets in
                             guard subscription.isPremium else { showPremiumAlert = true; return }
-                            let items = offsets.map { store.familyMembers[$0] }
+                            let snapshot = store.familyMembers
+                            let items = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
                             items.forEach { store.deleteFamilyMember($0) }
                         }
                         .onAppear {

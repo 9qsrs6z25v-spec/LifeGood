@@ -139,7 +139,8 @@ struct SubordinateView: View {
                     }
                     .onDelete { offsets in
                         guard subscription.isPremium else { showPremiumAlert = true; return }
-                        let items = offsets.map { sortedSubordinates[$0] }
+                        let snapshot = sortedSubordinates
+                        let items = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
                         items.forEach { lifeStore.deleteSubordinate($0) }
                     }
                     .onMove { from, to in
