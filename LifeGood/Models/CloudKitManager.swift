@@ -327,7 +327,7 @@ final class CloudKitManager {
                             try FileManager.default.copyItem(at: url, to: dest)
                             lock.lock(); pulledPhotos.insert("\(dir)/\(name)"); lock.unlock()
                         } catch {
-                            // ignore
+                            self.report(error, context: "寫入照片 \(dir)/\(name)")
                         }
                     }
                 }

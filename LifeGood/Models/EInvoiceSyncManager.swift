@@ -208,7 +208,9 @@ final class EInvoiceSyncManager: ObservableObject {
 
     /// 撤銷已匯入的發票（連同對應的支出一起刪除）
     func revert(_ record: EInvoiceImportRecord, expenseStore: ExpenseStore) {
-        expenseStore.expenses.removeAll { record.expenseIds.contains($0.id) }
+        // 先轉成 Set，將每筆 expense 的查詢從 O(m) 降為 O(1)
+        let idsToRemove = Set(record.expenseIds)
+        expenseStore.expenses.removeAll { idsToRemove.contains($0.id) }
         importHistory.removeAll { $0.id == record.id }
         persistHistory()
     }
