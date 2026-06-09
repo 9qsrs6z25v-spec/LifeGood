@@ -20,6 +20,13 @@ import UIKit
 //      對齊 SubordinateOverviewView.emptyHint 視覺規格
 //   7. 所有 section 容器：加 shadow + 極細 overlay 邊框，
 //      提升深色模式下的邊界感，對齊 OverviewView.categoryBreakdownSection
+// [2026-06 v2] Tab 切換器升級：
+//   8. detailTab Picker(.segmented) → @Namespace + matchedGeometryEffect 自訂彩色 Capsule Pill，
+//      日常→藍色（person.2.fill）、評分系統→橘色（star.fill），
+//      對齊 RealEstateDetailView.tabPicker / ChildDetailView.detailTab 設計規格；
+//      Tab 切換時加 spring(response:0.3, dampingFraction:0.72) 動畫
+//   9. tabSectionsAppeared：Tab 切換時重置進場動畫旗標並重播，
+//      區塊以 opacity+Y offset stagger 進場，對齊 CareerView.milestoneListSection 規格
 
 struct SubordinateDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -38,9 +45,13 @@ struct SubordinateDetailView: View {
 
     // 進場動畫旗標
     @State private var headerAppeared = false
+    // Tab 區塊進場旗標：切換 Tab 時重置並重播
+    @State private var tabSectionsAppeared = false
 
     enum DetailTab: String, CaseIterable { case daily = "日常"; case rating = "評分系統" }
     @State private var detailTab: DetailTab = .daily
+    // matchedGeometryEffect：Tab 指示器平滑滑動（對齊 RealEstateDetailView / ChildDetailView 規格）
+    @Namespace private var tabNamespace
 
     init(subordinate: Subordinate) { self.subordinateId = subordinate.id }
 
@@ -68,22 +79,86 @@ struct SubordinateDetailView: View {
                 VStack(spacing: 16) {
                     headerCard
 
-                    Picker("", selection: $detailTab) {
-                        ForEach(DetailTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    // 自訂 Capsule Pill Tab 切換器（matchedGeometryEffect 讓指示器平滑滑動）
+                    // 日常→藍色 / 評分系統→橘色，對齊 RealEstateDetailView.tabPicker 規格
+                    HStack(spacing: 0) {
+                        ForEach(DetailTab.allCases, id: \.self) { tab in
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) {
+                                    detailTab = tab
+                                }
+                                // 切換 Tab 時重置進場動畫，讓新 Tab 區塊重新滑入
+                                tabSectionsAppeared = false
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                    withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+                                        tabSectionsAppeared = true
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: tab == .daily ? "person.2.fill" : "star.fill")
+                                        .font(.caption2)
+                                    Text(tab.rawValue)
+                                        .font(.subheadline.weight(.semibold))
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 9)
+                                .foregroundStyle(detailTab == tab ? .white : .secondary)
+                                .background {
+                                    if detailTab == tab {
+                                        Capsule()
+                                            .fill(tabTint(tab))
+                                            .matchedGeometryEffect(id: "subDetailTabIndicator", in: tabNamespace)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .pickerStyle(.segmented)
+                    .padding(4)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
                     .padding(.horizontal)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.10)) {
+                            tabSectionsAppeared = true
+                        }
+                    }
 
                     if detailTab == .daily {
                         meetingSection
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.00), value: tabSectionsAppeared)
                         taskSection
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05), value: tabSectionsAppeared)
                         recordSection(.leave)
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.10), value: tabSectionsAppeared)
                     } else {
                         proConSection
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.00), value: tabSectionsAppeared)
                         recordSection(.achievement)
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05), value: tabSectionsAppeared)
                         recordSection(.improvement)
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.10), value: tabSectionsAppeared)
                         recordSection(.fault)
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.15), value: tabSectionsAppeared)
                         recordSection(.missOperation)
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.20), value: tabSectionsAppeared)
                     }
                 }
                 .padding(.vertical)
@@ -712,6 +787,14 @@ struct SubordinateDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
+    }
+
+    // Tab 主題色（對齊 ChildDetailView.tabTint 規格）
+    private func tabTint(_ tab: DetailTab) -> Color {
+        switch tab {
+        case .daily: return Color(red: 0.22, green: 0.53, blue: 0.98)   // 藍
+        case .rating: return Color(red: 0.96, green: 0.55, blue: 0.18)  // 橘
+        }
     }
 
     private func colorFor(_ type: SubordinateRecordType) -> Color {
