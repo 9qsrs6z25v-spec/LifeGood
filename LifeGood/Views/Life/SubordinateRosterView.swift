@@ -39,6 +39,7 @@ func rosterShiftColor(_ t: ShiftType) -> Color {
     case .nightShift:   return .indigo
     case .eveningShift: return .purple
     case .holidayDuty:  return .orange
+    case .dayDuty:      return .mint
     case .jetLagLeave:  return .teal
     case .restDay:      return .gray
     }
@@ -545,8 +546,15 @@ private struct RosterCellDetailSheet: View {
             } label: {
                 Label("套用小夜班（整週一至五 5 天）", systemImage: "moon.stars")
             }
+            Button {
+                lifeStore.setShift(subordinateId: cell.subId, date: cell.date, type: .dayDuty)
+                dismiss()   // 設定後關閉彈窗回班表
+            } label: {
+                Label("設為日值班（單日，平日 08:30–17:30）", systemImage: "sun.max")
+            }
             Button(role: .destructive) {
                 lifeStore.setShift(subordinateId: cell.subId, date: cell.date, type: nil)
+                dismiss()   // 清除後關閉彈窗回班表
             } label: {
                 Label("清除這天班別", systemImage: "xmark.circle")
             }
@@ -622,7 +630,7 @@ private struct ShiftScheduleSettingsView: View {
     @ObservedObject var scheduleStore: ShiftScheduleStore
     @Environment(\.dismiss) private var dismiss
 
-    private let editable: [ShiftType] = [.nightShift, .eveningShift, .holidayDuty]
+    private let editable: [ShiftType] = [.nightShift, .eveningShift, .holidayDuty, .dayDuty]
 
     var body: some View {
         NavigationStack {
