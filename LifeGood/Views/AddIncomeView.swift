@@ -343,7 +343,7 @@ struct AddIncomeView: View {
         .padding(.horizontal, 16)
         .opacity(cardAppeared ? 1 : 0)
         .offset(y: cardAppeared ? 0 : 14)
-        .animation(.spring(response: 0.50, dampingFraction: 0.80), value: parsedAmount)
+        .animation(.spring(response: 0.50, dampingFraction: 0.80), value: parsedAmount == nil)
     }
 
     // MARK: - ③ 分類 FilterChip 列
