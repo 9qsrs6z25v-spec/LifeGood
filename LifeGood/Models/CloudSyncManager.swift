@@ -376,9 +376,16 @@ final class CloudSyncManager: ObservableObject {
 
     private func markSynced() {
         let now = Date()
-        DispatchQueue.main.async { [weak self] in
-            self?.lastSyncDate = now
-            self?.lastErrorMessage = nil   // 成功同步即清掉先前錯誤
+        // 所有呼叫端都已確保在主執行緒，直接更新 @Published 屬性，
+        // 避免多一次 async enqueue 造成 lastSyncDate 短暫未更新、30 秒節流判斷出現空窗
+        if Thread.isMainThread {
+            lastSyncDate = now
+            lastErrorMessage = nil
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.lastSyncDate = now
+                self?.lastErrorMessage = nil
+            }
         }
         UserDefaults.standard.set(now, forKey: Self.lastSyncKey)
     }
