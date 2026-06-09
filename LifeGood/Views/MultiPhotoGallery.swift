@@ -180,11 +180,23 @@ struct PhotoLightbox: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
+    @State private var image: UIImage?
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if let img = UIImage(contentsOfFile: url.path) {
+            if let img = image {
+                // 背景：同一張照片放大填滿 + 高斯模糊 + 輕微暗化，讓畫面不再死黑
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .blur(radius: 38, opaque: true)
+                    .overlay(Color.black.opacity(0.30))
+                    .ignoresSafeArea()
+
+                // 前景：原圖
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFit()
@@ -219,6 +231,9 @@ struct PhotoLightbox: View {
                 }
                 Spacer()
             }
+        }
+        .onAppear {
+            if image == nil { image = UIImage(contentsOfFile: url.path) }
         }
     }
 }

@@ -3005,7 +3005,7 @@ struct CutePhotoViewer: View {
 
     var body: some View {
         ZStack {
-            backgroundGradient
+            photoBackground
             decorativeOrbs
 
             VStack(spacing: 0) {
@@ -3024,6 +3024,31 @@ struct CutePhotoViewer: View {
     }
 
     // MARK: 背景
+
+    /// 目前正在看的那張照片
+    private var currentURL: URL? {
+        guard draft.urls.indices.contains(currentIndex) else { return draft.urls.first }
+        return draft.urls[currentIndex]
+    }
+
+    /// 背景＝同一張照片放大填滿 + 高斯模糊（顏色取自照片，不再是死的固定漸層）；
+    /// 載入失敗時退回淡色漸層。
+    private var photoBackground: some View {
+        ZStack {
+            backgroundGradient
+            if let url = currentURL, let img = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .blur(radius: 60, opaque: true)
+                    .overlay(Color.black.opacity(0.12))     // 輕微壓暗，讓白框照片浮起
+                    .ignoresSafeArea()
+                    .animation(.easeInOut(duration: 0.35), value: currentIndex)
+            }
+        }
+    }
 
     private var backgroundGradient: some View {
         LinearGradient(
