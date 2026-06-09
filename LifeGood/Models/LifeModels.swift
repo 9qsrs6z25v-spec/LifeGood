@@ -978,6 +978,7 @@ enum ShiftType: String, Codable, CaseIterable, Identifiable {
     case nightShift = "大夜班"
     case eveningShift = "小夜班"
     case holidayDuty = "假日值班"
+    case dayDuty = "日值班"
     case jetLagLeave = "時差假"
     case restDay = "休息"
 
@@ -985,7 +986,7 @@ enum ShiftType: String, Codable, CaseIterable, Identifiable {
 
     /// 是否有上下班時間（時差假 / 休息沒有）
     var hasWorkTime: Bool {
-        self == .nightShift || self == .eveningShift || self == .holidayDuty
+        self == .nightShift || self == .eveningShift || self == .holidayDuty || self == .dayDuty
     }
 
     /// 班表格子上的精簡標示
@@ -994,6 +995,7 @@ enum ShiftType: String, Codable, CaseIterable, Identifiable {
         case .nightShift:  return "大夜"
         case .eveningShift: return "小夜"
         case .holidayDuty:  return "假值"
+        case .dayDuty:      return "日值"
         case .jetLagLeave:  return "時差"
         case .restDay:      return "休"
         }
@@ -1039,12 +1041,14 @@ struct ShiftSchedule: Codable {
         weekday: [
             ShiftType.nightShift.rawValue:   ShiftTimeRange(startMinutes: 0,    endMinutes: 8 * 60 + 30),   // 00:00–08:30
             ShiftType.eveningShift.rawValue: ShiftTimeRange(startMinutes: 16 * 60, endMinutes: 0),          // 16:00–00:00
-            ShiftType.holidayDuty.rawValue:  ShiftTimeRange(startMinutes: 8 * 60 + 30, endMinutes: 17 * 60 + 30) // 08:30–17:30
+            ShiftType.holidayDuty.rawValue:  ShiftTimeRange(startMinutes: 8 * 60 + 30, endMinutes: 17 * 60 + 30), // 08:30–17:30
+            ShiftType.dayDuty.rawValue:      ShiftTimeRange(startMinutes: 8 * 60 + 30, endMinutes: 17 * 60 + 30)  // 08:30–17:30
         ],
         holiday: [
             ShiftType.nightShift.rawValue:   ShiftTimeRange(startMinutes: 20 * 60 + 30, endMinutes: 8 * 60 + 30), // 20:30–08:30
             ShiftType.eveningShift.rawValue: ShiftTimeRange(startMinutes: 12 * 60, endMinutes: 20 * 60 + 30),     // 12:00–20:30
-            ShiftType.holidayDuty.rawValue:  ShiftTimeRange(startMinutes: 8 * 60 + 30, endMinutes: 20 * 60 + 30)  // 08:30–20:30
+            ShiftType.holidayDuty.rawValue:  ShiftTimeRange(startMinutes: 8 * 60 + 30, endMinutes: 20 * 60 + 30), // 08:30–20:30
+            ShiftType.dayDuty.rawValue:      ShiftTimeRange(startMinutes: 8 * 60 + 30, endMinutes: 17 * 60 + 30)  // 08:30–17:30
         ]
     )
 }
