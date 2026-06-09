@@ -18,6 +18,21 @@ struct SubordinateOverviewView: View {
     @State private var selectedDate = Date()
     @State private var sectionAppeared = false
     @State private var showCompleted = false
+    @State private var editTarget: OverviewEditTarget?
+
+    /// 點擊總覽項目要開啟的編輯目標
+    private enum OverviewEditTarget: Identifiable {
+        case leave(subId: UUID, rec: SubordinateRecord)
+        case meeting(subId: UUID, meeting: SubordinateMeeting)
+        case task(subId: UUID, task: SubordinateTask)
+        var id: String {
+            switch self {
+            case .leave(_, let r):   return "l_\(r.id.uuidString)"
+            case .meeting(_, let m): return "m_\(m.id.uuidString)"
+            case .task(_, let t):    return "t_\(t.id.uuidString)"
+            }
+        }
+    }
 
     private var calendar: Calendar { Calendar.current }
 
@@ -117,6 +132,16 @@ struct SubordinateOverviewView: View {
             .onAppear {
                 withAnimation(.spring(response: 0.50, dampingFraction: 0.82)) {
                     sectionAppeared = true
+                }
+            }
+            .sheet(item: $editTarget) { target in
+                switch target {
+                case .leave(let subId, let rec):
+                    RecordEditorSheet(subordinateId: subId, type: rec.type, editing: rec)
+                case .meeting(let subId, let meeting):
+                    MeetingEditorSheet(subordinateId: subId, editing: meeting)
+                case .task(let subId, let task):
+                    TaskEditorSheet(subordinateId: subId, editing: task)
                 }
             }
         }
@@ -341,6 +366,8 @@ struct SubordinateOverviewView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+        .contentShape(Rectangle())
+        .onTapGesture { editTarget = .leave(subId: sub.id, rec: rec) }
     }
 
     private func meetingRow(_ sub: Subordinate, _ meeting: SubordinateMeeting) -> some View {
@@ -400,6 +427,8 @@ struct SubordinateOverviewView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+        .contentShape(Rectangle())
+        .onTapGesture { editTarget = .meeting(subId: sub.id, meeting: meeting) }
     }
 
     private func taskRow(_ sub: Subordinate, _ task: SubordinateTask) -> some View {
@@ -478,6 +507,8 @@ struct SubordinateOverviewView: View {
         .opacity(task.isCompleted ? 0.6 : 1)
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+        .contentShape(Rectangle())
+        .onTapGesture { editTarget = .task(subId: sub.id, task: task) }
     }
 
     // MARK: - 輔助元件
