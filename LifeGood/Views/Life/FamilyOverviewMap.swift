@@ -53,7 +53,8 @@ struct FamilyOverviewMap: View {
                 id: "sib-\(s.id.uuidString)",
                 label: "\(s.role.rawValue)的家",
                 kind: .sibling,
-                occupants: [.init(name: s.chineseName.isEmpty ? s.role.rawValue : s.chineseName,
+                occupants: [.init(id: s.id.uuidString,
+                                   name: s.chineseName.isEmpty ? s.role.rawValue : s.chineseName,
                                    role: s.role)]
             ))
         }
@@ -64,7 +65,7 @@ struct FamilyOverviewMap: View {
                 id: "rel-\(r.id.uuidString)",
                 label: r.chineseName.isEmpty ? "親屬" : r.chineseName,
                 kind: .relative,
-                occupants: [.init(name: r.chineseName.isEmpty ? "親屬" : r.chineseName, role: r.role)]
+                occupants: [.init(id: r.id.uuidString, name: r.chineseName.isEmpty ? "親屬" : r.chineseName, role: r.role)]
             ))
         }
         return list
@@ -79,7 +80,7 @@ struct FamilyOverviewMap: View {
                 label: "爸媽的家",
                 kind: .parents,
                 occupants: parents.map { p in
-                    .init(name: p.chineseName.isEmpty ? p.role.rawValue : p.chineseName, role: p.role)
+                    .init(id: p.id.uuidString, name: p.chineseName.isEmpty ? p.role.rawValue : p.chineseName, role: p.role)
                 }
             ))
         }
@@ -90,19 +91,19 @@ struct FamilyOverviewMap: View {
                 id: "rel-top-\(r.id.uuidString)",
                 label: r.chineseName.isEmpty ? "親屬" : r.chineseName,
                 kind: .relative,
-                occupants: [.init(name: r.chineseName.isEmpty ? "親屬" : r.chineseName, role: r.role)]
+                occupants: [.init(id: r.id.uuidString, name: r.chineseName.isEmpty ? "親屬" : r.chineseName, role: r.role)]
             ))
         }
         return list
     }
 
     private var nuclearOccupants: [HouseOccupant] {
-        var list: [HouseOccupant] = [.init(name: myName.isEmpty ? "我" : myName, role: nil)]
+        var list: [HouseOccupant] = [.init(id: "me", name: myName.isEmpty ? "我" : myName, role: nil)]
         if let s = spouse {
-            list.append(.init(name: s.chineseName.isEmpty ? "配偶" : s.chineseName, role: .spouse))
+            list.append(.init(id: s.id.uuidString, name: s.chineseName.isEmpty ? "配偶" : s.chineseName, role: .spouse))
         }
         for c in children {
-            list.append(.init(name: c.chineseName.isEmpty ? c.role.rawValue : c.chineseName, role: c.role))
+            list.append(.init(id: c.id.uuidString, name: c.chineseName.isEmpty ? c.role.rawValue : c.chineseName, role: c.role))
         }
         return list
     }
@@ -224,7 +225,7 @@ struct FamilyOverviewMap: View {
 // MARK: - 房子資料
 
 struct HouseOccupant: Identifiable, Hashable {
-    var id: String { name + (role?.rawValue ?? "self") }
+    let id: String  // 直接傳入成員 UUID，避免同名同角色的成員產生重複 ID
     let name: String
     let role: FamilyMemberRole?
 }
