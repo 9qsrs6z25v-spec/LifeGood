@@ -400,7 +400,8 @@ struct ResumeView: View {
                     }
                     .onDelete { offsets in
                         guard subscription.isPremium else { showPremiumAlert = true; return }
-                        let items = offsets.map { section.items[$0] }
+                        let snapshot = section.items
+                        let items = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
                             .filter { realMilestoneIDs.contains($0.id) }
                         items.forEach { store.deleteMilestone($0) }
                     }
@@ -446,7 +447,8 @@ struct ResumeView: View {
                     }
                     .onDelete { offsets in
                         guard subscription.isPremium else { showPremiumAlert = true; return }
-                        let toDelete = offsets.map { items[$0] }
+                        let snapshot = items
+                        let toDelete = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
                             .filter { realMilestoneIDs.contains($0.id) }
                         toDelete.forEach { store.deleteMilestone($0) }
                     }

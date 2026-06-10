@@ -461,8 +461,7 @@ final class CloudKitManager {
 
     /// 由 AppDelegate / SwiftUI 接到 silent push 時呼叫
     func handleRemoteNotification(userInfo: [AnyHashable: Any], completion: @escaping (UIBackgroundFetchResult) -> Void) {
-        let notif = CKNotification(fromRemoteNotificationDictionary: userInfo)
-        guard notif != nil else { completion(.noData); return }
+        guard CKNotification(fromRemoteNotificationDictionary: userInfo) != nil else { completion(.noData); return }
         fetchChanges { ok in
             completion(ok ? .newData : .failed)
         }
