@@ -2,12 +2,17 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 // MARK: - 美化紀錄（SettingsView）
-// [2026-06] 本次美化方向：
+// [2026-06] v1 美化方向：
 //   1. 頂部訂閱狀態英雄卡：漸層背景 + 散景裝飾圓，對齊其他主要頁面 hero card 設計語言
 //      Premium → 綠色漸層；免費 → 藍紫漸層（視覺提示升級動機）
 //      顯示方案名稱、版本號、三模式記錄筆數 KPI 橫列
 //   2. disclosureBlock 標題字重 .medium → .semibold，強化視覺層級對比
 //   3. 英雄卡進場動畫（opacity + translateY spring），對齊 OverviewView summaryCard 規格
+// [2026-06] v2 美化方向：
+//   4. dataStatsSection 三模式統計徽章加入個別錯開進場動畫（stagger spring，0.07s 間隔）
+//      opacity(0→1) + offset(y: 18→0)，對齊 LazyVStack stagger 規格
+//   5. 展開 dataStatsSection 時重新觸發動畫（重設 dataStatBadgesAppeared），
+//      每次 DisclosureGroup 展開都有流暢進場效果
 
 // MARK: - Share Sheet (UIKit bridge)
 
@@ -89,6 +94,7 @@ struct SettingsView: View {
     @State private var aboutExpanded = false
     @StateObject private var aiSettings = AISettingsStore.shared
     @State private var heroCardAppeared = false
+    @State private var dataStatBadgesAppeared: [Bool] = [false, false, false]
 
     // 隱藏管理控制台（關於頁連點 20 下）
     @StateObject private var remoteAdmin = RemoteAdminManager.shared
@@ -800,7 +806,7 @@ struct SettingsView: View {
 
     private var dataStatsSection: some View {
         Section {
-            // 三模式統計徽章：橫向卡片排列
+            // 三模式統計徽章：橫向卡片排列（v2: 各自錯開進場動畫）
             HStack(spacing: 10) {
                 dataStatBadge(
                     icon: "yensign.circle.fill",
@@ -808,6 +814,8 @@ struct SettingsView: View {
                     count: store.expenses.count + store.incomes.count,
                     label: "記帳"
                 )
+                .opacity(dataStatBadgesAppeared[0] ? 1 : 0)
+                .offset(y: dataStatBadgesAppeared[0] ? 0 : 18)
                 dataStatBadge(
                     icon: "chart.pie.fill",
                     color: .blue,
@@ -815,16 +823,28 @@ struct SettingsView: View {
                            financeStore.vehicles.count + financeStore.realEstates.count,
                     label: "理財"
                 )
+                .opacity(dataStatBadgesAppeared[1] ? 1 : 0)
+                .offset(y: dataStatBadgesAppeared[1] ? 0 : 18)
                 dataStatBadge(
                     icon: "star.circle.fill",
                     color: .orange,
                     count: lifeStore.milestones.count + lifeStore.familyMembers.count,
                     label: "人生"
                 )
+                .opacity(dataStatBadgesAppeared[2] ? 1 : 0)
+                .offset(y: dataStatBadgesAppeared[2] ? 0 : 18)
             }
             .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 14))
             .listRowBackground(Color(.systemGroupedBackground))
             .listRowSeparator(.hidden)
+            .onAppear {
+                dataStatBadgesAppeared = [false, false, false]
+                for i in 0..<3 {
+                    withAnimation(.spring(response: 0.52, dampingFraction: 0.72).delay(0.08 + Double(i) * 0.07)) {
+                        dataStatBadgesAppeared[i] = true
+                    }
+                }
+            }
 
             // 支出記錄時間區間（若有資料）
             let expDates = store.expenses.map(\.date)
