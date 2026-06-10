@@ -1,5 +1,18 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（FamilyOverviewMap）
+// [2026-06] 本次美化方向：
+//   1. personChip 圖示圓：從 22pt 純色背景升級為 26pt LinearGradient 漸層底圓
+//      + 白色圖示 + 彩色外光暈陰影，對齊全 App 漸層圖示圓設計語言（ExpenseRow / incomeRow）。
+//   2. HouseView 雙層陰影：從單層 shadow 升級為「彩色頂光 + 黑色基底」雙層陰影，
+//      提升房子卡片的立體感，對齊 StockView.stockCard / VehicleView.vehicleCard 規格。
+//   3. 屋頂 stroke overlay：顏色從 roofColor.opacity(0.6) 改為 roofColor.opacity(0.80)，
+//      提升屋頂三角形與屋身接合處的對比度。
+//   4. 屋身 overlay stroke：lineWidth 從 1 改為 0.75、顏色微調，深色模式下邊框更細膩，
+//      對齊全 App overlay stroke 規格（StockView / VehicleView 0.75pt 邊框）。
+//   5. 屋頂標籤字重：.semibold → .bold，與全 App Capsule sectionHeader 字重一致。
+//   6. 人名字體：9pt → 10pt，提升最小可識別閾值，避免超小字在小螢幕閱讀困難。
+
 // MARK: - 家庭總覽（街道式）
 
 /// 將家庭成員依關係分組成數個「房子」，並排列在一條橫向街道的上下兩側。
@@ -259,13 +272,13 @@ struct HouseView: View {
                 .frame(height: 32)
                 .overlay(
                     RoofShape()
-                        .stroke(house.kind.roofColor.opacity(0.6), lineWidth: 1)
+                        .stroke(house.kind.roofColor.opacity(0.80), lineWidth: 1)
                 )
 
             // 屋身
             VStack(spacing: 4) {
                 Text(house.label)
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.bold))
                     .lineLimit(1)
                     .padding(.top, 6)
 
@@ -291,22 +304,33 @@ struct HouseView: View {
             .background(house.kind.bodyColor)
             .overlay(
                 Rectangle()
-                    .stroke(house.kind.roofColor.opacity(0.5), lineWidth: 1)
+                    .stroke(house.kind.roofColor.opacity(0.45), lineWidth: 0.75)
             )
         }
-        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+        // 雙層陰影：彩色頂光 + 黑色基底
+        .shadow(color: house.kind.roofColor.opacity(0.28), radius: 10, x: 0, y: 5)
+        .shadow(color: .black.opacity(0.10), radius: 3, x: 0, y: 1)
     }
 
     private func personChip(_ p: HouseOccupant) -> some View {
         VStack(spacing: 2) {
-            Image(systemName: p.role?.icon ?? "person.fill")
-                .font(.caption2)
-                .frame(width: 22, height: 22)
-                .background(house.kind.roofColor.opacity(0.18))
-                .foregroundStyle(house.kind.roofColor)
-                .clipShape(Circle())
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [house.kind.roofColor, house.kind.roofColor.opacity(0.72)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 26, height: 26)
+                    .shadow(color: house.kind.roofColor.opacity(0.35), radius: 4, x: 0, y: 2)
+                Image(systemName: p.role?.icon ?? "person.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white)
+            }
             Text(p.name)
-                .font(.system(size: 9))
+                .font(.system(size: 10))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: 50)
