@@ -77,8 +77,9 @@ final class CloudKitManager {
     func refreshAccountStatus(completion: @escaping (CKAccountStatus) -> Void) {
         container.accountStatus { [weak self] status, _ in
             guard let self = self else { completion(.couldNotDetermine); return }
-            self.accountStatus = status
+            // 將寫入統一移到主執行緒，消除背景執行緒與主執行緒並行讀寫 accountStatus 的競態條件
             DispatchQueue.main.async {
+                self.accountStatus = status
                 NotificationCenter.default.post(name: Self.accountStatusDidChangeNotification, object: nil)
                 completion(status)
             }
