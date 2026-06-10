@@ -35,7 +35,7 @@ struct RestaurantAggregate: Identifiable {
         var counts: [String: Int] = [:]
         for exp in visits {
             guard let raw = exp.diningMember, !raw.isEmpty else { continue }
-            for name in raw.components(separatedBy: ",").map({ $0.trimmingCharacters(in: .whitespaces) })
+            for name in raw.components(separatedBy: CharacterSet(charactersIn: ",、，")).map({ $0.trimmingCharacters(in: .whitespaces) })
                 where !name.isEmpty {
                 counts[name, default: 0] += 1
             }
