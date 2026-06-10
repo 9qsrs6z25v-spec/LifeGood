@@ -76,7 +76,9 @@ final class SubscriptionManager: ObservableObject {
             NSUbiquitousKeyValueStore.default.set(true, forKey: Self.founderKey)
             NSUbiquitousKeyValueStore.default.synchronize()
         }
-        objectWillChange.send()
+        // 移除多餘的 objectWillChange.send()：
+        // @Published var remoteAllFree 的 willSet 已自動發送 objectWillChange，
+        // 重複手動呼叫會觸發第二次 SwiftUI 更新週期，造成不必要的重繪。
     }
 
     private var transactionListener: Task<Void, Never>?
