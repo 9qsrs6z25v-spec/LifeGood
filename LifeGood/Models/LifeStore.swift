@@ -496,49 +496,39 @@ class LifeStore: ObservableObject {
            let p = try? decoder.decode(UserProfile.self, from: data) {
             profile = p
         }
-        if let data = UserDefaults.standard.data(forKey: "life_family"),
-           let items = try? decoder.decode([FamilyMember].self, from: data) {
-            familyMembers = items
+        // 各集合改用「逐筆容錯」解碼：單一筆損壞不會讓整批消失（避免家庭/部屬等資料整批不見）
+        if let items = Self.lossyDecodeArray([FamilyMember].self, key: "life_family", decoder: decoder) { familyMembers = items }
+        if let items = Self.lossyDecodeArray([LifeMilestone].self, key: "life_milestones", decoder: decoder) { milestones = items }
+        if let items = Self.lossyDecodeArray([Relationship].self, key: "life_relationships", decoder: decoder) { relationships = items }
+        if let items = Self.lossyDecodeArray([Pet].self, key: "life_pets", decoder: decoder) { pets = items }
+        if let items = Self.lossyDecodeArray([Schedule].self, key: "life_schedules", decoder: decoder) { schedules = items }
+        if let items = Self.lossyDecodeArray([Subordinate].self, key: "life_subordinates", decoder: decoder) { subordinates = items }
+        if let items = Self.lossyDecodeArray([Department].self, key: "life_departments", decoder: decoder) { departments = items }
+        if let items = Self.lossyDecodeArray([GradeTitle].self, key: "life_grade_titles", decoder: decoder) { gradeTitles = items }
+        if let items = Self.lossyDecodeArray([BusinessCard].self, key: "life_business_cards", decoder: decoder) { businessCards = items }
+        if let items = Self.lossyDecodeArray([PersonalEvent].self, key: "life_personal_events", decoder: decoder) { personalEvents = items }
+        if let items = Self.lossyDecodeArray([OrgPerson].self, key: "life_org_people", decoder: decoder) { orgPeople = items }
+    }
+
+    /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
+    /// key 不存在 → 回傳 nil（不覆蓋預設值）；存在但全空 → 回傳 []。
+    private static func lossyDecodeArray<Element: Decodable>(
+        _ type: [Element].Type, key: String, decoder: JSONDecoder
+    ) -> [Element]? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        if let items = try? decoder.decode([Element].self, from: data) { return items }
+        // 整批失敗 → 逐筆解碼保留可解的元素
+        if let raw = try? decoder.decode([FailableDecodable<Element>].self, from: data) {
+            return raw.compactMap { $0.value }
         }
-        if let data = UserDefaults.standard.data(forKey: "life_milestones"),
-           let items = try? decoder.decode([LifeMilestone].self, from: data) {
-            milestones = items
-        }
-        if let data = UserDefaults.standard.data(forKey: "life_relationships"),
-           let items = try? decoder.decode([Relationship].self, from: data) {
-            relationships = items
-        }
-        if let data = UserDefaults.standard.data(forKey: "life_pets"),
-           let items = try? decoder.decode([Pet].self, from: data) {
-            pets = items
-        }
-        if let data = UserDefaults.standard.data(forKey: "life_schedules"),
-           let items = try? decoder.decode([Schedule].self, from: data) {
-            schedules = items
-        }
-        if let data = UserDefaults.standard.data(forKey: "life_subordinates"),
-           let items = try? decoder.decode([Subordinate].self, from: data) {
-            subordinates = items
-        }
-        if let data = UserDefaults.standard.data(forKey: "life_departments"),
-           let items = try? decoder.decode([Department].self, from: data) {
-            departments = items
-        }
-        if let data = UserDefaults.standard.data(forKey: "life_grade_titles"),
-           let items = try? decoder.decode([GradeTitle].self, from: data) {
-            gradeTitles = items
-        }
-        if let data = UserDefaults.standard.data(forKey: "life_business_cards"),
-           let items = try? decoder.decode([BusinessCard].self, from: data) {
-            businessCards = items
-        }
-        if let data = UserDefaults.standard.data(forKey: "life_personal_events"),
-           let items = try? decoder.decode([PersonalEvent].self, from: data) {
-            personalEvents = items
-        }
-        if let data = UserDefaults.standard.data(forKey: "life_org_people"),
-           let items = try? decoder.decode([OrgPerson].self, from: data) {
-            orgPeople = items
+        return nil
+    }
+
+    /// 包裝單一元素，解碼失敗時不丟錯、回傳 nil
+    private struct FailableDecodable<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws {
+            value = try? T(from: decoder)
         }
     }
 
