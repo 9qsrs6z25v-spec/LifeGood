@@ -10,9 +10,17 @@ import SwiftUI
 //   4. emptyPlaceholder：主圓底從純 Color(.systemFill) 升級為 LinearGradient 漸層填色
 //      + 細邊框 stroke，對齊 OverviewView.emptyPlaceholder 設計規格；
 //      圖示尺寸從 26pt → 28pt，與 OverviewView 統一。
-// [待續方向]
-//   • allocationSection 的「橫向彩條」可考慮加入 glow overlay 強化層次感。
-//   • 若資產為零時的整頁空狀態可升級為雙層脈衝光環，對齊 StockView.emptyState。
+// [2026-06 v2] 本次美化方向：
+//   5. allocationSection 行圖示：RoundedRectangle(cornerRadius:7) 30pt →
+//      Circle 36pt + LinearGradient + stroke，對齊全 App icon circle 統一規格
+//      （OverviewView.categoryRow / LifeOverviewView.categoryBreakdownSection 40pt 規格降一級至 36pt）；
+//      Divider leading padding 同步從 58 → 62 對齊新圖示尺寸。
+//   6. allocationSection 標題列：補入「N 類」計數膠囊徽章，
+//      對齊 OverviewView.categoryBreakdownSection 標題規格。
+//   7. allocationSection 橫向彩條：加入 glow overlay（頂部白色高亮 + 底部柔化），
+//      視覺更立體，對齊 totalAssetsCard mini 彩條設計語言。
+//   8. cashFlowSideItem 圖示：RoundedRectangle(cornerRadius:10) → Circle + LinearGradient + stroke，
+//      補齊與 cashFlowNetItem（已用 Circle）的視覺一致性，對齊同卡片內設計均值。
 
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
@@ -382,6 +390,7 @@ struct FinanceOverviewView: View {
 
     private var allocationSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            let allocationsForHeader = ntdAllocations
             HStack(spacing: 10) {
                 Capsule()
                     .fill(
@@ -394,6 +403,15 @@ struct FinanceOverviewView: View {
                 Text("資產配置")
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                if !allocationsForHeader.isEmpty {
+                    Text("\(allocationsForHeader.count) 類")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.purple)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.purple.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.purple.opacity(0.22), lineWidth: 0.75))
+                }
             }
             .padding(.horizontal)
 
@@ -406,7 +424,7 @@ struct FinanceOverviewView: View {
                 )
                 .padding(.horizontal)
             } else {
-                // 橫向比例彩條（從左展開進場動畫）
+                // 橫向比例彩條（從左展開進場動畫 + glow overlay 強化層次感）
                 GeometryReader { geo in
                     HStack(spacing: 2) {
                         ForEach(allocations) { a in
@@ -421,6 +439,15 @@ struct FinanceOverviewView: View {
                 }
                 .frame(height: 14)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay(
+                    // 頂部高亮白邊 + 底部柔化，增加彩條立體感
+                    LinearGradient(
+                        colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                )
                 .scaleEffect(x: allocationBarAppeared ? 1.0 : 0.04, y: 1, anchor: .leading)
                 .animation(.spring(response: 0.78, dampingFraction: 0.82), value: allocationBarAppeared)
                 .padding(.horizontal)
@@ -434,7 +461,7 @@ struct FinanceOverviewView: View {
                         VStack(spacing: 7) {
                             HStack(spacing: 12) {
                                 ZStack {
-                                    RoundedRectangle(cornerRadius: 7)
+                                    Circle()
                                         .fill(
                                             LinearGradient(
                                                 colors: [color.opacity(0.22), color.opacity(0.09)],
@@ -442,9 +469,12 @@ struct FinanceOverviewView: View {
                                                 endPoint: .bottomTrailing
                                             )
                                         )
-                                        .frame(width: 30, height: 30)
+                                        .frame(width: 36, height: 36)
+                                    Circle()
+                                        .stroke(color.opacity(0.22), lineWidth: 1)
+                                        .frame(width: 36, height: 36)
                                     Image(systemName: iconFor(a.type))
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(.system(size: 14, weight: .semibold))
                                         .foregroundStyle(color)
                                 }
                                 Text(a.type.rawValue)
@@ -499,7 +529,7 @@ struct FinanceOverviewView: View {
                         )
 
                         if idx < allocations.count - 1 {
-                            Divider().padding(.leading, 58)
+                            Divider().padding(.leading, 64)
                         }
                     }
                 }
@@ -615,8 +645,17 @@ struct FinanceOverviewView: View {
                                   icon: String, color: Color) -> some View {
         VStack(spacing: 7) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(color.opacity(0.10))
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.18), color.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 38, height: 38)
+                Circle()
+                    .stroke(color.opacity(0.22), lineWidth: 1)
                     .frame(width: 38, height: 38)
                 Image(systemName: icon)
                     .font(.system(size: 15, weight: .semibold))
