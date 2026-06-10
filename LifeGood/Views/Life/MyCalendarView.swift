@@ -2,14 +2,16 @@ import SwiftUI
 import EventKit
 import MapKit
 
-// MARK: - UI美化方向（MyCalendarView）
-// ① sectionHeader：改用漸層膠囊色條 + 計數膠囊，與 OverviewView / IncomeView 設計語言保持均值。
-// ② eventRow：圖示圓加大至 36pt、加細 stroke 邊框；類型標籤改圓角膠囊；加入 shadow，提升卡片立體感。
-// ③ weekDayCard：選中日加 shadow、寬度放大到 54pt 更好點選；今日在背景下方加小綠點標記；
-//    事件彩色圓點從 6pt 縮為 5pt 並加 shadow，視覺更精緻。
-// ④ 空狀態：emptyHint 升級為帶圓形圖示的 emptyPlaceholder 卡片，與其他頁面一致。
-// ⑤ appleCalendarBanner：加 overlay 邊框 + icon 背景圓 + 陰影，與整體設計語言一致。
-// ⑥ 進場動畫：各區塊加 .opacity + .offset 彈跳進場（錯落延遲），與 OverviewView 保持均值。
+// MARK: - 美化紀錄（MyCalendarView）2026-06
+// ① sectionHeader：漸層膠囊色條 + 計數膠囊，與 OverviewView / IncomeView 設計語言保持均值。
+// ② eventRow：36pt 圓圈改用 LinearGradient（0.22→0.09 opacity, topLeading→bottomTrailing）填色
+//    + shadow(color: .opacity(0.18), radius: 5, x: 0, y: 2)，與其他頁面卡片立體感一致。
+// ③ weekDayCard：選中日加 shadow、寬度 54pt；今日小綠點標記；事件圓點 5pt + shadow。
+// ④ 空狀態：emptyPlaceholder 卡片（雙環脈衝 + CTA），與 IncomeView / VariableExpenseView 一致。
+// ⑤ appleCalendarBanner：overlay 邊框 + icon 背景圓 + 陰影。
+// ⑥ 進場動畫：.opacity + .offset 彈跳進場（錯落延遲）。
+// ⑦ upcomingMilestonesSection：新增 milestoneAccent() 輔助函式，各類別採獨立色彩，
+//    圖示圓改 LinearGradient + shadow；類別標籤改圓角膠囊 badge，與 LifeOverviewView 一致。
 
 /// 我的行事曆：彙整當日家庭紀念日、工作會議與任務、本週快覽、未來里程碑、Apple 行事曆事件。
 struct MyCalendarView: View {
@@ -398,11 +400,18 @@ struct MyCalendarView: View {
 
     private func eventRow(_ ev: CalendarEvent) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            // 圖示圓（加大至 36pt，加細 stroke 邊框）
+            // 圖示圓：36pt LinearGradient + shadow，與 IncomeView / VariableExpenseView 均值
             ZStack {
                 Circle()
-                    .fill(ev.type.color.opacity(0.16))
+                    .fill(
+                        LinearGradient(
+                            colors: [ev.type.color.opacity(0.22), ev.type.color.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                     .frame(width: 36, height: 36)
+                    .shadow(color: ev.type.color.opacity(0.18), radius: 5, x: 0, y: 2)
                 Circle()
                     .stroke(ev.type.color.opacity(0.28), lineWidth: 0.75)
                     .frame(width: 36, height: 36)
@@ -579,11 +588,12 @@ struct MyCalendarView: View {
     }
 
     private var upcomingMilestonesSection: some View {
-        let accentColor = Color(red: 0.99, green: 0.65, blue: 0.30)
+        // 區塊標題用固定橙色，各里程碑列使用 milestoneAccent() 獨立色彩（與 LifeOverviewView 一致）
+        let headerColor = Color(red: 0.99, green: 0.65, blue: 0.30)
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("未來 30 天里程碑",
                           icon: "flag.fill",
-                          color: accentColor,
+                          color: headerColor,
                           count: upcomingMilestones.count)
 
             if upcomingMilestones.isEmpty {
@@ -594,18 +604,27 @@ struct MyCalendarView: View {
                 )
             } else {
                 ForEach(Array(upcomingMilestones.prefix(8).enumerated()), id: \.element.id) { idx, ms in
+                    // 每列採各自類別色彩，統一色彩語言與 LifeOverviewView milestoneTimelineSection
+                    let msColor = milestoneAccent(ms.category)
                     HStack(spacing: 12) {
-                        // 圖示圓（加大至 36pt，帶細邊框）
+                        // 圖示圓：36pt LinearGradient + shadow，與 eventRow 及其他頁面卡片均值
                         ZStack {
                             Circle()
-                                .fill(accentColor.opacity(0.14))
+                                .fill(
+                                    LinearGradient(
+                                        colors: [msColor.opacity(0.22), msColor.opacity(0.09)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
                                 .frame(width: 36, height: 36)
+                                .shadow(color: msColor.opacity(0.18), radius: 5, x: 0, y: 2)
                             Circle()
-                                .stroke(accentColor.opacity(0.28), lineWidth: 0.75)
+                                .stroke(msColor.opacity(0.28), lineWidth: 0.75)
                                 .frame(width: 36, height: 36)
                             Image(systemName: ms.category.icon)
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(accentColor)
+                                .foregroundStyle(msColor)
                         }
                         VStack(alignment: .leading, spacing: 3) {
                             Text(ms.title)
@@ -615,23 +634,26 @@ struct MyCalendarView: View {
                                 Text(fmtDate(ms.date))
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
-                                Text("·").font(.caption2).foregroundStyle(.quaternary)
+                                // 類別標籤：圓角膠囊 badge，與 IncomeView / VariableExpenseView 均值
                                 Text(ms.category.rawValue)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(msColor.opacity(0.14))
+                                    .foregroundStyle(msColor)
+                                    .clipShape(Capsule())
                             }
                         }
                         Spacer()
-                        // 倒數天數膠囊
+                        // 倒數天數膠囊：跟隨類別色彩
                         Text(daysUntil(ms.date))
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(accentColor)
+                            .foregroundStyle(msColor)
                             .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(accentColor.opacity(0.12))
+                            .background(msColor.opacity(0.12))
                             .clipShape(Capsule())
                             .overlay(
                                 Capsule()
-                                    .stroke(accentColor.opacity(0.25), lineWidth: 0.6)
+                                    .stroke(msColor.opacity(0.25), lineWidth: 0.6)
                             )
                     }
                     .padding(.horizontal, 14)
@@ -744,6 +766,22 @@ struct MyCalendarView: View {
         if days == 0 { return "今天" }
         if days == 1 { return "明天" }
         return "\(days) 天後"
+    }
+
+    // 里程碑類別色彩：與 LifeOverviewView.milestoneColor() 保持完全一致的色彩語言
+    private func milestoneAccent(_ cat: MilestoneCategory) -> Color {
+        switch cat {
+        case .marriage:    return Color(red: 1.00, green: 0.40, blue: 0.60)
+        case .family:      return Color(red: 1.00, green: 0.60, blue: 0.20)
+        case .realEstate:  return Color(red: 0.42, green: 0.58, blue: 0.80)
+        case .career:      return Color(red: 0.25, green: 0.60, blue: 0.95)
+        case .education:   return Color(red: 0.45, green: 0.75, blue: 0.40)
+        case .achievement: return Color(red: 0.20, green: 0.78, blue: 0.55)
+        case .travel:      return Color(red: 0.55, green: 0.35, blue: 0.95)
+        case .pet:         return Color(red: 0.90, green: 0.50, blue: 0.20)
+        case .health:      return Color(red: 0.95, green: 0.28, blue: 0.32)
+        case .other:       return Color.secondary
+        }
     }
 }
 
