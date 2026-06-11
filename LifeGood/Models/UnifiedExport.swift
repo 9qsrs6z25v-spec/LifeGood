@@ -190,6 +190,133 @@ enum UnifiedExporter {
         }
         csv += "\n"
 
+        // 理財 - 房地產巢狀明細（攤平成多個區段，以 realEstateId 連結回主表）
+        if !finance.realEstates.isEmpty {
+            csv += "## 房地產-樓層 (RE Floors)\n"
+            csv += "realEstateId,realEstateName,floorNumber,area,functions\n"
+            for r in finance.realEstates {
+                for f in r.floors {
+                    csv += [r.id.uuidString, esc(r.name), esc(f.floorNumber),
+                            String(format: "%.2f", f.area),
+                            esc(f.functions.map { $0.rawValue }.joined(separator: " / "))].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-資產物件 (RE Floor Items)\n"
+            csv += "realEstateId,realEstateName,floorNumber,itemPath\n"
+            for r in finance.realEstates {
+                for f in r.floors {
+                    for path in flattenFloorItems(f.items, prefix: "") {
+                        csv += [r.id.uuidString, esc(r.name), esc(f.floorNumber), esc(path)].joined(separator: ",") + "\n"
+                    }
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-貸款 (RE Mortgages)\n"
+            csv += "realEstateId,realEstateName,title,amountPerPeriod,totalPeriods,startDate\n"
+            for r in finance.realEstates {
+                for m in r.mortgageItems {
+                    csv += [r.id.uuidString, esc(r.name), esc(m.title),
+                            String(format: "%.2f", m.amount), String(m.totalPeriods),
+                            iso.string(from: m.startDate)].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-已支出 (RE Paid Items)\n"
+            csv += "realEstateId,realEstateName,title,amount,date\n"
+            for r in finance.realEstates {
+                for p in r.paidItems {
+                    csv += [r.id.uuidString, esc(r.name), esc(p.title),
+                            String(format: "%.2f", p.amount), iso.string(from: p.date)].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-變動支出 (RE Variable Expenses)\n"
+            csv += "realEstateId,realEstateName,category,name,amount,date\n"
+            for r in finance.realEstates {
+                for v in r.variableExpenses {
+                    csv += [r.id.uuidString, esc(r.name), esc(v.category.rawValue), esc(v.name),
+                            String(format: "%.2f", v.amount), iso.string(from: v.date)].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-附屬資產 (RE Property Assets)\n"
+            csv += "realEstateId,realEstateName,category,name,brand,floorLocation,amount\n"
+            for r in finance.realEstates {
+                for a in r.propertyAssets {
+                    csv += [r.id.uuidString, esc(r.name), esc(a.category.rawValue), esc(a.name),
+                            esc(a.brand), esc(a.floorLocation), String(format: "%.2f", a.amount)].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-土地權狀 (RE Land Deeds)\n"
+            csv += "realEstateId,realEstateName,situation,number,area\n"
+            for r in finance.realEstates {
+                for d in r.landDeeds {
+                    csv += [r.id.uuidString, esc(r.name), esc(d.situation), esc(d.number),
+                            String(format: "%.2f", d.area)].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-建物權狀 (RE Building Deeds)\n"
+            csv += "realEstateId,realEstateName,situation,number,address,completionDate,usage,annex,area\n"
+            for r in finance.realEstates {
+                for d in r.buildingDeeds {
+                    csv += [r.id.uuidString, esc(r.name), esc(d.situation), esc(d.number), esc(d.address),
+                            d.completionDate.map { iso.string(from: $0) } ?? "", esc(d.usage), esc(d.annex),
+                            String(format: "%.2f", d.area)].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-保險 (RE Insurances)\n"
+            csv += "realEstateId,realEstateName,policyNumber,amount\n"
+            for r in finance.realEstates {
+                for ins in r.insuranceItems {
+                    csv += [r.id.uuidString, esc(r.name), esc(ins.policyNumber),
+                            String(format: "%.2f", ins.amount)].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-水電瓦斯繳費 (RE Utility Payments)\n"
+            csv += "realEstateId,realEstateName,type,date,amount,note\n"
+            for r in finance.realEstates {
+                for u in r.utilityPayments {
+                    csv += [r.id.uuidString, esc(r.name), esc(u.type.rawValue),
+                            iso.string(from: u.date), String(format: "%.2f", u.amount), esc(u.note)].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-文件 (RE Documents)\n"
+            csv += "realEstateId,realEstateName,displayName,fileName,date,note\n"
+            for r in finance.realEstates {
+                for d in r.documents {
+                    csv += [r.id.uuidString, esc(r.name), esc(d.displayName), esc(d.fileName),
+                            iso.string(from: d.date), esc(d.note)].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+
+            csv += "## 房地產-電梯保養 (RE Elevator Maintenances)\n"
+            csv += "realEstateId,realEstateName,date,hasPhoto\n"
+            for r in finance.realEstates {
+                for e in r.elevatorMaintenances {
+                    csv += [r.id.uuidString, esc(r.name), iso.string(from: e.date),
+                            e.photoFileName != nil ? "1" : "0"].joined(separator: ",") + "\n"
+                }
+            }
+            csv += "\n"
+        }
+
         // 人生 - 里程碑
         csv += "## 里程碑 (Milestones)\n"
         csv += "id,title,date,category,note\n"
@@ -205,6 +332,17 @@ enum UnifiedExporter {
         }
 
         return csv
+    }
+
+    /// 把樓層物件樹攤平成「父 / 子 / 孫」路徑字串（給 CSV 用）
+    private static func flattenFloorItems(_ items: [FloorItem], prefix: String) -> [String] {
+        var rows: [String] = []
+        for it in items {
+            let path = prefix.isEmpty ? it.name : "\(prefix) / \(it.name)"
+            rows.append(path)
+            rows.append(contentsOf: flattenFloorItems(it.children, prefix: path))
+        }
+        return rows
     }
 
     private static func esc(_ value: String) -> String {
