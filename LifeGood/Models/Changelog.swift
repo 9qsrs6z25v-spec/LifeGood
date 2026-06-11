@@ -13,8 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
-        ChangelogEntry(version: "18.76", build: 425, date: "2026/06/11", notes: [
+        ChangelogEntry(version: "18.93", build: 434, date: "2026/06/11", notes: [
             "管理控制台新增『版本更新紀錄』：可檢視歷代版本的更新內容（僅管理者可見）。"
+        ]),
+        ChangelogEntry(version: "18.77–18.91", build: 432, date: "2026/06/11", notes: [
+            "多個頁面視覺美化（付費牆、多照片廊、班表事項列、固定/變動支出摘要卡等）。",
+            "修正多個靜態分析發現的 bug，包含 ForEach 刪除項目造成的越界當機。"
         ]),
         ChangelogEntry(version: "18.75", build: 424, date: "2026/06/11", notes: [
             "修正：人生資料（家庭/部屬等）載入改為逐筆容錯解碼，單一壞紀錄不再讓整批資料消失。",
