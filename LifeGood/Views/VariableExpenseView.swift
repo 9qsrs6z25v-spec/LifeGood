@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（VariableExpenseView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. monthSummaryHeader：移除頂部內嵌「日均」文字，改以 KPI 橫列統一展示，
 //      三格：今日花費 / 日均支出 / 近3月均值，對齊 IncomeView.kpiCell 規格
 //   2. monthSummaryHeader：KPI 橫列與月進度條之間加入分隔線，提升視覺層次
@@ -9,6 +9,14 @@ import SwiftUI
 //      並加入橘色 CTA 按鈕，對齊 FixedExpenseView.emptyStateView 設計規格
 //   4. expenseListSections：加入交錯淡入 + 向上進場動畫，
 //      對齊 FixedExpenseView.fixedExpenseSections 規格
+// [2026-06 v2] 本次美化方向（ExpenseRow）：
+//   5. 分類標籤 HStack 加入地點指示圖示（mappin.circle.fill，11pt 綠色）：
+//      當 expense.placeLatitude != nil 時顯示，標示此筆消費已標注至美食地圖，
+//      對齊 VariableExpenseView.searchable 可搜尋 placeAddress 的資訊揭露規格。
+//   6. 右側 VStack 加入社交禮金收受人膠囊（gift.fill 圖示 + 粉紅色）：
+//      當 expense.variableCategory == .social && socialRecipient 不為空時顯示，
+//      補齊 diningMember 已顯示但 socialRecipient 未顯示的資訊不均衡問題，
+//      對齊 AddExpenseView 社交禮金收受人 .pink 配色規格。
 
 struct VariableExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -728,7 +736,7 @@ struct ExpenseRow: View {
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
 
-                // 分類膠囊標籤 + 備註
+                // 分類膠囊標籤 + 地點指示 + 備註
                 HStack(spacing: 5) {
                     Text(expense.categoryName)
                         .font(.system(size: 10, weight: .semibold))
@@ -737,6 +745,12 @@ struct ExpenseRow: View {
                         .padding(.vertical, 2.5)
                         .background(categoryAccent.opacity(0.12))
                         .clipShape(Capsule())
+                    // 地點指示（有 GPS 座標時顯示，對應美食地圖功能入口）
+                    if expense.placeLatitude != nil {
+                        Image(systemName: "mappin.circle.fill")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.green.opacity(0.72))
+                    }
                     if !expense.note.isEmpty {
                         Text(expense.note)
                             .font(.caption2)
@@ -782,6 +796,23 @@ struct ExpenseRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.orange.opacity(0.10))
+                    .clipShape(Capsule())
+                    .lineLimit(1)
+                }
+                // 社交禮金收受人（社交分類才顯示）
+                if expense.variableCategory == .social,
+                   let recipient = expense.socialRecipient,
+                   !recipient.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "gift.fill")
+                            .font(.system(size: 9))
+                        Text(recipient)
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(.pink)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.pink.opacity(0.10))
                     .clipShape(Capsule())
                     .lineLimit(1)
                 }
