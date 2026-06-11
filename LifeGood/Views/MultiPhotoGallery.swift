@@ -2,6 +2,18 @@ import SwiftUI
 import PhotosUI
 import UIKit
 
+// MARK: - 美化紀錄（v1 · 2026-06-11）
+// • Header：標題升級 .bold、數量改為綠色 Capsule 膠囊徽章（fill opacity 0.13），
+//   與全 App section header count badge 風格一致；新增按鈕加綠色光暈陰影
+// • emptyState：純文字升級為「36pt 漸層圓 + strokeBorder + 圖示 + 提示文字」橫排版型，
+//   漸層方向 topLeading→bottomTrailing，綠色 opacity 0.22→0.09，
+//   對齊全 App inline 空狀態（LifeOverview / CareerView 等同款）
+// • thumbnail：cornerRadius 10→12，雙層陰影（black 0.10 r6 + black 0.04 r2），
+//   白色邊框 strokeBorder opacity 0.20 overlay；載入佔位改用 LinearGradient 填滿＋「載入中」caption；
+//   xmark 刪除按鈕加 shadow 提升暗背景可見度
+// • PhotoLightbox 關閉按鈕：改用 36pt Circle + .ultraThinMaterial 背景＋陰影，
+//   視覺層次清晰，暗色 / 明色模式皆自適應
+
 // MARK: - 多照片廊（可拍照 / 從相簿多選 / 點看大圖 / 刪除）
 
 /// 通用的多張照片廊。將檔案以 jpeg 寫入指定資料夾，呼叫 onAdd / onDelete 回傳檔名給呼叫端。
@@ -31,12 +43,20 @@ struct MultiPhotoGallery: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(title).font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            // 標題列：bold 標題 + 數量膠囊徽章 + 新增 Menu 按鈕
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                if !fileNames.isEmpty {
+                    Text("\(fileNames.count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.green.opacity(0.13)))
+                }
                 Spacer()
-                Text("\(fileNames.count) 張")
-                    .font(.caption2).foregroundStyle(.tertiary)
                 if allowAdding {
                     Menu {
                         Button {
@@ -53,6 +73,7 @@ struct MultiPhotoGallery: View {
                         Image(systemName: "plus.circle.fill")
                             .foregroundStyle(.green)
                             .font(.title3)
+                            .shadow(color: Color.green.opacity(0.30), radius: 4, x: 0, y: 2)
                     }
                 }
             }
@@ -118,18 +139,37 @@ struct MultiPhotoGallery: View {
         }
     }
 
+    // 空狀態：36pt 漸層圓（topLeading→bottomTrailing 0.22→0.09）+ strokeBorder + 圖示 + 提示文字
     @ViewBuilder
     private var emptyState: some View {
-        HStack {
-            Image(systemName: "photo")
-                .foregroundStyle(.tertiary)
-            Text("尚無照片，按右上角＋拍照或從相簿選取")
-                .font(.caption).foregroundStyle(.tertiary)
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.green.opacity(0.22), Color.green.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .strokeBorder(Color.green.opacity(0.18), lineWidth: 1)
+                    .frame(width: 36, height: 36)
+                Image(systemName: "photo")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.green.opacity(0.70))
+            }
+            Text("尚無照片，按右上角 ＋ 拍照或從相簿選取")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.vertical, 8).padding(.horizontal, 4)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 4)
     }
 
+    // 縮圖：cornerRadius 12 + 雙層陰影 + 白色邊框；載入佔位用 LinearGradient + caption
     @ViewBuilder
     private func thumbnail(for name: String) -> some View {
         let url = urlFor(name)
@@ -144,19 +184,37 @@ struct MultiPhotoGallery: View {
                             .scaledToFill()
                             .frame(width: thumbnailSize.width, height: thumbnailSize.height)
                             .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
+                            )
                     } else {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color(.tertiarySystemFill))
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(.tertiarySystemFill), Color(.secondarySystemFill)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
                             .frame(width: thumbnailSize.width, height: thumbnailSize.height)
                             .overlay(
-                                Image(systemName: "icloud.and.arrow.down")
-                                    .foregroundStyle(.tertiary)
+                                VStack(spacing: 4) {
+                                    Image(systemName: "icloud.and.arrow.down")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundStyle(.tertiary)
+                                    Text("載入中")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
                             )
                     }
                 }
             }
             .buttonStyle(.plain)
+            .shadow(color: .black.opacity(0.10), radius: 6, x: 0, y: 3)
+            .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
 
             if allowAdding {
                 Button {
@@ -164,7 +222,8 @@ struct MultiPhotoGallery: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3)
-                        .foregroundStyle(.white, .black.opacity(0.55))
+                        .foregroundStyle(.white, .black.opacity(0.60))
+                        .shadow(color: .black.opacity(0.30), radius: 3, x: 0, y: 1)
                         .padding(4)
                 }
                 .buttonStyle(.plain)
@@ -217,15 +276,22 @@ struct PhotoLightbox: View {
                 ProgressView().tint(.white)
             }
 
+            // 關閉按鈕：Circle + ultraThinMaterial，暗色 / 明色模式皆自適應
             VStack {
                 HStack {
                     Spacer()
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title)
-                            .foregroundStyle(.white, .black.opacity(0.5))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                                    .shadow(color: .black.opacity(0.30), radius: 6, x: 0, y: 3)
+                            )
                     }
                     .padding()
                 }
