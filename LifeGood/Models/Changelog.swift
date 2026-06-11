@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "18.97", build: 438, date: "2026/06/11", notes: [
+            "完整備份匯出時，底部導覽上方顯示細進度條 + 小百分比，不影響操作。"
+        ]),
         ChangelogEntry(version: "18.96", build: 437, date: "2026/06/11", notes: [
             "新增『完整備份（含照片）』：把結構化資料 + 所有模組照片/文件打包成單一 .lifegood 檔，可重新匯入（合併/取代）。",
             "採自訂單一檔容器、串流寫入，照片很多也不會吃爆記憶體。"

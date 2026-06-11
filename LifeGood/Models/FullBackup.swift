@@ -1,4 +1,17 @@
 import Foundation
+import Combine
+
+/// 完整備份匯出進度（給底部導覽顯示細進度條用）。
+final class ExportProgressModel: ObservableObject {
+    static let shared = ExportProgressModel()
+    @Published var isExporting = false
+    @Published var fraction: Double = 0   // 0...1
+    private init() {}
+
+    @MainActor func start() { fraction = 0; isExporting = true }
+    @MainActor func update(_ f: Double) { fraction = min(1, max(0, f)) }
+    @MainActor func finish() { fraction = 1; isExporting = false }
+}
 
 /// 完整備份單一檔格式（.lifegood）：零依賴、可重新匯入、串流寫入不爆記憶體。
 ///
@@ -42,8 +55,9 @@ enum FullBackup {
 
     /// 產生完整備份檔，回傳暫存檔 URL（給分享）。串流寫入：每個附件單獨讀寫，不整包進記憶體。
     /// unified 由呼叫端在主執行緒先用 UnifiedExport.build 準備好傳入，本函式只做檔案 I/O，可在背景執行。
-    static func export(unified: UnifiedExport) throws -> URL {
+    static func export(unified: UnifiedExport, progress: ((Double) -> Void)? = nil) throws -> URL {
         let fm = FileManager.default
+        progress?(0)
 
         // 收集所有模組的附件檔
         let files = gatherAttachmentFiles()
@@ -69,12 +83,19 @@ enum FullBackup {
         try fh.write(contentsOf: magicData)
         try fh.write(contentsOf: uint64LE(UInt64(manifestData.count)))
         try fh.write(contentsOf: manifestData)
-        // 逐檔附加（單檔讀寫，記憶體只佔一張）
-        for f in files {
+        // 逐檔附加（單檔讀寫，記憶體只佔一張）；以整數百分比節流回報進度
+        let total = files.count
+        var lastPct = -1
+        for (i, f) in files.enumerated() {
             if let data = try? Data(contentsOf: f.url, options: .mappedIfSafe) {
                 try fh.write(contentsOf: data)
             }
+            if total > 0 {
+                let pct = Int(Double(i + 1) / Double(total) * 100)
+                if pct != lastPct { lastPct = pct; progress?(Double(i + 1) / Double(total)) }
+            }
         }
+        progress?(1)
         return outURL
     }
 

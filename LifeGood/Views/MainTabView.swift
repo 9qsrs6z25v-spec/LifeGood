@@ -249,6 +249,7 @@ struct MainTabView: View {
     // MARK: - 語音 AI 記帳
     @StateObject private var aiSettings = AISettingsStore.shared
     @StateObject private var speechRecognizer = SpeechRecognizer()
+    @StateObject private var exportProgress = ExportProgressModel.shared
     @State private var aiToast: AIToastInfo?
     @State private var toastDismissTask: Task<Void, Never>?
     @State private var aiBusy = false
@@ -321,6 +322,9 @@ struct MainTabView: View {
             // 真正顯示用的 tab bar：壓在麥克風上層，誤觸時也能看清楚分頁
             VStack(spacing: 0) {
                 Spacer()
+                if exportProgress.isExporting {
+                    exportProgressBar
+                }
                 bottomTabBar
             }
 
@@ -924,6 +928,33 @@ struct MainTabView: View {
         }
         .buttonStyle(.plain)
         .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
+    }
+
+    // MARK: - 匯出進度條（細，壓在底部導覽上方，不影響介面）
+
+    private var exportProgressBar: some View {
+        VStack(spacing: 1) {
+            HStack {
+                Spacer()
+                Text("匯出 \(Int(exportProgress.fraction * 100))%")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.trailing, 14)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.green.opacity(0.18))
+                    Rectangle()
+                        .fill(Color.green)
+                        .frame(width: max(0, geo.size.width * exportProgress.fraction))
+                        .animation(.linear(duration: 0.2), value: exportProgress.fraction)
+                }
+            }
+            .frame(height: 2.5)
+        }
+        .padding(.bottom, 1)
+        .background(.ultraThinMaterial)
+        .transition(.opacity)
     }
 
     // MARK: - 底部四按鈕
