@@ -1,13 +1,19 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（FixedExpenseView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. 補 .navigationBarTitleDisplayMode(.large) 與其他主要列表頁對齊
 //   2. 空狀態：加入雙層脈衝光環動畫（對齊 VariableExpenseView emptyStateView 規格）
 //   3. 分類 Section：加入交錯進場動畫（對齊 OverviewView categoryRow 規格）
 //   4. categoryHeader：新增項目計數膠囊徽章，資訊密度與 daySectionHeader 對齊
 //   5. FixedExpenseRow：季繳 / 年繳項目在金額下方顯示「月均 NT$X」輔助標籤，
 //      幫助使用者快速換算月度負擔，對齊可讀性標準
+// [2026-06 v2] 本次美化方向：
+//   6. fixedSummaryHeader：新增 KPI 橫列（年度預估 / 日均負擔 / 月節稅），
+//      對齊 VariableExpenseView / IncomeView summaryHeader 三格均值規格
+//   7. KPI 橫列與進度條之間插入 0.5pt 白色分隔線（對齊 VariableExpenseView 規格）
+//   8. 移除舊的內嵌「日均」文字標籤，改由 KPI 橫列統一呈現
+//   9. 進度條右端文字改為「剩 X%」，與 VariableExpenseView 對齊
 
 struct FixedExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -104,6 +110,22 @@ struct FixedExpenseView: View {
         return min(day / total, 1.0)
     }
 
+    // KPI 橫列格（對齊 VariableExpenseView / IncomeView kpiCell 規格）
+    private func kpiCell(label: String, value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
+    }
+
     private var fixedSummaryHeader: some View {
         let yearlyEstimate = store.fixedExpenses.reduce(0.0) { total, expense in
             total + expense.amount * Double(occurrencesThisYear(for: expense))
@@ -113,6 +135,7 @@ struct FixedExpenseView: View {
         let taxTotal = store.fixedExpenses
             .filter { $0.effectivelyTaxDeductible }
             .reduce(0.0) { $0 + monthlyEquivalent($1) }
+        let dailyFixed = monthlyTotal / max(1, Double(Calendar.current.component(.day, from: Date())))
 
         return VStack(spacing: 0) {
             HStack(alignment: .top) {
@@ -124,12 +147,6 @@ struct FixedExpenseView: View {
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
-                    if monthlyTotal > 0 {
-                        Text("日均 " + formatCurrency(monthlyTotal / max(1, Double(Calendar.current.component(.day, from: Date())))))
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .padding(.top, 1)
-                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 6) {
@@ -155,6 +172,29 @@ struct FixedExpenseView: View {
                 }
             }
 
+            // KPI 橫列：年度預估 / 日均負擔 / 月節稅（對齊 VariableExpenseView / IncomeView 三格規格）
+            HStack(spacing: 0) {
+                kpiCell(label: "年度預估", value: formatCurrency(yearlyEstimate))
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                kpiCell(label: "日均負擔", value: formatCurrency(dailyFixed))
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                kpiCell(label: "月節稅", value: taxTotal > 0 ? formatCurrency(taxTotal) : "NT$0")
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 12)
+
+            // 分隔線（對齊 VariableExpenseView 規格）
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 12)
+
             // 月進度條
             VStack(spacing: 5) {
                 GeometryReader { geo in
@@ -178,12 +218,11 @@ struct FixedExpenseView: View {
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.60))
                     Spacer()
-                    Text("年度預估 " + formatCurrency(yearlyEstimate))
+                    Text("剩 \(Int((1 - monthProgress) * 100))%")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.60))
                 }
             }
-            .padding(.top, 12)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
