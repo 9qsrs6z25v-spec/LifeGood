@@ -403,7 +403,7 @@ struct ChartView: View {
                             .foregroundStyle(Color.green.opacity(0.55))
                     }
                     .onAppear {
-                        pieEmptyPulse = false
+                        guard !pieEmptyPulse else { return }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
@@ -563,7 +563,7 @@ struct ChartView: View {
                             .foregroundStyle(Color.green.opacity(0.55))
                     }
                     .onAppear {
-                        pieEmptyPulse = false
+                        guard !pieEmptyPulse else { return }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
@@ -639,7 +639,7 @@ struct ChartView: View {
                             .foregroundStyle(Color.green.opacity(0.55))
                     }
                     .onAppear {
-                        pieEmptyPulse = false
+                        guard !pieEmptyPulse else { return }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
@@ -908,7 +908,7 @@ struct ChartView: View {
                             .foregroundStyle(Color.green.opacity(0.55))
                     }
                     .onAppear {
-                        pieEmptyPulse = false
+                        guard !pieEmptyPulse else { return }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
