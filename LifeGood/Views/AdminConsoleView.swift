@@ -118,6 +118,19 @@ struct AdminConsoleView: View {
                 Text("開啟且人數達門檻後，「關於」頁會顯示「已有 N 位使用者」。目前 \(admin.shouldShowPublicCount ? "會" : "不會")對外顯示。")
             }
 
+            // 版本更新紀錄（內建，僅管理者檢視）
+            Section("版本更新紀錄") {
+                NavigationLink {
+                    ChangelogListView()
+                } label: {
+                    Label("檢視更新紀錄（\(Changelog.entries.count) 版）", systemImage: "doc.text.clock")
+                }
+                if let latest = Changelog.entries.first {
+                    Text("最新：v\(latest.version)（build \(latest.build)）")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
             // PIN
             Section("PIN") {
                 SecureField("新的 PIN", text: $newPIN).keyboardType(.numberPad)
@@ -143,3 +156,38 @@ struct AdminConsoleView: View {
         admin.adminSetPublicDisplay(enabled: showPublicMirror, threshold: threshold)
     }
 }
+
+// MARK: - 版本更新紀錄清單（內建、新到舊）
+
+struct ChangelogListView: View {
+    var body: some View {
+        List {
+            ForEach(Changelog.entries) { entry in
+                Section {
+                    ForEach(Array(entry.notes.enumerated()), id: \.offset) { _, note in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 5))
+                                .foregroundStyle(.blue)
+                                .padding(.top, 6)
+                            Text(note).font(.subheadline)
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("v\(entry.version)")
+                            .font(.headline)
+                        Text("build \(entry.build)")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(entry.date)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .navigationTitle("版本更新紀錄")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+

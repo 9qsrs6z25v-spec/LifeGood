@@ -1,0 +1,71 @@
+import Foundation
+
+/// 單筆版本更新紀錄（內建、隨版本打包；只在管理控制台檢視）。
+struct ChangelogEntry: Identifiable {
+    let version: String     // 例 "18.76"
+    let build: Int          // 例 425
+    let date: String        // 例 "2026/06/11"
+    let notes: [String]     // 該版更新重點（條列）
+    var id: String { "\(version)_\(build)" }
+}
+
+/// 內建版本更新紀錄。
+/// 慣例：**每次改版在最上面新增一筆**（新到舊）。
+enum Changelog {
+    static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "18.76", build: 425, date: "2026/06/11", notes: [
+            "管理控制台新增『版本更新紀錄』：可檢視歷代版本的更新內容（僅管理者可見）。"
+        ]),
+        ChangelogEntry(version: "18.75", build: 424, date: "2026/06/11", notes: [
+            "修正：人生資料（家庭/部屬等）載入改為逐筆容錯解碼，單一壞紀錄不再讓整批資料消失。",
+            "有機會自動救回先前『某版後消失』的兒女 / 家庭成員。"
+        ]),
+        ChangelogEntry(version: "18.73", build: 421, date: "2026/06/11", notes: [
+            "房屋資料集錦照片：模糊填底改在白框內、不外溢。",
+            "修正橫式照片會跑出螢幕的問題。"
+        ]),
+        ChangelogEntry(version: "18.72", build: 420, date: "2026/06/11", notes: [
+            "人生總覽：個人看板改為隨內容一起捲動，不再固定佔用畫面。"
+        ]),
+        ChangelogEntry(version: "18.71", build: 419, date: "2026/06/11", notes: [
+            "照片全螢幕檢視背景改用同張照片的高斯模糊，畫面不再死黑。"
+        ]),
+        ChangelogEntry(version: "18.70", build: 418, date: "2026/06/11", notes: [
+            "推廣期間付費牆改為『全功能限時免費』文案，並說明早鳥永久保留。"
+        ]),
+        ChangelogEntry(version: "18.69", build: 417, date: "2026/06/11", notes: [
+            "新增遠端『全功能免費』總開關 + 隱藏管理控制台（關於頁連點 20 下）。",
+            "新增不重複 iCloud 使用者人數統計；早鳥永久保留解鎖。"
+        ]),
+        ChangelogEntry(version: "18.68", build: 416, date: "2026/06/11", notes: [
+            "班表新增『日值班』班別（平日 08:30–17:30，可自訂）與單日設定按鈕。",
+            "清除班別後自動回到班表頁。"
+        ]),
+        ChangelogEntry(version: "18.67", build: 415, date: "2026/06/11", notes: [
+            "部屬總覽：點請假 / 會議 / 任務項目可直接開啟該項目的編輯畫面。"
+        ]),
+        ChangelogEntry(version: "18.56", build: 407, date: "2026/06/11", notes: [
+            "新增『單獨匯出部屬資料』（含班表 / 任務 / 會議 / 請假）與合併匯入。"
+        ]),
+        ChangelogEntry(version: "18.55", build: 406, date: "2026/06/11", notes: [
+            "部屬可設定『分廠區』；班表依廠區分段顯示。",
+            "修正：編輯部屬時不再清掉已排好的班別。"
+        ]),
+        ChangelogEntry(version: "18.54", build: 405, date: "2026/06/11", notes: [
+            "套用小夜班一律對齊整週一至五；套用大夜 / 小夜班後自動關閉彈窗回班表。"
+        ]),
+        ChangelogEntry(version: "18.53", build: 404, date: "2026/06/11", notes: [
+            "班表套用範本改用中午錨點計算，修正跨時區可能的日期位移。"
+        ]),
+        ChangelogEntry(version: "18.51", build: 402, date: "2026/06/11", notes: [
+            "班表新增『套用小夜班（5 天）』與獨立『清除班別』按鈕。"
+        ]),
+        ChangelogEntry(version: "17.79", build: 382, date: "2026/06/05", notes: [
+            "iCloud 同步：把過去被吞掉的錯誤顯示在設定頁，方便排查。",
+            "修正兩台裝置同時編輯同一筆資料時上傳衝突遺失更新的問題。"
+        ]),
+        ChangelogEntry(version: "17.77", build: 380, date: "2026/06/04", notes: [
+            "新增『部屬班表』：棋盤式燈號（縱軸部屬、橫軸整月），可排大夜 / 小夜輪班、依部門篩選。"
+        ])
+    ]
+}
