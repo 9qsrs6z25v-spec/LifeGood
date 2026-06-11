@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import QuickLook
+import ImageIO
 
 // MARK: - 美化紀錄（RealEstateDetailView）
 // [2026-06] 本次美化方向：
@@ -1297,7 +1298,7 @@ struct RealEstateDetailView: View {
             .padding(.horizontal).padding(.vertical, 6)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
+                LazyHStack(spacing: 14) {
                     ForEach(allItems) { item in
                         Button {
                             handleHousePhotoTap(item)
@@ -1524,18 +1525,12 @@ struct RealEstateDetailView: View {
 
     @ViewBuilder
     private func stackedHousePhotoLayer(url: URL) -> some View {
-        Group {
-            if let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img).resizable().scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill))
-            }
-        }
-        .frame(width: 130, height: 100)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        // 去掉突兀的白色外框，改用陰影分層（疊張之間靠旋轉位移 + 陰影區隔）
-        .shadow(color: .black.opacity(0.2), radius: 3, y: 2)
+        ThumbnailImageView(url: url)
+            .frame(width: 130, height: 100)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            // 去掉突兀的白色外框，改用陰影分層（疊張之間靠旋轉位移 + 陰影區隔）
+            .shadow(color: .black.opacity(0.2), radius: 3, y: 2)
     }
 
     private func renovationPhotoCard(_ p: RenovationPhoto) -> some View {
@@ -1567,27 +1562,12 @@ struct RealEstateDetailView: View {
     /// 不再自帶白框與 onTapGesture，由外層 Button 統一導向 CutePhotoViewer。
     @ViewBuilder
     private func renovationSinglePhoto(url: URL?) -> some View {
-        Group {
-            if let url = url, let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 130, height: 100)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
-            } else {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(.tertiarySystemFill))
-                    .frame(width: 130, height: 100)
-                    .overlay(
-                        Image(systemName: "photo")
-                            .font(.title2)
-                            .foregroundStyle(.tertiary)
-                    )
-            }
-        }
-        .frame(width: 140, height: 110)
+        ThumbnailImageView(url: url, placeholderIcon: "photo")
+            .frame(width: 130, height: 100)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
+            .frame(width: 140, height: 110)
     }
 
     /// 多張照片堆疊卡片：3 張往後遞減旋轉位移，最上層放第一張，右上角徽章顯示總張數
@@ -1636,24 +1616,15 @@ struct RealEstateDetailView: View {
 
     @ViewBuilder
     private func stackedPhotoLayer(_ name: String) -> some View {
-        let url = RenovationPhoto.photoURL(for: name)
-        Group {
-            if let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill))
-            }
-        }
-        .frame(width: 130, height: 100)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.white, lineWidth: 2)
-        )
-        .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
+        ThumbnailImageView(url: RenovationPhoto.photoURL(for: name))
+            .frame(width: 130, height: 100)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.white, lineWidth: 2)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 3, y: 2)
     }
 
     @ViewBuilder
@@ -3336,5 +3307,66 @@ fileprivate struct FloorItemEditor: View {
             }
         }
         .presentationDetents([.height(220)])
+    }
+}
+
+// MARK: - 縮圖快取（降採樣 + 非同步 + NSCache）
+
+/// 以 ImageIO 降採樣產生小縮圖，避免主執行緒解碼全解析度大圖造成卡頓；結果快取於記憶體。
+final class ThumbnailCache {
+    static let shared = ThumbnailCache()
+    private let cache = NSCache<NSString, UIImage>()
+    private init() { cache.countLimit = 500 }
+
+    func thumbnail(for url: URL, maxPixel: CGFloat) async -> UIImage? {
+        let key = "\(url.path)#\(Int(maxPixel))" as NSString
+        if let cached = cache.object(forKey: key) { return cached }
+        return await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img = Self.downsample(url: url, maxPixel: maxPixel)
+                if let img { self.cache.setObject(img, forKey: key) }  // NSCache 為 thread-safe
+                cont.resume(returning: img)
+            }
+        }
+    }
+
+    private static func downsample(url: URL, maxPixel: CGFloat) -> UIImage? {
+        let srcOpts = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, srcOpts) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(max(1, maxPixel))
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+}
+
+/// 縮圖檢視：先顯示佔位，背景降採樣載入後淡入；切換 url 會重載。
+struct ThumbnailImageView: View {
+    let url: URL?
+    var maxPixel: CGFloat = 420
+    var placeholderIcon: String? = nil
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill))
+                if let placeholderIcon {
+                    Image(systemName: placeholderIcon)
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .task(id: url?.path) {
+            guard let url else { image = nil; return }
+            image = await ThumbnailCache.shared.thumbnail(for: url, maxPixel: maxPixel)
+        }
     }
 }
