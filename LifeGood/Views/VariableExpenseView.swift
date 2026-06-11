@@ -17,6 +17,13 @@ import SwiftUI
 //      當 expense.variableCategory == .social && socialRecipient 不為空時顯示，
 //      補齊 diningMember 已顯示但 socialRecipient 未顯示的資訊不均衡問題，
 //      對齊 AddExpenseView 社交禮金收受人 .pink 配色規格。
+// [2026-06 v3] 本次美化方向（monthSummaryHeader 雙軌進度條）：
+//   10. 月進度條從單軌升級為雙軌，對齊 IncomeView.summaryHeader / OverviewView.monthlyBalanceCard 規格：
+//       ① 上軌（薄 3pt，white.opacity(0.44)）：月份進度；
+//       ② 下軌（厚 6pt）：本月支出 vs 近3月均值比率，含月進度指示針（白色 2pt 豎棒）。
+//   11. 下軌配色三段：比率 ≤ 月進度+8% → 白色；比率 > 月進度+8% → 暖黃警示；
+//       比率 > 100%（超過月均）→ 粉紅警示色（超支）。
+//   12. 近3月均值為零時降級回原有單軌，確保初次使用兼容，不破壞既有邏輯。
 
 struct VariableExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -154,6 +161,21 @@ struct VariableExpenseView: View {
 
     private var trailingMonthlyAverageVariable: Double { cachedTrailingMonthlyAvg }
 
+    // 支出 vs 月均比率（用於雙軌下軌，上限 1.0 供進度條寬度計算）
+    private var spendingVsAvgRatio: Double {
+        guard trailingMonthlyAverageVariable > 0 else { return 0 }
+        return min(store.currentMonthVariableTotal / trailingMonthlyAverageVariable, 1.0)
+    }
+
+    // 下軌配色：超出月均 → 粉紅；超速消費（超前月進度）→ 暖黃；正常 → 白色
+    private var spendingVsAvgBarColor: Color {
+        guard trailingMonthlyAverageVariable > 0 else { return .white.opacity(0.82) }
+        let ratio = store.currentMonthVariableTotal / trailingMonthlyAverageVariable
+        if ratio > 1.0 { return Color(red: 1.0, green: 0.78, blue: 0.75).opacity(0.90) }
+        if ratio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90) }
+        return .white.opacity(0.82)
+    }
+
     private func kpiCell(label: String, value: String) -> some View {
         VStack(spacing: 3) {
             Text(label)
@@ -231,28 +253,78 @@ struct VariableExpenseView: View {
                 .frame(height: 0.5)
                 .padding(.vertical, 12)
 
-            // 月進度條
-            VStack(spacing: 5) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(.white.opacity(0.18))
-                            .frame(height: 5)
-                        Capsule()
-                            .fill(.white.opacity(0.80))
-                            .frame(width: geo.size.width * monthProgress, height: 5)
-                            .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
+            // 雙軌進度條（有近3月均值時）：月進度（上薄軌）+ 支出進度（下厚軌 + 指示針）
+            if trailingMonthlyAverageVariable > 0 {
+                VStack(spacing: 5) {
+                    // ① 月進度軌（薄軌，半透明白）
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(.white.opacity(0.12)).frame(height: 3)
+                            Capsule().fill(.white.opacity(0.44))
+                                .frame(width: geo.size.width * monthProgress, height: 3)
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
+                        }
+                    }
+                    .frame(height: 3)
+                    // ② 支出進度軌（厚軌 + 月進度指示針）
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(.white.opacity(0.18)).frame(height: 6)
+                            Capsule()
+                                .fill(spendingVsAvgBarColor)
+                                .frame(width: geo.size.width * spendingVsAvgRatio, height: 6)
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingVsAvgRatio)
+                            // 月進度指示針（細白豎棒）
+                            Capsule()
+                                .fill(.white.opacity(0.92))
+                                .frame(width: 2, height: 6)
+                                .shadow(color: .black.opacity(0.25), radius: 1.5, x: 0, y: 0)
+                                .offset(x: max(0, geo.size.width * monthProgress - 1))
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
+                        }
+                    }
+                    .frame(height: 6)
+                    HStack {
+                        HStack(spacing: 3) {
+                            let rawRatio = store.currentMonthVariableTotal / trailingMonthlyAverageVariable
+                            if rawRatio > monthProgress + 0.08 {
+                                Image(systemName: rawRatio > 1.0 ? "flame.fill" : "exclamationmark.triangle.fill")
+                                    .font(.system(size: 8))
+                            }
+                            Text("支出 \(Int(store.currentMonthVariableTotal / trailingMonthlyAverageVariable * 100))%（均）")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle({
+                            let r = store.currentMonthVariableTotal / trailingMonthlyAverageVariable
+                            if r > 1.0 { return Color(red: 1.0, green: 0.78, blue: 0.75) }
+                            if r > monthProgress + 0.08 { return Color(red: 1.0, green: 0.90, blue: 0.55) }
+                            return .white.opacity(0.60) as Color
+                        }())
+                        Spacer()
+                        Text("月進度 \(Int(monthProgress * 100))%")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.60))
                     }
                 }
-                .frame(height: 5)
-                HStack {
-                    Text("本月進度 \(Int(monthProgress * 100))%")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.60))
-                    Spacer()
-                    Text("剩 \(Int((1 - monthProgress) * 100))%")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.60))
+            } else {
+                // 無近3月均值時降級為單軌（初次使用兼容）
+                VStack(spacing: 5) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(.white.opacity(0.18)).frame(height: 5)
+                            Capsule().fill(.white.opacity(0.80))
+                                .frame(width: geo.size.width * monthProgress, height: 5)
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: monthProgress)
+                        }
+                    }
+                    .frame(height: 5)
+                    HStack {
+                        Text("本月進度 \(Int(monthProgress * 100))%")
+                            .font(.caption2).foregroundStyle(.white.opacity(0.60))
+                        Spacer()
+                        Text("剩 \(Int((1 - monthProgress) * 100))%")
+                            .font(.caption2).foregroundStyle(.white.opacity(0.60))
+                    }
                 }
             }
         }
