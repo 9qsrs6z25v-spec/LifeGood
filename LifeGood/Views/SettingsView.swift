@@ -31,17 +31,19 @@ struct ShareSheet: UIViewControllerRepresentable {
 enum ShareItem: Identifiable {
     case json(URL)
     case csv(URL)
+    case backup(URL)
 
     var id: String {
         switch self {
         case .json: return "json"
         case .csv: return "csv"
+        case .backup: return "backup"
         }
     }
 
     var url: URL {
         switch self {
-        case .json(let url), .csv(let url): return url
+        case .json(let url), .csv(let url), .backup(let url): return url
         }
     }
 }
@@ -71,6 +73,8 @@ struct SettingsView: View {
     @State private var showImporter = false
     @State private var showImportModeAlert = false
     @State private var pendingImportData: Data?
+    @State private var pendingBackupURL: URL?      // 完整備份檔（含照片）匯入用
+    @State private var backupBusy = false
     @State private var importResultMessage = ""
     @State private var showImportResult = false
 
@@ -170,7 +174,7 @@ struct SettingsView: View {
             // 匯入
             .fileImporter(
                 isPresented: $showImporter,
-                allowedContentTypes: [.json],
+                allowedContentTypes: [.json, UTType(filenameExtension: FullBackup.fileExtension) ?? .data],
                 allowsMultipleSelection: false
             ) { result in
                 handleFileImport(result)
@@ -185,6 +189,8 @@ struct SettingsView: View {
                 }
                 Button("取消", role: .cancel) {
                     pendingImportData = nil
+                    if let u = pendingBackupURL { try? FileManager.default.removeItem(at: u) }
+                    pendingBackupURL = nil
                 }
             } message: {
                 Text("請選擇匯入方式。合併會跳過已存在的紀錄；取代會刪除現有資料並以匯入檔案覆蓋。")
@@ -741,6 +747,28 @@ struct SettingsView: View {
             }
             .foregroundStyle(.primary)
 
+            // 完整備份（含照片 / 文件）
+            Button {
+                exportFullBackup()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("完整備份（含照片）")
+                            if backupBusy { ProgressView().scaleEffect(0.7) }
+                        }
+                        Text("單一檔 .lifegood，含所有照片與文件，可重新匯入")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "archivebox.fill")
+                        .foregroundStyle(.green)
+                }
+            }
+            .foregroundStyle(.primary)
+            .disabled(backupBusy)
+
             // 匯出 CSV
             Button {
                 exportCSV()
@@ -1175,6 +1203,24 @@ struct SettingsView: View {
         }
     }
 
+    /// 完整備份（含照片 / 文件）：結構化資料在主執行緒準備，檔案 I/O 丟背景，避免卡 UI。
+    private func exportFullBackup() {
+        backupBusy = true
+        let unified = UnifiedExport.build(expense: store, finance: financeStore, life: lifeStore)
+        Task.detached {
+            do {
+                let url = try FullBackup.export(unified: unified)
+                await MainActor.run { activeShareItem = .backup(url); backupBusy = false }
+            } catch {
+                await MainActor.run {
+                    exportErrorMessage = error.localizedDescription
+                    showExportError = true
+                    backupBusy = false
+                }
+            }
+        }
+    }
+
     // MARK: - 匯入
 
     private func handleFileImport(_ result: Result<[URL], Error>) {
@@ -1189,9 +1235,19 @@ struct SettingsView: View {
             defer { url.stopAccessingSecurityScopedResource() }
 
             do {
-                let data = try Data(contentsOf: url)
-                pendingImportData = data
-                showImportModeAlert = true
+                if FullBackup.isBackupFile(url: url) {
+                    // 完整備份檔可能很大 → 複製到暫存後串流還原，不整檔讀進記憶體
+                    let tmp = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("import_\(UUID().uuidString).\(FullBackup.fileExtension)")
+                    try? FileManager.default.removeItem(at: tmp)
+                    try FileManager.default.copyItem(at: url, to: tmp)
+                    pendingBackupURL = tmp
+                    showImportModeAlert = true
+                } else {
+                    let data = try Data(contentsOf: url)
+                    pendingImportData = data
+                    showImportModeAlert = true
+                }
             } catch {
                 importResultMessage = "讀取檔案失敗：\(error.localizedDescription)"
                 showImportResult = true
@@ -1203,6 +1259,20 @@ struct SettingsView: View {
     }
 
     private func performImport(mode: UnifiedImporter.Mode) {
+        // 完整備份檔（含照片）
+        if let backupURL = pendingBackupURL {
+            do {
+                let summary = try FullBackup.restore(from: backupURL, mode: mode,
+                                                     expense: store, finance: financeStore, life: lifeStore)
+                importResultMessage = (mode == .merge ? "已合併匯入完整備份：" : "已取代為完整備份：") + summary
+            } catch {
+                importResultMessage = "完整備份匯入失敗：\(error.localizedDescription)"
+            }
+            try? FileManager.default.removeItem(at: backupURL)
+            pendingBackupURL = nil
+            showImportResult = true
+            return
+        }
         guard let data = pendingImportData else { return }
         // 自動辨識：部屬資料檔走部屬匯入，否則走三模式完整匯入
         if SubordinateImporter.isSubordinateExport(data) {
