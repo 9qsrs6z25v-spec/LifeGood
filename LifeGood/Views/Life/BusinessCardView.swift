@@ -1861,7 +1861,10 @@ struct BusinessCardEditor: View {
                     ForEach(phones.indices, id: \.self) { idx in
                         HStack {
                             TextField("電話 \(phones.count > 1 ? "\(idx + 1)" : "")",
-                                      text: $phones[idx])
+                                      text: Binding(
+                                          get: { idx < phones.count ? phones[idx] : "" },
+                                          set: { if idx < phones.count { phones[idx] = $0 } }
+                                      ))
                                 .keyboardType(.phonePad)
                             if phones.count > 1 {
                                 Button(role: .destructive) {
@@ -1885,7 +1888,10 @@ struct BusinessCardEditor: View {
                     ForEach(emails.indices, id: \.self) { idx in
                         HStack {
                             TextField("Email \(emails.count > 1 ? "\(idx + 1)" : "")",
-                                      text: $emails[idx])
+                                      text: Binding(
+                                          get: { idx < emails.count ? emails[idx] : "" },
+                                          set: { if idx < emails.count { emails[idx] = $0 } }
+                                      ))
                                 .keyboardType(.emailAddress)
                                 .autocapitalization(.none)
                                 .disableAutocorrection(true)
@@ -1911,7 +1917,10 @@ struct BusinessCardEditor: View {
                     ForEach(faxes.indices, id: \.self) { idx in
                         HStack {
                             TextField("傳真 \(faxes.count > 1 ? "\(idx + 1)" : "")",
-                                      text: $faxes[idx])
+                                      text: Binding(
+                                          get: { idx < faxes.count ? faxes[idx] : "" },
+                                          set: { if idx < faxes.count { faxes[idx] = $0 } }
+                                      ))
                                 .keyboardType(.phonePad)
                             Button(role: .destructive) {
                                 faxes.remove(at: idx)

@@ -661,45 +661,45 @@ struct AddRealEstateView: View {
 
     @ViewBuilder
     private var landDetailSection: some View {
-        ForEach(Array(landDeedItems.enumerated()), id: \.element.id) { index, _ in
+        ForEach($landDeedItems) { $item in
             Section {
-                TextField("坐落", text: $landDeedItems[index].situation)
-                TextField("地號", text: $landDeedItems[index].number)
+                TextField("坐落", text: $item.situation)
+                TextField("地號", text: $item.number)
                 HStack {
-                    TextField("面積", text: $landDeedItems[index].areaText).keyboardType(.decimalPad)
+                    TextField("面積", text: $item.areaText).keyboardType(.decimalPad)
                     Text("㎡").foregroundStyle(.secondary)
                 }
             } header: {
                 HStack {
-                    Text("土地權狀 \(index + 1)")
+                    Text("土地權狀 \((landDeedItems.firstIndex(where: { $0.id == item.id }) ?? 0) + 1)")
                     Spacer()
-                    Button { landDeedItems.remove(at: index) } label: {
+                    Button { landDeedItems.removeAll { $0.id == item.id } } label: {
                         Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                     }.buttonStyle(.plain)
                 }
             }
         }
 
-        ForEach(Array(bldgDeedItems.enumerated()), id: \.element.id) { index, _ in
+        ForEach($bldgDeedItems) { $item in
             Section {
-                TextField("坐落", text: $bldgDeedItems[index].situation)
-                TextField("建號", text: $bldgDeedItems[index].number)
-                TextField("門牌", text: $bldgDeedItems[index].address)
-                Toggle("填入完工日", isOn: $bldgDeedItems[index].hasCompletionDate)
-                if bldgDeedItems[index].hasCompletionDate {
-                    DatePicker("完工日", selection: $bldgDeedItems[index].completionDate, displayedComponents: .date)
+                TextField("坐落", text: $item.situation)
+                TextField("建號", text: $item.number)
+                TextField("門牌", text: $item.address)
+                Toggle("填入完工日", isOn: $item.hasCompletionDate)
+                if item.hasCompletionDate {
+                    DatePicker("完工日", selection: $item.completionDate, displayedComponents: .date)
                 }
-                TextField("用途", text: $bldgDeedItems[index].usage)
-                TextField("附屬建物", text: $bldgDeedItems[index].annex)
+                TextField("用途", text: $item.usage)
+                TextField("附屬建物", text: $item.annex)
                 HStack {
-                    TextField("面積", text: $bldgDeedItems[index].areaText).keyboardType(.decimalPad)
+                    TextField("面積", text: $item.areaText).keyboardType(.decimalPad)
                     Text("㎡").foregroundStyle(.secondary)
                 }
             } header: {
                 HStack {
-                    Text("建物權狀 \(index + 1)")
+                    Text("建物權狀 \((bldgDeedItems.firstIndex(where: { $0.id == item.id }) ?? 0) + 1)")
                     Spacer()
-                    Button { bldgDeedItems.remove(at: index) } label: {
+                    Button { bldgDeedItems.removeAll { $0.id == item.id } } label: {
                         Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                     }.buttonStyle(.plain)
                 }
@@ -728,12 +728,13 @@ struct AddRealEstateView: View {
 
     private var elevatorSection: some View {
         Section {
-            ForEach(Array(elevatorItems.enumerated()), id: \.element.id) { index, item in
+            ForEach($elevatorItems) { $item in
                 HStack {
-                    Text("保養 \(index + 1)").font(.subheadline.weight(.medium))
+                    Text("保養 \((elevatorItems.firstIndex(where: { $0.id == item.id }) ?? 0) + 1)")
+                        .font(.subheadline.weight(.medium))
                         .frame(width: 56, alignment: .leading)
 
-                    DatePicker("", selection: $elevatorItems[index].date, displayedComponents: .date)
+                    DatePicker("", selection: $item.date, displayedComponents: .date)
                         .labelsHidden()
 
                     Spacer()
@@ -757,7 +758,9 @@ struct AddRealEstateView: View {
                             Task {
                                 if let data = try? await newItem.loadTransferable(type: Data.self) {
                                     let fileName = ElevatorMaintenance.savePhoto(data, id: item.id)
-                                    elevatorItems[index].photoFileName = fileName
+                                    if let idx = elevatorItems.firstIndex(where: { $0.id == item.id }) {
+                                        elevatorItems[idx].photoFileName = fileName
+                                    }
                                 }
                             }
                         }
@@ -768,10 +771,10 @@ struct AddRealEstateView: View {
                     .buttonStyle(.plain)
 
                     Button(role: .destructive) {
-                        if let fn = elevatorItems[index].photoFileName {
+                        if let fn = item.photoFileName {
                             ElevatorMaintenance.deletePhoto(fn)
                         }
-                        elevatorItems.remove(at: index)
+                        elevatorItems.removeAll { $0.id == item.id }
                     } label: {
                         Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                     }
@@ -797,21 +800,21 @@ struct AddRealEstateView: View {
                 Text("\(floorItems.count) 層").foregroundStyle(.secondary)
             }
 
-            ForEach(Array(floorItems.enumerated()), id: \.element.id) { index, _ in
+            ForEach($floorItems) { $item in
                 VStack(spacing: 8) {
                     HStack {
-                        TextField("樓層（如 B1、1F）", text: $floorItems[index].floorNumber)
+                        TextField("樓層（如 B1、1F）", text: $item.floorNumber)
                             .font(.subheadline.weight(.medium))
                             .frame(maxWidth: .infinity)
                         Divider()
                         HStack {
-                            TextField("面積", text: $floorItems[index].areaText)
+                            TextField("面積", text: $item.areaText)
                                 .keyboardType(.decimalPad)
                                 .frame(width: 60)
                             Text("㎡").foregroundStyle(.secondary).font(.caption)
                         }
                         Button(role: .destructive) {
-                            floorItems.remove(at: index)
+                            floorItems.removeAll { $0.id == item.id }
                         } label: {
                             Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                         }.buttonStyle(.plain)
@@ -819,10 +822,10 @@ struct AddRealEstateView: View {
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
                         ForEach(FloorFunction.allCases) { fn in
-                            let isOn = floorItems[index].functions.contains(fn)
+                            let isOn = item.functions.contains(fn)
                             Button {
-                                if isOn { floorItems[index].functions.remove(fn) }
-                                else { floorItems[index].functions.insert(fn) }
+                                if isOn { $item.wrappedValue.functions.remove(fn) }
+                                else { $item.wrappedValue.functions.insert(fn) }
                             } label: {
                                 Text(fn.rawValue)
                                     .font(.caption)
@@ -981,29 +984,29 @@ struct AddRealEstateView: View {
 
     private var insuranceSection: some View {
         Section {
-            ForEach(Array(insuranceItems.enumerated()), id: \.element.id) { index, _ in
+            ForEach($insuranceItems) { $item in
                 VStack(spacing: 10) {
-                    if index > 0 { Divider() }
+                    if insuranceItems.first?.id != item.id { Divider() }
 
                     HStack {
-                        Text("保險 \(index + 1)").font(.subheadline.weight(.medium))
+                        Text("保險 \((insuranceItems.firstIndex(where: { $0.id == item.id }) ?? 0) + 1)")
+                            .font(.subheadline.weight(.medium))
                         Spacer()
                         Button(role: .destructive) {
-                            let item = insuranceItems[index]
                             if let linkedId = item.linkedExpenseId {
                                 expenseStore.expenses.removeAll { $0.id == linkedId }
                             }
-                            insuranceItems.remove(at: index)
+                            insuranceItems.removeAll { $0.id == item.id }
                         } label: {
                             Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                         }.buttonStyle(.plain)
                     }
 
-                    TextField("火災地震險號", text: $insuranceItems[index].policyNumber)
+                    TextField("火災地震險號", text: $item.policyNumber)
 
                     HStack {
                         Text("NT$").foregroundStyle(.secondary)
-                        TextField("價格", text: $insuranceItems[index].amountText)
+                        TextField("價格", text: $item.amountText)
                             .keyboardType(.decimalPad)
                     }
                 }
@@ -1027,37 +1030,37 @@ struct AddRealEstateView: View {
 
     private var propertyAssetSection: some View {
         Section {
-            ForEach(Array(assetItems.enumerated()), id: \.element.id) { index, _ in
+            ForEach($assetItems) { $item in
                 VStack(spacing: 10) {
-                    if index > 0 { Divider() }
+                    if assetItems.first?.id != item.id { Divider() }
 
                     HStack {
-                        Text("資產 \(index + 1)").font(.subheadline.weight(.medium))
+                        Text("資產 \((assetItems.firstIndex(where: { $0.id == item.id }) ?? 0) + 1)")
+                            .font(.subheadline.weight(.medium))
                         Spacer()
                         Button(role: .destructive) {
-                            let item = assetItems[index]
                             if let linkedId = item.linkedExpenseId {
                                 expenseStore.expenses.removeAll { $0.id == linkedId }
                             }
-                            assetItems.remove(at: index)
+                            assetItems.removeAll { $0.id == item.id }
                         } label: {
                             Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                         }.buttonStyle(.plain)
                     }
 
-                    Picker("類別", selection: $assetItems[index].category) {
+                    Picker("類別", selection: $item.category) {
                         ForEach(RealEstateExpenseCategory.allCases) { cat in
                             Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                         }
                     }
 
-                    TextField("名稱", text: $assetItems[index].name)
-                    TextField("廠牌", text: $assetItems[index].brand)
-                    TextField("位置樓層", text: $assetItems[index].floorLocation)
+                    TextField("名稱", text: $item.name)
+                    TextField("廠牌", text: $item.brand)
+                    TextField("位置樓層", text: $item.floorLocation)
 
                     HStack {
                         Text("NT$").foregroundStyle(.secondary)
-                        TextField("價格", text: $assetItems[index].amountText)
+                        TextField("價格", text: $item.amountText)
                             .keyboardType(.decimalPad)
                     }
                 }
