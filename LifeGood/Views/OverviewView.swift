@@ -135,6 +135,10 @@ struct OverviewView: View {
                                 ringPulse = true
                             }
                         }
+                        .onDisappear {
+                            // 重置旗標，讓下次 onAppear 時脈衝動畫能重新觸發
+                            ringPulse = false
+                        }
 
                     categoryBreakdownSection
 

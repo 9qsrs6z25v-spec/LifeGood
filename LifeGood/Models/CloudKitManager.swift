@@ -204,8 +204,11 @@ final class CloudKitManager {
                     completion?(true)
                 case .failure(let error):
                     // 兩台同時改同一筆 → 重新抓最新版本再覆蓋一次（整份快照，last-writer-wins）
+                    // 延遲 0.5s 再重試，避免立即重打造成 CloudKit rate-limit
                     if Self.isServerRecordChanged(error), retriesLeft > 0 {
-                        self?.modifyKV(key: key, data: data, retriesLeft: retriesLeft - 1, completion: completion)
+                        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) {
+                            self?.modifyKV(key: key, data: data, retriesLeft: retriesLeft - 1, completion: completion)
+                        }
                     } else {
                         self?.report(error, context: "上傳 \(key)")
                         completion?(false)

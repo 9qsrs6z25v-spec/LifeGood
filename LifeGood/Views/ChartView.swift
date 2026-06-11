@@ -135,6 +135,10 @@ struct ChartView: View {
         try? await Task.sleep(nanoseconds: 100_000_000)
         guard !Task.isCancelled else { return }
         isLoading = true
+        // 重置脈衝旗標：isLoading=true 會移除 empty state，旗標卡在 true 時
+        // 資料重載後 empty state 重出現、onAppear guard 通過不了，動畫不再播放。
+        // 在此歸零確保每次載入結束後 empty state 能重新觸發脈衝動畫。
+        pieEmptyPulse = false
         let period = selectedPeriod
         chartData = store.chartData(for: period)
         variableBreakdownCache = store.variableBreakdown(for: period)
