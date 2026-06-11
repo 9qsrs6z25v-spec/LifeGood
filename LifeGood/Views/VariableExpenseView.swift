@@ -83,7 +83,8 @@ struct VariableExpenseView: View {
                         .listRowSeparator(.hidden)
                 }
 
-                if filteredExpenses.isEmpty {
+                let expenses = filteredExpenses
+                if expenses.isEmpty {
                     Section {
                         emptyStateView
                             .listRowInsets(EdgeInsets())
@@ -91,7 +92,7 @@ struct VariableExpenseView: View {
                             .listRowSeparator(.hidden)
                     }
                 } else {
-                    expenseListSections
+                    expenseListSectionsFor(expenses)
                 }
             }
             .listStyle(.insetGrouped)
@@ -467,8 +468,8 @@ struct VariableExpenseView: View {
     // MARK: - 支出列表（List sections，包在外層的 List 內）
 
     @ViewBuilder
-    private var expenseListSections: some View {
-        let allGroups = groupedByDate()
+    private func expenseListSectionsFor(_ expenses: [Expense]) -> some View {
+        let allGroups = groupedByDate(expenses)
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
         let cutoff = Calendar.current.date(byAdding: .day, value: -7 * visibleWeeks, to: Date()) ?? Date()
         // 搜尋時不限制週數，顯示所有符合的結果
@@ -631,8 +632,8 @@ struct VariableExpenseView: View {
 
     // MARK: - 依日期分組
 
-    private func groupedByDate() -> [(key: String, value: [Expense])] {
-        let grouped = Dictionary(grouping: filteredExpenses) { expense in
+    private func groupedByDate(_ expenses: [Expense]) -> [(key: String, value: [Expense])] {
+        let grouped = Dictionary(grouping: expenses) { expense in
             Self.groupDateFormatter.string(from: expense.date)
         }
 
