@@ -479,21 +479,20 @@ struct SettingsView: View {
 
     private var currencyRateSection: some View {
         Section {
-            ForEach(Array(store.currencyRates.enumerated()), id: \.element.id) { index, _ in
+            ForEach($store.currencyRates) { $rate in
                 HStack(spacing: 8) {
-                    TextField("幣別", text: $store.currencyRates[index].code)
+                    TextField("幣別", text: $rate.code)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text("=")
                         .foregroundStyle(.secondary)
-                    TextField("比值", value: $store.currencyRates[index].rate, format: .number)
+                    TextField("比值", value: $rate.rate, format: .number)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(maxWidth: 80)
                     Text("元")
                         .foregroundStyle(.secondary)
                     Button(role: .destructive) {
-                        guard index < store.currencyRates.count else { return }
-                        store.currencyRates.remove(at: index)
+                        store.currencyRates.removeAll { $0.id == rate.id }
                     } label: {
                         Image(systemName: "minus.circle.fill")
                             .foregroundStyle(.red)

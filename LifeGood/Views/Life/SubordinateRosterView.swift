@@ -562,7 +562,7 @@ private struct RosterCellDetailSheet: View {
                 }
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(sub?.name.isEmpty == false ? sub!.name : "未知部屬")
+                    Text(sub.flatMap { $0.name.isEmpty ? nil : $0.name } ?? "未知部屬")
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     HStack(spacing: 5) {
