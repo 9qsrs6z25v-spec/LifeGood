@@ -150,8 +150,8 @@ final class CloudSyncManager: ObservableObject {
 
     // MARK: - Push（給 Stores 呼叫）
 
-    /// 單一 key 的變更推送至 iCloud（Store save() 後可呼叫）
-    func push(key: String) {
+    /// 單一 key 的變更推送至 iCloud（不走 2 秒防抖，已無外部呼叫者；保留為 private 防止繞過節流）
+    private func push(key: String) {
         guard isEnabled, isAccountAvailable else { return }
         guard Self.syncKeys.contains(key) else { return }
         if let data = UserDefaults.standard.data(forKey: key) {

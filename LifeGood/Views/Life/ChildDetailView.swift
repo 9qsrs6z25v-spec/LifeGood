@@ -1138,10 +1138,14 @@ struct ChildRecordEditorSheet: View {
                     // 原圖永遠保留一份
                     photoFileName = ChildRecord.savePhoto(data, id: recordId)
                     let origImage = UIImage(data: data)
-                    // 素描版另存一份
-                    if let orig = origImage, let sketched = ChildRecord.applySketchEffect(orig),
-                       let sketchData = sketched.jpegData(compressionQuality: 0.85) {
-                        _ = ChildRecord.saveSketch(sketchData, id: recordId)
+                    // 素描版：CIContext 建立與 GPU 渲染移到背景執行緒，避免阻塞主執行緒
+                    if let orig = origImage {
+                        let sketched = await Task.detached(priority: .userInitiated) {
+                            ChildRecord.applySketchEffect(orig)
+                        }.value
+                        if let sketched, let sketchData = sketched.jpegData(compressionQuality: 0.85) {
+                            _ = ChildRecord.saveSketch(sketchData, id: recordId)
+                        }
                     }
                     previewImage = sketchMode ? loadSketchOrOrig(recordId) : origImage
                 }
@@ -1165,14 +1169,21 @@ struct ChildRecordEditorSheet: View {
         guard let data = try? Data(contentsOf: origPath), let origImage = UIImage(data: data) else { return }
 
         if sketchMode {
-            // 如果素描版不存在就產生
             let sketchPath = ChildRecord.photosDirectory.appendingPathComponent("\(recordId.uuidString)_sketch.jpg")
-            if !FileManager.default.fileExists(atPath: sketchPath.path),
-               let sketched = ChildRecord.applySketchEffect(origImage),
-               let sketchData = sketched.jpegData(compressionQuality: 0.85) {
-                _ = ChildRecord.saveSketch(sketchData, id: recordId)
+            if !FileManager.default.fileExists(atPath: sketchPath.path) {
+                // 素描版不存在：GPU 運算移到背景執行緒，完成後再更新預覽
+                Task {
+                    let sketched = await Task.detached(priority: .userInitiated) {
+                        ChildRecord.applySketchEffect(origImage)
+                    }.value
+                    if let sketched, let sketchData = sketched.jpegData(compressionQuality: 0.85) {
+                        _ = ChildRecord.saveSketch(sketchData, id: recordId)
+                    }
+                    previewImage = loadSketchOrOrig(recordId)
+                }
+            } else {
+                previewImage = loadSketchOrOrig(recordId)
             }
-            previewImage = loadSketchOrOrig(recordId)
         } else {
             previewImage = origImage
         }
