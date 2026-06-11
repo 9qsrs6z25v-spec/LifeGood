@@ -131,6 +131,9 @@ struct OverviewView: View {
                             withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.10)) {
                                 todayCardAppeared = true
                             }
+                            // 先重置為 false，確保即使殘留計時器搶先將 ringPulse 設為 true，
+                            // 下方的計時器仍能產生 false→true 的變化讓 animation(value:) 重新作用
+                            ringPulse = false
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                                 ringPulse = true
                             }

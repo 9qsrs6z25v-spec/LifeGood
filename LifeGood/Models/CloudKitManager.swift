@@ -533,11 +533,15 @@ final class CloudKitManager {
 
     // MARK: - Helpers
 
+    // CKRecord.ID name 限制：英數 _ - .，不可 / 開頭
+    private static let ckRecordIDAllowedCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-."
+    )
+
     private func sanitize(_ s: String) -> String {
-        // CKRecord.ID name 限制：英數 _ - .，不可 / 開頭
-        let allowed = CharacterSet(charactersIn:
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.")
-        return String(s.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" })
+        return String(s.unicodeScalars.map {
+            Self.ckRecordIDAllowedCharacters.contains($0) ? Character($0) : "_"
+        })
     }
 
     private func saveChangeToken(_ token: CKServerChangeToken) {
