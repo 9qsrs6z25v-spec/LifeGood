@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（LifeFinanceView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. summaryHeader → 升級為藍色漸層英雄卡片（對齊 SavingsInsuranceView summaryHeader 規格）：
 //      銀行總餘額台幣等值大字 + 計數膠囊 + 餘額正負色 + 散景裝飾圓；
 //      底部四欄 KPI（銀行 / 信用卡 / 證券 / 保險），對齊 FinanceChartView 英雄卡 KPI 規格；
@@ -13,6 +13,20 @@ import SwiftUI
 //      加入列表交錯淡入 + 向上進場動畫（rowsAppeared），對齊 VariableExpenseView 規格。
 //   4. creditCardSubRow → 圖示從 24pt 升級為 32pt 漸層圓，對齊 milestoneRow 規格；
 //      停用卡以 .tertiary 淡化，視覺上更一目了然。
+// [2026-06 v2] FinanceCardView 美化方向（depositSection + depositRow + linkedCreditCardSection + creditCardChartSection）：
+//   5. depositSection 標題列：Capsule 側條（藍色漸層）+ .semibold 標題 + 筆數計數膠囊，
+//      對齊 OverviewView categoryBreakdownSection / CareerView milestoneListSection 標題規格。
+//   6. depositRow：加入 36pt 漸層圖示圓（依類型分色圖示：存入/提款/信用卡/股票/沖正），
+//      Badge 從 RoundedRectangle(cornerRadius:3) 升級為 Capsule + 細邊框（0.6pt）；
+//      備註文字加入顯示（.caption2 .secondary），日期移至副文字行；
+//      金額字型升為 .system(size:15, weight:.bold, design:.rounded) + contentTransition(.numericText())；
+//      對齊 IncomeView.incomeRow / StockView.stockCard 視覺規格。
+//   7. linkedCreditCardSection 標題列：同步升級 Capsule 側條（橙色）+ 張數膠囊；
+//      信用卡列從 20pt 圖示升至 36pt 漸層圓（含 stroke），對齊 creditCardSubRow 36pt 規格。
+//   8. creditCardChartSection 個別支出列：加入 32pt 漸層圓圖示（使用分類圖示），
+//      日期從純文字改為 Capsule 徽章（tertiarySystemFill 底）；
+//      金額字型升為 .system(size:14, weight:.bold, design:.rounded) + contentTransition；
+//      對齊 OverviewView.recentRow 視覺語言，形成帳戶詳頁統一 row 規格。
 
 // MARK: - 固定支出週期展開（共用）
 
@@ -1220,11 +1234,31 @@ struct FinanceCardView: View {
     }
 
     private var depositSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "dollarsign.circle.fill").foregroundStyle(.blue)
-                Text(sub == .securities ? "證券交易" : "銀行存款").font(.headline)
+        // 預先取出 deposits，避免 header count + content 兩次重算
+        let allDeposits = deposits
+        return VStack(alignment: .leading, spacing: 0) {
+            // 標題列：Capsule 側條 + 計數膠囊，對齊 OverviewView categoryBreakdownSection 規格
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.blue, .blue.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text(sub == .securities ? "證券交易" : "銀行存款")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
+                if !allDeposits.isEmpty {
+                    Text("\(allDeposits.count) 筆")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.75))
+                }
                 Menu {
                     Button { addDepositCurrency = "NT$"; showAddDeposit = true } label: {
                         Label("台幣", systemImage: "dollarsign")
@@ -1235,19 +1269,19 @@ struct FinanceCardView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "plus.circle.fill").foregroundStyle(.blue)
+                    Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.blue)
                 }
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
 
-            if deposits.isEmpty {
+            if allDeposits.isEmpty {
                 Text("尚無存款記錄").font(.caption).foregroundStyle(.tertiary)
-                    .padding(.horizontal).padding(.bottom, 12)
+                    .padding(.horizontal, 16).padding(.bottom, 14)
             } else {
                 depositChart
                     .padding(.horizontal).padding(.bottom, 8)
 
-                let sortedDesc = deposits.sorted { $0.date > $1.date }
+                let sortedDesc = allDeposits.sorted { $0.date > $1.date }
                 let visible = depositsExpanded ? sortedDesc : Array(sortedDesc.prefix(6))
                 ForEach(visible, id: \.id) { dep in
                     depositRow(dep)
@@ -1342,13 +1376,31 @@ struct FinanceCardView: View {
 
     private var creditCardChartSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "chart.bar.fill").foregroundStyle(.orange)
-                Text("消費趨勢").font(.headline)
+            // 標題列：Capsule 側條（橙色）+ 筆數膠囊，對齊 depositSection 標題規格
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.orange, .orange.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("消費趨勢")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
-                Text("\(creditCardDailyTotals.count) 筆").font(.caption).foregroundStyle(.tertiary)
+                let dailyCount = creditCardDailyTotals.count
+                if dailyCount > 0 {
+                    Text("\(dailyCount) 筆")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.75))
+                }
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
 
             if creditCardDailyTotals.isEmpty {
                 Text("尚無扣款記錄").font(.caption).foregroundStyle(.tertiary)
@@ -1373,20 +1425,58 @@ struct FinanceCardView: View {
                 // 個別項目列表
                 let items = creditCardExpenseItems
                 let visible = ccExpanded ? items : Array(items.prefix(6))
+                // 信用卡個別支出列：32pt 漸層圖示圓 + 日期 Capsule 徽章 + 金額 rounded bold
+                // 對齊 depositRow 視覺語言，形成帳戶詳頁統一 row 規格
                 ForEach(visible) { exp in
                     Button { editingExpense = exp } label: {
-                        HStack {
-                            Text(fmtDate(exp.date)).font(.caption).foregroundStyle(.tertiary)
-                            Text(exp.title).font(.caption).lineLimit(1)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text("-NT$ \(fmtNum(exp.amount))")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.red)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2).foregroundStyle(.tertiary)
+                        HStack(spacing: 10) {
+                            // 32pt 漸層圖示圓（橙色 = 信用卡消費）
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.orange.opacity(0.18), Color.orange.opacity(0.07)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 32, height: 32)
+                                Circle()
+                                    .stroke(Color.orange.opacity(0.18), lineWidth: 0.75)
+                                    .frame(width: 32, height: 32)
+                                Image(systemName: exp.categoryIcon)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Color.orange)
+                            }
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(exp.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                // 日期 Capsule 徽章
+                                Text(fmtDate(exp.date))
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color(.tertiarySystemFill))
+                                    .clipShape(Capsule())
+                            }
+
+                            Spacer(minLength: 4)
+
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text("-NT$ \(fmtNum(exp.amount))")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.red)
+                                    .contentTransition(.numericText())
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
                         }
-                        .padding(.horizontal).padding(.vertical, 5)
+                        .padding(.horizontal, 14).padding(.vertical, 10)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1519,34 +1609,93 @@ struct FinanceCardView: View {
 
     private var linkedCreditCardSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "creditcard.fill").foregroundStyle(.orange)
-                Text("信用卡").font(.headline)
+            // 標題列：Capsule 側條（橙色）+ 張數膠囊，對齊 depositSection 標題規格
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.orange, .orange.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("信用卡")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
-                Text("\(linkedCreditCards.count) 張").font(.caption).foregroundStyle(.tertiary)
+                if !linkedCreditCards.isEmpty {
+                    Text("\(linkedCreditCards.count) 張")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.75))
+                }
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
 
             if linkedCreditCards.isEmpty {
                 Text("尚無信用卡").font(.caption).foregroundStyle(.tertiary)
-                    .padding(.horizontal).padding(.bottom, 12)
+                    .padding(.horizontal, 16).padding(.bottom, 14)
             } else {
                 ForEach(linkedCreditCards) { card in
+                    let disabled = card.isDisabled == true
+                    let accent: Color = disabled ? .secondary : .orange
                     Button { viewingLinkedCard = card } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "creditcard.fill")
-                                .font(.caption).foregroundStyle(.orange).frame(width: 20)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(card.title).font(.subheadline.weight(.medium)).foregroundStyle(Color.primary)
+                        HStack(spacing: 12) {
+                            // 36pt 漸層圖示圓，對齊 creditCardSubRow 規格
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [accent.opacity(0.20), accent.opacity(0.08)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 36, height: 36)
+                                Circle()
+                                    .stroke(accent.opacity(disabled ? 0.08 : 0.20), lineWidth: 0.75)
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: "creditcard.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(accent)
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 5) {
+                                    Text(card.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(disabled ? .secondary : .primary)
+                                        .lineLimit(1)
+                                    if disabled {
+                                        Text("已停用")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Color.secondary.opacity(0.10))
+                                            .clipShape(Capsule())
+                                    }
+                                }
                                 HStack(spacing: 4) {
-                                    if let cn = card.cardName, !cn.isEmpty { Text(cn).font(.caption).foregroundStyle(.secondary) }
-                                    if let lf = card.cardLastFour, !lf.isEmpty { Text("末\(lf)").font(.caption).foregroundStyle(.tertiary) }
+                                    if let cn = card.cardName, !cn.isEmpty {
+                                        Text(cn).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    if let lf = card.cardLastFour, !lf.isEmpty {
+                                        Text("末\(lf)")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                            .background(Color(.tertiarySystemFill))
+                                            .clipShape(Capsule())
+                                    }
                                 }
                             }
                             Spacer()
                             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                         }
-                        .padding(.horizontal).padding(.vertical, 8).contentShape(Rectangle())
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                        .opacity(disabled ? 0.65 : 1.0)
                     }
                     .buttonStyle(.plain)
                 }
@@ -1620,6 +1769,11 @@ struct FinanceCardView: View {
         editingDeposit = dep
     }
 
+    // MARK: - depositRow（v2 美化）
+    // 【美化方向】36pt 漸層圖示圓（依存款類型分色：存入/提款/信用卡/股票/沖正）；
+    //   Badge 升級為 Capsule + 細邊框；備註文字顯示；
+    //   金額升至 .system(size:15, weight:.bold, design:.rounded) + contentTransition；
+    //   對齊 IncomeView.incomeRow / StockView.stockCard 視覺規格
     private func depositRow(_ dep: BankDeposit) -> some View {
         let isVirtual = isVirtualCreditCardEntry(dep)
         let isStock = dep.linkedStockId != nil
@@ -1640,27 +1794,85 @@ struct FinanceCardView: View {
             if dep.isWithdrawal { return .red }
             return .green
         }()
+        let amountColor: Color = {
+            if isStock { return dep.isWithdrawal ? Color.red : Color.green }
+            if dep.isWithdrawal { return isVirtual ? Color.orange : Color.red }
+            return dep.currencyCode == "NT$" ? Color.green : Color.blue
+        }()
+        let iconName: String = {
+            if dep.isAdjust { return "arrow.2.circlepath" }
+            if isStock { return dep.isWithdrawal ? "chart.line.downtrend.xyaxis" : "chart.line.uptrend.xyaxis" }
+            if isVirtual { return "creditcard.fill" }
+            if dep.linkedExpenseId != nil { return dep.isWithdrawal ? "minus.circle.fill" : "plus.circle.fill" }
+            return dep.isWithdrawal ? "arrow.up.circle.fill" : "banknote.fill"
+        }()
         return Button {
             handleDepositTap(dep, isVirtual: isVirtual, isStock: isStock)
         } label: {
-            HStack {
-                Text(fmtDate(dep.date)).font(.caption).foregroundStyle(.tertiary)
-                if let txt = badgeText {
-                    Text(txt).font(.caption2).foregroundStyle(badgeColor)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(badgeColor.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+            HStack(spacing: 12) {
+                // 36pt 漸層圖示圓：依存款類型分色圖示
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [badgeColor.opacity(0.20), badgeColor.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                    Circle()
+                        .stroke(badgeColor.opacity(0.20), lineWidth: 0.75)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: iconName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(badgeColor)
                 }
-                Spacer()
-                Text("\(dep.isWithdrawal ? "-" : "")\(dep.currencyCode) \(fmtNum(dep.amount))")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(
-                        isStock ? (dep.isWithdrawal ? Color.red : Color.green) :
-                        (dep.isWithdrawal ? (isVirtual ? Color.orange : Color.red) :
-                         (dep.currencyCode == "NT$" ? Color.primary : Color.blue))
-                    )
+
+                // 主文字區：Badge 膠囊 + 備註 + 日期
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        if let txt = badgeText {
+                            Text(txt)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(badgeColor)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(badgeColor.opacity(0.10))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(badgeColor.opacity(0.22), lineWidth: 0.6))
+                        }
+                        if let note = dep.note, !note.isEmpty {
+                            Text(note)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    // 日期：小型 Capsule 徽章
+                    Text(fmtDate(dep.date))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                }
+
+                Spacer(minLength: 4)
+
+                // 金額 + chevron
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text("\(dep.isWithdrawal ? "-" : "+")\(dep.currencyCode) \(fmtNum(dep.amount))")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(amountColor)
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
-            .padding(.horizontal).padding(.vertical, 6)
+            .padding(.horizontal, 14).padding(.vertical, 11)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
