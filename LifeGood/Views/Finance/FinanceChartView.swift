@@ -20,6 +20,17 @@ import Charts
 //      讓每個 section 展開時有波紋式行列進場效果
 //   7. 修正股票明細列 Divider 分隔線的 padding leading 從 62 → 68（對齊 44pt 圖示）
 //   8. 修正股票加總損益摘要卡圖示圓從 42pt → 44pt 與明細列統一
+// [2026-06-v3] 本次美化方向（allocationChart 圖例列精修）：
+//   9. 圖示圓從 32pt → 36pt + LinearGradient（對齊 FinanceOverviewView.allocationSection 36pt
+//      統計情境規格；圖表圖例以 36pt 取中間值，列表行為 44pt 標準）；
+//      圖示字體從 12pt → 14pt，對應圓圈放大。
+//  10. 金額字型從 .caption.bold() → .system(size:14,weight:.bold,design:.rounded)
+//      + contentTransition(.numericText())，對齊全 App 金額圓體規格。
+//  11. 百分比膠囊加入 overlay Capsule stroke 細邊框（0.75pt），
+//      對齊 FinanceOverviewView.allocationSection 百分比膠囊規格。
+//  12. Divider leading padding 從 58 → 62（對齊 36pt 圓 + 16pt 水平間距 + 10pt spacing）。
+//  13. 加入交錯淡入 + 向上進場動畫（allocationRowsAppeared 旗標 + 0.06s stagger），
+//      對齊 stockPerformanceSection.rowsAppeared 進場規格。
 
 struct FinanceChartView: View {
     @EnvironmentObject var store: FinanceStore
@@ -27,6 +38,7 @@ struct FinanceChartView: View {
     @State private var heroCardAppeared = false
     @State private var sectionsAppeared = false
     @State private var rowsAppeared = false
+    @State private var allocationRowsAppeared = false
     @State private var emptyPulse = false
 
     var body: some View {
@@ -71,6 +83,9 @@ struct FinanceChartView: View {
             .onAppear {
                 withAnimation(.spring(response: 0.52, dampingFraction: 0.82).delay(0.12)) {
                     sectionsAppeared = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    withAnimation { allocationRowsAppeared = true }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                     withAnimation { rowsAppeared = true }
@@ -244,12 +259,12 @@ struct FinanceChartView: View {
                                                 startPoint: .topLeading, endPoint: .bottomTrailing
                                             )
                                         )
-                                        .frame(width: 32, height: 32)
+                                        .frame(width: 36, height: 36)
                                     Circle()
                                         .stroke(color.opacity(0.22), lineWidth: 1)
-                                        .frame(width: 32, height: 32)
+                                        .frame(width: 36, height: 36)
                                     Image(systemName: iconFor(a.type))
-                                        .font(.system(size: 12, weight: .semibold))
+                                        .font(.system(size: 14, weight: .semibold))
                                         .foregroundStyle(color)
                                 }
                                 Text(a.type.rawValue)
@@ -258,13 +273,15 @@ struct FinanceChartView: View {
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 1) {
                                     Text(fmtShort(a.value))
-                                        .font(.caption.bold())
+                                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                                        .contentTransition(.numericText())
                                     Text(String(format: "%.1f%%", pct * 100))
                                         .font(.caption2.weight(.semibold))
                                         .foregroundStyle(color)
                                         .padding(.horizontal, 6).padding(.vertical, 2.5)
                                         .background(color.opacity(0.10))
                                         .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.75))
                                 }
                             }
                             // 比例進度條
@@ -292,9 +309,12 @@ struct FinanceChartView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
+                        .opacity(allocationRowsAppeared ? 1 : 0)
+                        .offset(y: allocationRowsAppeared ? 0 : 10)
+                        .animation(.spring(response: 0.45, dampingFraction: 0.80).delay(0.06 * Double(idx)), value: allocationRowsAppeared)
 
                         if idx < allocations.count - 1 {
-                            Divider().padding(.leading, 58)
+                            Divider().padding(.leading, 62)
                         }
                     }
                 }
