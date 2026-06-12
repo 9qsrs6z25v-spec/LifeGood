@@ -703,12 +703,12 @@ struct MainTabView: View {
               !trimmedRaw.isEmpty
         else { return trimmedRaw?.isEmpty == true ? nil : trimmedRaw }
         let separators = CharacterSet(charactersIn: "、,，;； ")
-        let existing = raw
+        let existing = trimmedRaw
             .components(separatedBy: separators)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        if existing.contains(speaker) { return raw }
-        return "\(speaker)、\(raw)"
+        if existing.contains(speaker) { return trimmedRaw }
+        return "\(speaker)、\(trimmedRaw)"
     }
 
     /// 用 MKLocalSearch 查 AI 給出的店家名稱，帶當前位置偏向
