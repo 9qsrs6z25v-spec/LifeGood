@@ -236,8 +236,14 @@ final class CloudKitManager {
                 let pathKey = "\(directory)/\(fileName)"
                 let recID = CKRecord.ID(recordName: "photo_\(self.sanitize(pathKey))", zoneID: self.zoneID)
 
-                self.privateDB.fetch(withRecordID: recID) { [weak self] existing, _ in
+                self.privateDB.fetch(withRecordID: recID) { [weak self] existing, fetchError in
                     guard let self else { completion?(false); return }
+                    // fetch 失敗但「不是查無此筆」→ 真錯誤；若仍繼續存空 CKRecord 會因
+                    // 缺少 recordChangeTag 而觸發不必要的 .serverRecordChanged 衝突
+                    if existing == nil, let fe = fetchError as? CKError, fe.code != .unknownItem {
+                        self.report(fe, context: "上傳照片 \(fileName)")
+                        completion?(false); return
+                    }
                     let record = existing ?? CKRecord(recordType: Self.photoRecordType, recordID: recID)
                     record["pathKey"] = pathKey as NSString
                     record["directory"] = directory as NSString
