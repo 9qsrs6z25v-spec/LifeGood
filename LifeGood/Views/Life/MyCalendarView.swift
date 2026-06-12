@@ -827,6 +827,7 @@ struct PersonalEventEditor: View {
     @FocusState private var locationFieldFocused: Bool
     @State private var locationSuppressNextUpdate: Bool = false
     @State private var locationExpandedSuggestions: Bool = false
+    @State private var locationDebounceTask: Task<Void, Never>?
 
     /// 常用長度選項（分鐘），0 = 全日
     private let durationOptions: [(label: String, minutes: Int)] = [
@@ -1071,8 +1072,13 @@ struct PersonalEventEditor: View {
                 locationSuppressNextUpdate = false
                 return
             }
-            locationCompleter.queryFragment = newValue
             locationExpandedSuggestions = false
+            locationDebounceTask?.cancel()
+            locationDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+                locationCompleter.queryFragment = newValue
+            }
         }
         .onChange(of: locationProvider.lastLocation) { _, _ in
             locationCompleter.setRegion(LocationProvider.shared.searchRegion)

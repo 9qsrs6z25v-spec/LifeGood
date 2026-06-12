@@ -28,6 +28,7 @@ final class EInvoiceSyncManager: ObservableObject {
     private let client = EInvoiceClient()
     private let historyURL: URL
     private let stateURL: URL
+    private let persistQueue = DispatchQueue(label: "com.lifegood.einvoice.persist", qos: .utility)
 
     private static let autoSyncKey = "einvoice_auto_sync"
     private static let intervalKey = "einvoice_sync_interval_hours"
@@ -227,7 +228,11 @@ final class EInvoiceSyncManager: ObservableObject {
     }
 
     private func persistHistory() {
-        guard let data = try? JSONEncoder().encode(importHistory) else { return }
-        try? data.write(to: historyURL, options: .atomic)
+        let snapshot = importHistory
+        let url = historyURL
+        persistQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
     }
 }

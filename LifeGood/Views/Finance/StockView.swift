@@ -104,7 +104,9 @@ struct StockView: View {
                         }
                     }
                     .coordinateSpace(name: "scroll")
-                    .onPreferenceChange(ScrollOffsetKey.self) { scrollOffset = $0 }
+                    .onPreferenceChange(ScrollOffsetKey.self) { newOffset in
+                        if abs(newOffset - scrollOffset) > 1 { scrollOffset = newOffset }
+                    }
                     .background(Color(.systemGroupedBackground))
 
                     stickyTitle

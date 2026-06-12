@@ -707,26 +707,31 @@ struct RealEstateView: View {
         }
     }
 
+    private static let fmtDecimal0: NumberFormatter = {
+        let nf = NumberFormatter(); nf.numberStyle = .decimal; nf.maximumFractionDigits = 0; return nf
+    }()
+    private static let fmtDecimal1: NumberFormatter = {
+        let nf = NumberFormatter(); nf.numberStyle = .decimal
+        nf.maximumFractionDigits = 1; nf.minimumFractionDigits = 0; return nf
+    }()
+    private static let fmtDecimal2: NumberFormatter = {
+        let nf = NumberFormatter(); nf.numberStyle = .decimal
+        nf.maximumFractionDigits = 2; nf.minimumFractionDigits = 0; return nf
+    }()
+
     /// 依數字大小自動帶單位：< 1 萬顯示「元」、1 萬 ~ 1 億顯示「萬元」、≥ 1 億顯示「億元」
     private func fmt(_ v: Double) -> String {
         let abs = Swift.abs(v)
         let sign = v < 0 ? "-" : ""
-        let nf = NumberFormatter()
-        nf.numberStyle = .decimal
         if abs >= 100_000_000 {
-            nf.maximumFractionDigits = 2
-            nf.minimumFractionDigits = 0
-            let s = nf.string(from: NSNumber(value: abs / 100_000_000)) ?? "0"
+            let s = Self.fmtDecimal2.string(from: NSNumber(value: abs / 100_000_000)) ?? "0"
             return "\(sign)NT$ \(s) 億元"
         }
         if abs >= 10_000 {
-            nf.maximumFractionDigits = 1
-            nf.minimumFractionDigits = 0
-            let s = nf.string(from: NSNumber(value: abs / 10_000)) ?? "0"
+            let s = Self.fmtDecimal1.string(from: NSNumber(value: abs / 10_000)) ?? "0"
             return "\(sign)NT$ \(s) 萬元"
         }
-        nf.maximumFractionDigits = 0
-        let s = nf.string(from: NSNumber(value: abs)) ?? "0"
+        let s = Self.fmtDecimal0.string(from: NSNumber(value: abs)) ?? "0"
         return "\(sign)NT$ \(s) 元"
     }
 }

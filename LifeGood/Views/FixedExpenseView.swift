@@ -550,16 +550,16 @@ struct FixedExpenseView: View {
         }
     }
 
-    private static var currencyFormatterCache: [String: NumberFormatter] = [:]
+    private static let currencyFormatterCache = NSCache<NSString, NumberFormatter>()
     private func formatCurrencyWithCode(_ value: Double, code: String) -> String {
-        if let f = Self.currencyFormatterCache[code] {
+        if let f = Self.currencyFormatterCache.object(forKey: code as NSString) {
             return f.string(from: NSNumber(value: value)) ?? "\(code) 0"
         }
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.maximumFractionDigits = 0
         f.currencySymbol = (code == "NT$" || code == "TWD") ? "NT$" : "\(code) "
-        Self.currencyFormatterCache[code] = f
+        Self.currencyFormatterCache.setObject(f, forKey: code as NSString)
         return f.string(from: NSNumber(value: value)) ?? "\(code) 0"
     }
 
