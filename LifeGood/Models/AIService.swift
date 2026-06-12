@@ -527,6 +527,12 @@ final class SpeechRecognizer: NSObject, ObservableObject {
     func startRecording() throws {
         // 已在錄音中 → 直接略過，避免重複呼叫把 transcript 清空、重裝 audio tap
         if isRecording { return }
+        // recognizer 為 nil 表示此裝置不支援 zh-TW 語音辨識；提前中止，
+        // 避免音訊 session 啟動後麥克風佔用（及狀態列圖示）卻沒有實際轉錄。
+        guard recognizer != nil else {
+            errorMessage = "此裝置不支援中文語音辨識"
+            return
+        }
         transcript = ""
         errorMessage = nil
 
