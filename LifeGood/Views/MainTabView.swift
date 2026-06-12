@@ -695,10 +695,13 @@ struct MainTabView: View {
     /// 若 AI 抽出的 diningMember 沒包含本人，幫忙補進去（最前面）
     private func aiAppendSpeakerIfNeeded(_ raw: String?) -> String? {
         let speaker = aiSpeakerName()
+        // guard 失敗時以 trimmed 後的值判斷：原始 raw 可能是純空白字串，
+        // 直接回傳未 trim 的值會讓 diningMember 存到無效空白內容。
+        let trimmedRaw = raw?.trimmingCharacters(in: .whitespaces)
         guard !speaker.isEmpty,
-              let raw = raw?.trimmingCharacters(in: .whitespaces),
-              !raw.isEmpty
-        else { return raw?.isEmpty == true ? nil : raw }
+              let trimmedRaw = trimmedRaw,
+              !trimmedRaw.isEmpty
+        else { return trimmedRaw?.isEmpty == true ? nil : trimmedRaw }
         let separators = CharacterSet(charactersIn: "、,，;； ")
         let existing = raw
             .components(separatedBy: separators)

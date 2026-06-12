@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "18.98", build: 439, date: "2026/06/12", notes: [
+            "修正：uploadPhoto 忽略 CloudKit fetch 錯誤，網路異常時改為提前回報、不再以空 CKRecord 強行儲存（避免不必要的 serverRecordChanged 衝突）。",
+            "修正：AI 記帳同行者欄位，純空白輸入現在正確回傳 nil，不再存入無效空白字串。"
+        ]),
         ChangelogEntry(version: "18.97", build: 438, date: "2026/06/11", notes: [
             "完整備份匯出時，底部導覽上方顯示細進度條 + 小百分比，不影響操作。"
         ]),
