@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（CareerView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. summaryCard：加入彩色頂端 Capsule 條 + 漸層圖示圓（對齊 OverviewView.summaryCard 規格）
 //   2. statCard：加入漸層圖示圓（LinearGradient + stroke）+ 細邊框 + 雙層陰影（對齊 LifeOverviewView.statBadge 規格）
 //   3. dashboardSection：加入錯落進場動畫（對齊 OverviewView summaryCard onAppear 規格）
@@ -11,6 +11,13 @@ import SwiftUI
 //   7. careerRow：左側 4pt 分類色彩強調條 + 44pt 漸層圖示圓 + 陰影（對齊 ExpenseRow 規格）
 //   8. 空狀態：雙層脈衝光環 + 漸層底圓 + icon + 說明文字（對齊 VariableExpenseView emptyStateView 規格）
 //   9. milestoneListSection：加入交錯淡入 + 向上進場動畫（對齊 FamilyView 規格）
+// [2026-06 v2] 本次美化方向：
+//  10. careerRow 日期：從純 .caption2 文字升級為彩色 Capsule 徽章（accent.opacity(0.10) 底色 +
+//      accent.opacity(0.22) 細邊框），對齊 SpouseResumeView.marriageRow / OverviewView.recentRow 日期標籤規格。
+//  11. subtitleText salaryAdjust：薪資漲跌百分比從純色文字改為彩色 Capsule 膠囊（綠/紅）+
+//      薪前後金額以 .caption2.secondary 輔助顯示，提升資訊層次，對齊 IncomeView.incomeRow 數值排版規格。
+//  12. summaryCard 數值字型：.subheadline.bold() → .system(size:15, weight:.bold, design:.rounded)
+//      + minimumScaleFactor(0.72)，對齊 OverviewView.summaryCard 金額字型規格。
 
 struct CareerView: View {
     @EnvironmentObject var store: LifeStore
@@ -169,9 +176,9 @@ struct CareerView: View {
             Spacer(minLength: 8)
 
             Text(value)
-                .font(.subheadline.bold())
+                .font(.system(size: 15, weight: .bold, design: .rounded))
                 .lineLimit(2)
-                .minimumScaleFactor(0.75)
+                .minimumScaleFactor(0.72)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, minHeight: 80, alignment: .topLeading)
@@ -585,9 +592,14 @@ struct CareerView: View {
 
                 Spacer(minLength: 4)
 
+                // 日期 Capsule 徽章（對齊 SpouseResumeView.marriageRow / OverviewView.recentRow 規格）
                 Text(formatDate(item.date))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(accent.opacity(0.85))
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(accent.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                     .padding(.top, 2)
             }
             .padding(.vertical, 10)
@@ -609,10 +621,21 @@ struct CareerView: View {
            let before = item.salaryBefore, before > 0,
            let after = item.salaryAfter, after > 0 {
             let pct = (after - before) / before * 100
-            Text(String(format: "NT$%.0f → NT$%.0f（%@%.1f%%）", before, after, pct >= 0 ? "+" : "", pct))
-                .font(.caption)
-                .foregroundStyle(pct >= 0 ? .green : .red)
-                .lineLimit(1)
+            let pctColor: Color = pct >= 0 ? .green : .red
+            // 薪前後金額（輔助文字） + 漲跌百分比 Capsule 膠囊（對齊 IncomeView.incomeRow 數值排版）
+            HStack(spacing: 5) {
+                Text(String(format: "NT$%.0f → NT$%.0f", before, after))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(String(format: "%@%.1f%%", pct >= 0 ? "▲ +" : "▼ ", pct))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(pctColor)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(pctColor.opacity(0.12))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(pctColor.opacity(0.25), lineWidth: 0.6))
+            }
         } else if item.careerSubCategory == .resign {
             if let m = item.mood, !m.isEmpty {
                 Text("心境：\(m)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
