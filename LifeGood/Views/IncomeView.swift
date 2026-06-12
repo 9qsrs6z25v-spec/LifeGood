@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（IncomeView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. emptyState：單層脈衝光環升級為雙層（外環延遲 0.3s 製造波紋），
 //      主圓尺寸從 82pt 對齊至 88pt，脈衝環從 100pt 對齊至 108pt，
 //      加入綠色 CTA 按鈕「新增第一筆收入」，對齊 VariableExpenseView.emptyStateView 設計規格
@@ -9,6 +9,16 @@ import SwiftUI
 //      對齊 VariableExpenseView.expenseListSections 規格
 //   3. summaryHeader：本月收入下方加入「日均收入」輔助文字，
 //      對齊 FixedExpenseView.fixedSummaryHeader 的日均顯示規格
+// [2026-06 v2] 本次美化方向（summaryHeader 升級）：
+//   4. 支出進度條：從 2 段（白/紅）升級為 3 段配色（白→暖黃警示→粉紅超支），
+//      與 OverviewView.monthlyBalanceCard / VariableExpenseView.monthSummaryHeader 雙軌規格對齊；
+//      判斷條件：spendingRatio ≤ monthProgress+8% → 白；> monthProgress+8% → 暖黃；> 90% → 粉紅。
+//   5. 進度條下方說明列加入條件式警告圖示（exclamationmark.triangle.fill 暖黃 / flame.fill 粉紅），
+//      對齊 OverviewView / VariableExpenseView 警示標示規格。
+//   6. 英雄卡底部加入「收入分類彩條」（mini allocation bar）：
+//      當有 ≥2 個收入分類時，顯示薪資/獎金/投資/禮金/幸運金比例的漸層彩條 + glow overlay，
+//      底下附各分類色圓點 + 名稱的橫排圖例，
+//      對齊 FinanceOverviewView.totalAssetsCard mini 資產配置彩條設計語言。
 
 struct IncomeView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -172,6 +182,9 @@ struct IncomeView: View {
             ? min(store.currentMonthTotal / displayedIncome, 1.0)
             : 0.0
         let stats = monthlyStats
+        // mini 分類彩條資料（≥2 種分類才顯示）
+        let catAmounts = incomeCategoryAmounts
+        let totalCatIncome = catAmounts.reduce(0.0) { $0 + $1.amount }
 
         return VStack(spacing: 0) {
             // 頂部：本月收入 + 收支餘額
@@ -281,16 +294,19 @@ struct IncomeView: View {
                     }
                     .frame(height: 3)
 
-                    // ② 支出比例軌（厚軌 + 月進度指示針）
+                    // ② 支出比例軌（厚軌 + 月進度指示針；3 段配色對齊 OverviewView）
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule()
                                 .fill(.white.opacity(0.18))
                                 .frame(height: 6)
                             Capsule()
+                                // 3 段：正常白 → 超速暖黃 → 超支粉紅
                                 .fill(spendingRatio > 0.9
-                                      ? Color.red.opacity(0.85)
-                                      : .white.opacity(0.82))
+                                      ? Color(red: 1.0, green: 0.78, blue: 0.75).opacity(0.90)
+                                      : spendingRatio > headerMonthProgress + 0.08
+                                        ? Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90)
+                                        : .white.opacity(0.82))
                                 .frame(width: geo.size.width * spendingRatio, height: 6)
                                 .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingRatio)
                             // 月進度指示針（細白豎棒，指示月份走到哪）
@@ -306,18 +322,74 @@ struct IncomeView: View {
 
                     HStack {
                         HStack(spacing: 3) {
-                            Image(systemName: spendingRatio > 0.9 ? "flame.fill" : "arrow.up.arrow.down.circle.fill")
-                                .font(.system(size: spendingRatio > 0.9 ? 8 : 9))
+                            // 條件式警告圖示：正常時不顯示，對齊 OverviewView 規格
+                            if spendingRatio > headerMonthProgress + 0.08 {
+                                Image(systemName: spendingRatio > 0.9
+                                      ? "flame.fill"
+                                      : "exclamationmark.triangle.fill")
+                                    .font(.system(size: 8))
+                            }
                             Text("支出 \(Int(spendingRatio * 100))%")
                         }
                         .font(.caption2)
                         .foregroundStyle(spendingRatio > 0.9
                                          ? Color(red: 1.0, green: 0.78, blue: 0.75)
-                                         : .white.opacity(0.62))
+                                         : spendingRatio > headerMonthProgress + 0.08
+                                           ? Color(red: 1.0, green: 0.90, blue: 0.55)
+                                           : .white.opacity(0.62))
                         Spacer()
                         Text("月進度 \(Int(headerMonthProgress * 100))%")
                             .font(.caption2)
                             .foregroundStyle(.white.opacity(0.60))
+                    }
+                }
+            }
+
+            // 收入分類彩條（≥2 個分類才顯示；設計語言對齊 FinanceOverviewView totalAssetsCard）
+            if catAmounts.count > 1 && totalCatIncome > 0 {
+                Rectangle()
+                    .fill(.white.opacity(0.20))
+                    .frame(height: 0.5)
+                    .padding(.vertical, 12)
+
+                VStack(spacing: 6) {
+                    // 比例彩條（glow overlay 增加立體感）
+                    GeometryReader { geo in
+                        HStack(spacing: 2) {
+                            ForEach(Array(catAmounts.enumerated()), id: \.offset) { _, item in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(incomeCategoryColor(item.category).opacity(0.90))
+                                    .frame(
+                                        width: max(3, CGFloat(item.amount / totalCatIncome) *
+                                                   (geo.size.width - CGFloat(max(0, catAmounts.count - 1)) * 2))
+                                    )
+                            }
+                        }
+                    }
+                    .frame(height: 6)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .overlay(
+                        // 頂部白色高亮 + 底部柔化，增加彩條立體感
+                        LinearGradient(
+                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    )
+
+                    // 圖例：色圓點 + 分類名稱橫排
+                    HStack(spacing: 8) {
+                        ForEach(Array(catAmounts.enumerated()), id: \.offset) { _, item in
+                            HStack(spacing: 3) {
+                                Circle()
+                                    .fill(incomeCategoryColor(item.category))
+                                    .frame(width: 5, height: 5)
+                                Text(item.category.rawValue)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.80))
+                            }
+                        }
+                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -631,6 +703,20 @@ struct IncomeView: View {
         case .luck:       return Color(red: 0.68, green: 0.40, blue: 1.00)
         case .investment: return Color(red: 0.27, green: 0.67, blue: 0.99)
         }
+    }
+
+    // mini 收入分類彩條用：依收入金額加總，取排名前 N 大的分類比例
+    private var incomeCategoryAmounts: [(category: IncomeCategory, amount: Double)] {
+        var amounts: [IncomeCategory: Double] = [:]
+        for income in store.incomes {
+            amounts[income.category, default: 0] += income.amount
+        }
+        return IncomeCategory.allCases
+            .compactMap { cat -> (category: IncomeCategory, amount: Double)? in
+                let v = amounts[cat, default: 0]
+                return v > 0 ? (cat, v) : nil
+            }
+            .sorted { $0.amount > $1.amount }
     }
 
     private func incomeRow(_ income: Income) -> some View {
