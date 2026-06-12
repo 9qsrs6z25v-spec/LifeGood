@@ -39,7 +39,7 @@ struct BackupManifest: Codable {
 enum FullBackup {
     static let fileExtension = "lifegood"
     private static let magic = "LGBKP001"   // 8 bytes (ASCII)
-    private static var magicData: Data { magic.data(using: .ascii)! }
+    private static let magicData: Data = Data(magic.utf8)  // UTF-8 encoding of ASCII never fails; stored once
 
     enum BackupError: Error { case badFormat, writeFailed }
 
