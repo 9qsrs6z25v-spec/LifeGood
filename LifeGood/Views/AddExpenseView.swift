@@ -10,6 +10,14 @@ import MapKit
 //   3. loanCalcRow：數值列改用彩色膠囊搭配圓角背景，
 //      對齊 SavingsInsuranceView savingsCalcSection 卡片規格。
 //   4. savingsCalcSection header：補 Capsule 色條，對齊 section 標題規格。
+// [2026-06 v2] 本次美化方向：
+//   5. amountPreviewCard：Form 頂端新增即時金額預覽卡（漸層背景 + 48pt 類別圖示圓 + 萬/億大字），
+//      金額 > 0 時以 spring 動畫滑入，對齊 AddIncomeView.amountPreviewCard 設計語言；
+//      變動支出用橘色、固定支出用藍色，主題色與全頁 section header 保持一致。
+//   6. 全部剩餘 section 標題升級為 sectionHeader()（Capsule 漸層色條 + .subheadline.semibold），
+//      對齊 basicInfoSection / savingsCalcSection 已有的設計規格，達到全頁 section 標題均值性：
+//      分類(橘/藍)、關聯資產(teal/blue)、股票(橘)、汽車(teal)、儲蓄險(綠)、房地產(紫)、
+//      保險類別(綠)、貸款類別(藍)、稅務(綠)、房地產資訊(紫)、繳費設定(綠)。
 
 struct AddExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -47,6 +55,8 @@ struct AddExpenseView: View {
     @State private var selectedRecurrence: Recurrence = .monthly
     @State private var note = ""
     @State private var showValidationError = false
+    // 即時金額預覽卡進場動畫旗標
+    @State private var amountCardAppeared = false
 
     // MARK: - 保險子分類
 
@@ -224,6 +234,14 @@ struct AddExpenseView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // 美化 v2：即時金額預覽卡（金額 > 0 時 spring 滑入）
+                if (Double(amountText) ?? 0) > 0 {
+                    Section {
+                        amountPreviewCard
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                    }
+                }
                 basicInfoSection
 
                 // 變動支出：先選關聯資產，再選分類（基本模式隱藏關聯資產選擇）
@@ -1282,7 +1300,7 @@ struct AddExpenseView: View {
     }
 
     private var categorySection: some View {
-        Section("分類") {
+        Section {
             if expenseType == .variable {
                 HStack {
                     Picker("類別", selection: $selectedVariableCategory) {
@@ -1372,6 +1390,9 @@ struct AddExpenseView: View {
                     }
                 }
             }
+        } header: {
+            sectionHeader(title: "分類",
+                          accentColor: expenseType == .variable ? .orange : .blue)
         }
     }
 
@@ -1386,7 +1407,7 @@ struct AddExpenseView: View {
             }
             .pickerStyle(.menu)
         } header: {
-            Text("關聯理財資產（選填）")
+            sectionHeader(title: "關聯理財資產（選填）", accentColor: .teal)
         } footer: {
             Text("選擇後可將此筆支出連結到理財模式的對應項目。")
         }
@@ -1417,7 +1438,7 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
-            Text("股票投資（連動理財模式）")
+            sectionHeader(title: "股票投資（連動理財模式）", accentColor: .orange)
         } footer: {
             Text("儲存後將自動在理財模式的股票頁面建立對應的持股紀錄。金額欄位將自動填入投入金額。")
         }
@@ -1439,7 +1460,7 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
-            Text("儲蓄險（連動理財模式）")
+            sectionHeader(title: "儲蓄險（連動理財模式）", accentColor: .green)
         } footer: {
             Text("將此筆支出關聯到已有的儲蓄險保單。")
         }
@@ -1502,7 +1523,7 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
-            Text("房地產（連動理財模式）")
+            sectionHeader(title: "房地產（連動理財模式）", accentColor: .purple)
         } footer: {
             Text(realEstateLinkExisting
                  ? "房屋價金將同步至已支出房屋金額章節，其餘類別同步至變動支出章節。"
@@ -1537,7 +1558,7 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
-            Text("汽車資訊（連動理財模式）")
+            sectionHeader(title: "汽車資訊（連動理財模式）", accentColor: .teal)
         } footer: {
             Text("選擇後分類自動設為「汽車」並隱藏分類區塊，名稱自動生成為「項目 N：型號-支出類別」並轉為唯讀。支出類別會依照車輛動力類型自動篩選。")
         }
@@ -1546,26 +1567,30 @@ struct AddExpenseView: View {
     // MARK: - 保險子分類
 
     private var insuranceSubCategorySection: some View {
-        Section("保險類別") {
+        Section {
             Picker("保險類別", selection: $selectedInsuranceSubCategory) {
                 ForEach(InsuranceSubCategory.allCases) { sub in
                     Text(sub.rawValue).tag(sub)
                 }
             }
             .pickerStyle(.menu)
+        } header: {
+            sectionHeader(title: "保險類別", accentColor: .green)
         }
     }
 
     // MARK: - 貸款子分類
 
     private var loanSubCategorySection: some View {
-        Section("貸款類別") {
+        Section {
             Picker("貸款類別", selection: $selectedLoanSubCategory) {
                 ForEach(LoanSubCategory.allCases) { sub in
                     Text(sub.rawValue).tag(sub)
                 }
             }
             .pickerStyle(.menu)
+        } header: {
+            sectionHeader(title: "貸款類別", accentColor: .blue)
         }
     }
 
@@ -1612,7 +1637,7 @@ struct AddExpenseView: View {
                     .foregroundStyle(.green)
             }
         } header: {
-            Text("稅務")
+            sectionHeader(title: "稅務", accentColor: .green)
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("開啟後本筆固定支出會以「\(inferredTaxSavingSubLabel)」計入稅務頁節稅累積。")
@@ -1644,7 +1669,7 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
-            Text("車輛資訊（連動理財模式）")
+            sectionHeader(title: "車輛資訊（連動理財模式）", accentColor: .teal)
         } footer: {
             Text("儲存後將自動在理財模式的汽車定期支出中新增對應的車貸紀錄。")
         }
@@ -1702,7 +1727,7 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
-            Text("房地產資訊（連動理財模式）")
+            sectionHeader(title: "房地產資訊（連動理財模式）", accentColor: .purple)
         } footer: {
             Text(mortgageLinkExisting
                  ? "儲存後將自動在選擇的房地產物件中新增對應的房貸紀錄。"
@@ -1714,7 +1739,7 @@ struct AddExpenseView: View {
 
     private var savingsInsuranceSection: some View {
         Group {
-            Section("繳費設定") {
+            Section {
                 HStack {
                     Text("幣別")
                     Spacer()
@@ -1764,6 +1789,8 @@ struct AddExpenseView: View {
                 TextField("保險公司", text: $insCompany)
                 DatePicker("起始日", selection: $insStartDate, displayedComponents: .date)
                 DatePicker("到期日", selection: $insMaturityDate, displayedComponents: .date)
+            } header: {
+                sectionHeader(title: "繳費設定", accentColor: .green)
             }
         }
     }
@@ -1826,6 +1853,93 @@ struct AddExpenseView: View {
         }
     }
 
+    // MARK: - 美化 v2：即時金額預覽卡
+
+    /// 萬/億格式化輔助（預覽卡專用）
+    private func previewAmountString(_ value: Double) -> String {
+        let absVal = abs(value)
+        if absVal >= 100_000_000 { return String(format: "%.1f 億", value / 100_000_000) }
+        if absVal >= 10_000      { return String(format: "%.1f 萬", value / 10_000) }
+        return fmtCurrency(value)
+    }
+
+    /// 頂端即時金額預覽卡：漸層背景 + 48pt 類別圖示圓 + 萬/億大字金額
+    private var amountPreviewCard: some View {
+        let amount = Double(amountText) ?? 0
+        let accentColor: Color = expenseType == .variable ? .orange : .blue
+        let icon = expenseType == .variable ? selectedVariableCategory.icon : selectedFixedCategory.icon
+        let label = expenseType == .variable ? selectedVariableCategory.rawValue : selectedFixedCategory.rawValue
+
+        return HStack(spacing: 14) {
+            // 48pt 漸層圖示圓 + 細邊框 + 陰影（對齊 incomeRow / ExpenseRow 44pt 規格，預覽卡稍大）
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accentColor.opacity(0.22), accentColor.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                Circle()
+                    .stroke(accentColor.opacity(0.22), lineWidth: 1.2)
+                    .frame(width: 48, height: 48)
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(accentColor)
+            }
+            .shadow(color: accentColor.opacity(0.22), radius: 6, x: 0, y: 3)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(previewAmountString(amount))
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(accentColor)
+                    .contentTransition(.numericText())
+                    .minimumScaleFactor(0.65)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            // 散景裝飾圓
+            Circle()
+                .fill(accentColor.opacity(0.06))
+                .frame(width: 70, height: 70)
+                .blur(radius: 12)
+                .offset(x: 10)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            ZStack {
+                accentColor.opacity(0.05)
+                Circle()
+                    .fill(accentColor.opacity(0.06))
+                    .frame(width: 110, height: 110)
+                    .offset(x: 90, y: -15)
+                    .blur(radius: 18)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(accentColor.opacity(0.14), lineWidth: 0.75)
+        )
+        .opacity(amountCardAppeared ? 1 : 0)
+        .offset(y: amountCardAppeared ? 0 : 14)
+        .onAppear {
+            amountCardAppeared = false
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05)) {
+                amountCardAppeared = true
+            }
+        }
+        .onDisappear { amountCardAppeared = false }
+    }
+
     /// 美化：帶 Capsule 漸層色條的 Section header，對齊全 App 其他頁面 section 標題規格
     private func sectionHeader(title: String, accentColor: Color) -> some View {
         HStack(spacing: 10) {
@@ -1854,14 +1968,14 @@ struct AddExpenseView: View {
             }
             .pickerStyle(.menu)
         } header: {
-            Text("關聯理財資產（選填）")
+            sectionHeader(title: "關聯理財資產（選填）", accentColor: .blue)
         } footer: {
             Text("選擇後可將此筆固定支出連結到理財模式的對應項目。")
         }
     }
 
     private var fixedVehicleLinkSection: some View {
-        Section("汽車（連動理財模式）") {
+        Section {
             if financeStore.vehicles.isEmpty {
                 Text("尚無車輛，請先在理財模式新增汽車")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -1873,11 +1987,13 @@ struct AddExpenseView: View {
                     }
                 }
             }
+        } header: {
+            sectionHeader(title: "汽車（連動理財模式）", accentColor: .teal)
         }
     }
 
     private var fixedRealEstateLinkSection: some View {
-        Section("房地產（連動理財模式）") {
+        Section {
             if financeStore.realEstates.isEmpty {
                 Text("尚無房地產，請先在理財模式新增")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -1889,11 +2005,13 @@ struct AddExpenseView: View {
                     }
                 }
             }
+        } header: {
+            sectionHeader(title: "房地產（連動理財模式）", accentColor: .purple)
         }
     }
 
     private var fixedInsuranceLinkSection: some View {
-        Section("儲蓄險（連動理財模式）") {
+        Section {
             if financeStore.insurances.isEmpty {
                 Text("尚無儲蓄險，請先在理財模式新增")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -1905,6 +2023,8 @@ struct AddExpenseView: View {
                     }
                 }
             }
+        } header: {
+            sectionHeader(title: "儲蓄險（連動理財模式）", accentColor: .green)
         }
     }
 
