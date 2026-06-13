@@ -13,6 +13,13 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "19.9", build: 449, date: "2026/06/13", notes: [
+            "靜態掃描全部 Swift 檔：確認無強制解包越界、Optional 鏈式呼叫安全、所有 retain cycle 已以 [weak self] 處置、@Published 屬性皆在主執行緒更新。",
+            "確認 CloudKit 30 秒節流（syncNowIfDue）與 2 秒防抖（pushAll）正常，無新增閃爍或重複同步風險。",
+            "確認 OverviewView.recentItems 已透過 let items = recentItems 在 recentTransactionsSection 內一次捕捉，每次 body render 僅排序一次，無重複計算問題。",
+            "確認 saveQueue.async 串行背景佇列僅操作 value type 快照，無競態條件；NSLock fetchLock 正確保護 CloudKit fetch callback 中的 Set 寫入。",
+            "無需修改：本版為純靜態驗證掃描，所有既有防護機制均正常運作。"
+        ]),
         ChangelogEntry(version: "19.8", build: 448, date: "2026/06/13", notes: [
             "【修正】TaxOverviewView 切換年份時動畫旗標未完整重置：yearPicker 按鈕僅重置 heroCardAppeared/monthBarAppeared，taxRowsAppeared、checklistRowsAppeared、tipsRowsAppeared、emptyIconPulse 未歸零。導致第二次切換至無資料年份時，空狀態脈衝動畫（repeatForever，value: emptyIconPulse）因值未改變而靜止不動；同時切換有資料年份時各列進場 stagger 動畫亦不重播。新增 .onChange(of: selectedYear) 補齊全部旗標重置，並在 0.08 s 後重播列項進場動畫，對齊英雄卡片節奏。"
         ]),
