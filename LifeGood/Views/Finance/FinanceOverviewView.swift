@@ -389,8 +389,8 @@ struct FinanceOverviewView: View {
     }
 
     private var allocationSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            let allocationsForHeader = ntdAllocations
+        let allocations = ntdAllocations  // 合併兩個 ntdAllocations 呼叫為一次，避免重複排序
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Capsule()
                     .fill(
@@ -403,8 +403,8 @@ struct FinanceOverviewView: View {
                 Text("資產配置")
                     .font(.subheadline.weight(.bold))
                 Spacer()
-                if !allocationsForHeader.isEmpty {
-                    Text("\(allocationsForHeader.count) 類")
+                if !allocations.isEmpty {
+                    Text("\(allocations.count) 類")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.purple)
                         .padding(.horizontal, 8).padding(.vertical, 3)
@@ -415,7 +415,6 @@ struct FinanceOverviewView: View {
             }
             .padding(.horizontal)
 
-            let allocations = ntdAllocations
             if allocations.isEmpty {
                 emptyPlaceholder(
                     icon: "chart.pie",

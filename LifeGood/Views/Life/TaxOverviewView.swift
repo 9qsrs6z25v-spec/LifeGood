@@ -109,9 +109,10 @@ struct TaxOverviewView: View {
     }
 
     private var taxByMonth: [(month: Int, amount: Double)] {
+        let exps = taxExpenses  // 避免迴圈內重複執行 filter+sort（12 次 → 1 次）
         var result: [(Int, Double)] = []
         for m in 1...12 {
-            let amount = taxExpenses.filter {
+            let amount = exps.filter {
                 Calendar.current.component(.month, from: $0.date) == m
             }.reduce(0) { $0 + $1.amount }
             if amount > 0 { result.append((m, amount)) }
@@ -387,11 +388,12 @@ struct TaxOverviewView: View {
     // MARK: - 稅費紀錄（升級：漸層圖示圓 + 日期膠囊 + 空狀態佔位）
 
     private var taxRecordsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let exps = taxExpenses  // 整個 section 共用一份結果，避免多次 filter+sort
+        return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("稅費紀錄", icon: "list.bullet.rectangle", color: .red,
-                          count: taxExpenses.isEmpty ? nil : taxExpenses.count)
+                          count: exps.isEmpty ? nil : exps.count)
 
-            if taxExpenses.isEmpty {
+            if exps.isEmpty {
                 // [v2] 雙層脈衝光環空狀態（對齊 VariableExpenseView.emptyStateView 規格）
                 VStack(spacing: 16) {
                     ZStack {
@@ -426,7 +428,7 @@ struct TaxOverviewView: View {
                 .padding(.vertical, 30)
             } else {
                 // [v2] 44pt 漸層圓 + 左側 4pt 強調條 + 交錯進場動畫（對齊 ExpenseRow / FixedExpenseRow）
-                ForEach(Array(taxExpenses.enumerated()), id: \.element.id) { idx, exp in
+                ForEach(Array(exps.enumerated()), id: \.element.id) { idx, exp in
                     HStack(spacing: 0) {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(LinearGradient(
@@ -474,7 +476,7 @@ struct TaxOverviewView: View {
                         value: taxRowsAppeared
                     )
 
-                    if idx < taxExpenses.count - 1 {
+                    if idx < exps.count - 1 {
                         Divider().padding(.leading, 72)
                     }
                 }

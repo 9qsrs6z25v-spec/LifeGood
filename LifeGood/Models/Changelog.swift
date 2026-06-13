@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "20.0", build: 450, date: "2026/06/13", notes: [
+            "【效能】TaxOverviewView.taxByMonth：修正迴圈內每次迭代各自呼叫 taxExpenses（filter+sort）共 12 次的重複計算；改以 let exps = taxExpenses 在迴圈外一次捕捉，降至 1 次 O(n log n)。",
+            "【效能】TaxOverviewView.taxRecordsSection：修正 taxExpenses 在同一 section 內被多次呼叫（含 ForEach 每列一次的 count-1 判斷）；改以 let exps = taxExpenses 提前捕捉並全段共用，消除 N+3 次重複計算。",
+            "【效能】FinanceOverviewView.allocationSection：修正 ntdAllocations 在同一 view builder 中被呼叫兩次（allocationsForHeader + allocations）；合併為單一 let allocations = ntdAllocations，避免重複排序。",
+            "靜態掃描其餘 75 個 Swift 檔：無強制解包越界、無新增 retain cycle、CloudKit 30s 節流與 2s 防抖均正常，無需額外修改。"
+        ]),
         ChangelogEntry(version: "19.9", build: 449, date: "2026/06/13", notes: [
             "靜態掃描全部 Swift 檔：確認無強制解包越界、Optional 鏈式呼叫安全、所有 retain cycle 已以 [weak self] 處置、@Published 屬性皆在主執行緒更新。",
             "確認 CloudKit 30 秒節流（syncNowIfDue）與 2 秒防抖（pushAll）正常，無新增閃爍或重複同步風險。",
