@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（AddIncomeView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. amountPreviewCard：頂部金額預覽卡，即時顯示輸入金額（大字 + 分類色），
 //      數字用 .contentTransition(.numericText()) 動畫，空白時顯示提示文字
 //   2. categoryChipPicker：Picker 改為橫向 FilterChip 膠囊列（帶分類色圖示），
@@ -10,6 +10,16 @@ import SwiftUI
 //      正負值分別用綠/灰色強調，對齊 IncomeView.incomeRow 數字規格
 //   4. .tint(.green) 全局統一，Toggle/DatePicker 等系統元件配色一致
 //   5. errorBanner：錯誤訊息從純文字 Section 升級為橘色膠囊橫幅，更醒目但不突兀
+//
+// [2026-06 v2] 二次美化方向：
+//   6. sectionHeader：所有 Label(.caption) header 升級為「Capsule 側條 + .subheadline.semibold」
+//      與 IncomeView / FixedExpenseView 規格對齊，視覺層次更清晰
+//   7. calcPreviewRows / annualCalcRow：圖示圓從 30pt flat-fill 升級為 36pt
+//      LinearGradient([accent.opacity(0.20), accent.opacity(0.08)]) + stroke(opacity 0.20)
+//      對齊全 app 標準的 stat-context icon circle 規格
+//   8. smartCurrency：formatCurrency 支援「萬、億」量級顯示
+//      ≥1億 → "X.X 億"，≥1萬 → "X.X 萬"，其餘 → "NT$X"
+//      讓試算大金額在小型裝置上更易讀
 
 struct AddIncomeView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -169,8 +179,15 @@ struct AddIncomeView: View {
 
                     DatePicker("日期", selection: $date, displayedComponents: .date)
                 } header: {
-                    Label("基本資訊", systemImage: "pencil.line")
-                        .font(.caption.weight(.semibold))
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4, height: 16)
+                        Text("基本資訊")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .textCase(.none)
                 }
 
                 // ③ 分類：橫向 FilterChip 膠囊列
@@ -180,8 +197,15 @@ struct AddIncomeView: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 } header: {
-                    Label("分類", systemImage: "tag.fill")
-                        .font(.caption.weight(.semibold))
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4, height: 16)
+                        Text("分類")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .textCase(.none)
                 }
 
                 // ④ 週期 / 固定薪資設定
@@ -210,8 +234,15 @@ struct AddIncomeView: View {
                         }
                     }
                 } header: {
-                    Label("週期設定", systemImage: "calendar.badge.clock")
-                        .font(.caption.weight(.semibold))
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4, height: 16)
+                        Text("週期設定")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .textCase(.none)
                 }
 
                 // ⑤ 試算（有金額且非一次性時顯示）
@@ -220,8 +251,15 @@ struct AddIncomeView: View {
                     Section {
                         calcPreviewRows
                     } header: {
-                        Label("試算", systemImage: "function")
-                            .font(.caption.weight(.semibold))
+                        HStack(spacing: 10) {
+                            Capsule()
+                                .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                                .frame(width: 4, height: 16)
+                            Text("試算")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                        }
+                        .textCase(.none)
                     }
                 }
 
@@ -229,8 +267,15 @@ struct AddIncomeView: View {
                     Section {
                         annualCalcRow
                     } header: {
-                        Label("試算", systemImage: "function")
-                            .font(.caption.weight(.semibold))
+                        HStack(spacing: 10) {
+                            Capsule()
+                                .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                                .frame(width: 4, height: 16)
+                            Text("試算")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                        }
+                        .textCase(.none)
                     }
                 }
 
@@ -238,8 +283,15 @@ struct AddIncomeView: View {
                 Section {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
                 } header: {
-                    Label("備註", systemImage: "text.bubble")
-                        .font(.caption.weight(.semibold))
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4, height: 16)
+                        Text("備註")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .textCase(.none)
                 }
 
                 // ⑦ 錯誤橫幅
@@ -312,7 +364,7 @@ struct AddIncomeView: View {
 
                 // 金額大字
                 if let amt = amount {
-                    Text(formatCurrency(amt))
+                    Text(smartCurrency(amt))
                         .font(.system(size: 26, weight: .bold, design: .rounded))
                         .foregroundStyle(.primary)
                         .contentTransition(.numericText())
@@ -398,15 +450,18 @@ struct AddIncomeView: View {
             HStack(spacing: 10) {
                 ZStack {
                     Circle()
-                        .fill(accent.opacity(0.12))
-                        .frame(width: 30, height: 30)
+                        .fill(LinearGradient(colors: [accent.opacity(0.20), accent.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 36, height: 36)
+                    Circle()
+                        .stroke(accent.opacity(0.20), lineWidth: 1)
+                        .frame(width: 36, height: 36)
                     Image(systemName: "calendar")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(accent)
                 }
                 Text("月等效收入")
                 Spacer()
-                Text(formatCurrency(monthly))
+                Text(smartCurrency(monthly))
                     .font(.subheadline.bold())
                     .foregroundStyle(accent)
                     .contentTransition(.numericText())
@@ -415,17 +470,20 @@ struct AddIncomeView: View {
             HStack(spacing: 10) {
                 ZStack {
                     Circle()
-                        .fill(accent.opacity(0.10))
-                        .frame(width: 30, height: 30)
+                        .fill(LinearGradient(colors: [accent.opacity(0.20), accent.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 36, height: 36)
+                    Circle()
+                        .stroke(accent.opacity(0.20), lineWidth: 1)
+                        .frame(width: 36, height: 36)
                     Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(accent.opacity(0.80))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(accent.opacity(0.85))
                 }
                 Text("年等效收入")
                 Spacer()
-                Text(formatCurrency(annual))
+                Text(smartCurrency(annual))
                     .font(.subheadline.bold())
-                    .foregroundStyle(accent.opacity(0.80))
+                    .foregroundStyle(accent.opacity(0.85))
                     .contentTransition(.numericText())
             }
         }
@@ -439,15 +497,18 @@ struct AddIncomeView: View {
         return HStack(spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(accent.opacity(0.12))
-                    .frame(width: 30, height: 30)
+                    .fill(LinearGradient(colors: [accent.opacity(0.20), accent.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .stroke(accent.opacity(0.20), lineWidth: 1)
+                    .frame(width: 36, height: 36)
                 Image(systemName: "chart.bar.fill")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(accent)
             }
             Text("年薪估計")
             Spacer()
-            Text(formatCurrency(annual))
+            Text(smartCurrency(annual))
                 .font(.subheadline.bold())
                 .foregroundStyle(accent)
                 .contentTransition(.numericText())
@@ -586,5 +647,16 @@ struct AddIncomeView: View {
 
     private func formatCurrency(_ value: Double) -> String {
         Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+
+    // 萬/億 量級顯示：≥1億 → "X.X 億"，≥1萬 → "X.X 萬"，其餘 → "NT$X"
+    private func smartCurrency(_ value: Double) -> String {
+        let abs = Swift.abs(value)
+        if abs >= 100_000_000 {
+            return String(format: "%.1f 億", value / 100_000_000)
+        } else if abs >= 10_000 {
+            return String(format: "%.1f 萬", value / 10_000)
+        }
+        return formatCurrency(value)
     }
 }
