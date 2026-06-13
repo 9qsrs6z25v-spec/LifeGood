@@ -19,6 +19,15 @@ import SwiftUI
 //      （對齊統一列表 row 規格）；末項前加 Divider 視覺分隔。
 //   8. deductionTipsSection → 圖示升級為 34pt 漸層圓，對齊 taxSavingRow 統一視覺。
 //   9. 英雄卡片進場 spring 動畫（heroCardAppeared）+ 月份條進場動畫（monthBarAppeared）。
+// [2026-06 v2] 本次美化方向：
+//  10. taxRecordsSection 各列 → 38pt → 44pt 漸層圖示圓 + 左側 4pt 紅色強調條 + 交錯進場動畫
+//      (taxRowsAppeared 旗標，0.05s/列 stagger)，對齊 ExpenseRow / FixedExpenseRow 視覺規格；
+//      Divider leading 從 64 → 72（對齊 4pt bar + 14pt gap + 44pt icon + 12pt spacing）
+//  11. taxRecordsSection / taxSavingSection 空狀態 → 雙層脈衝光環（emptyIconPulse）+ 漸層底圓，
+//      對齊 VariableExpenseView.emptyStateView / IncomeView.emptyState 空狀態設計規格
+//  12. taxChecklistSection / deductionTipsSection → 加入交錯淡入進場動畫
+//      (checklistRowsAppeared / tipsRowsAppeared + 0.05s stagger)，
+//      對齊 taxRecordsSection stagger 規格
 
 struct TaxOverviewView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -29,6 +38,10 @@ struct TaxOverviewView: View {
     // 進場動畫旗標
     @State private var heroCardAppeared = false
     @State private var monthBarAppeared = false
+    @State private var taxRowsAppeared = false
+    @State private var checklistRowsAppeared = false
+    @State private var tipsRowsAppeared = false
+    @State private var emptyIconPulse = false
 
     // MARK: - 商業邏輯（不動）
 
@@ -362,68 +375,98 @@ struct TaxOverviewView: View {
                           count: taxExpenses.isEmpty ? nil : taxExpenses.count)
 
             if taxExpenses.isEmpty {
-                VStack(spacing: 10) {
+                // [v2] 雙層脈衝光環空狀態（對齊 VariableExpenseView.emptyStateView 規格）
+                VStack(spacing: 16) {
                     ZStack {
                         Circle()
-                            .fill(Color.red.opacity(0.08))
-                            .frame(width: 52, height: 52)
+                            .stroke(Color.red.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                            .frame(width: 100, height: 100)
+                            .scaleEffect(emptyIconPulse ? 1.38 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                        Circle()
+                            .stroke(Color.red.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                            .frame(width: 100, height: 100)
+                            .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.red.opacity(0.14), Color.red.opacity(0.06)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 80, height: 80)
+                            .overlay(Circle().stroke(Color.red.opacity(0.20), lineWidth: 1.2))
                         Image(systemName: "doc.text")
-                            .font(.system(size: 22, weight: .light))
-                            .foregroundStyle(Color.red.opacity(0.55))
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(Color.red.opacity(0.65))
+                    }
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyIconPulse = true }
                     }
                     Text("本年度尚無稅費紀錄")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 22)
+                .padding(.vertical, 30)
             } else {
+                // [v2] 44pt 漸層圓 + 左側 4pt 強調條 + 交錯進場動畫（對齊 ExpenseRow / FixedExpenseRow）
                 ForEach(Array(taxExpenses.enumerated()), id: \.element.id) { idx, exp in
-                    HStack(spacing: 12) {
-                        // 分類圖示圓
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.red.opacity(0.18), Color.red.opacity(0.07)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 38, height: 38)
-                            Image(systemName: "doc.text.fill")
-                                .font(.system(size: 15, weight: .semibold))
+                    HStack(spacing: 0) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(LinearGradient(
+                                colors: [Color.red.opacity(0.85), Color.red.opacity(0.35)],
+                                startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4)
+                            .padding(.vertical, 10)
+                            .padding(.trailing, 14)
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(LinearGradient(
+                                        colors: [Color.red.opacity(0.20), Color.red.opacity(0.08)],
+                                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .frame(width: 44, height: 44)
+                                    .shadow(color: Color.red.opacity(0.20), radius: 6, x: 0, y: 3)
+                                Image(systemName: "doc.text.fill")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(Color.red.opacity(0.85))
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(exp.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                Text(fmtDate(exp.date))
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 7).padding(.vertical, 2)
+                                    .background(Color(.tertiarySystemFill))
+                                    .clipShape(Capsule())
+                            }
+                            Spacer(minLength: 4)
+                            Text(fmt(exp.amount))
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
                                 .foregroundStyle(Color.red.opacity(0.85))
+                                .contentTransition(.numericText())
                         }
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(exp.title)
-                                .font(.subheadline.weight(.semibold))
-                                .lineLimit(1)
-                            // 日期膠囊
-                            Text(fmtDate(exp.date))
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 7).padding(.vertical, 2)
-                                .background(Color(.tertiarySystemFill))
-                                .clipShape(Capsule())
-                        }
-
-                        Spacer(minLength: 4)
-
-                        Text(fmt(exp.amount))
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.red.opacity(0.85))
-                            .contentTransition(.numericText())
+                        .padding(.trailing, 14)
+                        .padding(.vertical, 10)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .opacity(taxRowsAppeared ? 1 : 0)
+                    .offset(y: taxRowsAppeared ? 0 : 12)
+                    .animation(
+                        .spring(response: 0.44, dampingFraction: 0.82).delay(0.05 * Double(idx)),
+                        value: taxRowsAppeared
+                    )
 
                     if idx < taxExpenses.count - 1 {
-                        Divider().padding(.leading, 64)
+                        Divider().padding(.leading, 72)
                     }
                 }
                 .padding(.bottom, 4)
+                .onAppear {
+                    withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.08)) {
+                        taxRowsAppeared = true
+                    }
+                }
             }
         }
         .background(Color(.systemBackground))
@@ -524,6 +567,7 @@ struct TaxOverviewView: View {
             sectionHeader("年度稅務檢核", icon: "checkmark.square.fill", color: .green,
                           count: relevantCount > 0 ? relevantCount : nil)
 
+            // [v2] 交錯淡入進場動畫（對齊 taxRecordsSection stagger 規格）
             ForEach(items.indices, id: \.self) { i in
                 let item = items[i]
                 HStack(spacing: 12) {
@@ -570,6 +614,12 @@ struct TaxOverviewView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
+                .opacity(checklistRowsAppeared ? 1 : 0)
+                .offset(y: checklistRowsAppeared ? 0 : 12)
+                .animation(
+                    .spring(response: 0.44, dampingFraction: 0.82).delay(0.05 * Double(i)),
+                    value: checklistRowsAppeared
+                )
 
                 if i < items.count - 1 {
                     Divider().padding(.leading, 62)
@@ -581,6 +631,11 @@ struct TaxOverviewView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+        .onAppear {
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.10)) {
+                checklistRowsAppeared = true
+            }
+        }
     }
 
     // MARK: - 節稅累積（升級：漸層圖示圓 + 更精緻進度條）
@@ -591,27 +646,45 @@ struct TaxOverviewView: View {
                           count: totalTaxSaving > 0 ? nil : nil)
 
             if totalTaxSaving == 0 {
-                VStack(spacing: 10) {
+                // [v2] 雙層脈衝光環空狀態（對齊 IncomeView.emptyState 設計規格）
+                VStack(spacing: 16) {
                     ZStack {
                         Circle()
-                            .fill(Color.green.opacity(0.08))
-                            .frame(width: 52, height: 52)
+                            .stroke(Color.green.opacity(emptyIconPulse ? 0 : 0.26), lineWidth: 1.5)
+                            .frame(width: 100, height: 100)
+                            .scaleEffect(emptyIconPulse ? 1.38 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                        Circle()
+                            .stroke(Color.green.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                            .frame(width: 100, height: 100)
+                            .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.green.opacity(0.14), Color.green.opacity(0.05)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 80, height: 80)
+                            .overlay(Circle().stroke(Color.green.opacity(0.18), lineWidth: 1.2))
                         Image(systemName: "leaf")
-                            .font(.system(size: 22, weight: .light))
-                            .foregroundStyle(Color.green.opacity(0.55))
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(Color.green.opacity(0.65))
                     }
-                    Text("本年度尚無節稅紀錄")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                    Text("可在「變動支出」分類選「節稅」新增；保險、房貸、房租固定支出也會自動納入")
-                        .font(.caption2)
-                        .foregroundStyle(.quaternary)
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(2)
-                        .padding(.horizontal)
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyIconPulse = true }
+                    }
+                    VStack(spacing: 8) {
+                        Text("本年度尚無節稅紀錄")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Text("可在「變動支出」分類選「節稅」新增\n保險、房貸、房租固定支出也會自動納入")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(2)
+                    }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 22)
+                .padding(.vertical, 30)
             } else {
                 HStack {
                     Text("年度節稅總額")
@@ -759,6 +832,7 @@ struct TaxOverviewView: View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("節稅項目提醒", icon: "lightbulb.fill", color: Color(red: 1.00, green: 0.78, blue: 0.20))
 
+            // [v2] 交錯淡入進場動畫（對齊 taxChecklistSection stagger 規格）
             ForEach(Array(TaxSavingSubCategory.allCases.enumerated()), id: \.element) { idx, sub in
                 let acc = taxSavingTotal(for: sub)
                 let iconColor: Color = acc > 0 ? .green : .blue
@@ -803,6 +877,12 @@ struct TaxOverviewView: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
+                .opacity(tipsRowsAppeared ? 1 : 0)
+                .offset(y: tipsRowsAppeared ? 0 : 12)
+                .animation(
+                    .spring(response: 0.44, dampingFraction: 0.82).delay(0.05 * Double(idx)),
+                    value: tipsRowsAppeared
+                )
 
                 if idx < TaxSavingSubCategory.allCases.count - 1 {
                     Divider().padding(.leading, 62)
@@ -814,6 +894,11 @@ struct TaxOverviewView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+        .onAppear {
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.12)) {
+                tipsRowsAppeared = true
+            }
+        }
     }
 
     // MARK: - 輔助：統一 section 標題（升級：Capsule 側條 + semibold + 可選計數膠囊）
