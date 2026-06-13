@@ -16,6 +16,14 @@ import Charts
 //      金額改為 .system(size:15, weight:.bold, design:.rounded) + minimumScaleFactor(0.72)
 //      + contentTransition(.numericText())，百分比改為彩色膠囊（含細邊框 0.5pt），
 //      對齊 breakdownLegendItem 統一規格，確保變動/固定圓餅兩頁圖例一致
+// [2026-06 v2] 本次美化方向：
+//   6. chartHeroCard 進場動畫：補 heroCardAppeared spring 進場動畫（透明度 + Y 位移），
+//      對齊 FinanceChartView.financeChartHeroCard / SavingsInsuranceView summaryHeader 規格
+//   7. 輪播指示器主題色：各模式圓點 / 膠囊底色 / 文字色改為對應主題色
+//      （趨勢=green / 變動圓餅=orange / 固定圓餅=blue），新增 ChartMode.themeColor 擴充；
+//      視覺上一眼即知目前所在圖表類型，對齊 CareerView.subCategoryBreakdown 分類色彩語言
+//   8. variablePieChart / fixedPieChart 空狀態圓環：從錯誤的 .green 修正為各自主題色
+//      （變動=orange / 固定=blue），消除空狀態與該分頁主題色不一致的視覺矛盾
 
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
@@ -59,6 +67,8 @@ struct ChartView: View {
     @State private var fixedBreakdownCache: [(category: FixedCategory, amount: Double)] = []
     @State private var typeBreakdownAppeared = false
     @State private var pieEmptyPulse = false
+    // 英雄卡片進場動畫旗標（v2 美化）
+    @State private var heroCardAppeared = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -85,8 +95,16 @@ struct ChartView: View {
                     // 【美化方向】統一英雄卡片設計語言：漸層背景 + 週期篩選 pill 嵌入卡片，
                     // 取代原本平面的 periodPicker + statisticsSummary 雙區塊，
                     // 與 OverviewView / VariableExpenseView / IncomeView 設計語言保持均值。
+                    // v2: 補 heroCardAppeared spring 進場動畫，對齊 FinanceChartView 英雄卡規格。
                     chartHeroCard
                         .padding(.horizontal)
+                        .opacity(heroCardAppeared ? 1 : 0)
+                        .offset(y: heroCardAppeared ? 0 : 20)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.52, dampingFraction: 0.78).delay(0.05)) {
+                                heroCardAppeared = true
+                            }
+                        }
 
                     if isLoading {
                         VStack(spacing: 14) {
@@ -304,10 +322,11 @@ struct ChartView: View {
             .onPreferenceChange(ChartPageHeightKey.self) { chartPageHeights = $0 }
             .animation(.easeInOut(duration: 0.25), value: currentChartPageHeight)
 
-            // 自訂指示器：模式名稱 + 圓點 + 膠囊高亮
+            // 自訂指示器：模式名稱 + 圓點 + 膠囊高亮（v2: 各模式使用主題色，不再統一 .green）
             HStack(spacing: 6) {
                 ForEach(ChartMode.allCases) { mode in
                     let isActive = chartMode == mode
+                    let accent = mode.themeColor
                     Button {
                         withAnimation(.spring(response: 0.30, dampingFraction: 0.72)) {
                             chartMode = mode
@@ -315,22 +334,22 @@ struct ChartView: View {
                     } label: {
                         HStack(spacing: 5) {
                             Circle()
-                                .fill(isActive ? Color.green : Color(.tertiaryLabel))
+                                .fill(isActive ? accent : Color(.tertiaryLabel))
                                 .frame(width: 6, height: 6)
                             if isActive {
                                 Text(mode.rawValue)
                                     .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.green)
+                                    .foregroundStyle(accent)
                                     .transition(.opacity.combined(with: .scale(scale: 0.85)))
                             }
                         }
                         .padding(.horizontal, isActive ? 10 : 6)
                         .padding(.vertical, 4)
-                        .background(isActive ? Color.green.opacity(0.10) : Color.clear)
+                        .background(isActive ? accent.opacity(0.10) : Color.clear)
                         .clipShape(Capsule())
                         .overlay(
                             Capsule()
-                                .stroke(isActive ? Color.green.opacity(0.25) : Color.clear, lineWidth: 0.75)
+                                .stroke(isActive ? accent.opacity(0.25) : Color.clear, lineWidth: 0.75)
                         )
                     }
                     .buttonStyle(.plain)
@@ -540,15 +559,15 @@ struct ChartView: View {
             if entries.isEmpty {
                 VStack(spacing: 18) {
                     ZStack {
-                        // 外層脈衝光環
+                        // 外層脈衝光環（v2: 改用橘色主題色，對齊變動支出分頁主題）
                         Circle()
-                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .stroke(Color.orange.opacity(pieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
                             .frame(width: 90, height: 90)
                             .scaleEffect(pieEmptyPulse ? 1.42 : 1.0)
                             .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pieEmptyPulse)
                         // 內層脈衝光環（延遲 0.3s 製造波紋）
                         Circle()
-                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .stroke(Color.orange.opacity(pieEmptyPulse ? 0 : 0.12), lineWidth: 1)
                             .frame(width: 90, height: 90)
                             .scaleEffect(pieEmptyPulse ? 1.70 : 1.0)
                             .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pieEmptyPulse)
@@ -561,10 +580,10 @@ struct ChartView: View {
                                 )
                             )
                             .frame(width: 72, height: 72)
-                            .overlay(Circle().stroke(Color.green.opacity(0.18), lineWidth: 1))
+                            .overlay(Circle().stroke(Color.orange.opacity(0.18), lineWidth: 1))
                         Image(systemName: "chart.bar.xaxis")
                             .font(.system(size: 28, weight: .light))
-                            .foregroundStyle(Color.green.opacity(0.55))
+                            .foregroundStyle(Color.orange.opacity(0.55))
                     }
                     .onAppear {
                         guard !pieEmptyPulse else { return }
@@ -616,15 +635,15 @@ struct ChartView: View {
             if entries.isEmpty {
                 VStack(spacing: 18) {
                     ZStack {
-                        // 外層脈衝光環
+                        // 外層脈衝光環（v2: 改用藍色主題色，對齊固定支出分頁主題）
                         Circle()
-                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .stroke(Color.blue.opacity(pieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
                             .frame(width: 90, height: 90)
                             .scaleEffect(pieEmptyPulse ? 1.42 : 1.0)
                             .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pieEmptyPulse)
                         // 內層脈衝光環（延遲 0.3s 製造波紋）
                         Circle()
-                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .stroke(Color.blue.opacity(pieEmptyPulse ? 0 : 0.12), lineWidth: 1)
                             .frame(width: 90, height: 90)
                             .scaleEffect(pieEmptyPulse ? 1.70 : 1.0)
                             .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pieEmptyPulse)
@@ -637,10 +656,10 @@ struct ChartView: View {
                                 )
                             )
                             .frame(width: 72, height: 72)
-                            .overlay(Circle().stroke(Color.green.opacity(0.18), lineWidth: 1))
+                            .overlay(Circle().stroke(Color.blue.opacity(0.18), lineWidth: 1))
                         Image(systemName: "chart.bar.xaxis")
                             .font(.system(size: 28, weight: .light))
-                            .foregroundStyle(Color.green.opacity(0.55))
+                            .foregroundStyle(Color.blue.opacity(0.55))
                     }
                     .onAppear {
                         guard !pieEmptyPulse else { return }
@@ -1113,6 +1132,18 @@ struct ChartView: View {
             return String(label.suffix(4))
         }
         return label
+    }
+}
+
+// MARK: - ChartMode 主題色（v2 美化：輪播指示器依模式分色）
+
+private extension ChartMode {
+    var themeColor: Color {
+        switch self {
+        case .trend:       return .green
+        case .variablePie: return .orange
+        case .fixedPie:    return .blue
+        }
     }
 }
 
