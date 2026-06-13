@@ -390,9 +390,10 @@ struct FoodMapView: View {
     // MARK: - 地圖
 
     /// 依造訪次數決定 pin 大小（22~44）
+    private var maxVisitCount: Int { aggregates.map(\.visitCount).max() ?? 1 }
+
     private func pinSize(for agg: RestaurantAggregate) -> CGFloat {
-        let maxVisits = aggregates.map(\.visitCount).max() ?? 1
-        let ratio = Double(agg.visitCount) / Double(maxVisits)
+        let ratio = Double(agg.visitCount) / Double(maxVisitCount)
         return CGFloat(22 + ratio * 22)
     }
 
@@ -596,6 +597,8 @@ struct FoodMapView: View {
 
     // MARK: - 資料聚合
 
+    private static let memberSeparators = CharacterSet(charactersIn: ",、，")
+
     private var foodExpensesWithLocation: [Expense] {
         expenseStore.expenses.filter { exp in
             exp.expenseType == .variable
@@ -604,7 +607,7 @@ struct FoodMapView: View {
             && exp.placeLongitude != nil
             && range.contains(exp.date)
             && (selectedCompanion == nil || (exp.diningMember ?? "")
-                .components(separatedBy: ",")
+                .components(separatedBy: Self.memberSeparators)
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .contains(selectedCompanion ?? ""))
         }
@@ -648,7 +651,8 @@ struct FoodMapView: View {
         for exp in expenseStore.expenses where
             exp.expenseType == .variable && exp.variableCategory == .food {
             guard let raw = exp.diningMember, !raw.isEmpty else { continue }
-            for n in raw.components(separatedBy: ",").map({ $0.trimmingCharacters(in: .whitespaces) })
+            for n in raw.components(separatedBy: Self.memberSeparators)
+                            .map({ $0.trimmingCharacters(in: .whitespaces) })
                 where !n.isEmpty {
                 set.insert(n)
             }
@@ -658,13 +662,17 @@ struct FoodMapView: View {
 
     // MARK: - 格式化
 
-    private func fmtShort(_ v: Double) -> String {
+    private static let decimalFormatter: NumberFormatter = {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        return f
+    }()
+
+    private func fmtShort(_ v: Double) -> String {
         if abs(v) >= 10_000 {
-            let s = f.string(from: NSNumber(value: v / 10_000)) ?? "0"
+            let s = Self.decimalFormatter.string(from: NSNumber(value: v / 10_000)) ?? "0"
             return "\(s)萬"
         }
-        return f.string(from: NSNumber(value: v)) ?? "0"
+        return Self.decimalFormatter.string(from: NSNumber(value: v)) ?? "0"
     }
 
     private func fmtRelative(_ date: Date) -> String {
@@ -991,13 +999,21 @@ struct RestaurantDetailSheet: View {
         ])
     }
 
-    private func fmtNum(_ v: Double) -> String {
+    private static let decimalFormatter: NumberFormatter = {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "0"
+        return f
+    }()
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"
+        return f
+    }()
+
+    private func fmtNum(_ v: Double) -> String {
+        Self.decimalFormatter.string(from: NSNumber(value: v)) ?? "0"
     }
 
     private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"
-        return f.string(from: date)
+        Self.dateFormatter.string(from: date)
     }
 }
