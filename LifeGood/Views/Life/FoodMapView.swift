@@ -330,7 +330,8 @@ struct FoodMapView: View {
     // MARK: - 清單 sheet
 
     private var listSheet: some View {
-        NavigationStack {
+        let items = sortedAggregates
+        return NavigationStack {
             VStack(spacing: 0) {
                 statsCard
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -343,7 +344,7 @@ struct FoodMapView: View {
                 }
                 .padding(.vertical, 8)
                 List {
-                    ForEach(sortedAggregates) { agg in
+                    ForEach(items) { agg in
                         Button {
                             showListSheet = false
                             // 等 sheet 關閉再開另一張詳細 sheet
@@ -359,7 +360,7 @@ struct FoodMapView: View {
                 .listStyle(.insetGrouped)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("餐廳清單（\(sortedAggregates.count)）")
+            .navigationTitle("餐廳清單（\(items.count)）")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -438,10 +439,11 @@ struct FoodMapView: View {
     // MARK: - 統計卡（橘色漸層英雄卡片）
 
     private var statsCard: some View {
-        let total = aggregates.reduce(0) { $0 + $1.totalSpent }
-        let visits = aggregates.reduce(0) { $0 + $1.visitCount }
+        let aggs = aggregates
+        let total = aggs.reduce(0) { $0 + $1.totalSpent }
+        let visits = aggs.reduce(0) { $0 + $1.visitCount }
         let avg = visits > 0 ? total / Double(visits) : 0
-        let mostVisited = aggregates.max(by: { $0.visitCount < $1.visitCount })
+        let mostVisited = aggs.max(by: { $0.visitCount < $1.visitCount })
 
         return VStack(spacing: 0) {
             // 頂部：餐廳總數 + 總花費大字
@@ -456,7 +458,7 @@ struct FoodMapView: View {
                         .contentTransition(.numericText())
                 }
                 Spacer()
-                Text("\(aggregates.count) 間")
+                Text("\(aggs.count) 間")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 11).padding(.vertical, 5)
                     .background(.white.opacity(0.22))
@@ -514,6 +516,7 @@ struct FoodMapView: View {
                 statsCardAppeared = true
             }
         }
+        .onDisappear { statsCardAppeared = false }
     }
 
     private func foodKpiCell(label: String, value: String) -> some View {
