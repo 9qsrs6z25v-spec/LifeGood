@@ -161,6 +161,23 @@ struct TaxOverviewView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("稅務")
+            .onChange(of: selectedYear) { _, _ in
+                // yearPicker 只重置 heroCardAppeared/monthBarAppeared；
+                // 此處補齊其餘旗標，確保切換年份後：
+                //   1. emptyIconPulse 歸零，下一個空狀態出現時脈衝動畫正確重啟
+                //   2. 列項旗標歸零後延遲 0.08 s 重播進場動畫，對齊英雄卡片節奏
+                emptyIconPulse = false
+                taxRowsAppeared = false
+                checklistRowsAppeared = false
+                tipsRowsAppeared = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    withAnimation(.spring(response: 0.50, dampingFraction: 0.82)) {
+                        taxRowsAppeared = true
+                        checklistRowsAppeared = true
+                        tipsRowsAppeared = true
+                    }
+                }
+            }
         }
     }
 
