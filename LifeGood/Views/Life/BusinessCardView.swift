@@ -1222,6 +1222,24 @@ struct BusinessCardView: View {
     }
 }
 
+// MARK: - 美化紀錄（BusinessCardDetailView）
+// [2026-06 v2] 本次美化方向（BusinessCardDetailView — 名片詳細頁）：
+//   1. heroCard：background 升級為 ZStack（原漸層 + 兩顆散景裝飾圓），製造立體層次感，
+//      對齊 FinanceOverviewView.totalAssetsCard / OverviewView.monthlyBalanceCard 規格；
+//      shadow 從 .black.opacity(0.2) 升級為雙層 shadow（橘色主光暈 + 黑色基礎陰影），
+//      加入 cardAppeared spring 進場動畫（opacity + Y 位移），
+//      對齊 VehicleDetailView.flashCard / StockDetailView 進場規格。
+//   2. contactCard：加入 section header（Capsule 漸層側條 + "聯絡方式" + 計數膠囊），
+//      對齊 LifeOverviewView / CareerView.milestoneListSection 標題規格；
+//      Divider().padding(.leading,48) → Rectangle(.separator.opacity(0.20)) 0.5pt 細分隔線；
+//      容器加 overlay 細邊框 + 雙層陰影，對齊 VariableExpenseView / StockDetailView 卡片規格。
+//   3. contactRow：圖示圓 32pt → 36pt + LinearGradient(opacity:0.22→0.09) + stroke(opacity:0.22),
+//      對齊 FamilyMembersResumeView / IncomeView.incomeRow 圖示圓規格。
+//   4. metaCard：容器加 overlay 細邊框 + 雙層陰影；cornerRadius 16 → 14。
+//   5. metaRow：圖示圓 32pt → 36pt + LinearGradient + stroke，對齊 contactRow 規格。
+//   6. noteCard：加入 section header（Capsule 漸層側條 + "備註"），
+//      對齊全 App section 標題設計語言；容器加 overlay + shadow，對齊 noteCard 統一規格。
+
 // MARK: - 名片詳細頁（點 row 開啟）
 
 struct BusinessCardDetailView: View {
@@ -1243,6 +1261,8 @@ struct BusinessCardDetailView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var showQRFullscreen = false
     @State private var viewingLinkedOrgPersonId: UUID?
+    // 美化：英雄卡片進場動畫旗標（對齊 VehicleDetailView.flashCard / RealEstateDetailView 規格）
+    @State private var cardAppeared = false
 
     private var card: BusinessCard {
         lifeStore.businessCards.first(where: { $0.id == cardId })
@@ -1428,15 +1448,39 @@ struct BusinessCardDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 200)
         .background(
-            LinearGradient(
-                colors: [Color.orange, Color.pink.opacity(0.85), Color.purple.opacity(0.7)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            ZStack {
+                LinearGradient(
+                    colors: [Color.orange, Color.pink.opacity(0.85), Color.purple.opacity(0.7)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 右上散景裝飾圓：增加卡片立體層次感（對齊 FinanceOverviewView.totalAssetsCard 規格）
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 140, height: 140)
+                    .offset(x: 90, y: -55)
+                    .blur(radius: 14)
+                // 左下補光
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 90, height: 90)
+                    .offset(x: -70, y: 60)
+                    .blur(radius: 10)
+            }
         )
         .clipShape(RoundedRectangle(cornerRadius: 18))
-        .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+        // 雙層 shadow：橘色主光暈 + 黑色基礎陰影（對齊 IncomeView.summaryHeader 規格）
+        .shadow(color: Color.orange.opacity(0.38), radius: 18, x: 0, y: 9)
+        .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
         .padding(.horizontal)
+        // 英雄卡片進場動畫（對齊 VehicleDetailView.flashCard / StockDetailView 進場規格）
+        .opacity(cardAppeared ? 1 : 0)
+        .offset(y: cardAppeared ? 0 : 22)
+        .onAppear {
+            withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
+                cardAppeared = true
+            }
+        }
         .sheet(isPresented: $showCamera) {
             CameraPicker { image in
                 if let data = image.jpegData(compressionQuality: 0.85) {
@@ -1671,52 +1715,95 @@ struct BusinessCardDetailView: View {
     }
 
     private var contactCard: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(card.phones.enumerated()), id: \.offset) { idx, ph in
-                contactRow(
-                    icon: "phone.fill",
-                    label: card.phones.count > 1 ? "電話 \(idx + 1)" : "電話",
-                    value: ph,
-                    color: .green
-                ) { callPhone(ph) }
-                if idx < card.phones.count - 1 || !card.faxes.isEmpty || !card.emails.isEmpty || !card.address.isEmpty {
-                    Divider().padding(.leading, 48)
+        let count = card.phones.count + card.faxes.count + card.emails.count + (card.address.isEmpty ? 0 : 1)
+        return VStack(alignment: .leading, spacing: 10) {
+            // 聯絡方式 section header（Capsule 側條 + 標題 + 計數膠囊，對齊 CareerView.milestoneListSection 規格）
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("聯絡方式")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                if count > 0 {
+                    Text("\(count) 項")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
                 }
             }
-            ForEach(Array(card.faxes.enumerated()), id: \.offset) { idx, fx in
-                contactRow(
-                    icon: "printer.fill",
-                    label: card.faxes.count > 1 ? "傳真 \(idx + 1)" : "傳真",
-                    value: fx,
-                    color: .gray
-                ) {
-                    // 傳真不支援撥號，改為複製到剪貼簿
-                    UIPasteboard.general.string = fx
+            .padding(.horizontal)
+
+            VStack(spacing: 0) {
+                ForEach(Array(card.phones.enumerated()), id: \.offset) { idx, ph in
+                    contactRow(
+                        icon: "phone.fill",
+                        label: card.phones.count > 1 ? "電話 \(idx + 1)" : "電話",
+                        value: ph,
+                        color: .green
+                    ) { callPhone(ph) }
+                    if idx < card.phones.count - 1 || !card.faxes.isEmpty || !card.emails.isEmpty || !card.address.isEmpty {
+                        // 細分隔線（對齊 VehicleDetailView / FinanceOverviewView 卡片分隔規格）
+                        Rectangle()
+                            .fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5)
+                            .padding(.leading, 62)
+                    }
                 }
-                if idx < card.faxes.count - 1 || !card.emails.isEmpty || !card.address.isEmpty {
-                    Divider().padding(.leading, 48)
+                ForEach(Array(card.faxes.enumerated()), id: \.offset) { idx, fx in
+                    contactRow(
+                        icon: "printer.fill",
+                        label: card.faxes.count > 1 ? "傳真 \(idx + 1)" : "傳真",
+                        value: fx,
+                        color: .gray
+                    ) {
+                        // 傳真不支援撥號，改為複製到剪貼簿
+                        UIPasteboard.general.string = fx
+                    }
+                    if idx < card.faxes.count - 1 || !card.emails.isEmpty || !card.address.isEmpty {
+                        Rectangle()
+                            .fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5)
+                            .padding(.leading, 62)
+                    }
+                }
+                ForEach(Array(card.emails.enumerated()), id: \.offset) { idx, em in
+                    contactRow(
+                        icon: "envelope.fill",
+                        label: card.emails.count > 1 ? "Email \(idx + 1)" : "Email",
+                        value: em,
+                        color: .indigo
+                    ) { sendEmail(em) }
+                    if idx < card.emails.count - 1 || !card.address.isEmpty {
+                        Rectangle()
+                            .fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5)
+                            .padding(.leading, 62)
+                    }
+                }
+                if !card.address.isEmpty {
+                    contactRow(icon: "mappin.and.ellipse", label: "地址", value: card.address, color: .red) {
+                        openInMaps(card.address)
+                    }
                 }
             }
-            ForEach(Array(card.emails.enumerated()), id: \.offset) { idx, em in
-                contactRow(
-                    icon: "envelope.fill",
-                    label: card.emails.count > 1 ? "Email \(idx + 1)" : "Email",
-                    value: em,
-                    color: .indigo
-                ) { sendEmail(em) }
-                if idx < card.emails.count - 1 || !card.address.isEmpty {
-                    Divider().padding(.leading, 48)
-                }
-            }
-            if !card.address.isEmpty {
-                contactRow(icon: "mappin.and.ellipse", label: "地址", value: card.address, color: .red) {
-                    openInMaps(card.address)
-                }
-            }
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+            )
+            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+            .padding(.horizontal)
         }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal)
     }
 
     private func contactRow(icon: String, label: String, value: String,
@@ -1724,7 +1811,16 @@ struct BusinessCardDetailView: View {
         Button(action: action) {
             HStack(spacing: 14) {
                 ZStack {
-                    Circle().fill(color.opacity(0.14)).frame(width: 32, height: 32)
+                    // 美化：36pt LinearGradient 圖示圓 + stroke（對齊 FamilyMembersResumeView / IncomeView.incomeRow 規格）
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.22), color.opacity(0.09)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                        .overlay(Circle().stroke(color.opacity(0.22), lineWidth: 0.75))
                     Image(systemName: icon).font(.subheadline).foregroundStyle(color)
                 }
                 VStack(alignment: .leading, spacing: 2) {
@@ -1749,14 +1845,28 @@ struct BusinessCardDetailView: View {
             metaRow(icon: "calendar", label: "收集日期", value: fmtDate(card.date), color: .gray)
         }
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
     private func metaRow(icon: String, label: String, value: String, color: Color) -> some View {
         HStack(spacing: 14) {
             ZStack {
-                Circle().fill(color.opacity(0.14)).frame(width: 32, height: 32)
+                // 美化：36pt LinearGradient 圖示圓 + stroke（對齊 contactRow 規格）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.22), color.opacity(0.09)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 36, height: 36)
+                    .overlay(Circle().stroke(color.opacity(0.22), lineWidth: 0.75))
                 Image(systemName: icon).font(.subheadline).foregroundStyle(color)
             }
             Text(label).font(.subheadline).foregroundStyle(.secondary)
@@ -1769,17 +1879,37 @@ struct BusinessCardDetailView: View {
     // MARK: - 備註
 
     private var noteCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("備註")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            // 備註 section header（Capsule 漸層側條 + 標題，對齊全 App section 標題設計語言）
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.orange, .orange.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 18)
+                Text("備註")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            .padding(.horizontal)
+
             Text(card.note)
                 .font(.subheadline)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.bottom, 16)
         }
-        .padding()
+        .padding(.top, 14)
         .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
 
