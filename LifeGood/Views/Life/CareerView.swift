@@ -628,7 +628,7 @@ struct CareerView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Text(String(format: "%@%.1f%%", pct >= 0 ? "▲ +" : "▼ ", pct))
+                Text(String(format: "%@%.1f%%", pct >= 0 ? "▲ +" : "▼ ", abs(pct)))
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(pctColor)
                     .padding(.horizontal, 6).padding(.vertical, 2)
