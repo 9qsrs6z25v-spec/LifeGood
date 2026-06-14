@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "20.5", build: 455, date: "2026/06/14", notes: [
+            "【效能修復】RealEstateView.deleteEstate：刪除不動產時原本對每筆關聯支出 ID 各別呼叫一次 expenseStore.expenses.removeAll { }，最多觸發 9 次 @Published 更新與 9 次 save() 磁碟寫入；改為先收集所有 ID 至 Set<UUID>，最後一次 removeAll 完成，將 @Published 通知與磁碟 I/O 各從最多 9 次降為 1 次。",
+            "【效能修復】FamilyMemberDetailView.photosSection：ForEach 內 inline member.familyPhotos.sorted { } 每次 view body 求值都建立新陣列；抽成 sortedFamilyPhotos computed property，使程式意圖更清晰，並讓未來可在此處加入 @State 快取時有明確切入點。",
+            "【靜態掃描】全面複查 78 個 Swift 檔：stackedHousePhotos / renovationStackedPhotos 的 visible[0] 存取均由呼叫端 count >= 2 守衛保護，實際安全；RemoteAdmin.writeConfig 第 188 行 DispatchQueue.main.async 缺少 [weak self]，因 RemoteAdmin 為 singleton 不影響記憶體正確性，記錄備查但不修改以避免過度改動；其餘強制解包、Optional 鏈結、CloudKit 節流、競態條件均未發現新問題。"
+        ]),
         ChangelogEntry(version: "20.4", build: 454, date: "2026/06/14", notes: [
             "【效能】FixedExpenseView.groupedByCategory：從每次 body render 時當場執行 O(n log n) 分組排序，改為 @State cachedGroupedByCategory + .task(id: store.modifyID) 觸發更新；修正當 store.incomes 或 store.currencyRates 等與固定支出無關的 @Published 屬性變動時，仍重複執行分組排序的多餘計算。",
             "【效能】VariableExpenseView.filteredExpenses：搜尋過濾從每次按鍵立即以 searchText 觸發 O(n×8) 字串比對，改為 debouncedSearchText + 300ms 防抖 Task，對齊 AddExpenseView.completerDebounceTask 既有規格，避免快速輸入時連續觸發高頻過濾運算。",
