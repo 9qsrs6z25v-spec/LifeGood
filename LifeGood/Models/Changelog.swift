@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "20.2", build: 452, date: "2026/06/14", notes: [
+            "【UI 美化】IncomeView v3：incomeRow 存入銀行標籤前景色從 .secondary 升級為分類主題色（accent.opacity(0.85)），背景從 tertiarySystemFill 升級為 accent.opacity(0.08)，對齊 ExpenseRow.diningMember 膠囊設計語言。",
+            "【UI 美化】IncomeView v3：incomeRow 加入股票連結指示（chart.line.uptrend.xyaxis 11pt 藍色圖示），當 income.linkedStockId 不為 nil 時顯示，告知使用者該筆收入已連結股票配息，對齊 ExpenseRow.mappin 地點指示規格。",
+            "【UI 美化】IncomeView v3：incomeListSections 新增月份分頁展開（visibleMonths 預設 3），非搜尋狀態下只顯示近 3 個月收入，超出部分以「展開更早三個月」按鈕 + 隱藏筆數膠囊呈現，對齊 VariableExpenseView.expenseListSectionsFor 的 visibleWeeks 分頁規格。"
+        ]),
         ChangelogEntry(version: "20.1", build: 451, date: "2026/06/14", notes: [
             "【靜態 Debug】全面掃描 78 個 Swift 檔，確認本分支無強制解包（force unwrap）、無 as! 強制轉型、無陣列 index 越界風險。",
             "【記憶體安全】確認所有閉包（CloudKit callback、Timer、SpeechRecognizer 語音辨識、SubscriptionManager 交易監聽）均以 [weak self] 保護，無 retain cycle。",
