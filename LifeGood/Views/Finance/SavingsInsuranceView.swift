@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（SavingsInsuranceView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. summaryHeader → 升級為藍色漸層英雄卡片：含保單計數膠囊 + NT$ 目前估值 +
 //      損益 KPI 膠囊（參照 FixedExpenseView fixedSummaryHeader 規格），
 //      加入進場動畫（headerAppeared 旗標，對齊 IncomeView / FixedExpenseView）
@@ -16,6 +16,23 @@ import SwiftUI
 //      補 .navigationBarTitleDisplayMode(.large)，對齊各列表頁規格
 //   5. 結構整體調整：VStack+summaryHeader+List → 單一 insetGrouped List，
 //      header 嵌入為 Section，捲動行為與 VariableExpenseView 對齊
+// [2026-06 v2] 本次美化方向（insuranceCard 細節精修 + 均值對齊）：
+//   6. insuranceCard 強調條：cornerRadius 2→3、padding(.vertical) 4→10，
+//      對齊 StockView.stockCard / VehicleView.vehicleCard 左側色條規格
+//   7. insuranceCard：加入 overlay RoundedRectangle stroke（separator.opacity(0.12)，0.75pt）
+//      + 陰影從 radius 6 升為 radius 8，對齊 StockView.stockCard 邊框陰影規格
+//   8. insuranceCard 進度條底色：Color(.systemGray5) → Color(.systemFill)，
+//      深色模式下對比更佳，對齊 VariableExpenseView 進度條底軌規格
+//   9. insuranceCard 目前估值字型：.title3.bold() → .system(size:16, weight:.bold, design:.rounded)
+//      + contentTransition(.numericText())，對齊 StockView.stockCard 市值字型規格
+//  10. summaryHeader 損益膠囊：加入 overlay Capsule stroke（white.opacity 0.35/0.25），
+//      對齊 StockView summaryHeader 損益膠囊邊框規格
+//  11. summaryHeader KPI 橫列：上方補入 white.opacity(0.20) 分隔線（0.5pt），
+//      對齊 IncomeView / VehicleView summaryHeader 分隔線規格
+//  12. fmtSmart：加入「億」量級支援（≥1億 → "X.X 億"），
+//      對齊 StockView.fmtShort / OverviewView.smartCurrency 規格
+//  13. 新增 insurancesSectionHeader：「持有中 N 張」Capsule 側條 section header，
+//      對齊 StockView.activeStocksSectionHeader 規格
 
 struct SavingsInsuranceView: View {
     @EnvironmentObject var store: FinanceStore
@@ -57,6 +74,10 @@ struct SavingsInsuranceView: View {
                     }
                 } else {
                     Section {
+                        insurancesSectionHeader
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                         ForEach(Array(store.insurances.enumerated()), id: \.element.id) { idx, item in
                             insuranceCard(item)
                                 .listRowBackground(Color.clear)
@@ -184,12 +205,20 @@ struct SavingsInsuranceView: View {
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(.white.opacity(0.18))
                         .clipShape(Capsule())
+                        // 細邊框對齊 StockView summaryHeader 損益膠囊規格
+                        .overlay(Capsule().stroke(.white.opacity(isPositive ? 0.35 : 0.25), lineWidth: 0.75))
                         .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
                     }
                 }
             }
 
             if hasItems {
+                // 分隔線：對齊 IncomeView / VehicleView summaryHeader KPI 橫列上方分隔線規格
+                Rectangle()
+                    .fill(.white.opacity(0.20))
+                    .frame(height: 0.5)
+                    .padding(.vertical, 12)
+
                 HStack(spacing: 0) {
                     kpiCell(label: "已繳總額", value: fmtSmart(totalPaidNT, code: "NT$"))
                     Rectangle()
@@ -206,7 +235,6 @@ struct SavingsInsuranceView: View {
                 .padding(.vertical, 10)
                 .background(.white.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
-                .padding(.top, 14)
             }
         }
         .padding(.horizontal, 20)
@@ -337,8 +365,8 @@ struct SavingsInsuranceView: View {
             : 0.0
 
         return HStack(spacing: 0) {
-            // 左側 4pt 強調條
-            RoundedRectangle(cornerRadius: 2)
+            // 左側 4pt 強調條（cornerRadius 3、padding(.vertical) 10，對齊 StockView.stockCard 規格）
+            RoundedRectangle(cornerRadius: 3)
                 .fill(
                     LinearGradient(
                         colors: [heroAccent, heroAccentDark],
@@ -347,7 +375,7 @@ struct SavingsInsuranceView: View {
                     )
                 )
                 .frame(width: 4)
-                .padding(.vertical, 4)
+                .padding(.vertical, 10)
 
             HStack(alignment: .top, spacing: 12) {
                 // 44pt 漸層圖示圓
@@ -394,11 +422,12 @@ struct SavingsInsuranceView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    // 目前估值 + 損益膠囊
+                    // 目前估值 + 損益膠囊（字型對齊 StockView.stockCard 市值規格）
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(fmtSmart(item.currentValue, code: item.currencyCode))
-                            .font(.title3.bold())
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundStyle(.primary)
+                            .contentTransition(.numericText())
                         HStack(spacing: 3) {
                             Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
                                 .font(.system(size: 9))
@@ -435,12 +464,12 @@ struct SavingsInsuranceView: View {
                             .foregroundStyle(.tertiary)
                     }
 
-                    // 已繳期數進度條
+                    // 已繳期數進度條（底色改 systemFill，深色模式對比更佳）
                     if item.totalPeriods > 0 {
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color(.systemGray5))
+                                    .fill(Color(.systemFill))
                                     .frame(height: 4)
                                 Capsule()
                                     .fill(
@@ -466,7 +495,41 @@ struct SavingsInsuranceView: View {
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
+        // 細邊框對齊 StockView.stockCard overlay stroke 規格
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        // 陰影升為 radius 8，對齊 StockView.stockCard shadow 規格
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    // MARK: - 保單 Section Header（Capsule 側條 + 計數膠囊）
+
+    private var insurancesSectionHeader: some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(
+                    LinearGradient(
+                        colors: [heroAccent, heroAccent.opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 14)
+            Text("持有中")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.primary.opacity(0.75))
+            Spacer(minLength: 6)
+            Text("\(store.insurances.count) 張")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(heroAccent.opacity(0.85))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(heroAccent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(heroAccent.opacity(0.22), lineWidth: 0.6))
+        }
     }
 
     // MARK: - 格式化
@@ -495,8 +558,14 @@ struct SavingsInsuranceView: View {
         let isUSD = code == "US$" || code == "USD" || code.lowercased() == "美金"
         let absV = abs(v)
         let sign = v < 0 ? "-" : ""
-        if !isUSD && absV >= 10_000 {
-            return "\(sign)\(code)\(String(format: "%.1f", absV / 10_000))萬"
+        if !isUSD {
+            // 億量級對齊 StockView.fmtShort / OverviewView.smartCurrency 規格
+            if absV >= 100_000_000 {
+                return "\(sign)\(code)\(String(format: "%.1f", absV / 100_000_000))億"
+            }
+            if absV >= 10_000 {
+                return "\(sign)\(code)\(String(format: "%.1f", absV / 10_000))萬"
+            }
         }
         return fmt(v, code: code)
     }
