@@ -295,6 +295,21 @@ struct EditProfileView: View {
 //   4. groupedList / filteredList：補 .scrollContentBackground(.hidden) + .background(systemGroupedBackground)，
 //      深色模式下不再顯示白色 List 背景
 //   5. 列表行：加入交錯淡入 + 向上進場動畫（rowsAppeared 旗標），對齊 FamilyView / FixedExpenseView 規格
+// [2026-06 v2] mySpendingSection + spendingRow 升級：
+//   6. mySpendingSection header：從純 image+Text 升級為「4pt 紅色漸層 Capsule 側條 + 26pt 圖示圓角方形
+//      + .subheadline.bold 標題 + "N 筆" 計數膠囊（彩色文字 + 細邊框）」，
+//      對齊 sectionHeader() / OverviewView.categoryBreakdownSection 標準 section header 規格。
+//   7. 總計列：從純 Label+Text 升級為「34pt 紅色漸層圖示圓（sum）+ ntdWanString Capsule 金額徽章」，
+//      對齊 ResumeGiftSection 總計列 / SpouseResumeView 彙總行視覺規格。
+//   8. spendingRow 圖示圓：36pt → 40pt + shadow，對齊 OverviewView.recentRow 40pt 列表規格；
+//      左側加入 3pt 橘色漸層強調條，統一列表行視覺語言。
+//   9. spendingRow 日期：純 tertiary 文字 → tertiarySystemFill 底色 Capsule 徽章，
+//      對齊 OverviewView.recentRow / CareerView.careerRow 日期膠囊規格。
+//  10. spendingRow 同行人員：純橘文字 → pink Capsule 膠囊（person.2.fill 圖示），
+//      對齊 VariableExpenseView.ExpenseRow diningMember 規格，強化資訊辨識度。
+//  11. spendingRow 金額：formatCurrency → ntdWanString，支援萬/億量級自動切換；
+//      改用紅色 Capsule 徽章顯示（含細邊框），對齊 ResumeGiftSection.giftRow 金額規格。
+//  12. "還有 N 筆…" → 水平置中 Capsule 膠囊徽章，對齊 IncomeView.visibleMonths 展開按鈕視覺語言。
 
 // MARK: - 履歷頁面
 
@@ -487,36 +502,96 @@ struct ResumeView: View {
         let items = mySpendingExpenses
         if !items.isEmpty {
             Section {
-                HStack {
-                    Label("總計", systemImage: "sum")
-                    Spacer()
-                    Text(formatCurrency(items.reduce(0) { $0 + $1.amount }))
+                // 總計列：34pt 紅色漸層圖示圓 + ntdWanString Capsule 金額徽章
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.red.opacity(0.22), Color.red.opacity(0.09)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 34, height: 34)
+                            .overlay(Circle().stroke(Color.red.opacity(0.22), lineWidth: 1))
+                        Image(systemName: "sum")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.red)
+                    }
+                    Text("總計")
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text(items.reduce(0) { $0 + $1.amount }.ntdWanString)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(.red)
+                        .contentTransition(.numericText())
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
                 }
+
                 ForEach(items.prefix(20)) { e in
                     spendingRow(e)
                 }
+                // "還有 N 筆" → 水平置中 Capsule 膠囊徽章
                 if items.count > 20 {
-                    Text("還有 \(items.count - 20) 筆…")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                    HStack {
+                        Spacer()
+                        Text("還有 \(items.count - 20) 筆")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10).padding(.vertical, 3.5)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
+                        Spacer()
+                    }
+                    .padding(.vertical, 2)
                 }
             } header: {
+                // 標準 4pt Capsule 側條 section header（對齊 sectionHeader() 全 App 規格）
                 HStack(spacing: 8) {
-                    Image(systemName: "creditcard.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.red)
-                    Text("消費")
-                        .font(.subheadline.weight(.semibold))
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.red, Color.red.opacity(0.55)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 3, height: 16)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.red.opacity(0.20), Color.red.opacity(0.09)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 26, height: 26)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(Color.red.opacity(0.22), lineWidth: 0.75)
+                            )
+                        Image(systemName: "creditcard.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.red)
+                    }
+                    Text("我的消費")
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(.primary)
-                    Text("\(items.count)")
+                    Text("\(items.count) 筆")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.red, in: Capsule())
+                        .foregroundStyle(Color.red.opacity(0.85))
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
+                    Spacer()
                 }
-                .textCase(.none)
+                .textCase(nil)
+                .padding(.vertical, 2)
             } footer: {
                 Text("變動支出中將「\(store.profile.chineseName)」加入人員的紀錄會自動出現在此。")
             }
@@ -524,56 +599,85 @@ struct ResumeView: View {
     }
 
     private func spendingRow(_ e: Expense) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            // 分類圖示圓（帶漸層）
+        let rowAccent = Color.orange
+        return HStack(alignment: .center, spacing: 0) {
+            // 左側 3pt 橘色漸層強調條（對齊 milestoneRow / CareerView.careerRow 規格）
+            RoundedRectangle(cornerRadius: 2)
+                .fill(
+                    LinearGradient(
+                        colors: [rowAccent, rowAccent.opacity(0.45)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3)
+                .padding(.vertical, 8)
+                .padding(.trailing, 10)
+
+            // 40pt 漸層圖示圓 + 陰影（36pt → 40pt，對齊 OverviewView.recentRow 40pt 列表規格）
             ZStack {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color.orange.opacity(0.20), Color.orange.opacity(0.07)],
+                            colors: [rowAccent.opacity(0.22), rowAccent.opacity(0.09)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 36, height: 36)
+                    .frame(width: 40, height: 40)
+                    .shadow(color: rowAccent.opacity(0.22), radius: 5, x: 0, y: 2)
                 Circle()
-                    .stroke(Color.orange.opacity(0.20), lineWidth: 1)
-                    .frame(width: 36, height: 36)
+                    .stroke(rowAccent.opacity(0.18), lineWidth: 1)
+                    .frame(width: 40, height: 40)
                 Image(systemName: e.variableCategory?.icon ?? "questionmark.circle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.orange)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(rowAccent)
             }
+            .padding(.trailing, 10)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
                 HStack(spacing: 5) {
+                    // 日期：tertiarySystemFill Capsule 徽章（對齊 OverviewView.recentRow 日期規格）
                     Text(formatExpenseDate(e.date))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                     if let cat = e.variableCategory {
                         Text(cat.rawValue)
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(rowAccent)
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.10))
+                            .background(rowAccent.opacity(0.10))
                             .clipShape(Capsule())
                     }
+                    // 同行人員：粉紅 Capsule（對齊 ExpenseRow.diningMember 規格）
                     if let raw = e.diningMember, !raw.isEmpty {
-                        Text(raw)
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
+                        Label(raw, systemImage: "person.2.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color.pink.opacity(0.85))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.pink.opacity(0.10))
+                            .clipShape(Capsule())
                             .lineLimit(1)
                     }
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            Text(formatCurrency(e.amount))
-                .font(.subheadline.bold())
+            // 金額：ntdWanString + 紅色 Capsule 徽章（對齊 ResumeGiftSection.giftRow 金額規格）
+            Text(e.amount.ntdWanString)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundStyle(.red)
+                .contentTransition(.numericText())
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.red.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.5))
         }
         .padding(.vertical, 4)
     }
