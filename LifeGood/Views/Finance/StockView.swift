@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（StockView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. summaryHeader → 橙色漸層英雄卡片：總市值大字、持股計數膠囊、損益 KPI 膠囊、
 //      整體報酬率統計列，對齊 VariableExpenseView.monthSummaryHeader 規格；
 //      加入進場淡入 + 向上動畫（headerAppeared）
@@ -13,6 +13,13 @@ import SwiftUI
 //   4. 卡片列表 → 交錯淡入 + 向上進場動畫（cardsAppeared），
 //      對齊 SavingsInsuranceView insuranceCard 動畫規格
 //   5. soldStackSection 標題列 → 加入圓角方形圖示框，對齊 FixedExpenseView categoryHeader 規格
+// [2026-06 v2] 第二輪美化方向：
+//   6. summaryHeader → 新增「持股分配迷你條」：GeometryReader 水平色條依市值比例著色（前 5 檔
+//      各分一色 + 其他半透明），圖例顯示前 3 檔代號，對齊 FinanceOverviewView allocationMiniBar 規格
+//   7. 主列表 → 在 ForEach 前加入「持有中 N 檔」Capsule 側條 section header，
+//      對齊 FixedExpenseView categoryHeader / FamilyView familySectionHeader 規格
+//   8. soldStackPreview → 折疊時在堆疊牌底部加入「已實現損益」彩色膠囊 Capsule，
+//      讓未展開狀態亦能快速讀取整體已賣出損益，對齊 stockCard returnRate 膠囊規格
 
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
@@ -70,6 +77,10 @@ struct StockView: View {
                                 )
 
                             LazyVStack(spacing: 12) {
+                                if !activeStocks.isEmpty {
+                                    activeStocksSectionHeader
+                                        .padding(.horizontal, 4)
+                                }
                                 ForEach(Array(activeStocks.enumerated()), id: \.element.id) { idx, item in
                                     stockCard(item)
                                         .opacity(cardsAppeared ? 1 : 0)
@@ -305,7 +316,9 @@ struct StockView: View {
             }
 
             if let top = soldStocks.first {
-                HStack {
+                let totalSoldPL = soldStocks.reduce(0) { $0 + $1.profitLoss }
+                let soldPLPositive = totalSoldPL >= 0
+                HStack(spacing: 6) {
                     Text(top.name)
                         .font(.caption.weight(.medium))
                         .lineLimit(1)
@@ -314,10 +327,18 @@ struct StockView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    let pl = top.profitLoss
-                    Text(String(format: "%@%.1f%%", pl >= 0 ? "+" : "", top.returnRate))
-                        .font(.caption.bold())
-                        .foregroundStyle(pl >= 0 ? .green : .red)
+                    // 已實現損益膠囊（彙整所有已賣出股票）
+                    HStack(spacing: 3) {
+                        Image(systemName: soldPLPositive ? "arrow.up.right" : "arrow.down.right")
+                            .font(.system(size: 8, weight: .bold))
+                        Text(fmtShort(totalSoldPL))
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundStyle(soldPLPositive ? .green : .red)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background((soldPLPositive ? Color.green : Color.red).opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke((soldPLPositive ? Color.green : Color.red).opacity(0.22), lineWidth: 0.6))
                 }
                 .padding(.horizontal, 14)
                 .frame(height: 36)
@@ -425,6 +446,15 @@ struct StockView: View {
                                 ? Color(red: 0.60, green: 1.00, blue: 0.75)
                                 : Color(red: 1.0, green: 0.78, blue: 0.75))
                     }
+                }
+
+                // 持股分配迷你條（≥2 檔時才顯示）
+                if activeStocks.count >= 2 {
+                    Rectangle()
+                        .fill(.white.opacity(0.18))
+                        .frame(height: 0.5)
+                        .padding(.vertical, 10)
+                    allocationMiniBar
                 }
             }
         }
@@ -660,6 +690,96 @@ struct StockView: View {
                 .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
         )
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    // MARK: - 持有中 Section Header（Capsule 側條 + 計數膠囊）
+
+    private var activeStocksSectionHeader: some View {
+        let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
+        return HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 14)
+            Text("持有中")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.primary.opacity(0.75))
+            Spacer(minLength: 6)
+            Text("\(activeStocks.count) 檔")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(accent.opacity(0.85))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+        }
+    }
+
+    // MARK: - 持股分配迷你條（hero card 底部，GeometryReader 色條）
+
+    private var allocationMiniBar: some View {
+        let sorted = activeStocks.sorted { $0.marketValue > $1.marketValue }
+        let totalVal = max(activeStocks.reduce(0) { $0 + $1.marketValue }, 1)
+        let top5 = Array(sorted.prefix(5))
+        let othersTotal = sorted.dropFirst(5).reduce(0) { $0 + $1.marketValue }
+        let barColors: [Color] = [
+            .white,
+            Color(red: 1.00, green: 0.90, blue: 0.60),
+            Color(red: 0.72, green: 0.95, blue: 0.72),
+            Color(red: 0.68, green: 0.90, blue: 1.00),
+            Color(red: 0.90, green: 0.76, blue: 1.00)
+        ]
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("持股分配")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.62))
+            GeometryReader { geo in
+                HStack(spacing: 2) {
+                    ForEach(Array(top5.enumerated()), id: \.element.id) { i, stock in
+                        let frac = CGFloat(stock.marketValue / totalVal)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(barColors[i % barColors.count].opacity(0.88))
+                            .frame(width: max(geo.size.width * frac, 4))
+                    }
+                    if othersTotal > 0 {
+                        let frac = CGFloat(othersTotal / totalVal)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(.white.opacity(0.30))
+                            .frame(width: max(geo.size.width * frac, 4))
+                    }
+                }
+                .frame(height: 6)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+            }
+            .frame(height: 6)
+            // 圖例（最多顯示 3 檔）
+            HStack(spacing: 10) {
+                ForEach(Array(top5.prefix(3).enumerated()), id: \.element.id) { i, stock in
+                    HStack(spacing: 4) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(barColors[i % barColors.count].opacity(0.88))
+                            .frame(width: 8, height: 8)
+                        Text(stock.symbol.isEmpty ? String(stock.name.prefix(4)) : stock.symbol)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.80))
+                            .lineLimit(1)
+                    }
+                }
+                if top5.count > 3 {
+                    Text("…")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+                Spacer()
+            }
+        }
     }
 
     private func fmt(_ v: Double) -> String {
