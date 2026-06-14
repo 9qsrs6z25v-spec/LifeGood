@@ -35,6 +35,7 @@ struct FixedExpenseView: View {
     @State private var headerAppeared = false
     @State private var emptyIconPulse = false
     @State private var categoryListAppeared = false
+    @State private var cachedGroupedByCategory: [(key: FixedCategory, value: [Expense])] = []
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -45,12 +46,11 @@ struct FixedExpenseView: View {
         return f
     }()
 
-    var groupedByCategory: [(key: FixedCategory, value: [Expense])] {
+    private func buildGroupedByCategory() -> [(key: FixedCategory, value: [Expense])] {
         let now = Date()
         let grouped = Dictionary(grouping: store.fixedExpenses) { expense in
             expense.fixedCategory ?? .other
         }
-        // 先把每組總額算好一次，避免排序比較函式內重複執行 filter+reduce
         let sums = grouped.mapValues { exps in
             exps.filter { $0.date <= now }.reduce(0) { $0 + $1.amount }
         }
@@ -101,6 +101,9 @@ struct FixedExpenseView: View {
                             .foregroundStyle(.green)
                     }
                 }
+            }
+            .task(id: store.modifyID) {
+                cachedGroupedByCategory = buildGroupedByCategory()
             }
             .sheet(isPresented: $showingAddSheet) {
                 AddExpenseView(expenseType: .fixed)
@@ -427,7 +430,7 @@ struct FixedExpenseView: View {
 
     @ViewBuilder
     private var fixedExpenseSections: some View {
-        ForEach(Array(groupedByCategory.enumerated()), id: \.element.key) { groupIdx, pair in
+        ForEach(Array(cachedGroupedByCategory.enumerated()), id: \.element.key) { groupIdx, pair in
             let (category, expenses) = pair
             Section(header: categoryHeader(category: category, expenses: expenses)) {
                 ForEach(Array(expenses.enumerated()), id: \.element.id) { rowIdx, expense in

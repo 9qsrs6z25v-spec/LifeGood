@@ -36,6 +36,8 @@ struct VariableExpenseView: View {
     @State private var searchText: String = ""
     @State private var listRowsAppeared = false
     @State private var cachedTrailingMonthlyAvg: Double = 0
+    @State private var debouncedSearchText: String = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
 
     private static let groupDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -58,7 +60,7 @@ struct VariableExpenseView: View {
         if let category = selectedCategory {
             list = list.filter { $0.variableCategory == category }
         }
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = debouncedSearchText.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty {
             list = list.filter { exp in
                 exp.title.lowercased().contains(q)
@@ -129,6 +131,14 @@ struct VariableExpenseView: View {
                 placement: .navigationBarDrawer(displayMode: .always),
                 prompt: "搜尋名稱 / 備註 / 分類 / 地點"
             )
+            .onChange(of: searchText) { _, newValue in
+                searchDebounceTask?.cancel()
+                searchDebounceTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    debouncedSearchText = newValue
+                }
+            }
             .task(id: store.modifyID) {
                 cachedTrailingMonthlyAvg = computeTrailingMonthlyAvg()
             }

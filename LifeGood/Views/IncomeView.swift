@@ -41,6 +41,8 @@ struct IncomeView: View {
     @State private var headerAppeared = false
     @State private var listRowsAppeared = false
     @State private var visibleMonths = 3
+    @State private var debouncedSearchText: String = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -60,7 +62,7 @@ struct IncomeView: View {
         if let cat = selectedCategory {
             list = list.filter { $0.category == cat }
         }
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = debouncedSearchText.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty {
             list = list.filter { inc in
                 inc.title.lowercased().contains(q)
@@ -124,6 +126,14 @@ struct IncomeView: View {
                 placement: .navigationBarDrawer(displayMode: .always),
                 prompt: "搜尋名稱 / 備註 / 分類"
             )
+            .onChange(of: searchText) { _, newValue in
+                searchDebounceTask?.cancel()
+                searchDebounceTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    debouncedSearchText = newValue
+                }
+            }
         }
     }
 
