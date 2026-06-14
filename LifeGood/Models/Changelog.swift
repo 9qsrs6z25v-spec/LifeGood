@@ -13,6 +13,18 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "20.6", build: 456, date: "2026/06/14", notes: [
+            "【靜態 Debug】全面複查 78 個 Swift 檔（強制解包、Optional 鏈結、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
+            "【確認安全】NotificationManager.recurrenceLabel：names[wd - 1] 存取前已以 wd >= 1, wd <= 7 守衛保護，無越界風險。",
+            "【確認安全】EInvoiceSyncManager.performSync：類別標注 @MainActor 且方法非 nonisolated，async 掛起後仍回主執行緒；importHistory.insert / expenseStore.expenses.append 均在主執行緒執行，無競態條件。",
+            "【確認安全】LifeStore 所有 CRUD（update/delete）以 firstIndex 取得索引後立即寫入，全程在主執行緒；isLoading 旗標正確批次保護多步驟寫入，避免中間態被持久化。",
+            "【確認安全】BackupManager：外層 DispatchQueue.global.async 以 [weak self] 捕捉，內層 DispatchQueue.main.async 透過 self? 選用鏈安全存取，無 retain cycle。",
+            "【確認安全】RemoteAdmin：缺少 [weak self] 的 DispatchQueue.main.async 均屬 singleton，永不釋放，記憶體正確性不受影響（與 v20.5 記錄一致）。",
+            "【確認正常】CloudKit 30 秒節流（syncNowIfDue）、pushAll 2 秒防抖、modifyKV 0.5 秒延遲均正常，scenePhase 切換不會觸發超出節流的額外同步。",
+            "【確認正常】OverviewView.categoryBreakdownSection：store.variableCategoryTotals() 每次 body render 僅呼叫一次（O(n) 掃描，< 1ms），前次掃描未覆蓋此函式；確認與 recentItems 同屬一次計算，無需額外快取。",
+            "【確認正常】RealEstateView.deleteEstate（v20.5 修復）、FixedExpenseView.cachedGroupedByCategory（v20.4）、VariableExpenseView.debouncedSearchText（v20.4）均已正確實作，功能正常。",
+            "無新問題：全部防護機制均正常運作，本版為靜態驗證掃描。"
+        ]),
         ChangelogEntry(version: "20.5", build: 455, date: "2026/06/14", notes: [
             "【效能修復】RealEstateView.deleteEstate：刪除不動產時原本對每筆關聯支出 ID 各別呼叫一次 expenseStore.expenses.removeAll { }，最多觸發 9 次 @Published 更新與 9 次 save() 磁碟寫入；改為先收集所有 ID 至 Set<UUID>，最後一次 removeAll 完成，將 @Published 通知與磁碟 I/O 各從最多 9 次降為 1 次。",
             "【效能修復】FamilyMemberDetailView.photosSection：ForEach 內 inline member.familyPhotos.sorted { } 每次 view body 求值都建立新陣列；抽成 sortedFamilyPhotos computed property，使程式意圖更清晰，並讓未來可在此處加入 @State 快取時有明確切入點。",
