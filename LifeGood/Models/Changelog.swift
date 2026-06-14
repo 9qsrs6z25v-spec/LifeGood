@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "20.3", build: 453, date: "2026/06/14", notes: [
+            "【修正 Crash】AIService.decodeJSON：AI 回傳字串中若 } 出現於 { 之前（如錯誤訊息 \"}...{\" 格式），原本的 firstBrace...lastBrace 形成逆向 ClosedRange，Swift 在 String.subscript 處 fatal error；補上 firstBrace <= lastBrace 防衛條件，改拋 AIParseError.invalidResponse 而非崩潰。",
+            "【靜態掃描】全面複查 78 個 Swift 檔：CloudKitManager NSLock 區段均為簡單值型別寫入（無 throw），無 deadlock 風險；LifeStore 的 guard let si/ti firstIndex 模式、FinanceModels.seedTransactionsFromLegacyIfNeeded 的 seeds.first if-let 均有 Optional 保護；EInvoiceSyncManager.persistHistory() 已透過 persistQueue.async 卸載磁碟 I/O；ChartView 以 @State variableBreakdownCache/fixedBreakdownCache + onChange 觸發更新，無多餘重繪；CloudKit 30 秒節流、pushAll 2 秒防抖均正常。"
+        ]),
         ChangelogEntry(version: "20.2", build: 452, date: "2026/06/14", notes: [
             "【UI 美化】IncomeView v3：incomeRow 存入銀行標籤前景色從 .secondary 升級為分類主題色（accent.opacity(0.85)），背景從 tertiarySystemFill 升級為 accent.opacity(0.08)，對齊 ExpenseRow.diningMember 膠囊設計語言。",
             "【UI 美化】IncomeView v3：incomeRow 加入股票連結指示（chart.line.uptrend.xyaxis 11pt 藍色圖示），當 income.linkedStockId 不為 nil 時顯示，告知使用者該筆收入已連結股票配息，對齊 ExpenseRow.mappin 地點指示規格。",

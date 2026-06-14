@@ -430,9 +430,10 @@ final class AIExpenseParserService {
                 .joined(separator: "\n")
         }
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 嘗試找 { ... } 區塊
+        // 嘗試找 { ... } 區塊；firstBrace 必須 <= lastBrace，否則逆向 range 會 crash
         if let firstBrace = cleaned.firstIndex(of: "{"),
-           let lastBrace = cleaned.lastIndex(of: "}") {
+           let lastBrace = cleaned.lastIndex(of: "}"),
+           firstBrace <= lastBrace {
             cleaned = String(cleaned[firstBrace...lastBrace])
         }
         guard let data = cleaned.data(using: .utf8),
