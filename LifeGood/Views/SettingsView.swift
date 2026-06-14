@@ -13,6 +13,16 @@ import UniformTypeIdentifiers
 //      opacity(0→1) + offset(y: 18→0)，對齊 LazyVStack stagger 規格
 //   5. 展開 dataStatsSection 時重新觸發動畫（重設 dataStatBadgesAppeared），
 //      每次 DisclosureGroup 展開都有流暢進場效果
+// [2026-06] v3 美化方向：
+//   6. settingsActionRow 輔助函式：統一 dataManagementSection 各匯出/匯入按鈕為
+//      「36pt LinearGradient 漸層圓 + subheadline.medium 主標 + caption 副標 + chevron.right」，
+//      對齊 CareerView.careerRow / SubordinateDetailView.recordRow 列式卡規格。
+//   7. subscriptionSection：「已訂閱」從裸 Text 升級為綠色 Capsule 膠囊徽章；
+//      「還原購買」/ 「管理訂閱」按鈕補 36pt 漸層圖示圓，對齊 dataManagementSection 行列規格。
+//   8. iCloudSyncSection：「iCloud 帳號」已登入/未登入 → 彩色 Capsule 狀態徽章；
+//      「同步狀態」/ 「最近同步」/ 「最近事件」/ 「同步錯誤」右側值 → Capsule 徽章；
+//      「立即同步」/ 「重新選擇同步方式」補 36pt 漸層圖示圓，對齊 dataManagementSection 規格。
+//   9. restoreSection：復原按鈕補 36pt 橘色漸層圖示圓，對齊 dataManagementSection 規格。
 
 // MARK: - Share Sheet (UIKit bridge)
 
@@ -364,7 +374,14 @@ struct SettingsView: View {
                 }
                 Spacer()
                 if subscription.isPremium {
-                    Text("已訂閱").font(.caption).foregroundStyle(.green)
+                    Text("已訂閱")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
                 } else {
                     Button("升級") { showPaywall = true }
                         .buttonStyle(.borderedProminent)
@@ -384,12 +401,23 @@ struct SettingsView: View {
             Button {
                 Task { await subscription.restorePurchases() }
             } label: {
-                Label("還原購買", systemImage: "arrow.clockwise")
+                settingsActionRow(
+                    icon: "arrow.clockwise",
+                    color: .blue,
+                    title: "還原購買",
+                    subtitle: "重新驗證已購買的訂閱方案"
+                )
             }
+            .foregroundStyle(.primary)
 
             if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
                 Link(destination: url) {
-                    Label("管理訂閱（App Store）", systemImage: "creditcard")
+                    settingsActionRow(
+                        icon: "creditcard.fill",
+                        color: .indigo,
+                        title: "管理訂閱（App Store）",
+                        subtitle: "取消或變更訂閱方案"
+                    )
                 }
             }
 
@@ -547,7 +575,13 @@ struct SettingsView: View {
                     .foregroundStyle(cloudSync.isAccountAvailable ? Color.green : Color.red)
                 Spacer()
                 Text(cloudSync.isAccountAvailable ? "已登入" : "未登入")
-                    .foregroundStyle(.secondary)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(cloudSync.isAccountAvailable ? Color.green : Color.red)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background((cloudSync.isAccountAvailable ? Color.green : Color.red).opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke((cloudSync.isAccountAvailable ? Color.green : Color.red).opacity(0.22), lineWidth: 0.6))
             }
 
             HStack {
@@ -555,8 +589,13 @@ struct SettingsView: View {
                     .foregroundStyle(syncStatusColor)
                 Spacer()
                 Text(syncStatusText)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(syncStatusColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(syncStatusColor.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(syncStatusColor.opacity(0.22), lineWidth: 0.6))
             }
 
             HStack {
@@ -564,12 +603,21 @@ struct SettingsView: View {
                 Spacer()
                 if let date = cloudSync.lastSyncDate {
                     Text(formatSyncDate(date))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.08))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.blue.opacity(0.18), lineWidth: 0.6))
                 } else {
                     Text("尚未同步")
-                        .font(.caption)
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                 }
             }
 
@@ -578,8 +626,12 @@ struct SettingsView: View {
                     Label("最近事件", systemImage: "arrow.triangle.2.circlepath")
                     Spacer()
                     Text(cloudSync.lastChangeReason.rawValue)
-                        .font(.caption)
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                 }
             }
 
@@ -589,8 +641,13 @@ struct SettingsView: View {
                         .foregroundStyle(.red)
                     Spacer()
                     Text(err)
-                        .font(.caption)
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(.red)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.red.opacity(0.08))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.red.opacity(0.20), lineWidth: 0.6))
                         .multilineTextAlignment(.trailing)
                 }
             }
@@ -598,16 +655,24 @@ struct SettingsView: View {
             Button {
                 cloudSync.syncNow()
             } label: {
-                Label("立即同步", systemImage: "arrow.clockwise.icloud")
-                    .foregroundStyle(cloudSync.isAccountAvailable ? Color.blue : Color.secondary)
+                settingsActionRow(
+                    icon: "arrow.clockwise.icloud",
+                    color: cloudSync.isAccountAvailable && cloudSync.isEnabled ? .blue : .secondary,
+                    title: "立即同步",
+                    subtitle: "手動觸發 iCloud 資料同步"
+                )
             }
             .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled)
 
             Button {
                 cloudSync.repromptInitialSync()
             } label: {
-                Label("重新選擇同步方式", systemImage: "arrow.triangle.merge")
-                    .foregroundStyle(cloudSync.isAccountAvailable ? Color.blue : Color.secondary)
+                settingsActionRow(
+                    icon: "arrow.triangle.merge",
+                    color: cloudSync.isAccountAvailable && cloudSync.isEnabled ? .teal : .secondary,
+                    title: "重新選擇同步方式",
+                    subtitle: "重新設定本機與雲端的整合方式"
+                )
             }
             .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled)
         } header: {
@@ -733,17 +798,12 @@ struct SettingsView: View {
             Button {
                 exportJSON()
             } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("匯出 JSON")
-                        Text("完整資料備份，可重新匯入")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "square.and.arrow.up")
-                        .foregroundStyle(.green)
-                }
+                settingsActionRow(
+                    icon: "square.and.arrow.up",
+                    color: .green,
+                    title: "匯出 JSON",
+                    subtitle: "完整資料備份，可重新匯入"
+                )
             }
             .foregroundStyle(.primary)
 
@@ -751,19 +811,37 @@ struct SettingsView: View {
             Button {
                 exportFullBackup()
             } label: {
-                Label {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.teal.opacity(0.22), Color.teal.opacity(0.09)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 36, height: 36)
+                        Circle()
+                            .stroke(Color.teal.opacity(0.20), lineWidth: 1)
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "archivebox.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.teal)
+                    }
+                    .shadow(color: Color.teal.opacity(0.15), radius: 4, x: 0, y: 2)
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text("完整備份（含照片）")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
                             if backupBusy { ProgressView().scaleEffect(0.7) }
                         }
                         Text("單一檔 .lifegood，含所有照片與文件，可重新匯入")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                } icon: {
-                    Image(systemName: "archivebox.fill")
-                        .foregroundStyle(.green)
+                    Spacer()
                 }
             }
             .foregroundStyle(.primary)
@@ -773,17 +851,12 @@ struct SettingsView: View {
             Button {
                 exportCSV()
             } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("匯出 CSV")
-                        Text("可用 Excel 或 Numbers 開啟")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "tablecells")
-                        .foregroundStyle(.green)
-                }
+                settingsActionRow(
+                    icon: "tablecells",
+                    color: .mint,
+                    title: "匯出 CSV",
+                    subtitle: "可用 Excel 或 Numbers 開啟"
+                )
             }
             .foregroundStyle(.primary)
 
@@ -791,17 +864,12 @@ struct SettingsView: View {
             Button {
                 exportSubordinates()
             } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("匯出部屬資料")
-                        Text("僅部屬，含班表/任務/會議/請假，可合併匯入")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "person.2.fill")
-                        .foregroundStyle(.green)
-                }
+                settingsActionRow(
+                    icon: "person.2.fill",
+                    color: .indigo,
+                    title: "匯出部屬資料",
+                    subtitle: "僅部屬，含班表/任務/會議/請假，可合併匯入"
+                )
             }
             .foregroundStyle(.primary)
 
@@ -809,17 +877,12 @@ struct SettingsView: View {
             Button {
                 showImporter = true
             } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("匯入資料")
-                        Text("從 JSON 備份檔案匯入（自動辨識完整備份或部屬資料）")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "square.and.arrow.down")
-                        .foregroundStyle(.blue)
-                }
+                settingsActionRow(
+                    icon: "square.and.arrow.down",
+                    color: .blue,
+                    title: "匯入資料",
+                    subtitle: "從 JSON 備份檔案匯入（自動辨識完整備份或部屬資料）"
+                )
             }
             .foregroundStyle(.primary)
         } header: {
@@ -963,23 +1026,12 @@ struct SettingsView: View {
                     showRestoreResult = true
                 }
             } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("復原一小時前的資料")
-                        if let candidate = restoreCandidate {
-                            Text("可用快照：\(formatRestoreDate(candidate.date))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("尚無可用的快照")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } icon: {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .foregroundStyle(.orange)
-                }
+                settingsActionRow(
+                    icon: "clock.arrow.circlepath",
+                    color: .orange,
+                    title: "復原一小時前的資料",
+                    subtitle: restoreCandidate.map { "可用快照：\(formatRestoreDate($0.date))" } ?? "尚無可用的快照"
+                )
             }
             .foregroundStyle(.primary)
             .onAppear {
@@ -1037,6 +1089,40 @@ struct SettingsView: View {
         financeStore.vehicles.isEmpty && financeStore.realEstates.isEmpty &&
         lifeStore.milestones.isEmpty && lifeStore.relationships.isEmpty &&
         lifeStore.pets.isEmpty && lifeStore.schedules.isEmpty
+    }
+
+    // MARK: - 行動列輔助（v3：36pt 漸層圖示圓 + 雙行文字）
+
+    private func settingsActionRow(icon: String, color: Color, title: String, subtitle: String) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.22), color.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .stroke(color.opacity(0.20), lineWidth: 1)
+                    .frame(width: 36, height: 36)
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            .shadow(color: color.opacity(0.15), radius: 4, x: 0, y: 2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
     }
 
     // MARK: - 關於
