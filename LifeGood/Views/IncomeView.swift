@@ -19,6 +19,16 @@ import SwiftUI
 //      當有 ≥2 個收入分類時，顯示薪資/獎金/投資/禮金/幸運金比例的漸層彩條 + glow overlay，
 //      底下附各分類色圓點 + 名稱的橫排圖例，
 //      對齊 FinanceOverviewView.totalAssetsCard mini 資產配置彩條設計語言。
+// [2026-06 v3] 本次美化方向（incomeRow 升級 + 列表月份分頁）：
+//   7. incomeRow 存入銀行標籤：前景色從 .secondary 升級為 accent.opacity(0.85)，
+//      背景從 tertiarySystemFill 升級為 accent.opacity(0.08)，對齊 diningMember 膠囊
+//      （ExpenseRow）的主題色設計語言，強化收入列各標籤間的視覺一致性。
+//   8. incomeRow 股票連結指示：當 income.linkedStockId != nil 時，在副標籤列
+//      顯示 chart.line.uptrend.xyaxis（11pt 藍色），對齊 ExpenseRow.mappin 地點指示規格，
+//      讓使用者一眼看出這筆收入已連結股票配息，資訊揭露對齊 StockDetailView dividendRow。
+//   9. incomeListSections 月份分頁展開：新增 visibleMonths（預設 3），
+//      搜尋時顯示全部，非搜尋時只顯示近 N 個月，超出部分顯示「展開更早三個月」按鈕
+//      + 隱藏筆數膠囊，對齊 VariableExpenseView.expenseListSectionsFor.visibleWeeks 規格。
 
 struct IncomeView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -30,6 +40,7 @@ struct IncomeView: View {
     @State private var searchText: String = ""
     @State private var headerAppeared = false
     @State private var listRowsAppeared = false
+    @State private var visibleMonths = 3
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -607,8 +618,21 @@ struct IncomeView: View {
 
     @ViewBuilder
     private var incomeListSections: some View {
-        let groups = groupedByDate()
-        ForEach(Array(groups.enumerated()), id: \.element.key) { groupIdx, pair in
+        let allGroups = groupedByDate()
+        let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        // 月份分頁：搜尋時顯示全部；非搜尋時只顯示近 N 個月
+        let cutoff = Calendar.current.date(byAdding: .month, value: -visibleMonths, to: Date()) ?? Date()
+        let visibleGroups = isSearching ? allGroups : allGroups.filter { group in
+            guard let d = group.value.first?.date else { return false }
+            return d >= cutoff
+        }
+        let hiddenGroups: [(key: String, value: [Income])] = isSearching ? [] : allGroups.filter { group in
+            guard let d = group.value.first?.date else { return true }
+            return d < cutoff
+        }
+        let hiddenCount = hiddenGroups.reduce(0) { $0 + $1.value.count }
+
+        ForEach(Array(visibleGroups.enumerated()), id: \.element.key) { groupIdx, pair in
             let (dateString, incomes) = pair
             Section(header: daySectionHeader(dateString: dateString, incomes: incomes)) {
                 ForEach(Array(incomes.enumerated()), id: \.element.id) { rowIdx, income in
@@ -641,6 +665,49 @@ struct IncomeView: View {
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
                 listRowsAppeared = true
+            }
+        }
+
+        // 展開更早紀錄按鈕（對齊 VariableExpenseView.expenseListSectionsFor 展開規格）
+        if hiddenCount > 0 {
+            Section {
+                Button {
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                        visibleMonths += 3
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.green.opacity(0.12))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.green)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("展開更早三個月")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text("還有 \(hiddenCount) 筆隱藏中")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("\(hiddenCount)")
+                            .font(.caption.weight(.bold))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Color.green.opacity(0.12))
+                            .foregroundStyle(.green)
+                            .clipShape(Capsule())
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.green)
+                    }
+                    .padding(.vertical, 2)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -759,6 +826,12 @@ struct IncomeView: View {
                             .foregroundStyle(accent.opacity(0.85))
                             .clipShape(Capsule())
                     }
+                    // 股票連結指示：有配息連結時顯示圖示，對齊 ExpenseRow.mappin 地點指示規格
+                    if income.linkedStockId != nil {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color(red: 0.27, green: 0.67, blue: 0.99).opacity(0.80))
+                    }
                     if !income.note.isEmpty {
                         Text(income.note)
                             .font(.caption2)
@@ -776,16 +849,17 @@ struct IncomeView: View {
                     .foregroundStyle(accent)
                     .contentTransition(.numericText())
                 if let label = depositBankLabel(for: income) {
+                    // 銀行標籤：升級為分類主題色（對齊 ExpenseRow.diningMember 膠囊規格）
                     HStack(spacing: 3) {
                         Image(systemName: "building.columns.fill")
                             .font(.system(size: 9))
                         Text(label)
                             .font(.system(size: 10, weight: .medium))
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(accent.opacity(0.85))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color(.tertiarySystemFill))
+                    .background(accent.opacity(0.08))
                     .clipShape(Capsule())
                     .lineLimit(1)
                 }
