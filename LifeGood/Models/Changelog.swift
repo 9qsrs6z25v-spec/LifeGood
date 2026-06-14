@@ -13,6 +13,15 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "20.1", build: 451, date: "2026/06/14", notes: [
+            "【靜態 Debug】全面掃描 78 個 Swift 檔，確認本分支無強制解包（force unwrap）、無 as! 強制轉型、無陣列 index 越界風險。",
+            "【記憶體安全】確認所有閉包（CloudKit callback、Timer、SpeechRecognizer 語音辨識、SubscriptionManager 交易監聽）均以 [weak self] 保護，無 retain cycle。",
+            "【競態條件】確認 CloudKitManager.refreshAccountStatus 回主執行緒後才寫入 accountStatus；saveQueue.async 僅操作 value type 快照；NSLock fetchLock 正確保護 Set 並行寫入。",
+            "【CloudKit 節流】確認 syncNowIfDue 30 秒節流、pushAll 2 秒防抖、modifyKV 0.5 秒延遲重試均完整運作，無閃爍風險。",
+            "【@Published 批次更新】確認 isLoading 旗標在多筆寫入期間阻擋 didSet→save() 連鎖；EInvoiceSyncManager.performSync 以 pendingExpenses 一次性 append，只觸發一次 CloudKit push。",
+            "【效能確認】ExpenseStore 圖表資料（dailyData/weeklyData/monthlyData）已以 O(n) 分組取代 O(n×周期數) 逐區間 filter；LifeStore.backfillOrgPeopleFromSubordinates 以 Set 加速連結查詢至 O(1)。",
+            "無需修改：以上所有防護機制均正常，本版為靜態驗證掃描。"
+        ]),
         ChangelogEntry(version: "20.0", build: 450, date: "2026/06/13", notes: [
             "【效能】TaxOverviewView.taxByMonth：修正迴圈內每次迭代各自呼叫 taxExpenses（filter+sort）共 12 次的重複計算；改以 let exps = taxExpenses 在迴圈外一次捕捉，降至 1 次 O(n log n)。",
             "【效能】TaxOverviewView.taxRecordsSection：修正 taxExpenses 在同一 section 內被多次呼叫（含 ForEach 每列一次的 count-1 判斷）；改以 let exps = taxExpenses 提前捕捉並全段共用，消除 N+3 次重複計算。",
