@@ -227,31 +227,29 @@ struct RealEstateView: View {
     }
 
     private func deleteEstate(_ item: RealEstate) {
-        for m in item.mortgageItems {
-            if let linkedId = m.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        }
-        for p in item.paidItems {
-            if let linkedId = p.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        }
-        for ve in item.variableExpenses {
-            if let linkedId = ve.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        }
-        for ins in item.insuranceItems {
-            if let linkedId = ins.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        }
-        for asset in item.propertyAssets {
-            if let linkedId = asset.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        }
+        // 先收集所有關聯支出 ID，最後一次 removeAll，避免每個 ID 各自觸發一次 @Published 更新與 save() 磁碟寫入
+        var expenseIds = Set<UUID>()
+        for m in item.mortgageItems { if let id = m.linkedExpenseId { expenseIds.insert(id) } }
+        for p in item.paidItems { if let id = p.linkedExpenseId { expenseIds.insert(id) } }
+        for ve in item.variableExpenses { if let id = ve.linkedExpenseId { expenseIds.insert(id) } }
+        for ins in item.insuranceItems { if let id = ins.linkedExpenseId { expenseIds.insert(id) } }
+        for asset in item.propertyAssets { if let id = asset.linkedExpenseId { expenseIds.insert(id) } }
         for up in item.utilityPayments {
-            if let linkedId = up.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
+            if let id = up.linkedExpenseId { expenseIds.insert(id) }
             if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
         }
         for rp in item.renovationPhotos {
             for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
         }
-        if let linkedId = item.linkedExpenseId { expenseStore.expenses.removeAll { $0.id == linkedId } }
-        if let saleExpId = item.saleLinkedExpenseId { expenseStore.expenses.removeAll { $0.id == saleExpId } }
-        if let saleIncId = item.saleLinkedIncomeId { expenseStore.incomes.removeAll { $0.id == saleIncId } }
+        if let id = item.linkedExpenseId { expenseIds.insert(id) }
+        if let id = item.saleLinkedExpenseId { expenseIds.insert(id) }
+
+        if !expenseIds.isEmpty {
+            expenseStore.expenses.removeAll { expenseIds.contains($0.id) }
+        }
+        if let saleIncId = item.saleLinkedIncomeId {
+            expenseStore.incomes.removeAll { $0.id == saleIncId }
+        }
         store.deleteRealEstate(item)
     }
 

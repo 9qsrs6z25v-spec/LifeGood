@@ -266,6 +266,10 @@ struct FamilyMemberDetailView: View {
             ?? FamilyMember(role: .otherRelative)
     }
 
+    private var sortedFamilyPhotos: [FamilyAlbumPhoto] {
+        member.familyPhotos.sorted { $0.date > $1.date }
+    }
+
     private var roleColor: Color {
         switch member.role {
         case .spouse:                                            return .pink
@@ -532,7 +536,7 @@ struct FamilyMemberDetailView: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        ForEach(member.familyPhotos.sorted { $0.date > $1.date }) { p in
+                        ForEach(sortedFamilyPhotos) { p in
                             Button { editingPhoto = p } label: {
                                 photoCard(p)
                             }
