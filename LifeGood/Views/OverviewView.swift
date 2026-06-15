@@ -13,6 +13,18 @@ import SwiftUI
 //      LifeOverviewView.categoryBreakdownSection 40pt 標準統計圖示規格）；
 //      百分比從純 caption2 文字升為彩色 Capsule 膠囊（含細邊框），對齊 LifeOverviewView 規格；
 //      金額字型升為 .system(size:14, design:.rounded)，與列表行整體加重一致。
+// [2026-06 v3] 五處細節補齊，對齊全 App 最高視覺均值：
+//   1. summaryCard 圖示圓：30pt 純色 opacity.0.16 → 32pt LinearGradient (0.20→0.08) + stroke border (0.18)，
+//      對齊 categoryRow / breakdownLegendItem 漸層圓規格。
+//   2. monthlyBalanceCard 頂部玻璃光澤：ZStack 背景最上層加 LinearGradient [white.opacity(0.18), clear]
+//      top→center，讓英雄卡頂部呈現玻璃反光感，對齊 FinanceOverviewView totalAssetsCard 規格。
+//   3. categoryRow 比例條 glow overlay：彩色 Capsule 條上疊加 LinearGradient
+//      [white.opacity(0.28), clear, black.opacity(0.08)] top→bottom，增加立體感，
+//      對齊 ChartView.expenseTypeBreakdown 彩條及 VariableExpenseView.monthSummaryHeader 雙軌進度條規格。
+//   4. recentRow 圖示圓 stroke border：補 Circle().stroke(accentColor.opacity(0.18), lineWidth:0.75)，
+//      對齊 categoryRow 的 stroke 規格，兩個 Section 圖示圓視覺一致。
+//   5. todayCard 右側計數膠囊：有支出時顯示「今日 N 筆」灰底膠囊（取代空白 Spacer），
+//      對齊 recentTransactionsSection / categoryBreakdownSection 計數膠囊設計語言。
 
 struct OverviewView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -340,6 +352,12 @@ struct OverviewView: View {
                     .frame(width: 90, height: 90)
                     .offset(x: -70, y: 55)
                     .blur(radius: 10)
+                // [v3] 頂部玻璃光澤：LinearGradient white→clear，對齊 FinanceOverviewView totalAssetsCard 規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -371,10 +389,20 @@ struct OverviewView: View {
                 .padding(.bottom, 10)
 
             HStack(spacing: 6) {
+                // [v3] 圖示圓：純色 opacity.0.16 → LinearGradient (0.20→0.08) + stroke border，對齊 categoryRow 規格
                 ZStack {
                     Circle()
-                        .fill(color.opacity(0.16))
-                        .frame(width: 30, height: 30)
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.20), color.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 32, height: 32)
+                    Circle()
+                        .stroke(color.opacity(0.18), lineWidth: 0.75)
+                        .frame(width: 32, height: 32)
                     Image(systemName: icon)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(color)
@@ -431,6 +459,8 @@ struct OverviewView: View {
         let weekdayIdx = weekday - 1
         let weekdayStr = weekdays.indices.contains(weekdayIdx) ? weekdays[weekdayIdx] : ""
         let hasSpending = store.todayTotal > 0
+        // [v3] 今日交易筆數，用於右側計數膠囊
+        let todayCount = store.expenses.filter { cal.isDateInToday($0.date) }.count
 
         return HStack(spacing: 0) {
             // 左側綠色強調條
@@ -497,7 +527,20 @@ struct OverviewView: View {
 
             Spacer()
 
-            if !hasSpending {
+            // [v3] 右側情境膠囊：有支出→ N 筆計數膠囊；零支出→成就徽章
+            if hasSpending {
+                HStack(spacing: 4) {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("今日 \(todayCount) 筆")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(Capsule())
+            } else {
                 // 零支出成就徽章：綠色膠囊 + 圖示
                 HStack(spacing: 5) {
                     Image(systemName: "checkmark.seal.fill")
@@ -680,6 +723,16 @@ struct OverviewView: View {
                         )
                         .frame(width: geo.size.width * ratio, height: 6)
                         .animation(.spring(response: 0.6, dampingFraction: 0.78), value: ratio)
+                    // [v3] glow overlay：彩條頂部白色光澤 + 底部柔化，對齊 ChartView.expenseTypeBreakdown 規格
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: geo.size.width * ratio, height: 6)
                 }
             }
             .frame(height: 6)
@@ -790,6 +843,10 @@ struct OverviewView: View {
                     )
                     .frame(width: 44, height: 44)
                     .shadow(color: accentColor.opacity(0.22), radius: 6, x: 0, y: 3)
+                // [v3] stroke border：補齊 categoryRow 的邊框規格，兩 Section 圖示圓視覺一致
+                Circle()
+                    .stroke(accentColor.opacity(0.18), lineWidth: 0.75)
+                    .frame(width: 44, height: 44)
                 Image(systemName: item.icon)
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(accentColor)
