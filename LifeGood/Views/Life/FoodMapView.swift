@@ -180,7 +180,8 @@ struct FoodMapView: View {
     // MARK: - 上層 overlay：標題 + 篩選
 
     private var topOverlay: some View {
-        HStack(alignment: .top, spacing: 8) {
+        let options = companionOptions  // 單次捕捉，避免 isEmpty 判斷與 ForEach 各呼叫一次 O(n) 掃描
+        return HStack(alignment: .top, spacing: 8) {
             Text("美食地圖")
                 .font(.subheadline.weight(.bold))
                 .padding(.horizontal, 10)
@@ -197,13 +198,13 @@ struct FoodMapView: View {
                         }
                     }
                 }
-                if !companionOptions.isEmpty {
+                if !options.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             chip("全部家人", isSelected: selectedCompanion == nil, tint: .pink) {
                                 selectedCompanion = nil
                             }
-                            ForEach(companionOptions, id: \.self) { name in
+                            ForEach(options, id: \.self) { name in
                                 chip(name, isSelected: selectedCompanion == name, tint: .pink) {
                                     selectedCompanion = name
                                 }
@@ -345,7 +346,7 @@ struct FoodMapView: View {
         let items = sortedAggregates
         return NavigationStack {
             VStack(spacing: 0) {
-                statsCard
+                statsCard(items)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(FoodMapSort.allCases) { s in
@@ -449,8 +450,7 @@ struct FoodMapView: View {
 
     // MARK: - 統計卡（橘色漸層英雄卡片）
 
-    private var statsCard: some View {
-        let aggs = aggregates
+    private func statsCard(_ aggs: [RestaurantAggregate]) -> some View {
         let total = aggs.reduce(0) { $0 + $1.totalSpent }
         let visits = aggs.reduce(0) { $0 + $1.visitCount }
         let avg = visits > 0 ? total / Double(visits) : 0
@@ -681,6 +681,11 @@ struct FoodMapView: View {
         return f
     }()
 
+    private static let relativeDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"
+        return f
+    }()
+
     private func fmtShort(_ v: Double) -> String {
         if abs(v) >= 10_000 {
             let s = Self.decimalFormatter.string(from: NSNumber(value: v / 10_000)) ?? "0"
@@ -697,8 +702,7 @@ struct FoodMapView: View {
         if days == 1 { return "昨天" }
         if days < 7 { return "\(days) 天前" }
         if days < 30 { return "\(days / 7) 週前" }
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"
-        return f.string(from: date)
+        return Self.relativeDateFormatter.string(from: date)
     }
 }
 
