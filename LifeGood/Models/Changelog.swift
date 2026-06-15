@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "20.9", build: 459, date: "2026/06/15", notes: [
+            "【效能修復】TaxOverviewView.annualSummaryCard：taxExpenses（O(n log n) filter+sort）原本透過 totalTax 被呼叫 3 次、再加 taxExpenses.count 直接呼叫 1 次，共 4 次重複計算；改在 annualSummaryCard 頂端以 let exps = taxExpenses / let taxTotal = exps.reduce(0) 各計算一次後全段共用，同時移除已無呼叫者的 totalTax 計算屬性。",
+            "【效能修復】TaxOverviewView.monthlyBreakdown：taxByMonth（內部含 taxExpenses O(n log n)）原本在同一 @ViewBuilder 區塊被呼叫 4 次（isEmpty 判斷、count 標頭、max 計算、ForEach 資料源）；改以 let byMonth = taxByMonth 在判斷前一次捕捉，降至 1 次計算，對齊 v20.0 taxByMonth 迴圈修復規格。",
+            "【靜態掃描】全面複查 78 個 Swift 檔：除上述兩處外，無強制解包越界、無新增 retain cycle、@Published 屬性均在主執行緒更新、CloudKit 30 秒節流與 2 秒防抖均正常。"
+        ]),
         ChangelogEntry(version: "20.8", build: 458, date: "2026/06/15", notes: [
             "【靜態 Debug】全面複查 78 個 Swift 檔（強制解包、Optional 鏈結、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
             "【確認安全】所有閉包均正確使用 [weak self]；RemoteAdmin 兩處缺少 [weak self] 的 DispatchQueue.main.async 為 singleton，不影響記憶體安全性（沿用 v20.5 記錄）。",
