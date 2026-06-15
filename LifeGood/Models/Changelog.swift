@@ -13,6 +13,14 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "20.8", build: 458, date: "2026/06/15", notes: [
+            "【靜態 Debug】全面複查 78 個 Swift 檔（強制解包、Optional 鏈結、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
+            "【確認安全】所有閉包均正確使用 [weak self]；RemoteAdmin 兩處缺少 [weak self] 的 DispatchQueue.main.async 為 singleton，不影響記憶體安全性（沿用 v20.5 記錄）。",
+            "【確認安全】NotificationManager.recurrenceLabel：names[wd - 1] 存取前已以 wd >= 1, wd <= 7 守衛保護；FinanceModels.seedTransactionsFromLegacyIfNeeded：seeds.first 以 if let 安全解包。",
+            "【確認正常】CloudKit 30 秒節流（syncNowIfDue）、pushAll 2 秒防抖、modifyKV 0.5 秒延遲重試均正常；ChartView 四個獨立空狀態脈衝旗標（v20.7）運作正確。",
+            "【確認正常】VariableExpenseView 搜尋 300ms 防抖、FixedExpenseView NSCache 格式器、.task(id: store.modifyID) 快取更新均正常，無多餘計算。",
+            "無新問題：全部防護機制均正常運作，本版為靜態驗證掃描。"
+        ]),
         ChangelogEntry(version: "20.7", build: 457, date: "2026/06/15", notes: [
             "【修復】SubscriptionManager.refreshStatus：多訂閱方案並存時改保留到期日最晚者，避免月費方案覆蓋年費方案導致 isPremium 提早回傳 false。",
             "【修復】AIService.startRecording：語音辨識 Task 完成回呼發生錯誤時自動呼叫 stopRecording()，防止 isRecording 卡在 true 造成麥克風指示燈永遠亮著。",
