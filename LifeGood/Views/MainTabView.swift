@@ -124,12 +124,27 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - 美化紀錄（MainTabView）
+// [初版] UI 美化方向（既有）：
+//   • bottomTabBar：@Namespace + matchedGeometryEffect 讓選中膠囊在頁籤間平滑滑動
+//   • topSubFeatureBar：兩側漸層遮罩（allowsHitTesting false）暗示橫向可捲動
+//   • FAB：彈出選單彩色陰影 + 主 FAB 雙層 shadow 綠色光暈
+//   • Tab 圖示：active 時 scaleEffect 1.05 + symbolEffect(.bounce)
+// [2026-06] 本次美化方向：
+//   1. subFeaturePill 非選中狀態：補 Capsule overlay stroke（.primary.opacity(0.08), 0.6pt），
+//      深色模式下未選中膠囊具備細框線，與全 App 系統元件細邊框設計語言一致，
+//      對齊 FilterChip / ExpenseRow categoryAccent Capsule 規格。
+//   2. exportProgressBar：
+//      ① 軌道從 Rectangle → Capsule，圓頭視覺更精緻；
+//      ② 進度填充從純色 Color.green → LinearGradient（.green→teal）+ Capsule + 軟光暈 shadow，
+//         對齊 IncomeView summaryHeader 雙軌進度條設計語言；
+//      ③ 高度 2.5pt → 3.5pt，避免細到難以辨識。
+//   3. tabItemLabel 選中指示器：
+//      Capsule 底色從純色 Color.green.opacity(0.15) 升級為
+//      LinearGradient（topLeading 0.22 → bottomTrailing 0.10）+ overlay stroke（0.75pt），
+//      對齊 FinanceOverviewView.totalAssetsCard / SavingsInsuranceView 漸層卡片設計語言。
+
 // MARK: - 主畫面
-// UI美化方向（MainTabView）：
-//   • 底部 Tab Bar：@Namespace + matchedGeometryEffect 讓選中膠囊在頁籤間平滑滑動
-//   • 頂部子功能列：兩側疊加漸層遮罩（allowsHitTesting false）暗示可橫向捲動
-//   • 浮動新增按鈕：選單按鈕加強陰影／彈跳曲線，主 FAB 加雙層 shadow 綠色光暈
-//   • Tab 圖示：active 時輕微放大 (scaleEffect 1.05) 強化點擊回饋
 
 struct MainTabView: View {
     @AppStorage("appMode") private var appMode: String = AppMode.expense.rawValue
@@ -923,6 +938,11 @@ struct MainTabView: View {
             .background(isSelected ? tint : Color(.tertiarySystemFill))
             .foregroundStyle(isSelected ? .white : .primary)
             .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(.primary.opacity(0.08), lineWidth: 0.6)
+                    .opacity(isSelected ? 0 : 1)
+            )
             .shadow(
                 color: isSelected ? tint.opacity(0.38) : .clear,
                 radius: 6, x: 0, y: 3
@@ -946,14 +966,18 @@ struct MainTabView: View {
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Rectangle().fill(Color.green.opacity(0.18))
-                    Rectangle()
-                        .fill(Color.green)
+                    Capsule().fill(Color.green.opacity(0.14))
+                    Capsule()
+                        .fill(LinearGradient(
+                            colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)],
+                            startPoint: .leading, endPoint: .trailing
+                        ))
                         .frame(width: max(0, geo.size.width * exportProgress.fraction))
+                        .shadow(color: Color.green.opacity(0.40), radius: 3, x: 0, y: 0)
                         .animation(.linear(duration: 0.2), value: exportProgress.fraction)
                 }
             }
-            .frame(height: 2.5)
+            .frame(height: 3.5)
         }
         .padding(.bottom, 1)
         .background(.ultraThinMaterial)
@@ -1010,10 +1034,15 @@ struct MainTabView: View {
         VStack(spacing: 3) {
             ZStack {
                 if isActive {
-                    // 選中時的膠囊指示器：使用 matchedGeometryEffect 跨頁籤滑動
+                    // 選中時的膠囊指示器：漸層填色 + 細框 + matchedGeometryEffect 跨頁籤滑動
                     Capsule()
-                        .fill(Color.green.opacity(0.15))
+                        .fill(LinearGradient(
+                            colors: [Color.green.opacity(0.22), Color.green.opacity(0.10)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
                         .frame(width: 54, height: 30)
+                        .overlay(Capsule().stroke(Color.green.opacity(0.18), lineWidth: 0.75))
                         .matchedGeometryEffect(id: "activeTabIndicator", in: namespace)
                 } else {
                     // 佔位透明膠囊，確保圖示對齊不跳動
