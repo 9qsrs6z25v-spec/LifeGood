@@ -24,6 +24,20 @@ import Charts
 //      視覺上一眼即知目前所在圖表類型，對齊 CareerView.subCategoryBreakdown 分類色彩語言
 //   8. variablePieChart / fixedPieChart 空狀態圓環：從錯誤的 .green 修正為各自主題色
 //      （變動=orange / 固定=blue），消除空狀態與該分頁主題色不一致的視覺矛盾
+// [2026-06 v3] 本次美化方向：
+//   9. trendChart 標題列：補入「N 點」計數膠囊徽章（.green），對齊
+//      variablePieChart / fixedPieChart 標題規格，讓三頁圖表標題視覺均值一致。
+//  10. variablePieChart / fixedPieChart 標題列：補入「N 類」計數膠囊
+//      （橘色 / 藍色，對齊 OverviewView.categoryBreakdownSection 標題設計語言）。
+//  11. expenseTypeBreakdown 標題「本月」標籤：從純灰 tertiarySystemFill → 綠色膠囊
+//      + 細邊框（Color.green.opacity(0.22)），對齊全 App section 計數膠囊配色語言。
+//  12. expenseTypeBreakdown 雙段比例條：各段加入 glow overlay（頂部白色高亮 +
+//      底部柔化），提升彩條立體感，對齊 FinanceOverviewView.allocationSection 規格。
+//  13. breakdownLegendItem 圖示圓：底色從純色 color.opacity(0.14) 升級為
+//      LinearGradient（topLeading 0.20 → bottomTrailing 0.08），對齊
+//      OverviewView.categoryRow / FinanceOverviewView.allocationSection 圖示圓規格。
+//  14. pieChartBody 圖例行：加入交錯淡入進場動畫（pieRowsAppeared 旗標 +
+//      0.06s stagger），對齊 FinanceChartView.allocationRowsAppeared 規格。
 
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
@@ -73,6 +87,9 @@ struct ChartView: View {
     @State private var typeBreakdownEmptyPulse = false
     // 英雄卡片進場動畫旗標（v2 美化）
     @State private var heroCardAppeared = false
+    // 圓餅圖例行交錯進場動畫旗標（v3 美化，各圓餅頁各用一個旗標避免頁面切換時互相重置）
+    @State private var variablePieRowsAppeared = false
+    @State private var fixedPieRowsAppeared = false
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -387,7 +404,8 @@ struct ChartView: View {
     // MARK: - 趨勢圖
 
     private var trendChart: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let nonZeroCount = chartData.filter { $0.amount > 0 }.count
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Capsule()
                     .fill(
@@ -400,6 +418,16 @@ struct ChartView: View {
                 Text(periodTitle)
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                // [v3] 計數膠囊徽章：非零資料點數，對齊 variablePieChart / fixedPieChart 標題規格
+                if nonZeroCount > 0 {
+                    Text("\(nonZeroCount) 點")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
+                }
             }
             .padding(.horizontal)
 
@@ -560,6 +588,16 @@ struct ChartView: View {
                 Text(periodPieTitle(prefix: "變動支出"))
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                // [v3] 「N 類」計數膠囊（橘色，對齊 OverviewView.categoryBreakdownSection 規格）
+                if !entries.isEmpty {
+                    Text("\(entries.count) 類")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.75))
+                }
             }
             .padding(.horizontal)
 
@@ -608,7 +646,8 @@ struct ChartView: View {
                 .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
-                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(variable: $0.category), $0.amount) }, total: total)
+                // [v3] 傳入 $variablePieRowsAppeared 控制圖例行交錯進場
+                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(variable: $0.category), $0.amount) }, total: total, rowsAppeared: $variablePieRowsAppeared)
             }
         }
         .padding(.vertical)
@@ -636,6 +675,16 @@ struct ChartView: View {
                 Text(periodPieTitle(prefix: "固定支出"))
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                // [v3] 「N 類」計數膠囊（藍色，對齊 FinanceOverviewView.allocationSection 規格）
+                if !entries.isEmpty {
+                    Text("\(entries.count) 類")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.75))
+                }
             }
             .padding(.horizontal)
 
@@ -684,7 +733,8 @@ struct ChartView: View {
                 .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
-                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(fixed: $0.category), $0.amount) }, total: total)
+                // [v3] 傳入 $fixedPieRowsAppeared 控制圖例行交錯進場
+                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(fixed: $0.category), $0.amount) }, total: total, rowsAppeared: $fixedPieRowsAppeared)
             }
         }
         .padding(.vertical)
@@ -695,9 +745,10 @@ struct ChartView: View {
         .padding(.horizontal)
     }
 
-    /// 共用的圓餅圖 body
+    /// 共用的圓餅圖 body（v3：加入 rowsAppeared Binding 控制交錯進場動畫）
     private func pieChartBody(entries: [(name: String, icon: String, color: Color, amount: Double)],
-                              total: Double) -> some View {
+                              total: Double,
+                              rowsAppeared: Binding<Bool>) -> some View {
         let displayCount = min(entries.count, 6)
         return VStack(spacing: 16) {
             // 環形圖（加大內徑與間距，讓圓餅更精緻）
@@ -743,17 +794,23 @@ struct ChartView: View {
                 .frame(height: 0.5)
                 .padding(.horizontal, 8)
 
-            // 圖例（每項加上比例進度條，強化視覺層次）
+            // [v3] 圖例（加入交錯淡入進場動畫，對齊 FinanceChartView.allocationRowsAppeared 規格）
             VStack(spacing: 0) {
                 ForEach(Array(entries.prefix(6).enumerated()), id: \.element.name) { i, e in
                     let pct = total > 0 ? e.amount / total : 0
 
                     VStack(spacing: 6) {
                         HStack(spacing: 10) {
-                            // 圖示圓：36pt + 細邊框，對齊 breakdownLegendItem 規格
+                            // [v3] 圖示圓底色：純色 → LinearGradient，對齊 breakdownLegendItem / FinanceOverviewView 規格
                             ZStack {
                                 Circle()
-                                    .fill(e.color.opacity(0.15))
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [e.color.opacity(0.20), e.color.opacity(0.08)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
                                     .frame(width: 36, height: 36)
                                 Circle()
                                     .stroke(e.color.opacity(0.22), lineWidth: 1)
@@ -813,9 +870,22 @@ struct ChartView: View {
                     }
                     .padding(.vertical, 10)
                     .padding(.horizontal, 16)
+                    // [v3] 交錯淡入 + 向上進場動畫，對齊 FinanceChartView.allocationRowsAppeared 規格
+                    .opacity(rowsAppeared.wrappedValue ? 1 : 0)
+                    .offset(y: rowsAppeared.wrappedValue ? 0 : 12)
+                    .animation(
+                        .spring(response: 0.45, dampingFraction: 0.82)
+                            .delay(0.06 * Double(i)),
+                        value: rowsAppeared.wrappedValue
+                    )
 
                     if i < displayCount - 1 {
                         Divider().padding(.leading, 58)
+                    }
+                }
+                .onAppear {
+                    withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.05)) {
+                        rowsAppeared.wrappedValue = true
                     }
                 }
 
@@ -900,13 +970,15 @@ struct ChartView: View {
                 Text("支出類型比例")
                     .font(.subheadline.weight(.bold))
                 Spacer()
+                // [v3] 「本月」標籤從純灰升級為綠色膠囊（含細邊框），對齊全 App section 計數膠囊語言
                 if total > 0 {
                     Text("本月")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.green)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color(.tertiarySystemFill))
+                        .background(Color.green.opacity(0.10))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
                 }
             }
             .padding(.horizontal)
@@ -966,6 +1038,7 @@ struct ChartView: View {
                             let varW = max(10, totalW * CGFloat(variableTotal / total))
                             let fixW = max(10, totalW - varW)
                             HStack(spacing: gapW) {
+                                // [v3] 變動支出段：加入 glow overlay（頂白底柔化），對齊 allocationSection 彩條立體感規格
                                 RoundedRectangle(cornerRadius: 7)
                                     .fill(
                                         LinearGradient(
@@ -974,7 +1047,15 @@ struct ChartView: View {
                                         )
                                     )
                                     .frame(width: typeBreakdownAppeared ? varW : 0, height: 14)
+                                    .overlay(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                            startPoint: .top, endPoint: .bottom
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                                    )
                                     .animation(.spring(response: 0.68, dampingFraction: 0.82), value: typeBreakdownAppeared)
+                                // [v3] 固定支出段：加入 glow overlay（頂白底柔化），同上規格
                                 RoundedRectangle(cornerRadius: 7)
                                     .fill(
                                         LinearGradient(
@@ -983,6 +1064,13 @@ struct ChartView: View {
                                         )
                                     )
                                     .frame(width: typeBreakdownAppeared ? fixW : 0, height: 14)
+                                    .overlay(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                            startPoint: .top, endPoint: .bottom
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                                    )
                                     .animation(.spring(response: 0.68, dampingFraction: 0.82).delay(0.07), value: typeBreakdownAppeared)
                             }
                         }
@@ -1042,9 +1130,17 @@ struct ChartView: View {
     private func breakdownLegendItem(color: Color, icon: String, label: String, amount: Double, total: Double) -> some View {
         let pct = total > 0 ? amount / total * 100 : 0
         return HStack(spacing: 10) {
+            // [v3] 圖示圓底色：純色 → LinearGradient（topLeading 0.20 → bottomTrailing 0.08），
+            //      對齊 OverviewView.categoryRow / FinanceOverviewView.allocationSection 圖示圓規格
             ZStack {
                 Circle()
-                    .fill(color.opacity(0.14))
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.20), color.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                     .frame(width: 36, height: 36)
                 Circle()
                     .stroke(color.opacity(0.22), lineWidth: 1)
