@@ -15,6 +15,14 @@ import SwiftUI
 //      讓長條能直觀反映各分類實際份額
 //   8. categoryRowsAppeared 觸發動畫加入 0.05s 延遲，確保 view 完成佈局後再啟動，
 //      對齊 milestoneTimelineSection 的觸發規格
+// [2026-06 v3] 三處細節對齊全 App 最高視覺均值：
+//   9. categoryBreakdownSection 進度條：加入 glow overlay（頂部白色高亮 + 底部柔化），
+//      提升彩條立體感，對齊 OverviewView.categoryRow / FinanceOverviewView.allocationSection 彩條規格。
+//  10. categoryBreakdownSection 筆數/佔比膠囊：加入 overlay Capsule stroke 細邊框
+//      （accent.opacity(0.22), 0.75pt），對齊 OverviewView.categoryRow 百分比膠囊邊框規格。
+//  11. milestoneTimelineSection 日期文字：從純 .caption2 .tertiary 升級為小型 Capsule
+//      徽章（calendar 圖示 + tertiarySystemFill 底色），對齊 OverviewView.recentRow
+//      日期 Capsule 設計語言，強化行內視覺層次。
 
 struct LifeOverviewView: View {
     @EnvironmentObject var store: LifeStore
@@ -268,9 +276,17 @@ struct LifeOverviewView: View {
                                         .background(accent.opacity(0.13))
                                         .foregroundStyle(accent)
                                         .clipShape(Capsule())
-                                    Text(formatDate(m.date))
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
+                                    // [v3] 日期升級為小型 Capsule 徽章，對齊 OverviewView.recentRow 日期膠囊規格
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "calendar")
+                                            .font(.system(size: 9, weight: .medium))
+                                        Text(formatDate(m.date))
+                                            .font(.system(size: 10, weight: .medium))
+                                    }
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6).padding(.vertical, 2.5)
+                                    .background(Color(.tertiarySystemFill))
+                                    .clipShape(Capsule())
                                 }
                             }
 
@@ -439,12 +455,14 @@ struct LifeOverviewView: View {
                                         .font(.subheadline)
                                     Spacer()
                                     // 筆數 + 佔比膠囊徽章（提升資訊密度）
+                                    // [v3] 加入 overlay Capsule stroke 細邊框，對齊 OverviewView.categoryRow 百分比膠囊規格
                                     Text("\(entry.1) 筆 · \(pct)%")
                                         .font(.system(size: 12, weight: .bold))
                                         .padding(.horizontal, 9).padding(.vertical, 4)
                                         .background(accent.opacity(0.12))
                                         .foregroundStyle(accent)
                                         .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.75))
                                 }
 
                                 GeometryReader { geo in
@@ -461,6 +479,16 @@ struct LifeOverviewView: View {
                                             )
                                             .frame(width: geo.size.width * totalRatio, height: 5)
                                             .animation(.spring(response: 0.6, dampingFraction: 0.78), value: totalRatio)
+                                        // [v3] glow overlay：白色高亮 + 底部柔化，對齊 OverviewView.categoryRow 彩條規格
+                                        Capsule()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                                    startPoint: .top,
+                                                    endPoint: .bottom
+                                                )
+                                            )
+                                            .frame(width: geo.size.width * totalRatio, height: 5)
                                     }
                                 }
                                 .frame(height: 5)
