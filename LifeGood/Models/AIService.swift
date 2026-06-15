@@ -562,10 +562,13 @@ final class SpeechRecognizer: NSObject, ObservableObject {
             // 先在背景執行緒提取值型別，避免對 @MainActor 隔離的 self 建立強引用
             let text = result?.bestTranscription.formattedString
             let errMsg = error?.localizedDescription
+            // 發生錯誤時需自動停止，否則 isRecording 卡在 true、麥克風指示器永遠亮著
+            let shouldStop = error != nil
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if let text { self.transcript = text }
                 if let errMsg { self.errorMessage = errMsg }
+                if shouldStop { self.stopRecording() }
             }
         }
         isRecording = true

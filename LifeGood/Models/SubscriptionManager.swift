@@ -160,8 +160,16 @@ final class SubscriptionManager: ObservableObject {
                   LifeGoodProduct.allCases.contains(where: { $0.rawValue == transaction.productID })
             else { continue }
             if transaction.revocationDate == nil {
-                foundID = transaction.productID
-                foundExp = transaction.expirationDate
+                // 保留到期日最晚的訂閱，避免升級後舊方案覆蓋新方案的 expirationDate
+                if let existingExp = foundExp, let newExp = transaction.expirationDate {
+                    if newExp > existingExp {
+                        foundID = transaction.productID
+                        foundExp = newExp
+                    }
+                } else {
+                    foundID = transaction.productID
+                    foundExp = transaction.expirationDate
+                }
             }
         }
         self.entitledProductID = foundID

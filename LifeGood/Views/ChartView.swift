@@ -66,7 +66,11 @@ struct ChartView: View {
     @State private var variableBreakdownCache: [(category: VariableCategory, amount: Double)] = []
     @State private var fixedBreakdownCache: [(category: FixedCategory, amount: Double)] = []
     @State private var typeBreakdownAppeared = false
-    @State private var pieEmptyPulse = false
+    // 各圖表空白態脈衝動畫獨立管理，避免量測層同時渲染三個圖表時共用旗標造成動畫互搶與閃爍
+    @State private var trendEmptyPulse = false
+    @State private var variablePieEmptyPulse = false
+    @State private var fixedPieEmptyPulse = false
+    @State private var typeBreakdownEmptyPulse = false
     // 英雄卡片進場動畫旗標（v2 美化）
     @State private var heroCardAppeared = false
 
@@ -153,10 +157,13 @@ struct ChartView: View {
         try? await Task.sleep(nanoseconds: 100_000_000)
         guard !Task.isCancelled else { return }
         isLoading = true
-        // 重置脈衝旗標：isLoading=true 會移除 empty state，旗標卡在 true 時
+        // 重置各圖表脈衝旗標：isLoading=true 會移除 empty state，旗標卡在 true 時
         // 資料重載後 empty state 重出現、onAppear guard 通過不了，動畫不再播放。
         // 在此歸零確保每次載入結束後 empty state 能重新觸發脈衝動畫。
-        pieEmptyPulse = false
+        trendEmptyPulse = false
+        variablePieEmptyPulse = false
+        fixedPieEmptyPulse = false
+        typeBreakdownEmptyPulse = false
         let period = selectedPeriod
         chartData = store.chartData(for: period)
         variableBreakdownCache = store.variableBreakdown(for: period)
@@ -401,16 +408,16 @@ struct ChartView: View {
                     ZStack {
                         // 外層脈衝光環
                         Circle()
-                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .stroke(Color.green.opacity(trendEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
                             .frame(width: 90, height: 90)
-                            .scaleEffect(pieEmptyPulse ? 1.42 : 1.0)
-                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                            .scaleEffect(trendEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: trendEmptyPulse)
                         // 內層脈衝光環（延遲 0.3s 製造波紋）
                         Circle()
-                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .stroke(Color.green.opacity(trendEmptyPulse ? 0 : 0.12), lineWidth: 1)
                             .frame(width: 90, height: 90)
-                            .scaleEffect(pieEmptyPulse ? 1.70 : 1.0)
-                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                            .scaleEffect(trendEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: trendEmptyPulse)
                         // 漸層底圓 + 細邊框
                         Circle()
                             .fill(
@@ -426,8 +433,8 @@ struct ChartView: View {
                             .foregroundStyle(Color.green.opacity(0.55))
                     }
                     .onAppear {
-                        guard !pieEmptyPulse else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
+                        guard !trendEmptyPulse else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { trendEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
@@ -561,16 +568,16 @@ struct ChartView: View {
                     ZStack {
                         // 外層脈衝光環（v2: 改用橘色主題色，對齊變動支出分頁主題）
                         Circle()
-                            .stroke(Color.orange.opacity(pieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .stroke(Color.orange.opacity(variablePieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
                             .frame(width: 90, height: 90)
-                            .scaleEffect(pieEmptyPulse ? 1.42 : 1.0)
-                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                            .scaleEffect(variablePieEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: variablePieEmptyPulse)
                         // 內層脈衝光環（延遲 0.3s 製造波紋）
                         Circle()
-                            .stroke(Color.orange.opacity(pieEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .stroke(Color.orange.opacity(variablePieEmptyPulse ? 0 : 0.12), lineWidth: 1)
                             .frame(width: 90, height: 90)
-                            .scaleEffect(pieEmptyPulse ? 1.70 : 1.0)
-                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                            .scaleEffect(variablePieEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: variablePieEmptyPulse)
                         // 漸層底圓 + 細邊框
                         Circle()
                             .fill(
@@ -586,8 +593,8 @@ struct ChartView: View {
                             .foregroundStyle(Color.orange.opacity(0.55))
                     }
                     .onAppear {
-                        guard !pieEmptyPulse else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
+                        guard !variablePieEmptyPulse else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { variablePieEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
@@ -637,16 +644,16 @@ struct ChartView: View {
                     ZStack {
                         // 外層脈衝光環（v2: 改用藍色主題色，對齊固定支出分頁主題）
                         Circle()
-                            .stroke(Color.blue.opacity(pieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
+                            .stroke(Color.blue.opacity(fixedPieEmptyPulse ? 0 : 0.24), lineWidth: 1.5)
                             .frame(width: 90, height: 90)
-                            .scaleEffect(pieEmptyPulse ? 1.42 : 1.0)
-                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                            .scaleEffect(fixedPieEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: fixedPieEmptyPulse)
                         // 內層脈衝光環（延遲 0.3s 製造波紋）
                         Circle()
-                            .stroke(Color.blue.opacity(pieEmptyPulse ? 0 : 0.12), lineWidth: 1)
+                            .stroke(Color.blue.opacity(fixedPieEmptyPulse ? 0 : 0.12), lineWidth: 1)
                             .frame(width: 90, height: 90)
-                            .scaleEffect(pieEmptyPulse ? 1.70 : 1.0)
-                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                            .scaleEffect(fixedPieEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: fixedPieEmptyPulse)
                         // 漸層底圓 + 細邊框
                         Circle()
                             .fill(
@@ -662,8 +669,8 @@ struct ChartView: View {
                             .foregroundStyle(Color.blue.opacity(0.55))
                     }
                     .onAppear {
-                        guard !pieEmptyPulse else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
+                        guard !fixedPieEmptyPulse else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { fixedPieEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
@@ -908,15 +915,15 @@ struct ChartView: View {
                 VStack(spacing: 18) {
                     ZStack {
                         Circle()
-                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.22), lineWidth: 1.5)
+                            .stroke(Color.green.opacity(typeBreakdownEmptyPulse ? 0 : 0.22), lineWidth: 1.5)
                             .frame(width: 88, height: 88)
-                            .scaleEffect(pieEmptyPulse ? 1.42 : 1.0)
-                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                            .scaleEffect(typeBreakdownEmptyPulse ? 1.42 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: typeBreakdownEmptyPulse)
                         Circle()
-                            .stroke(Color.green.opacity(pieEmptyPulse ? 0 : 0.11), lineWidth: 1)
+                            .stroke(Color.green.opacity(typeBreakdownEmptyPulse ? 0 : 0.11), lineWidth: 1)
                             .frame(width: 88, height: 88)
-                            .scaleEffect(pieEmptyPulse ? 1.70 : 1.0)
-                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pieEmptyPulse)
+                            .scaleEffect(typeBreakdownEmptyPulse ? 1.70 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: typeBreakdownEmptyPulse)
                         Circle()
                             .fill(
                                 LinearGradient(
@@ -931,8 +938,8 @@ struct ChartView: View {
                             .foregroundStyle(Color.green.opacity(0.55))
                     }
                     .onAppear {
-                        guard !pieEmptyPulse else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pieEmptyPulse = true }
+                        guard !typeBreakdownEmptyPulse else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { typeBreakdownEmptyPulse = true }
                     }
                     VStack(spacing: 6) {
                         Text("尚無支出資料")

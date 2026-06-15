@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "20.7", build: 457, date: "2026/06/15", notes: [
+            "【修復】SubscriptionManager.refreshStatus：多訂閱方案並存時改保留到期日最晚者，避免月費方案覆蓋年費方案導致 isPremium 提早回傳 false。",
+            "【修復】AIService.startRecording：語音辨識 Task 完成回呼發生錯誤時自動呼叫 stopRecording()，防止 isRecording 卡在 true 造成麥克風指示燈永遠亮著。",
+            "【修復】EInvoiceSyncManager.revert：補標 @MainActor，確保 expenseStore.expenses（@Published）一律在主執行緒修改。",
+            "【修復】ChartView 畫面閃爍：將共用的 pieEmptyPulse 拆分為 trendEmptyPulse／variablePieEmptyPulse／fixedPieEmptyPulse／typeBreakdownEmptyPulse 四個獨立旗標；隱形量測層同時渲染三個圖表時各自管理動畫，不再互搶旗標造成 resetAll → 重新動畫的閃爍循環。",
+        ]),
         ChangelogEntry(version: "20.6", build: 456, date: "2026/06/14", notes: [
             "【靜態 Debug】全面複查 78 個 Swift 檔（強制解包、Optional 鏈結、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
             "【確認安全】NotificationManager.recurrenceLabel：names[wd - 1] 存取前已以 wd >= 1, wd <= 7 守衛保護，無越界風險。",
