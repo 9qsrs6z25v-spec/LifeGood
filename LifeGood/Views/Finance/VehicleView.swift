@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（VehicleView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. summaryHeader → 升級為 teal 漸層英雄卡片：總估值大字 + 車輛計數膠囊 +
 //      右側折舊資產損益 KPI 膠囊 + 散景裝飾圓，
 //      加入 KPI 橫列（購入成本 / 月養車費），對齊 FixedExpenseView fixedSummaryHeader 規格；
@@ -14,6 +14,14 @@ import SwiftUI
 //      折舊率與持有年數改為彩色膠囊標籤
 //   4. 卡片列表 → 改為 insetGrouped List + 交錯淡入進場動畫（cardsAppeared 旗標），
 //      對齊 SavingsInsuranceView / StockView 列表規格
+//
+// [2026-06 v2] 本次美化方向：
+//   5. activeVehiclesSectionHeader → 新增「持有中 N 輛」Section 標頭
+//      （左側 4pt Capsule 漸層條 + subheadline.bold 文字 + 輛數 Capsule 膠囊），
+//      加入 vehiclesSectionHeaderAppeared 進場動畫；對齊 StockView activeStocksSectionHeader 規格
+//   6. summaryHeader 迷你車輛估值佔比彩條 → KPI 橫列下方加入白色分隔線 +
+//      多色分配彩條（每輛車按估值比例著色，由高到低排列）+ 圖例點陣列（色點 + 車名），
+//      對齊 FinanceOverviewView totalAssetsCard mini allocation bar 規格
 
 enum VehicleSortOption: String, CaseIterable, Identifiable {
     case purchasePrice = "購入價格"
@@ -49,6 +57,7 @@ struct VehicleView: View {
     @State private var headerAppeared = false
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
+    @State private var vehiclesSectionHeaderAppeared = false  // [v2] Section 標頭進場動畫旗標
 
     private let heroAccent    = Color(red: 0.18, green: 0.68, blue: 0.68)
     private let heroAccentDark = Color(red: 0.08, green: 0.46, blue: 0.48)
@@ -129,6 +138,16 @@ struct VehicleView: View {
                                     }
                                 }
                         }
+                    } header: {
+                        // [v2] 持有中 N 輛 Section 標頭，帶進場動畫
+                        activeVehiclesSectionHeader
+                            .opacity(vehiclesSectionHeaderAppeared ? 1 : 0)
+                            .offset(y: vehiclesSectionHeaderAppeared ? 0 : 8)
+                            .onAppear {
+                                withAnimation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.12)) {
+                                    vehiclesSectionHeaderAppeared = true
+                                }
+                            }
                     }
                     .onAppear {
                         withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.08)) {
@@ -207,6 +226,36 @@ struct VehicleView: View {
         }
     }
 
+    // MARK: - 車輛 Section 標頭 (v2)
+    // 對齊 StockView activeStocksSectionHeader：左側 4pt Capsule 漸層條 + 持有中文字 + 輛數膠囊
+
+    private var activeVehiclesSectionHeader: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [heroAccent, heroAccent.opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 16)
+            Text("持有中")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("\(store.vehicles.count) 輛")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(heroAccent)
+                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                .background(heroAccent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(heroAccent.opacity(0.22), lineWidth: 0.6))
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+        .textCase(nil)
+    }
+
     // MARK: - 英雄摘要卡片
 
     private var summaryHeader: some View {
@@ -215,6 +264,15 @@ struct VehicleView: View {
         let monthly = store.vehicles.reduce(0.0) { $0 + $1.monthlyExpense }
         let count = store.vehicles.count
         let depreciationLoss = totalCost - totalValue
+        // [v2] 迷你估值佔比彩條：按估值由高到低排序，最多顯示 5 輛圖例
+        let valueSorted = store.vehicles.sorted { $0.currentValue > $1.currentValue }
+        let barColors: [Color] = [
+            heroAccent,
+            Color(red: 0.12, green: 0.55, blue: 0.90),
+            Color(red: 0.25, green: 0.78, blue: 0.62),
+            Color(red: 0.75, green: 0.55, blue: 0.88),
+            Color(red: 0.95, green: 0.65, blue: 0.25),
+        ]
 
         return VStack(spacing: 0) {
             // 頂部：總估值 + 車輛計數膠囊
@@ -280,6 +338,47 @@ struct VehicleView: View {
             .background(.white.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .padding(.top, 14)
+
+            // ── 迷你車輛估值佔比彩條 (v2) ─────────────────────────────────────
+            // 對齊 FinanceOverviewView totalAssetsCard mini allocation bar 規格
+            if count > 0 && totalValue > 0 {
+                VStack(alignment: .leading, spacing: 8) {
+                    Rectangle()
+                        .fill(.white.opacity(0.20))
+                        .frame(height: 0.5)
+
+                    GeometryReader { geo in
+                        HStack(spacing: 2) {
+                            ForEach(Array(valueSorted.enumerated()), id: \.element.id) { idx, v in
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(barColors[idx % barColors.count])
+                                    .frame(width: max(6, geo.size.width * CGFloat(v.currentValue / totalValue)))
+                            }
+                        }
+                    }
+                    .frame(height: 6)
+
+                    HStack(spacing: 10) {
+                        ForEach(Array(valueSorted.prefix(5).enumerated()), id: \.element.id) { idx, v in
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(barColors[idx % barColors.count])
+                                    .frame(width: 6, height: 6)
+                                Text(v.name)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.82))
+                                    .lineLimit(1)
+                            }
+                        }
+                        if valueSorted.count > 5 {
+                            Text("+\(valueSorted.count - 5)")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                    }
+                }
+                .padding(.top, 12)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
