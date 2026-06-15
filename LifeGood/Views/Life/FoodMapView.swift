@@ -2,7 +2,7 @@ import SwiftUI
 import MapKit
 
 // MARK: - 美化紀錄（FoodMapView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. statsCard（清單 sheet 頂部）：升級為橘色漸層英雄卡片（食物主題配色），
 //      含散景裝飾圓 + KPI 格（造訪次數 / 平均每次 / 最常光顧），
 //      對齊 VariableExpenseView.monthSummaryHeader 設計規格；
@@ -17,6 +17,15 @@ import MapKit
 //   6. RestaurantDetailSheet.visitsSection：Capsule 側條標題 + 計數膠囊；
 //      每列加入 34pt 漸層圖示圓 + 日期膠囊徽章 + 同行者粉紅膠囊，
 //      金額右對齊 .rounded 字體，對齊 IncomeView.incomeRow 規格
+// [2026-06 v2] 本次美化方向：
+//   7. RestaurantDetailSheet.headerCard：加入 cardAppeared spring 進場動畫
+//      （透明度 + Y 位移），對齊 SpouseResumeView.heroCard 進場規格
+//   8. RestaurantDetailSheet.photoGallerySection header：升級為 Capsule 4pt 漸層側條
+//      + subheadline.bold + 計數膠囊徽章，對齊 visitsSection header 設計語言
+//   9. RestaurantDetailSheet.visitsSection：加入 visitsAppeared 交錯淡入 + 向上進場動畫，
+//      對齊 StockDetailView.transactionsSection stagger 規格
+//  10. RestaurantDetailSheet.companionCard：升級為粉紅漸層英雄小卡（含散景圓 + 36pt 漸層
+//      圖示圓 + 粉紅膠囊強調標籤），對齊 SpouseResumeView.heroCard 設計語言
 
 // MARK: - 餐廳聚合資料
 
@@ -699,6 +708,9 @@ struct RestaurantDetailSheet: View {
 
     let aggregate: RestaurantAggregate
     @State private var cameraPosition: MapCameraPosition = .automatic
+    // 進場動畫旗標
+    @State private var cardAppeared = false
+    @State private var visitsAppeared = false
 
     var body: some View {
         NavigationStack {
@@ -714,6 +726,13 @@ struct RestaurantDetailSheet: View {
                     .padding(.horizontal)
 
                     headerCard
+                        .opacity(cardAppeared ? 1 : 0)
+                        .offset(y: cardAppeared ? 0 : 20)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                cardAppeared = true
+                            }
+                        }
 
                     if !aggregatePhotos.isEmpty {
                         photoGallerySection
@@ -842,12 +861,29 @@ struct RestaurantDetailSheet: View {
     @State private var viewingPhotoURL: IdentifiableURL?
 
     private var photoGallerySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "photo.stack").foregroundStyle(.orange)
-                Text("照片（\(aggregatePhotos.count)）")
-                    .font(.subheadline.weight(.semibold))
+        let photoAccent = Color(red: 1.00, green: 0.55, blue: 0.18)
+        return VStack(alignment: .leading, spacing: 8) {
+            // 升級為 Capsule 4pt 側條 + subheadline.bold + 計數膠囊，對齊 visitsSection header
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(LinearGradient(
+                        colors: [photoAccent, photoAccent.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .frame(width: 4, height: 18)
+                Image(systemName: "photo.stack")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(photoAccent)
+                Text("照片")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
+                Text("\(aggregatePhotos.count) 張")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(photoAccent)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(photoAccent.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(photoAccent.opacity(0.22), lineWidth: 0.75))
             }
             .padding(.horizontal)
 
@@ -965,6 +1001,14 @@ struct RestaurantDetailSheet: View {
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
+                    // 交錯淡入 + 向上進場動畫，對齊 StockDetailView.transactionsSection 規格
+                    .opacity(visitsAppeared ? 1 : 0)
+                    .offset(y: visitsAppeared ? 0 : 10)
+                    .animation(
+                        .spring(response: 0.44, dampingFraction: 0.82)
+                            .delay(0.05 * Double(min(idx, 10))),
+                        value: visitsAppeared
+                    )
 
                     if idx < sorted.count - 1 {
                         Divider().padding(.leading, 58)
@@ -975,20 +1019,72 @@ struct RestaurantDetailSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
             .padding(.horizontal)
+            .onAppear {
+                withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.08)) {
+                    visitsAppeared = true
+                }
+            }
         }
     }
 
     private func companionCard(_ name: String) -> some View {
-        HStack {
-            Image(systemName: "person.2.fill").foregroundStyle(.pink)
-            Text("最常一起：")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(name).font(.caption.weight(.semibold))
+        let pinkLight = Color(red: 0.96, green: 0.35, blue: 0.60)
+        let pinkDark  = Color(red: 0.76, green: 0.18, blue: 0.42)
+        return HStack(spacing: 14) {
+            // 36pt 粉紅漸層圖示圓
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [pinkLight.opacity(0.28), pinkLight.opacity(0.12)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 36, height: 36)
+                    .shadow(color: pinkLight.opacity(0.22), radius: 5, x: 0, y: 2)
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(pinkLight)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("最常一起用餐")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.72))
+                Text(name)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+
             Spacer()
+
+            // 粉紅膠囊強調標籤
+            Text("TOP")
+                .font(.system(size: 9, weight: .heavy))
+                .tracking(1.5)
+                .foregroundStyle(pinkLight)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(.white.opacity(0.22))
+                .clipShape(Capsule())
         }
-        .padding()
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [pinkLight, pinkDark],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(.white.opacity(0.10))
+                    .frame(width: 80, height: 80)
+                    .offset(x: 60, y: -25)
+                    .blur(radius: 10)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: pinkDark.opacity(0.32), radius: 10, x: 0, y: 5)
         .padding(.horizontal)
     }
 
