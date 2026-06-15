@@ -109,20 +109,21 @@ struct FoodMapView: View {
     @State private var statsCardAppeared = false
 
     var body: some View {
-        NavigationStack {
+        let aggs = aggregates  // 單次計算，消除 body 內重複呼叫
+        return NavigationStack {
             ZStack(alignment: .topLeading) {
-                mapLayer
+                mapContent(aggs)
 
                 topOverlay
                     .padding(.top, 8)
                     .padding(.horizontal, 10)
 
-                bottomOverlay
+                bottomOverlay(count: aggs.count)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 12)
 
-                if aggregates.isEmpty {
+                if aggs.isEmpty {
                     emptyOverlay
                 }
             }
@@ -134,7 +135,7 @@ struct FoodMapView: View {
             .onChange(of: locationProvider.lastLocation) { _, _ in
                 tryInitialCenter()
             }
-            .onChange(of: aggregates.count) { _, _ in
+            .onChange(of: aggs.count) { _, _ in
                 tryInitialCenter()
             }
             .sheet(item: $selectedAggregate) { agg in
@@ -149,17 +150,19 @@ struct FoodMapView: View {
 
     // MARK: - 地圖底層
 
-    private var mapLayer: some View {
-        Map(position: $cameraPosition) {
-            ForEach(aggregates) { agg in
+    private func mapContent(_ aggs: [RestaurantAggregate]) -> some View {
+        let maxCount = aggs.map(\.visitCount).max() ?? 1  // 單次計算，供每個 pin 共用
+        return Map(position: $cameraPosition) {
+            ForEach(aggs) { agg in
                 Annotation(agg.name, coordinate: agg.coordinate) {
                     Button {
                         selectedAggregate = agg
                     } label: {
+                        let sz = pinSize(for: agg, maxCount: maxCount)
                         ZStack {
                             Circle()
                                 .fill(pinColor(for: agg))
-                                .frame(width: pinSize(for: agg), height: pinSize(for: agg))
+                                .frame(width: sz, height: sz)
                                 .shadow(radius: 2)
                             Text("\(agg.visitCount)")
                                 .font(.caption2.weight(.bold))
@@ -214,7 +217,7 @@ struct FoodMapView: View {
 
     // MARK: - 下層 overlay：清單按鈕 + 照片開關
 
-    private var bottomOverlay: some View {
+    private func bottomOverlay(count: Int) -> some View {
         HStack {
             Button {
                 showListSheet = true
@@ -223,7 +226,7 @@ struct FoodMapView: View {
                     Image(systemName: "list.bullet.rectangle")
                     Text("餐廳清單")
                         .font(.caption.weight(.semibold))
-                    Text("\(sortedAggregates.count)")
+                    Text("\(count)")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6).padding(.vertical, 2)
@@ -399,11 +402,9 @@ struct FoodMapView: View {
 
     // MARK: - 地圖
 
-    /// 依造訪次數決定 pin 大小（22~44）
-    private var maxVisitCount: Int { aggregates.map(\.visitCount).max() ?? 1 }
-
-    private func pinSize(for agg: RestaurantAggregate) -> CGFloat {
-        let ratio = Double(agg.visitCount) / Double(maxVisitCount)
+    /// 依造訪次數決定 pin 大小（22~44），maxCount 由呼叫端傳入避免重複計算 aggregates
+    private func pinSize(for agg: RestaurantAggregate, maxCount: Int) -> CGFloat {
+        let ratio = Double(agg.visitCount) / Double(maxCount)
         return CGFloat(22 + ratio * 22)
     }
 
@@ -428,9 +429,10 @@ struct FoodMapView: View {
             return
         }
         // 沒定位 → 如果有餐廳資料就框全部
-        guard !aggregates.isEmpty else { return }
-        let lats = aggregates.map(\.coordinate.latitude)
-        let lons = aggregates.map(\.coordinate.longitude)
+        let aggs = aggregates  // 單次計算，避免三次重複呼叫
+        guard !aggs.isEmpty else { return }
+        let lats = aggs.map(\.coordinate.latitude)
+        let lons = aggs.map(\.coordinate.longitude)
         guard let minLat = lats.min(), let maxLat = lats.max(),
               let minLon = lons.min(), let maxLon = lons.max() else { return }
         let center = CLLocationCoordinate2D(

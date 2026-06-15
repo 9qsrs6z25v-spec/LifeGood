@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "21.1", build: 461, date: "2026/06/15", notes: [
+            "【效能修復】FoodMapView：aggregates 計算屬性在每次 body rebuild 中原本被呼叫 2+2N 次（N＝餐廳數量）——body 中 isEmpty/onChange/ForEach 各 1 次，加上 pinSize(for:) 透過 maxVisitCount 每個 annotation 呼叫 2 次。50 間餐廳時達 102 次重複計算。",
+            "【效能修復】修復方式：body 以 let aggs = aggregates 單次捕捉；mapLayer var 改為 mapContent(_ aggs:) 函式並於內部一次計算 maxCount；pinSize(for:) 改為 pinSize(for:maxCount:) 接收外部傳入的 maxCount，不再反查 aggregates；bottomOverlay var 改為 bottomOverlay(count:) 函式，移除對 sortedAggregates 的額外呼叫。",
+            "【效能修復】tryInitialCenter()：原本對 aggregates 呼叫 3 次（isEmpty + latitude map + longitude map），改以 let aggs = aggregates 在函式頂端單次捕捉後共用。",
+            "修復後每次 body render 呼叫 aggregates 次數：50 間餐廳時從 102 次降至 1 次。"
+        ]),
         ChangelogEntry(version: "20.9", build: 459, date: "2026/06/15", notes: [
             "【效能修復】TaxOverviewView.annualSummaryCard：taxExpenses（O(n log n) filter+sort）原本透過 totalTax 被呼叫 3 次、再加 taxExpenses.count 直接呼叫 1 次，共 4 次重複計算；改在 annualSummaryCard 頂端以 let exps = taxExpenses / let taxTotal = exps.reduce(0) 各計算一次後全段共用，同時移除已無呼叫者的 totalTax 計算屬性。",
             "【效能修復】TaxOverviewView.monthlyBreakdown：taxByMonth（內部含 taxExpenses O(n log n)）原本在同一 @ViewBuilder 區塊被呼叫 4 次（isEmpty 判斷、count 標頭、max 計算、ForEach 資料源）；改以 let byMonth = taxByMonth 在判斷前一次捕捉，降至 1 次計算，對齊 v20.0 taxByMonth 迴圈修復規格。",
