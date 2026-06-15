@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "21.2", build: 462, date: "2026/06/15", notes: [
+            "【效能修復】FoodMapView.topOverlay：companionOptions（O(n) 掃描所有支出）原本被呼叫兩次——isEmpty 判斷一次、ForEach 資料源一次；改以 let options = companionOptions 在 topOverlay 頂端單次捕捉後共用，降至 1 次掃描。",
+            "【效能修復】FoodMapView.statsCard：原本為 var，內部以 let aggs = aggregates 獨立呼叫一次 aggregates（O(n) 聚合）；listSheet 中已有 let items = sortedAggregates 捕捉過一次 aggregates，statsCard 另外再算一次造成重複。改為 statsCard(_ aggs:) 函式接收外部傳入的 items，listSheet 改呼叫 statsCard(items)，消除清單 sheet 開啟時 aggregates 被呼叫兩次的多餘計算。",
+            "【效能修復】FoodMapView.fmtRelative：日期超過 30 天時以 let f = DateFormatter() 在函式內建立一次性物件，清單 render 時每列各建一個（DateFormatter 建立成本高）；新增 static let relativeDateFormatter 快取，對齊同檔 decimalFormatter / RestaurantDetailSheet.dateFormatter 的既有做法。",
+            "【靜態掃描】全面複查 78 個 Swift 檔：除上述三處外，無新增強制解包越界、retain cycle、@Published 競態條件或 CloudKit 節流問題。"
+        ]),
         ChangelogEntry(version: "21.1", build: 461, date: "2026/06/15", notes: [
             "【效能修復】FoodMapView：aggregates 計算屬性在每次 body rebuild 中原本被呼叫 2+2N 次（N＝餐廳數量）——body 中 isEmpty/onChange/ForEach 各 1 次，加上 pinSize(for:) 透過 maxVisitCount 每個 annotation 呼叫 2 次。50 間餐廳時達 102 次重複計算。",
             "【效能修復】修復方式：body 以 let aggs = aggregates 單次捕捉；mapLayer var 改為 mapContent(_ aggs:) 函式並於內部一次計算 maxCount；pinSize(for:) 改為 pinSize(for:maxCount:) 接收外部傳入的 maxCount，不再反查 aggregates；bottomOverlay var 改為 bottomOverlay(count:) 函式，移除對 sortedAggregates 的額外呼叫。",
