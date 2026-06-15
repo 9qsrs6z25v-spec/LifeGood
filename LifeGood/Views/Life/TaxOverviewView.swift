@@ -53,10 +53,6 @@ struct TaxOverviewView: View {
         .sorted { $0.date > $1.date }
     }
 
-    private var totalTax: Double {
-        taxExpenses.reduce(0) { $0 + $1.amount }
-    }
-
     private var taxSavingExpenses: [Expense] {
         expenseStore.expenses.filter {
             $0.variableCategory == .taxSaving &&
@@ -257,7 +253,10 @@ struct TaxOverviewView: View {
     // MARK: - 年度摘要英雄卡（升級：紅橘漸層 + 散景裝飾 + KPI 統計行）
 
     private var annualSummaryCard: some View {
-        let taxRatio = estimatedAnnualIncome > 0 ? totalTax / estimatedAnnualIncome * 100 : 0
+        // taxExpenses は filter+sort（O(n log n)）のため、一度だけ実行して再利用
+        let exps = taxExpenses
+        let taxTotal = exps.reduce(0) { $0 + $1.amount }
+        let taxRatio = estimatedAnnualIncome > 0 ? taxTotal / estimatedAnnualIncome * 100 : 0
 
         return VStack(spacing: 0) {
             // 頂部：稅費 + 年收入
@@ -266,11 +265,11 @@ struct TaxOverviewView: View {
                     Text("年度稅費支出")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.78))
-                    Text(fmt(totalTax))
+                    Text(fmt(taxTotal))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
-                    if totalTax > 0 && estimatedAnnualIncome > 0 {
+                    if taxTotal > 0 && estimatedAnnualIncome > 0 {
                         HStack(spacing: 4) {
                             Image(systemName: taxRatio > 10 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                                 .font(.system(size: 9))
@@ -315,7 +314,7 @@ struct TaxOverviewView: View {
                 taxStatDivider()
                 taxStatCell(icon: "car.fill",             label: "持有車輛", value: "\(vehicleCount) 台",   color: Color(red: 1.00, green: 0.72, blue: 0.20))
                 taxStatDivider()
-                taxStatCell(icon: "doc.text.fill",        label: "稅費筆數", value: "\(taxExpenses.count) 筆", color: Color(red: 1.00, green: 0.78, blue: 0.75))
+                taxStatCell(icon: "doc.text.fill",        label: "稅費筆數", value: "\(exps.count) 筆", color: Color(red: 1.00, green: 0.78, blue: 0.75))
                 taxStatDivider()
                 taxStatCell(icon: "leaf.fill",            label: "節稅累積", value: fmtShort(totalTaxSaving), color: Color(red: 0.62, green: 1.00, blue: 0.75))
             }
@@ -498,13 +497,15 @@ struct TaxOverviewView: View {
 
     @ViewBuilder
     private var monthlyBreakdown: some View {
-        if !taxByMonth.isEmpty {
+        // taxByMonth 內部呼叫 taxExpenses（O(n log n)），一次捕捉避免四次重複計算
+        let byMonth = taxByMonth
+        if !byMonth.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 sectionHeader("月份分佈", icon: "calendar", color: .orange,
-                              count: taxByMonth.count)
+                              count: byMonth.count)
 
-                let maxAmount = taxByMonth.map(\.amount).max() ?? 1
-                ForEach(Array(taxByMonth.enumerated()), id: \.element.month) { idx, item in
+                let maxAmount = byMonth.map(\.amount).max() ?? 1
+                ForEach(Array(byMonth.enumerated()), id: \.element.month) { idx, item in
                     HStack(spacing: 10) {
                         // 月份膠囊
                         Text("\(item.month)月")
