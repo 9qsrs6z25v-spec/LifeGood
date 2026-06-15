@@ -208,6 +208,7 @@ final class EInvoiceSyncManager: ObservableObject {
     // MARK: - 歷史 / 取消匯入
 
     /// 撤銷已匯入的發票（連同對應的支出一起刪除）
+    @MainActor
     func revert(_ record: EInvoiceImportRecord, expenseStore: ExpenseStore) {
         // 先轉成 Set，將每筆 expense 的查詢從 O(m) 降為 O(1)
         let idsToRemove = Set(record.expenseIds)
