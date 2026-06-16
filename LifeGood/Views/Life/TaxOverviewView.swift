@@ -62,7 +62,11 @@ struct TaxOverviewView: View {
     }
 
     private var totalTaxSaving: Double {
-        TaxSavingSubCategory.allCases.reduce(0) { $0 + taxSavingTotal(for: $1) }
+        // 所有節稅子分類之直接支出合計即為 taxSavingExpenses 全量，一次 reduce 即可，
+        // 避免原本 10 個子分類 × taxSavingExpenses（O(n) filter+sort）= 10 次掃描
+        let directTotal = taxSavingExpenses.reduce(0.0) { $0 + $1.amount }
+        let fixedTotal = TaxSavingSubCategory.allCases.reduce(0.0) { $0 + taxSavingFromFixedTotal(for: $1) }
+        return directTotal + fixedTotal
     }
 
     private func taxSavingDirectTotal(for sub: TaxSavingSubCategory) -> Double {
@@ -661,11 +665,13 @@ struct TaxOverviewView: View {
     // MARK: - 節稅累積（升級：漸層圖示圓 + 更精緻進度條）
 
     private var taxSavingSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("節稅累積", icon: "leaf.fill", color: .green,
-                          count: totalTaxSaving > 0 ? nil : nil)
+        // 先算一次，避免 totalTaxSaving（= taxSavingExpenses O(n) + 10×fixed 掃描）
+        // 在 sectionHeader / if / fmt 三處被重複呼叫
+        let savingTotal = totalTaxSaving
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("節稅累積", icon: "leaf.fill", color: .green, count: nil)
 
-            if totalTaxSaving == 0 {
+            if savingTotal == 0 {
                 // [v2] 雙層脈衝光環空狀態（對齊 IncomeView.emptyState 設計規格）
                 VStack(spacing: 16) {
                     ZStack {
@@ -710,7 +716,7 @@ struct TaxOverviewView: View {
                     Text("年度節稅總額")
                         .font(.subheadline).foregroundStyle(.secondary)
                     Spacer()
-                    Text(fmt(totalTaxSaving))
+                    Text(fmt(savingTotal))
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(.green)
                         .contentTransition(.numericText())
