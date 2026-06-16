@@ -29,6 +29,16 @@ import SwiftUI
 //   9. incomeListSections 月份分頁展開：新增 visibleMonths（預設 3），
 //      搜尋時顯示全部，非搜尋時只顯示近 N 個月，超出部分顯示「展開更早三個月」按鈕
 //      + 隱藏筆數膠囊，對齊 VariableExpenseView.expenseListSectionsFor.visibleWeeks 規格。
+// [2026-06 v4] 本次美化方向（summaryHeader 玻璃光澤 + 細節補齊）：
+//  10. summaryHeader 背景 ZStack 末層加入 LinearGradient [.white.opacity(0.18), .clear]
+//      top→center 玻璃反光覆蓋層，對齊 OverviewView.monthlyBalanceCard v3 /
+//      FinanceOverviewView.totalAssetsCard v3 英雄卡玻璃光澤設計規格；
+//      補齊全 App 六張英雄卡（收入、支出、固定、收支、理財總覽、資產）最後缺失的一張。
+//  11. useEstimate 說明文字：從純 HStack 文字升級為半透明 Capsule 膠囊徽章
+//      （white.opacity(0.14) 底 + white.opacity(0.22) stroke 邊框），
+//      對齊 summaryHeader 頂部「預估」badge 膠囊設計語言，提升卡片內信息層次均值性。
+//  12. 日均收入文字：加入 contentTransition(.numericText())，
+//      讓日均數值隨月份累積更新時有平滑數字過渡動畫，對齊主金額大字已有的 numericText 規格。
 
 struct IncomeView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -237,9 +247,11 @@ struct IncomeView: View {
                     // 日均收入：對齊 FixedExpenseView.fixedSummaryHeader 輔助文字規格
                     if displayedIncome > 0 {
                         let day = Calendar.current.component(.day, from: Date())
+                        // [v4] 加入 contentTransition(.numericText())，讓日均數值更新有平滑過渡
                         Text("日均 " + fmt(displayedIncome / Double(max(day, 1))))
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.white.opacity(0.72))
+                            .contentTransition(.numericText())
                             .padding(.top, 1)
                     }
                 }
@@ -261,16 +273,22 @@ struct IncomeView: View {
                 }
             }
 
+            // [v4] useEstimate 說明文字升級為半透明 Capsule 膠囊徽章，對齊卡片頂部「預估」badge 設計語言
             if useEstimate {
                 HStack(spacing: 5) {
                     Image(systemName: "info.circle")
-                        .font(.caption2)
+                        .font(.system(size: 10, weight: .medium))
                     Text("顯示近 6 個月收入中位數預估值")
-                        .font(.caption2)
+                        .font(.system(size: 10, weight: .medium))
                     Spacer()
                 }
-                .foregroundStyle(.white.opacity(0.70))
-                .padding(.top, 10)
+                .foregroundStyle(.white.opacity(0.82))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.white.opacity(0.14))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 0.75))
+                .padding(.top, 8)
             }
 
             // KPI 橫列：累計收入 / 月均收入 / 固定月收
@@ -445,6 +463,13 @@ struct IncomeView: View {
                     .frame(width: 55, height: 55)
                     .offset(x: 60, y: 40)
                     .blur(radius: 8)
+                // [v4] 頂部玻璃光澤：LinearGradient white→clear top→center，
+                // 對齊 OverviewView.monthlyBalanceCard v3 / FinanceOverviewView.totalAssetsCard v3 規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
