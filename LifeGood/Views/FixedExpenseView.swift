@@ -141,12 +141,14 @@ struct FixedExpenseView: View {
     }
 
     private var fixedSummaryHeader: some View {
-        let yearlyEstimate = store.fixedExpenses.reduce(0.0) { total, expense in
+        // 先計算一次，避免 store.fixedExpenses（每次都 filter+sort 全部支出）被呼叫 3 次
+        let fixed = store.fixedExpenses
+        let yearlyEstimate = fixed.reduce(0.0) { total, expense in
             total + expense.amount * Double(occurrencesThisYear(for: expense))
         }
-        let count = store.fixedExpenses.count
+        let count = fixed.count
         let monthlyTotal = store.currentMonthFixedTotal
-        let taxTotal = store.fixedExpenses
+        let taxTotal = fixed
             .filter { $0.effectivelyTaxDeductible }
             .reduce(0.0) { $0 + monthlyEquivalent($1) }
         let dailyFixed = monthlyTotal / max(1, Double(Calendar.current.component(.day, from: Date())))
