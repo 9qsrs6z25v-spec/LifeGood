@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（ChildrenResumeView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. childCard → 左側 4pt 藍/粉依性別漸層強調條 + 44pt LinearGradient 漸層圖示圓 + 陰影，
 //      對齊 FamilyView.memberRow / StockView.stockCard 卡片規格
 //   2. 角色膠囊 → 從 RoundedRectangle(cornerRadius:4) 升級為 Capsule，
@@ -13,12 +13,27 @@ import SwiftUI
 //      對齊 FamilyView.emptyMembersPlaceholder / VariableExpenseView.emptyStateView 規格
 //   6. 卡片列表 → 交錯淡入 + 向上進場動畫（cardsAppeared），對齊 FamilyView membersAppeared 規格
 //   7. DateFormatter 改為靜態共用實例，避免每次 render 重新分配
+// [2026-06 v2] 本次美化方向：
+//   8. heroStatsCard：頂部新增「粉藍雙色漸層」英雄統計卡（兒子藍→女兒粉），
+//      含兒子/女兒/生涯紀錄 KPI 橫列 + 右上計數膠囊 + 散景裝飾圓，
+//      加入 heroAppeared spring 進場動畫，對齊 SubordinateView.summaryStatsBar 規格。
+//   9. childrenSectionHeader：清單區塊上方加入「Capsule 4pt 漸層側條 + 兒女 N 位計數膠囊」，
+//      對齊 StockView.activeStocksSectionHeader / FamilyView sectionHeader 標題規格。
+//  10. childCard 圖示圓：補入 Circle().stroke(accent.opacity(0.18), lineWidth:0.75) overlay，
+//      對齊 OverviewView.recentRow v3 stroke border 規格，視覺與 categoryRow 圖示圓一致。
+//  11. .navigationBarTitleDisplayMode(.large) 補齊，與其他列表頁 (IncomeView / StockView) 對齊。
 
 struct ChildrenResumeView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var viewingChild: FamilyMember?
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
+    /// [v2] 英雄統計卡進場動畫旗標
+    @State private var heroAppeared = false
+
+    // [v2] 英雄卡主題色：藍（兒子）→ 粉紫（女兒），兩色皆用
+    private let heroBlue = Color(red: 0.30, green: 0.52, blue: 0.94)
+    private let heroPink = Color(red: 0.88, green: 0.28, blue: 0.55)
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
@@ -37,33 +52,203 @@ struct ChildrenResumeView: View {
                     emptyState
                         .padding(.top, 60)
                 } else {
-                    LazyVStack(spacing: 12) {
-                        ForEach(Array(children.enumerated()), id: \.element.id) { idx, child in
-                            childCard(child)
-                                .opacity(cardsAppeared ? 1 : 0)
-                                .offset(y: cardsAppeared ? 0 : 18)
-                                .animation(
-                                    .spring(response: 0.45, dampingFraction: 0.82)
-                                        .delay(0.06 * Double(idx)),
-                                    value: cardsAppeared
-                                )
-                                .onTapGesture { viewingChild = child }
+                    VStack(spacing: 0) {
+                        // [v2] 英雄統計卡：粉藍漸層 + KPI + 進場動畫
+                        heroStatsCard
+                            .opacity(heroAppeared ? 1 : 0)
+                            .offset(y: heroAppeared ? 0 : 22)
+                            .onAppear {
+                                withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                    heroAppeared = true
+                                }
+                            }
+
+                        // [v2] 清單區塊標題
+                        childrenSectionHeader
+                            .padding(.top, 20)
+                            .padding(.bottom, 8)
+
+                        LazyVStack(spacing: 12) {
+                            ForEach(Array(children.enumerated()), id: \.element.id) { idx, child in
+                                childCard(child)
+                                    .opacity(cardsAppeared ? 1 : 0)
+                                    .offset(y: cardsAppeared ? 0 : 18)
+                                    .animation(
+                                        .spring(response: 0.45, dampingFraction: 0.82)
+                                            .delay(0.06 * Double(idx)),
+                                        value: cardsAppeared
+                                    )
+                                    .onTapGesture { viewingChild = child }
+                            }
                         }
-                    }
-                    .padding(16)
-                    .onAppear {
-                        withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.05)) {
-                            cardsAppeared = true
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.05)) {
+                                cardsAppeared = true
+                            }
                         }
                     }
                 }
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("兒女履歷")
+            .navigationBarTitleDisplayMode(.large)  // [v2] 對齊 IncomeView / StockView 大標題規格
             .sheet(item: $viewingChild) { child in
                 ChildDetailView(child: child)
             }
         }
+    }
+
+    // MARK: - [v2] 英雄統計卡
+
+    private var heroStatsCard: some View {
+        let sons = children.filter { $0.role == .son }.count
+        let daughters = children.filter { $0.role == .daughter }.count
+        let totalRecords = children.reduce(0) { $0 + $1.childRecords.count }
+
+        return VStack(spacing: 0) {
+            // 頂部：總數大字 + 右側性別膠囊
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("兒女總覽")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(children.count)")
+                            .font(.system(size: 42, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .contentTransition(.numericText())
+                        Text("位")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    if sons > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "figure.child")
+                                .font(.system(size: 10))
+                            Text("兒子 \(sons) 位")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(.white.opacity(0.22))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
+                    }
+                    if daughters > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "figure.child")
+                                .font(.system(size: 10))
+                            Text("女兒 \(daughters) 位")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(.white.opacity(0.22))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
+                    }
+                }
+            }
+
+            // KPI 橫列：兒子 / 女兒 / 生涯紀錄
+            HStack(spacing: 0) {
+                heroKpiCell(label: "兒子", value: "\(sons) 位")
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                heroKpiCell(label: "女兒", value: "\(daughters) 位")
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                heroKpiCell(label: "生涯紀錄", value: "\(totalRecords) 筆")
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 12)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 20)
+        .background(
+            ZStack {
+                // 粉藍雙色漸層：兒子藍（topLeading）→ 女兒粉紫（bottomTrailing）
+                LinearGradient(
+                    colors: [heroBlue, heroPink],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 右上散景裝飾圓（增加卡片層次感）
+                Circle()
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 130, height: 130)
+                    .offset(x: 85, y: -50)
+                    .blur(radius: 14)
+                // 左下補光
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 80, height: 80)
+                    .offset(x: -60, y: 40)
+                    .blur(radius: 10)
+                // 頂部玻璃光澤（對齊 OverviewView.monthlyBalanceCard v3 規格）
+                LinearGradient(
+                    colors: [.white.opacity(0.15), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: heroPink.opacity(0.38), radius: 16, x: 0, y: 8)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    // KPI 格（對齊 IncomeView / VariableExpenseView kpiCell 規格）
+    private func heroKpiCell(label: String, value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - [v2] 清單 Section Header
+
+    private var childrenSectionHeader: some View {
+        HStack(spacing: 10) {
+            // 4pt Capsule 漸層側條（對齊 OverviewView categoryBreakdownSection 標題規格）
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [heroBlue, heroBlue.opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 20)
+            Text("兒女清單")
+                .font(.subheadline.weight(.bold))
+            Spacer()
+            Text("\(children.count) 位")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(heroBlue)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(heroBlue.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(heroBlue.opacity(0.22), lineWidth: 0.75))
+        }
+        .padding(.horizontal, 16)
     }
 
     // MARK: - 兒女卡片（左側強調條 + 漸層圖示圓）
@@ -87,7 +272,7 @@ struct ChildrenResumeView: View {
                 .padding(.trailing, 14)
 
             HStack(spacing: 12) {
-                // 44pt 漸層圖示圓
+                // 44pt 漸層圖示圓 + [v2] stroke border
                 ZStack {
                     Circle()
                         .fill(
@@ -99,6 +284,10 @@ struct ChildrenResumeView: View {
                         )
                         .frame(width: 44, height: 44)
                         .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
+                    // [v2] stroke border：對齊 OverviewView.recentRow v3 stroke border 規格
+                    Circle()
+                        .stroke(accent.opacity(0.18), lineWidth: 0.75)
+                        .frame(width: 44, height: 44)
                     Image(systemName: isSon ? "figure.child" : "figure.child")
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(accent)
