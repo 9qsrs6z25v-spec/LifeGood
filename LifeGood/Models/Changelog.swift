@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "21.6", build: 466, date: "2026/06/16", notes: [
+            "【UI 美化】ChildrenResumeView：新增粉藍漸層英雄統計卡（兒子/女兒/生涯紀錄 KPI 三格）、玻璃光澤與 bokeh 裝飾圓、入場 spring 動畫。",
+            "【UI 美化】ChildrenResumeView：新增「兒女清單」Section Header（Capsule 漸層側條 + 位數徽章）。",
+            "【UI 美化】ChildrenResumeView：兒女卡片頭像圓圈新增 0.75pt stroke 細邊框，與全 App v3 圖示標準一致。",
+            "【UI 美化】ChildrenResumeView：啟用 .navigationBarTitleDisplayMode(.large) 大標題模式。"
+        ]),
         ChangelogEntry(version: "21.5", build: 465, date: "2026/06/16", notes: [
             "【靜態 Debug】全面複查 78 個 Swift 檔（強制解包、Optional 鏈結、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
             "【確認安全】無 force unwrap（!）、無 as! 型別轉換、無 fatalError；所有陣列索引存取均有邊界守衛；所有閉包以 [weak self] 捕捉。",
