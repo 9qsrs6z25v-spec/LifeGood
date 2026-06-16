@@ -279,6 +279,9 @@ struct ChildDetailView: View {
 
     @ViewBuilder
     private var dailyContent: some View {
+        // childGifts（雙重 filter + sort 全支出）一次捕捉後共用，
+        // 避免 isEmpty 判斷與 childGiftsSection 內部各自再算一次（原本 2 次 → 1 次）
+        let gifts = childGifts
         ForEach(Array(DailyRecordType.allCases.enumerated()), id: \.element) { idx, type in
             dailySection(type)
                 .opacity(contentAppeared ? 1 : 0)
@@ -299,8 +302,8 @@ struct ChildDetailView: View {
                 value: contentAppeared
             )
         // 收到的禮金（依本人名字連動到 .social 變動支出收受人）
-        if !childGifts.isEmpty {
-            childGiftsSection
+        if !gifts.isEmpty {
+            childGiftsSection(gifts)
                 .opacity(contentAppeared ? 1 : 0)
                 .offset(y: contentAppeared ? 0 : 14)
                 .animation(
@@ -326,10 +329,7 @@ struct ChildDetailView: View {
             .sorted { $0.date > $1.date }
     }
 
-    private var childGiftsSection: some View {
-        // 先算一次，避免 childGifts（雙重 filter + sort 全部支出）在 count/reduce/
-        // ForEach 內被呼叫 10 次
-        let gifts = childGifts
+    private func childGiftsSection(_ gifts: [Expense]) -> some View {
         let total = gifts.reduce(0) { $0 + $1.amount }
         return VStack(alignment: .leading, spacing: 0) {
             // 段落標題：Capsule 漸層側條 + 計數膠囊 + 合計

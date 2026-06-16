@@ -261,6 +261,9 @@ struct TaxOverviewView: View {
         let exps = taxExpenses
         let taxTotal = exps.reduce(0) { $0 + $1.amount }
         let taxRatio = estimatedAnnualIncome > 0 ? taxTotal / estimatedAnnualIncome * 100 : 0
+        // totalTaxSaving（taxSavingExpenses O(n) + 10×fixed 掃描）也在 taxSavingSection 使用，
+        // 此處先算一次供統計格共用，避免 body 同時渲染兩者時重複計算
+        let savingTotal = totalTaxSaving
 
         return VStack(spacing: 0) {
             // 頂部：稅費 + 年收入
@@ -320,7 +323,7 @@ struct TaxOverviewView: View {
                 taxStatDivider()
                 taxStatCell(icon: "doc.text.fill",        label: "稅費筆數", value: "\(exps.count) 筆", color: Color(red: 1.00, green: 0.78, blue: 0.75))
                 taxStatDivider()
-                taxStatCell(icon: "leaf.fill",            label: "節稅累積", value: fmtShort(totalTaxSaving), color: Color(red: 0.62, green: 1.00, blue: 0.75))
+                taxStatCell(icon: "leaf.fill",            label: "節稅累積", value: fmtShort(savingTotal), color: Color(red: 0.62, green: 1.00, blue: 0.75))
             }
         }
         .padding(20)

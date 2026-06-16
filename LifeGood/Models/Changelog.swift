@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "21.9", build: 469, date: "2026/06/16", notes: [
+            "【效能修復】TaxOverviewView.annualSummaryCard：totalTaxSaving（= taxSavingExpenses O(n) + 10×fixed 掃描）被 body 分別在 annualSummaryCard 與 taxSavingSection 各計算一次（共 2 次）；在 annualSummaryCard 頂端加入 let savingTotal = totalTaxSaving，統計格改用 savingTotal，21.8 已修 taxSavingSection 側，本次補齊 annualSummaryCard 側，整體降為 1 次計算。",
+            "【效能修復】ChildDetailView.dailyContent + childGiftsSection：childGifts（雙重 filter + sort 全支出）在 isEmpty 判斷（dailyContent 內）與 childGiftsSection 入口各呼叫一次，共 2 次；將 childGiftsSection 從 computed property 改為接受 [Expense] 參數的 func，dailyContent 頂端以 let gifts = childGifts 單次捕捉後傳入，掃描次數 2→1。"
+        ]),
         ChangelogEntry(version: "21.8", build: 468, date: "2026/06/16", notes: [
             "【效能修復】ChildDetailView.childGiftsSection：childGifts（雙重 filter + sort 全支出）原本在 isEmpty 判斷、reduce、count、8 個 SocialSubCategory ForEach 內共被呼叫 10 次；改在 childGiftsSection 頂端以 let gifts = childGifts 單次捕捉後共用，掃描次數從 10 次降至 1 次。",
             "【效能修復】TaxOverviewView.totalTaxSaving：原實作對 taxSavingExpenses（O(n) filter+sort）逐一呼叫 10 個 TaxSavingSubCategory，共計 10 次 O(n) 掃描；改以一次 reduce 加總全量直接支出（等價於 10 個子分類之和），掃描次數 10→1。",
