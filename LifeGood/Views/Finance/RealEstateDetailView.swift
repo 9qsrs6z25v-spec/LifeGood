@@ -5,7 +5,7 @@ import QuickLook
 import ImageIO
 
 // MARK: - 美化紀錄（RealEstateDetailView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. flashCard：加入 cardAppeared spring 進場動畫（透明度 + Y 位移），
 //      對齊 SavingsInsuranceView / StockDetailView 閃卡進場規格。
 //   2. tabPicker：從系統 .segmented 升級為自訂彩色 Capsule Pill 列（@Namespace + matchedGeometryEffect），
@@ -18,6 +18,27 @@ import ImageIO
 //   4. sectionHeader：補 Capsule 側條（.secondary 色），對齊 collapsibleSection 規格。
 //   5. emptySectionRow：加入 tray 圖示，對齊 FixedExpenseView 空狀態佔位規格，
 //      避免空白感。
+//
+// [2026-06 v2] 本次美化方向：
+//   6. mortgageItems 列（理財分頁）→ 36pt 藍色漸層圖示圓（building.columns.fill）+
+//      標題標籤 RoundedRectangle(cornerRadius:4) → Capsule + 0.6pt 細邊框 +
+//      繳期標籤改為 tertiarySystemFill 底色 Capsule 膠囊；
+//      金額字型升級 .subheadline.bold() → .system(size:15,weight:.bold,design:.rounded)
+//      + contentTransition(.numericText())，對齊 IncomeView.incomeRow 數值規格。
+//   7. paidItems 列 → 36pt 紫色漸層圖示圓（banknote.fill）+ 標題 Capsule 升級；
+//      日期從純文字升級為 tertiarySystemFill Capsule 膠囊徽章，對齊 CareerView.careerRow 規格；
+//      金額字型同步升級。
+//   8. variableExpenses 列 → 36pt 橘色漸層圖示圓（依 ve.category.icon 取圖示）+ 分類 Capsule 升級；
+//      名稱從 Spacer 分開改為標籤列同排（.caption2 secondary），日期 Capsule 膠囊化；
+//      金額字型升級，對齊 ExpenseRow / VehicleDetailView 視覺規格。
+//   9. insuranceContent → 36pt indigo 漸層圖示圓（shield.fill）替代原 24pt 平面圖示；
+//      保單號 .foregroundStyle 改為 .primary（有效）/ .tertiary（空），
+//      金額升級 .system(size:15,weight:.bold,design:.rounded)，
+//      對齊 SavingsInsuranceView.insuranceCard 保險圖示視覺規格。
+//  10. propertyAssetsContent 分類標籤 RoundedRectangle(cornerRadius:4) → Capsule + 細邊框，
+//      對齊全 App 統一 Capsule 標籤規格。
+//  11. calcRow 金額字型：.subheadline.bold() → .system(size:14,weight:.bold,design:.rounded)
+//      對齊 kpiCell / collapsibleSection summary 字型層級。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -402,7 +423,10 @@ struct RealEstateDetailView: View {
         HStack {
             Text(label).font(.caption).foregroundStyle(.secondary)
             Spacer()
-            Text(value).font(.subheadline.bold()).foregroundStyle(color)
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .contentTransition(.numericText())
         }
         .padding(.horizontal).padding(.vertical, 6)
     }
@@ -435,19 +459,45 @@ struct RealEstateDetailView: View {
                             onCopy: { duplicateMortgageItem(m) },
                             onDelete: { deleteMortgageItem(m) }
                         ) {
-                            HStack {
-                                Text(m.title.isEmpty ? "房貸" : m.title)
-                                    .font(.caption.weight(.medium))
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Color.blue.opacity(0.1))
-                                    .foregroundStyle(.blue)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                                Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                Text(fmt(m.amount) + "/月").font(.subheadline.bold())
+                            // [v2] 36pt 藍色漸層圖示圓 + Capsule 標籤 + 繳期膠囊 + 升級金額字型
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    Circle()
+                                        .fill(LinearGradient(
+                                            colors: [Color.blue.opacity(0.18), Color.blue.opacity(0.07)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        ))
+                                        .frame(width: 36, height: 36)
+                                        .shadow(color: Color.blue.opacity(0.16), radius: 4, x: 0, y: 2)
+                                        .overlay(Circle().stroke(Color.blue.opacity(0.18), lineWidth: 0.8))
+                                    Image(systemName: "building.columns.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Color.blue)
+                                }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 5) {
+                                        Text(m.title.isEmpty ? "房貸" : m.title)
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.blue)
+                                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                            .background(Color.blue.opacity(0.10))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
+                                        Text("\(m.elapsedPeriods)/\(m.totalPeriods) 期")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Color(.tertiarySystemFill))
+                                            .clipShape(Capsule())
+                                    }
+                                    Text(fmt(m.amount) + "/月")
+                                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                                        .foregroundStyle(.primary)
+                                        .contentTransition(.numericText())
+                                }
+                                Spacer(minLength: 4)
                             }
-                            .padding(.horizontal).padding(.vertical, 8)
+                            .padding(.horizontal, 12).padding(.vertical, 10)
                             .contentShape(Rectangle())
                             .onTapGesture { openLinkedExpense(id: m.linkedExpenseId) }
                         }
@@ -456,7 +506,9 @@ struct RealEstateDetailView: View {
                         Text("已繳貸款").font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Text(fmt(estate.totalMortgagePaid))
-                            .font(.subheadline.bold()).foregroundStyle(.blue)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(.blue)
+                            .contentTransition(.numericText())
                     }
                     .padding(.horizontal).padding(.vertical, 6)
                 }
@@ -487,22 +539,45 @@ struct RealEstateDetailView: View {
                             onCopy: { duplicatePaidItem(p) },
                             onDelete: { deletePaidItem(p) }
                         ) {
-                            HStack(alignment: .top) {
-                                Text(p.title.isEmpty ? "已付款" : p.title)
-                                    .font(.caption.weight(.medium))
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Color.purple.opacity(0.1))
-                                    .foregroundStyle(.purple)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(fmt(p.amount)).font(.subheadline.bold())
-                                    Text(fmtDate(p.date))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                            // [v2] 36pt 紫色漸層圖示圓 + Capsule 標籤 + 日期 Capsule 膠囊 + 升級金額字型
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    Circle()
+                                        .fill(LinearGradient(
+                                            colors: [Color.purple.opacity(0.18), Color.purple.opacity(0.07)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        ))
+                                        .frame(width: 36, height: 36)
+                                        .shadow(color: Color.purple.opacity(0.16), radius: 4, x: 0, y: 2)
+                                        .overlay(Circle().stroke(Color.purple.opacity(0.18), lineWidth: 0.8))
+                                    Image(systemName: "banknote.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Color.purple)
                                 }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 5) {
+                                        Text(p.title.isEmpty ? "已付款" : p.title)
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.purple)
+                                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                            .background(Color.purple.opacity(0.10))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(Color.purple.opacity(0.22), lineWidth: 0.6))
+                                        Text(fmtDate(p.date))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Color(.tertiarySystemFill))
+                                            .clipShape(Capsule())
+                                    }
+                                    Text(fmt(p.amount))
+                                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                                        .foregroundStyle(.primary)
+                                        .contentTransition(.numericText())
+                                }
+                                Spacer(minLength: 4)
                             }
-                            .padding(.horizontal).padding(.vertical, 8)
+                            .padding(.horizontal, 12).padding(.vertical, 10)
                             .contentShape(Rectangle())
                             .onTapGesture { openLinkedExpense(id: p.linkedExpenseId) }
                         }
@@ -524,15 +599,17 @@ struct RealEstateDetailView: View {
                         Text("月淨現金流").font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Text(fmt(flow))
-                            .font(.subheadline.bold())
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
                             .foregroundStyle(flow >= 0 ? .green : .red)
+                            .contentTransition(.numericText())
                     }
                     .padding(.horizontal).padding(.vertical, 8)
                     HStack {
                         Text("年租金報酬率").font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Text(String(format: "%.2f%%", estate.rentalYield))
-                            .font(.subheadline.bold()).foregroundStyle(.blue)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(.blue)
                     }
                     .padding(.horizontal).padding(.vertical, 8)
                 }
@@ -576,30 +653,51 @@ struct RealEstateDetailView: View {
                         onCopy: { duplicateVariableExpenseItem(ve) },
                         onDelete: { deleteVariableExpenseItem(ve) }
                     ) {
-                        HStack(alignment: .top) {
-                            Text(ve.category.rawValue)
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.1))
-                                .foregroundStyle(.orange)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                            if !ve.name.isEmpty {
-                                Text(ve.name)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.leading)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else {
-                                Spacer()
+                        // [v2] 36pt 橘色漸層圖示圓（用 ve.category.icon）+ Capsule 標籤 + 日期膠囊 + 升級金額字型
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill(LinearGradient(
+                                        colors: [Color.orange.opacity(0.18), Color.orange.opacity(0.07)],
+                                        startPoint: .topLeading, endPoint: .bottomTrailing
+                                    ))
+                                    .frame(width: 36, height: 36)
+                                    .shadow(color: Color.orange.opacity(0.16), radius: 4, x: 0, y: 2)
+                                    .overlay(Circle().stroke(Color.orange.opacity(0.18), lineWidth: 0.8))
+                                Image(systemName: ve.category.icon)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Color.orange)
                             }
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(fmt(ve.amount)).font(.subheadline.bold())
-                                Text(fmtDate(ve.date))
-                                    .font(.caption2).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 5) {
+                                    Text(ve.category.rawValue)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.orange)
+                                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                        .background(Color.orange.opacity(0.10))
+                                        .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+                                    if !ve.name.isEmpty {
+                                        Text(ve.name)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Text(fmtDate(ve.date))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color(.tertiarySystemFill))
+                                        .clipShape(Capsule())
+                                }
+                                Text(fmt(ve.amount))
+                                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                    .contentTransition(.numericText())
                             }
+                            Spacer(minLength: 4)
                         }
-                        .padding(.horizontal).padding(.vertical, 8)
+                        .padding(.horizontal, 12).padding(.vertical, 10)
                         .contentShape(Rectangle())
                         .onTapGesture { openLinkedExpense(id: ve.linkedExpenseId) }
                     }
@@ -910,18 +1008,36 @@ struct RealEstateDetailView: View {
 
     @ViewBuilder
     private var insuranceContent: some View {
+        // [v2] 36pt indigo 漸層圖示圓 + 升級金額字型，對齊 SavingsInsuranceView.insuranceCard 視覺規格
         ForEach(estate.insuranceItems) { ins in
-            HStack {
-                Image(systemName: "shield.fill").foregroundStyle(.indigo)
-                Text(ins.policyNumber.isEmpty ? "未填險號" : ins.policyNumber)
-                    .font(.subheadline)
-                    .foregroundStyle(ins.policyNumber.isEmpty ? .tertiary : .primary)
-                Spacer()
-                if ins.amount > 0 {
-                    Text(fmt(ins.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [Color.indigo.opacity(0.18), Color.indigo.opacity(0.07)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 36, height: 36)
+                        .shadow(color: Color.indigo.opacity(0.16), radius: 4, x: 0, y: 2)
+                        .overlay(Circle().stroke(Color.indigo.opacity(0.18), lineWidth: 0.8))
+                    Image(systemName: "shield.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.indigo)
                 }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(ins.policyNumber.isEmpty ? "未填險號" : ins.policyNumber)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(ins.policyNumber.isEmpty ? .tertiary : .primary)
+                    if ins.amount > 0 {
+                        Text(fmt(ins.amount))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .contentTransition(.numericText())
+                    }
+                }
+                Spacer(minLength: 4)
             }
-            .padding(.horizontal).padding(.vertical, 8)
+            .padding(.horizontal, 12).padding(.vertical, 10)
         }
     }
 
@@ -929,20 +1045,27 @@ struct RealEstateDetailView: View {
 
     @ViewBuilder
     private var propertyAssetsContent: some View {
+        // [v2] 分類標籤 RoundedRectangle(cornerRadius:4) → Capsule + 細邊框，
+        //      金額字型升級，對齊全 App 統一 Capsule 標籤規格
         ForEach(estate.propertyAssets) { asset in
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack {
                     Text(asset.category.rawValue)
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.orange.opacity(0.1))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.orange)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(Color.orange.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
                     Text(asset.name.isEmpty ? "—" : asset.name)
                         .font(.subheadline.weight(.semibold))
-                    Spacer()
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
                     if asset.amount > 0 {
-                        Text(fmt(asset.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
+                        Text(fmt(asset.amount))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .contentTransition(.numericText())
                     }
                 }
                 HStack(spacing: 10) {
@@ -956,7 +1079,7 @@ struct RealEstateDetailView: View {
                     }
                 }
             }
-            .padding(.horizontal).padding(.vertical, 8)
+            .padding(.horizontal, 12).padding(.vertical, 10)
         }
     }
 
@@ -1725,11 +1848,12 @@ struct RealEstateDetailView: View {
                 HStack(spacing: 6) {
                     if !m.label.isEmpty {
                         Text(m.label)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(color.opacity(0.12))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(color)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(color.opacity(0.12))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
                     }
                     if !m.userNumber.isEmpty {
                         Text("用戶編號 \(m.userNumber)").font(.caption2).foregroundStyle(.secondary)
