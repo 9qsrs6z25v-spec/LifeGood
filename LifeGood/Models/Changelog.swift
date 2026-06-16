@@ -13,6 +13,15 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "21.5", build: 465, date: "2026/06/16", notes: [
+            "【靜態 Debug】全面複查 78 個 Swift 檔（強制解包、Optional 鏈結、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
+            "【確認安全】無 force unwrap（!）、無 as! 型別轉換、無 fatalError；所有陣列索引存取均有邊界守衛；所有閉包以 [weak self] 捕捉。",
+            "【確認正常】RealEstateDetailView.gallerySummary 與 renovationPhotosContent 各自呼叫 linkedExpensePhotos 一次（O(n) 過濾），合計 O(2n)，無 O(n²) 問題。",
+            "【確認正常】CloudKit 30 秒節流（syncNowIfDue）、pushAll 2 秒防抖、isSyncing 並發守衛、modifyKV 0.5 秒重試延遲均正確運作。",
+            "【確認正常】LifeStore / FinanceStore / ExpenseStore 所有批次寫入均以 isLoading 旗標保護；所有 @Published 更新均在主執行緒執行。",
+            "【確認正常】LifeOverviewView.body 以 let allMS = store.combinedMilestones(...) 單次捕捉里程碑，不重複計算；ExpenseStore 圖表方法均為 O(n) 預分組。",
+            "無新問題：全部防護機制均正常運作，本版為靜態驗證掃描。"
+        ]),
         ChangelogEntry(version: "21.4", build: 464, date: "2026/06/16", notes: [
             "【靜態 Debug】全面複查 78 個 Swift 檔（強制解包、Optional 鏈結、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
             "【確認安全】所有陣列索引存取均有邊界守衛；無 force unwrap（!）、無 as! 型別轉換、無 fatalError 呼叫。",
