@@ -21,6 +21,20 @@ import SwiftUI
 //      視覺更立體，對齊 totalAssetsCard mini 彩條設計語言。
 //   8. cashFlowSideItem 圖示：RoundedRectangle(cornerRadius:10) → Circle + LinearGradient + stroke，
 //      補齊與 cashFlowNetItem（已用 Circle）的視覺一致性，對齊同卡片內設計均值。
+// [2026-06 v3] 本次美化方向：
+//   9. totalAssetsCard 頂部玻璃光澤：background ZStack 最後加入
+//      LinearGradient [white.opacity(0.18), clear] top→center，
+//      對齊 OverviewView.monthlyBalanceCard v3 玻璃反光規格。
+//  10. assetCard 圖示圓：30pt pure color.opacity(0.15) →
+//      34pt LinearGradient (0.22→0.08) + stroke border (0.18, 0.75pt)，
+//      對齊 OverviewView.summaryCard v3 圖示圓規格；圖示字體 13→14pt。
+//  11. assetCard 頂端色條 glow overlay：疊加 LinearGradient [white.opacity(0.30), clear]
+//      top→bottom，讓色條呈現立體光澤，對齊 ChartView.expenseTypeBreakdown v3 glow 規格。
+//  12. cashFlowNetItem 圖示圓：Circle().fill(netColor.opacity(0.14)) →
+//      LinearGradient (0.20→0.08) + stroke (0.22, 1pt)，
+//      補齊 cashFlowSideItem v2 升級後 cashFlowNetItem 殘留的視覺不一致。
+//  13. assetCard 筆數文字：加入 lineLimit(1) + minimumScaleFactor(0.8) +
+//      contentTransition(.numericText())，防止長數字換行且數值變化流暢。
 
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
@@ -242,6 +256,12 @@ struct FinanceOverviewView: View {
                     .frame(width: 90, height: 90)
                     .offset(x: -70, y: 55)
                     .blur(radius: 10)
+                // [v3] 頂部玻璃光澤：LinearGradient white→clear，對齊 OverviewView.monthlyBalanceCard v3 規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -292,16 +312,35 @@ struct FinanceOverviewView: View {
                         startPoint: .leading, endPoint: .trailing
                     )
                 )
+                // [v3] glow overlay：頂部白色高亮，對齊 ChartView.expenseTypeBreakdown v3 glow 規格
+                .overlay(
+                    LinearGradient(
+                        colors: [.white.opacity(0.30), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 2))
+                )
                 .frame(height: 4)
                 .padding(.bottom, 10)
 
             HStack(spacing: 7) {
+                // [v3] 圖示圓：30pt pure → 34pt LinearGradient + stroke，對齊 OverviewView.summaryCard v3 規格
                 ZStack {
                     Circle()
-                        .fill(color.opacity(0.15))
-                        .frame(width: 30, height: 30)
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.22), color.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 34, height: 34)
+                    Circle()
+                        .stroke(color.opacity(0.18), lineWidth: 0.75)
+                        .frame(width: 34, height: 34)
                     Image(systemName: icon)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(color)
                 }
                 VStack(alignment: .leading, spacing: 1) {
@@ -309,9 +348,13 @@ struct FinanceOverviewView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    // [v3] 筆數文字：lineLimit + minimumScaleFactor + contentTransition 防止長數字換行
                     Text("\(count) 筆")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .contentTransition(.numericText())
                 }
                 Spacer(minLength: 0)
             }
@@ -676,9 +719,19 @@ struct FinanceOverviewView: View {
         let isPositive = flow >= 0
         let netColor: Color = isPositive ? .green : .red
         return VStack(spacing: 7) {
+            // [v3] 圖示圓：plain fill → LinearGradient + stroke，補齊 cashFlowSideItem v2 升級後的視覺一致性
             ZStack {
                 Circle()
-                    .fill(netColor.opacity(0.14))
+                    .fill(
+                        LinearGradient(
+                            colors: [netColor.opacity(0.20), netColor.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 38, height: 38)
+                Circle()
+                    .stroke(netColor.opacity(0.22), lineWidth: 1)
                     .frame(width: 38, height: 38)
                 Image(systemName: isPositive ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
                     .font(.system(size: 18, weight: .semibold))
