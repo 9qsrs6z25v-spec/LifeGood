@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.1", build: 470, date: "2026/06/16", notes: [
+            "【效能修復】ChildDetailView.consumptionSection：consumptionExpenses（雙重 filter + sort 全支出，O(n log n)）原本在 section 內被呼叫 8 次——count 判斷×2、isEmpty 判斷×2、reduce 合計×1、prefix(20) 取資料×1、count Divider 判斷×1、count 超量提示×1；改在 consumptionSection 頂端以 let exps = consumptionExpenses 單次捕捉後全段共用（對齊 dailyContent 的 let gifts = childGifts 既有規格），掃描次數 8→1。",
+            "【靜態掃描】全面複查 78 個 Swift 檔：無強制解包越界、無新增 retain cycle、CloudKit 30 秒節流與 2 秒防抖均正常；消費段落修復為本版唯一實質改動。"
+        ]),
         ChangelogEntry(version: "21.9", build: 469, date: "2026/06/16", notes: [
             "【效能修復】TaxOverviewView.annualSummaryCard：totalTaxSaving（= taxSavingExpenses O(n) + 10×fixed 掃描）被 body 分別在 annualSummaryCard 與 taxSavingSection 各計算一次（共 2 次）；在 annualSummaryCard 頂端加入 let savingTotal = totalTaxSaving，統計格改用 savingTotal，21.8 已修 taxSavingSection 側，本次補齊 annualSummaryCard 側，整體降為 1 次計算。",
             "【效能修復】ChildDetailView.dailyContent + childGiftsSection：childGifts（雙重 filter + sort 全支出）在 isEmpty 判斷（dailyContent 內）與 childGiftsSection 入口各呼叫一次，共 2 次；將 childGiftsSection 從 computed property 改為接受 [Expense] 參數的 func，dailyContent 頂端以 let gifts = childGifts 單次捕捉後傳入，掃描次數 2→1。"
