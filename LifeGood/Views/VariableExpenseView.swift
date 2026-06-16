@@ -171,20 +171,6 @@ struct VariableExpenseView: View {
 
     private var trailingMonthlyAverageVariable: Double { cachedTrailingMonthlyAvg }
 
-    // 支出 vs 月均比率（用於雙軌下軌，上限 1.0 供進度條寬度計算）
-    private var spendingVsAvgRatio: Double {
-        guard trailingMonthlyAverageVariable > 0 else { return 0 }
-        return min(store.currentMonthVariableTotal / trailingMonthlyAverageVariable, 1.0)
-    }
-
-    // 下軌配色：超出月均 → 粉紅；超速消費（超前月進度）→ 暖黃；正常 → 白色
-    private var spendingVsAvgBarColor: Color {
-        guard trailingMonthlyAverageVariable > 0 else { return .white.opacity(0.82) }
-        let ratio = store.currentMonthVariableTotal / trailingMonthlyAverageVariable
-        if ratio > 1.0 { return Color(red: 1.0, green: 0.78, blue: 0.75).opacity(0.90) }
-        if ratio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90) }
-        return .white.opacity(0.82)
-    }
 
     private func kpiCell(label: String, value: String) -> some View {
         VStack(spacing: 3) {
@@ -212,8 +198,10 @@ struct VariableExpenseView: View {
     }
 
     private var monthSummaryHeader: some View {
-        let count = store.currentMonthExpenses.filter { $0.expenseType == .variable }.count
-        let total = store.currentMonthVariableTotal
+        // 一次 filter 同時算筆數與總額，避免 currentMonthExpenses（掃全部支出）被呼叫兩次
+        let monthlyVariable = store.currentMonthExpenses.filter { $0.expenseType == .variable }
+        let count = monthlyVariable.count
+        let total = monthlyVariable.reduce(0) { $0 + $1.amount }
         let dayOfMonth = Calendar.current.component(.day, from: Date())
         let dailyAvg = total / Double(max(dayOfMonth, 1))
 
@@ -265,6 +253,16 @@ struct VariableExpenseView: View {
 
             // 雙軌進度條（有近3月均值時）：月進度（上薄軌）+ 支出進度（下厚軌 + 指示針）
             if trailingMonthlyAverageVariable > 0 {
+                // rawRatio 計算一次，供進度條寬度、配色、標籤文字共用，
+                // 避免在各 closure 內重複呼叫 store.currentMonthVariableTotal
+                let avg = trailingMonthlyAverageVariable
+                let rawRatio = total / avg
+                let barRatio = min(rawRatio, 1.0)
+                let barColor: Color = {
+                    if rawRatio > 1.0 { return Color(red: 1.0, green: 0.78, blue: 0.75).opacity(0.90) }
+                    if rawRatio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90) }
+                    return .white.opacity(0.82)
+                }()
                 VStack(spacing: 5) {
                     // ① 月進度軌（薄軌，半透明白）
                     GeometryReader { geo in
@@ -281,9 +279,9 @@ struct VariableExpenseView: View {
                         ZStack(alignment: .leading) {
                             Capsule().fill(.white.opacity(0.18)).frame(height: 6)
                             Capsule()
-                                .fill(spendingVsAvgBarColor)
-                                .frame(width: geo.size.width * spendingVsAvgRatio, height: 6)
-                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingVsAvgRatio)
+                                .fill(barColor)
+                                .frame(width: geo.size.width * barRatio, height: 6)
+                                .animation(.spring(response: 0.7, dampingFraction: 0.8), value: barRatio)
                             // 月進度指示針（細白豎棒）
                             Capsule()
                                 .fill(.white.opacity(0.92))
@@ -296,18 +294,16 @@ struct VariableExpenseView: View {
                     .frame(height: 6)
                     HStack {
                         HStack(spacing: 3) {
-                            let rawRatio = store.currentMonthVariableTotal / trailingMonthlyAverageVariable
                             if rawRatio > monthProgress + 0.08 {
                                 Image(systemName: rawRatio > 1.0 ? "flame.fill" : "exclamationmark.triangle.fill")
                                     .font(.system(size: 8))
                             }
-                            Text("支出 \(Int(store.currentMonthVariableTotal / trailingMonthlyAverageVariable * 100))%（均）")
+                            Text("支出 \(Int(rawRatio * 100))%（均）")
                         }
                         .font(.caption2)
                         .foregroundStyle({
-                            let r = store.currentMonthVariableTotal / trailingMonthlyAverageVariable
-                            if r > 1.0 { return Color(red: 1.0, green: 0.78, blue: 0.75) }
-                            if r > monthProgress + 0.08 { return Color(red: 1.0, green: 0.90, blue: 0.55) }
+                            if rawRatio > 1.0 { return Color(red: 1.0, green: 0.78, blue: 0.75) }
+                            if rawRatio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.90, blue: 0.55) }
                             return .white.opacity(0.60) as Color
                         }())
                         Spacer()
