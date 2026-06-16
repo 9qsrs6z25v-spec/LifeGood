@@ -13,6 +13,22 @@ import MapKit
 //   4. itemRow → 圖示從 40pt 純色升至 44pt LinearGradient 漸層圓 + 陰影，
 //      日期改為彩色膠囊徽章，對齊 ExpenseRow / incomeRow 視覺規格。
 //   5. 加入 navigationBarTitleDisplayMode(.large)，與其他主列表頁對齊。
+// [2026-06 v2] 本次美化方向：
+//   6. summaryHeader 頂部玻璃光澤：背景 ZStack 末層加入 LinearGradient [white.opacity(0.18), clear]
+//      top→center 玻璃反光覆蓋層，對齊 OverviewView.monthlyBalanceCard v3 /
+//      FinanceOverviewView.totalAssetsCard v3 英雄卡玻璃光澤規格。
+//   7. heroKpiCell 圖示圓：純色 color.opacity(0.22) 30pt →
+//      LinearGradient (0.24→0.09) 32pt + Circle stroke (color.opacity(0.18), 0.75pt)，
+//      對齊 OverviewView.summaryCard v3 / FinanceOverviewView.assetCard 圖示圓規格；
+//      value 文字加 minimumScaleFactor(0.72) 防止大數字截斷。
+//   8. itemRow 左側 4pt 強調條：持有中→紫色漸層，已售出→紅色漸層，
+//      對齊 RealEstateView.estateCard / StockView.stockCard 左側強調條規格。
+//   9. itemRow 右側估值 + 增值率膠囊：補入 item.currentValue.ntdWanString 估值大字
+//      (.system(size:15, weight:.bold, design:.rounded))，
+//      增值率改為彩色 Capsule 膠囊（綠漲/紅跌 + 細邊框 0.5pt），
+//      對齊 RealEstateView.estateCard 估值 + 增值率膠囊設計語言。
+//  10. cityPanel 物件列交錯進場動畫：加入 cityPanelRowsAppeared 旗標 + 0.04s stagger，
+//      對齊 IncomeView.incomeListSections / StockView.cardsAppeared 規格。
 
 struct LifeRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -24,6 +40,8 @@ struct LifeRealEstateView: View {
     @State private var showPremiumAlert = false
     @State private var headerAppeared = false
     @State private var emptyIconPulse = false
+    // [v2] cityPanel 物件列交錯進場動畫旗標
+    @State private var cityPanelRowsAppeared = false
 
     private static let taiwanRegion = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 23.75, longitude: 121.0),
@@ -202,6 +220,13 @@ struct LifeRealEstateView: View {
                     .frame(width: 55, height: 55)
                     .offset(x: 80, y: 40)
                     .blur(radius: 10)
+                // [v2] 頂部玻璃反光覆蓋層（對齊 OverviewView.monthlyBalanceCard v3 規格）
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+                .allowsHitTesting(false)
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -218,19 +243,29 @@ struct LifeRealEstateView: View {
         }
     }
 
+    // [v2] heroKpiCell：圖示圓升級為 32pt LinearGradient + stroke border，對齊 OverviewView.summaryCard v3
     private func heroKpiCell(icon: String, label: String, value: String, color: Color) -> some View {
         VStack(spacing: 5) {
             ZStack {
                 Circle()
-                    .fill(color.opacity(0.22))
-                    .frame(width: 30, height: 30)
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.24), color.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 32, height: 32)
+                    .overlay(Circle().stroke(color.opacity(0.18), lineWidth: 0.75))
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(color)
             }
             Text(value)
                 .font(.system(size: 16, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
+                .minimumScaleFactor(0.72)
+                .lineLimit(1)
             Text(label)
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.65))
@@ -475,6 +510,7 @@ struct LifeRealEstateView: View {
                 .fill(Color(.separator).opacity(0.20))
                 .frame(height: 0.5)
 
+            // [v2] 物件列進場動畫：每次縣市 panel 開啟時重置並重播
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
@@ -484,13 +520,26 @@ struct LifeRealEstateView: View {
                             itemRow(item)
                         }
                         .buttonStyle(.plain)
+                        .opacity(cityPanelRowsAppeared ? 1 : 0)
+                        .offset(y: cityPanelRowsAppeared ? 0 : 12)
+                        .animation(
+                            .spring(response: 0.44, dampingFraction: 0.80)
+                                .delay(0.04 * Double(idx)),
+                            value: cityPanelRowsAppeared
+                        )
                         if idx < items.count - 1 {
-                            Divider().padding(.leading, 58)
+                            Divider().padding(.leading, 74)
                         }
                     }
                 }
             }
             .frame(maxHeight: 260)
+            .onAppear {
+                cityPanelRowsAppeared = false
+                withAnimation(.spring(response: 0.44, dampingFraction: 0.80).delay(0.08)) {
+                    cityPanelRowsAppeared = true
+                }
+            }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -501,11 +550,29 @@ struct LifeRealEstateView: View {
         .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
     }
 
+    // [v2] itemRow：加入左側 4pt 強調條 + 右側估值大字 + 增值率彩色膠囊
     private func itemRow(_ item: RealEstate) -> some View {
         let isSold = item.soldDate != nil
         let accent: Color = isSold ? .red : .purple
-        return HStack(spacing: 12) {
-            // 44pt LinearGradient 漸層圓 + 陰影（對齊 ExpenseRow 規格）
+        let rate = item.appreciationRate
+        let rateColor: Color = rate >= 0 ? .green : .red
+        let rateIcon = rate >= 0 ? "arrow.up.right" : "arrow.down.right"
+
+        return HStack(spacing: 0) {
+            // [v2] 左側 4pt 漸層強調條（對齊 RealEstateView.estateCard / StockView.stockCard 規格）
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4)
+                .padding(.vertical, 10)
+                .padding(.trailing, 10)
+
+            // 44pt LinearGradient 漸層圓 + stroke + 陰影（對齊 ExpenseRow 規格）
             ZStack {
                 Circle()
                     .fill(
@@ -517,10 +584,12 @@ struct LifeRealEstateView: View {
                     )
                     .frame(width: 44, height: 44)
                     .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
+                    .overlay(Circle().stroke(accent.opacity(0.18), lineWidth: 0.75))
                 Image(systemName: isSold ? "building.2" : "building.2.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(accent)
             }
+            .padding(.trailing, 12)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.name)
@@ -563,11 +632,35 @@ struct LifeRealEstateView: View {
 
             Spacer(minLength: 4)
 
+            // [v2] 右側：估值大字 + 增值率彩色膠囊（對齊 RealEstateView.estateCard 設計語言）
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(item.currentValue.ntdWanString)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                if item.purchasePrice > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: rateIcon)
+                            .font(.system(size: 8, weight: .bold))
+                        Text(String(format: "%.1f%%", abs(rate)))
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(rateColor)
+                    .padding(.horizontal, 6).padding(.vertical, 2.5)
+                    .background(rateColor.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(rateColor.opacity(0.22), lineWidth: 0.5))
+                }
+            }
+            .padding(.trailing, 6)
+
             Image(systemName: "chevron.right")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.tertiary)
+                .padding(.trailing, 4)
         }
-        .padding(.horizontal, 14).padding(.vertical, 11)
+        .padding(.leading, 10).padding(.vertical, 10)
         .contentShape(Rectangle())
     }
 
