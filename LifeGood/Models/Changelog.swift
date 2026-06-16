@@ -13,6 +13,15 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "21.8", build: 468, date: "2026/06/16", notes: [
+            "【效能修復】ChildDetailView.childGiftsSection：childGifts（雙重 filter + sort 全支出）原本在 isEmpty 判斷、reduce、count、8 個 SocialSubCategory ForEach 內共被呼叫 10 次；改在 childGiftsSection 頂端以 let gifts = childGifts 單次捕捉後共用，掃描次數從 10 次降至 1 次。",
+            "【效能修復】TaxOverviewView.totalTaxSaving：原實作對 taxSavingExpenses（O(n) filter+sort）逐一呼叫 10 個 TaxSavingSubCategory，共計 10 次 O(n) 掃描；改以一次 reduce 加總全量直接支出（等價於 10 個子分類之和），掃描次數 10→1。",
+            "【效能修復】TaxOverviewView.taxSavingSection：totalTaxSaving 被呼叫 3 次（sectionHeader 條件、isEmpty 判斷、fmt 顯示）；改以 let savingTotal = totalTaxSaving 在 section 頂端單次捕捉後共用；同步移除 sectionHeader 中恒回傳 nil 的無效三元運算。"
+        ]),
+        ChangelogEntry(version: "21.7", build: 467, date: "2026/06/16", notes: [
+            "【效能修復】OverviewView.monthlyBalanceCard：spendingRatio / spendingBarColor 為 struct-level computed property，在 body 內被存取 10+ 次，每次均重新執行 currentMonthTotal（= currentMonthVariableTotal + currentMonthFixedTotal，各含一次 O(n) 掃描）；移除兩個 computed property，改在 monthlyBalanceCard 頂端以 let total / spendingRatio / barColor 各算一次，GeometryReader 等閉包直接捕捉局部常數。",
+            "【效能修復】OverviewView.todayCard：store.todayTotal（O(n) filter + 固定日均計算）被呼叫兩次；改以 let todayTotal = store.todayTotal 單次捕捉後共用，呼叫次數 2→1。"
+        ]),
         ChangelogEntry(version: "21.6", build: 466, date: "2026/06/16", notes: [
             "【UI 美化】ChildrenResumeView：新增粉藍漸層英雄統計卡（兒子/女兒/生涯紀錄 KPI 三格）、玻璃光澤與 bokeh 裝飾圓、入場 spring 動畫。",
             "【UI 美化】ChildrenResumeView：新增「兒女清單」Section Header（Capsule 漸層側條 + 位數徽章）。",
