@@ -83,19 +83,6 @@ struct OverviewView: View {
         return min(day / total, 1.0)
     }
 
-    // 支出占收入比例（用於進度條）
-    private var spendingRatio: Double {
-        guard displayedIncome > 0 else { return 0 }
-        return min(store.currentMonthTotal / displayedIncome, 1.0)
-    }
-
-    // 支出進度條配色：正常→白、超前月進度→橘、危險→紅
-    private var spendingBarColor: Color {
-        if spendingRatio > 0.9 { return Color.red.opacity(0.85) }
-        if spendingRatio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90) }
-        return .white.opacity(0.85)
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -195,8 +182,17 @@ struct OverviewView: View {
 
     private var monthlyBalanceCard: some View {
         let income = displayedIncome
-        let balance = income - store.currentMonthTotal
+        // 一次計算 currentMonthTotal（含兩次 O(n) 掃描），避免透過原先 spendingRatio /
+        // spendingBarColor 兩個 struct-level computed property 在 body 內重複呼叫 10+ 次
+        let total = store.currentMonthTotal
+        let balance = income - total
         let isPositive = balance >= 0
+        let spendingRatio = income > 0 ? min(total / income, 1.0) : 0.0
+        let barColor: Color = {
+            if spendingRatio > 0.9 { return Color.red.opacity(0.85) }
+            if spendingRatio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90) }
+            return .white.opacity(0.85)
+        }()
 
         return VStack(spacing: 0) {
             // 頂部：收入 vs 支出
@@ -224,7 +220,7 @@ struct OverviewView: View {
                     Text("本月支出")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.75))
-                    Text(smartCurrency(store.currentMonthTotal))
+                    Text(smartCurrency(total))
                         .font(.title3.bold())
                         .foregroundStyle(.white)
                 }
@@ -291,7 +287,7 @@ struct OverviewView: View {
                                 .fill(.white.opacity(0.18))
                                 .frame(height: 6)
                             Capsule()
-                                .fill(spendingBarColor)
+                                .fill(barColor)
                                 .frame(width: geo.size.width * spendingRatio, height: 6)
                                 .animation(.spring(response: 0.7, dampingFraction: 0.8), value: spendingRatio)
                             // 月進度指示針（細白豎棒，指示月份走到哪）
@@ -458,7 +454,8 @@ struct OverviewView: View {
         let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
         let weekdayIdx = weekday - 1
         let weekdayStr = weekdays.indices.contains(weekdayIdx) ? weekdays[weekdayIdx] : ""
-        let hasSpending = store.todayTotal > 0
+        let todayTotal = store.todayTotal
+        let hasSpending = todayTotal > 0
         // [v3] 今日交易筆數，用於右側計數膠囊
         let todayCount = store.expenses.filter { cal.isDateInToday($0.date) }.count
 
@@ -519,7 +516,7 @@ struct OverviewView: View {
                 Text("今日花費")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(smartCurrency(store.todayTotal))
+                Text(smartCurrency(todayTotal))
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(hasSpending ? .primary : Color.green.opacity(0.5))
                     .contentTransition(.numericText())
