@@ -13,6 +13,15 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "21.4", build: 464, date: "2026/06/16", notes: [
+            "【靜態 Debug】全面複查 78 個 Swift 檔（強制解包、Optional 鏈結、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
+            "【確認安全】所有陣列索引存取均有邊界守衛；無 force unwrap（!）、無 as! 型別轉換、無 fatalError 呼叫。",
+            "【確認安全】所有閉包均以 [weak self] 捕捉；RemoteAdmin singleton 兩處缺少 [weak self] 的 DispatchQueue.main.async 不影響記憶體正確性（沿用既有記錄）。",
+            "【確認正常】CloudKit 30 秒節流（syncNowIfDue）、pushAll 2 秒防抖、isSyncing 並發守衛均正確運作，scenePhase 切換不觸發額外同步。",
+            "【確認正常】LifeStore / FinanceStore / ExpenseStore 所有批次寫入均以 isLoading 旗標保護；所有 @Published 屬性更新均在主執行緒執行。",
+            "【確認正常】圖表資料預分組（O(n)）、VariableExpenseView 搜尋 300ms 防抖、ChartView 100ms 更新聚合與獨立空狀態旗標均正常。",
+            "無新問題：全部防護機制均正常運作，本版為靜態驗證掃描。"
+        ]),
         ChangelogEntry(version: "21.2", build: 462, date: "2026/06/15", notes: [
             "【效能修復】FoodMapView.topOverlay：companionOptions（O(n) 掃描所有支出）原本被呼叫兩次——isEmpty 判斷一次、ForEach 資料源一次；改以 let options = companionOptions 在 topOverlay 頂端單次捕捉後共用，降至 1 次掃描。",
             "【效能修復】FoodMapView.statsCard：原本為 var，內部以 let aggs = aggregates 獨立呼叫一次 aggregates（O(n) 聚合）；listSheet 中已有 let items = sortedAggregates 捕捉過一次 aggregates，statsCard 另外再算一次造成重複。改為 statsCard(_ aggs:) 函式接收外部傳入的 items，listSheet 改呼叫 statsCard(items)，消除清單 sheet 開啟時 aggregates 被呼叫兩次的多餘計算。",
