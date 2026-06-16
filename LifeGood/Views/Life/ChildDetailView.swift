@@ -327,7 +327,10 @@ struct ChildDetailView: View {
     }
 
     private var childGiftsSection: some View {
-        let total = childGifts.reduce(0) { $0 + $1.amount }
+        // 先算一次，避免 childGifts（雙重 filter + sort 全部支出）在 count/reduce/
+        // ForEach 內被呼叫 10 次
+        let gifts = childGifts
+        let total = gifts.reduce(0) { $0 + $1.amount }
         return VStack(alignment: .leading, spacing: 0) {
             // 段落標題：Capsule 漸層側條 + 計數膠囊 + 合計
             HStack(spacing: 10) {
@@ -344,7 +347,7 @@ struct ChildDetailView: View {
                     .foregroundStyle(.pink)
                 Text("收到的禮金")
                     .font(.subheadline.weight(.semibold))
-                Text("\(childGifts.count) 筆")
+                Text("\(gifts.count) 筆")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.pink)
                     .padding(.horizontal, 7).padding(.vertical, 2.5)
@@ -361,7 +364,7 @@ struct ChildDetailView: View {
             .padding(.bottom, 8)
 
             ForEach(SocialSubCategory.allCases) { sub in
-                let items = childGifts.filter { $0.socialSubCategory == sub }
+                let items = gifts.filter { $0.socialSubCategory == sub }
                 if !items.isEmpty {
                     HStack(spacing: 10) {
                         ZStack {
