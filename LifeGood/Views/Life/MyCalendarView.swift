@@ -365,20 +365,23 @@ struct MyCalendarView: View {
     }
 
     private var todayEventsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // 先算一次，避免 todayEvents（每次存取都重跑 eventsOn()）在 count/isEmpty/ForEach/
+        // 分隔線判斷中被呼叫 3+N 次，N 為事件數量
+        let events = todayEvents
+        return VStack(alignment: .leading, spacing: 0) {
             sectionHeader(selectedDayHeaderTitle,
                           icon: "calendar.badge.clock",
                           color: Color(red: 0.95, green: 0.55, blue: 0.65),
-                          count: todayEvents.count)
+                          count: events.count)
 
-            if todayEvents.isEmpty {
+            if events.isEmpty {
                 emptyPlaceholder(
                     icon: "calendar",
                     title: "這天沒有特別事件",
                     subtitle: "新增事件或等待紀念日、里程碑到來"
                 )
             } else {
-                ForEach(Array(todayEvents.enumerated()), id: \.element.id) { idx, ev in
+                ForEach(Array(events.enumerated()), id: \.element.id) { idx, ev in
                     if let pid = ev.personalEventId,
                        let pe = lifeStore.personalEvents.first(where: { $0.id == pid }) {
                         Button { editingEvent = pe } label: { eventRow(ev) }
@@ -386,7 +389,7 @@ struct MyCalendarView: View {
                     } else {
                         eventRow(ev)
                     }
-                    if idx < todayEvents.count - 1 {
+                    if idx < events.count - 1 {
                         Divider().padding(.leading, 60)
                     }
                 }
