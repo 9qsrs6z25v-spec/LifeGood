@@ -589,6 +589,9 @@ struct ChildDetailView: View {
 
     @ViewBuilder
     private var consumptionSection: some View {
+        // consumptionExpenses（雙重 filter + sort，O(n log n)）一次捕捉後全段共用，
+        // 避免 section 內 count / isEmpty / reduce / prefix 各自觸發重複計算（原本 8 次 → 1 次）
+        let exps = consumptionExpenses
         VStack(alignment: .leading, spacing: 0) {
             // 段落標題：Capsule 漸層側條 + 計數膠囊 + 合計
             HStack(spacing: 10) {
@@ -605,8 +608,8 @@ struct ChildDetailView: View {
                     .foregroundStyle(.red)
                 Text("消費")
                     .font(.subheadline.weight(.semibold))
-                if consumptionExpenses.count > 0 {
-                    Text("\(consumptionExpenses.count) 筆")
+                if exps.count > 0 {
+                    Text("\(exps.count) 筆")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.red)
                         .padding(.horizontal, 7).padding(.vertical, 2.5)
@@ -615,8 +618,8 @@ struct ChildDetailView: View {
                         .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
                 }
                 Spacer()
-                if !consumptionExpenses.isEmpty {
-                    let total = consumptionExpenses.reduce(0) { $0 + $1.amount }
+                if !exps.isEmpty {
+                    let total = exps.reduce(0) { $0 + $1.amount }
                     Text(formatCurrency(total))
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(.red)
@@ -626,7 +629,7 @@ struct ChildDetailView: View {
             .padding(.top, 14)
             .padding(.bottom, 8)
 
-            if consumptionExpenses.isEmpty {
+            if exps.isEmpty {
                 HStack(spacing: 8) {
                     Image(systemName: "tray")
                         .font(.caption)
@@ -641,17 +644,17 @@ struct ChildDetailView: View {
                 .padding(.horizontal, 14)
                 .padding(.bottom, 14)
             } else {
-                ForEach(Array(consumptionExpenses.prefix(20).enumerated()), id: \.element.id) { idx, e in
+                ForEach(Array(exps.prefix(20).enumerated()), id: \.element.id) { idx, e in
                     consumptionRow(e)
-                    if idx < min(consumptionExpenses.count, 20) - 1 {
+                    if idx < min(exps.count, 20) - 1 {
                         Rectangle()
                             .fill(Color(.separator).opacity(0.20))
                             .frame(height: 0.5)
                             .padding(.leading, 50)
                     }
                 }
-                if consumptionExpenses.count > 20 {
-                    Text("還有 \(consumptionExpenses.count - 20) 筆…")
+                if exps.count > 20 {
+                    Text("還有 \(exps.count - 20) 筆…")
                         .font(.caption2).foregroundStyle(.tertiary)
                         .padding(.horizontal, 14).padding(.bottom, 10)
                 }
