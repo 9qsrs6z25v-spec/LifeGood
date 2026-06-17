@@ -69,10 +69,12 @@ struct FinanceOverviewView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        // 一次計算，避免 totalAssetsCard / allocationSection 各自重算（共 2 次）
+        let allocations = ntdAllocations
+        return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    totalAssetsCard
+                    totalAssetsCard(allocations)
                         .padding(.horizontal)
                         .opacity(appearedCards.contains("total") ? 1 : 0)
                         .offset(y: appearedCards.contains("total") ? 0 : 20)
@@ -83,7 +85,7 @@ struct FinanceOverviewView: View {
                         }
 
                     assetCards
-                    allocationSection
+                    allocationSection(allocations)
                     cashFlowSection
                         .opacity(cashFlowSectionAppeared ? 1 : 0)
                         .offset(y: cashFlowSectionAppeared ? 0 : 18)
@@ -146,9 +148,8 @@ struct FinanceOverviewView: View {
 
     private var totalInvestmentPL: Double { insuranceProfitLoss + stockProfitLoss }
 
-    private var totalAssetsCard: some View {
+    private func totalAssetsCard(_ allocations: [AssetAllocation]) -> some View {
         let pl = totalInvestmentPL
-        let allocations = ntdAllocations
 
         return VStack(spacing: 0) {
             // 頂部：總資產 + 損益 KPI
@@ -431,9 +432,8 @@ struct FinanceOverviewView: View {
         return result.sorted { $0.value > $1.value }
     }
 
-    private var allocationSection: some View {
-        let allocations = ntdAllocations  // 合併兩個 ntdAllocations 呼叫為一次，避免重複排序
-        return VStack(alignment: .leading, spacing: 10) {
+    private func allocationSection(_ allocations: [AssetAllocation]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Capsule()
                     .fill(

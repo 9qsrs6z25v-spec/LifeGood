@@ -140,11 +140,13 @@ struct TaxOverviewView: View {
     // MARK: - 主體
 
     var body: some View {
-        NavigationStack {
+        // 一次計算，避免 annualSummaryCard / taxSavingSection 各自重算（共 2 次）
+        let savingTotal = totalTaxSaving
+        return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     yearPicker
-                    annualSummaryCard
+                    annualSummaryCard(savingTotal)
                         .opacity(heroCardAppeared ? 1 : 0)
                         .offset(y: heroCardAppeared ? 0 : 20)
                         .onAppear {
@@ -154,7 +156,7 @@ struct TaxOverviewView: View {
                         }
                     taxRecordsSection
                     monthlyBreakdown
-                    taxSavingSection
+                    taxSavingSection(savingTotal)
                     taxChecklistSection
                     deductionTipsSection
                 }
@@ -256,14 +258,11 @@ struct TaxOverviewView: View {
 
     // MARK: - 年度摘要英雄卡（升級：紅橘漸層 + 散景裝飾 + KPI 統計行）
 
-    private var annualSummaryCard: some View {
+    private func annualSummaryCard(_ savingTotal: Double) -> some View {
         // taxExpenses は filter+sort（O(n log n)）のため、一度だけ実行して再利用
         let exps = taxExpenses
         let taxTotal = exps.reduce(0) { $0 + $1.amount }
         let taxRatio = estimatedAnnualIncome > 0 ? taxTotal / estimatedAnnualIncome * 100 : 0
-        // totalTaxSaving（taxSavingExpenses O(n) + 10×fixed 掃描）也在 taxSavingSection 使用，
-        // 此處先算一次供統計格共用，避免 body 同時渲染兩者時重複計算
-        let savingTotal = totalTaxSaving
 
         return VStack(spacing: 0) {
             // 頂部：稅費 + 年收入
@@ -667,11 +666,8 @@ struct TaxOverviewView: View {
 
     // MARK: - 節稅累積（升級：漸層圖示圓 + 更精緻進度條）
 
-    private var taxSavingSection: some View {
-        // 先算一次，避免 totalTaxSaving（= taxSavingExpenses O(n) + 10×fixed 掃描）
-        // 在 sectionHeader / if / fmt 三處被重複呼叫
-        let savingTotal = totalTaxSaving
-        return VStack(alignment: .leading, spacing: 0) {
+    private func taxSavingSection(_ savingTotal: Double) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             sectionHeader("節稅累積", icon: "leaf.fill", color: .green, count: nil)
 
             if savingTotal == 0 {
