@@ -25,6 +25,11 @@ import SwiftUI
 //      > 1.5 → 粉紅警示（本月固定支出顯著偏高，可能為季/年繳集中月）；
 //      對齊 IncomeView / VariableExpenseView 警示配色規格。
 //  12. 無年度估算（yearlyEstimate = 0）時降級回單軌，確保初次使用相容性。
+// [2026-06 v4] 本次美化方向（英雄卡玻璃光澤補齊）：
+//  13. fixedSummaryHeader 背景 ZStack 末層加入 LinearGradient [.white.opacity(0.18), .clear]
+//      top→center 玻璃反光覆蓋層，對齊 OverviewView.monthlyBalanceCard v3 /
+//      IncomeView.summaryHeader v4 / FinanceOverviewView.totalAssetsCard v3 英雄卡玻璃光澤規格；
+//      補齊全 App 六張英雄卡中此張缺少的一層光澤（與 VariableExpenseView 同步補齊）。
 
 struct FixedExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -333,6 +338,14 @@ struct FixedExpenseView: View {
                     .frame(width: 55, height: 55)
                     .offset(x: 95, y: 40)
                     .blur(radius: 10)
+                // [v4] 頂部玻璃光澤：LinearGradient white→clear top→center，
+                // 對齊 OverviewView.monthlyBalanceCard v3 / IncomeView.summaryHeader v4 /
+                // FinanceOverviewView.totalAssetsCard v3 英雄卡玻璃反光規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
