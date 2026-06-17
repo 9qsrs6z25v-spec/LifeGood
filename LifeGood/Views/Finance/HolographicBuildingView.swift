@@ -1,6 +1,18 @@
 import SwiftUI
 import SceneKit
 
+// MARK: - 美化紀錄（HolographicBuildingView）
+// [2026-06] 本次美化方向：
+//   本元件採刻意設計的深色 HUD 全息主題（SceneKit 3D + 霓虹青色 #0ADDF2），
+//   與全 App 亮色 UI 語言截然不同——美化重心在「主題內部一致性」而非全 App 對齊。
+//   1. header 計數：從帶括弧的等寬文字 "(\(n)層)" 升級為霓虹青色 Capsule 膠囊徽章
+//      (fill opacity 0.10 + stroke 0.40)，維持 HUD 配色，同時提升可讀性與視覺層次。
+//   2. header 佈局：脈衝點移至最右側（Spacer 之後），標題區域更乾淨。
+//   3. sideLabels：FloorTagView 清單上方補入等寬小標題「FLOORS」+ 霓虹青色細分隔線，
+//      強化 HUD 面板資訊結構感，對齊科幻 HUD 常見的「區域標籤 + 分隔線」設計語言。
+//
+//   注意：SceneKit 3D 部分（BuildingSceneView、Coordinator）完全不動——屬商業邏輯。
+
 // MARK: - 全息 HUD 配色
 
 private enum HoloPalette {
@@ -59,20 +71,25 @@ struct HolographicBuildingView: View {
 
     // MARK: 標題
 
+    // 美化：計數升級為 Capsule 膠囊徽章；脈衝點移至右側，標題區域更清晰
     private var header: some View {
         HStack(spacing: 8) {
             Text("樓層資訊")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
-            Text("(\(floors.count)層)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(HoloPalette.neonCyan.opacity(0.85))
+            Text("\(floors.count) 層")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(HoloPalette.neonCyan)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(HoloPalette.neonCyan.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(HoloPalette.neonCyan.opacity(0.40), lineWidth: 0.75))
+            Spacer()
             Circle()
                 .fill(HoloPalette.neonCyan)
                 .frame(width: 6, height: 6)
                 .scaleEffect(pulse)
                 .shadow(color: HoloPalette.neonCyan.opacity(0.8), radius: 4)
-            Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
@@ -81,8 +98,19 @@ struct HolographicBuildingView: View {
 
     // MARK: 側邊樓層標籤
 
+    // 美化：清單上方補「FLOORS」等寬小標題 + 霓虹青色細分隔線，強化 HUD 面板結構感
     private var sideLabels: some View {
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("FLOORS")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(HoloPalette.neonCyan.opacity(0.50))
+                Rectangle()
+                    .fill(HoloPalette.neonCyan.opacity(0.18))
+                    .frame(height: 0.5)
+            }
+            .padding(.bottom, 2)
+
             ForEach(floors.sorted { floorOrder($0) > floorOrder($1) }) { f in
                 FloorTagView(
                     floor: f,
