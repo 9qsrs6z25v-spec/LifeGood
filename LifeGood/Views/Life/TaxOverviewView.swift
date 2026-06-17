@@ -28,6 +28,19 @@ import SwiftUI
 //  12. taxChecklistSection / deductionTipsSection → 加入交錯淡入進場動畫
 //      (checklistRowsAppeared / tipsRowsAppeared + 0.05s stagger)，
 //      對齊 taxRecordsSection stagger 規格
+// [2026-06 v3] 本次美化方向：
+//  13. annualSummaryCard 玻璃光澤：背景 ZStack 末層加入 LinearGradient [.white.opacity(0.18), .clear]
+//      top→center 玻璃反光覆蓋層，對齊 VariableExpenseView / IncomeView / OverviewView v3 英雄卡規格
+//  14. annualSummaryCard 第三顆散景圓：右側中央加入微型模糊圓（width:50, opacity:0.05, blur:8）,
+//      對齊 ChartView / VariableExpenseView v4 三顆散景圓設計語言
+//  15. taxStatCell 圖示圓升級：36pt → 40pt LinearGradient 底 + Circle().stroke(color.opacity(0.25), 0.75pt)
+//      overlay + 圖示 14→15pt，對齊 FinanceOverviewView allocationSection / OverviewView summaryCard v3 規格；
+//      value Text 補 .contentTransition(.numericText()) 讓年份切換時數字平滑過渡
+//  16. taxSavingSection 彙總列升級：純 Text HStack → 36pt 綠色漸層圖示圓（leaf.fill）+
+//      右側金額改為綠色 Capsule 膠囊徽章（帶細邊框 0.6pt），
+//      對齊 ResumeGiftSection 彙總列 / SpouseResumeView 金額設計語言
+//  17. fmtShort 小數位補齊：「%.0f萬」→「%.1f萬」，對齊 OverviewView.smartCurrency /
+//      FinanceOverviewView.fmtShort 的 1 位小數顯示規格，避免精度損失
 
 struct TaxOverviewView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -348,6 +361,18 @@ struct TaxOverviewView: View {
                     .frame(width: 85, height: 85)
                     .offset(x: -65, y: 48)
                     .blur(radius: 10)
+                // 右中微型散景圓（v3：第三顆，增加卡片立體層次感）
+                Circle()
+                    .fill(.white.opacity(0.05))
+                    .frame(width: 50, height: 50)
+                    .offset(x: 70, y: 36)
+                    .blur(radius: 8)
+                // 玻璃光澤反光層（v3：對齊 VariableExpenseView / IncomeView 英雄卡規格）
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -355,6 +380,7 @@ struct TaxOverviewView: View {
         .padding(.horizontal)
     }
 
+    // [v3] 36pt → 40pt + stroke overlay + contentTransition（對齊 FinanceOverviewView allocationSection kpi 規格）
     private func taxStatCell(icon: String, label: String, value: String, color: Color) -> some View {
         VStack(spacing: 6) {
             ZStack {
@@ -366,9 +392,10 @@ struct TaxOverviewView: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 36, height: 36)
+                    .frame(width: 40, height: 40)
+                    .overlay(Circle().stroke(color.opacity(0.25), lineWidth: 0.75))
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(color)
             }
             Text(value)
@@ -376,6 +403,7 @@ struct TaxOverviewView: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                .contentTransition(.numericText())
             Text(label)
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(.white.opacity(0.70))
@@ -711,18 +739,36 @@ struct TaxOverviewView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 30)
             } else {
-                HStack {
+                // [v3] 彙總列升級：36pt 漸層圖示圓 + 綠色 Capsule 金額徽章（對齊 ResumeGiftSection 彙總行規格）
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.green.opacity(0.22), Color.green.opacity(0.09)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 36, height: 36)
+                            .overlay(Circle().stroke(Color.green.opacity(0.18), lineWidth: 0.75))
+                        Image(systemName: "leaf.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.green)
+                    }
                     Text("年度節稅總額")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.subheadline.weight(.semibold))
                     Spacer()
-                    Text(fmt(savingTotal))
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundStyle(.green)
+                    Text(fmtShort(savingTotal))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(LinearGradient(
+                            colors: [Color.green.opacity(0.82), Color.green.opacity(0.58)],
+                            startPoint: .leading, endPoint: .trailing))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.30), lineWidth: 0.6))
                         .contentTransition(.numericText())
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
 
-                Divider().padding(.leading, 14)
+                Divider().padding(.leading, 62)
 
                 ForEach(TaxSavingSubCategory.allCases) { sub in
                     let total = taxSavingTotal(for: sub)
@@ -977,9 +1023,10 @@ struct TaxOverviewView: View {
         Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
+    // [v3] 萬級改為 %.1f（對齊 OverviewView.smartCurrency / RealEstateView.fmt 1 位小數規格）
     private func fmtShort(_ v: Double) -> String {
         if v >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
-        if v >= 10_000 { return String(format: "%.0f萬", v / 10_000) }
+        if v >= 10_000 { return String(format: "%.1f萬", v / 10_000) }
         return fmt(v)
     }
 
