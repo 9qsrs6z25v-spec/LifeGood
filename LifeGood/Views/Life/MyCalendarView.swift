@@ -17,7 +17,7 @@ import MapKit
 struct MyCalendarView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
-    @ObservedObject private var appleCal = AppleCalendarBridge.shared
+    @StateObject private var appleCal = AppleCalendarBridge.shared
 
     @State private var selectedDate = Date()
     @State private var showAdd = false
@@ -822,11 +822,11 @@ struct PersonalEventEditor: View {
     // 上一次新增事件用的設定，新事件預填用
     @AppStorage("calendar.lastSyncToAppleCalendar") private var lastSyncToAppleCalendar: Bool = false
     @AppStorage("calendar.lastAppleCalendarId") private var lastAppleCalendarIdRaw: String = ""
-    @ObservedObject private var appleCal = AppleCalendarBridge.shared
+    @StateObject private var appleCal = AppleCalendarBridge.shared
 
     // 地點自動完成（Apple Maps POI + 過去用過的地點）
     @StateObject private var locationCompleter = RestaurantSearchCompleter()
-    @ObservedObject private var locationProvider = LocationProvider.shared
+    @StateObject private var locationProvider = LocationProvider.shared
     @FocusState private var locationFieldFocused: Bool
     @State private var locationSuppressNextUpdate: Bool = false
     @State private var locationExpandedSuggestions: Bool = false

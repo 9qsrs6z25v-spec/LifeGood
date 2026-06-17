@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.4", build: 473, date: "2026/06/17", notes: [
+            "【競態條件修復】CloudKitManager.modifyKV 重試路徑：原本用 DispatchQueue.global(qos:.utility).asyncAfter 安排重試，繞過 CloudKitManager 自有的 serial queue，導致同一 KV 記錄可能被並行寫入觸發 CKErrorServerRecordChanged 死循環；改為 self.queue.asyncAfter，確保所有重試仍在序列佇列內依序執行。",
+            "【邏輯修復】SubscriptionManager.listenForTransactions：for-await 迴圈內 guard let self else { return } 的 return 會永久終止整個交易監聽迴圈，導致 self 若被提前釋放（理論上不應發生但防禦性正確）後所有未完成的 StoreKit 交易無法被 finish，重啟後持續重播；改為 continue 僅跳過當次迭代。",
+            "【資料完整性修復】EInvoiceSyncManager.revert：撤銷已匯入發票時直接呼叫 removeAll 略過 ExpenseStore.delete(_:) 的 Expense.deletePhoto 路徑，若對應支出附有照片將造成孤立檔案殘留；修復為先逐筆呼叫 deletePhoto 清理照片，再執行 removeAll。",
+            "【UI 穩定性修復】MyCalendarView（主視圖與 PersonalEventEditor）：AppleCalendarBridge.shared 與 LocationProvider.shared 均以 @ObservedObject 搭配行內初始化使用，SwiftUI 不保證跨重繪週期穩定持有，可能在父視圖更新時丟棄觀察訂閱造成 UI 狀態遺失；改為 @StateObject，符合 singleton 的正確 SwiftUI 持有語意。"
+        ]),
         ChangelogEntry(version: "22.3", build: 472, date: "2026/06/17", notes: [
             "【修復警告】ChildDetailView.swift：第 1140 行 .onChange(of: photoItem) 使用已棄用的單參數語法（iOS 16 舊式），在 iOS 17+ 產生編譯器警告；改為雙參數新式語法 { _, _ in }，與全檔其他 onChange 保持一致。",
             "【靜態掃描】全面複查 78 個 Swift 檔（強制解包、Optional 越界、型別轉換、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：無 force unwrap（!）、無 as! 強制轉型、無 fatalError；所有陣列索引存取均有邊界守衛（stackedHousePhotos/renovationStackedPhotos count>=2 守衛、diningMembersLabel count==1 守衛、dataStatBadgesAppeared 固定 3 元素）；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛均正常；EInvoiceSyncManager 批次 append 與背景序列 persistHistory 均正常；RemoteAdmin singleton 無 [weak self] 兩處不影響記憶體正確性（已多版記錄）；deprecated onChange 修復為本版唯一實質改動。"
