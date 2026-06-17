@@ -156,7 +156,7 @@ struct AddExpenseView: View {
     // MARK: - 飲食店家自動完成
 
     @StateObject private var restaurantCompleter = RestaurantSearchCompleter()
-    @ObservedObject private var locationProvider = LocationProvider.shared
+    @StateObject private var locationProvider = LocationProvider.shared
     @State private var placeAddress: String?
     @State private var placeLatitude: Double?
     @State private var placeLongitude: Double?
