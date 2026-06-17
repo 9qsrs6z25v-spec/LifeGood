@@ -37,6 +37,8 @@ struct OverviewView: View {
     @State private var recentListAppeared = false
     @State private var categoryListAppeared = false
     @State private var todayCardAppeared = false
+    @State private var cachedRecentItems: [RecentItem] = []
+    @State private var cachedCategoryTotals: [(category: VariableCategory, amount: Double)] = []
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -164,6 +166,10 @@ struct OverviewView: View {
             .sheet(isPresented: $showAddFixed) { AddExpenseView(expenseType: .fixed) }
             .sheet(isPresented: $showAddStock) { AddStockView() }
             .sheet(isPresented: $showAddRealEstate) { AddRealEstateView() }
+            .task(id: store.modifyID) {
+                cachedRecentItems = buildRecentItems()
+                cachedCategoryTotals = store.variableCategoryTotals()
+            }
         }
     }
 
@@ -593,7 +599,7 @@ struct OverviewView: View {
 
     private var categoryBreakdownSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            let categoryTotals = store.variableCategoryTotals()
+            let categoryTotals = cachedCategoryTotals
             let maxAmount = categoryTotals.map(\.amount).max() ?? 1
             // variableCategoryTotals() 已過濾本月變動支出，直接加總即可，
             // 避免在每個 categoryRow 內重複呼叫 currentMonthVariableTotal（O(n)×列數）
@@ -750,8 +756,9 @@ struct OverviewView: View {
         let isIncome: Bool
     }
 
-    private var recentItems: [RecentItem] {
-        // 用日期排序後取前 5，避免 suffix(5) 依插入順序而非日期導致顯示錯誤
+    private var recentItems: [RecentItem] { cachedRecentItems }
+
+    private func buildRecentItems() -> [RecentItem] {
         let recentExp = store.expenses.sorted { $0.date > $1.date }.prefix(5).map { e in
             RecentItem(id: e.id, title: e.title, icon: e.categoryIcon,
                        category: e.categoryName, amount: e.amount, date: e.date, isIncome: false)
