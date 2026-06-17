@@ -179,7 +179,7 @@ final class SubscriptionManager: ObservableObject {
     private func listenForTransactions() -> Task<Void, Never> {
         Task.detached { [weak self] in
             for await result in Transaction.updates {
-                guard let self else { return }
+                guard let self else { continue }
                 if case .verified(let transaction) = result {
                     await self.refreshStatus()
                     await transaction.finish()

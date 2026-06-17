@@ -212,6 +212,9 @@ final class EInvoiceSyncManager: ObservableObject {
     func revert(_ record: EInvoiceImportRecord, expenseStore: ExpenseStore) {
         // 先轉成 Set，將每筆 expense 的查詢從 O(m) 降為 O(1)
         let idsToRemove = Set(record.expenseIds)
+        for expense in expenseStore.expenses where idsToRemove.contains(expense.id) {
+            for name in expense.photoFileNames { Expense.deletePhoto(name) }
+        }
         expenseStore.expenses.removeAll { idsToRemove.contains($0.id) }
         importHistory.removeAll { $0.id == record.id }
         persistHistory()
