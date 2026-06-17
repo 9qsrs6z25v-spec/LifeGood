@@ -24,6 +24,14 @@ import SwiftUI
 //   11. 下軌配色三段：比率 ≤ 月進度+8% → 白色；比率 > 月進度+8% → 暖黃警示；
 //       比率 > 100%（超過月均）→ 粉紅警示色（超支）。
 //   12. 近3月均值為零時降級回原有單軌，確保初次使用兼容，不破壞既有邏輯。
+// [2026-06 v4] 本次美化方向（英雄卡玻璃光澤補齊）：
+//   13. monthSummaryHeader 背景 ZStack 末層加入 LinearGradient [.white.opacity(0.18), .clear]
+//       top→center 玻璃反光覆蓋層，對齊 OverviewView.monthlyBalanceCard v3 /
+//       IncomeView.summaryHeader v4 / FinanceOverviewView.totalAssetsCard v3 英雄卡玻璃光澤規格；
+//       補齊全 App 六張英雄卡中此張缺少的一層光澤（與 FixedExpenseView 同步補齊）。
+//   14. 補入第三顆散景裝飾圓（中右 55pt，white.opacity(0.05)），
+//       對齊 IncomeView.summaryHeader 三圓規格（右上主圓 + 左下次圓 + 中右微光），
+//       讓色彩層次與其他英雄卡對齊。
 
 struct VariableExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -346,17 +354,32 @@ struct VariableExpenseView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                // 裝飾性散景圓
+                // 右上主散景圓
                 Circle()
                     .fill(.white.opacity(0.12))
                     .frame(width: 120, height: 120)
                     .offset(x: 80, y: -45)
                     .blur(radius: 12)
+                // 左下次散景圓
                 Circle()
                     .fill(.white.opacity(0.07))
                     .frame(width: 70, height: 70)
                     .offset(x: -60, y: 40)
                     .blur(radius: 8)
+                // [v4] 中右微光（提升色彩層次，對齊 IncomeView.summaryHeader 三圓規格）
+                Circle()
+                    .fill(.white.opacity(0.05))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 60, y: 40)
+                    .blur(radius: 8)
+                // [v4] 頂部玻璃光澤：LinearGradient white→clear top→center，
+                // 對齊 OverviewView.monthlyBalanceCard v3 / IncomeView.summaryHeader v4 /
+                // FinanceOverviewView.totalAssetsCard v3 英雄卡玻璃反光規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
