@@ -1137,7 +1137,7 @@ struct ChildRecordEditorSheet: View {
                 }
             }
             .onAppear { loadEditing() }
-            .onChange(of: photoItem) { _ in
+            .onChange(of: photoItem) { _, _ in
                 Task {
                     guard let photoItem, let data = try? await photoItem.loadTransferable(type: Data.self) else { return }
                     let recordId = editing?.id ?? UUID()

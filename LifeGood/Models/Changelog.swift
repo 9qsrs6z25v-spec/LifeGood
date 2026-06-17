@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.3", build: 472, date: "2026/06/17", notes: [
+            "【修復警告】ChildDetailView.swift：第 1140 行 .onChange(of: photoItem) 使用已棄用的單參數語法（iOS 16 舊式），在 iOS 17+ 產生編譯器警告；改為雙參數新式語法 { _, _ in }，與全檔其他 onChange 保持一致。",
+            "【靜態掃描】全面複查 78 個 Swift 檔（強制解包、Optional 越界、型別轉換、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：無 force unwrap（!）、無 as! 強制轉型、無 fatalError；所有陣列索引存取均有邊界守衛（stackedHousePhotos/renovationStackedPhotos count>=2 守衛、diningMembersLabel count==1 守衛、dataStatBadgesAppeared 固定 3 元素）；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛均正常；EInvoiceSyncManager 批次 append 與背景序列 persistHistory 均正常；RemoteAdmin singleton 無 [weak self] 兩處不影響記憶體正確性（已多版記錄）；deprecated onChange 修復為本版唯一實質改動。"
+        ]),
         ChangelogEntry(version: "22.2", build: 471, date: "2026/06/17", notes: [
             "【效能修復】TaxOverviewView.body：totalTaxSaving（= taxSavingExpenses O(n) + reduce）在 annualSummaryCard 與 taxSavingSection 各自為 computed property，body 同時渲染時仍各算一次共 2 次；v21.9 僅在各 section 內部以 let 避免多次存取，未解決跨 section 重複；本次將兩個 computed property 改為 func(_ savingTotal: Double)，在 body 頂端以 let savingTotal = totalTaxSaving 單次計算後傳入，掃描次數 2→1，同時修正 v21.9 注釋中誤稱「整體降為 1 次」的說明不符實情。",
             "【效能修復】FinanceOverviewView.body：ntdAllocations（含 4 次 O(n) reduce + sort）在 totalAssetsCard 與 allocationSection 各為 computed property，body 同時渲染時各算一次共 2 次；v2 注釋雖有「合併兩個 ntdAllocations 呼叫為一次」但僅合併 allocationSection 內部、未解決跨 section 重複；本次將兩個 computed property 改為 func(_ allocations: [AssetAllocation])，在 body 頂端以 let allocations = ntdAllocations 單次計算後傳入，掃描次數 2→1。"
