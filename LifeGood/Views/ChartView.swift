@@ -38,6 +38,13 @@ import Charts
 //      OverviewView.categoryRow / FinanceOverviewView.allocationSection 圖示圓規格。
 //  14. pieChartBody 圖例行：加入交錯淡入進場動畫（pieRowsAppeared 旗標 +
 //      0.06s stagger），對齊 FinanceChartView.allocationRowsAppeared 規格。
+// [2026-06 v4] 本次美化方向：
+//  15. chartHeroCard 背景：補入第三顆散景圓（中右 55pt，white.opacity(0.07)，blur 8），
+//      對齊 IncomeView / VariableExpenseView summaryHeader 三顆散景設計規格。
+//  16. chartHeroCard 背景：補入 glass shine 頂部白色漸層（LinearGradient
+//      [.white.opacity(0.18),.clear] top→center），與 OverviewView / IncomeView /
+//      VariableExpenseView / FixedExpenseView / FinanceOverviewView 英雄卡片
+//      glass shine 規格完全統一，消除此卡片是全 App 唯一缺漏的視覺不均衡現象。
 
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
@@ -290,6 +297,18 @@ struct ChartView: View {
                     .frame(width: 90, height: 90)
                     .offset(x: -70, y: 55)
                     .blur(radius: 10)
+                // [v4] 中右輔助散景圓（對齊 IncomeView / VariableExpenseView 三顆散景規格）
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 30, y: 28)
+                    .blur(radius: 8)
+                // [v4] glass shine 頂部白色漸層（對齊全 App 英雄卡片 glass shine 統一規格）
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
