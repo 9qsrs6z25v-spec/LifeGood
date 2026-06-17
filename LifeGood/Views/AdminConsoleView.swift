@@ -3,8 +3,8 @@ import SwiftUI
 /// 隱藏管理控制台（關於頁連點版本卡 20 下開啟，需輸入 PIN）。
 /// 可：查看不重複 iCloud 使用者人數、切換「全功能免費」總開關、設定對外人數顯示、改 PIN。
 struct AdminConsoleView: View {
-    @ObservedObject private var admin = RemoteAdminManager.shared
-    @ObservedObject private var subscription = SubscriptionManager.shared
+    @StateObject private var admin = RemoteAdminManager.shared
+    @StateObject private var subscription = SubscriptionManager.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var enteredPIN = ""

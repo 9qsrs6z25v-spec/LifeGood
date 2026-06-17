@@ -1059,7 +1059,7 @@ struct ChildRecordEditorSheet: View {
 
     // 就醫 / 接種院所 自動完成
     @StateObject private var clinicCompleter = RestaurantSearchCompleter()
-    @ObservedObject private var locationProvider = LocationProvider.shared
+    @StateObject private var locationProvider = LocationProvider.shared
     @FocusState private var detailFieldFocused: Bool
     @State private var clinicSuppressNextUpdate: Bool = false
     @State private var clinicExpandedSuggestions: Bool = false

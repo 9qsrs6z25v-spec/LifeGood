@@ -95,7 +95,7 @@ enum FoodMapSort: String, CaseIterable, Identifiable {
 
 struct FoodMapView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
-    @ObservedObject private var locationProvider = LocationProvider.shared
+    @StateObject private var locationProvider = LocationProvider.shared
 
     @State private var range: FoodMapRange = .all
     @State private var sort: FoodMapSort = .visits

@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.7", build: 476, date: "2026/06/17", notes: [
+            "【UI 穩定性修復】FoodMapView、ChildRecordEditorSheet（ChildDetailView）、AdminConsoleView、AddExpenseView 四個視圖：LocationProvider.shared、RemoteAdminManager.shared、SubscriptionManager.shared 均以 @ObservedObject 搭配行內 singleton 初始化，SwiftUI 不保證跨重繪週期穩定持有，可能在父視圖更新時丟棄觀察訂閱造成地圖/定位/訂閱狀態 UI 異常；與 v22.4 修復 MyCalendarView 的方式一致，改為 @StateObject。",
+            "【靜態掃描】全面複查 78 個 Swift 檔（強制解包、Optional 越界、型別轉換、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：無 force unwrap（!）、無 as! 強制轉型、無 fatalError；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛均正常；HolographicBuildingView 最新美化程式碼（SceneKit weak 捕捉、Binding 讀寫路徑）確認安全；@ObservedObject singleton 誤用為本版唯一實質改動。"
+        ]),
         ChangelogEntry(version: "22.4", build: 473, date: "2026/06/17", notes: [
             "【競態條件修復】CloudKitManager.modifyKV 重試路徑：原本用 DispatchQueue.global(qos:.utility).asyncAfter 安排重試，繞過 CloudKitManager 自有的 serial queue，導致同一 KV 記錄可能被並行寫入觸發 CKErrorServerRecordChanged 死循環；改為 self.queue.asyncAfter，確保所有重試仍在序列佇列內依序執行。",
             "【邏輯修復】SubscriptionManager.listenForTransactions：for-await 迴圈內 guard let self else { return } 的 return 會永久終止整個交易監聽迴圈，導致 self 若被提前釋放（理論上不應發生但防禦性正確）後所有未完成的 StoreKit 交易無法被 finish，重啟後持續重播；改為 continue 僅跳過當次迭代。",
