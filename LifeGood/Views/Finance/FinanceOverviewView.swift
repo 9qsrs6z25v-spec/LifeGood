@@ -35,6 +35,13 @@ import SwiftUI
 //      補齊 cashFlowSideItem v2 升級後 cashFlowNetItem 殘留的視覺不一致。
 //  13. assetCard 筆數文字：加入 lineLimit(1) + minimumScaleFactor(0.8) +
 //      contentTransition(.numericText())，防止長數字換行且數值變化流暢。
+// [2026-06 v4] 本次美化方向：
+//  14. totalAssetsCard mini 彩條：補入 glow overlay（白色頂部高亮 + 底部柔化）+ 左展開
+//      spring 動畫（miniBarAppeared / scaleEffect x: 0.04→1, anchor: .leading），
+//      對齊 allocationSection 14pt 彩條規格，消除卡片內與下方區塊的視覺落差。
+//  15. cashFlowSection 空狀態圖示圓：純 Color(.systemFill) →
+//      LinearGradient (secondarySystemFill→systemFill) + stroke (separator.0.35, 1pt)，
+//      對齊 emptyPlaceholder 設計規格，保持全頁空狀態視覺一致性。
 
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
@@ -50,6 +57,8 @@ struct FinanceOverviewView: View {
     @State private var allocationRowsAppeared = false
     // 每月現金流區塊進場動畫旗標（補齊前三區塊均有動畫、現金流缺失的均值差距）
     @State private var cashFlowSectionAppeared = false
+    // [v4] totalAssetsCard mini 彩條左展開動畫旗標
+    @State private var miniBarAppeared = false
 
     private func rateForCode(_ code: String) -> Double {
         if code == "NT$" { return 1 }
@@ -81,6 +90,10 @@ struct FinanceOverviewView: View {
                         .onAppear {
                             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                                 _ = appearedCards.insert("total")
+                            }
+                            // [v4] 卡片進場後 0.45s 觸發 mini 彩條左展開
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                                miniBarAppeared = true
                             }
                         }
 
@@ -218,6 +231,18 @@ struct FinanceOverviewView: View {
                     }
                     .frame(height: 6)
                     .clipShape(RoundedRectangle(cornerRadius: 3))
+                    // [v4] glow overlay：頂部白色高亮 + 底部柔化，對齊 allocationSection 14pt 彩條規格
+                    .overlay(
+                        LinearGradient(
+                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    )
+                    // [v4] 左展開動畫：scaleEffect x: 0.04→1.0 anchor: .leading
+                    .scaleEffect(x: miniBarAppeared ? 1.0 : 0.04, y: 1, anchor: .leading)
+                    .animation(.spring(response: 0.70, dampingFraction: 0.82), value: miniBarAppeared)
 
                     // 圖例膠囊橫排
                     HStack(spacing: 6) {
@@ -629,8 +654,18 @@ struct FinanceOverviewView: View {
                 // 空狀態：無房地產現金流資料
                 VStack(spacing: 10) {
                     ZStack {
+                        // [v4] 圖示圓：純 fill → LinearGradient + stroke，對齊 emptyPlaceholder 規格
                         Circle()
-                            .fill(Color(.systemFill))
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(.secondarySystemFill), Color(.systemFill)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 52, height: 52)
+                        Circle()
+                            .stroke(Color(.separator).opacity(0.35), lineWidth: 1)
                             .frame(width: 52, height: 52)
                         Image(systemName: "house.badge.questionmark")
                             .font(.system(size: 22, weight: .light))
