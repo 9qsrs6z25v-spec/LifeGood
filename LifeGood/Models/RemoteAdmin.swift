@@ -141,7 +141,7 @@ final class RemoteAdminManager: ObservableObject {
                 guard let self = self else { return }
                 switch result {
                 case .success:
-                    DispatchQueue.main.async { self.userCount = Int(next); self.persist() }
+                    DispatchQueue.main.async { [weak self] in self?.userCount = Int(next); self?.persist() }
                 case .failure(let err):
                     // 兩位使用者同時 +1 → 重抓最新再加
                     if (err as? CKError)?.code == .serverRecordChanged, retriesLeft > 0 {
@@ -185,7 +185,7 @@ final class RemoteAdminManager: ObservableObject {
 
     private func writeConfig(_ mutate: @escaping (CKRecord) -> Void,
                              completion: @escaping (Bool) -> Void) {
-        DispatchQueue.main.async { self.isBusy = true }
+        DispatchQueue.main.async { [weak self] in self?.isBusy = true }
         db.fetch(withRecordID: configID) { [weak self] existing, _ in
             guard let self = self else { return }
             let rec = existing ?? CKRecord(recordType: "AppConfig", recordID: self.configID)
