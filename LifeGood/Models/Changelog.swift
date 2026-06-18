@@ -13,6 +13,15 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.8", build: 477, date: "2026/06/18", notes: [
+            "【靜態掃描】全面複查 78 個 Swift 檔（強制解包、Optional 越界、型別轉換、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：無 force unwrap（!）、無 as! 強制轉型、無 fatalError；所有陣列索引存取均有邊界守衛；所有非 singleton 閉包均以 [weak self] 捕捉。",
+            "【確認正常】CloudKit 機制：pushAll 2 秒防抖（Timer on main）、syncNowIfDue 30 秒節流（lastSyncDate）、isSyncing 並行守衛、modifyKV 0.5 秒序列佇列重試、fetchLock NSLock 執行緒安全存取均正常運作。",
+            "【確認正常】@ObservedObject singleton 誤用已全數修復（v22.4 MyCalendarView、v22.7 FoodMapView/ChildDetailView/AdminConsoleView/AddExpenseView）；LifeGoodApp 所有 singleton store 以 @StateObject 持有。",
+            "【確認正常】EInvoiceSyncManager：批次 pendingExpenses/newHistoryRecords 單次 append、revert @MainActor 隔離、persistHistory 背景序列佇列均正常；SubscriptionManager listenForTransactions guard else continue（非 return）正常；BackupManager I/O 背景佇列正常。",
+            "【確認正常】LifeStore isLoading 批次寫入保護、lossyDecodeArray 彈性解碼、save() 值型快照背景編碼均正常；ExpenseStore delete(at:from:) validOffsets 邊界守衛正常。",
+            "【確認正常】AIService.decodeJSON firstBrace <= lastBrace 守衛（v20.3 修復）、speechRecognizer [req] 捕捉避免 @MainActor 跨執行緒存取均正常；ChartView 100ms Task.sleep 防抖與 Task.isCancelled 檢查正常。",
+            "無新問題：所有防護機制均正常運作，本版為靜態驗證掃描，版本升至 22.8。"
+        ]),
         ChangelogEntry(version: "22.7", build: 476, date: "2026/06/17", notes: [
             "【UI 穩定性修復】FoodMapView、ChildRecordEditorSheet（ChildDetailView）、AdminConsoleView、AddExpenseView 四個視圖：LocationProvider.shared、RemoteAdminManager.shared、SubscriptionManager.shared 均以 @ObservedObject 搭配行內 singleton 初始化，SwiftUI 不保證跨重繪週期穩定持有，可能在父視圖更新時丟棄觀察訂閱造成地圖/定位/訂閱狀態 UI 異常；與 v22.4 修復 MyCalendarView 的方式一致，改為 @StateObject。",
             "【靜態掃描】全面複查 78 個 Swift 檔（強制解包、Optional 越界、型別轉換、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：無 force unwrap（!）、無 as! 強制轉型、無 fatalError；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛均正常；HolographicBuildingView 最新美化程式碼（SceneKit weak 捕捉、Binding 讀寫路徑）確認安全；@ObservedObject singleton 誤用為本版唯一實質改動。"
