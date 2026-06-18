@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.9", build: 478, date: "2026/06/18", notes: [
+            "【UI 美化】VehicleView v3：① summaryHeader 補入頂部玻璃光澤 LinearGradient [white.opacity(0.18), clear]，對齊全 App 英雄卡 glass shine 統一規格；② mini 估值彩條補入 glow overlay（白色頂光 + 底部柔化）+ 左展開 spring 動畫（miniBarAppeared scaleEffect），對齊 StockView.allocationMiniBar v3 / FinanceOverviewView.totalAssetsCard v4 規格；③ vehicleCard 圖示圓補入 stroke 細邊框，對齊 StockView / SavingsInsuranceView 圖示圓規格；④ 品牌、動力類型、折舊率三種 Capsule 補入 overlay stroke（0.6pt），對齊全 App 膠囊 stroke 均值規格；⑤ fmtShort「NT$%.0f萬」→「%.1f萬」，去掉多餘 NT$ 前綴並加 1 位小數，對齊 TaxOverviewView v3 / OverviewView.smartCurrency 顯示規格。"
+        ]),
         ChangelogEntry(version: "22.8", build: 477, date: "2026/06/18", notes: [
             "【靜態掃描】全面複查 78 個 Swift 檔（強制解包、Optional 越界、型別轉換、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：無 force unwrap（!）、無 as! 強制轉型、無 fatalError；所有陣列索引存取均有邊界守衛；所有非 singleton 閉包均以 [weak self] 捕捉。",
             "【確認正常】CloudKit 機制：pushAll 2 秒防抖（Timer on main）、syncNowIfDue 30 秒節流（lastSyncDate）、isSyncing 並行守衛、modifyKV 0.5 秒序列佇列重試、fetchLock NSLock 執行緒安全存取均正常運作。",
