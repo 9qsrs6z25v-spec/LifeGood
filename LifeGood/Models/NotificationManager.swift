@@ -224,7 +224,8 @@ final class NotificationManager {
         var fires: [Date] = []
         var current = start
         var safety = 0
-        while current <= end, safety < 5000 {
+        // 呼叫端只取前 60 筆（iOS 系統通知上限），上限設 61 避免多餘計算（原 5000 會浪費高達 4940 次）
+        while current <= end, safety < 61 {
             fires.append(current)
             guard let next = cal.date(byAdding: step, value: 1, to: current) else { break }
             current = next

@@ -216,6 +216,10 @@ struct FamilyView: View {
         .onAppear {
             withAnimation { statsAppeared = true }
         }
+        .onDisappear {
+            // 重置旗標，讓 Section 消失（所有成員被刪除）後再次出現時能重新播放進場動畫
+            statsAppeared = false
+        }
     }
 
     // MARK: - 空狀態（雙層脈衝光環 + 漸層圓底）
