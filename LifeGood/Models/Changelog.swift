@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.11", build: 481, date: "2026/06/18", notes: [
+            "【靜態 Debug】全面複查 78 個 Swift 檔，找到並修復兩個問題：① FamilyView v2 statsStrip 缺少 onDisappear 重置 statsAppeared，導致所有成員被刪除後再新增時進場動畫不再播放（已補 .onDisappear { statsAppeared = false }）；② NotificationManager.enumerateFires safety 上限為 5000，但呼叫端只取前 60 筆，最多浪費 4940 次日期計算（已收緊至 61）。其餘防護機制（CloudKit 30 秒節流、2 秒防抖、isSyncing 守衛、isLoading 批次保護、force unwrap 全無、as! 全無、fatalError 全無）均確認正常。"
+        ]),
         ChangelogEntry(version: "22.10", build: 480, date: "2026/06/18", notes: [
             "【版本號同步】project.pbxproj MARKETING_VERSION 已於先前提交升至 22.10，但 Changelog 最新條目仍為 22.9（build 479），版本顯示不一致；本次補齊 Changelog 條目並將 CURRENT_PROJECT_VERSION 從 479 遞增至 480，使兩者對齊。",
             "【靜態掃描】延續 build 479 對全 78 個 Swift 檔的完整複查（強制解包、Optional 鏈結、型別轉換、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：無新問題。所有防護機制（CloudKit 30 秒節流、2 秒防抖、isSyncing 並行守衛、modifyKV 序列佇列重試、NSLock fetchLock、isLoading 批次寫入保護、lossyDecodeArray 彈性解碼）均確認正常運作。",
