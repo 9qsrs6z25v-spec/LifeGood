@@ -43,6 +43,18 @@ struct CameraPicker: UIViewControllerRepresentable {
     }
 }
 
+// MARK: - 美化紀錄（RenovationPhotoEditor / RenovationStackViewer）
+// [2026-06] 本次美化方向：
+//   1. renoSectionHeader 輔助：統一三個 Section（基本資訊 / 照片 / 備註）標題列，
+//      升級為 4pt Capsule 漸層色條 + 彩色圖示 + .subheadline.bold，
+//      對齊全 App AddVehicleView / AddStockView section header 設計語言。
+//   2. 照片 Section header：加入彩色計數膠囊（teal Capsule 徽章），
+//      對齊 MultiPhotoGallery.title header count badge 規格。
+//   3. RenovationStackViewer 頁碼：從純 .caption2 文字升級為白色半透明 Capsule 膠囊徽章，
+//      對齊全 App 計數膠囊規格（IncomeView.daySectionHeader 等），暗背景下更醒目。
+//   4. RenovationStackViewer 日期：加入 calendar 圖示前綴，
+//      與全 App 日期 icon+text 設計語言統一（CareerView / SubordinateView 等）。
+
 // MARK: - 裝潢照片編輯器（支援多張照片）
 
 struct RenovationPhotoEditor: View {
@@ -69,9 +81,13 @@ struct RenovationPhotoEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     DatePicker("日期", selection: $date, displayedComponents: .date)
                     TextField("標題（例：客廳油漆、廚房磁磚）", text: $title)
+                } header: {
+                    renoSectionHeader("基本資訊", icon: "calendar.circle.fill",
+                                      gradient: [Color(red: 0.42, green: 0.30, blue: 0.92),
+                                                 Color(red: 0.30, green: 0.18, blue: 0.75)])
                 }
 
                 Section {
@@ -88,13 +104,37 @@ struct RenovationPhotoEditor: View {
                     )
                     .padding(.vertical, 4)
                 } header: {
-                    Text("照片（\(photoFileNames.count) 張）")
+                    HStack(spacing: 8) {
+                        Capsule()
+                            .fill(LinearGradient(
+                                colors: [Color(red: 0.10, green: 0.62, blue: 0.60),
+                                         Color(red: 0.06, green: 0.45, blue: 0.45)],
+                                startPoint: .top, endPoint: .bottom
+                            ))
+                            .frame(width: 4, height: 16)
+                        Image(systemName: "photo.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.10, green: 0.62, blue: 0.60))
+                        Text("照片")
+                            .font(.subheadline.weight(.bold))
+                        if !photoFileNames.isEmpty {
+                            Text("\(photoFileNames.count) 張")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Color(red: 0.10, green: 0.62, blue: 0.60))
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(Color(red: 0.10, green: 0.62, blue: 0.60).opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
                 } footer: {
                     Text("可拍照或從相簿一次選多張，會以堆疊方式顯示在裝潢照片廊中。")
                 }
 
-                Section("備註") {
+                Section {
                     TextField("選填備註（例：師傅電話、廠商）", text: $note, axis: .vertical).lineLimit(3)
+                } header: {
+                    renoSectionHeader("備註", icon: "note.text",
+                                      gradient: [Color(.systemGray2), Color(.systemGray3)])
                 }
 
                 if editing != nil {
@@ -122,6 +162,23 @@ struct RenovationPhotoEditor: View {
                 Button("取消", role: .cancel) {}
             }
             .onAppear { setupInitial() }
+        }
+    }
+
+    // MARK: - 輔助
+
+    /// 美化：統一 Section header（4pt Capsule 漸層色條 + 彩色圖示 + .subheadline.bold），
+    /// 對齊全 App AddVehicleView / AddStockView section header 設計語言。
+    private func renoSectionHeader(_ title: String, icon: String, gradient: [Color]) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: gradient, startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(gradient.first ?? Color(.systemGray))
+            Text(title)
+                .font(.subheadline.weight(.bold))
         }
     }
 
@@ -229,12 +286,16 @@ struct RenovationStackViewer: View {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Text(record.title.isEmpty ? "未命名" : record.title)
-                                    .font(.subheadline.weight(.semibold))
+                                    .font(.subheadline.weight(.bold))
                                     .foregroundStyle(.white)
                                 Spacer()
+                                // 頁碼升級為半透明 Capsule 膠囊徽章（對齊全 App 計數膠囊規格）
                                 Text("\(currentIndex + 1) / \(record.photoFileNames.count)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.white.opacity(0.7))
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.90))
+                                    .padding(.horizontal, 9).padding(.vertical, 3)
+                                    .background(.white.opacity(0.20))
+                                    .clipShape(Capsule())
                             }
                             if !record.note.isEmpty {
                                 Text(record.note)
@@ -242,9 +303,14 @@ struct RenovationStackViewer: View {
                                     .foregroundStyle(.white.opacity(0.85))
                                     .lineLimit(3)
                             }
-                            Text(fmtDate(record.date))
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.65))
+                            // 日期加 calendar 圖示前綴（對齊全 App 日期 icon+text 語言）
+                            HStack(spacing: 4) {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 10, weight: .medium))
+                                Text(fmtDate(record.date))
+                                    .font(.caption2)
+                            }
+                            .foregroundStyle(.white.opacity(0.65))
                         }
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
