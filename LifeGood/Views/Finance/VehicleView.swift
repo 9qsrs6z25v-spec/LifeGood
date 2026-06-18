@@ -22,6 +22,22 @@ import SwiftUI
 //   6. summaryHeader 迷你車輛估值佔比彩條 → KPI 橫列下方加入白色分隔線 +
 //      多色分配彩條（每輛車按估值比例著色，由高到低排列）+ 圖例點陣列（色點 + 車名），
 //      對齊 FinanceOverviewView totalAssetsCard mini allocation bar 規格
+// [2026-06 v3] 本次美化方向：
+//   7. summaryHeader 背景 ZStack 末層加入 LinearGradient [.white.opacity(0.18), .clear]
+//      top→center 玻璃反光覆蓋層，對齊 VariableExpenseView / IncomeView / OverviewView v3/v4
+//      英雄卡片 glass shine 統一規格，消除此頁與其他英雄卡的視覺均值落差。
+//   8. summaryHeader mini allocation bar：補入 clipShape(RoundedRectangle) +
+//      glow overlay（白色頂光 + 底部柔化），對齊 StockView.allocationMiniBar v3 規格；
+//      補入左展開 spring 動畫（miniBarAppeared scaleEffect x: 0.04→1.0 anchor: .leading），
+//      對齊 FinanceOverviewView.totalAssetsCard v4 彩條動畫規格。
+//   9. vehicleCard 圖示圓：補入 Circle().stroke(heroAccent.opacity(0.18), lineWidth: 0.75)，
+//      對齊 StockView.stockCard / SavingsInsuranceView.insuranceCard 圖示圓邊框規格。
+//  10. vehicleCard 品牌/動力類型 Capsule：各加入 .overlay(Capsule().stroke(…opacity(0.22), 0.6pt))
+//      細邊框，對齊 StockView.stockCard symbol Capsule / IncomeView.incomeRow 膠囊規格。
+//  11. vehicleCard 折舊率膠囊：補入 .overlay(Capsule().stroke(…opacity(0.22), 0.6pt))，
+//      對齊全 App 損益膠囊細邊框規格（FinanceOverviewView / StockView）。
+//  12. fmtShort「NT$%.0f萬」→「%.1f萬」：去掉 NT$ 前綴、加 1 位小數，
+//      對齊 TaxOverviewView v3 / OverviewView.smartCurrency 的萬量級顯示規格。
 
 enum VehicleSortOption: String, CaseIterable, Identifiable {
     case purchasePrice = "購入價格"
@@ -58,6 +74,8 @@ struct VehicleView: View {
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
     @State private var vehiclesSectionHeaderAppeared = false  // [v2] Section 標頭進場動畫旗標
+    // [v3] mini allocation bar 左展開動畫旗標
+    @State private var miniBarAppeared = false
 
     private let heroAccent    = Color(red: 0.18, green: 0.68, blue: 0.68)
     private let heroAccentDark = Color(red: 0.08, green: 0.46, blue: 0.48)
@@ -90,6 +108,10 @@ struct VehicleView: View {
                         .onAppear {
                             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                                 headerAppeared = true
+                            }
+                            // [v3] 英雄卡進場後 0.45s 觸發 mini 彩條左展開
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                                miniBarAppeared = true
                             }
                         }
                 }
@@ -351,12 +373,25 @@ struct VehicleView: View {
                         HStack(spacing: 2) {
                             ForEach(Array(valueSorted.enumerated()), id: \.element.id) { idx, v in
                                 RoundedRectangle(cornerRadius: 3)
-                                    .fill(barColors[idx % barColors.count])
+                                    .fill(barColors[idx % barColors.count].opacity(0.88))
                                     .frame(width: max(6, geo.size.width * CGFloat(v.currentValue / totalValue)))
                             }
                         }
                     }
                     .frame(height: 6)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    // [v3] glow overlay：頂部白色高亮 + 底部柔化，對齊 StockView.allocationMiniBar v3 規格
+                    .overlay(
+                        LinearGradient(
+                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    )
+                    // [v3] 左展開動畫：scaleEffect x: 0.04→1.0 anchor: .leading，對齊 FinanceOverviewView v4 規格
+                    .scaleEffect(x: miniBarAppeared ? 1.0 : 0.04, y: 1, anchor: .leading)
+                    .animation(.spring(response: 0.70, dampingFraction: 0.82), value: miniBarAppeared)
 
                     HStack(spacing: 10) {
                         ForEach(Array(valueSorted.prefix(5).enumerated()), id: \.element.id) { idx, v in
@@ -407,6 +442,12 @@ struct VehicleView: View {
                     .frame(width: 55, height: 55)
                     .offset(x: 95, y: 40)
                     .blur(radius: 10)
+                // [v3] 頂部玻璃光澤：LinearGradient white→clear，對齊全 App 英雄卡 glass shine 規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -552,6 +593,10 @@ struct VehicleView: View {
                             )
                             .frame(width: 44, height: 44)
                             .shadow(color: heroAccent.opacity(0.22), radius: 6, x: 0, y: 3)
+                        // [v3] 圖示圓邊框：對齊 StockView.stockCard / SavingsInsuranceView.insuranceCard 規格
+                        Circle()
+                            .stroke(heroAccent.opacity(0.18), lineWidth: 0.75)
+                            .frame(width: 44, height: 44)
                         Image(systemName: "car.fill")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(heroAccent)
@@ -571,6 +616,8 @@ struct VehicleView: View {
                                     .padding(.horizontal, 7).padding(.vertical, 2.5)
                                     .background(heroAccent.opacity(0.12))
                                     .clipShape(Capsule())
+                                    // [v3] 細邊框：對齊 StockView.stockCard symbol Capsule 規格
+                                    .overlay(Capsule().stroke(heroAccent.opacity(0.22), lineWidth: 0.6))
                                     .lineLimit(1)
                             }
                             HStack(spacing: 3) {
@@ -583,6 +630,8 @@ struct VehicleView: View {
                             .padding(.horizontal, 7).padding(.vertical, 2.5)
                             .background(powerColor.opacity(0.12))
                             .clipShape(Capsule())
+                            // [v3] 細邊框：對齊全 App 動力/類型 Capsule 規格
+                            .overlay(Capsule().stroke(powerColor.opacity(0.22), lineWidth: 0.6))
                         }
                     }
 
@@ -604,6 +653,8 @@ struct VehicleView: View {
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color(red: 0.90, green: 0.25, blue: 0.25).opacity(0.10))
                         .clipShape(Capsule())
+                        // [v3] 折舊率膠囊細邊框：對齊 FinanceOverviewView / StockView 損益膠囊規格
+                        .overlay(Capsule().stroke(Color(red: 0.90, green: 0.25, blue: 0.25).opacity(0.22), lineWidth: 0.6))
                     }
                 }
 
@@ -735,7 +786,8 @@ struct VehicleView: View {
 
     private func fmtShort(_ v: Double) -> String {
         if v >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
-        if v >= 10_000 { return String(format: "NT$%.0f萬", v / 10_000) }
+        // [v3] NT$ 前綴改移至 fmt()，加 1 位小數，對齊 TaxOverviewView v3 / OverviewView.smartCurrency 規格
+        if v >= 10_000 { return String(format: "%.1f萬", v / 10_000) }
         return fmt(v)
     }
 }
