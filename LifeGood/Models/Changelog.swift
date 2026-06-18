@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.9", build: 479, date: "2026/06/18", notes: [
+            "【Build 號修復】project.pbxproj CURRENT_PROJECT_VERSION 在 VehicleView v3 提交（build 478）後未同步遞增，停留在 477，導致 MARKETING_VERSION（22.9）與 CURRENT_PROJECT_VERSION（477）不一致；修復 Debug/Release 兩個 buildSettings 區塊，版本號升至 build 479。",
+            "【靜態掃描】全面複查 78 個 Swift 檔（強制解包、Optional 鏈結、型別轉換、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：VehicleView v3 新增程式碼（miniBarAppeared DispatchQueue.main.asyncAfter 動畫觸發、glow overlay、fmtShort 所有呼叫端均傳正值、vehicleCard 圖示圓/膠囊 stroke）確認安全；StockView v3 allocationMiniBar glow overlay 確認安全；除 build 號不一致外無其他新問題。",
+            "【確認安全】VehicleView applyDepreciation 以 value type 快照原地修改無競態、miniBarAppeared 設定為冪等操作不引發重複動畫；StockView allocationMiniBar totalVal = max(..., 1) 防除零、scrollOffset 以 > 1 pt 閾值節流重繪；CloudKit 30 秒節流、2 秒防抖、isSyncing 並行守衛、modifyKV 序列佇列重試均正常。"
+        ]),
         ChangelogEntry(version: "22.9", build: 478, date: "2026/06/18", notes: [
             "【UI 美化】VehicleView v3：① summaryHeader 補入頂部玻璃光澤 LinearGradient [white.opacity(0.18), clear]，對齊全 App 英雄卡 glass shine 統一規格；② mini 估值彩條補入 glow overlay（白色頂光 + 底部柔化）+ 左展開 spring 動畫（miniBarAppeared scaleEffect），對齊 StockView.allocationMiniBar v3 / FinanceOverviewView.totalAssetsCard v4 規格；③ vehicleCard 圖示圓補入 stroke 細邊框，對齊 StockView / SavingsInsuranceView 圖示圓規格；④ 品牌、動力類型、折舊率三種 Capsule 補入 overlay stroke（0.6pt），對齊全 App 膠囊 stroke 均值規格；⑤ fmtShort「NT$%.0f萬」→「%.1f萬」，去掉多餘 NT$ 前綴並加 1 位小數，對齊 TaxOverviewView v3 / OverviewView.smartCurrency 顯示規格。"
         ]),
