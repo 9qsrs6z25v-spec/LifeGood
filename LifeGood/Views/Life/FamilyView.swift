@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（FamilyView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. memberRow：圖示圓升至 44pt + LinearGradient 漸層填色 + 陰影，對齊 ExpenseRow 規格
 //   2. memberRow：左側 4pt 角色色彩強調條（依角色分色），增加視覺層次
 //   3. memberRow：角色名稱改為彩色膠囊標籤，配偶名稱以粉紅愛心膠囊呈現
@@ -9,6 +9,19 @@ import SwiftUI
 //   5. 空狀態：加入雙層脈衝光環 + 漸層圓底，對齊 VariableExpenseView emptyStateView 規格
 //   6. Section header：加入粉紅側條 + 成員計數膠囊，對齊 daySectionHeader 規格
 //   7. 列表：加入交錯淡入 + 向上進場動畫，對齊 FixedExpenseView 規格
+// [2026-06 v2] 本次美化方向：
+//   8. familySectionHeader 側條：RoundedRectangle(cornerRadius:3) 3pt/14pt → Capsule 4pt/18pt，
+//      字型 .footnote.weight(.semibold) → .subheadline.weight(.bold)，去除 .opacity(0.75) 降飽；
+//      對齊全 App 標準 section header（OverviewView / LifeOverviewView / CareerView）規格。
+//   9. memberRow 圖示圓：補入 Circle().stroke(accent.opacity(0.18), lineWidth:0.75) overlay 細邊框，
+//      對齊 CareerView v2 / VehicleView v3 / StockView v3 圖示圓邊框規格。
+//  10. memberRow 角色膠囊 / 配偶心形膠囊：補入 .overlay(Capsule().stroke(…opacity(0.22), 0.6pt))，
+//      對齊 OverviewView.categoryRow / LifeOverviewView.categoryBreakdownSection 膠囊邊框規格。
+//  11. memberRow 右側日期：從純圖示+文字升級為 Capsule 徽章（tertiarySystemFill 底色 + padding），
+//      對齊 OverviewView.recentRow / CareerView v2 / LifeOverviewView v3 日期膠囊規格。
+//  12. 新增 statsStrip：地圖與成員列表間加入統計徽章橫列（總成員 / 配偶 / 兒女計數），
+//      42pt 漸層圖示圓 + 數字 + 標籤，對齊 LifeOverviewView.statBadge 設計語言；
+//      加入 statsAppeared spring 錯落進場動畫（0.07s stagger），對齊 LifeOverviewView.statsCard 規格。
 
 struct FamilyView: View {
     @EnvironmentObject var store: LifeStore
@@ -18,6 +31,8 @@ struct FamilyView: View {
     @State private var showPremiumAlert = false
     @State private var membersAppeared = false
     @State private var emptyIconPulse = false
+    // [v2] 統計徽章橫列進場動畫旗標
+    @State private var statsAppeared = false
 
     var body: some View {
         NavigationStack {
@@ -33,6 +48,16 @@ struct FamilyView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
+                }
+
+                // [v2] 統計徽章橫列（地圖下、成員清單前，有成員時才顯示）
+                if !store.familyMembers.isEmpty {
+                    Section {
+                        statsStrip
+                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                 }
 
                 if store.familyMembers.isEmpty {
@@ -97,7 +122,8 @@ struct FamilyView: View {
     private var familySectionHeader: some View {
         let accent = Color(red: 1.00, green: 0.35, blue: 0.55)
         return HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 3)
+            // [v2] 側條：RoundedRectangle(cornerRadius:3) 3pt/14pt → Capsule 4pt/18pt（對齊全 App section header 規格）
+            Capsule()
                 .fill(
                     LinearGradient(
                         colors: [accent, accent.opacity(0.55)],
@@ -105,10 +131,9 @@ struct FamilyView: View {
                         endPoint: .bottom
                     )
                 )
-                .frame(width: 3, height: 14)
+                .frame(width: 4, height: 18)
             Text("家庭成員")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.primary.opacity(0.75))
+                .font(.subheadline.weight(.bold))
             Spacer(minLength: 6)
             Text("\(store.familyMembers.count) 位")
                 .font(.caption2.weight(.semibold))
@@ -120,6 +145,77 @@ struct FamilyView: View {
                 .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
         }
         .textCase(nil)
+    }
+
+    // MARK: - [v2] 統計徽章橫列（總成員 / 配偶 / 兒女）
+
+    private var statsStrip: some View {
+        let spouseCount  = store.familyMembers.filter { $0.role == .spouse }.count
+        let childrenCount = store.familyMembers.filter { $0.role == .son || $0.role == .daughter }.count
+        let items: [(title: String, count: Int, icon: String, color: Color, delay: Double)] = [
+            ("總成員", store.familyMembers.count, "person.3.fill",
+             Color(red: 1.00, green: 0.35, blue: 0.55), 0.06),
+            ("配偶",   spouseCount,                "heart.fill",
+             Color(red: 1.00, green: 0.35, blue: 0.55), 0.14),
+            ("兒女",   childrenCount,               "figure.2.and.child.holdinghands",
+             Color(red: 1.00, green: 0.62, blue: 0.22), 0.22),
+        ]
+        return HStack(spacing: 10) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                VStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [item.color.opacity(0.20), item.color.opacity(0.07)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 42, height: 42)
+                        Circle()
+                            .stroke(item.color.opacity(0.22), lineWidth: 1.2)
+                            .frame(width: 42, height: 42)
+                        Image(systemName: item.icon)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(item.color)
+                    }
+                    Text("\(item.count)")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .contentTransition(.numericText())
+                    Text(item.title)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(
+                    ZStack {
+                        Color(.systemBackground)
+                        item.color.opacity(0.03)
+                    }
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(item.color.opacity(0.10), lineWidth: 0.75)
+                )
+                .shadow(color: item.color.opacity(0.12), radius: 8, x: 0, y: 3)
+                .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
+                // 錯落進場動畫（對齊 LifeOverviewView.statsCard 規格）
+                .opacity(statsAppeared ? 1 : 0)
+                .offset(y: statsAppeared ? 0 : 16)
+                .animation(
+                    .spring(response: 0.50, dampingFraction: 0.78).delay(item.delay),
+                    value: statsAppeared
+                )
+            }
+        }
+        .padding(.horizontal, 4)
+        .onAppear {
+            withAnimation { statsAppeared = true }
+        }
     }
 
     // MARK: - 空狀態（雙層脈衝光環 + 漸層圓底）
@@ -235,6 +331,10 @@ struct FamilyView: View {
                         )
                         .frame(width: 44, height: 44)
                         .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
+                    // [v2] 細邊框：對齊 CareerView v2 / VehicleView v3 / StockView v3 圖示圓規格
+                    Circle()
+                        .stroke(accent.opacity(0.18), lineWidth: 0.75)
+                        .frame(width: 44, height: 44)
                     Image(systemName: member.role.icon)
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(accent)
@@ -254,6 +354,8 @@ struct FamilyView: View {
                             .padding(.vertical, 2.5)
                             .background(accent.opacity(0.12))
                             .clipShape(Capsule())
+                            // [v2] 膠囊細邊框，對齊 OverviewView.categoryRow 百分比膠囊規格
+                            .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                         if !member.englishName.isEmpty && !member.chineseName.isEmpty {
                             Text(member.englishName)
                                 .font(.caption2)
@@ -271,38 +373,51 @@ struct FamilyView: View {
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Color(red: 1.00, green: 0.35, blue: 0.55).opacity(0.10))
                             .clipShape(Capsule())
+                            // [v2] 配偶心形膠囊細邊框，對齊全 App 彩色膠囊邊框規格
+                            .overlay(Capsule().stroke(Color(red: 1.00, green: 0.35, blue: 0.55).opacity(0.22), lineWidth: 0.6))
                         }
                     }
                 }
 
                 Spacer(minLength: 4)
 
-                // 右側日期資訊（圖示 + 文字組合）
-                VStack(alignment: .trailing, spacing: 3) {
+                // [v2] 右側日期：升級為 Capsule 徽章，對齊 OverviewView.recentRow / CareerView v2 日期膠囊規格
+                VStack(alignment: .trailing, spacing: 4) {
                     if let bd = member.birthday {
                         HStack(spacing: 3) {
                             Image(systemName: "calendar")
                                 .font(.system(size: 9))
                             Text(formatDate(bd))
-                                .font(.caption2)
+                                .font(.caption2.weight(.medium))
                         }
                         .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2.5)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                     } else if member.role == .spouse, let md = member.marriageDate {
+                        let spouseAccent = Color(red: 1.00, green: 0.35, blue: 0.55)
                         HStack(spacing: 3) {
                             Image(systemName: "heart.fill")
                                 .font(.system(size: 9))
                             Text(formatDate(md))
-                                .font(.caption2)
+                                .font(.caption2.weight(.medium))
                         }
-                        .foregroundStyle(Color(red: 1.00, green: 0.35, blue: 0.55).opacity(0.75))
+                        .foregroundStyle(spouseAccent)
+                        .padding(.horizontal, 6).padding(.vertical, 2.5)
+                        .background(spouseAccent.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(spouseAccent.opacity(0.20), lineWidth: 0.5))
                         if member.isDivorced, let dd = member.divorceDate {
                             HStack(spacing: 3) {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 9))
                                 Text(formatDate(dd))
-                                    .font(.caption2)
+                                    .font(.caption2.weight(.medium))
                             }
                             .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6).padding(.vertical, 2.5)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
                         }
                     }
                 }
