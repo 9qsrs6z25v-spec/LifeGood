@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.10", build: 480, date: "2026/06/18", notes: [
+            "【版本號同步】project.pbxproj MARKETING_VERSION 已於先前提交升至 22.10，但 Changelog 最新條目仍為 22.9（build 479），版本顯示不一致；本次補齊 Changelog 條目並將 CURRENT_PROJECT_VERSION 從 479 遞增至 480，使兩者對齊。",
+            "【靜態掃描】延續 build 479 對全 78 個 Swift 檔的完整複查（強制解包、Optional 鏈結、型別轉換、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：無新問題。所有防護機制（CloudKit 30 秒節流、2 秒防抖、isSyncing 並行守衛、modifyKV 序列佇列重試、NSLock fetchLock、isLoading 批次寫入保護、lossyDecodeArray 彈性解碼）均確認正常運作。",
+            "【確認安全】VehicleView miniBarAppeared 動畫冪等、applyDepreciation 值型快照無競態、StockView allocationMiniBar totalVal max(…,1) 防除零、scrollOffset 1pt 閾值節流、OverviewView .task(id: store.modifyID) 快取更新機制均正常；無 force unwrap（!）、無 as! 強制轉型、無 fatalError。"
+        ]),
         ChangelogEntry(version: "22.9", build: 479, date: "2026/06/18", notes: [
             "【Build 號修復】project.pbxproj CURRENT_PROJECT_VERSION 在 VehicleView v3 提交（build 478）後未同步遞增，停留在 477，導致 MARKETING_VERSION（22.9）與 CURRENT_PROJECT_VERSION（477）不一致；修復 Debug/Release 兩個 buildSettings 區塊，版本號升至 build 479。",
             "【靜態掃描】全面複查 78 個 Swift 檔（強制解包、Optional 鏈結、型別轉換、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：VehicleView v3 新增程式碼（miniBarAppeared DispatchQueue.main.asyncAfter 動畫觸發、glow overlay、fmtShort 所有呼叫端均傳正值、vehicleCard 圖示圓/膠囊 stroke）確認安全；StockView v3 allocationMiniBar glow overlay 確認安全；除 build 號不一致外無其他新問題。",
