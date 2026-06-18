@@ -20,6 +20,13 @@ import SwiftUI
 //      對齊 FixedExpenseView categoryHeader / FamilyView familySectionHeader 規格
 //   8. soldStackPreview → 折疊時在堆疊牌底部加入「已實現損益」彩色膠囊 Capsule，
 //      讓未展開狀態亦能快速讀取整體已賣出損益，對齊 stockCard returnRate 膠囊規格
+// [2026-06 v3] 第三輪美化方向：
+//   9. summaryHeader.background → 補齊第三顆散景圓（55pt white.opacity(0.06) offset(30,28) blur 8），
+//      對齊 IncomeView / VariableExpenseView / FixedExpenseView / ChartView 三圓規格
+//  10. summaryHeader.background → 補齊頂部玻璃光澤 LinearGradient white.opacity(0.18)→clear top→center，
+//      對齊全 App 英雄卡片 glass shine 統一規格（v3+）
+//  11. allocationMiniBar → 彩條 GeometryReader 加入 glow overlay（白色頂光 + 底部柔化），
+//      對齊 FinanceOverviewView.totalAssetsCard / IncomeView 持倉彩條 glow overlay 規格
 
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
@@ -482,6 +489,19 @@ struct StockView: View {
                     .frame(width: 80, height: 80)
                     .offset(x: -70, y: 50)
                     .blur(radius: 10)
+                // [v3] 中右微光（提升色彩層次，對齊 IncomeView / VariableExpenseView 三圓規格）
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 30, y: 28)
+                    .blur(radius: 8)
+                // [v3] 頂部玻璃光澤：LinearGradient white→clear top→center，
+                // 對齊全 App 英雄卡片 glass shine 統一規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .opacity(headerAppeared ? 1 : 0)
@@ -759,6 +779,15 @@ struct StockView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 3))
             }
             .frame(height: 6)
+            // [v3] glow overlay：頂部白色高亮 + 底部柔化，對齊 FinanceOverviewView.totalAssetsCard / IncomeView 彩條規格
+            .overlay(
+                LinearGradient(
+                    colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+            )
             // 圖例（最多顯示 3 檔）
             HStack(spacing: 10) {
                 ForEach(Array(top5.prefix(3).enumerated()), id: \.element.id) { i, stock in
