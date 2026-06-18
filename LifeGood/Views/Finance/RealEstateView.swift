@@ -15,6 +15,18 @@ import SwiftUI
 //      文字改 .caption2.weight(.medium) 並區分綠色（租金）/ 藍色（貸款）/ 紅色（已付）顯色
 //   6. 分隔線從 Divider() 改為 Rectangle().fill(.separator.opacity(0.20)).frame(height:0.5)，
 //      視覺更細緻，對齊 VehicleView vehicleCard 分隔線規格
+// [2026-06-v4] 本次美化方向（英雄卡玻璃光澤補齊 + 卡片細節精修）：
+//   7. summaryHeader 背景 ZStack 末層加入 LinearGradient [.white.opacity(0.18), .clear]
+//      top→center 玻璃反光覆蓋層，對齊 OverviewView / IncomeView / VariableExpenseView /
+//      FixedExpenseView / VehicleView / StockView v3/v4 英雄卡玻璃光澤統一規格，
+//      補齊全 App 英雄卡此頁最後缺漏的一層 glass shine。
+//   8. estateCard 44pt 圖示圓：補入 Circle().stroke(purpleAccent.opacity(0.18), lineWidth:0.75)
+//      overlay 細邊框，對齊 VehicleView v3 / StockView v3 圖示圓邊框規格，
+//      視覺與 allocationSection / summaryCard 統一。
+//   9. kpiCell 數值文字：加入 contentTransition(.numericText())，
+//      讓年份切換 / 資料更新時 KPI 數字有平滑滾動過渡，對齊 TaxOverviewView v3 taxStatCell 規格。
+//  10. summaryHeader 總估值大字：補入 minimumScaleFactor(0.72)，
+//      防止大數字（如「NT$ 12.5 億元」）在小螢幕截斷，對齊 VehicleView summaryHeader 規格。
 
 enum RealEstateSortOption: String, CaseIterable, Identifiable {
     case purchasePrice = "購入價格"
@@ -275,6 +287,8 @@ struct RealEstateView: View {
                     Text(fmt(store.totalRealEstateValue))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .minimumScaleFactor(0.72)
+                        .lineLimit(1)
                         .contentTransition(.numericText())
                     if store.totalRealEstateValue > 0 {
                         Text("\(active) 筆持有" + (sold > 0 ? " · \(sold) 筆已售" : ""))
@@ -356,6 +370,12 @@ struct RealEstateView: View {
                     .frame(width: 55, height: 55)
                     .offset(x: 80, y: 42)
                     .blur(radius: 8)
+                // [v4] 頂部玻璃光澤：LinearGradient white→clear，對齊全 App 英雄卡 glass shine 統一規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -366,6 +386,7 @@ struct RealEstateView: View {
     }
 
     // kpiCell：統一白色 KPI 格（對齊 IncomeView / VehicleView / SavingsInsuranceView 規格）
+    // [v4] 數值加入 contentTransition(.numericText())，切換年份/更新資料時有平滑滾動過渡
     private func kpiCell(label: String, value: String) -> some View {
         VStack(spacing: 3) {
             Text(label)
@@ -376,6 +397,7 @@ struct RealEstateView: View {
                 .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                .contentTransition(.numericText())
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)
@@ -494,7 +516,7 @@ struct RealEstateView: View {
             VStack(alignment: .leading, spacing: 10) {
                 // ① 頂部：44pt 圖示圓 + 名稱/地址 + 估值大字 + 增值率膠囊
                 HStack(spacing: 12) {
-                    // 44pt 漸層圖示圓（對齊 VehicleView vehicleCard 規格）
+                    // 44pt 漸層圖示圓 + [v4] stroke 細邊框（對齊 VehicleView v3 / StockView v3 規格）
                     ZStack {
                         Circle()
                             .fill(
@@ -506,6 +528,9 @@ struct RealEstateView: View {
                             )
                             .frame(width: 44, height: 44)
                             .shadow(color: purpleAccent.opacity(0.22), radius: 6, x: 0, y: 3)
+                        Circle()
+                            .stroke(purpleAccent.opacity(0.18), lineWidth: 0.75)
+                            .frame(width: 44, height: 44)
                         Image(systemName: "building.2.fill")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(purpleAccent)
