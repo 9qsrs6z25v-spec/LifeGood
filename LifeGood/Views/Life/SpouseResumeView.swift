@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（SpouseResumeView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. profileSection → 粉紅漸層英雄卡片：配偶名字大字 + 心形圖示圓 + 散景裝飾圓，
 //      底部三欄 KPI（結婚年數 / 共同消費金額 / 禮金筆數），
 //      對齊 FinanceOverviewView.totalAssetsCard 設計語言；
@@ -20,6 +20,17 @@ import SwiftUI
 //   6. 空狀態：漸層圖示圓 + 說明文字佔位，對齊 FixedExpenseView emptyStateView 規格
 //   7. formatCurrency 改用 .ntdWanString，統一全 App 金額顯示規格；
 //      DateFormatter 改為靜態共用實例，避免每次 render 重新分配
+// [2026-06 v2] 補齊缺失的全 App 設計語言標準元素：
+//   A. heroCard background ZStack → 頂部玻璃光澤：LinearGradient([.white.opacity(0.18), .clear], top→center)
+//      對齊 FinanceOverviewView、StockView、VehicleView 的 totalAssetsCard 玻璃效果
+//   B. KPI 底欄背景 → 加入光澤 glow overlay：LinearGradient([.white.opacity(0.28), .clear, .black.opacity(0.08)])
+//      對齊 VariableExpenseView.monthSummaryHeader KPI 區域光澤規格
+//   C. marriageRow 36pt 圖示圓 → 加入細邊框 stroke(accent.opacity(0.28), lineWidth: 1.0)
+//      對齊 milestoneRow 40pt 圓已有邊框，確保 section 內視覺一致
+//   D. expenseRow 44pt 圖示圓 → 加入細邊框 stroke(accent.opacity(0.28), lineWidth: 1.5)
+//      對齊 IncomeView.incomeRow / OverviewView.recentRow 的圓形邊框規格
+//   E. expenseRow 日期文字 → 改為膠囊徽章（tertiarySystemFill 背景），
+//      對齊 VariableExpenseView.expenseRow 日期膠囊標準
 
 struct SpouseResumeView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -173,7 +184,16 @@ struct SpouseResumeView: View {
                         value: "\(spouseGifts.count) 筆")
             }
             .padding(.vertical, 8)
-            .background(.white.opacity(0.10))
+            .background(
+                // [v2-B] KPI 底欄光澤 glow：白頂→透明中→暗底，對齊 VariableExpenseView KPI 規格
+                ZStack {
+                    Color.white.opacity(0.10)
+                    LinearGradient(
+                        colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                }
+            )
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .padding(.horizontal, 20)
@@ -203,6 +223,12 @@ struct SpouseResumeView: View {
                     .frame(width: 55, height: 55)
                     .offset(x: 55, y: 38)
                     .blur(radius: 8)
+                // [v2-A] 頂部玻璃光澤：白→透明，對齊全 App 英雄卡片光澤標準
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -323,7 +349,7 @@ struct SpouseResumeView: View {
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         HStack(spacing: 12) {
-            // 36pt 漸層圖示圓
+            // 36pt 漸層圖示圓 + [v2-C] 細邊框，對齊 milestoneRow 及全 App 圖示圓規格
             ZStack {
                 Circle()
                     .fill(
@@ -332,6 +358,9 @@ struct SpouseResumeView: View {
                             startPoint: .topLeading, endPoint: .bottomTrailing
                         )
                     )
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .stroke(accent.opacity(0.28), lineWidth: 1.0)
                     .frame(width: 36, height: 36)
                 Image(systemName: icon)
                     .font(.system(size: 14, weight: .semibold))
@@ -512,7 +541,7 @@ struct SpouseResumeView: View {
     private func expenseRow(_ e: Expense) -> some View {
         let accent = e.variableCategory?.accentColor ?? Color.orange
         return HStack(spacing: 12) {
-            // 44pt 漸層圖示圓 + 陰影（對齊 ExpenseRow / IncomeView.incomeRow 規格）
+            // 44pt 漸層圖示圓 + 陰影 + [v2-D] 細邊框（對齊 ExpenseRow / IncomeView.incomeRow 規格）
             ZStack {
                 Circle()
                     .fill(
@@ -524,6 +553,9 @@ struct SpouseResumeView: View {
                     )
                     .frame(width: 44, height: 44)
                     .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
+                Circle()
+                    .stroke(accent.opacity(0.28), lineWidth: 1.5)
+                    .frame(width: 44, height: 44)
                 Image(systemName: e.variableCategory?.icon ?? "questionmark.circle")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(accent)
@@ -550,9 +582,13 @@ struct SpouseResumeView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     }
+                    // [v2-E] 日期改為膠囊徽章，對齊 VariableExpenseView.expenseRow 標準
                     Text(Self.dateFormatter.string(from: e.date))
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                 }
             }
 
