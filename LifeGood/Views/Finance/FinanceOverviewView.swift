@@ -435,12 +435,13 @@ struct FinanceOverviewView: View {
     // MARK: - 資產配置
 
     private var ntdAllocations: [AssetAllocation] {
-        let total = totalAssetsNTD
+        let insVal = insuranceValueNTD
+        let total = insVal + store.totalStockValue + store.totalVehicleValue + store.totalRealEstateValue
         guard total > 0 else { return [] }
         var result: [AssetAllocation] = []
-        if insuranceValueNTD > 0 {
-            result.append(AssetAllocation(type: .savingsInsurance, value: insuranceValueNTD,
-                                          percentage: insuranceValueNTD / total * 100))
+        if insVal > 0 {
+            result.append(AssetAllocation(type: .savingsInsurance, value: insVal,
+                                          percentage: insVal / total * 100))
         }
         if store.totalStockValue > 0 {
             result.append(AssetAllocation(type: .stock, value: store.totalStockValue,
