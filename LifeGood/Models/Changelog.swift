@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.18", build: 488, date: "2026/06/19", notes: [
+            "【UI 美化】StockDetailView v2：圖示圓 38pt → 44pt + stroke 細邊框（transactionRow / dividendRow）；種類標籤 RoundedRectangle → Capsule + stroke；損益/報酬率改彩色 Capsule 膠囊；summaryFooter / dividendsFooter 膠囊補入 stroke；空狀態升級為 40pt 圖示圓 + 說明文字；sectionHeader 色條升級為橙色漸層 + 計數膠囊；flashCard 股票代號升級為 Capsule；三個卡片補入 overlay 細邊框。"
+        ]),
         ChangelogEntry(version: "22.17", build: 487, date: "2026/06/19", notes: [
             "【效能修復】MyCalendarView v2（最新美化提交）引入兩個效能 bug：① calendarHeroCard 內部呼叫 eventsOn() 8 次（今日 1 次 + 未來 7 天各 1 次），加上 weekPreviewSection 7 次、todayEventsSection 1 次，每次 body render 共 16 次 eventsOn()；② upcomingMilestones（O(n log n) filter+sort）在 calendarHeroCard 與 upcomingMilestonesSection 共被存取 6 次。修復：在 body 頂端預先計算 weekEventsMap（一次性 7 次 eventsOn()）與 upcomingMS（1 次）並向下傳參，將 calendarHeroCard / todayEventsSection / weekPreviewSection / upcomingMilestonesSection 由 computed property 改為接收預算資料的函式；當 selectedDate == 今天時共享同一份 weekEventsMap，eventsOn() 呼叫次數從 16 降為 7，upcomingMilestones 從 6 降為 1。"
         ]),
