@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.16", build: 486, date: "2026/06/19", notes: [
+            "【靜態除錯 v22.16】全面掃描後僅發現一個效能 bug：SubordinateView.sortedSubordinates 的 .department 排序在 sort closure 內每次比較都呼叫 departments.first(where:)（O(n) 線性掃描），導致整體排序退化為 O(n² log n)；對齊已有的 dateAdded 預計算模式，改在排序前一次性建立 deptCache: [UUID: String] 字典，比較時 O(1) 查表，同時移除已無用的 deptLabel() 輔助函式。其餘強制解包均由上游 guard/if-let 保護，CloudKit 節流（2 s debounce + 30 s cooldown）與 singleton retain cycle 均屬既有設計無需更動，FamilyView.onDisappear 重置動畫旗標為故意行為，未發現新問題。"
+        ]),
         ChangelogEntry(version: "22.14", build: 484, date: "2026/06/19", notes: [
             "【崩潰修復】MyCalendarView：EKCalendarItem.title 型別為 String!，對其直接呼叫 .isEmpty 若 EventKit 回傳 nil 會 crash；改以 (ev.title ?? \"\") 先做 nil 合併再判斷。",
             "【強制解包修復】EInvoiceClient.swift endpoint：改用閉包初始化並加 fatalError 訊息，讓格式錯誤於啟動時立即可見。PaywallView / EInvoiceSetupView：三組 Apple/電子發票靜態 URL 從行內 URL(string:)! 改為 struct static let 常數，集中維護、語意清晰。",
