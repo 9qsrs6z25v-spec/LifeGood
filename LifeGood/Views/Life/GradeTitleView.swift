@@ -10,6 +10,16 @@ import SwiftUI
 //   • 部門與職等各自加入空狀態視圖（double-pulse ring）
 //   • 職等列改為圓角卡片樣式 HStack
 //   • DepartmentEditor checkRow badge → Capsule 升級
+//
+// [2026-06 v2] 二輪細化：
+//   • heroCard：加入頂部玻璃光澤（glass shine）LinearGradient overlay
+//   • heroCard：新增第二、第三顆散景裝飾圓（左下角 + 右下角）
+//   • sectionHeader：新增 count 數量 Capsule badge，與 App 全局 section 標頭一致
+//   • departmentRow code badge：補 Capsule().stroke(color.opacity(0.22)) 描邊
+//   • gradeTitleRow 職稱欄：Color(.systemGray6) → Color(.secondarySystemFill) 深色模式修正
+//   • gradeTitleRow 兩欄：補 RoundedRectangle().stroke 細描邊
+//   • deptEmptyState / gradeTitleEmptyState：主圓升級為 LinearGradient fill + stroke 描邊
+//   • DepartmentEditor checkRow code badge：補 Capsule stroke overlay
 
 struct GradeTitleView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -62,7 +72,7 @@ struct GradeTitleView: View {
                             .foregroundStyle(.green)
                     }
                 } header: {
-                    sectionHeader("部門名稱", icon: "building.2.fill", color: .indigo)
+                    sectionHeader("部門名稱", icon: "building.2.fill", color: .indigo, count: lifeStore.departments.count)
                 } footer: {
                     Text("點部門進入編輯畫面，可設定部門功能、上下游部門。資料會被「公司組織」頁拿來繪製組織樹。")
                 }
@@ -89,7 +99,7 @@ struct GradeTitleView: View {
                             .foregroundStyle(.green)
                     }
                 } header: {
-                    sectionHeader("職等設定", icon: "list.number", color: .purple)
+                    sectionHeader("職等設定", icon: "list.number", color: .purple, count: lifeStore.gradeTitles.count)
                 } footer: {
                     Text("設定公司內部的職等編號與對應職稱，方便管理部屬與職涯記錄。")
                 }
@@ -126,12 +136,34 @@ struct GradeTitleView: View {
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
 
-            // 裝飾光暈
+            // [v2] 玻璃光澤 glass shine overlay（與 App 全局英雄卡一致）
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top, endPoint: .center
+            )
+
+            // 第一顆散景圓（右上）
             Circle()
                 .fill(Color.white.opacity(0.08))
                 .frame(width: 160, height: 160)
                 .blur(radius: 30)
                 .offset(x: 40, y: -30)
+
+            // [v2] 第二顆散景圓（左下）
+            Circle()
+                .fill(Color.purple.opacity(0.14))
+                .frame(width: 90, height: 90)
+                .blur(radius: 22)
+                .offset(x: -50, y: 50)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+
+            // [v2] 第三顆散景圓（右下，細小）
+            Circle()
+                .fill(Color.white.opacity(0.06))
+                .frame(width: 60, height: 60)
+                .blur(radius: 14)
+                .offset(x: 20, y: 30)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
@@ -199,7 +231,8 @@ struct GradeTitleView: View {
 
     // MARK: - Section Header
 
-    private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    // [v2] count 數量 Capsule badge，與 App 全局 section 標頭保持一致
+    private func sectionHeader(_ title: String, icon: String, color: Color, count: Int) -> some View {
         HStack(spacing: 8) {
             Capsule()
                 .fill(LinearGradient(colors: [color, color.opacity(0.6)],
@@ -211,6 +244,19 @@ struct GradeTitleView: View {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
+            Spacer()
+            // [v2] 數量 badge（與 FinanceOverviewView / OverviewView 一致）
+            ZStack {
+                Capsule()
+                    .fill(color.opacity(0.10))
+                Text("\(count)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                Capsule()
+                    .stroke(color.opacity(0.22), lineWidth: 0.75)
+            }
+            .fixedSize()
         }
     }
 
@@ -237,12 +283,14 @@ struct GradeTitleView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     if !dept.code.isEmpty {
+                        // [v2] 補 Capsule stroke 描邊，與 App 全局 badge 一致
                         Text(dept.code)
                             .font(.caption2.weight(.semibold))
                             .padding(.horizontal, 7).padding(.vertical, 2.5)
                             .background(Color.indigo.opacity(0.13))
                             .foregroundStyle(.indigo)
                             .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.75))
                     }
                     Text(dept.name.isEmpty ? "未命名部門" : dept.name)
                         .font(.subheadline.weight(.medium))
@@ -280,10 +328,13 @@ struct GradeTitleView: View {
     @ViewBuilder
     private func gradeTitleRow(item gt: GradeTitle) -> some View {
         HStack(spacing: 10) {
-            // 職等編號欄
+            // 職等編號欄 [v2] 補 RoundedRectangle stroke 細描邊
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.purple.opacity(0.10))
+                    .frame(width: 56, height: 36)
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.purple.opacity(0.20), lineWidth: 0.75)
                     .frame(width: 56, height: 36)
                 TextField("職等", text: Binding(
                     get: { lifeStore.gradeTitles.first(where: { $0.id == gt.id })?.grade ?? gt.grade },
@@ -295,10 +346,13 @@ struct GradeTitleView: View {
                 .frame(width: 52)
             }
 
-            // 職稱欄
+            // 職稱欄 [v2] Color(.systemGray6) → Color(.secondarySystemFill) 深色模式修正 + stroke 描邊
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.systemGray6))
+                    .fill(Color(.secondarySystemFill))
+                    .frame(height: 36)
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(.separator).opacity(0.40), lineWidth: 0.75)
                     .frame(height: 36)
                 TextField("職稱", text: Binding(
                     get: { lifeStore.gradeTitles.first(where: { $0.id == gt.id })?.title ?? gt.title },
@@ -325,12 +379,21 @@ struct GradeTitleView: View {
     private var deptEmptyState: some View {
         VStack(spacing: 14) {
             ZStack {
-                Circle().fill(Color.indigo.opacity(0.06)).frame(width: 70, height: 70)
+                // [v2] 主圓升級為 LinearGradient fill + stroke 描邊
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.indigo.opacity(0.14), Color.indigo.opacity(0.05)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 70, height: 70)
+                Circle()
+                    .stroke(Color.indigo.opacity(0.35), lineWidth: 1)
+                    .frame(width: 70, height: 70)
                 Circle().stroke(Color.indigo.opacity(0.18), lineWidth: 1.5).frame(width: 82, height: 82)
                 Circle().stroke(Color.indigo.opacity(0.08), lineWidth: 1).frame(width: 96, height: 96)
                 Image(systemName: "building.2")
                     .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(Color.indigo.opacity(0.50))
+                    .foregroundStyle(Color.indigo.opacity(0.55))
             }
             VStack(spacing: 4) {
                 Text("尚未建立任何部門")
@@ -348,12 +411,21 @@ struct GradeTitleView: View {
     private var gradeTitleEmptyState: some View {
         VStack(spacing: 14) {
             ZStack {
-                Circle().fill(Color.purple.opacity(0.06)).frame(width: 70, height: 70)
+                // [v2] 主圓升級為 LinearGradient fill + stroke 描邊
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.purple.opacity(0.14), Color.purple.opacity(0.05)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 70, height: 70)
+                Circle()
+                    .stroke(Color.purple.opacity(0.35), lineWidth: 1)
+                    .frame(width: 70, height: 70)
                 Circle().stroke(Color.purple.opacity(0.18), lineWidth: 1.5).frame(width: 82, height: 82)
                 Circle().stroke(Color.purple.opacity(0.08), lineWidth: 1).frame(width: 96, height: 96)
                 Image(systemName: "list.number")
                     .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(Color.purple.opacity(0.50))
+                    .foregroundStyle(Color.purple.opacity(0.55))
             }
             VStack(spacing: 4) {
                 Text("尚未設定職等")
@@ -554,12 +626,14 @@ struct DepartmentEditor: View {
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isOn ? color : .secondary)
                 if !code.isEmpty {
+                    // [v2] 補 Capsule stroke 描邊，與 departmentRow code badge 一致
                     Text(code)
                         .font(.caption2.weight(.semibold))
                         .padding(.horizontal, 7).padding(.vertical, 2.5)
                         .background(color.opacity(0.12))
                         .foregroundStyle(color)
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.75))
                 }
                 Text(label)
                 Spacer()
