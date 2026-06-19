@@ -132,7 +132,7 @@ struct SoldStamp: View {
 }
 
 // MARK: - 美化紀錄（VehicleDetailView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. flashCard：加入 cardAppeared spring 進場動畫（透明度 + Y 位移），
 //      對齊 StockDetailView flashCard 進場規格。
 //   2. sectionHeader：升級為 Capsule 色條 + subheadline.bold + 計數膠囊，
@@ -144,6 +144,20 @@ struct SoldStamp: View {
 //   5. 兩個列表：加入行間 Divider + 交錯淡入進場動畫（infoRowsAppeared），
 //      對齊 StockDetailView transactionsSection 動畫規格。
 //   6. infoSection 卡片：補極細 overlay 邊框，提升精緻感與深色模式相容性。
+// [2026-06 v2] 本次美化方向：
+//   7. flashCard 玻璃光澤：非 legendary 卡片背景加入 .white.opacity(0.18)→.clear
+//      由上到中的 LinearGradient overlay，對齊全 App 英雄卡玻璃光澤規格
+//      （OverviewView / StockView / VariableExpenseView 等）。
+//   8. 圖示圓升圓形＋邊框：fixedExpenseRow / variableExpenseRow 圖示圓從
+//      RoundedRectangle(cornerRadius:10) 升級為 Circle +
+//      stroke(color.opacity(0.20), lineWidth: 0.75)，
+//      對齊全 App 標準圓形圖示圓規格（ExpenseRow / incomeRow 等）。
+//   9. vehicleKpiStrip：flashCard 正下方加入 KPI 橫列
+//      （月固定支出 / 近12月變動 / 持有年限），各含 30pt 漸層圓圖示，
+//      kpiStripAppeared spring 進場動畫；
+//      對齊 LifeOverviewView.statsStrip / FamilyView.statsStrip 設計規格。
+//  10. 金額色彩：支出列右側金額從 .primary 升為各自 accent 顏色（藍 / 橘），
+//      提升視覺層次，讓定期與變動的分類色貫穿整列。
 
 // MARK: - 汽車檢視卡片
 
@@ -163,6 +177,7 @@ struct VehicleDetailView: View {
     @State private var showPremiumAlert = false
     // 美化：進場動畫旗標（對齊 StockDetailView / RealEstateDetailView 規格）
     @State private var cardAppeared = false
+    @State private var kpiStripAppeared = false
     @State private var infoRowsAppeared = false
 
     private var rarity: CardRarity { CardRarity(price: vehicle.purchasePrice) }
@@ -177,6 +192,15 @@ struct VehicleDetailView: View {
                         .onAppear {
                             withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
                                 cardAppeared = true
+                            }
+                        }
+                    // v2：KPI 摘要橫列（月固定 / 近12月變動 / 持有年限）
+                    vehicleKpiStrip
+                        .opacity(kpiStripAppeared ? 1 : 0)
+                        .offset(y: kpiStripAppeared ? 0 : 14)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.18)) {
+                                kpiStripAppeared = true
                             }
                         }
                     infoSection
@@ -293,8 +317,18 @@ struct VehicleDetailView: View {
             .padding(.bottom, 16)
         }
         .background(
+            // v2：非 legendary 加玻璃光澤，legendary 本身已有豐富色彩故跳過
             LinearGradient(colors: rarity.bgGradient,
                            startPoint: .topLeading, endPoint: .bottomTrailing)
+                .overlay(
+                    LinearGradient(
+                        colors: rarity == .legendary
+                            ? [Color.clear, Color.clear]
+                            : [Color.white.opacity(0.18), Color.clear],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
+                )
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
@@ -391,8 +425,9 @@ struct VehicleDetailView: View {
         let monthlyEquiv = fe.period.toMonthly(fe.amount)
 
         return HStack(spacing: 12) {
+            // v2：升圓形 + stroke 邊框（對齊全 App 標準圓形圖示圓規格）
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                Circle()
                     .fill(
                         LinearGradient(
                             colors: [color.opacity(0.22), color.opacity(0.09)],
@@ -400,6 +435,7 @@ struct VehicleDetailView: View {
                         )
                     )
                     .frame(width: 38, height: 38)
+                    .overlay(Circle().stroke(color.opacity(0.20), lineWidth: 0.75))
                 Image(systemName: icon)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(color)
@@ -426,9 +462,10 @@ struct VehicleDetailView: View {
 
             Spacer(minLength: 4)
 
+            // v2：金額升為 accent 顏色，讓分類色貫穿整列
             Text(fmt(fe.amount))
                 .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
+                .foregroundStyle(color)
                 .contentTransition(.numericText())
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -443,8 +480,9 @@ struct VehicleDetailView: View {
         let color = Color.orange
 
         return HStack(spacing: 12) {
+            // v2：升圓形 + stroke 邊框（對齊全 App 標準圓形圖示圓規格）
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                Circle()
                     .fill(
                         LinearGradient(
                             colors: [color.opacity(0.22), color.opacity(0.09)],
@@ -452,6 +490,7 @@ struct VehicleDetailView: View {
                         )
                     )
                     .frame(width: 38, height: 38)
+                    .overlay(Circle().stroke(color.opacity(0.20), lineWidth: 0.75))
                 Image(systemName: ve.category.icon)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(color)
@@ -472,15 +511,77 @@ struct VehicleDetailView: View {
 
             Spacer(minLength: 4)
 
+            // v2：金額升為 accent 顏色，讓分類色貫穿整列
             Text(fmt(ve.amount))
                 .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
+                .foregroundStyle(color)
                 .contentTransition(.numericText())
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    // MARK: - v2：KPI 摘要橫列（月固定 / 近12月變動 / 持有年限）
+
+    private var vehicleKpiStrip: some View {
+        let monthlyFixed = vehicle.fixedExpenses.reduce(0.0) { $0 + $1.period.toMonthly($1.amount) }
+        let twelveMonthsAgo = Calendar.current.date(byAdding: .month, value: -12, to: Date()) ?? Date()
+        let recentVariable = vehicle.variableExpenses
+            .filter { $0.date >= twelveMonthsAgo }
+            .reduce(0.0) { $0 + $1.amount }
+
+        return HStack(spacing: 0) {
+            vehicleKpiCell(icon: "calendar.badge.clock", label: "月固定支出",
+                           value: fmt(monthlyFixed), color: .blue)
+            Rectangle()
+                .fill(Color(.separator).opacity(0.3))
+                .frame(width: 0.5, height: 28)
+            vehicleKpiCell(icon: "cart.circle.fill", label: "近12月變動",
+                           value: fmt(recentVariable), color: .orange)
+            Rectangle()
+                .fill(Color(.separator).opacity(0.3))
+                .frame(width: 0.5, height: 28)
+            vehicleKpiCell(icon: "clock.fill", label: "持有",
+                           value: String(format: "%.1f 年", vehicle.yearsOwned), color: .green)
+        }
+        .padding(.vertical, 12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .padding(.horizontal, 24)
+    }
+
+    private func vehicleKpiCell(icon: String, label: String, value: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            // 30pt 漸層圖示圓（對齊 statsStrip 規格）
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [color.opacity(0.22), color.opacity(0.08)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 30, height: 30)
+                    .overlay(Circle().stroke(color.opacity(0.20), lineWidth: 0.75))
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(value)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 輔助
