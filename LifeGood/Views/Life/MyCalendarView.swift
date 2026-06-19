@@ -54,10 +54,23 @@ struct MyCalendarView: View {
     }()
 
     var body: some View {
+        // Pre-compute once per render: avoids 16 redundant eventsOn() + 6 upcomingMilestones calls
+        let resolvedWeekDates = weekDates
+        let startOfSelectedDay = calendar.startOfDay(for: selectedDate)
+        let startOfToday = calendar.startOfDay(for: Date())
+        let weekEventsMap = Dictionary(uniqueKeysWithValues: resolvedWeekDates.map { ($0, eventsOn($0)) })
+        let upcomingMS = upcomingMilestones
+        let heroIsToday = startOfSelectedDay == startOfToday
+        let heroWeekDates = heroIsToday ? resolvedWeekDates
+            : (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: startOfToday) }
+        let heroEventsMap = heroIsToday ? weekEventsMap
+            : Dictionary(uniqueKeysWithValues: heroWeekDates.map { ($0, eventsOn($0)) })
+        let heroTodayCount = heroEventsMap[startOfToday]?.count ?? 0
+        let heroWeekTotal = heroWeekDates.reduce(0) { $0 + (heroEventsMap[$1]?.count ?? 0) }
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    calendarHeroCard
+                    calendarHeroCard(todayEvCount: heroTodayCount, weekTotal: heroWeekTotal, upcomingCount: upcomingMS.count)
                         .opacity(heroCardAppeared ? 1 : 0)
                         .offset(y: heroCardAppeared ? 0 : 20)
                         .onAppear {
@@ -67,7 +80,7 @@ struct MyCalendarView: View {
                         }
                     MacaronDatePicker(selectedDate: $selectedDate)
                     appleCalendarBanner
-                    todayEventsSection
+                    todayEventsSection(events: weekEventsMap[startOfSelectedDay] ?? [])
                         .opacity(todayCardAppeared ? 1 : 0)
                         .offset(y: todayCardAppeared ? 0 : 18)
                         .onAppear {
@@ -75,7 +88,7 @@ struct MyCalendarView: View {
                                 todayCardAppeared = true
                             }
                         }
-                    weekPreviewSection
+                    weekPreviewSection(weekDates: resolvedWeekDates, weekEventsMap: weekEventsMap)
                         .opacity(weekCardAppeared ? 1 : 0)
                         .offset(y: weekCardAppeared ? 0 : 18)
                         .onAppear {
@@ -83,7 +96,7 @@ struct MyCalendarView: View {
                                 weekCardAppeared = true
                             }
                         }
-                    upcomingMilestonesSection
+                    upcomingMilestonesSection(milestones: upcomingMS)
                         .opacity(milestonesCardAppeared ? 1 : 0)
                         .offset(y: milestonesCardAppeared ? 0 : 18)
                         .onAppear {
@@ -379,19 +392,14 @@ struct MyCalendarView: View {
         }
     }
 
-    private var todayEvents: [CalendarEvent] { eventsOn(selectedDate) }
-
     /// 當前選定日期顯示用（今天 → 「當日事件」、其他日 → 「2025/5/15 (Wed) 事件」）
     private var selectedDayHeaderTitle: String {
         if calendar.isDateInToday(selectedDate) { return "當日事件" }
         return "\(Self.calendarDateFormatter.string(from: selectedDate)) 事件"
     }
 
-    private var todayEventsSection: some View {
-        // 先算一次，避免 todayEvents（每次存取都重跑 eventsOn()）在 count/isEmpty/ForEach/
-        // 分隔線判斷中被呼叫 3+N 次，N 為事件數量
-        let events = todayEvents
-        return VStack(alignment: .leading, spacing: 0) {
+    private func todayEventsSection(events: [CalendarEvent]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             sectionHeader(selectedDayHeaderTitle,
                           icon: "calendar.badge.clock",
                           color: Color(red: 0.95, green: 0.55, blue: 0.65),
@@ -498,9 +506,8 @@ struct MyCalendarView: View {
 
     // MARK: - 本週快覽（以選取日為中心向後 7 天）
 
-    private var weekPreviewSection: some View {
-        let weekEvents = Dictionary(uniqueKeysWithValues: weekDates.map { ($0, eventsOn($0)) })
-        let totalCount = weekEvents.values.reduce(0) { $0 + $1.count }
+    private func weekPreviewSection(weekDates: [Date], weekEventsMap: [Date: [CalendarEvent]]) -> some View {
+        let totalCount = weekEventsMap.values.reduce(0) { $0 + $1.count }
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("接下來 7 天",
                           icon: "calendar",
@@ -510,7 +517,7 @@ struct MyCalendarView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(weekDates, id: \.self) { date in
-                        weekDayCard(date: date, events: weekEvents[date] ?? [])
+                        weekDayCard(date: date, events: weekEventsMap[date] ?? [])
                     }
                 }
                 .padding(.horizontal)
@@ -616,23 +623,23 @@ struct MyCalendarView: View {
             .sorted { $0.date < $1.date }
     }
 
-    private var upcomingMilestonesSection: some View {
+    private func upcomingMilestonesSection(milestones: [LifeMilestone]) -> some View {
         // 區塊標題用固定橙色，各里程碑列使用 milestoneAccent() 獨立色彩（與 LifeOverviewView 一致）
         let headerColor = Color(red: 0.99, green: 0.65, blue: 0.30)
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("未來 30 天里程碑",
                           icon: "flag.fill",
                           color: headerColor,
-                          count: upcomingMilestones.count)
+                          count: milestones.count)
 
-            if upcomingMilestones.isEmpty {
+            if milestones.isEmpty {
                 emptyPlaceholder(
                     icon: "flag",
                     title: "尚無排程的里程碑",
                     subtitle: "在人生頁新增里程碑後顯示於此"
                 )
             } else {
-                ForEach(Array(upcomingMilestones.prefix(8).enumerated()), id: \.element.id) { idx, ms in
+                ForEach(Array(milestones.prefix(8).enumerated()), id: \.element.id) { idx, ms in
                     // 每列採各自類別色彩，統一色彩語言與 LifeOverviewView milestoneTimelineSection
                     let msColor = milestoneAccent(ms.category)
                     HStack(spacing: 12) {
@@ -696,18 +703,18 @@ struct MyCalendarView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 11)
 
-                    if idx < min(upcomingMilestones.count, 8) - 1 {
+                    if idx < min(milestones.count, 8) - 1 {
                         Divider().padding(.leading, 62)
                     }
                 }
-                if upcomingMilestones.count > 8 {
+                if milestones.count > 8 {
                     HStack(spacing: 5) {
                         ForEach(0..<3, id: \.self) { _ in
                             Circle()
                                 .fill(Color(.tertiaryLabel))
                                 .frame(width: 3, height: 3)
                         }
-                        Text("還有 \(upcomingMilestones.count - 8) 個里程碑")
+                        Text("還有 \(milestones.count - 8) 個里程碑")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                         Spacer()
@@ -726,12 +733,7 @@ struct MyCalendarView: View {
 
     // MARK: - [v2] 英雄摘要卡
 
-    private var calendarHeroCard: some View {
-        let todayEvCount = eventsOn(Date()).count
-        let startOfToday = calendar.startOfDay(for: Date())
-        let weekTotal = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: startOfToday) }
-                               .reduce(0) { $0 + eventsOn($1).count }
-        let upcomingCount = upcomingMilestones.count
+    private func calendarHeroCard(todayEvCount: Int, weekTotal: Int, upcomingCount: Int) -> some View {
         let day = calendar.component(.day, from: Date())
         let month = calendar.component(.month, from: Date())
         let weekdayNames = ["日", "一", "二", "三", "四", "五", "六"]

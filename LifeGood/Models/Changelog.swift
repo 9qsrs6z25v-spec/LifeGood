@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.17", build: 487, date: "2026/06/19", notes: [
+            "【效能修復】MyCalendarView v2（最新美化提交）引入兩個效能 bug：① calendarHeroCard 內部呼叫 eventsOn() 8 次（今日 1 次 + 未來 7 天各 1 次），加上 weekPreviewSection 7 次、todayEventsSection 1 次，每次 body render 共 16 次 eventsOn()；② upcomingMilestones（O(n log n) filter+sort）在 calendarHeroCard 與 upcomingMilestonesSection 共被存取 6 次。修復：在 body 頂端預先計算 weekEventsMap（一次性 7 次 eventsOn()）與 upcomingMS（1 次）並向下傳參，將 calendarHeroCard / todayEventsSection / weekPreviewSection / upcomingMilestonesSection 由 computed property 改為接收預算資料的函式；當 selectedDate == 今天時共享同一份 weekEventsMap，eventsOn() 呼叫次數從 16 降為 7，upcomingMilestones 從 6 降為 1。"
+        ]),
         ChangelogEntry(version: "22.16", build: 486, date: "2026/06/19", notes: [
             "【靜態除錯 v22.16】全面掃描後僅發現一個效能 bug：SubordinateView.sortedSubordinates 的 .department 排序在 sort closure 內每次比較都呼叫 departments.first(where:)（O(n) 線性掃描），導致整體排序退化為 O(n² log n)；對齊已有的 dateAdded 預計算模式，改在排序前一次性建立 deptCache: [UUID: String] 字典，比較時 O(1) 查表，同時移除已無用的 deptLabel() 輔助函式。其餘強制解包均由上游 guard/if-let 保護，CloudKit 節流（2 s debounce + 30 s cooldown）與 singleton retain cycle 均屬既有設計無需更動，FamilyView.onDisappear 重置動畫旗標為故意行為，未發現新問題。"
         ]),
