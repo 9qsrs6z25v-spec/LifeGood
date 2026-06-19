@@ -321,7 +321,7 @@ struct MyCalendarView: View {
                 events.append(CalendarEvent(
                     id: "ek-\(ev.calendarItemIdentifier)-\(ev.startDate.timeIntervalSince1970)",
                     type: .appleCalendar,
-                    title: ev.title.isEmpty ? "(無標題)" : ev.title,
+                    title: (ev.title ?? "").isEmpty ? "(無標題)" : (ev.title ?? "(無標題)"),
                     time: ev.isAllDay ? nil : ev.startDate,
                     detail: detailParts.joined(separator: " · ")
                 ))

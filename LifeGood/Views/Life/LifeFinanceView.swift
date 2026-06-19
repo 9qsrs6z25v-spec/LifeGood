@@ -653,13 +653,16 @@ struct LifeFinanceView: View {
         return banks.reduce(0) { $0 + balanceInTWD(bankBalances(for: $1)) }
     }
 
+    private static let decimalFormatter: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+    }()
+
     private func formatNumber(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "0"
+        Self.decimalFormatter.string(from: NSNumber(value: v)) ?? "0"
     }
 
     private func formatTwdShort(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        let f = Self.decimalFormatter
         if abs(v) >= 100_000_000 {
             let s = f.string(from: NSNumber(value: v / 100_000_000)) ?? "0"
             return "NT$ \(s) 億"
@@ -698,8 +701,12 @@ struct LifeFinanceView: View {
         }
     }
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func formatDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.dateFormatter.string(from: date)
     }
 }
 
@@ -999,16 +1006,19 @@ struct FinanceCardView: View {
         }
     }
 
+    private static let fmtMonthYearFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MM/yy"; return f
+    }()
+    private static let fmtYearMonthZhFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy 年 M 月"; return f
+    }()
+
     private func fmtMonthYear(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "MM/yy"
-        return f.string(from: d)
+        Self.fmtMonthYearFormatter.string(from: d)
     }
 
     private func fmtYearMonthZh(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy 年 M 月"
-        return f.string(from: d)
+        Self.fmtYearMonthZhFormatter.string(from: d)
     }
 
     private var detailCard: some View {
@@ -1124,13 +1134,19 @@ struct FinanceCardView: View {
         .padding(.horizontal).padding(.vertical, 10)
     }
 
+    private static let fmtDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private static let fmtNumFormatter: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+    }()
+
     private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.fmtDateFormatter.string(from: date)
     }
 
     private func fmtNum(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "0"
+        Self.fmtNumFormatter.string(from: NSNumber(value: v)) ?? "0"
     }
 
     // MARK: - 銀行存款章節
