@@ -12,6 +12,20 @@ import MapKit
 // ⑥ 進場動畫：.opacity + .offset 彈跳進場（錯落延遲）。
 // ⑦ upcomingMilestonesSection：新增 milestoneAccent() 輔助函式，各類別採獨立色彩，
 //    圖示圓改 LinearGradient + shadow；類別標籤改圓角膠囊 badge，與 LifeOverviewView 一致。
+// [2026-06 v2] 本次美化方向：
+// ⑧ calendarHeroCard：新增藍色漸層英雄摘要卡（今日大字日期 + 月份/星期副標 +
+//    今日事件計數白色膠囊 + 未來里程碑 KPI 膠囊 + 三欄 KPI 橫列：今日/本週七天/未來30天）
+//    三顆散景裝飾圓 + 頂部玻璃光澤（white.opacity(0.18)），
+//    對齊 FinanceOverviewView.totalAssetsCard / IncomeView.summaryHeader 英雄卡片規格；
+//    heroCardAppeared spring 進場動畫（透明度 + Y 位移 20pt），位於 MacaronDatePicker 上方。
+// ⑨ 三個 section 卡片（當日事件 / 本週快覽 / 未來里程碑）加入 overlay RoundedRectangle
+//    stroke（separator.opacity(0.12), 0.75pt），提升深色模式邊界感，
+//    對齊 OverviewView / IncomeView 全 App 卡片精緻規格。
+// ⑩ eventRow 事件類型膠囊：補入 Capsule().stroke(ev.type.color.opacity(0.22), 0.6pt)，
+//    對齊 OverviewView.categoryRow / LifeOverviewView.categoryBreakdownSection 膠囊邊框規格。
+// ⑪ upcomingMilestonesSection 里程碑日期：從純 .caption2 tertiary 文字升級為
+//    calendar 圖示 + tertiarySystemFill Capsule 徽章，
+//    對齊 OverviewView.recentRow / CareerView v2 日期膠囊設計語言。
 
 /// 我的行事曆：彙整當日家庭紀念日、工作會議與任務、本週快覽、未來里程碑、Apple 行事曆事件。
 struct MyCalendarView: View {
@@ -24,6 +38,7 @@ struct MyCalendarView: View {
     @State private var editingEvent: PersonalEvent?
 
     // 進場動畫旗標
+    @State private var heroCardAppeared = false
     @State private var todayCardAppeared = false
     @State private var weekCardAppeared = false
     @State private var milestonesCardAppeared = false
@@ -42,6 +57,14 @@ struct MyCalendarView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    calendarHeroCard
+                        .opacity(heroCardAppeared ? 1 : 0)
+                        .offset(y: heroCardAppeared ? 0 : 20)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.04)) {
+                                heroCardAppeared = true
+                            }
+                        }
                     MacaronDatePicker(selectedDate: $selectedDate)
                     appleCalendarBanner
                     todayEventsSection
@@ -397,6 +420,7 @@ struct MyCalendarView: View {
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
@@ -434,6 +458,7 @@ struct MyCalendarView: View {
                         .background(ev.type.color.opacity(0.15))
                         .foregroundStyle(ev.type.color)
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(ev.type.color.opacity(0.22), lineWidth: 0.6))
                 }
                 // 時間 + 詳情
                 HStack(spacing: 6) {
@@ -494,6 +519,7 @@ struct MyCalendarView: View {
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
@@ -634,9 +660,17 @@ struct MyCalendarView: View {
                                 .font(.subheadline.weight(.medium))
                                 .lineLimit(1)
                             HStack(spacing: 5) {
-                                Text(fmtDate(ms.date))
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
+                                HStack(spacing: 3) {
+                                    Image(systemName: "calendar")
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                    Text(fmtDate(ms.date))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color(.tertiarySystemFill))
+                                .clipShape(Capsule())
                                 // 類別標籤：圓角膠囊 badge，與 IncomeView / VariableExpenseView 均值
                                 Text(ms.category.rawValue)
                                     .font(.system(size: 10, weight: .semibold))
@@ -685,8 +719,138 @@ struct MyCalendarView: View {
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+    }
+
+    // MARK: - [v2] 英雄摘要卡
+
+    private var calendarHeroCard: some View {
+        let todayEvCount = eventsOn(Date()).count
+        let startOfToday = calendar.startOfDay(for: Date())
+        let weekTotal = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: startOfToday) }
+                               .reduce(0) { $0 + eventsOn($1).count }
+        let upcomingCount = upcomingMilestones.count
+        let day = calendar.component(.day, from: Date())
+        let month = calendar.component(.month, from: Date())
+        let weekdayNames = ["日", "一", "二", "三", "四", "五", "六"]
+        let weekdayIdx = calendar.component(.weekday, from: Date()) - 1
+        let weekdayStr = weekdayNames.indices.contains(weekdayIdx) ? weekdayNames[weekdayIdx] : ""
+
+        return VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("我的行事曆")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.75))
+                    HStack(alignment: .lastTextBaseline, spacing: 8) {
+                        Text("\(day)")
+                            .font(.system(size: 44, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(month) 月")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.80))
+                            Text("週\(weekdayStr)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.60))
+                        }
+                    }
+                    Text("今日 \(todayEvCount) 件事件")
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.white.opacity(0.20))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.white)
+                        .padding(.top, 1)
+                }
+                Spacer()
+                if upcomingCount > 0 {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("未來 30 天")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.62))
+                        HStack(spacing: 3) {
+                            Image(systemName: "flag.fill")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("\(upcomingCount) 個里程碑")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                        .foregroundStyle(Color(red: 0.72, green: 0.95, blue: 0.82))
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(.white.opacity(0.18))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
+                    }
+                }
+            }
+
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.vertical, 14)
+
+            HStack(spacing: 0) {
+                heroKpiCell(label: "今日", value: "\(todayEvCount) 件")
+                Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5, height: 28)
+                heroKpiCell(label: "本週七天", value: "\(weekTotal) 件")
+                Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5, height: 28)
+                heroKpiCell(label: "未來 30 天", value: "\(upcomingCount) 個")
+            }
+        }
+        .padding(20)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.28, green: 0.48, blue: 0.90),
+                        Color(red: 0.16, green: 0.30, blue: 0.72)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(.white.opacity(0.13))
+                    .frame(width: 130, height: 130)
+                    .offset(x: 90, y: -50)
+                    .blur(radius: 14)
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 85, height: 85)
+                    .offset(x: -65, y: 52)
+                    .blur(radius: 10)
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 28, y: 28)
+                    .blur(radius: 8)
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.16, green: 0.30, blue: 0.72).opacity(0.42), radius: 18, x: 0, y: 9)
+        .padding(.horizontal)
+    }
+
+    private func heroKpiCell(label: String, value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.62))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 輔助元件
