@@ -63,13 +63,6 @@ struct SubordinateView: View {
         )
     }
 
-    private func deptLabel(_ sub: Subordinate) -> String {
-        if let dept = lifeStore.departments.first(where: { $0.id == sub.departmentId }) {
-            return dept.code.isEmpty ? dept.name : "\(dept.code) \(dept.name)"
-        }
-        return sub.department
-    }
-
     private var sortedSubordinates: [Subordinate] {
         let list = lifeStore.subordinates
         if sortOption == .manual { return list }
@@ -77,11 +70,21 @@ struct SubordinateView: View {
         let indexMap: [UUID: Int] = sortOption == .dateAdded
             ? Dictionary(uniqueKeysWithValues: list.indices.map { (list[$0].id, $0) })
             : [:]
+        // 預先建立部門標籤快取；deptLabel() 內部做 departments.first(where:) O(n)，
+        // 若放在 sort closure 內每次比較都執行，整體排序退化為 O(n² log n)。
+        let deptCache: [UUID: String] = sortOption == .department
+            ? Dictionary(uniqueKeysWithValues: lifeStore.departments.map {
+                ($0.id, $0.code.isEmpty ? $0.name : "\($0.code) \($0.name)")
+            })
+            : [:]
         let sorted = list.sorted { a, b in
             let result: Bool
             switch sortOption {
             case .name: result = a.name < b.name
-            case .department: result = deptLabel(a) < deptLabel(b)
+            case .department:
+                let aLabel = a.departmentId.flatMap { deptCache[$0] } ?? a.department
+                let bLabel = b.departmentId.flatMap { deptCache[$0] } ?? b.department
+                result = aLabel < bLabel
             case .jobTitle: result = a.jobTitle < b.jobTitle
             case .joinDate:
                 let ad = a.joinDate ?? Date.distantFuture
