@@ -24,6 +24,10 @@ import SwiftUI
 // MARK: - 主畫面
 
 struct EInvoiceSetupView: View {
+    // 靜態常數：電子發票官方連結不含非法字元，永不為 nil；集中於此方便維護
+    private static let einvoicePortalURL = URL(string: "https://www.einvoice.nat.gov.tw/")!
+    private static let einvoiceAPIURL = URL(string: "https://www.einvoice.nat.gov.tw/ESCAPI/")!
+
     @EnvironmentObject var sync: EInvoiceSyncManager
     @EnvironmentObject var expenseStore: ExpenseStore
     @StateObject private var categorizer = InvoiceCategorizer.shared
@@ -477,7 +481,7 @@ struct EInvoiceSetupView: View {
             einvoiceSectionHeader("關於", icon: "info.circle.fill", color: .secondary)
 
             VStack(spacing: 0) {
-                Link(destination: URL(string: "https://www.einvoice.nat.gov.tw/")!) {
+                Link(destination: Self.einvoicePortalURL) {
                     HStack(spacing: 12) {
                         ZStack {
                             Circle()
@@ -499,7 +503,7 @@ struct EInvoiceSetupView: View {
 
                 Divider().padding(.leading, 62)
 
-                Link(destination: URL(string: "https://www.einvoice.nat.gov.tw/ESCAPI/")!) {
+                Link(destination: Self.einvoiceAPIURL) {
                     HStack(spacing: 12) {
                         ZStack {
                             Circle()

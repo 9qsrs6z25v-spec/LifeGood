@@ -21,6 +21,11 @@ import StoreKit
 // MARK: - 升級訂閱頁
 
 struct PaywallView: View {
+    // 靜態常數：Apple 官方連結不含非法字元，永不為 nil；集中於此方便維護
+    private static let eulaURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+    private static let privacyURL = URL(string: "https://www.apple.com/legal/privacy/")!
+    private static let subscriptionsURL = URL(string: "https://apps.apple.com/account/subscriptions")!
+
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
     @State private var heroAppeared = false
@@ -510,11 +515,11 @@ struct PaywallView: View {
 
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
-                Link("使用條款", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                Link("使用條款", destination: Self.eulaURL)
                 Text(" · ").foregroundStyle(.tertiary)
-                Link("隱私政策", destination: URL(string: "https://www.apple.com/legal/privacy/")!)
+                Link("隱私政策", destination: Self.privacyURL)
                 Text(" · ").foregroundStyle(.tertiary)
-                Link("管理訂閱", destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
+                Link("管理訂閱", destination: Self.subscriptionsURL)
                 Spacer(minLength: 0)
             }
             .font(.caption2)

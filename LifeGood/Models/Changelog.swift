@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.14", build: 484, date: "2026/06/19", notes: [
+            "【崩潰修復】MyCalendarView：EKCalendarItem.title 型別為 String!，對其直接呼叫 .isEmpty 若 EventKit 回傳 nil 會 crash；改以 (ev.title ?? \"\") 先做 nil 合併再判斷。",
+            "【強制解包修復】EInvoiceClient.swift endpoint：改用閉包初始化並加 fatalError 訊息，讓格式錯誤於啟動時立即可見。PaywallView / EInvoiceSetupView：三組 Apple/電子發票靜態 URL 從行內 URL(string:)! 改為 struct static let 常數，集中維護、語意清晰。",
+            "【效能修復】SubordinateOverviewView：① `var calendar: Calendar { Calendar.current }` 改為 `let calendar = Calendar.current`，消除 todayLeaves / todayMeetings / todayTasks / isSameDay 等熱路徑每次存取都重建 Calendar 的開銷；② fmtTime / fmtDateTime 改用 static let DateFormatter，不再每次呼叫都分配新物件。",
+            "【效能修復】LifeFinanceView / FinanceCardView：formatNumber / formatTwdShort / formatDate / fmtMonthYear / fmtYearMonthZh / fmtDate / fmtNum 等 7 個函式原先每次呼叫都建立新的 NumberFormatter 或 DateFormatter，改為 static let 單例後呼叫成本從 O(建立) 降為 O(1)。"
+        ]),
         ChangelogEntry(version: "22.13", build: 483, date: "2026/06/19", notes: [
             "【靜態 Debug】全面複查 78 個 Swift 檔（強制解包、Optional 越界、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
             "【效能修復】FinanceChartView.stockPerformanceSection：stocksSortedByProfitLoss（O(n log n) 排序）原本在 ForEach 資料源呼叫一次，再於每筆列的 Divider 判斷（i < stocksSortedByProfitLoss.count - 1）又各呼叫一次，共 N+1 次排序（10 筆股票 = 11 次）；改在 else 區塊頂端以 let sortedStocks = Array(stocksSortedByProfitLoss.enumerated()) 一次捕捉，ForEach 與 Divider 條件均改用 sortedStocks，排序次數從 N+1 降為 1。",

@@ -34,7 +34,7 @@ struct SubordinateOverviewView: View {
         }
     }
 
-    private var calendar: Calendar { Calendar.current }
+    private let calendar = Calendar.current
 
     private func isSameDay(_ a: Date, _ b: Date) -> Bool {
         calendar.isDate(a, inSameDayAs: b)
@@ -588,11 +588,18 @@ struct SubordinateOverviewView: View {
         .padding(.bottom, 2)
     }
 
+    private static let fmtTimeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    }()
+    private static let fmtDateTimeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d HH:mm"; return f
+    }()
+
     private func fmtTime(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: date)
+        Self.fmtTimeFormatter.string(from: date)
     }
 
     private func fmtDateTime(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "M/d HH:mm"; return f.string(from: date)
+        Self.fmtDateTimeFormatter.string(from: date)
     }
 }
