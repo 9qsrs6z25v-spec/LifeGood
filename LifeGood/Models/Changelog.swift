@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.13", build: 483, date: "2026/06/19", notes: [
+            "【靜態 Debug】全面複查 78 個 Swift 檔（強制解包、Optional 越界、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
+            "【效能修復】FinanceChartView.stockPerformanceSection：stocksSortedByProfitLoss（O(n log n) 排序）原本在 ForEach 資料源呼叫一次，再於每筆列的 Divider 判斷（i < stocksSortedByProfitLoss.count - 1）又各呼叫一次，共 N+1 次排序（10 筆股票 = 11 次）；改在 else 區塊頂端以 let sortedStocks = Array(stocksSortedByProfitLoss.enumerated()) 一次捕捉，ForEach 與 Divider 條件均改用 sortedStocks，排序次數從 N+1 降為 1。",
+            "【效能修復】FinanceOverviewView.ntdAllocations：insuranceValueNTD（O(n) reduce over store.insurances）原本在函式內被呼叫 4 次（totalAssetsNTD 內一次 + if 判斷、value: 欄位、percentage: 計算各一次）；改在函式頂端以 let insVal = insuranceValueNTD 單次捕捉後全段共用，並內聯計算 total（不再透過 totalAssetsNTD 中轉），呼叫次數 4→1。",
+            "【確認安全】CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛均正常；saveQueue.async 僅操作 value type 快照無 retain cycle；所有 @Published 更新均在主執行緒；無 force unwrap（!）、無 as! 強制轉型、無 fatalError；RenovationPhotoEditor v2 / RenovationStackViewer 美化程式碼確認安全。"
+        ]),
         ChangelogEntry(version: "22.11", build: 481, date: "2026/06/18", notes: [
             "【靜態 Debug】全面複查 78 個 Swift 檔，找到並修復兩個問題：① FamilyView v2 statsStrip 缺少 onDisappear 重置 statsAppeared，導致所有成員被刪除後再新增時進場動畫不再播放（已補 .onDisappear { statsAppeared = false }）；② NotificationManager.enumerateFires safety 上限為 5000，但呼叫端只取前 60 筆，最多浪費 4940 次日期計算（已收緊至 61）。其餘防護機制（CloudKit 30 秒節流、2 秒防抖、isSyncing 守衛、isLoading 批次保護、force unwrap 全無、as! 全無、fatalError 全無）均確認正常。"
         ]),

@@ -342,6 +342,7 @@ struct FinanceChartView: View {
                 emptyPlaceholder(icon: "chart.bar.xaxis", title: "尚無股票資料",
                                  subtitle: "新增股票後顯示損益分析", accent: .orange)
             } else {
+                let sortedStocks = Array(stocksSortedByProfitLoss.enumerated())
                 // 加總損益摘要卡
                 let totalPL = store.stocks.reduce(0.0) { $0 + $1.profitLoss }
                 let plColor: Color = totalPL >= 0 ? .green : .red
@@ -416,7 +417,7 @@ struct FinanceChartView: View {
 
                 // 明細列
                 VStack(spacing: 0) {
-                    ForEach(Array(stocksSortedByProfitLoss.enumerated()), id: \.element.id) { i, stock in
+                    ForEach(sortedStocks, id: \.element.id) { i, stock in
                         let pl = stock.profitLoss
                         let plC: Color = pl >= 0 ? .green : .red
 
@@ -479,7 +480,7 @@ struct FinanceChartView: View {
                             value: rowsAppeared
                         )
 
-                        if i < stocksSortedByProfitLoss.count - 1 {
+                        if i < sortedStocks.count - 1 {
                             Divider().padding(.leading, 68)
                         }
                     }
