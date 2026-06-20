@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.22", build: 492, date: "2026/06/20", notes: [
+            "【CloudKit 閃爍修復】CloudKitManager.fetchChanges：原本在 fetchRecordZoneChangesResultBlock 中，無論成功或失敗均先發 KV/照片通知，導致 changeTokenExpired 重試路徑下各 Store 被觸發兩次 reloadFromCloud——第一次是不完整的部分資料，第二次才是完整資料，造成畫面閃爍。修復：將通知發送移入 .success 分支；changeTokenExpired 時完全略過通知直接重試，retry 成功後再一次性通知；zoneNotFound 與其他錯誤仍發已拉取的部分資料通知並回報失敗。",
+            "【圓餅圖動畫修復】ChartView.pieChartBody：原本以 Chart(entries.indices, id: \\.self) 用陣列位置作為 SectorMark 的 identity，當某分類支出歸零從陣列消失、其餘分類位移時，SwiftUI 會將不同分類的扇形誤判為同一身分並執行錯誤的變形動畫。修復：改以內部 PieSlice: Identifiable（id = 分類 rawValue）取代 entries.indices，讓 Chart 依語意身分追蹤各扇形，分類出現/消失時正確執行淡入淡出而非錯位變形。"
+        ]),
         ChangelogEntry(version: "22.21", build: 491, date: "2026/06/20", notes: [
             "【效能修復】VehicleDetailView.deleteVehicle：刪除車輛時原本對每筆連結的定期/變動支出各別呼叫一次 expenseStore.expenses.removeAll { }，N 筆支出觸發 N 次 @Published didSet → save() + pushAll()；對齊 RealEstateView.deleteEstate v20.5 修復規格，改為先收集所有連結 ID 至 Set<UUID>，最後一次 removeAll 完成，@Published 通知與磁碟 I/O 各從最多 N 次降為 1 次。"
         ]),

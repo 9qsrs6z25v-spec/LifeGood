@@ -768,18 +768,25 @@ struct ChartView: View {
     private func pieChartBody(entries: [(name: String, icon: String, color: Color, amount: Double)],
                               total: Double,
                               rowsAppeared: Binding<Bool>) -> some View {
+        // 將 named tuple 包成 Identifiable 結構，讓 Chart 以分類名稱（固定語義）
+        // 而非陣列位置作為 identity，避免類別消失/重排時 SectorMark 動畫錯位。
+        struct PieSlice: Identifiable {
+            let id: String   // category rawValue，同一分類永遠相同
+            let color: Color
+            let amount: Double
+        }
+        let slices = entries.map { PieSlice(id: $0.name, color: $0.color, amount: $0.amount) }
         let displayCount = min(entries.count, 6)
         return VStack(spacing: 16) {
             // 環形圖（加大內徑與間距，讓圓餅更精緻）
             ZStack {
-                Chart(entries.indices, id: \.self) { i in
-                    let e = entries[i]
+                Chart(slices) { s in
                     SectorMark(
-                        angle: .value("金額", e.amount),
+                        angle: .value("金額", s.amount),
                         innerRadius: .ratio(0.58),
                         angularInset: 2.0
                     )
-                    .foregroundStyle(e.color)
+                    .foregroundStyle(s.color)
                     .cornerRadius(5)
                 }
                 .frame(height: 192)
