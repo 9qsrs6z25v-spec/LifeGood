@@ -33,6 +33,20 @@ import SwiftUI
 //      對齊 StockView.fmtShort / OverviewView.smartCurrency 規格
 //  13. 新增 insurancesSectionHeader：「持有中 N 張」Capsule 側條 section header，
 //      對齊 StockView.activeStocksSectionHeader 規格
+// [2026-06 v3] 本次美化方向（glass shine + mini 配置彩條 + 膠囊細邊框 + 進度條 glow）：
+//  14. summaryHeader 背景 ZStack 末層加入 LinearGradient [.white.opacity(0.18), .clear]
+//      top→center 玻璃反光覆蓋層，補齊全 App 英雄卡最後缺漏的一張玻璃光澤，
+//      對齊 OverviewView / IncomeView / VariableExpenseView / FixedExpenseView /
+//      VehicleView / StockView / RealEstateView v3/v4 glass shine 統一規格。
+//  15. summaryHeader 保單配置迷你彩條（≥2 張時顯示）：KPI 橫列下方加入白色分隔線 +
+//      GeometryReader 水平色條依 NT$ 估值比例著色（前 5 張各分一色）+ glow overlay +
+//      左展開 spring 動畫（miniBarAppeared scaleEffect x: 0.04→1.0 anchor: .leading）+
+//      底部圖例（色圓點 + 保單名稱），對齊 VehicleView v2 / StockView v2 迷你配置彩條規格。
+//  16. insuranceCard 損益膠囊：補入 Capsule().stroke(…opacity(0.22), lineWidth:0.6)，
+//      對齊 StockView.stockCard 損益膠囊細邊框規格，消除與同 App 膠囊設計語言的視覺不均衡。
+//  17. insuranceCard 進度條：在 ZStack 頂層加入 glow overlay Capsule
+//      （LinearGradient [white.opacity(0.28), clear, black.opacity(0.08)] top→bottom），
+//      對齊 OverviewView.categoryRow / VariableExpenseView / FinanceChartView v3 彩條 glow 規格。
 
 struct SavingsInsuranceView: View {
     @EnvironmentObject var store: FinanceStore
@@ -44,9 +58,18 @@ struct SavingsInsuranceView: View {
     @State private var headerAppeared = false
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
+    @State private var miniBarAppeared = false
 
     private let heroAccent = Color(red: 0.22, green: 0.53, blue: 0.98)
     private let heroAccentDark = Color(red: 0.10, green: 0.35, blue: 0.82)
+    // 迷你配置彩條顏色（前 5 張保單各一色，對齊 VehicleView / StockView miniBarColors 規格）
+    private let miniBarColors: [Color] = [
+        .white,
+        Color(red: 0.80, green: 0.95, blue: 1.00),
+        Color(red: 0.75, green: 1.00, blue: 0.85),
+        Color(red: 0.90, green: 0.80, blue: 1.00),
+        Color(red: 1.00, green: 0.90, blue: 0.65)
+    ]
 
     var body: some View {
         NavigationStack {
@@ -61,6 +84,11 @@ struct SavingsInsuranceView: View {
                         .onAppear {
                             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                                 headerAppeared = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+                                    miniBarAppeared = true
+                                }
                             }
                         }
                 }
@@ -168,6 +196,12 @@ struct SavingsInsuranceView: View {
         let ntGainRate = totalPaidNT > 0 ? totalGainNT / totalPaidNT * 100 : 0.0
         let isPositive = totalGainNT >= 0
         let hasItems = !store.insurances.isEmpty
+        // 前 5 張保單（依 NT$ 估值排序），用於迷你配置彩條
+        let miniBarTop5 = Array(
+            store.insurances
+                .sorted { ntEquivalent($0.currentValue, code: $0.currencyCode) > ntEquivalent($1.currentValue, code: $1.currencyCode) }
+                .prefix(5)
+        )
 
         return VStack(spacing: 0) {
             HStack(alignment: .top) {
@@ -235,6 +269,70 @@ struct SavingsInsuranceView: View {
                 .padding(.vertical, 10)
                 .background(.white.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                // 迷你保單配置彩條（≥2 張時顯示，對齊 VehicleView / StockView 迷你配置彩條規格）
+                if miniBarTop5.count >= 2 {
+                    Rectangle()
+                        .fill(.white.opacity(0.18))
+                        .frame(height: 0.5)
+                        .padding(.vertical, 10)
+
+                    GeometryReader { geo in
+                        let barTotal = miniBarTop5.reduce(0.0) { $0 + ntEquivalent($1.currentValue, code: $1.currencyCode) }
+                        ZStack(alignment: .leading) {
+                            HStack(spacing: 2) {
+                                ForEach(Array(miniBarTop5.enumerated()), id: \.element.id) { idx, ins in
+                                    let ratio = barTotal > 0 ? ntEquivalent(ins.currentValue, code: ins.currencyCode) / barTotal : 0
+                                    Capsule()
+                                        .fill(miniBarColors[idx % miniBarColors.count].opacity(0.88))
+                                        .frame(width: max(geo.size.width * ratio - 2, 2), height: 10)
+                                }
+                            }
+                            // glow overlay 對齊 VehicleView / StockView 彩條 glow 規格
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.32), .clear, .black.opacity(0.06)],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .frame(height: 10)
+                        }
+                    }
+                    .frame(height: 10)
+                    // 左展開 spring 動畫（anchor: .leading，對齊 VehicleView miniBarAppeared 規格）
+                    .scaleEffect(x: miniBarAppeared ? 1.0 : 0.04, y: 1.0, anchor: .leading)
+
+                    // 圖例（色圓點 + 保單名稱）
+                    HStack(spacing: 10) {
+                        ForEach(Array(miniBarTop5.prefix(4).enumerated()), id: \.element.id) { idx, ins in
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(miniBarColors[idx % miniBarColors.count].opacity(0.88))
+                                    .frame(width: 6, height: 6)
+                                Text(ins.name)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.72))
+                                    .lineLimit(1)
+                            }
+                        }
+                        if miniBarTop5.count == 5 {
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(miniBarColors[4].opacity(0.88))
+                                    .frame(width: 6, height: 6)
+                                Text(miniBarTop5[4].name)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.72))
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.top, 7)
+                    .opacity(miniBarAppeared ? 1 : 0)
+                }
             }
         }
         .padding(.horizontal, 20)
@@ -261,6 +359,12 @@ struct SavingsInsuranceView: View {
                     .frame(width: 55, height: 55)
                     .offset(x: 95, y: 40)
                     .blur(radius: 10)
+                // 玻璃反光覆蓋層，對齊全 App 英雄卡 glass shine 統一規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -438,6 +542,8 @@ struct SavingsInsuranceView: View {
                         .background((isPositive ? Color.green : Color.red).opacity(0.10))
                         .foregroundStyle(isPositive ? .green : .red)
                         .clipShape(Capsule())
+                        // 細邊框對齊 StockView.stockCard 損益膠囊細邊框規格
+                        .overlay(Capsule().stroke((isPositive ? Color.green : Color.red).opacity(0.22), lineWidth: 0.6))
                     }
 
                     // 利率 + 到期還本 + 已繳期數
@@ -481,6 +587,16 @@ struct SavingsInsuranceView: View {
                                     )
                                     .frame(width: geo.size.width * periodRatio, height: 4)
                                     .animation(.spring(response: 0.7, dampingFraction: 0.8), value: periodRatio)
+                                // glow overlay 對齊 OverviewView / VariableExpenseView 彩條 glow 規格
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .frame(width: geo.size.width * periodRatio, height: 4)
                             }
                         }
                         .frame(height: 4)
