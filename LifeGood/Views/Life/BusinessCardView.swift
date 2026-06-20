@@ -387,7 +387,7 @@ extension BusinessCard {
 }
 
 // MARK: - 美化紀錄（BusinessCardView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. summaryHeader：新增橘粉漸層英雄卡（總名片數 + 公司數 + 聯絡人數），
 //      對齊 VehicleView.summaryHeader / StockView.summaryHeader 設計語言；
 //      加入 heroCardAppeared spring 進場動畫
@@ -399,6 +399,18 @@ extension BusinessCard {
 //      對齊 IncomeView.incomeRow 視覺規格
 //   5. 卡片列表加入 cardsAppeared 交錯淡入 + 向上進場動畫，
 //      對齊 IncomeView.incomeListSections 進場動畫規格
+// [2026-06 v2] 本次美化方向：
+//   1. summaryHeader：補第三顆散景裝飾圓（中右側 55pt, white.opacity(0.06), blur 8）
+//      + 玻璃光澤高光覆層（LinearGradient [.white.opacity(0.18), .clear] 頂→中），
+//      對齊 IncomeView / VariableExpenseView v4 三圓散景 + 玻璃光澤規格
+//   2. companyHeader：Capsule 強調條寬度 3pt → 4pt，標題字型
+//      .footnote.weight(.semibold) → .subheadline.weight(.bold)，對齊全 App 分組標題基準
+//   3. cardRow 職稱膠囊：補 Capsule stroke overlay (blue.opacity(0.22), 0.6pt)
+//      讓膠囊輪廓更立體，對齊 LifeOverview / Career 標籤規格
+//   4. cardRow 日期標籤：從 plain caption2 升級為 Capsule 日期膠囊
+//      (quaternarySystemFill 底 + 7/3pt padding)，對齊 FamilyView / SubordinateView 規格
+//   5. avatarView 首字母方塊：補 .white.opacity(0.30) stroke overlay，
+//      讓無照片頭像邊框更明確，對齊設計語言圖示圓邊框規格
 
 struct BusinessCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -519,9 +531,24 @@ struct BusinessCardView: View {
                     .frame(width: 75, height: 75)
                     .offset(x: -65, y: 45)
                     .blur(radius: 9)
+                // v2：第三顆散景裝飾圓，中右側
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 20, y: 30)
+                    .blur(radius: 8)
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
+        // v2：玻璃光澤高光覆層
+        .overlay(
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top,
+                endPoint: .center
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        )
         .shadow(color: accentBot.opacity(0.42), radius: 16, x: 0, y: 8)
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -547,9 +574,9 @@ struct BusinessCardView: View {
                         startPoint: .top, endPoint: .bottom
                     )
                 )
-                .frame(width: 3, height: 14)
+                .frame(width: 4, height: 14) // v2：3pt → 4pt 對齊全 App 分組標題規格
             Text(company)
-                .font(.footnote.weight(.semibold))
+                .font(.subheadline.weight(.bold)) // v2：footnote.semibold → subheadline.bold
                 .foregroundStyle(.primary.opacity(0.75))
             Spacer(minLength: 6)
             HStack(spacing: 4) {
@@ -973,6 +1000,8 @@ struct BusinessCardView: View {
                             .padding(.horizontal, 6).padding(.vertical, 2.5)
                             .background(Color.blue.opacity(0.10))
                             .clipShape(Capsule())
+                            // v2：補 stroke 讓膠囊輪廓更立體
+                            .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
                             .lineLimit(1)
                     }
                 }
@@ -1037,11 +1066,16 @@ struct BusinessCardView: View {
 
             Spacer(minLength: 4)
 
-            // 右側：日期 + 箭頭
+            // 右側：日期膠囊 + 箭頭
             VStack(alignment: .trailing, spacing: 4) {
+                // v2：plain caption2 → Capsule 日期膠囊
                 Text(fmtDate(card.date))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color(.quaternarySystemFill))
+                    .clipShape(Capsule())
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Color(.tertiaryLabel))
@@ -1084,6 +1118,10 @@ struct BusinessCardView: View {
                 Text(initial)
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
+                // v2：補白色邊框讓無照片頭像更立體
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(.white.opacity(0.30), lineWidth: 0.75)
+                    .frame(width: 52, height: 52)
             }
         }
     }
