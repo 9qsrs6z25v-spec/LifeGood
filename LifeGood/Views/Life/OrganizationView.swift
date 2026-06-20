@@ -19,6 +19,28 @@ import UniformTypeIdentifiers
 //   7. OrgPersonDetailView.linkedCardButton：加圖示底圓 + overlay 邊框 + orange 光暈陰影，
 //      對齊 LifeFinanceView 連結按鈕設計規格
 
+// [2026-06 v2] 本次美化方向：
+//   8. OrgPersonDetailView.headerCard：升級為 indigo-purple 漸層英雄卡（散景裝飾圓 + 玻璃光澤），
+//      人名 .title3.bold 白色大字；部門改為白色半透明 Capsule；生日改為白色 calendar Capsule 徽章；
+//      加入 headerAppeared spring 進場動畫（opacity + Y 位移），對齊 SubordinateDetailView.headerCard 規格。
+//   9. OrgPersonDetailView.relationsCard：關係類型徽章從 RoundedRectangle(cornerRadius:3) 升級為 Capsule
+//      + stroke 邊框；每列加入 36pt LinearGradient 漸層圖示圓（依關係色彩）；
+//      列間加 0.5pt separator 分隔線，對齊 SubordinateDetailView / FamilyMembersResumeView 規格。
+//  10. OrgPersonDetailView.giftCard：禮金子分類徽章 RoundedRectangle → Capsule + stroke；
+//      累計列升級為 36pt 粉紅漸層圖示圓 + ntdWanString Capsule 金額標籤；
+//      日期改為 calendar 圖示 + tertiaryFill Capsule 徽章；金額改 ntdWanString，對齊 ResumeGiftSection 規格。
+//  11. OrgPersonDetailView.childrenCard：每行加入 30pt 粉紅漸層圖示圓；生日改為 Capsule 日期膠囊徽章；
+//      列間加 0.5pt separator 分隔線，對齊 FamilyView.memberRow / SubordinateDetailView 規格。
+//  12. OrgPersonDetailView.sectionCard 標題：.headline → .subheadline.weight(.bold)，
+//      與全 App section header 字重一致（OverviewView / IncomeView / VariableExpenseView）。
+//  13. DepartmentDetailView.peopleSection：section header 從裸 Text(.headline) 升級為
+//      「3pt 綠色漸層 Capsule 側條 + person.2.fill 圖示 + .subheadline.bold + 計數膠囊」；
+//      personRow 離職徽章 RoundedRectangle(cornerRadius:3) → Capsule + stroke；
+//      加入 peopleAppeared 交錯進場動畫（opacity + Y offset stagger），對齊 SubordinateView.subordinateRow 規格。
+//  14. DepartmentDetailView.relationsCard：上游/下游部門標籤升級為「3pt Capsule 側條 + 圖示 + .caption.semibold」；
+//      chipText 補 .overlay(Capsule().stroke(color.opacity(0.22), lineWidth:0.6)) 邊框；
+//      容器補雙層 shadow，對齊 VehicleView / StockView chipText 邊框規格。
+
 // MARK: - 公司組織頁
 
 /// 依 Department.upstreamIds / downstreamIds 計算組織樹，
@@ -369,6 +391,8 @@ struct DepartmentDetailView: View {
     @State private var addingPerson = false
     @State private var viewingPersonId: UUID?
     @State private var showEditDept = false
+    // [v2] 進場動畫旗標
+    @State private var peopleAppeared = false
 
     private var dept: Department {
         lifeStore.departments.first(where: { $0.id == deptId }) ?? Department(id: deptId)
@@ -494,10 +518,21 @@ struct DepartmentDetailView: View {
         .padding(.horizontal)
     }
 
+    // [v2] 上游/下游標籤升級為 Capsule 側條 + 圖示 + .caption.semibold；容器補雙層 shadow
     private var relationsCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             if !upstreamDepts.isEmpty {
-                Text("上游部門").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Capsule()
+                        .fill(LinearGradient(colors: [.blue, .blue.opacity(0.50)], startPoint: .top, endPoint: .bottom))
+                        .frame(width: 3, height: 12)
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.blue)
+                    Text("上游部門")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(upstreamDepts) { d in
@@ -507,7 +542,17 @@ struct DepartmentDetailView: View {
                 }
             }
             if !downstreamDepts.isEmpty {
-                Text("下游部門").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Capsule()
+                        .fill(LinearGradient(colors: [.orange, .orange.opacity(0.50)], startPoint: .top, endPoint: .bottom))
+                        .frame(width: 3, height: 12)
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.orange)
+                    Text("下游部門")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(downstreamDepts) { d in
@@ -521,50 +566,80 @@ struct DepartmentDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.blue.opacity(0.06), radius: 6, x: 0, y: 2)
+        .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
         .padding(.horizontal)
     }
 
+    // [v2] chipText 補 stroke 邊框，對齊全 App 膠囊邊框規格
     private func chipText(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(.caption)
+            .font(.caption.weight(.medium))
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(color.opacity(0.12))
             .foregroundStyle(color)
             .clipShape(Capsule())
+            .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
     }
 
+    // [v2] section header 從裸 Text 升級為 Capsule 側條 + 計數膠囊；加入交錯進場動畫
     private var peopleSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("部門人員").font(.headline)
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.green, .green.opacity(0.50)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 3, height: 16)
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.green)
+                Text("部門人員")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
                 Text("\(people.count) 人")
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(Color.green.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
                 Button {
                     addingPerson = true
                 } label: {
                     Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
                 }
             }
-            .padding(.horizontal).padding(.top, 12).padding(.bottom, 6)
+            .padding(.horizontal).padding(.top, 14).padding(.bottom, 10)
 
             if people.isEmpty {
-                Text("尚無人員，按右上角 + 新增")
-                    .font(.caption).foregroundStyle(.tertiary)
-                    .padding(.horizontal).padding(.bottom, 12)
+                HStack(spacing: 8) {
+                    Image(systemName: "person.badge.plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                    Text("尚無人員，按右側 + 新增")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal).padding(.bottom, 14)
             } else {
-                ForEach(people) { person in
+                ForEach(Array(people.enumerated()), id: \.element.id) { idx, person in
                     Button { viewingPersonId = person.id } label: {
                         personRow(person)
                     }
                     .buttonStyle(.plain)
-                    Divider().padding(.leading, 60)
+                    .opacity(peopleAppeared ? 1 : 0)
+                    .offset(y: peopleAppeared ? 0 : 12)
+                    .animation(.spring(response: 0.42, dampingFraction: 0.78).delay(0.05 + Double(idx) * 0.06), value: peopleAppeared)
+                    if person.id != people.last?.id {
+                        Rectangle().fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5).padding(.leading, 60)
+                    }
                 }
+                Spacer().frame(height: 4)
             }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+        .onAppear { withAnimation { peopleAppeared = true } }
     }
 
     private func personRow(_ p: OrgPerson) -> some View {
@@ -575,12 +650,14 @@ struct DepartmentDetailView: View {
                     Text(p.name.isEmpty ? "未命名" : p.name)
                         .font(.subheadline.weight(.semibold))
                     if p.isInactive {
+                        // [v2] 離職徽章 RoundedRectangle → Capsule + stroke
                         Text("離職")
-                            .font(.caption2)
-                            .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(Color.gray.opacity(0.15))
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(Color.gray.opacity(0.12))
                             .foregroundStyle(.gray)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.gray.opacity(0.20), lineWidth: 0.5))
                     }
                 }
                 if !p.jobTitle.isEmpty {
@@ -1035,6 +1112,8 @@ struct OrgPersonDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var viewingRelatedPersonId: UUID?
     @State private var viewingLinkedCardId: UUID?
+    // [v2] 英雄卡進場動畫旗標
+    @State private var headerAppeared = false
 
     private var person: OrgPerson {
         lifeStore.orgPeople.first(where: { $0.id == personId }) ?? OrgPerson(id: personId)
@@ -1167,36 +1246,70 @@ struct OrgPersonDetailView: View {
         .buttonStyle(.plain)
     }
 
+    // [v2] 每列加入 36pt LinearGradient 漸層圖示圓；關係類型徽章 RoundedRectangle → Capsule + stroke
     private var relationsCard: some View {
         sectionCard("派系與相關人員", systemImage: "person.2.circle.fill", color: .indigo) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
                 ForEach(person.relations) { rel in
                     if let other = lifeStore.orgPeople.first(where: { $0.id == rel.personId }) {
                         Button {
                             viewingRelatedPersonId = other.id
                         } label: {
-                            HStack {
-                                Circle()
-                                    .fill(relationColor(rel.type))
-                                    .frame(width: 10, height: 10)
-                                Text(other.name).font(.subheadline.weight(.medium))
-                                Text(rel.type.rawValue).font(.caption2)
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(relationColor(rel.type).opacity(0.15))
-                                    .foregroundStyle(relationColor(rel.type))
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                                Spacer()
-                                if !rel.note.isEmpty {
-                                    Text(rel.note).font(.caption2)
-                                        .foregroundStyle(.secondary).lineLimit(1)
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    Circle()
+                                        .fill(LinearGradient(
+                                            colors: [relationColor(rel.type).opacity(0.22), relationColor(rel.type).opacity(0.09)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        ))
+                                        .frame(width: 36, height: 36)
+                                        .overlay(Circle().stroke(relationColor(rel.type).opacity(0.20), lineWidth: 0.75))
+                                    Image(systemName: relationIcon(rel.type))
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(relationColor(rel.type))
                                 }
+                                .shadow(color: relationColor(rel.type).opacity(0.14), radius: 4, x: 0, y: 2)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 5) {
+                                        Text(other.name).font(.subheadline.weight(.medium))
+                                        Text(rel.type.rawValue)
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(relationColor(rel.type).opacity(0.12))
+                                            .foregroundStyle(relationColor(rel.type))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(relationColor(rel.type).opacity(0.22), lineWidth: 0.6))
+                                    }
+                                    if !rel.note.isEmpty {
+                                        Text(rel.note).font(.caption2)
+                                            .foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                                Spacer()
                                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                             }
+                            .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
+                        if rel.id != person.relations.last?.id {
+                            Rectangle().fill(Color(.separator).opacity(0.20))
+                                .frame(height: 0.5).padding(.leading, 46)
+                        }
                     }
                 }
             }
+        }
+    }
+
+    private func relationIcon(_ type: OrgRelationType) -> String {
+        switch type {
+        case .ally: return "person.2.fill"
+        case .neutral: return "person.fill"
+        case .rival: return "person.fill.xmark"
+        case .mentor: return "graduationcap.fill"
+        case .mentee: return "figure.stand"
+        case .other: return "person.crop.circle"
         }
     }
 
@@ -1211,120 +1324,212 @@ struct OrgPersonDetailView: View {
         }
     }
 
-    // 美化：頭像加 overlay 邊框 + indigo 光暈陰影；部門標籤改 Capsule 小膠囊，
-    // 對齊 IncomeView incomeRow / BusinessCardView 頭像設計規格
+    // [v2] 升級為 indigo-purple 漸層英雄卡（散景裝飾圓 + 玻璃光澤 + spring 進場動畫），
+    // 對齊 SubordinateDetailView.headerCard / SpouseResumeView.heroCard 規格
     private var headerCard: some View {
-        HStack(spacing: 16) {
-            Group {
-                if let url = person.photoURL, let img = UIImage(contentsOfFile: url.path) {
-                    Image(uiImage: img).resizable().scaledToFill()
-                } else {
-                    LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .overlay(
-                            Text(String(person.name.prefix(1)))
-                                .font(.title.bold()).foregroundStyle(.white)
-                        )
-                }
-            }
-            .frame(width: 72, height: 72)
-            .clipShape(Circle())
-            // 美化：邊框 + indigo 光暈陰影，強化頭像層次感
-            .overlay(Circle().stroke(Color.indigo.opacity(0.28), lineWidth: 1.5))
-            .shadow(color: Color.indigo.opacity(0.22), radius: 10, x: 0, y: 4)
+        ZStack(alignment: .topLeading) {
+            // 背景漸層
+            LinearGradient(
+                colors: [Color(red: 0.28, green: 0.18, blue: 0.72), Color(red: 0.50, green: 0.28, blue: 0.88)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            // 散景裝飾圓
+            Circle().fill(.white.opacity(0.07)).frame(width: 100, height: 100)
+                .offset(x: -30, y: -30)
+            Circle().fill(.white.opacity(0.04)).frame(width: 70, height: 70)
+                .offset(x: 260, y: 55)
+            Circle().fill(.white.opacity(0.06)).frame(width: 50, height: 50)
+                .offset(x: 290, y: -10)
+            // 玻璃頂部光澤
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top, endPoint: .center
+            )
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text(person.name.isEmpty ? "未命名" : person.name)
-                        .font(.title3.bold())
-                    if person.isInactive {
-                        Text("離職")
-                            .font(.system(size: 10, weight: .semibold))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.gray.opacity(0.10))
-                            .foregroundStyle(.gray)
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(Color.gray.opacity(0.20), lineWidth: 0.6))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 14) {
+                    // 頭像圓
+                    Group {
+                        if let url = person.photoURL, let img = UIImage(contentsOfFile: url.path) {
+                            Image(uiImage: img).resizable().scaledToFill()
+                                .frame(width: 64, height: 64).clipShape(Circle())
+                        } else {
+                            ZStack {
+                                Circle().fill(.white.opacity(0.22)).frame(width: 64, height: 64)
+                                Text(String(person.name.prefix(1)))
+                                    .font(.title.bold()).foregroundStyle(.white)
+                            }
+                        }
                     }
+                    .overlay(Circle().stroke(.white.opacity(0.28), lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.20), radius: 8, x: 0, y: 3)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text(person.name.isEmpty ? "未命名" : person.name)
+                                .font(.title3.bold())
+                                .foregroundStyle(.white)
+                            if person.isInactive {
+                                Text("離職")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.90))
+                                    .padding(.horizontal, 7).padding(.vertical, 2)
+                                    .background(.white.opacity(0.18))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        if !person.jobTitle.isEmpty {
+                            Text(person.jobTitle)
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.80))
+                        }
+                        HStack(spacing: 4) {
+                            Image(systemName: "building.2.fill")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.75))
+                            Text(deptName)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.90))
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.white.opacity(0.18))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 0.6))
+                    }
+                    Spacer(minLength: 0)
                 }
-                if !person.jobTitle.isEmpty {
-                    Text(person.jobTitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                // 美化：部門標籤改為 Capsule 膠囊，對齊 IncomeView categoryTag 規格
-                HStack(spacing: 4) {
-                    Image(systemName: "building.2.fill")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.indigo.opacity(0.72))
-                    Text(deptName)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.indigo.opacity(0.88))
-                }
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(Color.indigo.opacity(0.08))
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(Color.indigo.opacity(0.18), lineWidth: 0.6))
 
                 if let bd = person.birthday {
-                    Text("生日：\(formatDate(bd))")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 5) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.75))
+                        Text("生日：\(formatDate(bd))")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.82))
+                    }
+                    .padding(.horizontal, 9).padding(.vertical, 3)
+                    .background(.white.opacity(0.12))
+                    .clipShape(Capsule())
                 }
             }
-            Spacer(minLength: 0)
+            .padding(20)
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .shadow(color: Color.indigo.opacity(0.08), radius: 12, x: 0, y: 5)
-        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color.indigo.opacity(0.32), radius: 16, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
         .padding(.horizontal)
+        .opacity(headerAppeared ? 1 : 0)
+        .offset(y: headerAppeared ? 0 : 20)
+        .onAppear {
+            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.05)) {
+                headerAppeared = true
+            }
+        }
     }
 
+    // [v2] 每列加入 30pt 粉紅漸層圖示圓；生日改為 Capsule 日期膠囊徽章；列間加 separator
     private var childrenCard: some View {
         sectionCard("他的子女", systemImage: "figure.child", color: .pink) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
                 ForEach(person.children) { c in
-                    HStack {
-                        Text(c.name.isEmpty ? "未命名" : c.name).font(.subheadline.weight(.medium))
-                        if let bd = c.birthday {
-                            Text("· \(formatDate(bd))")
-                                .font(.caption2).foregroundStyle(.tertiary)
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [Color.pink.opacity(0.22), Color.pink.opacity(0.09)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 30, height: 30)
+                                .overlay(Circle().stroke(Color.pink.opacity(0.20), lineWidth: 0.5))
+                            Image(systemName: "figure.child")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.pink)
                         }
+                        Text(c.name.isEmpty ? "未命名" : c.name)
+                            .font(.subheadline.weight(.medium))
                         Spacer()
+                        if let bd = c.birthday {
+                            HStack(spacing: 3) {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.secondary)
+                                Text(formatDate(bd))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
+                        }
                         if !c.note.isEmpty {
                             Text(c.note).font(.caption2)
                                 .foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
+                    .padding(.vertical, 3)
+                    if c.id != person.children.last?.id {
+                        Rectangle().fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5).padding(.leading, 40)
+                    }
                 }
             }
         }
     }
 
+    // [v2] 累計列升級為 36pt 漸層圖示圓 + ntdWanString Capsule 金額；日期改 Capsule；子分類標籤改 Capsule
     private var giftCard: some View {
         sectionCard("我送過他的禮金", systemImage: "gift.fill", color: .pink) {
             let total = giftHistory.reduce(0) { $0 + $1.amount }
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("累計").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.pink.opacity(0.22), Color.pink.opacity(0.09)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ))
+                            .frame(width: 36, height: 36)
+                            .overlay(Circle().stroke(Color.pink.opacity(0.20), lineWidth: 0.75))
+                        Image(systemName: "gift.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.pink)
+                    }
+                    .shadow(color: Color.pink.opacity(0.14), radius: 4, x: 0, y: 2)
+                    Text("累計").font(.subheadline.weight(.medium))
                     Spacer()
-                    Text(formatCurrency(total)).font(.subheadline.weight(.semibold)).foregroundStyle(.red)
+                    Text(total.ntdWanString)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.pink.opacity(0.10))
+                        .foregroundStyle(.pink)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.pink.opacity(0.20), lineWidth: 0.6))
                 }
-                Divider()
+                Rectangle().fill(Color(.separator).opacity(0.22)).frame(height: 0.5)
                 ForEach(giftHistory.prefix(8)) { e in
-                    HStack {
-                        Text(formatDate(e.date)).font(.caption2).foregroundStyle(.tertiary)
+                    HStack(spacing: 6) {
+                        HStack(spacing: 3) {
+                            Image(systemName: "calendar").font(.system(size: 8))
+                            Text(formatDate(e.date)).font(.caption2)
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                         if let sub = e.socialSubCategory {
-                            Text(sub.rawValue).font(.caption2)
-                                .padding(.horizontal, 4).padding(.vertical, 1)
+                            Text(sub.rawValue)
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
                                 .background(Color.pink.opacity(0.12))
                                 .foregroundStyle(.pink)
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.pink.opacity(0.22), lineWidth: 0.5))
                         }
                         Spacer()
-                        Text(formatCurrency(e.amount)).font(.caption.weight(.semibold)).foregroundStyle(.red)
+                        Text(e.amount.ntdWanString)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
                     }
                 }
                 if giftHistory.count > 8 {
@@ -1355,7 +1560,7 @@ struct OrgPersonDetailView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(color)
                 Text(title)
-                    .font(.headline)
+                    .font(.subheadline.weight(.bold))
                 Spacer()
             }
             content()
@@ -1364,6 +1569,7 @@ struct OrgPersonDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.10), lineWidth: 0.75))
         .shadow(color: color.opacity(0.07), radius: 8, x: 0, y: 3)
         .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
         .padding(.horizontal)
