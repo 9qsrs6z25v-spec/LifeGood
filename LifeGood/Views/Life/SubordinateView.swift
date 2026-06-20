@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（SubordinateView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. summaryStatsBar：頂部加入三格統計膠囊橫列（總人數 / 平均評分 / 優秀人數），
 //      藍色漸層 hero card，散景裝飾圓 + spring 進場動畫（summaryAppeared）；
 //      對齊 VariableExpenseView.monthSummaryHeader 設計語言。
@@ -12,6 +12,16 @@ import SwiftUI
 //      對齊 VariableExpenseView.emptyStateView 設計規格。
 //   4. 列表進場：加入交錯淡入 + 向上進場動畫（rowsAppeared），
 //      對齊 FixedExpenseView.fixedExpenseSections 規格。
+// [2026-06 v2] 本次美化方向：
+//   1. summaryStatsCard 背景：補第三顆散景圓（中右 55pt、blur 8）+ 玻璃光澤
+//      LinearGradient([white.opacity(0.18), clear] top→center)，對齊 v3+ hero card 標準。
+//   2. subordinateRow 到職日：從純 icon+text 升級為 Capsule 日期徽章
+//      （tertiarySystemFill 底色 + calendar icon），對齊 CareerView / OverviewView.recentRow v2。
+//   3. subordinateRow 膠囊補細邊框：
+//      - 職等/職稱膠囊：.overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+//      - 部門膠囊：.overlay(Capsule().stroke(Color(.separator).opacity(0.18), lineWidth: 0.6))
+//   4. 列表新增 activeSubordinatesSectionHeader（4pt Capsule 漸層側條 + 人數計數徽章），
+//      對齊 StockView.activeStocksSectionHeader 設計語言。
 
 enum SubordinateSortOption: String, CaseIterable, Identifiable {
     case name = "姓名"
@@ -50,6 +60,8 @@ struct SubordinateView: View {
     @State private var summaryAppeared = false
     @State private var rowsAppeared = false
     @State private var emptyIconPulse = false
+    // [2026-06 v2] sectionHeader 進場旗標
+    @State private var headerAppeared = false
 
     private var sortOption: SubordinateSortOption {
         get { SubordinateSortOption(rawValue: sortOptionRaw) ?? .dateAdded }
@@ -128,6 +140,21 @@ struct SubordinateView: View {
                             .listRowSeparator(.hidden)
                     }
                 } else {
+                    // [2026-06 v2] 部屬列表 sectionHeader（4pt Capsule 側條 + 計數徽章）
+                    Section {
+                        activeSubordinatesSectionHeader
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 2, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .opacity(headerAppeared ? 1 : 0)
+                            .offset(y: headerAppeared ? 0 : 8)
+                            .onAppear {
+                                withAnimation(.spring(response: 0.45, dampingFraction: 0.80).delay(0.12)) {
+                                    headerAppeared = true
+                                }
+                            }
+                    }
+
                     ForEach(Array(sortedSubordinates.enumerated()), id: \.element.id) { idx, sub in
                         subordinateRow(sub)
                             .contentShape(Rectangle())
@@ -352,6 +379,18 @@ struct SubordinateView: View {
                     .frame(width: 80, height: 80)
                     .offset(x: -65, y: 50)
                     .blur(radius: 10)
+                // [2026-06 v2] 第三顆中右散景圓（對齊 v3+ hero card 標準）
+                Circle()
+                    .fill(.white.opacity(0.055))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 30, y: 40)
+                    .blur(radius: 8)
+                // [2026-06 v2] 玻璃光澤（對齊 v3+ hero card 標準）
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -359,6 +398,38 @@ struct SubordinateView: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)
+    }
+
+    // MARK: - 部屬列表 sectionHeader [2026-06 v2]
+
+    private var activeSubordinatesSectionHeader: some View {
+        let count = sortedSubordinates.count
+        let accent = Color(red: 0.22, green: 0.53, blue: 0.98)
+        return HStack(spacing: 8) {
+            // 4pt Capsule 漸層側條（對齊 StockView.activeStocksSectionHeader 規格）
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.45)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 16)
+            Text("部屬成員")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Spacer()
+            // 計數徽章
+            Text("\(count) 位")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(accent)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+        }
+        .padding(.vertical, 2)
     }
 
     // MARK: - 空狀態
@@ -501,6 +572,8 @@ struct SubordinateView: View {
                             .padding(.horizontal, 7).padding(.vertical, 2.5)
                             .background(accent.opacity(0.12))
                             .clipShape(Capsule())
+                            // [2026-06 v2] 職等膠囊補細邊框
+                            .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                     } else if !sub.jobTitle.isEmpty {
                         Text(sub.jobTitle)
                             .font(.system(size: 10, weight: .semibold))
@@ -508,6 +581,8 @@ struct SubordinateView: View {
                             .padding(.horizontal, 7).padding(.vertical, 2.5)
                             .background(accent.opacity(0.12))
                             .clipShape(Capsule())
+                            // [2026-06 v2] 職稱膠囊補細邊框
+                            .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                             .lineLimit(1)
                     }
 
@@ -520,19 +595,25 @@ struct SubordinateView: View {
                             .padding(.horizontal, 6).padding(.vertical, 2.5)
                             .background(Color(.tertiarySystemFill))
                             .clipShape(Capsule())
+                            // [2026-06 v2] 部門膠囊補細邊框
+                            .overlay(Capsule().stroke(Color(.separator).opacity(0.18), lineWidth: 0.6))
                             .lineLimit(1)
                     }
                 }
 
-                // 到職日 / 年資
+                // [2026-06 v2] 到職日：升級為 Capsule 日期徽章（對齊 CareerView / OverviewView.recentRow v2）
                 if let jd = sub.joinDate {
-                    HStack(spacing: 3) {
+                    HStack(spacing: 4) {
                         Image(systemName: "calendar")
                             .font(.system(size: 9, weight: .medium))
                         Text("到職 \(formatDate(jd))")
-                            .font(.caption2)
+                            .font(.system(size: 10, weight: .medium))
                     }
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color(.separator).opacity(0.15), lineWidth: 0.5))
                 }
             }
 
