@@ -53,6 +53,7 @@ struct IncomeView: View {
     @State private var visibleMonths = 3
     @State private var debouncedSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
+    @State private var cachedFilteredIncomes: [Income] = []
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -67,7 +68,9 @@ struct IncomeView: View {
         return f
     }()
 
-    var filteredIncomes: [Income] {
+    var filteredIncomes: [Income] { cachedFilteredIncomes }
+
+    private func buildFilteredIncomes() -> [Income] {
         var list = store.incomes.sorted { $0.date > $1.date }
         if let cat = selectedCategory {
             list = list.filter { $0.category == cat }
@@ -143,6 +146,9 @@ struct IncomeView: View {
                     guard !Task.isCancelled else { return }
                     debouncedSearchText = newValue
                 }
+            }
+            .task(id: "\(store.modifyID)-\(selectedCategory?.rawValue ?? "")-\(debouncedSearchText)") {
+                cachedFilteredIncomes = buildFilteredIncomes()
             }
         }
     }

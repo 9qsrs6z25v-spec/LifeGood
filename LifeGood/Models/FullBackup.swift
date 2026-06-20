@@ -111,7 +111,10 @@ enum FullBackup {
         guard let head = try fh.read(upToCount: 8), head == magicData else { throw BackupError.badFormat }
         guard let lenData = try fh.read(upToCount: 8), lenData.count == 8 else { throw BackupError.badFormat }
         let manifestLen = Int(readUInt64LE(lenData))
-        guard manifestLen > 0, let manifestData = try fh.read(upToCount: manifestLen),
+        // 50 MB 上限：manifest 是純 JSON 中繼資料，正常情況遠低於此；
+        // 損壞或惡意備份檔若寫入超大 manifestLen 會造成 OOM，在此截斷。
+        guard manifestLen > 0, manifestLen <= 50_000_000,
+              let manifestData = try fh.read(upToCount: manifestLen),
               manifestData.count == manifestLen else { throw BackupError.badFormat }
 
         let dec = JSONDecoder()

@@ -68,7 +68,7 @@ final class SubscriptionManager: ObservableObject {
 
     /// 由 RemoteAdminManager 在「伺服器確認」免費狀態後呼叫。
     /// 免費中 → 蓋早鳥章（日後收回時這些早期使用者永久保留解鎖）。
-    func applyRemoteFreeAccess(_ free: Bool) {
+    @MainActor func applyRemoteFreeAccess(_ free: Bool) {
         UserDefaults.standard.set(free, forKey: Self.remoteAllFreeKey)
         remoteAllFree = free
         if free, !isFounderUnlocked {
