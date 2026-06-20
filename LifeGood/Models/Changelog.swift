@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.24", build: 493, date: "2026/06/20", notes: [
+            "【動畫修復】ChartView.loadChartData()：空白態脈衝旗標（trendEmptyPulse 等）已有歸零，但圓餅圖例行旗標（variablePieRowsAppeared / fixedPieRowsAppeared）與支出類型比例進場旗標（typeBreakdownAppeared）未歸零，導致切換時間區間後這三個進場動畫再也不播放。修復：一律在 isLoading=true 前同步歸零，確保每次重載後進場動畫能重新觸發。",
+            "【動畫修復】SubordinateView v2：summaryStatsCard（summaryAppeared）與 activeSubordinatesSectionHeader（headerAppeared）缺少歸零路徑——當所有部屬被刪除後這兩個 section 從畫面移除，旗標卡在 true；再新增部屬時 section 重出現但 onAppear 找不到狀態變化，進場動畫不再播放。修復：補 .onChange(of: lifeStore.subordinates.isEmpty) 在列表歸零時重置旗標，對齊 FamilyView v22.11 同類修復規格。"
+        ]),
         ChangelogEntry(version: "22.22", build: 492, date: "2026/06/20", notes: [
             "【CloudKit 閃爍修復】CloudKitManager.fetchChanges：原本在 fetchRecordZoneChangesResultBlock 中，無論成功或失敗均先發 KV/照片通知，導致 changeTokenExpired 重試路徑下各 Store 被觸發兩次 reloadFromCloud——第一次是不完整的部分資料，第二次才是完整資料，造成畫面閃爍。修復：將通知發送移入 .success 分支；changeTokenExpired 時完全略過通知直接重試，retry 成功後再一次性通知；zoneNotFound 與其他錯誤仍發已拉取的部分資料通知並回報失敗。",
             "【圓餅圖動畫修復】ChartView.pieChartBody：原本以 Chart(entries.indices, id: \\.self) 用陣列位置作為 SectorMark 的 identity，當某分類支出歸零從陣列消失、其餘分類位移時，SwiftUI 會將不同分類的扇形誤判為同一身分並執行錯誤的變形動畫。修復：改以內部 PieSlice: Identifiable（id = 分類 rawValue）取代 entries.indices，讓 Chart 依語意身分追蹤各扇形，分類出現/消失時正確執行淡入淡出而非錯位變形。"
