@@ -126,11 +126,15 @@ enum FullBackup {
                                                 expense: expense, finance: finance, life: life)
 
         // 2) 附件寫回各資料夾（依序，依 size 取位元組）
+        // 每個附件最大 100 MB，防止備份檔損壞或惡意內容造成 OOM
+        let maxAttachmentSize = 100_000_000
         var written = 0
         if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
             for att in manifest.attachments {
-                guard att.size >= 0, let bytes = try fh.read(upToCount: att.size),
-                      bytes.count == att.size else { break }
+                // break → continue：單筆讀取失敗不中斷後續附件的還原
+                guard att.size >= 0, att.size <= maxAttachmentSize,
+                      let bytes = try fh.read(upToCount: att.size),
+                      bytes.count == att.size else { continue }
                 let dirURL = docs.appendingPathComponent(att.directory, isDirectory: true)
                 try? fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
                 let dest = dirURL.appendingPathComponent(att.fileName)

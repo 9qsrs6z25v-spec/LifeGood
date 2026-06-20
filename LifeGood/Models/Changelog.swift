@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.25", build: 494, date: "2026/06/20", notes: [
+            "【靜態除錯】全面複查 78 個 Swift 檔，發現並修復三個問題：① FullBackup.restore()：附件迴圈讀取失敗時原以 break 中斷，導致後續附件全部略過；改為 continue，讓其餘附件繼續還原。同時新增 100 MB 大小上限（att.size <= 100_000_000）守衛，防止損壞或惡意備份檔透過超大 size 欄位觸發 OOM。② BusinessCardView / BusinessCardDetailView：fmtDate() 每次呼叫都建立新的 DateFormatter，名片列表 render 時隨名片數量建立等量物件；改為 static let 快取，對齊 RealEstateView / FoodMapView / LifeFinanceView 等既有修復規格。③ ResumeView.body：allSorted（combinedMilestones + sorted，O(n log n)）在 isEmptyAll 判斷與 groupedSections / filteredByCategory 各呼叫一次，每次 body render 共 2 次；對齊 LifeOverviewView（let allMS 單次捕捉）規格，在 body 頂端以 let sorted = allSorted 一次計算後傳入 groupedList(_:) / filteredList(category:sorted:)，呼叫次數 2→1。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流與 2 秒防抖、isSyncing 並行守衛、@Published 更新主執行緒隔離）均確認正常。"
+        ]),
         ChangelogEntry(version: "22.24", build: 493, date: "2026/06/20", notes: [
             "【動畫修復】ChartView.loadChartData()：空白態脈衝旗標（trendEmptyPulse 等）已有歸零，但圓餅圖例行旗標（variablePieRowsAppeared / fixedPieRowsAppeared）與支出類型比例進場旗標（typeBreakdownAppeared）未歸零，導致切換時間區間後這三個進場動畫再也不播放。修復：一律在 isLoading=true 前同步歸零，確保每次重載後進場動畫能重新觸發。",
             "【動畫修復】SubordinateView v2：summaryStatsCard（summaryAppeared）與 activeSubordinatesSectionHeader（headerAppeared）缺少歸零路徑——當所有部屬被刪除後這兩個 section 從畫面移除，旗標卡在 true；再新增部屬時 section 重出現但 onAppear 找不到狀態變化，進場動畫不再播放。修復：補 .onChange(of: lifeStore.subordinates.isEmpty) 在列表歸零時重置旗標，對齊 FamilyView v22.11 同類修復規格。"
