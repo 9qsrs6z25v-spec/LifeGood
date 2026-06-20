@@ -1126,8 +1126,12 @@ struct BusinessCardView: View {
         }
     }
 
+    private static let cardDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.cardDateFormatter.string(from: date)
     }
 
     // MARK: - 複製名片
@@ -1980,8 +1984,12 @@ struct BusinessCardDetailView: View {
         openURL(url)
     }
 
+    private static let detailDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
     private func fmtDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f.string(from: date)
+        Self.detailDateFormatter.string(from: date)
     }
 }
 

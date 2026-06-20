@@ -339,34 +339,34 @@ struct ResumeView: View {
             .sorted { $0.date > $1.date }
     }
 
-    /// 只在有選擇篩選時使用，顯示平面列表
-    private var filteredByCategory: [LifeMilestone] {
+    /// 只在有選擇篩選時使用，顯示平面列表（接收已排序陣列，避免重複計算）
+    private func filteredByCategory(_ sorted: [LifeMilestone]) -> [LifeMilestone] {
         guard let cat = selectedCategory else { return [] }
-        return allSorted.filter { $0.category == cat }
+        return sorted.filter { $0.category == cat }
     }
 
-    /// 依分類分組（保留 sectionOrder 順序，跳過空分類）
-    private var groupedSections: [(category: MilestoneCategory, items: [LifeMilestone])] {
-        let grouped = Dictionary(grouping: allSorted, by: \.category)
+    /// 依分類分組（保留 sectionOrder 順序，跳過空分類；接收已排序陣列，避免重複計算）
+    private func groupedSections(_ sorted: [LifeMilestone]) -> [(category: MilestoneCategory, items: [LifeMilestone])] {
+        let grouped = Dictionary(grouping: sorted, by: \.category)
         return sectionOrder.compactMap { cat in
             guard let items = grouped[cat], !items.isEmpty else { return nil }
             return (cat, items)
         }
     }
 
-    private var isEmptyAll: Bool { allSorted.isEmpty }
-
     var body: some View {
-        NavigationStack {
+        // body 頂端一次計算，filteredByCategory / groupedSections / isEmpty 共用同一份陣列
+        let sorted = allSorted
+        return NavigationStack {
             VStack(spacing: 0) {
                 categoryFilter
 
-                if isEmptyAll {
+                if sorted.isEmpty {
                     emptyState
                 } else if let cat = selectedCategory {
-                    filteredList(category: cat)
+                    filteredList(category: cat, sorted: sorted)
                 } else {
-                    groupedList
+                    groupedList(sorted)
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -393,9 +393,9 @@ struct ResumeView: View {
 
     // MARK: - 列表
 
-    private var groupedList: some View {
+    private func groupedList(_ sorted: [LifeMilestone]) -> some View {
         List {
-            ForEach(Array(groupedSections.enumerated()), id: \.element.category) { sectionIdx, section in
+            ForEach(Array(groupedSections(sorted).enumerated()), id: \.element.category) { sectionIdx, section in
                 Section {
                     ForEach(Array(section.items.enumerated()), id: \.element.id) { rowIdx, item in
                         milestoneRow(item)
@@ -436,8 +436,8 @@ struct ResumeView: View {
         }
     }
 
-    private func filteredList(category: MilestoneCategory) -> some View {
-        let items = filteredByCategory
+    private func filteredList(category: MilestoneCategory, sorted: [LifeMilestone]) -> some View {
+        let items = filteredByCategory(sorted)
         return List {
             if items.isEmpty {
                 Text("此分類尚無紀錄")
