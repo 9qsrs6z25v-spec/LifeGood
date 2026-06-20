@@ -46,6 +46,7 @@ struct VariableExpenseView: View {
     @State private var cachedTrailingMonthlyAvg: Double = 0
     @State private var debouncedSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
+    @State private var cachedFilteredExpenses: [Expense] = []
 
     private static let groupDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -63,7 +64,9 @@ struct VariableExpenseView: View {
         return f
     }()
 
-    var filteredExpenses: [Expense] {
+    var filteredExpenses: [Expense] { cachedFilteredExpenses }
+
+    private func buildFilteredExpenses() -> [Expense] {
         var list = store.variableExpenses
         if let category = selectedCategory {
             list = list.filter { $0.variableCategory == category }
@@ -149,6 +152,9 @@ struct VariableExpenseView: View {
             }
             .task(id: store.modifyID) {
                 cachedTrailingMonthlyAvg = computeTrailingMonthlyAvg()
+            }
+            .task(id: "\(store.modifyID)-\(selectedCategory?.rawValue ?? "")-\(debouncedSearchText)") {
+                cachedFilteredExpenses = buildFilteredExpenses()
             }
         }
     }

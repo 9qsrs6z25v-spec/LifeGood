@@ -169,7 +169,7 @@ struct MultiPhotoGallery: View {
         .padding(.horizontal, 4)
     }
 
-    // 縮圖：cornerRadius 12 + 雙層陰影 + 白色邊框；載入佔位用 LinearGradient + caption
+    // 縮圖：cornerRadius 12 + 雙層陰影 + 白色邊框；非同步載入避免在 view body 阻塞主執行緒
     @ViewBuilder
     private func thumbnail(for name: String) -> some View {
         let url = urlFor(name)
@@ -177,40 +177,7 @@ struct MultiPhotoGallery: View {
             Button {
                 viewingURL = IdentifiableURL(url: url)
             } label: {
-                Group {
-                    if let img = UIImage(contentsOfFile: url.path) {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: thumbnailSize.width, height: thumbnailSize.height)
-                            .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
-                            )
-                    } else {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color(.tertiarySystemFill), Color(.secondarySystemFill)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: thumbnailSize.width, height: thumbnailSize.height)
-                            .overlay(
-                                VStack(spacing: 4) {
-                                    Image(systemName: "icloud.and.arrow.down")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundStyle(.tertiary)
-                                    Text("載入中")
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
-                            )
-                    }
-                }
+                AsyncThumbnailView(url: url, size: thumbnailSize)
             }
             .buttonStyle(.plain)
             .shadow(color: .black.opacity(0.10), radius: 6, x: 0, y: 3)
@@ -228,6 +195,59 @@ struct MultiPhotoGallery: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+}
+
+// MARK: - 非同步縮圖載入（避免在 view body 同步讀檔阻塞主執行緒）
+
+private struct AsyncThumbnailView: View {
+    let url: URL
+    let size: CGSize
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
+                    )
+            } else {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(.tertiarySystemFill), Color(.secondarySystemFill)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: size.width, height: size.height)
+                    .overlay(
+                        VStack(spacing: 4) {
+                            Image(systemName: "icloud.and.arrow.down")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                            Text("載入中")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    )
+            }
+        }
+        .task(id: url) {
+            guard image == nil else { return }
+            let path = url.path
+            let loaded = await Task.detached(priority: .userInitiated) {
+                UIImage(contentsOfFile: path)
+            }.value
+            image = loaded
         }
     }
 }
