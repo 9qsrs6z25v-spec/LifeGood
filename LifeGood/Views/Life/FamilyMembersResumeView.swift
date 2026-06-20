@@ -2,21 +2,26 @@ import SwiftUI
 import PhotosUI
 
 // MARK: - 美化紀錄
-// 版本：v1（2026-06）
+// 版本：v2（2026-06）
 // 美化方向：
-//   • FamilyMembersResumeView（列表）
-//       - Capsule 側條 sectionHeader（4pt 漸層） + 計數 Capsule 徽章
+//   • FamilyMembersResumeView（列表）v1
+//       - Capsule 側條 sectionHeader（4pt 漸層） + 計數 Capsule 徽章（含 stroke 0.6pt 邊框）
 //       - 44pt 漸層圖示圓（role 對應色） + shadow；角色徽章改 Capsule
 //       - familySide 顯示 Capsule 小標籤
 //       - stagger 入場動畫（rowsAppeared + 0.06s delay/row）
 //       - 全空 empty state（雙脈衝擴散環 + figure.2.and.child.holdinghands）
-//   • FamilyMemberDetailView（詳細頁）
+//   • FamilyMemberDetailView（詳細頁）v2
+//       - hero card 頂部玻璃光澤 overlay（.white.opacity(0.18)→.clear，.top→.center）
 //       - role 漸層 hero card + bokeh 裝飾 + cardAppeared spring 動畫
-//       - sectionHeaderWithAdd：Capsule 側條 + .subheadline.weight(.bold) + 計數徽章 + icon 參數
+//       - sectionHeaderWithAdd：Capsule 側條 + .subheadline.weight(.bold) + 計數徽章（含 stroke 0.6pt）
 //       - 靜態 dateFormatter / currencyFormatter（效能優化，避免每次 render 重新建立）
-//       - eventsSection 每行加 34pt 日曆圖示圓（橘色漸層）
-//       - memberGiftsSection 標頭改 Capsule 側條；禮金行加 32pt 圖示圓
-//       - 空狀態：emptyPlaceholder helper（icon + 說明文字）
+//       - eventsSection stagger 入場動畫（eventsAppeared + 0.06s delay/row）
+//       - eventsSection 每行升級為 36pt 日曆圖示圓（orange→orange.opacity(0.65) 漸層 + stroke 1pt）
+//       - eventsSection 日期改 Capsule 徽章（tertiarySystemFill 底色 + calendar icon）
+//       - memberGiftsSection 標頭改 Capsule 側條；禮金行升級為 36pt 圖示圓（含 stroke 1pt）
+//       - memberGiftsSection 金額改 Capsule 徽章（pink.opacity(0.10) 底色 + stroke 0.6pt）
+//       - smartGiftAmount()：萬/億 智慧量級顯示（≥1億→億，≥1萬→萬，其餘 NT$）
+//       - photoCard 加 shadow（black.opacity(0.06)，radius 4）
 // ─────────────────────────────────────────────
 
 // MARK: - 家人履歷 列表
@@ -117,13 +122,14 @@ struct FamilyMembersResumeView: View {
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
             Capsule()
-                .fill(color.opacity(0.15))
+                .fill(color.opacity(0.12))
                 .frame(width: 32, height: 18)
                 .overlay(
                     Text("\(count)")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(color)
                 )
+                .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
             Spacer()
         }
         .padding(.horizontal, 4)
@@ -248,6 +254,7 @@ struct FamilyMemberDetailView: View {
     @State private var editingPhoto: FamilyAlbumPhoto?
     @State private var viewingPhotoURL: URL?
     @State private var cardAppeared = false
+    @State private var eventsAppeared = false
     @EnvironmentObject var expenseStore: ExpenseStore
 
     // 靜態格式化器（避免每次 render 重新建立）
@@ -307,9 +314,14 @@ struct FamilyMemberDetailView: View {
                 Text("收到的禮金")
                     .font(.subheadline.weight(.bold))
                 Spacer()
-                Text(formatGiftTotal(memberGifts.reduce(0) { $0 + $1.amount }))
+                // 禮金總計 Capsule 徽章
+                Text(smartGiftAmount(memberGifts.reduce(0) { $0 + $1.amount }))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.pink)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(.pink.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.pink.opacity(0.22), lineWidth: 0.6))
             }
             .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
 
@@ -317,25 +329,34 @@ struct FamilyMemberDetailView: View {
                 let items = memberGifts.filter { $0.socialSubCategory == sub }
                 if !items.isEmpty {
                     HStack(spacing: 10) {
+                        // 36pt 粉色漸層圖示圓 + stroke 邊框
                         ZStack {
                             Circle()
-                                .fill(LinearGradient(colors: [.pink.opacity(0.8), .pink.opacity(0.5)],
+                                .fill(LinearGradient(colors: [.pink, .pink.opacity(0.65)],
                                                       startPoint: .topLeading, endPoint: .bottomTrailing))
-                                .frame(width: 32, height: 32)
+                                .frame(width: 36, height: 36)
+                            Circle()
+                                .stroke(.pink.opacity(0.22), lineWidth: 1)
+                                .frame(width: 36, height: 36)
                             Image(systemName: sub.icon)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(size: 14, weight: .medium))
                                 .foregroundStyle(.white)
                         }
                         Text(sub.rawValue).font(.subheadline)
                         Spacer()
                         Text("\(items.count) 筆")
                             .font(.caption2).foregroundStyle(.secondary)
-                        Text(formatGiftTotal(items.reduce(0) { $0 + $1.amount }))
+                        // 分類金額 Capsule 徽章
+                        Text(smartGiftAmount(items.reduce(0) { $0 + $1.amount }))
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.red)
+                            .foregroundStyle(.pink)
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(.pink.opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(.pink.opacity(0.22), lineWidth: 0.6))
                     }
                     .padding(.horizontal).padding(.vertical, 6)
-                    Divider().padding(.leading, 54)
+                    Divider().padding(.leading, 58)
                 }
             }
         }
@@ -346,6 +367,12 @@ struct FamilyMemberDetailView: View {
 
     private func formatGiftTotal(_ v: Double) -> String {
         Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
+    }
+
+    private func smartGiftAmount(_ v: Double) -> String {
+        if v >= 100_000_000 { return String(format: "NT$%.1f億", v / 100_000_000) }
+        if v >= 10_000      { return String(format: "NT$%.1f萬", v / 10_000) }
+        return Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     var body: some View {
@@ -416,6 +443,14 @@ struct FamilyMemberDetailView: View {
                 .frame(width: 150, height: 150)
                 .offset(x: 80, y: 50)
 
+            // 玻璃光澤（頂部高光）
+            RoundedRectangle(cornerRadius: 20)
+                .fill(LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                ))
+
             VStack(spacing: 10) {
                 ZStack {
                     Circle()
@@ -479,16 +514,20 @@ struct FamilyMemberDetailView: View {
             } else {
                 let sortedEvents = member.familyEvents.sorted { $0.date > $1.date }
                 let lastEventId = sortedEvents.last?.id
-                ForEach(sortedEvents) { ev in
+                ForEach(Array(sortedEvents.enumerated()), id: \.element.id) { idx, ev in
                     Button { editingEvent = ev } label: {
                         HStack(spacing: 12) {
+                            // 36pt 橘色漸層圖示圓 + stroke 邊框
                             ZStack {
                                 Circle()
-                                    .fill(LinearGradient(colors: [.orange.opacity(0.8), .orange.opacity(0.5)],
+                                    .fill(LinearGradient(colors: [.orange, .orange.opacity(0.65)],
                                                           startPoint: .topLeading, endPoint: .bottomTrailing))
-                                    .frame(width: 34, height: 34)
+                                    .frame(width: 36, height: 36)
+                                Circle()
+                                    .stroke(.orange.opacity(0.22), lineWidth: 1)
+                                    .frame(width: 36, height: 36)
                                 Image(systemName: "calendar")
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.system(size: 14, weight: .medium))
                                     .foregroundStyle(.white)
                             }
                             VStack(alignment: .leading, spacing: 3) {
@@ -503,16 +542,30 @@ struct FamilyMemberDetailView: View {
                                 }
                             }
                             Spacer()
-                            Text(Self.dateFormatter.string(from: ev.date))
-                                .font(.caption2).foregroundStyle(.tertiary)
+                            // 日期 Capsule 徽章
+                            HStack(spacing: 4) {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.secondary.opacity(0.7))
+                                Text(Self.dateFormatter.string(from: ev.date))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
                         }
                         .padding(.horizontal).padding(.vertical, 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .opacity(eventsAppeared ? 1 : 0)
+                    .offset(y: eventsAppeared ? 0 : 10)
+                    .animation(.spring(response: 0.48, dampingFraction: 0.8).delay(0.06 * Double(idx)),
+                               value: eventsAppeared)
                     if ev.id != lastEventId {
-                        Divider().padding(.leading, 58)
+                        Divider().padding(.leading, 60)
                     }
                 }
             }
@@ -520,6 +573,9 @@ struct FamilyMemberDetailView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.4).delay(0.25)) { eventsAppeared = true }
+        }
     }
 
     // MARK: 照片相簿
@@ -586,6 +642,7 @@ struct FamilyMemberDetailView: View {
         .padding(8)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
     }
 
     // MARK: Helpers
@@ -611,6 +668,7 @@ struct FamilyMemberDetailView: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(color)
                 )
+                .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
             Spacer()
             Button(action: action) {
                 Image(systemName: "plus.circle.fill")
