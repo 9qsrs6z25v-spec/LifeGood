@@ -188,6 +188,12 @@ struct ChartView: View {
         variablePieEmptyPulse = false
         fixedPieEmptyPulse = false
         typeBreakdownEmptyPulse = false
+        // 重置圓餅圖例行與類型比例的進場動畫旗標：與 empty pulse 旗標相同，
+        // isLoading=true 會移除這些 view，若旗標卡在 true，
+        // 重載後 onAppear 不再觸發 state 變化，進場動畫不會重播。
+        variablePieRowsAppeared = false
+        fixedPieRowsAppeared = false
+        typeBreakdownAppeared = false
         let period = selectedPeriod
         chartData = store.chartData(for: period)
         variableBreakdownCache = store.variableBreakdown(for: period)

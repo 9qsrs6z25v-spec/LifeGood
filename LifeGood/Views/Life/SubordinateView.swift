@@ -236,6 +236,14 @@ struct SubordinateView: View {
                     rowsAppeared = true
                 }
             }
+            // 部屬全部刪除後 summaryStatsCard 與 sectionHeader 從畫面移除，
+            // 旗標需歸零讓下次新增部屬時進場動畫能重新播放（對齊 FamilyView v22.11 修復規格）。
+            .onChange(of: lifeStore.subordinates.isEmpty) { _, isEmpty in
+                if isEmpty {
+                    summaryAppeared = false
+                    headerAppeared = false
+                }
+            }
             .sheet(isPresented: $showAdd) { AddSubordinateView() }
             .sheet(item: $editingItem) { item in AddSubordinateView(editing: item) }
             .sheet(item: $viewingItem) { item in SubordinateDetailView(subordinate: item) }
