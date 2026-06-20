@@ -367,33 +367,61 @@ final class CloudKitManager {
         op.fetchRecordZoneChangesResultBlock = { [weak self] result in
             guard let self = self else { completion?(false); return }
             DispatchQueue.main.async {
-                if !pulledKVKeys.isEmpty {
-                    NotificationCenter.default.post(
-                        name: Self.didPullKVChangesNotification, object: nil,
-                        userInfo: ["keys": Array(pulledKVKeys)]
-                    )
-                }
-                if !pulledPhotos.isEmpty || !deletedPhotos.isEmpty {
-                    NotificationCenter.default.post(
-                        name: Self.didPullPhotoChangesNotification, object: nil,
-                        userInfo: ["pulled": Array(pulledPhotos), "deletedRecords": Array(deletedPhotos)]
-                    )
-                }
                 switch result {
-                case .success: completion?(true)
+                case .success:
+                    // 成功：資料完整，才發通知觸發各 Store reload
+                    if !pulledKVKeys.isEmpty {
+                        NotificationCenter.default.post(
+                            name: Self.didPullKVChangesNotification, object: nil,
+                            userInfo: ["keys": Array(pulledKVKeys)]
+                        )
+                    }
+                    if !pulledPhotos.isEmpty || !deletedPhotos.isEmpty {
+                        NotificationCenter.default.post(
+                            name: Self.didPullPhotoChangesNotification, object: nil,
+                            userInfo: ["pulled": Array(pulledPhotos), "deletedRecords": Array(deletedPhotos)]
+                        )
+                    }
+                    completion?(true)
                 case .failure(let err):
-                    // 若 server change token expired → 清除重抓
                     if let ck = err as? CKError, ck.code == .changeTokenExpired {
+                        // token 過期：不發部分資料通知，避免以不完整資料觸發 Store reload 造成畫面閃爍；
+                        // 清掉 token 後重抓完整變更，retry 成功時才一次性發通知
                         self.clearChangeToken()
                         self.fetchChanges(completion: completion)
                     } else if let ck = err as? CKError, ck.code == .zoneNotFound || ck.code == .userDeletedZone {
-                        // zone 被刪 → 清掉本地旗標讓下次重建
+                        // zone 被刪 → 清掉本地旗標讓下次重建；已拉取的部分資料仍發通知
+                        if !pulledKVKeys.isEmpty {
+                            NotificationCenter.default.post(
+                                name: Self.didPullKVChangesNotification, object: nil,
+                                userInfo: ["keys": Array(pulledKVKeys)]
+                            )
+                        }
+                        if !pulledPhotos.isEmpty || !deletedPhotos.isEmpty {
+                            NotificationCenter.default.post(
+                                name: Self.didPullPhotoChangesNotification, object: nil,
+                                userInfo: ["pulled": Array(pulledPhotos), "deletedRecords": Array(deletedPhotos)]
+                            )
+                        }
                         self.defaults.removeObject(forKey: self.zoneCreatedKey)
                         self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
                         self.clearChangeToken()
                         self.report(err, context: "拉取雲端變更")
                         completion?(false)
                     } else {
+                        // 其他錯誤：已拉取的部分資料仍發通知
+                        if !pulledKVKeys.isEmpty {
+                            NotificationCenter.default.post(
+                                name: Self.didPullKVChangesNotification, object: nil,
+                                userInfo: ["keys": Array(pulledKVKeys)]
+                            )
+                        }
+                        if !pulledPhotos.isEmpty || !deletedPhotos.isEmpty {
+                            NotificationCenter.default.post(
+                                name: Self.didPullPhotoChangesNotification, object: nil,
+                                userInfo: ["pulled": Array(pulledPhotos), "deletedRecords": Array(deletedPhotos)]
+                            )
+                        }
                         self.report(err, context: "拉取雲端變更")
                         completion?(false)
                     }
