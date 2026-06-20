@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.26", build: 495, date: "2026/06/20", notes: [
+            "【UI 美化 v2】FamilyMembersResumeView / FamilyMemberDetailView：① hero card 加頂部玻璃光澤 overlay（white.opacity(0.18)→clear）；② eventsSection 升級 36pt 橘色漸層圖示圓（+ stroke 1pt），日期改 Capsule 徽章（tertiarySystemFill 底色），並加 stagger 入場動畫（0.06s/row）；③ memberGiftsSection 禮金子項目圖示圓從 32pt 升至 36pt（+ stroke 1pt），金額改 Capsule 徽章（pink.opacity(0.10) 底色 + stroke 0.6pt），新增 smartGiftAmount() 萬/億 智慧量級顯示；④ sectionHeader 計數徽章統一加 stroke 0.6pt 邊框；⑤ photoCard 加 shadow（black.opacity(0.06), radius 4）。"
+        ]),
         ChangelogEntry(version: "22.25", build: 494, date: "2026/06/20", notes: [
             "【靜態除錯】全面複查 78 個 Swift 檔，發現並修復三個問題：① FullBackup.restore()：附件迴圈讀取失敗時原以 break 中斷，導致後續附件全部略過；改為 continue，讓其餘附件繼續還原。同時新增 100 MB 大小上限（att.size <= 100_000_000）守衛，防止損壞或惡意備份檔透過超大 size 欄位觸發 OOM。② BusinessCardView / BusinessCardDetailView：fmtDate() 每次呼叫都建立新的 DateFormatter，名片列表 render 時隨名片數量建立等量物件；改為 static let 快取，對齊 RealEstateView / FoodMapView / LifeFinanceView 等既有修復規格。③ ResumeView.body：allSorted（combinedMilestones + sorted，O(n log n)）在 isEmptyAll 判斷與 groupedSections / filteredByCategory 各呼叫一次，每次 body render 共 2 次；對齊 LifeOverviewView（let allMS 單次捕捉）規格，在 body 頂端以 let sorted = allSorted 一次計算後傳入 groupedList(_:) / filteredList(category:sorted:)，呼叫次數 2→1。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流與 2 秒防抖、isSyncing 並行守衛、@Published 更新主執行緒隔離）均確認正常。"
         ]),
