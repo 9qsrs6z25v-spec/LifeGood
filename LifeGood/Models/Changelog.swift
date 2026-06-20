@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.21", build: 491, date: "2026/06/20", notes: [
+            "【效能修復】VehicleDetailView.deleteVehicle：刪除車輛時原本對每筆連結的定期/變動支出各別呼叫一次 expenseStore.expenses.removeAll { }，N 筆支出觸發 N 次 @Published didSet → save() + pushAll()；對齊 RealEstateView.deleteEstate v20.5 修復規格，改為先收集所有連結 ID 至 Set<UUID>，最後一次 removeAll 完成，@Published 通知與磁碟 I/O 各從最多 N 次降為 1 次。"
+        ]),
         ChangelogEntry(version: "22.19", build: 489, date: "2026/06/19", notes: [
             "【靜態掃描】全面複查 78 個 Swift 檔（強制解包、Optional 處理、型別錯誤、index 越界、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：無 force unwrap（!）、無 as! 強制轉型、無 fatalError（EInvoiceClient 唯一一處為啟動期程式員錯誤守衛，屬正當用法）；所有陣列索引存取均有邊界守衛（validOffsets filter、compactMap、firstIndex、guard bounds）；所有非 singleton 閉包均以 [weak self] 捕捉，singleton 正確省略；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、modifyKV 序列佇列重試均正常；@Published 更新全在主執行緒；MyCalendarView 每次 body render 最多 14 次 eventsOn()（heroIsToday=false 時 14 次，=true 時 7 次）符合預期；SubordinateView deptCache O(1) 查表已確認；FinanceChartView sortedStocks 一次捕捉已確認；VariableExpenseView / AddExpenseView 300ms 搜尋防抖已確認；OverviewView .task(id: modifyID) 快取更新機制已確認；StockDetailView sortedTransactions 4 次、sortedDividends 3 次呼叫因陣列極小（< 50 項）影響可忽略，不需修正；EInvoiceSyncManager @MainActor 批次 append 防止多次 didSet；NotificationManager enumerateFires 上限 61；無新問題。"
         ]),
