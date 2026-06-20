@@ -635,15 +635,18 @@ struct VehicleDetailView: View {
     }
 
     private func deleteVehicle() {
+        // 先收集所有連結支出 ID，最後一次 removeAll 完成，
+        // 對齊 RealEstateView.deleteEstate v20.5 修復規格，
+        // 避免逐筆呼叫各自觸發 @Published didSet → save() + pushAll()
+        var linkedIds = Set<UUID>()
         for fe in vehicle.fixedExpenses {
-            if let linkedId = fe.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let id = fe.linkedExpenseId { linkedIds.insert(id) }
         }
         for ve in vehicle.variableExpenses {
-            if let linkedId = ve.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let id = ve.linkedExpenseId { linkedIds.insert(id) }
+        }
+        if !linkedIds.isEmpty {
+            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
         }
         store.deleteVehicle(vehicle)
     }
