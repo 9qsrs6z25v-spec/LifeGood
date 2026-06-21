@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.31", build: 500, date: "2026/06/21", notes: [
+            "【靜態除錯】全面複查 78 個 Swift 檔，發現並修復一個資料遺失 bug：AddRealEstateView.loadFrom() 以 split(separator:\"-\") 解析 waterMeterNumber 時，預設 omittingEmptySubsequences: true 會將末尾或中間的空欄位消滅，使 combinedWaterNumber（格式為「站所-編號-檢核」）在任一欄位為空時分割結果為 count==2，既不符合 count>=3 也不符合 count==1 的條件，導致 waterStation / waterCode / waterCheck 全部留空，使用者下次開啟編輯並儲存後水表號碼資料遺失；改為 split(separator:\"-\", omittingEmptySubsequences: false)，保留空欄位後 count 恆為 3，三個欄位均可正確還原。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、visible[0] count>=2 外層守衛、FinanceChartView v4 美化純視覺無邏輯變更）均確認正常。"
+        ]),
         ChangelogEntry(version: "22.30", build: 499, date: "2026/06/21", notes: [
             "【靜態除錯】發現並修復兩個問題：① EInvoiceSetupView.heroAppeared 進場旗標未在 onDisappear 重置：heroCard（未連結）與 statusHeroCard（已連結）共用同一個 @State heroAppeared，使用者連結或取消連結載具後，新英雄卡 onAppear 時旗標已為 true，導致進場動畫（opacity 0→1、Y 偏移）完全不播放；補 .onDisappear { heroAppeared = false } 於兩處，對齊 v22.24 FamilyView statsAppeared 同型修復規格。② statusHeroCard KPI 計算重複過濾 importHistory：monthCount 與 monthTotal 各自呼叫 filter { invDate >= monthStart }，造成 O(2n) 雙重遍歷；改為先 let monthFiltered = ...filter{ ... } 再分別取 .count / .reduce，降至 O(n)。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
         ]),
