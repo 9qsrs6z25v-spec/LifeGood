@@ -42,6 +42,15 @@ import Charts
 //      對齊 OverviewView.categoryRow v3 / FinanceOverviewView.allocationSection v2 彩條 glow 規格。
 //  18. realEstatePerformanceSection 圖示容器：RoundedRectangle(cornerRadius:11) → Circle，
 //      補入 Circle().stroke(indigo.opacity(0.22), lineWidth:1) overlay，統一全 section 圖示形狀語言。
+// [2026-06-v5] 本次美化方向（補齊三大 section 膠囊細邊框）：
+//  19. stockPerformanceSection 股票代號膠囊 + 報酬率膠囊：
+//      補入 .overlay(Capsule().stroke(plC.opacity(0.22), lineWidth: 0.6))，
+//      對齊 sectionHeader 計數膠囊 / allocationChart 百分比膠囊 全 App 膠囊細邊框規格。
+//  20. realEstatePerformanceSection 升值率膠囊 + 租報率膠囊：
+//      分別補入 appColor.opacity(0.22) / Color.blue.opacity(0.22) 細邊框，統一膠囊語言。
+//  21. insuranceSummarySection 已繳金額膠囊 + 預估報酬率膠囊：
+//      中性膠囊用 Color(.separator).opacity(0.40) 線寬 0.6；彩色膠囊用 rateColor.opacity(0.22)，
+//      讓全頁所有 Capsule 標籤均具備細描邊，視覺層次一致。
 
 struct FinanceChartView: View {
     @EnvironmentObject var store: FinanceStore
@@ -494,6 +503,7 @@ struct FinanceChartView: View {
                                         .padding(.horizontal, 6).padding(.vertical, 2)
                                         .background(plC.opacity(0.10))
                                         .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(plC.opacity(0.22), lineWidth: 0.6))
                                 } else {
                                     Text("股票")
                                         .font(.caption2)
@@ -512,6 +522,7 @@ struct FinanceChartView: View {
                                     .padding(.horizontal, 6).padding(.vertical, 2)
                                     .background(plC.opacity(0.10))
                                     .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(plC.opacity(0.22), lineWidth: 0.6))
                             }
                         }
                         .padding(.horizontal)
@@ -588,6 +599,7 @@ struct FinanceChartView: View {
                                     .padding(.horizontal, 6).padding(.vertical, 2)
                                     .background(appColor.opacity(0.10))
                                     .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(appColor.opacity(0.22), lineWidth: 0.6))
 
                                     if item.monthlyRental > 0 {
                                         HStack(spacing: 3) {
@@ -600,6 +612,7 @@ struct FinanceChartView: View {
                                         .padding(.horizontal, 6).padding(.vertical, 2)
                                         .background(Color.blue.opacity(0.08))
                                         .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
                                     }
                                 }
                             }
@@ -679,6 +692,7 @@ struct FinanceChartView: View {
                                         .padding(.horizontal, 6).padding(.vertical, 2)
                                         .background(Color(.tertiarySystemFill))
                                         .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(Color(.separator).opacity(0.40), lineWidth: 0.6))
                                     if item.returnRate != 0 {
                                         Text(String(format: "預估 %@%.1f%%", item.returnRate >= 0 ? "+" : "", item.returnRate))
                                             .font(.system(size: 10, weight: .semibold))
@@ -686,6 +700,7 @@ struct FinanceChartView: View {
                                             .padding(.horizontal, 6).padding(.vertical, 2)
                                             .background(rateColor.opacity(0.10))
                                             .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(rateColor.opacity(0.22), lineWidth: 0.6))
                                     }
                                 }
                             }

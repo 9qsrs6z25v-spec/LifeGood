@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.34", build: 503, date: "2026/06/21", notes: [
+            "【UI 美化 v5】FinanceChartView：補齊三大 section 膠囊細邊框——① stockPerformanceSection 股票代號膠囊 + 報酬率膠囊補入 .overlay(Capsule().stroke(plC.opacity(0.22), lineWidth: 0.6))；② realEstatePerformanceSection 升值率膠囊補入 appColor.opacity(0.22) 細邊框、租報率膠囊補入 Color.blue.opacity(0.22) 細邊框；③ insuranceSummarySection 已繳金額中性膠囊補入 Color(.separator).opacity(0.40) 細邊框、預估報酬率膠囊補入 rateColor.opacity(0.22) 細邊框；全頁所有 Capsule 標籤均具備 0.6pt 描邊，對齊 sectionHeader 計數膠囊 / allocationChart 百分比膠囊全 App 膠囊視覺語言規格。"
+        ]),
         ChangelogEntry(version: "22.33", build: 502, date: "2026/06/21", notes: [
             "【動畫修復】FamilyOverviewMap.houseRowsAppeared 進場動畫旗標未在 onDisappear 重置：使用者捲動使街道圖離開視窗後再捲回，或切換分頁後返回，旗標已為 true，導致 onAppear 觸發時動畫不再播放；補 .onDisappear { houseRowsAppeared = false }，對齊 v22.24 FamilyView.statsAppeared、v22.30 EInvoiceSetupView.heroAppeared 同型修復規格。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
         ]),
