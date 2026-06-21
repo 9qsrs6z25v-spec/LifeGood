@@ -318,8 +318,13 @@ struct PhotoLightbox: View {
                 Spacer()
             }
         }
-        .onAppear {
-            if image == nil { image = UIImage(contentsOfFile: url.path) }
+        .task(id: url) {
+            guard image == nil else { return }
+            let path = url.path
+            let loaded = await Task.detached(priority: .userInitiated) {
+                UIImage(contentsOfFile: path)
+            }.value
+            image = loaded
         }
     }
 }
