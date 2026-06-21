@@ -1460,7 +1460,7 @@ struct AddRealEstateView: View {
             FloorItemState(id: f.id, floorNumber: f.floorNumber, functions: Set(f.functions), areaText: f.area > 0 ? String(format: "%g", f.area) : "")
         }
         waterMeterNumber = e.waterMeterNumber
-        let waterParts = e.waterMeterNumber.split(separator: "-").map(String.init)
+        let waterParts = e.waterMeterNumber.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
         if waterParts.count >= 3 {
             waterStation = waterParts[0]; waterCode = waterParts[1]; waterCheck = waterParts[2]
         } else if waterParts.count == 1 && !waterParts[0].isEmpty {
