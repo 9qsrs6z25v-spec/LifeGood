@@ -59,12 +59,10 @@ enum FullBackup {
         let fm = FileManager.default
         progress?(0)
 
-        // 收集所有模組的附件檔
+        // 收集所有模組的附件檔（fileSizeKey 在 contentsOfDirectory 時一次取得，避免 N 次 attributesOfItem 系統呼叫）
         let files = gatherAttachmentFiles()
-        var manifestAtts: [BackupAttachment] = []
-        for f in files {
-            let size = (try? fm.attributesOfItem(atPath: f.url.path)[.size] as? Int) ?? 0
-            manifestAtts.append(BackupAttachment(directory: f.dir, fileName: f.name, size: size))
+        let manifestAtts: [BackupAttachment] = files.map {
+            BackupAttachment(directory: $0.dir, fileName: $0.name, size: $0.size)
         }
 
         let manifest = BackupManifest(formatVersion: 1, createdAt: Date(),
@@ -150,15 +148,20 @@ enum FullBackup {
 
     // MARK: - Helpers
 
-    private static func gatherAttachmentFiles() -> [(dir: String, name: String, url: URL)] {
+    private static func gatherAttachmentFiles() -> [(dir: String, name: String, url: URL, size: Int)] {
         let fm = FileManager.default
         guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return [] }
-        var out: [(String, String, URL)] = []
+        var out: [(String, String, URL, Int)] = []
         for dir in CloudKitManager.photoDirectories {
             let dirURL = docs.appendingPathComponent(dir, isDirectory: true)
-            guard let names = try? fm.contentsOfDirectory(atPath: dirURL.path) else { continue }
-            for n in names where !n.hasPrefix(".") {
-                out.append((dir, n, dirURL.appendingPathComponent(n)))
+            guard let urls = try? fm.contentsOfDirectory(
+                at: dirURL,
+                includingPropertiesForKeys: [.fileSizeKey],
+                options: .skipsHiddenFiles
+            ) else { continue }
+            for url in urls {
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                out.append((dir, url.lastPathComponent, url, size))
             }
         }
         return out
