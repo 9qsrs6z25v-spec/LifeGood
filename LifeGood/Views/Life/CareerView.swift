@@ -18,6 +18,21 @@ import SwiftUI
 //      薪前後金額以 .caption2.secondary 輔助顯示，提升資訊層次，對齊 IncomeView.incomeRow 數值排版規格。
 //  12. summaryCard 數值字型：.subheadline.bold() → .system(size:15, weight:.bold, design:.rounded)
 //      + minimumScaleFactor(0.72)，對齊 OverviewView.summaryCard 金額字型規格。
+// [2026-06 v3] 本次美化方向：
+//  13. summaryCard 圖示圓：30pt 純色 opacity(0.16) → 32pt LinearGradient (0.20→0.08) +
+//      Circle().stroke(color.opacity(0.18), lineWidth: 0.75)，
+//      對齊 OverviewView.summaryCard v3 / FinanceOverviewView.assetCard v3 圖示圓規格。
+//  14. subCategoryBreakdown 計數膠囊：補入 overlay Capsule().stroke(accent.opacity(0.22), 0.6pt)，
+//      對齊 LifeOverviewView.categoryBreakdownSection / OverviewView.categoryRow 膠囊邊框規格。
+//  15. subCategoryBreakdown 進度條：加入 glow overlay Capsule（LinearGradient
+//      [white.opacity(0.28), clear, black.opacity(0.08)] top→bottom），
+//      對齊 OverviewView.categoryRow v3 / ChartView v3 / FinanceChartView v4 彩條 glow 規格。
+//  16. careerRow 44pt 圖示圓：補入 Circle().stroke(accent.opacity(0.18), lineWidth: 0.75)，
+//      對齊 FamilyView v2 / VehicleView v3 / StockView v3 圖示圓 stroke 邊框規格。
+//  17. careerRow 子分類膠囊 + 管理職徽章：各補入 overlay Capsule stroke（0.6pt），
+//      對齊全 App 膠囊細邊框設計語言（VariableExpenseView.ExpenseRow / IncomeView.incomeRow）。
+//  18. emptyMilestoneState CTA 按鈕：非篩選狀態下補入「新增第一個里程碑」橘色漸層膠囊按鈕，
+//      對齊 IncomeView.emptyState / VariableExpenseView.emptyStateView CTA 按鈕設計規格。
 
 struct CareerView: View {
     @EnvironmentObject var store: LifeStore
@@ -159,10 +174,20 @@ struct CareerView: View {
                 .padding(.bottom, 10)
 
             HStack(spacing: 8) {
+                // [v3] 32pt LinearGradient + stroke，對齊 OverviewView.summaryCard v3 圖示圓規格
                 ZStack {
                     Circle()
-                        .fill(color.opacity(0.16))
-                        .frame(width: 30, height: 30)
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.20), color.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 32, height: 32)
+                    Circle()
+                        .stroke(color.opacity(0.18), lineWidth: 0.75)
+                        .frame(width: 32, height: 32)
                     Image(systemName: icon)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(color)
@@ -315,16 +340,17 @@ struct CareerView: View {
                                 Text(sub.rawValue)
                                     .font(.subheadline)
                                 Spacer()
-                                // 計數膠囊徽章
+                                // [v3] 計數膠囊：補入 stroke 細邊框，對齊 LifeOverviewView.categoryBreakdownSection 規格
                                 Text("\(count) 筆")
                                     .font(.system(size: 12, weight: .bold))
                                     .padding(.horizontal, 9).padding(.vertical, 4)
                                     .background(accent.opacity(0.12))
                                     .foregroundStyle(accent)
                                     .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                             }
 
-                            // 比例進度條
+                            // [v3] 比例進度條 + glow overlay，對齊 OverviewView.categoryRow v3 彩條規格
                             GeometryReader { geo in
                                 ZStack(alignment: .leading) {
                                     Capsule()
@@ -339,6 +365,16 @@ struct CareerView: View {
                                         )
                                         .frame(width: geo.size.width * ratio, height: 4)
                                         .animation(.spring(response: 0.6, dampingFraction: 0.78), value: ratio)
+                                    // glow overlay：頂部白色高亮 + 底部柔化
+                                    Capsule()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            )
+                                        )
+                                        .frame(width: geo.size.width * ratio, height: 4)
                                 }
                             }
                             .frame(height: 4)
@@ -512,10 +548,35 @@ struct CareerView: View {
                 Text(selectedSub == nil ? "尚無職涯里程碑" : "此分類尚無紀錄")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.primary.opacity(0.70))
-                Text(selectedSub == nil ? "點擊右上角 + 記錄職涯中的每個重要時刻" : "換一個分類篩選試試")
+                Text(selectedSub == nil ? "記錄職涯中的入職、升職、薪資調整等\n每個重要時刻" : "換一個分類篩選試試")
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+
+            // [v3] 非篩選狀態下顯示 CTA 按鈕，對齊 IncomeView / VariableExpenseView emptyState 規格
+            if selectedSub == nil {
+                Button {
+                    if subscription.isPremium { showAdd = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Label("新增第一個里程碑", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                colors: [accent, Color(red: 0.85, green: 0.40, blue: 0.00)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                        .shadow(color: Color(red: 0.85, green: 0.40, blue: 0.00).opacity(0.35), radius: 10, y: 5)
+                }
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity)
@@ -544,7 +605,7 @@ struct CareerView: View {
                 .padding(.trailing, 14)
 
             HStack(alignment: .top, spacing: 12) {
-                // 44pt 漸層圖示圓 + 陰影（對齊 ExpenseRow 規格）
+                // [v3] 44pt 漸層圖示圓 + 陰影 + stroke，對齊 FamilyView v2 / VehicleView v3 / StockView v3 規格
                 ZStack {
                     Circle()
                         .fill(
@@ -556,6 +617,9 @@ struct CareerView: View {
                         )
                         .frame(width: 44, height: 44)
                         .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
+                    Circle()
+                        .stroke(accent.opacity(0.18), lineWidth: 0.75)
+                        .frame(width: 44, height: 44)
                     Image(systemName: item.careerSubCategory?.icon ?? "briefcase.fill")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(accent)
@@ -567,24 +631,28 @@ struct CareerView: View {
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
                         if item.isManagerial == true {
+                            // [v3] 管理職徽章補 stroke 細邊框，對齊全 App 膠囊設計語言
                             Text("管理職")
                                 .font(.caption2.bold())
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(Color.orange.opacity(0.18))
                                 .foregroundStyle(.orange)
                                 .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.orange.opacity(0.28), lineWidth: 0.6))
                         }
                     }
 
                     // 子分類膠囊 + 副標題
                     HStack(spacing: 6) {
                         if let sub = item.careerSubCategory {
+                            // [v3] 子分類膠囊補 stroke 細邊框，對齊 ExpenseRow / IncomeView 膠囊規格
                             Text(sub.rawValue)
                                 .font(.system(size: 10, weight: .semibold))
                                 .padding(.horizontal, 7).padding(.vertical, 2.5)
                                 .background(accent.opacity(0.12))
                                 .foregroundStyle(accent)
                                 .clipShape(Capsule())
+                                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                         }
                         subtitleText(for: item)
                     }
