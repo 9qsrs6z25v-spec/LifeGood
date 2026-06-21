@@ -31,6 +31,17 @@ import Charts
 //  12. Divider leading padding 從 58 → 62（對齊 36pt 圓 + 16pt 水平間距 + 10pt spacing）。
 //  13. 加入交錯淡入 + 向上進場動畫（allocationRowsAppeared 旗標 + 0.06s stagger），
 //      對齊 stockPerformanceSection.rowsAppeared 進場規格。
+// [2026-06-v4] 本次美化方向：
+//  14. financeChartHeroCard 背景：補入第三顆散景圓（55pt white.opacity(0.07) offset(30,28) blur 8），
+//      對齊 ChartView v4 / IncomeView / VariableExpenseView 三顆散景設計規格。
+//  15. financeChartHeroCard 背景：補入頂部玻璃光澤 LinearGradient [.white.opacity(0.18), .clear]
+//      top→center，對齊全 App 英雄卡片 glass shine 統一規格。
+//  16. heroKpiCell 圖示：升級為 28pt LinearGradient 漸層圓（white.opacity(0.18→0.08) topLeading→bottomTrailing）
+//      + 圖示字體 11→12pt，對齊 SavingsInsuranceView / VehicleView heroKpiCell 設計規格。
+//  17. allocationChart 進度條：加入 glow overlay（白色頂光 0.28 + 底部柔化 0.08），
+//      對齊 OverviewView.categoryRow v3 / FinanceOverviewView.allocationSection v2 彩條 glow 規格。
+//  18. realEstatePerformanceSection 圖示容器：RoundedRectangle(cornerRadius:11) → Circle，
+//      補入 Circle().stroke(indigo.opacity(0.22), lineWidth:1) overlay，統一全 section 圖示形狀語言。
 
 struct FinanceChartView: View {
     @EnvironmentObject var store: FinanceStore
@@ -180,6 +191,18 @@ struct FinanceChartView: View {
                     .frame(width: 90, height: 90)
                     .offset(x: -65, y: 52)
                     .blur(radius: 10)
+                // 中右第三顆散景（對齊 ChartView v4 三顆散景規格）
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 30, y: 28)
+                    .blur(radius: 8)
+                // 頂部玻璃光澤（對齊全 App 英雄卡片 glass shine 規格）
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -187,10 +210,24 @@ struct FinanceChartView: View {
     }
 
     private func heroKpiCell(label: String, value: String, icon: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.70))
+        VStack(spacing: 5) {
+            // 漸層圓圖示（對齊 SavingsInsuranceView / VehicleView heroKpiCell 設計規格）
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.18), .white.opacity(0.08)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 28, height: 28)
+                Circle()
+                    .stroke(.white.opacity(0.22), lineWidth: 0.75)
+                    .frame(width: 28, height: 28)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+            }
             Text(value)
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.92))
@@ -284,7 +321,7 @@ struct FinanceChartView: View {
                                         .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.75))
                                 }
                             }
-                            // 比例進度條
+                            // 比例進度條（glow overlay 對齊 OverviewView.categoryRow v3 規格）
                             GeometryReader { geo in
                                 ZStack(alignment: .leading) {
                                     Capsule()
@@ -298,6 +335,13 @@ struct FinanceChartView: View {
                                             )
                                         )
                                         .frame(width: geo.size.width * pct, height: 4)
+                                        .overlay(
+                                            LinearGradient(
+                                                colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                                startPoint: .top, endPoint: .bottom
+                                            )
+                                            .clipShape(Capsule())
+                                        )
                                         .animation(
                                             .spring(response: 0.65, dampingFraction: 0.78)
                                                 .delay(Double(idx) * 0.06),
@@ -511,7 +555,8 @@ struct FinanceChartView: View {
 
                         HStack(spacing: 12) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                // 圓形圖示（統一全 section 44pt Circle 語言，對齊 stockPerformanceSection / insuranceSummarySection）
+                                Circle()
                                     .fill(
                                         LinearGradient(
                                             colors: [Color.indigo.opacity(0.20), Color.indigo.opacity(0.08)],
@@ -519,7 +564,7 @@ struct FinanceChartView: View {
                                         )
                                     )
                                     .frame(width: 44, height: 44)
-                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                Circle()
                                     .stroke(Color.indigo.opacity(0.22), lineWidth: 1)
                                     .frame(width: 44, height: 44)
                                 Image(systemName: "building.2.fill")
