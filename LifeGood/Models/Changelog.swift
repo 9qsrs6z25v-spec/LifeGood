@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.28", build: 497, date: "2026/06/21", notes: [
+            "【靜態除錯】全面複查 78 個 Swift 檔，發現並修復一個問題：PhotoLightbox.onAppear（MultiPhotoGallery.swift）在 .onAppear 閉包中以 UIImage(contentsOfFile:) 同步讀取全解析度照片，在大圖時阻塞主執行緒並造成介面短暫凍結；改用 .task(id: url) + Task.detached(priority: .userInitiated) 背景讀取，對齊 v22.27 AsyncThumbnailView 已建立的非同步模式。同時補正 project.pbxproj 版本號（MARKETING_VERSION / CURRENT_PROJECT_VERSION 停留在 22.25/494，未隨 22.26、22.27 兩版 Changelog 更新），一併對齊至 22.28/497。其餘防護機制（強制解包全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、visible[0] 均有 count>=2 外層守衛、dataStatBadgesAppeared 固定 3 元素、FullBackup 雙層 OOM 守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
+        ]),
         ChangelogEntry(version: "22.27", build: 496, date: "2026/06/20", notes: [
             "【靜態除錯】發現並修復五個問題：① FullBackup.restore()：manifest JSON 讀取長度（manifestLen）原無上限，損壞備份檔若 manifestLen 欄位超大會觸發 OOM；加入 50 MB 守衛，與既有附件 100 MB 守衛共同構成雙層防護。② SubscriptionManager.applyRemoteFreeAccess()：寫入 @Published remoteAllFree 未聲明執行緒隔離；加上 @MainActor，與兩個呼叫端既有的 DispatchQueue.main.async 一致。③ IncomeView.filteredIncomes：O(n log n) 排序 + 過濾為計算屬性，每次 body 重繪都重算；改為 cachedFilteredIncomes（@State），透過 .task(id: store.modifyID-category-keyword) 懶惰重建，只在資料或篩選條件改變時才排序。④ VariableExpenseView.filteredExpenses：同上模式，O(n) 過濾改為 cachedFilteredExpenses，新增 .task 快取。⑤ MultiPhotoGallery.thumbnail(for:)：UIImage(contentsOfFile:) 在 view body 的 @ViewBuilder 中同步讀檔，每次 ScrollView 重繪都阻塞主執行緒；抽出 AsyncThumbnailView，以 Task.detached(priority: .userInitiated) 背景讀取後回寫 @State image，首次渲染前顯示佔位符。其餘防護機制均確認正常。"
         ]),
