@@ -63,6 +63,33 @@ final class NotificationManager {
         let authorized = await requestAuthorization()
         guard authorized else { return }
 
+        await addScheduleRequests(for: event)
+    }
+
+    /// 啟動時把所有事件的提醒重排一次，讓既有事件升級到新版的 body / 多 trigger / 截止日邏輯。
+    /// 一次取得 pendingNotificationRequests，批次移除後再逐一建立，避免 N 次系統 API 呼叫。
+    func rescheduleAll(events: [PersonalEvent]) async {
+        let authorized = await requestAuthorization()
+        guard authorized else { return }
+
+        let center = UNUserNotificationCenter.current()
+        let pending = await center.pendingNotificationRequests()
+        let prefixes = Set(events.map { $0.id.uuidString })
+        let toRemove = pending.map(\.identifier).filter { id in
+            prefixes.contains(where: { id == $0 || id.hasPrefix($0 + "#") })
+        }
+        if !toRemove.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: toRemove)
+        }
+
+        for event in events where event.reminderMinutes >= 0 {
+            await addScheduleRequests(for: event)
+        }
+    }
+
+    /// 僅新增排程請求，不做移除（移除由呼叫端負責）。
+    private func addScheduleRequests(for event: PersonalEvent) async {
+        let center = UNUserNotificationCenter.current()
         let cal = Calendar.current
         let baseFire = cal.date(byAdding: .minute, value: -event.reminderMinutes, to: event.date) ?? event.date
 
@@ -88,13 +115,6 @@ final class NotificationManager {
                 let req = UNNotificationRequest(identifier: event.id.uuidString, content: content, trigger: trigger)
                 try? await center.add(req)
             }
-        }
-    }
-
-    /// 啟動時把所有事件的提醒重排一次，讓既有事件升級到新版的 body / 多 trigger / 截止日邏輯
-    func rescheduleAll(events: [PersonalEvent]) async {
-        for event in events where event.reminderMinutes >= 0 {
-            await schedule(event)
         }
     }
 

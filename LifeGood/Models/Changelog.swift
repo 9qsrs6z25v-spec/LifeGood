@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.32", build: 501, date: "2026/06/21", notes: [
+            "【靜態除錯】全面複查 FullBackup、NotificationManager、StockView、MainTabView 等核心檔案，發現並修復兩個效能問題：① FullBackup.gatherAttachmentFiles()：原本使用 contentsOfDirectory(atPath:) 取得檔名後，在 export() 中對每個附件再額外呼叫 fm.attributesOfItem(atPath:) 取得檔案大小，N 個附件造成 N 次系統呼叫；改為 contentsOfDirectory(at:includingPropertiesForKeys:[.fileSizeKey]) 一次取得所有 URL 及檔案大小資源值，export() 直接使用，N 次 attributesOfItem 降為 0 次。② NotificationManager.rescheduleAll()：原本呼叫 schedule() 的實作，每處理一個事件都 await center.pendingNotificationRequests() 一次系統 API 呼叫，N 個事件造成 N 次非必要的系統呼叫；抽取 addScheduleRequests(for:) 私有方法包含排程邏輯，rescheduleAll() 改為一次批次取得 pending 通知並批次移除，再逐一呼叫 addScheduleRequests(for:)，系統 API 呼叫從 N 次降為 1 次。StockView.refreshAllPrices() 的逐次更新設計確認為刻意設計（避免 CloudKit async 期間快照覆蓋），保持不變。isCurrentlyManagerial 確認只在 shouldExpandManagement 被呼叫一次，無需修正。"
+        ]),
         ChangelogEntry(version: "22.31", build: 500, date: "2026/06/21", notes: [
             "【靜態除錯】全面複查 78 個 Swift 檔，發現並修復一個資料遺失 bug：AddRealEstateView.loadFrom() 以 split(separator:\"-\") 解析 waterMeterNumber 時，預設 omittingEmptySubsequences: true 會將末尾或中間的空欄位消滅，使 combinedWaterNumber（格式為「站所-編號-檢核」）在任一欄位為空時分割結果為 count==2，既不符合 count>=3 也不符合 count==1 的條件，導致 waterStation / waterCode / waterCheck 全部留空，使用者下次開啟編輯並儲存後水表號碼資料遺失；改為 split(separator:\"-\", omittingEmptySubsequences: false)，保留空欄位後 count 恆為 3，三個欄位均可正確還原。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、visible[0] count>=2 外層守衛、FinanceChartView v4 美化純視覺無邏輯變更）均確認正常。"
         ]),
