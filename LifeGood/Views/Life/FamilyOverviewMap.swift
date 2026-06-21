@@ -216,6 +216,7 @@ struct FamilyOverviewMap: View {
                     houseRowsAppeared = true
                 }
             }
+            .onDisappear { houseRowsAppeared = false }
         }
         .background(
             LinearGradient(

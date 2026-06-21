@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.33", build: 502, date: "2026/06/21", notes: [
+            "【動畫修復】FamilyOverviewMap.houseRowsAppeared 進場動畫旗標未在 onDisappear 重置：使用者捲動使街道圖離開視窗後再捲回，或切換分頁後返回，旗標已為 true，導致 onAppear 觸發時動畫不再播放；補 .onDisappear { houseRowsAppeared = false }，對齊 v22.24 FamilyView.statsAppeared、v22.30 EInvoiceSetupView.heroAppeared 同型修復規格。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
+        ]),
         ChangelogEntry(version: "22.32", build: 501, date: "2026/06/21", notes: [
             "【靜態除錯】全面複查 FullBackup、NotificationManager、StockView、MainTabView 等核心檔案，發現並修復兩個效能問題：① FullBackup.gatherAttachmentFiles()：原本使用 contentsOfDirectory(atPath:) 取得檔名後，在 export() 中對每個附件再額外呼叫 fm.attributesOfItem(atPath:) 取得檔案大小，N 個附件造成 N 次系統呼叫；改為 contentsOfDirectory(at:includingPropertiesForKeys:[.fileSizeKey]) 一次取得所有 URL 及檔案大小資源值，export() 直接使用，N 次 attributesOfItem 降為 0 次。② NotificationManager.rescheduleAll()：原本呼叫 schedule() 的實作，每處理一個事件都 await center.pendingNotificationRequests() 一次系統 API 呼叫，N 個事件造成 N 次非必要的系統呼叫；抽取 addScheduleRequests(for:) 私有方法包含排程邏輯，rescheduleAll() 改為一次批次取得 pending 通知並批次移除，再逐一呼叫 addScheduleRequests(for:)，系統 API 呼叫從 N 次降為 1 次。StockView.refreshAllPrices() 的逐次更新設計確認為刻意設計（避免 CloudKit async 期間快照覆蓋），保持不變。isCurrentlyManagerial 確認只在 shouldExpandManagement 被呼叫一次，無需修正。"
         ]),
