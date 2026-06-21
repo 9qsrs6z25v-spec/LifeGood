@@ -20,6 +20,22 @@ import SwiftUI
 //      空狀態升級為雙層脈衝光環（teal）+ 漸層圓，對齊 IncomeView.emptyState 規格；
 //      historyRow 左側加 36pt 漸層圖示圓；分類改為 Capsule 膠囊；
 //      historyAppeared 進場動畫（交錯延遲）。
+// [2026-06 v2] 本次美化方向：
+//   8. heroCard 玻璃光澤 + 第三顆散景圓：加入 LinearGradient [.white.opacity(0.18)→.clear]
+//      top→center 玻璃高光覆層 + 右下方第三顆散景圓（white.opacity(0.05), 55pt, blur:8），
+//      對齊 IncomeView / VariableExpenseView v4 三圓散景 + 玻璃光澤規格。
+//   9. statusHeroCard 補散景圓 + 玻璃光澤 + 三欄 KPI：新增第二顆 + 第三顆散景裝飾圓；
+//      頂部加入玻璃光澤 LinearGradient overlay；
+//      底部新增三欄 KPI 橫列（已匯入發票數 / 本月發票 / 本月支出金額），
+//      各含 28pt 漸層圓圖示，對齊 LifeOverviewView.statsStrip 設計規格。
+//  10. historyRow 日期升 Capsule 徽章：date text (.caption2.tertiary) 升級為
+//      calendar 圖示 + tertiarySystemFill Capsule 徽章；
+//      發票號碼改為 tag 圖示 + 相同規格膠囊，
+//      對齊 CareerView / OverviewView.recentRow 日期膠囊設計語言。
+//  11. historyRow 金額智慧量級：NT$\(Int(amount)) → ntdWanString 萬/億 量級顯示，
+//      對齊全 App 金額顯示規格（VariableExpenseView / IncomeView 等）。
+//  12. 卡片內 Divider() 升級：改用 Rectangle().fill(Color(.separator).opacity(0.20))
+//      .frame(height:0.5)，對齊全 App 分隔線規格（VariableExpenseView / IncomeView 等）。
 
 // MARK: - 主畫面
 
@@ -117,11 +133,13 @@ struct EInvoiceSetupView: View {
 
     private var heroCard: some View {
         ZStack {
-            // 散景裝飾圓
+            // [v2] 三顆散景裝飾圓（對齊 IncomeView / VariableExpenseView v4 三圓規格）
             Circle().fill(Color.white.opacity(0.12)).frame(width: 120, height: 120)
                 .offset(x: 70, y: -30).blur(radius: 18)
             Circle().fill(Color.white.opacity(0.09)).frame(width: 80, height: 80)
                 .offset(x: -60, y: 20).blur(radius: 14)
+            Circle().fill(Color.white.opacity(0.05)).frame(width: 55, height: 55)
+                .offset(x: 50, y: 35).blur(radius: 8)
 
             VStack(spacing: 12) {
                 // 圖示圓
@@ -146,6 +164,14 @@ struct EInvoiceSetupView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 28)
+
+            // [v2] 頂部玻璃光澤高光覆層（對齊 IncomeView / VariableExpenseView v4 規格）
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top, endPoint: .center
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity)
         .background(
@@ -163,9 +189,22 @@ struct EInvoiceSetupView: View {
     // MARK: - 已連結狀態英雄卡
 
     private var statusHeroCard: some View {
-        ZStack {
+        // [v2] 預先計算 KPI 資料（避免在 ZStack 內重複計算）
+        let cal = Calendar.current
+        let now = Date()
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? now
+        let monthCount = sync.importHistory.filter { $0.invDate >= monthStart }.count
+        let monthTotal = sync.importHistory.filter { $0.invDate >= monthStart }
+            .reduce(0.0) { $0 + $1.amount }
+
+        return ZStack {
+            // [v2] 三顆散景裝飾圓（對齊 IncomeView v4 三圓規格）
             Circle().fill(Color.white.opacity(0.10)).frame(width: 100, height: 100)
                 .offset(x: 60, y: -20).blur(radius: 16)
+            Circle().fill(Color.white.opacity(0.07)).frame(width: 70, height: 70)
+                .offset(x: -55, y: 22).blur(radius: 12)
+            Circle().fill(Color.white.opacity(0.05)).frame(width: 55, height: 55)
+                .offset(x: 48, y: 36).blur(radius: 8)
 
             VStack(spacing: 10) {
                 ZStack {
@@ -193,7 +232,7 @@ struct EInvoiceSetupView: View {
                         .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
                 }
 
-                // 最近同步
+                // 最近同步時間 Capsule
                 HStack(spacing: 6) {
                     Image(systemName: "clock.fill")
                         .font(.caption2)
@@ -217,9 +256,38 @@ struct EInvoiceSetupView: View {
                     .overlay(Capsule().stroke(Color.orange.opacity(0.35), lineWidth: 0.75))
                     .padding(.top, 2)
                 }
+
+                // [v2] 三欄 KPI 橫列（對齊 LifeOverviewView.statsStrip 設計規格）
+                Rectangle()
+                    .fill(Color.white.opacity(0.14))
+                    .frame(height: 0.5)
+                    .padding(.top, 6)
+
+                HStack(spacing: 0) {
+                    statusKpiCell(icon: "doc.text.fill", color: .teal,
+                                  value: "\(sync.importHistory.count)",
+                                  label: "累計匯入")
+                    Rectangle().fill(Color.white.opacity(0.20)).frame(width: 0.5, height: 36)
+                    statusKpiCell(icon: "calendar", color: .mint,
+                                  value: "\(monthCount)",
+                                  label: "本月發票")
+                    Rectangle().fill(Color.white.opacity(0.20)).frame(width: 0.5, height: 36)
+                    statusKpiCell(icon: "banknote.fill", color: .green,
+                                  value: monthTotal.ntdWanString,
+                                  label: "本月支出")
+                }
+                .padding(.bottom, 4)
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 24)
+            .padding(.vertical, 20)
+
+            // [v2] 頂部玻璃光澤高光覆層
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top, endPoint: .center
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity)
         .background(
@@ -232,6 +300,30 @@ struct EInvoiceSetupView: View {
         .padding(.horizontal, 16)
         .padding(.top, 16)
         .padding(.bottom, 8)
+    }
+
+    // [v2] KPI 格元件（對齊 TaxOverviewView.taxStatCell 設計規格）
+    private func statusKpiCell(icon: String, color: Color, value: String, label: String) -> some View {
+        VStack(spacing: 5) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0.14)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 28, height: 28)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .minimumScaleFactor(0.72)
+                .lineLimit(1)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.80))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 連結輸入表單卡
@@ -314,7 +406,7 @@ struct EInvoiceSetupView: View {
                     .padding(.horizontal, 16).padding(.vertical, 12)
 
                 if sync.autoSyncEnabled {
-                    Divider().padding(.leading, 16)
+                    Rectangle().fill(Color(.separator).opacity(0.20)).frame(height: 0.5).padding(.leading, 16)
                     Picker("同步間隔", selection: $sync.autoSyncIntervalHours) {
                         Text("每 6 小時").tag(6)
                         Text("每 12 小時").tag(12)
@@ -325,7 +417,7 @@ struct EInvoiceSetupView: View {
                     .padding(.horizontal, 16).padding(.vertical, 12)
                 }
 
-                Divider().padding(.leading, 16)
+                Rectangle().fill(Color(.separator).opacity(0.20)).frame(height: 0.5).padding(.leading, 16)
                 Toggle("拆分品項", isOn: $sync.splitItems)
                     .padding(.horizontal, 16).padding(.vertical, 12)
             }
@@ -423,7 +515,7 @@ struct EInvoiceSetupView: View {
                 }
                 .buttonStyle(.plain)
 
-                Divider().padding(.leading, 62)
+                Rectangle().fill(Color(.separator).opacity(0.20)).frame(height: 0.5).padding(.leading, 62)
 
                 Button {
                     showRulesEditor = true
@@ -501,7 +593,7 @@ struct EInvoiceSetupView: View {
                     .padding(.horizontal, 16).padding(.vertical, 12)
                 }
 
-                Divider().padding(.leading, 62)
+                Rectangle().fill(Color(.separator).opacity(0.20)).frame(height: 0.5).padding(.leading, 62)
 
                 Link(destination: Self.einvoiceAPIURL) {
                     HStack(spacing: 12) {
@@ -820,7 +912,7 @@ struct EInvoiceHistoryView: View {
         }
     }
 
-    // 美化：36pt 漸層圖示圓 + 分類 Capsule 膠囊
+    // [v2] 36pt 漸層圖示圓 + Capsule 日期徽章 + 發票號碼膠囊 + 智慧量級金額
     private func historyRow(_ record: EInvoiceImportRecord) -> some View {
         HStack(spacing: 12) {
             ZStack {
@@ -834,21 +926,41 @@ struct EInvoiceHistoryView: View {
                     .foregroundStyle(.white)
             }
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(record.sellerName)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     Spacer()
-                    Text("NT$\(Int(record.amount))")
-                        .font(.subheadline.bold())
+                    // [v2] 智慧量級金額（對齊 VariableExpenseView / IncomeView 規格）
+                    Text(record.amount.ntdWanString)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .contentTransition(.numericText())
                 }
-                HStack(spacing: 6) {
-                    Text(Self.dateFormatter.string(from: record.invDate))
-                        .font(.caption2).foregroundStyle(.tertiary)
+                HStack(spacing: 5) {
+                    // [v2] 日期 Capsule 徽章（對齊 CareerView / OverviewView.recentRow 規格）
+                    HStack(spacing: 3) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 9, weight: .medium))
+                        Text(Self.dateFormatter.string(from: record.invDate))
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
+
+                    // [v2] 發票號碼膠囊
                     Text(record.invNum)
-                        .font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+
                     Spacer()
+                    // 分類膠囊
                     Text(record.assignedCategory.rawValue)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.teal)
