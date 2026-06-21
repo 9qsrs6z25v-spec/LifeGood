@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.30", build: 499, date: "2026/06/21", notes: [
+            "【靜態除錯】發現並修復兩個問題：① EInvoiceSetupView.heroAppeared 進場旗標未在 onDisappear 重置：heroCard（未連結）與 statusHeroCard（已連結）共用同一個 @State heroAppeared，使用者連結或取消連結載具後，新英雄卡 onAppear 時旗標已為 true，導致進場動畫（opacity 0→1、Y 偏移）完全不播放；補 .onDisappear { heroAppeared = false } 於兩處，對齊 v22.24 FamilyView statsAppeared 同型修復規格。② statusHeroCard KPI 計算重複過濾 importHistory：monthCount 與 monthTotal 各自呼叫 filter { invDate >= monthStart }，造成 O(2n) 雙重遍歷；改為先 let monthFiltered = ...filter{ ... } 再分別取 .count / .reduce，降至 O(n)。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
+        ]),
         ChangelogEntry(version: "22.29", build: 498, date: "2026/06/21", notes: [
             "【UI 美化 v2】EInvoiceSetupView：① heroCard 加入第三顆散景裝飾圓（white.opacity(0.05), 55pt, blur:8）+ 頂部玻璃光澤高光覆層（LinearGradient [.white.opacity(0.18)→.clear] top→center），對齊 IncomeView / VariableExpenseView v4 三圓散景 + 玻璃光澤規格；② statusHeroCard 新增第二、三顆散景圓 + 玻璃光澤覆層 + 三欄 KPI 橫列（累計匯入 / 本月發票 / 本月支出），各含 28pt 漸層圓圖示及智慧量級金額，對齊 LifeOverviewView.statsStrip 設計規格；③ EInvoiceHistoryView.historyRow 日期升級為 calendar 圖示 + tertiarySystemFill Capsule 徽章、發票號碼改同規格膠囊，金額改用 ntdWanString 萬/億 智慧量級，對齊 CareerView / VariableExpenseView 設計語言；④ 卡片內所有 Divider() 升級為 Rectangle().fill(Color(.separator).opacity(0.20)).frame(height:0.5)，對齊全 App 分隔線規格。"
         ]),

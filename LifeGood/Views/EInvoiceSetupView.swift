@@ -71,6 +71,7 @@ struct EInvoiceSetupView: View {
                                 heroAppeared = true
                             }
                         }
+                        .onDisappear { heroAppeared = false }
                     linkFormCard
                     aboutFormCard
                 } else {
@@ -82,6 +83,7 @@ struct EInvoiceSetupView: View {
                                 heroAppeared = true
                             }
                         }
+                        .onDisappear { heroAppeared = false }
                     syncSettingsCard
                     actionsCard
                     historyAndRulesCard
@@ -193,9 +195,9 @@ struct EInvoiceSetupView: View {
         let cal = Calendar.current
         let now = Date()
         let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? now
-        let monthCount = sync.importHistory.filter { $0.invDate >= monthStart }.count
-        let monthTotal = sync.importHistory.filter { $0.invDate >= monthStart }
-            .reduce(0.0) { $0 + $1.amount }
+        let monthFiltered = sync.importHistory.filter { $0.invDate >= monthStart }
+        let monthCount = monthFiltered.count
+        let monthTotal = monthFiltered.reduce(0.0) { $0 + $1.amount }
 
         return ZStack {
             // [v2] 三顆散景裝飾圓（對齊 IncomeView v4 三圓規格）
