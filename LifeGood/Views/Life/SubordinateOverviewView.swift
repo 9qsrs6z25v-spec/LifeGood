@@ -158,6 +158,7 @@ struct SubordinateOverviewView: View {
                     sectionAppeared = true
                 }
             }
+            .onDisappear { heroAppeared = false; sectionAppeared = false }
             .sheet(item: $editTarget) { target in
                 switch target {
                 case .leave(let subId, let rec):

@@ -96,6 +96,7 @@ struct FinanceOverviewView: View {
                                 miniBarAppeared = true
                             }
                         }
+                        .onDisappear { appearedCards.remove("total"); miniBarAppeared = false }
 
                     assetCards
                     allocationSection(allocations)
@@ -107,6 +108,7 @@ struct FinanceOverviewView: View {
                                 cashFlowSectionAppeared = true
                             }
                         }
+                        .onDisappear { cashFlowSectionAppeared = false }
                 }
                 .padding(.vertical)
             }
@@ -430,6 +432,7 @@ struct FinanceOverviewView: View {
                 _ = appearedCards.insert(key)
             }
         }
+        .onDisappear { appearedCards.remove(key) }
     }
 
     // MARK: - 資產配置
@@ -615,6 +618,7 @@ struct FinanceOverviewView: View {
                 allocationRowsAppeared = true
             }
         }
+        .onDisappear { allocationBarAppeared = false; allocationRowsAppeared = false }
     }
 
     // MARK: - 每月現金流

@@ -640,6 +640,7 @@ struct DepartmentDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
         .onAppear { withAnimation { peopleAppeared = true } }
+        .onDisappear { peopleAppeared = false }
     }
 
     private func personRow(_ p: OrgPerson) -> some View {
