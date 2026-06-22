@@ -5,7 +5,7 @@ import Charts
 
 extension Subordinate {
     /// 潛力分數（記錄式評分，0~100；與部屬列表的評分一致）：
-    /// 基礎 80，優點/成就/進步加分，缺點/缺失/疏失/請假扣分。
+    /// 基礎 80，優點/成就/進步加分，缺點/缺失/疏失扣分。請假不計入（已反映在主動性）。
     var potentialScore: Int {
         var score: Double = 80
         for rec in records {
@@ -23,7 +23,7 @@ extension Subordinate {
                 case .none:   score -= 2
                 }
             case .leave:
-                score -= (rec.leaveHours ?? 8) / 16
+                break   // 請假不計入潛力（已反映在主動性）
             }
         }
         return max(0, min(100, Int(score.rounded())))
