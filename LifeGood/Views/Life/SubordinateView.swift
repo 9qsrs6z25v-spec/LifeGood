@@ -677,9 +677,9 @@ struct SubordinateView: View {
         Self.dateFormatter.string(from: date)
     }
 
-    /// 自動評分（潛力）：與人才矩陣共用同一套邏輯（Subordinate.potentialScore）。
+    /// 列表顯示分數：潛力與主動性的平均（Subordinate.overallScore）。
     private func subordinateScore(_ sub: Subordinate) -> Int {
-        sub.potentialScore
+        sub.overallScore
     }
 
     private func scoreColor(_ score: Int) -> Color {

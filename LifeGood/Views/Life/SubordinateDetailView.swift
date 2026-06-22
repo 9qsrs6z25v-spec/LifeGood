@@ -100,8 +100,10 @@ struct SubordinateDetailView: View {
                                         .font(.caption2)
                                     Text(tab.rawValue)
                                         .font(.subheadline.weight(.semibold))
+                                    Text("\(tab == .daily ? subordinate.proactivityScore : subordinate.potentialScore)")
+                                        .font(.caption.weight(.bold))
                                 }
-                                .padding(.horizontal, 20)
+                                .padding(.horizontal, 16)
                                 .padding(.vertical, 9)
                                 .foregroundStyle(detailTab == tab ? .white : .secondary)
                                 .background {

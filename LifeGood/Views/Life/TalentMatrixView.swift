@@ -41,6 +41,11 @@ extension Subordinate {
         return max(0, min(100, Int(score.rounded())))
     }
 
+    /// 綜合分數＝潛力與主動性的平均（部屬列表左側顯示用）
+    var overallScore: Int {
+        Int(((Double(potentialScore) + Double(proactivityScore)) / 2).rounded())
+    }
+
     /// 潛力評分的計算明細（分組條目 + 加減分）
     var potentialBreakdown: [(label: String, points: Int)] {
         var items: [(String, Int)] = [("基礎分", 80)]
