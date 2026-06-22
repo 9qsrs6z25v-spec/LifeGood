@@ -48,7 +48,7 @@ struct SubordinateDetailView: View {
     // Tab 區塊進場旗標：切換 Tab 時重置並重播
     @State private var tabSectionsAppeared = false
 
-    enum DetailTab: String, CaseIterable { case daily = "日常"; case rating = "評分系統" }
+    enum DetailTab: String, CaseIterable { case daily = "主動性"; case rating = "潛力性" }
     @State private var detailTab: DetailTab = .daily
     // matchedGeometryEffect：Tab 指示器平滑滑動（對齊 RealEstateDetailView / ChildDetailView 規格）
     @Namespace private var tabNamespace

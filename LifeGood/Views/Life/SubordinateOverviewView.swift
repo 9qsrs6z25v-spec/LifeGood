@@ -112,6 +112,16 @@ struct SubordinateOverviewView: View {
         }
     }
 
+    /// 所有部屬、所有會議的「未完成」議程項目（依會議日期新到舊）
+    private var incompleteMeetingItems: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)] {
+        lifeStore.subordinates.flatMap { sub in
+            sub.meetings.flatMap { m in
+                m.items.filter { !$0.isCompleted }.map { (sub: sub, meeting: m, item: $0) }
+            }
+        }
+        .sorted { $0.meeting.date > $1.meeting.date }
+    }
+
     /// 所有「已完成」任務（依完成時間新到舊，無完成時間者退用日期）
     private var completedTasks: [(sub: Subordinate, task: SubordinateTask)] {
         lifeStore.subordinates.flatMap { sub in
@@ -238,6 +248,9 @@ struct SubordinateOverviewView: View {
             taskGroupCard(title: "當日任務", icon: "checklist", color: .cyan,
                           items: todayTasks, emptyText: "當日無任務")
 
+            // 未完成會議條目（跨所有部屬 / 會議的未完成議程項目）
+            meetingItemsCard
+
             // 未完成任務（跨所有日期 / 部屬的待辦總清單，逾期排最前）
             taskGroupCard(title: "未完成任務", icon: "tray.full.fill", color: .orange,
                           items: incompleteTasks, emptyText: "沒有未完成任務")
@@ -248,6 +261,60 @@ struct SubordinateOverviewView: View {
             }
         }
         .padding(.horizontal)
+    }
+
+    /// 未完成會議條目卡
+    private var meetingItemsCard: some View {
+        cardWrap {
+            VStack(alignment: .leading, spacing: 0) {
+                sectionHeader("未完成會議條目", icon: "person.3.sequence.fill", color: .indigo,
+                              count: incompleteMeetingItems.count)
+                if incompleteMeetingItems.isEmpty {
+                    emptyHint("沒有未完成的會議條目", icon: "person.3.sequence.fill", color: .indigo)
+                } else {
+                    ForEach(Array(incompleteMeetingItems.enumerated()), id: \.element.item.id) { idx, it in
+                        meetingItemOverviewRow(it.sub, it.meeting, it.item)
+                        if idx < incompleteMeetingItems.count - 1 { Divider().padding(.leading, 62) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func meetingItemOverviewRow(_ sub: Subordinate, _ meeting: SubordinateMeeting, _ item: MeetingItem) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Button {
+                lifeStore.toggleMeetingItemCompletion(subordinateId: sub.id, meetingId: meeting.id, itemId: item.id)
+            } label: {
+                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(item.isCompleted ? Color.green : Color.indigo)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.content.isEmpty ? "未填內容" : item.content)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(meeting.topic.isEmpty ? "未命名會議" : meeting.topic)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.indigo)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.indigo.opacity(0.12))
+                        .clipShape(Capsule())
+                    Text(sub.name)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+        .onTapGesture { editTarget = .meeting(subId: sub.id, meeting: meeting) }
     }
 
     private func taskGroupCard(title: String, icon: String, color: Color,
