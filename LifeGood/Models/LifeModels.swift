@@ -1092,9 +1092,23 @@ struct MeetingItem: Identifiable, Codable {
     var content: String
     var assigneeId: UUID?
     var dueDate: Date?
+    var isCompleted: Bool
 
-    init(id: UUID = UUID(), content: String = "", assigneeId: UUID? = nil, dueDate: Date? = nil) {
-        self.id = id; self.content = content; self.assigneeId = assigneeId; self.dueDate = dueDate
+    init(id: UUID = UUID(), content: String = "", assigneeId: UUID? = nil, dueDate: Date? = nil, isCompleted: Bool = false) {
+        self.id = id; self.content = content; self.assigneeId = assigneeId
+        self.dueDate = dueDate; self.isCompleted = isCompleted
+    }
+
+    enum CodingKeys: String, CodingKey { case id, content, assigneeId, dueDate, isCompleted }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        content = (try? c.decode(String.self, forKey: .content)) ?? ""
+        assigneeId = try? c.decodeIfPresent(UUID.self, forKey: .assigneeId)
+        dueDate = try? c.decodeIfPresent(Date.self, forKey: .dueDate)
+        // 舊資料沒有 isCompleted → 視為未完成（避免整批會議解碼失敗）
+        isCompleted = (try? c.decode(Bool.self, forKey: .isCompleted)) ?? false
     }
 }
 

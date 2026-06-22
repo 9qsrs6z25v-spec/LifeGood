@@ -453,13 +453,27 @@ struct SubordinateOverviewView: View {
                         .overlay(Capsule().stroke(Color(.separator).opacity(0.18), lineWidth: 0.6))
                 }
                 if !meeting.items.isEmpty {
-                    HStack(spacing: 3) {
-                        Image(systemName: "list.bullet")
-                            .font(.system(size: 9))
-                        Text("\(meeting.items.count) 個議程項目")
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(meeting.items) { item in
+                            HStack(alignment: .top, spacing: 6) {
+                                Button {
+                                    lifeStore.toggleMeetingItemCompletion(subordinateId: sub.id, meetingId: meeting.id, itemId: item.id)
+                                } label: {
+                                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(item.isCompleted ? Color.green : Color.indigo.opacity(0.55))
+                                }
+                                .buttonStyle(.plain)
+                                Text(item.content.isEmpty ? "未填內容" : item.content)
+                                    .font(.caption2)
+                                    .strikethrough(item.isCompleted, color: .secondary)
+                                    .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                                    .lineLimit(2)
+                            }
+                            .opacity(item.isCompleted ? 0.7 : 1)
+                        }
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
                 }
             }
             Spacer(minLength: 4)
