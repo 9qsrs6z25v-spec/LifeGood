@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.42", build: 509, date: "2026/06/11", notes: [
+            "部屬班表：凍結頂部日期表頭列（往下捲也看得到日期），姓名欄維持凍結；水平捲動表頭與內容同步。",
+            "點格子設定班別時，上方可微調 / 直接選日期，避免點歪選不準。"
+        ]),
         ChangelogEntry(version: "22.40", build: 507, date: "2026/06/11", notes: [
             "完整備份可選照片時間範圍（全部 / 最近一年 / 最近三年 / 自訂），避免照片過多時檔案過大；結構化資料一律完整。"
         ]),

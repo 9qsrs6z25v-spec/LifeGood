@@ -84,6 +84,12 @@ private struct RosterCell: Identifiable {
     let date: Date
 }
 
+/// 班表日格水平捲動位移（用來讓凍結的日期表頭與內容同步）
+private struct RosterHOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 // MARK: - 部屬班表（棋盤式燈號）
 
 struct SubordinateRosterView: View {
@@ -96,6 +102,7 @@ struct SubordinateRosterView: View {
     @State private var selectedDeptId: UUID? = nil
     @State private var detail: RosterCell?
     @State private var showSettings = false
+    @State private var hOffset: CGFloat = 0   // 日格水平捲動位移（同步凍結表頭）
     @State private var emptyIconPulse = false
 
     private let nameColWidth: CGFloat = 88
@@ -329,32 +336,50 @@ struct SubordinateRosterView: View {
     // MARK: 棋盤格
 
     private var gridArea: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            HStack(alignment: .top, spacing: 0) {
-                // 凍結姓名欄
-                VStack(spacing: 0) {
-                    Color.clear.frame(width: nameColWidth, height: headerH)
-                    ForEach(rosterRows) { row in
-                        switch row {
-                        case .header(let area): nameHeaderCell(area)
-                        case .person(let p):    nameCell(p)
-                        }
-                    }
-                }
-                // 可水平捲動的整月格
-                ScrollView(.horizontal, showsIndicators: true) {
+        let bodyWidth = CGFloat(days.count) * cellW
+        return VStack(spacing: 0) {
+            // 凍結表頭列：左上角 + 與內容水平同步的日期列（垂直捲動時固定）
+            HStack(spacing: 0) {
+                Color.clear.frame(width: nameColWidth, height: headerH)
+                HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
+                    .frame(width: bodyWidth, alignment: .leading)
+                    .offset(x: hOffset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .clipped()
+            }
+
+            // 內容：凍結姓名欄（水平固定）+ 日格（可水平捲動並回報位移）
+            ScrollView(.vertical, showsIndicators: true) {
+                HStack(alignment: .top, spacing: 0) {
                     VStack(spacing: 0) {
-                        HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
                         ForEach(rosterRows) { row in
                             switch row {
-                            case .header:        gridHeaderRow()
-                            case .person(let p): HStack(spacing: 0) { ForEach(days, id: \.self) { d in cell(p, d) } }
+                            case .header(let area): nameHeaderCell(area)
+                            case .person(let p):    nameCell(p)
                             }
                         }
                     }
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        VStack(spacing: 0) {
+                            ForEach(rosterRows) { row in
+                                switch row {
+                                case .header:        gridHeaderRow()
+                                case .person(let p): HStack(spacing: 0) { ForEach(days, id: \.self) { d in cell(p, d) } }
+                                }
+                            }
+                        }
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(key: RosterHOffsetKey.self,
+                                                       value: geo.frame(in: .named("rosterBodyH")).minX)
+                            }
+                        )
+                    }
+                    .coordinateSpace(name: "rosterBodyH")
+                    .onPreferenceChange(RosterHOffsetKey.self) { hOffset = $0 }
                 }
+                .background(Color(.systemBackground))
             }
-            .background(Color(.systemBackground))
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -485,8 +510,27 @@ private struct RosterCellDetailSheet: View {
     @State private var showAddLeave = false
     @State private var goDetail = false
     @State private var heroAppeared = false
+    @State private var dayOffset = 0   // 相對點到那天的日期微調（避免點歪）
 
     private var sub: Subordinate? { lifeStore.subordinates.first { $0.id == cell.subId } }
+
+    /// 實際操作的日期（可由使用者在上方微調）
+    private var selectedDate: Date {
+        Calendar.current.date(byAdding: .day, value: dayOffset, to: cell.date) ?? cell.date
+    }
+
+    /// 綁定到 DatePicker：選日期 → 換算成相對點擊日的 offset
+    private var selectedDateBinding: Binding<Date> {
+        Binding(
+            get: { selectedDate },
+            set: { newDate in
+                let cal = Calendar.current
+                let d0 = cal.startOfDay(for: cell.date)
+                let d1 = cal.startOfDay(for: newDate)
+                dayOffset = cal.dateComponents([.day], from: d0, to: d1).day ?? 0
+            }
+        )
+    }
 
     private var initials: String {
         let name = sub?.name ?? ""
@@ -495,13 +539,13 @@ private struct RosterCellDetailSheet: View {
     }
 
     private var isHoliday: Bool {
-        let wd = Calendar.current.component(.weekday, from: cell.date)
+        let wd = Calendar.current.component(.weekday, from: selectedDate)
         return wd == 1 || wd == 7
     }
 
     private var currentShift: ShiftType? {
         let cal = Calendar.current
-        return sub?.shifts.first { cal.isDate($0.date, inSameDayAs: cell.date) }?.type
+        return sub?.shifts.first { cal.isDate($0.date, inSameDayAs: selectedDate) }?.type
     }
 
     private static let headerDateFormatter: DateFormatter = {
@@ -512,13 +556,14 @@ private struct RosterCellDetailSheet: View {
     }()
 
     private var headerTitle: String {
-        "\(sub?.name ?? "")　\(Self.headerDateFormatter.string(from: cell.date))"
+        "\(sub?.name ?? "")　\(Self.headerDateFormatter.string(from: selectedDate))"
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 heroSection
+                dateSection
                 shiftSection
                 summarySection
                 actionSection
@@ -567,7 +612,7 @@ private struct RosterCellDetailSheet: View {
                         .lineLimit(1)
                     HStack(spacing: 5) {
                         // 日期膠囊：假日用紅色，平日用藍色
-                        Text(Self.headerDateFormatter.string(from: cell.date))
+                        Text(Self.headerDateFormatter.string(from: selectedDate))
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(isHoliday ? .red : .blue)
                             .padding(.horizontal, 7).padding(.vertical, 2.5)
@@ -657,6 +702,34 @@ private struct RosterCellDetailSheet: View {
         }
     }
 
+    // MARK: - 日期選擇（避免點歪，可在此微調 / 直接選日期）
+
+    private var dateSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                Button { dayOffset -= 1 } label: {
+                    Image(systemName: "chevron.left.circle.fill")
+                        .font(.title2).foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+
+                DatePicker("", selection: selectedDateBinding, displayedComponents: .date)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+
+                Button { dayOffset += 1 } label: {
+                    Image(systemName: "chevron.right.circle.fill")
+                        .font(.title2).foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+            }
+        } header: {
+            Text("操作日期")
+        } footer: {
+            Text("這裡可微調或直接選日期，下方的班別設定都會套用到這一天。")
+        }
+    }
+
     // MARK: - 班別設定 Section（美化 v2）
 
     private var shiftSection: some View {
@@ -698,31 +771,31 @@ private struct RosterCellDetailSheet: View {
             }
             Menu {
                 ForEach(ShiftType.allCases) { t in
-                    Button(t.rawValue) { lifeStore.setShift(subordinateId: cell.subId, date: cell.date, type: t) }
+                    Button(t.rawValue) { lifeStore.setShift(subordinateId: cell.subId, date: selectedDate, type: t) }
                 }
             } label: {
                 Label("設定 / 變更班別", systemImage: "calendar.badge.clock")
             }
             Button {
-                lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: cell.date)
+                lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: selectedDate)
                 dismiss()
             } label: {
                 Label("從這天套用大夜班輪班（8 天）", systemImage: "arrow.triangle.2.circlepath")
             }
             Button {
-                lifeStore.applyEveningShiftWeekdays(subordinateId: cell.subId, startDate: cell.date)
+                lifeStore.applyEveningShiftWeekdays(subordinateId: cell.subId, startDate: selectedDate)
                 dismiss()
             } label: {
                 Label("套用小夜班（整週一至五 5 天）", systemImage: "moon.stars")
             }
             Button {
-                lifeStore.setShift(subordinateId: cell.subId, date: cell.date, type: .dayDuty)
+                lifeStore.setShift(subordinateId: cell.subId, date: selectedDate, type: .dayDuty)
                 dismiss()
             } label: {
                 Label("設為日值班（單日，平日 08:30–17:30）", systemImage: "sun.max")
             }
             Button(role: .destructive) {
-                lifeStore.setShift(subordinateId: cell.subId, date: cell.date, type: nil)
+                lifeStore.setShift(subordinateId: cell.subId, date: selectedDate, type: nil)
                 dismiss()
             } label: {
                 Label("清除這天班別", systemImage: "xmark.circle")
@@ -798,7 +871,7 @@ private struct RosterCellDetailSheet: View {
     private var leaveRecord: SubordinateRecord? {
         guard let sub = sub else { return nil }
         let cal = Calendar.current
-        let d = cal.startOfDay(for: cell.date)
+        let d = cal.startOfDay(for: selectedDate)
         return sub.records.first { r in
             guard r.type == .leave else { return false }
             let s = cal.startOfDay(for: r.date)
@@ -810,15 +883,15 @@ private struct RosterCellDetailSheet: View {
     private var meetingsToday: [SubordinateMeeting] {
         guard let sub = sub else { return [] }
         let cal = Calendar.current
-        return sub.meetings.filter { cal.isDate($0.date, inSameDayAs: cell.date) }
+        return sub.meetings.filter { cal.isDate($0.date, inSameDayAs: selectedDate) }
     }
 
     private var tasksToday: [SubordinateTask] {
         guard let sub = sub else { return [] }
         let cal = Calendar.current
         return sub.tasks.filter { t in
-            if let due = t.dueDate, cal.isDate(due, inSameDayAs: cell.date) { return true }
-            return cal.isDate(t.date, inSameDayAs: cell.date)
+            if let due = t.dueDate, cal.isDate(due, inSameDayAs: selectedDate) { return true }
+            return cal.isDate(t.date, inSameDayAs: selectedDate)
         }
     }
 }
