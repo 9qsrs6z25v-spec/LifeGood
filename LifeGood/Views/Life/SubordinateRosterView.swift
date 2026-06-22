@@ -374,16 +374,20 @@ struct SubordinateRosterView: View {
                             }
                             .background(
                                 GeometryReader { g in
+                                    // 內容左緣相對「外層固定容器」的位置 = nameColWidth + 水平捲動量
                                     Color.clear.preference(key: RosterHOffsetKey.self,
-                                                           value: g.frame(in: .named("rosterBodyH")).minX)
+                                                           value: g.frame(in: .named("rosterArea")).minX)
                                 }
                             )
                         }
                         .frame(width: viewportW)
-                        .coordinateSpace(name: "rosterBodyH")
-                        .onPreferenceChange(RosterHOffsetKey.self) { hOffset = $0 }
                     }
                 }
+            }
+            .coordinateSpace(name: "rosterArea")
+            .onPreferenceChange(RosterHOffsetKey.self) { value in
+                // 扣掉靜態的姓名欄寬度，得到純水平捲動位移（捲右為負）
+                hOffset = value - nameColWidth
             }
             .background(Color(.systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))
