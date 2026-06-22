@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.47", build: 514, date: "2026/06/11", notes: [
+            "人才矩陣：點散布圖上的點會彈出計算明細卡（主動性 / 潛力各條目加減分），點卡片外即關閉。"
+        ]),
         ChangelogEntry(version: "22.46", build: 513, date: "2026/06/11", notes: [
             "潛力評分不再把請假計入（請假已反映在主動性），避免重複計算；列表評分同步。"
         ]),
