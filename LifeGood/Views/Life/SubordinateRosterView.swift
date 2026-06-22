@@ -336,54 +336,59 @@ struct SubordinateRosterView: View {
     // MARK: 棋盤格
 
     private var gridArea: some View {
-        let bodyWidth = CGFloat(days.count) * cellW
-        return VStack(spacing: 0) {
-            // 凍結表頭列：左上角 + 與內容水平同步的日期列（垂直捲動時固定）
-            HStack(spacing: 0) {
-                Color.clear.frame(width: nameColWidth, height: headerH)
-                HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
-                    .frame(width: bodyWidth, alignment: .leading)
-                    .offset(x: hOffset)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .clipped()
-            }
+        GeometryReader { geo in
+            let bodyWidth = CGFloat(days.count) * cellW
+            let viewportW = max(0, geo.size.width - nameColWidth)   // 日格可視寬度（扣掉凍結姓名欄）
+            VStack(spacing: 0) {
+                // 凍結表頭列：左上角 + 與內容水平同步的日期列（垂直捲動時固定）
+                HStack(spacing: 0) {
+                    Color.clear.frame(width: nameColWidth, height: headerH)
+                    HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
+                        .frame(width: bodyWidth, alignment: .leading)
+                        .offset(x: hOffset)
+                        .frame(width: viewportW, alignment: .leading)
+                        .clipped()
+                }
 
-            // 內容：凍結姓名欄（水平固定）+ 日格（可水平捲動並回報位移）
-            ScrollView(.vertical, showsIndicators: true) {
-                HStack(alignment: .top, spacing: 0) {
-                    VStack(spacing: 0) {
-                        ForEach(rosterRows) { row in
-                            switch row {
-                            case .header(let area): nameHeaderCell(area)
-                            case .person(let p):    nameCell(p)
-                            }
-                        }
-                    }
-                    ScrollView(.horizontal, showsIndicators: true) {
+                // 內容：凍結姓名欄（固定寬）+ 日格（限定 viewport 寬，水平捲動並回報位移）
+                ScrollView(.vertical, showsIndicators: true) {
+                    HStack(alignment: .top, spacing: 0) {
                         VStack(spacing: 0) {
                             ForEach(rosterRows) { row in
                                 switch row {
-                                case .header:        gridHeaderRow()
-                                case .person(let p): HStack(spacing: 0) { ForEach(days, id: \.self) { d in cell(p, d) } }
+                                case .header(let area): nameHeaderCell(area)
+                                case .person(let p):    nameCell(p)
                                 }
                             }
                         }
-                        .background(
-                            GeometryReader { geo in
-                                Color.clear.preference(key: RosterHOffsetKey.self,
-                                                       value: geo.frame(in: .named("rosterBodyH")).minX)
+                        .frame(width: nameColWidth)
+
+                        ScrollView(.horizontal, showsIndicators: true) {
+                            VStack(spacing: 0) {
+                                ForEach(rosterRows) { row in
+                                    switch row {
+                                    case .header:        gridHeaderRow()
+                                    case .person(let p): HStack(spacing: 0) { ForEach(days, id: \.self) { d in cell(p, d) } }
+                                    }
+                                }
                             }
-                        )
+                            .background(
+                                GeometryReader { g in
+                                    Color.clear.preference(key: RosterHOffsetKey.self,
+                                                           value: g.frame(in: .named("rosterBodyH")).minX)
+                                }
+                            )
+                        }
+                        .frame(width: viewportW)
+                        .coordinateSpace(name: "rosterBodyH")
+                        .onPreferenceChange(RosterHOffsetKey.self) { hOffset = $0 }
                     }
-                    .coordinateSpace(name: "rosterBodyH")
-                    .onPreferenceChange(RosterHOffsetKey.self) { hOffset = $0 }
                 }
-                .background(Color(.systemBackground))
             }
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator).opacity(0.15), lineWidth: 0.75))
         }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator).opacity(0.15), lineWidth: 0.75))
         .padding(.horizontal)
         .padding(.bottom, 8)
     }
