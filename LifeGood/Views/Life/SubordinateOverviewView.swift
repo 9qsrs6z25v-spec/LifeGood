@@ -304,6 +304,17 @@ struct SubordinateOverviewView: View {
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color.indigo.opacity(0.12))
                         .clipShape(Capsule())
+                    if let due = item.dueDate {
+                        HStack(spacing: 3) {
+                            Image(systemName: "flag.fill").font(.system(size: 7, weight: .semibold))
+                            Text("截止 \(fmtDateTime(due))")
+                        }
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(due < Date() ? .red : .indigo)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background((due < Date() ? Color.red : Color.indigo).opacity(0.12))
+                        .clipShape(Capsule())
+                    }
                     Text(sub.name)
                         .font(.caption2)
                         .foregroundStyle(.secondary)

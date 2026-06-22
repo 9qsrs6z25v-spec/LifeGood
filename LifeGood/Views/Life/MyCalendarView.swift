@@ -108,6 +108,11 @@ struct MyCalendarView: View {
                             }
                         }
                         .onDisappear { milestonesCardAppeared = false }
+
+                    // 部屬事項（請假 / 會議 / 任務 / 未完成會議 / 未完成任務）
+                    if !lifeStore.subordinates.isEmpty {
+                        subordinateAgendaSection(date: startOfSelectedDay)
+                    }
                 }
                 .padding(.vertical)
             }
@@ -857,6 +862,157 @@ struct MyCalendarView: View {
                 .foregroundStyle(.white.opacity(0.62))
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - 部屬事項卡片（彙整自部屬總覽）
+
+    private static let subAgendaFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d HH:mm"; return f
+    }()
+    private func subAgendaTime(_ d: Date) -> String { Self.subAgendaFmt.string(from: d) }
+
+    private func subLeaves(on date: Date) -> [(sub: Subordinate, rec: SubordinateRecord)] {
+        let d = calendar.startOfDay(for: date)
+        return lifeStore.subordinates.flatMap { sub in
+            sub.records.filter { r in
+                guard r.type == .leave else { return false }
+                let s = calendar.startOfDay(for: r.date)
+                let e = calendar.startOfDay(for: r.endDate ?? r.date)
+                return d >= s && d <= e
+            }.map { (sub: sub, rec: $0) }
+        }
+    }
+    private func subMeetings(on date: Date) -> [(sub: Subordinate, meeting: SubordinateMeeting)] {
+        lifeStore.subordinates.flatMap { sub in
+            sub.meetings.filter { calendar.isDate($0.date, inSameDayAs: date) }.map { (sub: sub, meeting: $0) }
+        }
+    }
+    private func subTasks(on date: Date) -> [(sub: Subordinate, task: SubordinateTask)] {
+        lifeStore.subordinates.flatMap { sub in
+            sub.tasks.filter { t in
+                guard !t.isCompleted else { return false }
+                if let due = t.dueDate, calendar.isDate(due, inSameDayAs: date) { return true }
+                return calendar.isDate(t.date, inSameDayAs: date)
+            }.map { (sub: sub, task: $0) }
+        }
+    }
+    private var subIncompleteMeetingItems: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)] {
+        lifeStore.subordinates.flatMap { sub in
+            sub.meetings.flatMap { m in
+                m.items.filter { !$0.isCompleted }.map { (sub: sub, meeting: m, item: $0) }
+            }
+        }.sorted { $0.meeting.date > $1.meeting.date }
+    }
+    private var subIncompleteTasks: [(sub: Subordinate, task: SubordinateTask)] {
+        lifeStore.subordinates.flatMap { sub in
+            sub.tasks.filter { !$0.isCompleted }.map { (sub: sub, task: $0) }
+        }.sorted { ($0.task.dueDate ?? $0.task.date) < ($1.task.dueDate ?? $1.task.date) }
+    }
+
+    private func subordinateAgendaSection(date: Date) -> some View {
+        let leaves = subLeaves(on: date)
+        let meetings = subMeetings(on: date)
+        let tasks = subTasks(on: date)
+        return VStack(spacing: 16) {
+            subAgendaCard("部屬請假", "calendar.badge.minus", .teal, count: leaves.count, empty: "當日無人請假") {
+                ForEach(Array(leaves.enumerated()), id: \.offset) { _, it in
+                    subAgendaRow(name: it.sub.name, lead: it.rec.leaveType?.rawValue ?? "請假",
+                                 sub: it.rec.content, accent: .teal, icon: "calendar.badge.minus")
+                }
+            }
+            subAgendaCard("部屬會議", "person.3.fill", .indigo, count: meetings.count, empty: "當日無會議") {
+                ForEach(Array(meetings.enumerated()), id: \.offset) { _, it in
+                    subAgendaRow(name: it.sub.name, lead: it.meeting.topic.isEmpty ? "未命名會議" : it.meeting.topic,
+                                 sub: subAgendaTime(it.meeting.date), accent: .indigo, icon: "person.3.fill")
+                }
+            }
+            subAgendaCard("部屬任務", "checklist", .cyan, count: tasks.count, empty: "當日無任務") {
+                ForEach(Array(tasks.enumerated()), id: \.offset) { _, it in
+                    subAgendaCheckRow(name: it.sub.name,
+                                      text: it.task.topic.isEmpty ? "未命名任務" : it.task.topic,
+                                      detail: it.task.dueDate.map { "截止 " + subAgendaTime($0) },
+                                      done: it.task.isCompleted, accent: .cyan) {
+                        lifeStore.toggleTaskCompletion(subordinateId: it.sub.id, taskId: it.task.id)
+                    }
+                }
+            }
+            subAgendaCard("未完成會議條目", "person.3.sequence.fill", .indigo,
+                          count: subIncompleteMeetingItems.count, empty: "沒有未完成的會議條目") {
+                ForEach(Array(subIncompleteMeetingItems.enumerated()), id: \.element.item.id) { _, it in
+                    subAgendaCheckRow(name: it.sub.name,
+                                      text: it.item.content.isEmpty ? "未填內容" : it.item.content,
+                                      detail: (it.meeting.topic.isEmpty ? "會議" : it.meeting.topic)
+                                            + (it.item.dueDate.map { "・截止 " + subAgendaTime($0) } ?? ""),
+                                      done: it.item.isCompleted, accent: .indigo) {
+                        lifeStore.toggleMeetingItemCompletion(subordinateId: it.sub.id, meetingId: it.meeting.id, itemId: it.item.id)
+                    }
+                }
+            }
+            subAgendaCard("未完成任務", "tray.full.fill", .orange,
+                          count: subIncompleteTasks.count, empty: "沒有未完成任務") {
+                ForEach(Array(subIncompleteTasks.enumerated()), id: \.element.task.id) { _, it in
+                    subAgendaCheckRow(name: it.sub.name,
+                                      text: it.task.topic.isEmpty ? "未命名任務" : it.task.topic,
+                                      detail: it.task.dueDate.map { "截止 " + subAgendaTime($0) },
+                                      done: it.task.isCompleted, accent: .orange) {
+                        lifeStore.toggleTaskCompletion(subordinateId: it.sub.id, taskId: it.task.id)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func subAgendaCard<Content: View>(_ title: String, _ icon: String, _ color: Color,
+                                              count: Int, empty: String,
+                                              @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader(title, icon: icon, color: color, count: count)
+            if count == 0 {
+                Text(empty).font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+            } else {
+                content()
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    private func subAgendaRow(name: String, lead: String, sub: String, accent: Color, icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 12)).foregroundStyle(accent).frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(lead).font(.subheadline.weight(.medium)).lineLimit(1)
+                if !sub.isEmpty { Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+            }
+            Spacer(minLength: 4)
+            Text(name).font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+    }
+
+    private func subAgendaCheckRow(name: String, text: String, detail: String?, done: Bool,
+                                   accent: Color, toggle: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Button(action: toggle) {
+                Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16)).foregroundStyle(done ? Color.green : accent)
+            }
+            .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(text).font(.subheadline.weight(.medium))
+                    .strikethrough(done, color: .secondary)
+                    .foregroundStyle(done ? .secondary : .primary).lineLimit(2)
+                if let detail { Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+            }
+            Spacer(minLength: 4)
+            Text(name).font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .opacity(done ? 0.7 : 1)
     }
 
     // MARK: - 輔助元件

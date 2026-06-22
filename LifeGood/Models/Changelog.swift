@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.49", build: 516, date: "2026/06/11", notes: [
+            "部屬總覽『未完成會議條目』顯示截止日期（逾期紅字）。",
+            "我的行事曆未來里程碑下方新增部屬事項：請假/會議/任務/未完成會議條目/未完成任務（依所選日期，任務與會議條目可打勾）。"
+        ]),
         ChangelogEntry(version: "22.48", build: 515, date: "2026/06/11", notes: [
             "部屬卡片分頁『日常 / 評分系統』改名為『主動性 / 潛力性』。",
             "部屬總覽在『未完成任務』上方新增『未完成會議條目』章節，可逐條打勾。"
