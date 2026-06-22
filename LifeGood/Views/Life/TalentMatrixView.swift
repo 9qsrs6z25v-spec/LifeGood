@@ -40,6 +40,53 @@ extension Subordinate {
         score -= leaveHours / 8 * 2              // 每請假 8 小時 -2
         return max(0, min(100, Int(score.rounded())))
     }
+
+    /// 潛力評分的計算明細（分組條目 + 加減分）
+    var potentialBreakdown: [(label: String, points: Int)] {
+        var items: [(String, Int)] = [("基礎分", 80)]
+        var pro = 0, con = 0, ach = 0, imp = 0, fault = 0
+        var mMinor = 0, mNormal = 0, mSevere = 0
+        for r in records {
+            switch r.type {
+            case .pro:         pro += 1
+            case .con:         con += 1
+            case .achievement: ach += 1
+            case .improvement: imp += 1
+            case .fault:       fault += 1
+            case .missOperation:
+                switch r.severity {
+                case .minor:  mMinor += 1
+                case .severe: mSevere += 1
+                default:      mNormal += 1
+                }
+            case .leave:       break   // 不計入潛力
+            }
+        }
+        if ach > 0   { items.append(("成就 ×\(ach)", ach * 3)) }
+        if pro > 0   { items.append(("優點 ×\(pro)", pro * 2)) }
+        if imp > 0   { items.append(("進步 ×\(imp)", imp)) }
+        if con > 0   { items.append(("缺點 ×\(con)", -con * 2)) }
+        if fault > 0 { items.append(("缺失 ×\(fault)", -fault * 3)) }
+        if mMinor > 0  { items.append(("疏失·輕微 ×\(mMinor)", -mMinor)) }
+        if mNormal > 0 { items.append(("疏失·一般 ×\(mNormal)", -mNormal * 2)) }
+        if mSevere > 0 { items.append(("疏失·嚴重 ×\(mSevere)", -mSevere * 4)) }
+        return items
+    }
+
+    /// 主動性評分的計算明細（分組條目 + 加減分）
+    var proactivityBreakdown: [(label: String, points: Int)] {
+        var items: [(String, Int)] = [("基礎分", 60)]
+        let completedTasks = tasks.filter { $0.isCompleted }.count
+        let completedItems = meetings.flatMap { $0.items }.filter { $0.isCompleted }.count
+        let leaveHours = records.filter { $0.type == .leave }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
+        if completedTasks > 0 { items.append(("完成任務 ×\(completedTasks)", completedTasks * 3)) }
+        if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems * 2)) }
+        if leaveHours > 0 {
+            let h = leaveHours.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(leaveHours))" : String(format: "%.1f", leaveHours)
+            items.append(("請假 \(h) 小時", -Int((leaveHours / 8 * 2).rounded())))
+        }
+        return items
+    }
 }
 
 // MARK: - 人才矩陣（主動性 × 潛力 散布圖）
@@ -48,6 +95,7 @@ struct TalentMatrixView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDeptId: UUID? = nil
+    @State private var selected: Subordinate?
 
     private var members: [Subordinate] {
         lifeStore.subordinates
@@ -62,17 +110,31 @@ struct TalentMatrixView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                deptFilter
-                if members.isEmpty {
-                    emptyHint
-                } else {
-                    chart
-                    quadrantLegend
-                    Spacer(minLength: 0)
+            ZStack {
+                VStack(spacing: 12) {
+                    deptFilter
+                    if members.isEmpty {
+                        emptyHint
+                    } else {
+                        chart
+                        quadrantLegend
+                        Spacer(minLength: 0)
+                    }
+                }
+                .padding(.top, 8)
+
+                // 點選某點 → 展開計算明細指示窗；點窗外關閉
+                if let m = selected {
+                    Color.black.opacity(0.18)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) { selected = nil }
+                        }
+                    breakdownCard(m)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        .zIndex(1)
                 }
             }
-            .padding(.top, 8)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("人才矩陣")
             .navigationBarTitleDisplayMode(.inline)
@@ -152,6 +214,12 @@ struct TalentMatrixView: View {
         }
         .chartXScale(domain: xDomain)
         .chartYScale(domain: yDomain)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(Color.clear).contentShape(Rectangle())
+                    .onTapGesture { loc in selectNearest(at: loc, proxy: proxy, geo: geo) }
+            }
+        }
         .chartXAxisLabel("主動性（日常：任務 / 會議完成、出勤）", alignment: .center)
         .chartYAxisLabel("潛力（評分系統）")
         .frame(height: 380)
@@ -179,6 +247,85 @@ struct TalentMatrixView: View {
         HStack(spacing: 8) {
             Circle().fill(color).frame(width: 10, height: 10)
             Text(text).foregroundStyle(.secondary)
+        }
+    }
+
+    // 找最靠近點擊位置的成員（命中半徑 50pt）
+    private func selectNearest(at loc: CGPoint, proxy: ChartProxy, geo: GeometryProxy) {
+        guard let anchor = proxy.plotFrame else { return }
+        let rect = geo[anchor]
+        var best: Subordinate?
+        var bestDist = CGFloat.greatestFiniteMagnitude
+        for m in members {
+            guard let px = proxy.position(forX: m.proactivityScore),
+                  let py = proxy.position(forY: m.potentialScore) else { continue }
+            let p = CGPoint(x: rect.minX + px, y: rect.minY + py)
+            let d = hypot(p.x - loc.x, p.y - loc.y)
+            if d < bestDist { bestDist = d; best = m }
+        }
+        if let best, bestDist < 50 {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) { selected = best }
+        }
+    }
+
+    // 計算明細指示窗
+    private func breakdownCard(_ m: Subordinate) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(m.name.isEmpty ? "未命名" : m.name).font(.headline)
+                    Text("主動性 \(m.proactivityScore)　潛力 \(m.potentialScore)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) { selected = nil }
+                } label: {
+                    Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.bottom, 10)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    breakdownGroup("主動性（日常）", color: .blue, total: m.proactivityScore, items: m.proactivityBreakdown)
+                    breakdownGroup("潛力（評分）", color: .indigo, total: m.potentialScore, items: m.potentialBreakdown)
+                }
+                .padding(.vertical, 4)
+            }
+            .frame(maxHeight: 300)
+        }
+        .padding(16)
+        .frame(maxWidth: 320)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color(.separator).opacity(0.2), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.22), radius: 22, x: 0, y: 10)
+        .contentShape(Rectangle())
+        .onTapGesture { }   // 吸收點擊，避免點到卡片本身就關閉
+        .padding(.horizontal, 24)
+    }
+
+    private func breakdownGroup(_ title: String, color: Color, total: Int,
+                                items: [(label: String, points: Int)]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title).font(.subheadline.weight(.bold))
+                Spacer()
+                Text("\(total) 分").font(.subheadline.weight(.bold)).foregroundStyle(color)
+            }
+            Divider()
+            ForEach(Array(items.enumerated()), id: \.offset) { _, it in
+                HStack {
+                    Text(it.label).font(.caption).foregroundStyle(.primary)
+                    Spacer()
+                    Text(it.points >= 0 ? "+\(it.points)" : "\(it.points)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(it.points >= 0 ? .green : .red)
+                        .monospacedDigit()
+                }
+            }
         }
     }
 
