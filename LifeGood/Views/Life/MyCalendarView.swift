@@ -78,6 +78,7 @@ struct MyCalendarView: View {
                                 heroCardAppeared = true
                             }
                         }
+                        .onDisappear { heroCardAppeared = false }
                     MacaronDatePicker(selectedDate: $selectedDate)
                     appleCalendarBanner
                     todayEventsSection(events: weekEventsMap[startOfSelectedDay] ?? [])
@@ -88,6 +89,7 @@ struct MyCalendarView: View {
                                 todayCardAppeared = true
                             }
                         }
+                        .onDisappear { todayCardAppeared = false }
                     weekPreviewSection(weekDates: resolvedWeekDates, weekEventsMap: weekEventsMap)
                         .opacity(weekCardAppeared ? 1 : 0)
                         .offset(y: weekCardAppeared ? 0 : 18)
@@ -96,6 +98,7 @@ struct MyCalendarView: View {
                                 weekCardAppeared = true
                             }
                         }
+                        .onDisappear { weekCardAppeared = false }
                     upcomingMilestonesSection(milestones: upcomingMS)
                         .opacity(milestonesCardAppeared ? 1 : 0)
                         .offset(y: milestonesCardAppeared ? 0 : 18)
@@ -104,6 +107,7 @@ struct MyCalendarView: View {
                                 milestonesCardAppeared = true
                             }
                         }
+                        .onDisappear { milestonesCardAppeared = false }
                 }
                 .padding(.vertical)
             }
