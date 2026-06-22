@@ -53,6 +53,7 @@ struct SubordinateView: View {
     @State private var viewingItem: Subordinate?
     @State private var showPremiumAlert = false
     @State private var showRoster = false
+    @State private var showTalentMatrix = false
     @AppStorage("subordinateSortOption") private var sortOptionRaw = SubordinateSortOption.dateAdded.rawValue
     @AppStorage("subordinateSortAscending") private var sortAscending = false
 
@@ -190,6 +191,13 @@ struct SubordinateView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
                         Button {
+                            showTalentMatrix = true
+                        } label: {
+                            Image(systemName: "chart.dots.scatter")
+                                .font(.title3).foregroundStyle(.blue)
+                        }
+
+                        Button {
                             showRoster = true
                         } label: {
                             Image(systemName: "calendar.day.timeline.left")
@@ -248,6 +256,7 @@ struct SubordinateView: View {
             .sheet(item: $editingItem) { item in AddSubordinateView(editing: item) }
             .sheet(item: $viewingItem) { item in SubordinateDetailView(subordinate: item) }
             .sheet(isPresented: $showRoster) { SubordinateRosterView() }
+            .sheet(isPresented: $showTalentMatrix) { TalentMatrixView() }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
@@ -668,29 +677,9 @@ struct SubordinateView: View {
         Self.dateFormatter.string(from: date)
     }
 
-    /// 自動評分：基礎 80，依記錄加減，範圍 0~100
+    /// 自動評分（潛力）：與人才矩陣共用同一套邏輯（Subordinate.potentialScore）。
     private func subordinateScore(_ sub: Subordinate) -> Int {
-        var score: Double = 80
-        for rec in sub.records {
-            switch rec.type {
-            case .pro:           score += 2
-            case .con:           score -= 2
-            case .achievement:   score += 3
-            case .improvement:   score += 1
-            case .fault:         score -= 3
-            case .missOperation:
-                switch rec.severity {
-                case .minor:  score -= 1
-                case .normal: score -= 2
-                case .severe: score -= 4
-                case .none:   score -= 2
-                }
-            case .leave:
-                let hours = rec.leaveHours ?? 8
-                score -= hours / 16
-            }
-        }
-        return max(0, min(100, Int(score.rounded())))
+        sub.potentialScore
     }
 
     private func scoreColor(_ score: Int) -> Color {

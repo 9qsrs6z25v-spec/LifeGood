@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.45", build: 512, date: "2026/06/11", notes: [
+            "新增『人才矩陣』散布圖（部屬頁右上）：X 軸主動性（任務/會議完成、出勤）、Y 軸潛力（評分系統），依成員最大/最小值自動縮放，分四象限定位每位成員。"
+        ]),
         ChangelogEntry(version: "22.44", build: 511, date: "2026/06/11", notes: [
             "部屬會議章節：除了會議名稱，也列出議程項目並可逐項打勾完成（部屬詳情頁與部屬總覽同步）。"
         ]),
