@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（SubordinateOverviewView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. sectionHeader：升級為「漸層 Capsule 左側條 + 彩色圓形圖示圈 + 計數徽章膠囊」，
 //      對齊 LifeOverviewView / FinanceChartView.sectionHeader 視覺規格
 //   2. 各區塊列（請假 / 會議 / 任務）：改用 36pt 漸層圓形圖示 + 細邊框，
@@ -12,10 +12,26 @@ import SwiftUI
 //      對齊 LifeOverviewView.timelineRowsAppeared 動畫規格
 //   5. 三個主區塊（請假 / 會議 / 任務）最外層加 shadow + 極細 overlay 邊框，
 //      提升深色模式下的邊界感與層次，對齊 OverviewView categoryBreakdownSection
+// [2026-06 v2] 本次美化方向：
+//   6. summaryHeroCard：日期選取器上方新增藍綠漸層英雄卡，顯示部屬總人數 +
+//      今日請假 / 今日會議 / 待辦任務三格 KPI；三顆散景裝飾圓 + 頂部玻璃光澤
+//      （white.opacity(0.18)），對齊 SubordinateView.summaryStatsCard /
+//      VariableExpenseView.monthSummaryHeader 英雄卡規格；
+//      heroAppeared spring 進場動畫（透明度 + Y 位移 16pt），段落進場延遲 0.10s
+//   7. 時間標籤 Capsule 升級：leaveRow / meetingRow / taskRow 中裸 clock + 時間文字
+//      升級為 tertiarySystemFill 底色 Capsule 徽章，
+//      對齊 CareerView v2 / OverviewView.recentRow 日期 Capsule 設計語言
+//   8. 彩色膠囊補細邊框：leaveType / 會議時長 / 截止日 / 部屬姓名膠囊補
+//      Capsule().stroke(color.opacity(0.22), lineWidth:0.6)，
+//      對齊全 App 膠囊描邊規格（BusinessCardView v2 / StockDetailView v2）
+//   9. 雙層 shadow 升級：各卡片由單層 black.opacity(0.06) 升級為雙層
+//      （色調主光暈 + 黑底基礎陰影），提升立體感，
+//      對齊 SubordinateDetailView.headerCard / FamilyMembersResumeView v2 規格
 
 struct SubordinateOverviewView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var selectedDate = Date()
+    @State private var heroAppeared = false
     @State private var sectionAppeared = false
     @State private var showCompleted = false
     @State private var editTarget: OverviewEditTarget?
@@ -108,6 +124,11 @@ struct SubordinateOverviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    summaryHeroCard
+                        .opacity(heroAppeared ? 1 : 0)
+                        .offset(y: heroAppeared ? 0 : 16)
+                        .animation(.spring(response: 0.52, dampingFraction: 0.80), value: heroAppeared)
+
                     MacaronDatePicker(selectedDate: $selectedDate)
 
                     leaveSection
@@ -130,7 +151,10 @@ struct SubordinateOverviewView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("部屬總覽")
             .onAppear {
-                withAnimation(.spring(response: 0.50, dampingFraction: 0.82)) {
+                withAnimation(.spring(response: 0.52, dampingFraction: 0.80)) {
+                    heroAppeared = true
+                }
+                withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.10)) {
                     sectionAppeared = true
                 }
             }
@@ -171,7 +195,8 @@ struct SubordinateOverviewView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
         )
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .shadow(color: Color.teal.opacity(0.12), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
         .padding(.horizontal)
     }
 
@@ -199,7 +224,8 @@ struct SubordinateOverviewView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
         )
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .shadow(color: Color.indigo.opacity(0.12), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
         .padding(.horizontal)
     }
 
@@ -295,7 +321,8 @@ struct SubordinateOverviewView: View {
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
             )
-            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+            .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 4)
+            .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
     }
 
     // MARK: - 列元件
@@ -332,6 +359,7 @@ struct SubordinateOverviewView: View {
                             .padding(.horizontal, 7).padding(.vertical, 2.5)
                             .background(Color.teal.opacity(0.12))
                             .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.teal.opacity(0.22), lineWidth: 0.6))
                     }
                     if let h = rec.leaveHours, h > 0 {
                         Text(h.truncatingRemainder(dividingBy: 1) == 0
@@ -343,18 +371,20 @@ struct SubordinateOverviewView: View {
                             .clipShape(Capsule())
                     }
                 }
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Image(systemName: "clock")
                         .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
                     Text(fmtTime(rec.date))
                     if let end = rec.endDate {
                         Text("~")
                         Text(fmtTime(end))
                     }
                 }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(Capsule())
                 if !rec.content.isEmpty {
                     Text(rec.content)
                         .font(.caption)
@@ -399,8 +429,11 @@ struct SubordinateOverviewView: View {
                             .font(.system(size: 9))
                         Text(fmtTime(meeting.date))
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
 
                     Text("\(meeting.durationMinutes) 分鐘")
                         .font(.system(size: 10, weight: .semibold))
@@ -408,10 +441,15 @@ struct SubordinateOverviewView: View {
                         .padding(.horizontal, 7).padding(.vertical, 2.5)
                         .background(Color.indigo.opacity(0.12))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
 
                     Text(sub.name)
-                        .font(.caption2)
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color(.separator).opacity(0.18), lineWidth: 0.6))
                 }
                 if !meeting.items.isEmpty {
                     HStack(spacing: 3) {
@@ -472,6 +510,7 @@ struct SubordinateOverviewView: View {
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color(.tertiarySystemFill))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color(.separator).opacity(0.18), lineWidth: 0.6))
                 }
                 HStack(spacing: 6) {
                     HStack(spacing: 3) {
@@ -479,8 +518,11 @@ struct SubordinateOverviewView: View {
                             .font(.system(size: 9))
                         Text(fmtTime(task.date))
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
 
                     if let due = task.dueDate {
                         HStack(spacing: 3) {
@@ -493,6 +535,7 @@ struct SubordinateOverviewView: View {
                         .padding(.horizontal, 7).padding(.vertical, 2.5)
                         .background(taskAccent.opacity(0.12))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(taskAccent.opacity(0.22), lineWidth: 0.6))
                     }
                 }
                 if !task.content.isEmpty {
@@ -509,6 +552,106 @@ struct SubordinateOverviewView: View {
         .padding(.vertical, 11)
         .contentShape(Rectangle())
         .onTapGesture { editTarget = .task(subId: sub.id, task: task) }
+    }
+
+    // MARK: - 英雄摘要卡
+
+    private var summaryHeroCard: some View {
+        ZStack(alignment: .topLeading) {
+            // 主漸層背景
+            LinearGradient(
+                colors: [Color(red: 0.17, green: 0.54, blue: 0.90),
+                         Color(red: 0.05, green: 0.78, blue: 0.72)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+
+            // 散景裝飾圓：右上
+            Circle()
+                .fill(Color.white.opacity(0.10))
+                .frame(width: 90, height: 90)
+                .blur(radius: 10)
+                .offset(x: 250, y: -20)
+            // 散景裝飾圓：左下
+            Circle()
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 65, height: 65)
+                .blur(radius: 8)
+                .offset(x: -10, y: 62)
+            // 散景裝飾圓：中右（第三顆）
+            Circle()
+                .fill(Color.white.opacity(0.05))
+                .frame(width: 55, height: 55)
+                .blur(radius: 8)
+                .offset(x: 185, y: 52)
+
+            VStack(alignment: .leading, spacing: 12) {
+                // 標題列
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.22))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "person.3.sequence.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    Text("部屬總覽")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Text("共 \(lifeStore.subordinates.count) 人")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.88))
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.white.opacity(0.20))
+                        .clipShape(Capsule())
+                }
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.22))
+                    .frame(height: 0.5)
+
+                // KPI 三格
+                HStack(spacing: 0) {
+                    heroKpiCell(value: "\(todayLeaves.count)", label: "今日請假",
+                                icon: "calendar.badge.minus")
+                    Rectangle().fill(Color.white.opacity(0.22)).frame(width: 0.5, height: 36)
+                    heroKpiCell(value: "\(todayMeetings.count)", label: "今日會議",
+                                icon: "person.3.fill")
+                    Rectangle().fill(Color.white.opacity(0.22)).frame(width: 0.5, height: 36)
+                    heroKpiCell(value: "\(incompleteTasks.count)", label: "待辦任務",
+                                icon: "tray.full.fill")
+                }
+            }
+            .padding(16)
+
+            // 玻璃光澤覆層
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top, endPoint: .center
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .allowsHitTesting(false)
+        }
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.17, green: 0.54, blue: 0.90).opacity(0.30), radius: 14, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
+        .padding(.horizontal)
+    }
+
+    private func heroKpiCell(value: String, label: String, icon: String) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.80))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 輔助元件
