@@ -3,26 +3,18 @@ import PhotosUI
 import MapKit
 
 // MARK: - 美化紀錄（ChildDetailView）
-// [2026-06] 本次美化方向：
-//   1. headerCard → 升級為漸層英雄卡片（男孩藍 / 女孩粉）：88pt 大圖示圓 + 散景裝飾圓 +
-//      姓名 .title2.bold（白色），年齡改為白色 Capsule 膠囊、生日加 calendar 圖示，
-//      角色標籤從 RoundedRectangle(cornerRadius:4) 升級為 Capsule；
-//      加入 headerAppeared spring 進場動畫（透明度 + Y 位移），對齊 SpouseResumeView heroCard。
-//   2. detailTab 切換器 → 從系統 .segmented 升級為 @Namespace + matchedGeometryEffect 自訂 Capsule Pill，
-//      日常→藍色（sun.max.fill）、生涯→橘色（star.fill），對齊 RealEstateDetailView.tabPicker 規格。
-//   3. dailySection / recordSection header → 加入 Capsule 漸層側條 + 計數膠囊徽章 + .subheadline.semibold 標題 +
-//      彩色漸層圖示；Divider 改為 Rectangle fill(separator.opacity(0.20))，
-//      對齊 LifeOverviewView.milestoneTimelineSection / OverviewView.categoryBreakdownSection 標題規格。
-//   4. dailyRow 圖示 → 從 20pt 純色升級為 30pt LinearGradient 漸層圓（對齊 ExpenseRow 圖示規格）；
-//      ml 數值改為彩色膠囊標籤，對齊 ChildrenResumeView.recordBadge 規格。
-//   5. recordRow → 圖示升級為 30pt 漸層圓；allergy/vaccination 子標籤從 RoundedRectangle(cornerRadius:3)
-//      升級為 Capsule，對齊 ChildrenResumeView / VehicleView vehicleCard 膠囊規格。
-//   6. consumptionSection / childGiftsSection header → 加入 Capsule 漸層側條 + 計數膠囊；
-//      consumptionRow 圖示升級為 30pt 漸層圓；分類標籤升級為 Capsule 膠囊。
-//   7. DateFormatter 改為靜態共用實例，避免每次 render 重新分配，對齊 SpouseResumeView 規格。
-//   8. contentAppeared 交錯進場動畫：tab 切換時重置並重播，
-//      對齊 CareerView.milestoneListSection / VariableExpenseView.expenseListSections 規格。
-//   9. 各卡片加 overlay 細邊框（accent.opacity(0.08) + 0.75pt）+ 雙層陰影，深色模式相容。
+// [2026-06 v1] 基礎美化：漸層英雄卡 / matchedGeometryEffect Tab / Capsule 側條段落標題 /
+//              30pt 漸層圖示圓 / 彩色膠囊標籤 / 靜態 DateFormatter / contentAppeared 交錯動畫。
+// [2026-06 v2] 進階美化（對齊 OverviewView / VariableExpenseView v4 規格）：
+//   • headerCard → 玻璃光澤（white.opacity(0.18)→clear，top→center）+ 第三顆散景圓（55pt / blur 8）
+//                  + RoundedRectangle stroke(.white.opacity(0.18), 0.75pt)
+//                  + 角色 / 年齡 Capsule 加 stroke(.white.opacity(0.28–0.30), 0.6pt)
+//   • 圖示圓升至 36pt（dailyRow / recordRow / consumptionRow / childGiftsSection sub）
+//     + 新增 Circle stroke(accent.opacity(0.22), 1pt)；icon 字型 12→14pt
+//   • 日期改為彩色 Capsule 徽章（accent tint + stroke）對齊 CareerView / SpouseResumeView 規格
+//   • consumptionRow 分類 Capsule + stroke(orange.opacity(0.22), 0.6pt)
+//   • childGiftsSection sub 圖示從純色 28pt 升至 36pt LinearGradient + stroke
+//   • 段落分隔線 leading: 50→56（對齊 36pt 圖示 + 14pt padding + 6pt spacing）
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -208,6 +200,7 @@ struct ChildDetailView: View {
                         .padding(.horizontal, 9).padding(.vertical, 3)
                         .background(.white.opacity(0.22))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.6))
                     if !ageString.isEmpty {
                         Text(ageString)
                             .font(.system(size: 11, weight: .semibold))
@@ -215,6 +208,7 @@ struct ChildDetailView: View {
                             .padding(.horizontal, 9).padding(.vertical, 3)
                             .background(.white.opacity(0.16))
                             .clipShape(Capsule())
+                            .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 0.6))
                     }
                 }
                 // 姓名
@@ -268,9 +262,22 @@ struct ChildDetailView: View {
                     .frame(width: 80, height: 80)
                     .offset(x: -60, y: 50)
                     .blur(radius: 10)
+                // 第三顆散景圓：中下補深，增加卡片立體層次
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 8, y: 38)
+                    .blur(radius: 8)
+                // 玻璃光澤：頂部白色高光漸層，對齊 OverviewView monthlyBalanceCard 規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.18), lineWidth: 0.75))
         .shadow(color: gradEnd.opacity(0.42), radius: 18, x: 0, y: 9)
         .padding(.horizontal)
     }
@@ -369,10 +376,19 @@ struct ChildDetailView: View {
                     HStack(spacing: 10) {
                         ZStack {
                             Circle()
-                                .fill(Color.pink.opacity(0.14))
-                                .frame(width: 28, height: 28)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.pink.opacity(0.22), Color.pink.opacity(0.09)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 36, height: 36)
+                            Circle()
+                                .stroke(Color.pink.opacity(0.22), lineWidth: 1)
+                                .frame(width: 36, height: 36)
                             Image(systemName: sub.icon)
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.pink)
                         }
                         Text(sub.rawValue).font(.subheadline)
@@ -388,7 +404,7 @@ struct ChildDetailView: View {
                     Rectangle()
                         .fill(Color(.separator).opacity(0.20))
                         .frame(height: 0.5)
-                        .padding(.leading, 50)
+                        .padding(.leading, 56)
                 }
             }
         }
@@ -471,7 +487,7 @@ struct ChildDetailView: View {
                         Rectangle()
                             .fill(Color(.separator).opacity(0.20))
                             .frame(height: 0.5)
-                            .padding(.leading, 50)
+                            .padding(.leading, 56)
                     }
                 }
                 if items.count > 20 {
@@ -494,7 +510,7 @@ struct ChildDetailView: View {
     private func dailyRow(_ rec: DailyRecord) -> some View {
         let accent = dailyColor(rec.type)
         return HStack(spacing: 12) {
-            // 30pt 漸層圖示圓（對齊 ExpenseRow 規格）
+            // 36pt 漸層圖示圓 + stroke（v2 升級，對齊 VariableExpenseView ExpenseRow 規格）
             ZStack {
                 Circle()
                     .fill(
@@ -504,9 +520,12 @@ struct ChildDetailView: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 30, height: 30)
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .stroke(accent.opacity(0.22), lineWidth: 1)
+                    .frame(width: 36, height: 36)
                 Image(systemName: rec.type.icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(accent)
             }
             VStack(alignment: .leading, spacing: 3) {
@@ -554,8 +573,11 @@ struct ChildDetailView: View {
                     }
                 }
                 Text(Self.dateTimeFormatter.string(from: rec.date))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(accent.opacity(0.72))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(accent.opacity(0.08))
+                    .clipShape(Capsule())
             }
             Spacer()
         }
@@ -650,7 +672,7 @@ struct ChildDetailView: View {
                         Rectangle()
                             .fill(Color(.separator).opacity(0.20))
                             .frame(height: 0.5)
-                            .padding(.leading, 50)
+                            .padding(.leading, 56)
                     }
                 }
                 if exps.count > 20 {
@@ -682,7 +704,7 @@ struct ChildDetailView: View {
 
     private func consumptionRow(_ e: Expense) -> some View {
         HStack(alignment: .center, spacing: 12) {
-            // 30pt 漸層圖示圓
+            // 36pt 漸層圖示圓 + stroke（v2 升級）
             ZStack {
                 Circle()
                     .fill(
@@ -692,9 +714,12 @@ struct ChildDetailView: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 30, height: 30)
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .stroke(Color.orange.opacity(0.22), lineWidth: 1)
+                    .frame(width: 36, height: 36)
                 Image(systemName: e.variableCategory?.icon ?? "questionmark.circle")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.orange)
             }
             VStack(alignment: .leading, spacing: 3) {
@@ -703,7 +728,11 @@ struct ChildDetailView: View {
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(Self.shortDateFormatter.string(from: e.date))
-                        .font(.caption2).foregroundStyle(.tertiary)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                     if let cat = e.variableCategory {
                         Text(cat.rawValue)
                             .font(.system(size: 10, weight: .semibold))
@@ -711,6 +740,7 @@ struct ChildDetailView: View {
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Color.orange.opacity(0.10))
                             .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
                     }
                     if let raw = e.diningMember, !raw.isEmpty {
                         Text(raw).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -810,7 +840,7 @@ struct ChildDetailView: View {
                         Rectangle()
                             .fill(Color(.separator).opacity(0.20))
                             .frame(height: 0.5)
-                            .padding(.leading, 50)
+                            .padding(.leading, 56)
                     }
                 }
             }
@@ -833,7 +863,7 @@ struct ChildDetailView: View {
             else { showPremiumAlert = true }
         } label: {
             HStack(alignment: .center, spacing: 12) {
-                // 30pt 漸層圖示圓
+                // 36pt 漸層圖示圓 + stroke（v2 升級）
                 ZStack {
                     Circle()
                         .fill(
@@ -843,9 +873,12 @@ struct ChildDetailView: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .frame(width: 30, height: 30)
+                        .frame(width: 36, height: 36)
+                    Circle()
+                        .stroke(accent.opacity(0.22), lineWidth: 1)
+                        .frame(width: 36, height: 36)
                     Image(systemName: rec.type.icon)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(accent)
                 }
                 VStack(alignment: .leading, spacing: 4) {
@@ -874,9 +907,14 @@ struct ChildDetailView: View {
                         }
                     }
                     HStack(spacing: 6) {
-                        Text(Self.dateFormatter.string(from: rec.date)).font(.caption2).foregroundStyle(.tertiary)
+                        Text(Self.dateFormatter.string(from: rec.date))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(accent.opacity(0.80))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(accent.opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(accent.opacity(0.20), lineWidth: 0.5))
                         if !rec.detail.isEmpty {
-                            Text("·").foregroundStyle(.tertiary)
                             Text(rec.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
