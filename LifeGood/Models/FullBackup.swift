@@ -60,19 +60,10 @@ enum FullBackup {
         let fm = FileManager.default
         progress?(0)
 
-<<<<<<< Updated upstream
-        // 收集所有模組的附件檔（fileSizeKey 在 contentsOfDirectory 時一次取得，避免 N 次 attributesOfItem 系統呼叫）
-        let files = gatherAttachmentFiles()
+        // 收集附件檔（依時間範圍篩選；size 在 contentsOfDirectory 時一次取得，避免 N 次 attributesOfItem）
+        let files = gatherAttachmentFiles(in: photoRange)
         let manifestAtts: [BackupAttachment] = files.map {
             BackupAttachment(directory: $0.dir, fileName: $0.name, size: $0.size)
-=======
-        // 收集附件檔（可依檔案建立 / 修改時間篩選，縮小檔案）
-        let files = gatherAttachmentFiles(in: photoRange)
-        var manifestAtts: [BackupAttachment] = []
-        for f in files {
-            let size = (try? fm.attributesOfItem(atPath: f.url.path)[.size] as? Int) ?? 0
-            manifestAtts.append(BackupAttachment(directory: f.dir, fileName: f.name, size: size))
->>>>>>> Stashed changes
         }
 
         let manifest = BackupManifest(formatVersion: 1, createdAt: Date(),
@@ -158,36 +149,23 @@ enum FullBackup {
 
     // MARK: - Helpers
 
-<<<<<<< Updated upstream
-    private static func gatherAttachmentFiles() -> [(dir: String, name: String, url: URL, size: Int)] {
-=======
-    private static func gatherAttachmentFiles(in range: ClosedRange<Date>?) -> [(dir: String, name: String, url: URL)] {
->>>>>>> Stashed changes
+    private static func gatherAttachmentFiles(in range: ClosedRange<Date>?) -> [(dir: String, name: String, url: URL, size: Int)] {
         let fm = FileManager.default
         guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return [] }
         var out: [(String, String, URL, Int)] = []
         for dir in CloudKitManager.photoDirectories {
             let dirURL = docs.appendingPathComponent(dir, isDirectory: true)
-<<<<<<< Updated upstream
             guard let urls = try? fm.contentsOfDirectory(
                 at: dirURL,
-                includingPropertiesForKeys: [.fileSizeKey],
+                includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
                 options: .skipsHiddenFiles
             ) else { continue }
             for url in urls {
-                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                let rv = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+                // 依檔案修改時間篩選；取不到時間就保留（寧可多備不漏）
+                if let range, let mod = rv?.contentModificationDate, !range.contains(mod) { continue }
+                let size = rv?.fileSize ?? 0
                 out.append((dir, url.lastPathComponent, url, size))
-=======
-            guard let names = try? fm.contentsOfDirectory(atPath: dirURL.path) else { continue }
-            for n in names where !n.hasPrefix(".") {
-                let url = dirURL.appendingPathComponent(n)
-                if let range {
-                    // 依檔案修改時間篩選；取不到時間就保留（寧可多備不漏）
-                    let attrs = try? fm.attributesOfItem(atPath: url.path)
-                    if let mod = attrs?[.modificationDate] as? Date, !range.contains(mod) { continue }
-                }
-                out.append((dir, n, url))
->>>>>>> Stashed changes
             }
         }
         return out
