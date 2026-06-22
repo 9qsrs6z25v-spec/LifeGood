@@ -58,6 +58,68 @@ enum ShareItem: Identifiable {
     }
 }
 
+// MARK: - 完整備份：照片時間範圍選擇
+
+struct BackupRangeSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onConfirm: (ClosedRange<Date>?) -> Void
+
+    @State private var option = 0   // 0 全部 / 1 最近一年 / 2 最近三年 / 3 自訂
+    @State private var start = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+    @State private var end = Date()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("照片範圍", selection: $option) {
+                        Text("全部").tag(0)
+                        Text("最近一年").tag(1)
+                        Text("最近三年").tag(2)
+                        Text("自訂").tag(3)
+                    }
+                    if option == 3 {
+                        DatePicker("起", selection: $start, displayedComponents: .date)
+                        DatePicker("訖", selection: $end, displayedComponents: .date)
+                    }
+                } header: {
+                    Text("照片 / 文件時間範圍")
+                } footer: {
+                    Text("結構化資料一律完整備份；此範圍只用來篩選照片 / 文件以縮小檔案，依檔案時間判斷。")
+                }
+                Section {
+                    Button {
+                        onConfirm(resolvedRange())
+                        dismiss()
+                    } label: {
+                        Label("開始完整備份", systemImage: "archivebox.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .foregroundStyle(.green).bold()
+                }
+            }
+            .navigationTitle("完整備份")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+            }
+        }
+    }
+
+    private func resolvedRange() -> ClosedRange<Date>? {
+        let cal = Calendar.current
+        switch option {
+        case 1: return (cal.date(byAdding: .year, value: -1, to: Date()) ?? Date())...Date()
+        case 2: return (cal.date(byAdding: .year, value: -3, to: Date()) ?? Date())...Date()
+        case 3:
+            let lo = cal.startOfDay(for: min(start, end))
+            let hi = cal.date(bySettingHour: 23, minute: 59, second: 59, of: max(start, end)) ?? max(start, end)
+            return lo...hi
+        default: return nil
+        }
+    }
+}
+
 // MARK: - 設定頁面
 
 struct SettingsView: View {
@@ -85,6 +147,7 @@ struct SettingsView: View {
     @State private var pendingImportData: Data?
     @State private var pendingBackupURL: URL?      // 完整備份檔（含照片）匯入用
     @State private var backupBusy = false
+    @State private var showBackupRange = false     // 完整備份的時間範圍選擇
     @State private var importResultMessage = ""
     @State private var showImportResult = false
 
@@ -174,6 +237,13 @@ struct SettingsView: View {
             // 隱藏管理控制台
             .sheet(isPresented: $showAdminConsole) {
                 AdminConsoleView()
+            }
+            // 完整備份：照片時間範圍選擇
+            .sheet(isPresented: $showBackupRange) {
+                BackupRangeSheet { range in
+                    exportFullBackup(photoRange: range)
+                }
+                .presentationDetents([.height(360)])
             }
             // 匯出錯誤
             .alert("匯出失敗", isPresented: $showExportError) {
@@ -809,7 +879,7 @@ struct SettingsView: View {
 
             // 完整備份（含照片 / 文件）
             Button {
-                exportFullBackup()
+                showBackupRange = true
             } label: {
                 HStack(spacing: 14) {
                     ZStack {
@@ -1290,14 +1360,14 @@ struct SettingsView: View {
     }
 
     /// 完整備份（含照片 / 文件）：結構化資料在主執行緒準備，檔案 I/O 丟背景，避免卡 UI。
-    private func exportFullBackup() {
+    private func exportFullBackup(photoRange: ClosedRange<Date>?) {
         backupBusy = true
         ExportProgressModel.shared.isExporting = true
         ExportProgressModel.shared.fraction = 0
         let unified = UnifiedExport.build(expense: store, finance: financeStore, life: lifeStore)
         Task.detached {
             do {
-                let url = try FullBackup.export(unified: unified) { f in
+                let url = try FullBackup.export(unified: unified, photoRange: photoRange) { f in
                     Task { @MainActor in ExportProgressModel.shared.update(f) }
                 }
                 await MainActor.run {

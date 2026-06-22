@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.40", build: 507, date: "2026/06/11", notes: [
+            "完整備份可選照片時間範圍（全部 / 最近一年 / 最近三年 / 自訂），避免照片過多時檔案過大；結構化資料一律完整。"
+        ]),
         ChangelogEntry(version: "22.39", build: 506, date: "2026/06/22", notes: [
             "【靜態除錯 v22.39】發現並修復三個畫面缺少 onDisappear 進場動畫旗標重置的問題：① OrganizationView.peopleAppeared：唯一的 peopleAppeared 旗標未在 onDisappear 重置，使用者切換分頁後返回組織圖頁時人員列表進場動畫不再播放；補 .onDisappear { peopleAppeared = false }。② SubordinateOverviewView：heroAppeared / sectionAppeared 兩個旗標均缺 onDisappear 重置，切換分頁後返回部屬總覽時英雄卡與統計區塊進場動畫不再播放；補 .onDisappear { heroAppeared = false; sectionAppeared = false }。③ FinanceOverviewView：appearedCards（各資產卡）/ miniBarAppeared / allocationBarAppeared / allocationRowsAppeared / cashFlowSectionAppeared 五組旗標全部缺 onDisappear 重置，切換分頁後返回理財總覽時所有進場動畫均不再播放；按各節點分別補對應 onDisappear 重置，對齊 v22.36 LifeOverviewView / v22.35 CareerView / v22.24 FamilyView 同型修復規格。全域掃描（force unwrap、Optional、競態條件、CloudKit 節流、主執行緒重運算、index 越界）：其餘防護機制均確認正常。"
         ]),

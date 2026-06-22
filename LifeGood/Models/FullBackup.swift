@@ -55,14 +55,24 @@ enum FullBackup {
 
     /// 產生完整備份檔，回傳暫存檔 URL（給分享）。串流寫入：每個附件單獨讀寫，不整包進記憶體。
     /// unified 由呼叫端在主執行緒先用 UnifiedExport.build 準備好傳入，本函式只做檔案 I/O，可在背景執行。
-    static func export(unified: UnifiedExport, progress: ((Double) -> Void)? = nil) throws -> URL {
+    static func export(unified: UnifiedExport, photoRange: ClosedRange<Date>? = nil,
+                       progress: ((Double) -> Void)? = nil) throws -> URL {
         let fm = FileManager.default
         progress?(0)
 
+<<<<<<< Updated upstream
         // 收集所有模組的附件檔（fileSizeKey 在 contentsOfDirectory 時一次取得，避免 N 次 attributesOfItem 系統呼叫）
         let files = gatherAttachmentFiles()
         let manifestAtts: [BackupAttachment] = files.map {
             BackupAttachment(directory: $0.dir, fileName: $0.name, size: $0.size)
+=======
+        // 收集附件檔（可依檔案建立 / 修改時間篩選，縮小檔案）
+        let files = gatherAttachmentFiles(in: photoRange)
+        var manifestAtts: [BackupAttachment] = []
+        for f in files {
+            let size = (try? fm.attributesOfItem(atPath: f.url.path)[.size] as? Int) ?? 0
+            manifestAtts.append(BackupAttachment(directory: f.dir, fileName: f.name, size: size))
+>>>>>>> Stashed changes
         }
 
         let manifest = BackupManifest(formatVersion: 1, createdAt: Date(),
@@ -148,12 +158,17 @@ enum FullBackup {
 
     // MARK: - Helpers
 
+<<<<<<< Updated upstream
     private static func gatherAttachmentFiles() -> [(dir: String, name: String, url: URL, size: Int)] {
+=======
+    private static func gatherAttachmentFiles(in range: ClosedRange<Date>?) -> [(dir: String, name: String, url: URL)] {
+>>>>>>> Stashed changes
         let fm = FileManager.default
         guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return [] }
         var out: [(String, String, URL, Int)] = []
         for dir in CloudKitManager.photoDirectories {
             let dirURL = docs.appendingPathComponent(dir, isDirectory: true)
+<<<<<<< Updated upstream
             guard let urls = try? fm.contentsOfDirectory(
                 at: dirURL,
                 includingPropertiesForKeys: [.fileSizeKey],
@@ -162,6 +177,17 @@ enum FullBackup {
             for url in urls {
                 let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                 out.append((dir, url.lastPathComponent, url, size))
+=======
+            guard let names = try? fm.contentsOfDirectory(atPath: dirURL.path) else { continue }
+            for n in names where !n.hasPrefix(".") {
+                let url = dirURL.appendingPathComponent(n)
+                if let range {
+                    // 依檔案修改時間篩選；取不到時間就保留（寧可多備不漏）
+                    let attrs = try? fm.attributesOfItem(atPath: url.path)
+                    if let mod = attrs?[.modificationDate] as? Date, !range.contains(mod) { continue }
+                }
+                out.append((dir, n, url))
+>>>>>>> Stashed changes
             }
         }
         return out
