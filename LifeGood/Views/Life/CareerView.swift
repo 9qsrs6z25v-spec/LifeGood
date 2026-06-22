@@ -157,6 +157,7 @@ struct CareerView: View {
         .onAppear {
             withAnimation { dashboardAppeared = true }
         }
+        .onDisappear { dashboardAppeared = false }
     }
 
     /// summaryCard：彩色頂端 Capsule 條 + 漸層圖示圓，對齊 OverviewView.summaryCard
@@ -404,6 +405,7 @@ struct CareerView: View {
                         subCatRowsAppeared = true
                     }
                 }
+                .onDisappear { subCatRowsAppeared = false }
             }
         }
     }
@@ -474,6 +476,7 @@ struct CareerView: View {
                         milestoneRowsAppeared = true
                     }
                 }
+                .onDisappear { milestoneRowsAppeared = false }
             }
         }
     }
