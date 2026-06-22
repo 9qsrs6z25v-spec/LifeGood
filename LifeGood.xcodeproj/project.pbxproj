@@ -54,6 +54,7 @@
 		A01B00007A000038 /* Changelog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00007A000038 /* Changelog.swift */; };
 		A01B00007B000038 /* FullBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00007B000038 /* FullBackup.swift */; };
 		A01B000079000038 /* AdminConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000079000038 /* AdminConsoleView.swift */; };
+		A01B00007C000038 /* TalentMatrixView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00007C000038 /* TalentMatrixView.swift */; };
 		A01B000001000101 /* RestaurantSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000101 /* RestaurantSearch.swift */; };
 		A01B000001000102 /* FoodMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000102 /* FoodMapView.swift */; };
 		A01B000001000103 /* MultiPhotoGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000103 /* MultiPhotoGallery.swift */; };
@@ -137,6 +138,7 @@
 		A01A00007A000038 /* Changelog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Changelog.swift; sourceTree = "<group>"; };
 		A01A00007B000038 /* FullBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullBackup.swift; sourceTree = "<group>"; };
 		A01A000079000038 /* AdminConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminConsoleView.swift; sourceTree = "<group>"; };
+		A01A00007C000038 /* TalentMatrixView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalentMatrixView.swift; sourceTree = "<group>"; };
 		A01A000001000101 /* RestaurantSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestaurantSearch.swift; sourceTree = "<group>"; };
 		A01A000001000102 /* FoodMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodMapView.swift; sourceTree = "<group>"; };
 		A01A000001000103 /* MultiPhotoGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiPhotoGallery.swift; sourceTree = "<group>"; };
@@ -300,6 +302,7 @@
 				A01A000001000037 /* ChildrenResumeView.swift */,
 				A01A000001000038 /* SubordinateDetailView.swift */,
 				A01A000077000038 /* SubordinateRosterView.swift */,
+				A01A00007C000038 /* TalentMatrixView.swift */,
 				A01A000001000039 /* ChildDetailView.swift */,
 				A01A00000100003A /* LifeFinanceView.swift */,
 				A01A000001000044 /* MacaronDatePicker.swift */,
@@ -447,6 +450,7 @@
 				A01B00007A000038 /* Changelog.swift in Sources */,
 				A01B00007B000038 /* FullBackup.swift in Sources */,
 				A01B000079000038 /* AdminConsoleView.swift in Sources */,
+				A01B00007C000038 /* TalentMatrixView.swift in Sources */,
 				A01B000001000101 /* RestaurantSearch.swift in Sources */,
 				A01B000001000102 /* FoodMapView.swift in Sources */,
 				A01B000001000103 /* MultiPhotoGallery.swift in Sources */,
@@ -491,7 +495,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 511;
+				CURRENT_PROJECT_VERSION = 512;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -515,7 +519,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 22.44;
+				MARKETING_VERSION = 22.45;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -531,7 +535,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 511;
+				CURRENT_PROJECT_VERSION = 512;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -555,7 +559,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 22.44;
+				MARKETING_VERSION = 22.45;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
