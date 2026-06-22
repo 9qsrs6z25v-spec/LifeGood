@@ -135,6 +135,15 @@ class LifeStore: ObservableObject {
         save()
     }
 
+    /// 切換某場會議底下某個議程項目的完成狀態（部屬詳情頁與總覽頁的打勾共用）。
+    func toggleMeetingItemCompletion(subordinateId: UUID, meetingId: UUID, itemId: UUID) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
+              let mi = subordinates[si].meetings.firstIndex(where: { $0.id == meetingId }),
+              let ii = subordinates[si].meetings[mi].items.firstIndex(where: { $0.id == itemId }) else { return }
+        subordinates[si].meetings[mi].items[ii].isCompleted.toggle()
+        save()
+    }
+
     // MARK: - 班表（班別指派）
 
     /// 設定某位部屬某一天的班別；type 傳 nil 表示清除該天班別。

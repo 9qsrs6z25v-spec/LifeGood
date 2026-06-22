@@ -432,6 +432,18 @@ struct SubordinateDetailView: View {
                     }
                     .buttonStyle(.plain)
 
+                    // 議程項目（可打勾完成）
+                    if !m.items.isEmpty {
+                        VStack(spacing: 0) {
+                            ForEach(m.items) { item in
+                                meetingItemRow(meeting: m, item: item)
+                            }
+                        }
+                        .padding(.leading, 64)
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 8)
+                    }
+
                     if idx < items.count - 1 {
                         Divider().padding(.leading, 64)
                     }
@@ -446,6 +458,36 @@ struct SubordinateDetailView: View {
         )
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+    }
+
+    /// 會議議程項目列：左側打勾圓圈（切換完成）+ 內容（完成時刪除線）。
+    private func meetingItemRow(meeting m: SubordinateMeeting, item: MeetingItem) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                lifeStore.toggleMeetingItemCompletion(subordinateId: subordinateId, meetingId: m.id, itemId: item.id)
+            } label: {
+                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16))
+                    .foregroundStyle(item.isCompleted ? Color.green : Color.indigo.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+
+            Text(item.content.isEmpty ? "未填內容" : item.content)
+                .font(.caption)
+                .strikethrough(item.isCompleted, color: .secondary)
+                .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                .lineLimit(3)
+
+            Spacer(minLength: 0)
+
+            if let due = item.dueDate {
+                Text(formatDate(due))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 5)
+        .opacity(item.isCompleted ? 0.7 : 1)
     }
 
     // MARK: - 任務章節
