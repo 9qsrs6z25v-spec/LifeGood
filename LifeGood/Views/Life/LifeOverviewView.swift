@@ -133,6 +133,7 @@ struct LifeOverviewView: View {
         .onAppear {
             withAnimation { statsCardAppeared = true }
         }
+        .onDisappear { statsCardAppeared = false }
     }
 
     private func statBadge(title: String, count: Int, icon: String, color: Color) -> some View {
@@ -318,6 +319,7 @@ struct LifeOverviewView: View {
                 .onAppear {
                     withAnimation { timelineRowsAppeared = true }
                 }
+                .onDisappear { timelineRowsAppeared = false }
             }
         }
     }
@@ -519,6 +521,7 @@ struct LifeOverviewView: View {
                             withAnimation { categoryRowsAppeared = true }
                         }
                     }
+                    .onDisappear { categoryRowsAppeared = false }
                 }
             }
         }

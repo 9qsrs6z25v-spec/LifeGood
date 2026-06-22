@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.36", build: 505, date: "2026/06/22", notes: [
+            "【靜態除錯 v22.36】發現並修復兩個進場動畫旗標缺少 onDisappear 重置的問題：① LifeOverviewView 三個旗標（statsCardAppeared / timelineRowsAppeared / categoryRowsAppeared）均無 .onDisappear { flag = false }；當使用者滾動使各區塊離開畫面後再捲回，或切換功能後返回，旗標已為 true，進場動畫不再播放；補三處 .onDisappear 重置，對齊 v22.35 CareerView / v22.24 FamilyView 同型修復規格。② MyCalendarView 四個旗標（heroCardAppeared / todayCardAppeared / weekCardAppeared / milestonesCardAppeared）同樣缺少 .onDisappear 重置；補四處，確保每次返回行事曆頁時進場動畫正確重播。全域掃描（force unwrap、Optional、競態條件、CloudKit 節流、主執行緒重運算、index 越界）：其餘防護機制均確認正常。"
+        ]),
         ChangelogEntry(version: "22.35", build: 504, date: "2026/06/22", notes: [
             "【靜態除錯 v22.35】CareerView 三個進場動畫旗標（dashboardAppeared / subCatRowsAppeared / milestoneRowsAppeared）缺少 onDisappear 重置：使用者切換分頁後返回職涯頁，旗標已為 true，onAppear 觸發時動畫不再播放；補三處 .onDisappear { flag = false }，對齊 v22.24 FamilyView / v22.30 EInvoiceSetupView / v22.33 FamilyOverviewMap 同型修復規格。全域掃描（force unwrap、Optional、競態條件、CloudKit 節流、主執行緒重運算、index 越界）：FinanceChartView v5 膠囊邊框均為純視覺修飾確認安全；其餘防護機制均正常。"
         ]),
