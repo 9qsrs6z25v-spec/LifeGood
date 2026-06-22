@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.35", build: 504, date: "2026/06/22", notes: [
+            "【靜態除錯 v22.35】CareerView 三個進場動畫旗標（dashboardAppeared / subCatRowsAppeared / milestoneRowsAppeared）缺少 onDisappear 重置：使用者切換分頁後返回職涯頁，旗標已為 true，onAppear 觸發時動畫不再播放；補三處 .onDisappear { flag = false }，對齊 v22.24 FamilyView / v22.30 EInvoiceSetupView / v22.33 FamilyOverviewMap 同型修復規格。全域掃描（force unwrap、Optional、競態條件、CloudKit 節流、主執行緒重運算、index 越界）：FinanceChartView v5 膠囊邊框均為純視覺修飾確認安全；其餘防護機制均正常。"
+        ]),
         ChangelogEntry(version: "22.34", build: 503, date: "2026/06/21", notes: [
             "【UI 美化 v5】FinanceChartView：補齊三大 section 膠囊細邊框——① stockPerformanceSection 股票代號膠囊 + 報酬率膠囊補入 .overlay(Capsule().stroke(plC.opacity(0.22), lineWidth: 0.6))；② realEstatePerformanceSection 升值率膠囊補入 appColor.opacity(0.22) 細邊框、租報率膠囊補入 Color.blue.opacity(0.22) 細邊框；③ insuranceSummarySection 已繳金額中性膠囊補入 Color(.separator).opacity(0.40) 細邊框、預估報酬率膠囊補入 rateColor.opacity(0.22) 細邊框；全頁所有 Capsule 標籤均具備 0.6pt 描邊，對齊 sectionHeader 計數膠囊 / allocationChart 百分比膠囊全 App 膠囊視覺語言規格。"
         ]),
