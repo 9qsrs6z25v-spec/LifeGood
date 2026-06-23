@@ -86,15 +86,37 @@ struct SubordinateOverviewView: View {
         .sorted { $0.meeting.date < $1.meeting.date }
     }
 
-    // MARK: - 當日報告
+    // MARK: - 報告（本週全部 + 任何未完成 / 逾期）
 
-    private var todayReports: [(sub: Subordinate, report: WeeklyReport)] {
-        lifeStore.subordinates.flatMap { sub in
-            sub.weeklyReports
-                .filter { isSameDay($0.date, selectedDate) }
-                .map { (sub, $0) }
+    /// 報告呈現狀態
+    enum ReportStatus { case overdue, thisWeek, pending, done }
+
+    /// 選取日所在的自然週區間 [週起, 下週起)
+    private var weekInterval: DateInterval {
+        calendar.dateInterval(of: .weekOfYear, for: selectedDate)
+            ?? DateInterval(start: calendar.startOfDay(for: selectedDate), duration: 86_400)
+    }
+
+    /// 顯示規則：本週的報告（含已完成）+ 任何未完成的報告（含逾期、未來週）
+    /// 排序：未完成優先（逾期最前 → 日期舊到新），其後已完成（日期新到舊）
+    private var displayedReports: [(sub: Subordinate, report: WeeklyReport, status: ReportStatus)] {
+        let wk = weekInterval
+        return lifeStore.subordinates.flatMap { sub in
+            sub.weeklyReports.compactMap { r -> (sub: Subordinate, report: WeeklyReport, status: ReportStatus)? in
+                let inWeek = wk.contains(r.date)
+                if r.isCompleted {
+                    return inWeek ? (sub, r, .done) : nil       // 已完成只顯示本週
+                }
+                if r.date < wk.start { return (sub, r, .overdue) }   // 逾期未完成
+                if inWeek            { return (sub, r, .thisWeek) }   // 本週未完成
+                return (sub, r, .pending)                            // 未來週、未完成
+            }
         }
-        .sorted { $0.report.date < $1.report.date }
+        .sorted { a, b in
+            if a.report.isCompleted != b.report.isCompleted { return !a.report.isCompleted }
+            return a.report.isCompleted ? a.report.date > b.report.date
+                                        : a.report.date < b.report.date
+        }
     }
 
     // MARK: - 當日任務（進行中或當日到期）
@@ -234,16 +256,17 @@ struct SubordinateOverviewView: View {
     // MARK: - 報告彙整
 
     private var reportSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("報告", icon: "doc.text.fill", color: .purple, count: todayReports.count)
+        let rows = displayedReports
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("報告（本週 / 待辦）", icon: "doc.text.fill", color: .purple, count: rows.count)
 
-            if todayReports.isEmpty {
-                emptyHint("當日無報告", icon: "doc.text.fill", color: .purple)
+            if rows.isEmpty {
+                emptyHint("本週無報告、無待辦報告", icon: "doc.text.fill", color: .purple)
             } else {
-                ForEach(Array(todayReports.enumerated()), id: \.element.report.id) { idx, item in
-                    reportRow(item.sub, item.report)
+                ForEach(Array(rows.enumerated()), id: \.element.report.id) { idx, item in
+                    reportRow(item.sub, item.report, status: item.status)
 
-                    if idx < todayReports.count - 1 {
+                    if idx < rows.count - 1 {
                         Divider().padding(.leading, 62)
                     }
                 }
@@ -260,8 +283,19 @@ struct SubordinateOverviewView: View {
         .padding(.horizontal)
     }
 
-    private func reportRow(_ sub: Subordinate, _ report: WeeklyReport) -> some View {
-        HStack(spacing: 12) {
+    /// 狀態標籤文案與顏色
+    private func reportStatusBadge(_ status: ReportStatus) -> (text: String, color: Color)? {
+        switch status {
+        case .overdue:  return ("逾期", .red)
+        case .thisWeek: return ("本週", .purple)
+        case .pending:  return ("待辦", .orange)
+        case .done:     return nil
+        }
+    }
+
+    private func reportRow(_ sub: Subordinate, _ report: WeeklyReport, status: ReportStatus) -> some View {
+        let badge = reportStatusBadge(status)
+        return HStack(spacing: 12) {
             Button {
                 lifeStore.toggleWeeklyReportCompletion(subordinateId: sub.id, reportId: report.id)
             } label: {
@@ -272,11 +306,21 @@ struct SubordinateOverviewView: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(report.topic.isEmpty ? "未命名報告" : report.topic)
-                    .font(.subheadline.weight(.semibold))
-                    .strikethrough(report.isCompleted, color: .secondary)
-                    .foregroundStyle(report.isCompleted ? .secondary : .primary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(report.topic.isEmpty ? "未命名報告" : report.topic)
+                        .font(.subheadline.weight(.semibold))
+                        .strikethrough(report.isCompleted, color: .secondary)
+                        .foregroundStyle(report.isCompleted ? .secondary : .primary)
+                        .lineLimit(1)
+                    if let badge {
+                        Text(badge.text)
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(badge.color.opacity(0.15))
+                            .foregroundStyle(badge.color)
+                            .clipShape(Capsule())
+                    }
+                }
                 HStack(spacing: 6) {
                     Text(sub.name.isEmpty ? "未命名" : sub.name)
                         .font(.caption2.weight(.semibold))
@@ -284,6 +328,13 @@ struct SubordinateOverviewView: View {
                         .background(Color.purple.opacity(0.12))
                         .foregroundStyle(.purple)
                         .clipShape(Capsule())
+                    HStack(spacing: 3) {
+                        Image(systemName: "calendar").font(.system(size: 8))
+                        Text(reportDateText(report.date))
+                    }
+                    .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color(.tertiarySystemFill)).clipShape(Capsule())
                     if !report.note.isEmpty {
                         Text(report.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -295,6 +346,13 @@ struct SubordinateOverviewView: View {
         .opacity(report.isCompleted ? 0.7 : 1)
         .contentShape(Rectangle())
         .onTapGesture { editTarget = .report(subId: sub.id, report: report) }
+    }
+
+    private func reportDateText(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d (E)"
+        return f.string(from: date)
     }
 
     // MARK: - 會議

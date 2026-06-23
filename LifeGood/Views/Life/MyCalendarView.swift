@@ -859,11 +859,46 @@ struct MyCalendarView: View {
             sub.meetings.filter { calendar.isDate($0.date, inSameDayAs: date) }.map { (sub: sub, meeting: $0) }
         }
     }
-    private func subReports(on date: Date) -> [(sub: Subordinate, report: WeeklyReport)] {
-        lifeStore.subordinates.flatMap { sub in
-            sub.weeklyReports.filter { calendar.isDate($0.date, inSameDayAs: date) }.map { (sub: sub, report: $0) }
+    /// 報告呈現狀態（與部屬總覽一致）
+    enum SubReportStatus { case overdue, thisWeek, pending, done }
+
+    /// 顯示規則：所在週的全部報告（含已完成）+ 任何未完成報告（含逾期、未來週）
+    /// 排序：未完成優先（逾期最前→日期舊到新），其後已完成（日期新到舊）
+    private func subReports(on date: Date) -> [(sub: Subordinate, report: WeeklyReport, status: SubReportStatus)] {
+        let wk = calendar.dateInterval(of: .weekOfYear, for: date)
+            ?? DateInterval(start: calendar.startOfDay(for: date), duration: 86_400)
+        return lifeStore.subordinates.flatMap { sub in
+            sub.weeklyReports.compactMap { r -> (sub: Subordinate, report: WeeklyReport, status: SubReportStatus)? in
+                let inWeek = wk.contains(r.date)
+                if r.isCompleted { return inWeek ? (sub, r, .done) : nil }
+                if r.date < wk.start { return (sub, r, .overdue) }
+                if inWeek            { return (sub, r, .thisWeek) }
+                return (sub, r, .pending)
+            }
+        }
+        .sorted { a, b in
+            if a.report.isCompleted != b.report.isCompleted { return !a.report.isCompleted }
+            return a.report.isCompleted ? a.report.date > b.report.date
+                                        : a.report.date < b.report.date
         }
     }
+    /// 報告狀態 → 標籤文字與強調色
+    private func subReportMeta(_ status: SubReportStatus) -> (label: String?, color: Color) {
+        switch status {
+        case .overdue:  return ("逾期", .red)
+        case .thisWeek: return ("本週", .purple)
+        case .pending:  return ("待辦", .orange)
+        case .done:     return (nil, .green)
+        }
+    }
+
+    private func subReportDateText(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d (E)"
+        return f.string(from: date)
+    }
+
     private func subTasks(on date: Date) -> [(sub: Subordinate, task: SubordinateTask)] {
         lifeStore.subordinates.flatMap { sub in
             sub.tasks.filter { t in
@@ -898,12 +933,17 @@ struct MyCalendarView: View {
                                  sub: it.rec.content, accent: .teal, icon: "calendar.badge.minus")
                 }
             }
-            subAgendaCard("部屬報告", "doc.text.fill", .purple, count: reports.count, empty: "當日無報告") {
+            subAgendaCard("部屬報告（本週/待辦）", "doc.text.fill", .purple, count: reports.count, empty: "本週無報告、無待辦報告") {
                 ForEach(Array(reports.enumerated()), id: \.element.report.id) { _, it in
+                    let meta = subReportMeta(it.status)
+                    let dateStr = subReportDateText(it.report.date)
+                    let detail = [meta.label.map { "\($0) · \(dateStr)" } ?? dateStr,
+                                  it.report.note.isEmpty ? nil : it.report.note]
+                        .compactMap { $0 }.joined(separator: " · ")
                     subAgendaCheckRow(name: it.sub.name,
                                       text: it.report.topic.isEmpty ? "未命名報告" : it.report.topic,
-                                      detail: it.report.note.isEmpty ? nil : it.report.note,
-                                      done: it.report.isCompleted, accent: .purple) {
+                                      detail: detail,
+                                      done: it.report.isCompleted, accent: meta.color) {
                         lifeStore.toggleWeeklyReportCompletion(subordinateId: it.sub.id, reportId: it.report.id)
                     }
                 }
