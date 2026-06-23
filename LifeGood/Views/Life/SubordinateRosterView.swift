@@ -102,6 +102,7 @@ struct SubordinateRosterView: View {
     @State private var selectedDeptId: UUID? = nil
     @State private var detail: RosterCell?
     @State private var showSettings = false
+    @State private var hOffset: CGFloat = 0   // 日格水平捲動位移（同步凍結表頭）
     @State private var emptyIconPulse = false
 
     private let nameColWidth: CGFloat = 88
@@ -355,41 +356,28 @@ struct SubordinateRosterView: View {
                         }
                         .frame(width: nameColWidth)
 
-                        ScrollView(.horizontal, showsIndicators: true) {
-                            VStack(spacing: 0) {
-                                ForEach(rosterRows) { row in
-                                    switch row {
-                                    case .header:        gridHeaderRow()
-                                    case .person(let p): HStack(spacing: 0) { ForEach(days, id: \.self) { d in cell(p, d) } }
-                                    }
-                                }
-                            }
-                            .background(
-                                GeometryReader { g in
-                                    // 內容左緣相對「外層固定容器」的位置 = nameColWidth + 水平捲動量
-                                    Color.clear.preference(key: RosterHOffsetKey.self,
-                                                           value: g.frame(in: .named("rosterArea")).minX)
-                                }
-                            )
-                        }
-                        .frame(width: viewportW)
+                        rosterHScroll(bodyWidth: bodyWidth)
+                            .frame(width: viewportW)
                     }
                 }
             }
             .coordinateSpace(name: "rosterArea")
-            .overlayPreferenceValue(RosterHOffsetKey.self) { minX in
-                // 直接由捲動位移即時重建凍結表頭（minX 含姓名欄寬，扣除後為純水平位移）
+            .onPreferenceChange(RosterHOffsetKey.self) { value in
+                // iOS 17 後援：由偏好值推算水平位移（捲右為負）
+                hOffset = value - nameColWidth
+            }
+            .overlay(alignment: .topLeading) {
+                // 凍結表頭：以實際水平捲動量即時平移（hOffset 由捲動內容回報）
                 HStack(spacing: 0) {
                     Color.clear.frame(width: nameColWidth, height: headerH)
                     HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
                         .frame(width: bodyWidth, alignment: .leading)
-                        .offset(x: minX - nameColWidth)
+                        .offset(x: hOffset)
                         .frame(width: viewportW, alignment: .leading)
                         .clipped()
                 }
                 .frame(height: headerH)
                 .background(Color(.systemBackground))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .allowsHitTesting(false)
             }
             .background(Color(.systemBackground))
@@ -398,6 +386,38 @@ struct SubordinateRosterView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, 8)
+    }
+
+    /// 日格水平捲動區：iOS 18 直接讀 contentOffset 同步表頭；iOS 17 退回偏好值量測。
+    @ViewBuilder
+    private func rosterHScroll(bodyWidth: CGFloat) -> some View {
+        let content = ScrollView(.horizontal, showsIndicators: true) {
+            VStack(spacing: 0) {
+                ForEach(rosterRows) { row in
+                    switch row {
+                    case .header:        gridHeaderRow()
+                    case .person(let p): HStack(spacing: 0) { ForEach(days, id: \.self) { d in cell(p, d) } }
+                    }
+                }
+            }
+            .background(
+                GeometryReader { g in
+                    // iOS 17 後援：內容左緣相對外層固定容器的位置 = nameColWidth + 水平捲動量
+                    Color.clear.preference(key: RosterHOffsetKey.self,
+                                           value: g.frame(in: .named("rosterArea")).minX)
+                }
+            )
+        }
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.x
+            } action: { _, x in
+                // 捲右 contentOffset 為正，表頭需往左 → 取負
+                hOffset = -x
+            }
+        } else {
+            content
+        }
     }
 
     private func nameCell(_ sub: Subordinate) -> some View {
