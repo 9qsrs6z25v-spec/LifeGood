@@ -844,7 +844,8 @@ struct AddSubordinateView: View {
             tasks: editing?.tasks ?? [],
             // 帶回既有班別，避免編輯部屬後排好的班被清掉
             shifts: editing?.shifts ?? [],
-            plantArea: hasPlantArea ? plantArea.trimmingCharacters(in: .whitespaces) : ""
+            plantArea: hasPlantArea ? plantArea.trimmingCharacters(in: .whitespaces) : "",
+            weeklyReports: editing?.weeklyReports ?? []
         )
         if editing != nil { lifeStore.update(item) } else { lifeStore.add(item) }
         dismiss()

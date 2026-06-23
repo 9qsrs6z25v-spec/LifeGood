@@ -41,6 +41,8 @@ struct SubordinateDetailView: View {
     @State private var editingMeeting: SubordinateMeeting?
     @State private var addingTask = false
     @State private var editingTask: SubordinateTask?
+    @State private var addingReport = false
+    @State private var editingReport: WeeklyReport?
     @State private var showPremiumAlert = false
 
     // 進場動畫旗標
@@ -128,10 +130,14 @@ struct SubordinateDetailView: View {
                     }
 
                     if detailTab == .daily {
-                        meetingSection
+                        weeklyReportSection
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.00), value: tabSectionsAppeared)
+                        meetingSection
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.03), value: tabSectionsAppeared)
                         taskSection
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
@@ -190,6 +196,12 @@ struct SubordinateDetailView: View {
             }
             .sheet(item: $editingMeeting) { m in
                 MeetingEditorSheet(subordinateId: subordinateId, editing: m)
+            }
+            .sheet(isPresented: $addingReport) {
+                WeeklyReportEditorSheet(subordinateId: subordinateId, editing: nil)
+            }
+            .sheet(item: $editingReport) { r in
+                WeeklyReportEditorSheet(subordinateId: subordinateId, editing: r)
             }
             .sheet(isPresented: $addingTask) {
                 TaskEditorSheet(subordinateId: subordinateId, editing: nil)
@@ -346,6 +358,70 @@ struct SubordinateDetailView: View {
     }
 
     // MARK: - 會議章節
+
+    // MARK: - 週報章節
+
+    private var weeklyReportSection: some View {
+        let items = subordinate.weeklyReports.sorted { $0.date > $1.date }
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("週報", icon: "doc.text.fill", color: .purple, count: items.count) {
+                Button {
+                    if subscription.isPremium { addingReport = true } else { showPremiumAlert = true }
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.purple)
+                }
+            }
+            if items.isEmpty {
+                emptyHint
+            } else {
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, r in
+                    HStack(alignment: .center, spacing: 10) {
+                        Button {
+                            lifeStore.toggleWeeklyReportCompletion(subordinateId: subordinateId, reportId: r.id)
+                        } label: {
+                            Image(systemName: r.isCompleted ? "checkmark.circle.fill" : "circle")
+                                .font(.title3)
+                                .foregroundStyle(r.isCompleted ? Color.green : Color.purple)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            if subscription.isPremium { editingReport = r } else { showPremiumAlert = true }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(r.topic.isEmpty ? "未命名週報" : r.topic)
+                                    .font(.subheadline.weight(.medium))
+                                    .strikethrough(r.isCompleted, color: .secondary)
+                                    .foregroundStyle(r.isCompleted ? .secondary : .primary)
+                                    .lineLimit(1)
+                                HStack(spacing: 3) {
+                                    Image(systemName: "calendar").font(.system(size: 8))
+                                    Text(formatDate(r.date))
+                                }
+                                .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color(.tertiarySystemFill)).clipShape(Capsule())
+                                if !r.note.isEmpty {
+                                    Text(r.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .opacity(r.isCompleted ? 0.7 : 1)
+                    if idx < items.count - 1 { Divider().padding(.leading, 64) }
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+    }
 
     private var meetingSection: some View {
         let items = subordinate.meetings.sorted { $0.date > $1.date }
@@ -1229,6 +1305,88 @@ struct TaskEditorSheet: View {
     private func deleteTask() {
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
         sub.tasks.removeAll { $0.id == e.id }
+        lifeStore.update(sub); dismiss()
+    }
+}
+
+// MARK: - 週報編輯
+
+struct WeeklyReportEditorSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let subordinateId: UUID
+    var editing: WeeklyReport?
+
+    @State private var topic = ""
+    @State private var date = Date()
+    @State private var note = ""
+    @State private var isCompleted = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("週報") {
+                    TextField("週報題目", text: $topic)
+                    HStack {
+                        Text("日期")
+                        Spacer()
+                        FiveMinuteDateTimePicker(selection: $date).fixedSize()
+                    }
+                }
+                Section {
+                    Toggle(isOn: $isCompleted) {
+                        Label("標記為已完成", systemImage: isCompleted ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(isCompleted ? .green : .primary)
+                    }
+                    .tint(.green)
+                }
+                Section("備註") {
+                    TextField("選填", text: $note, axis: .vertical).lineLimit(2...5)
+                }
+                if editing != nil {
+                    Section {
+                        Button(role: .destructive) { deleteReport() } label: { Label("刪除週報", systemImage: "trash") }
+                    }
+                }
+            }
+            .navigationTitle(editing != nil ? "編輯週報" : "新增週報")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(editing != nil ? "儲存" : "新增") { save() }
+                        .bold().foregroundStyle(.green)
+                        .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear {
+                if let e = editing {
+                    topic = e.topic; date = e.date; note = e.note; isCompleted = e.isCompleted
+                } else {
+                    date = FiveMinuteDateTimePicker.defaultSchedulingTime()
+                }
+            }
+        }
+    }
+
+    private func save() {
+        guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        let report = WeeklyReport(
+            id: editing?.id ?? UUID(),
+            topic: topic.trimmingCharacters(in: .whitespaces),
+            date: date,
+            note: note.trimmingCharacters(in: .whitespaces),
+            isCompleted: isCompleted
+        )
+        if let idx = sub.weeklyReports.firstIndex(where: { $0.id == report.id }) { sub.weeklyReports[idx] = report }
+        else { sub.weeklyReports.append(report) }
+        lifeStore.update(sub); dismiss()
+    }
+
+    private func deleteReport() {
+        guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        sub.weeklyReports.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
     }
 }
