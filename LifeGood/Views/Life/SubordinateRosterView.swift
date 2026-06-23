@@ -102,7 +102,6 @@ struct SubordinateRosterView: View {
     @State private var selectedDeptId: UUID? = nil
     @State private var detail: RosterCell?
     @State private var showSettings = false
-    @State private var hOffset: CGFloat = 0   // 日格水平捲動位移（同步凍結表頭）
     @State private var emptyIconPulse = false
 
     private let nameColWidth: CGFloat = 88
@@ -340,15 +339,8 @@ struct SubordinateRosterView: View {
             let bodyWidth = CGFloat(days.count) * cellW
             let viewportW = max(0, geo.size.width - nameColWidth)   // 日格可視寬度（扣掉凍結姓名欄）
             VStack(spacing: 0) {
-                // 凍結表頭列：左上角 + 與內容水平同步的日期列（垂直捲動時固定）
-                HStack(spacing: 0) {
-                    Color.clear.frame(width: nameColWidth, height: headerH)
-                    HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
-                        .frame(width: bodyWidth, alignment: .leading)
-                        .offset(x: hOffset)
-                        .frame(width: viewportW, alignment: .leading)
-                        .clipped()
-                }
+                // 預留凍結表頭的高度（實際表頭改由 overlay 即時繪製，確保水平捲動同步）
+                Color.clear.frame(height: headerH)
 
                 // 內容：凍結姓名欄（固定寬）+ 日格（限定 viewport 寬，水平捲動並回報位移）
                 ScrollView(.vertical, showsIndicators: true) {
@@ -385,9 +377,20 @@ struct SubordinateRosterView: View {
                 }
             }
             .coordinateSpace(name: "rosterArea")
-            .onPreferenceChange(RosterHOffsetKey.self) { value in
-                // 扣掉靜態的姓名欄寬度，得到純水平捲動位移（捲右為負）
-                hOffset = value - nameColWidth
+            .overlayPreferenceValue(RosterHOffsetKey.self) { minX in
+                // 直接由捲動位移即時重建凍結表頭（minX 含姓名欄寬，扣除後為純水平位移）
+                HStack(spacing: 0) {
+                    Color.clear.frame(width: nameColWidth, height: headerH)
+                    HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
+                        .frame(width: bodyWidth, alignment: .leading)
+                        .offset(x: minX - nameColWidth)
+                        .frame(width: viewportW, alignment: .leading)
+                        .clipped()
+                }
+                .frame(height: headerH)
+                .background(Color(.systemBackground))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .allowsHitTesting(false)
             }
             .background(Color(.systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.53", build: 520, date: "2026/06/23", notes: [
+            "部屬班表：修正左右捲動表格時，頂部凍結日期表頭未跟著水平移動的問題（改以 overlayPreferenceValue 即時同步位移）。"
+        ]),
         ChangelogEntry(version: "22.52", build: 519, date: "2026/06/11", notes: [
             "部屬卡片新增『週報』章節（會議上方）：可新增週報題目、勾選完成；每完成一份週報 +3 併入主動性評分。"
         ]),
