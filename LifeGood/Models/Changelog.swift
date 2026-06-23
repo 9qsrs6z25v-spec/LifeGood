@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.56", build: 523, date: "2026/06/23", notes: [
+            "整合：將班表日期表頭水平同步修正、週報→報告改名與報告彙整、當日事件卡精簡等更新併入本線（保留既有美化）。"
+        ]),
         ChangelogEntry(version: "22.55", build: 522, date: "2026/06/23", notes: [
             "我的行事曆『當日事件』卡片不再列入部屬會議與部屬任務（下方已有獨立的部屬事項卡片，避免重複）。"
         ]),
