@@ -41,11 +41,13 @@ struct SubordinateOverviewView: View {
         case leave(subId: UUID, rec: SubordinateRecord)
         case meeting(subId: UUID, meeting: SubordinateMeeting)
         case task(subId: UUID, task: SubordinateTask)
+        case report(subId: UUID, report: WeeklyReport)
         var id: String {
             switch self {
             case .leave(_, let r):   return "l_\(r.id.uuidString)"
             case .meeting(_, let m): return "m_\(m.id.uuidString)"
             case .task(_, let t):    return "t_\(t.id.uuidString)"
+            case .report(_, let r):  return "r_\(r.id.uuidString)"
             }
         }
     }
@@ -82,6 +84,17 @@ struct SubordinateOverviewView: View {
                 .map { (sub, $0) }
         }
         .sorted { $0.meeting.date < $1.meeting.date }
+    }
+
+    // MARK: - 當日報告
+
+    private var todayReports: [(sub: Subordinate, report: WeeklyReport)] {
+        lifeStore.subordinates.flatMap { sub in
+            sub.weeklyReports
+                .filter { isSameDay($0.date, selectedDate) }
+                .map { (sub, $0) }
+        }
+        .sorted { $0.report.date < $1.report.date }
     }
 
     // MARK: - 當日任務（進行中或當日到期）
@@ -146,10 +159,15 @@ struct SubordinateOverviewView: View {
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.05), value: sectionAppeared)
 
+                    reportSection
+                        .opacity(sectionAppeared ? 1 : 0)
+                        .offset(y: sectionAppeared ? 0 : 14)
+                        .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.11), value: sectionAppeared)
+
                     meetingSection
                         .opacity(sectionAppeared ? 1 : 0)
                         .offset(y: sectionAppeared ? 0 : 14)
-                        .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.12), value: sectionAppeared)
+                        .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.15), value: sectionAppeared)
 
                     taskSection
                         .opacity(sectionAppeared ? 1 : 0)
@@ -177,6 +195,8 @@ struct SubordinateOverviewView: View {
                     MeetingEditorSheet(subordinateId: subId, editing: meeting)
                 case .task(let subId, let task):
                     TaskEditorSheet(subordinateId: subId, editing: task)
+                case .report(let subId, let report):
+                    WeeklyReportEditorSheet(subordinateId: subId, editing: report)
                 }
             }
         }
@@ -209,6 +229,72 @@ struct SubordinateOverviewView: View {
         .shadow(color: Color.teal.opacity(0.12), radius: 10, x: 0, y: 4)
         .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
         .padding(.horizontal)
+    }
+
+    // MARK: - 報告彙整
+
+    private var reportSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("報告", icon: "doc.text.fill", color: .purple, count: todayReports.count)
+
+            if todayReports.isEmpty {
+                emptyHint("當日無報告", icon: "doc.text.fill", color: .purple)
+            } else {
+                ForEach(Array(todayReports.enumerated()), id: \.element.report.id) { idx, item in
+                    reportRow(item.sub, item.report)
+
+                    if idx < todayReports.count - 1 {
+                        Divider().padding(.leading, 62)
+                    }
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: Color.purple.opacity(0.12), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
+        .padding(.horizontal)
+    }
+
+    private func reportRow(_ sub: Subordinate, _ report: WeeklyReport) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                lifeStore.toggleWeeklyReportCompletion(subordinateId: sub.id, reportId: report.id)
+            } label: {
+                Image(systemName: report.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(report.isCompleted ? Color.green : Color.purple)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(report.topic.isEmpty ? "未命名報告" : report.topic)
+                    .font(.subheadline.weight(.semibold))
+                    .strikethrough(report.isCompleted, color: .secondary)
+                    .foregroundStyle(report.isCompleted ? .secondary : .primary)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(sub.name.isEmpty ? "未命名" : sub.name)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.12))
+                        .foregroundStyle(.purple)
+                        .clipShape(Capsule())
+                    if !report.note.isEmpty {
+                        Text(report.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .opacity(report.isCompleted ? 0.7 : 1)
+        .contentShape(Rectangle())
+        .onTapGesture { editTarget = .report(subId: sub.id, report: report) }
     }
 
     // MARK: - 會議

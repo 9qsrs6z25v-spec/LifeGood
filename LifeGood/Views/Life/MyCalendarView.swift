@@ -887,6 +887,11 @@ struct MyCalendarView: View {
             sub.meetings.filter { calendar.isDate($0.date, inSameDayAs: date) }.map { (sub: sub, meeting: $0) }
         }
     }
+    private func subReports(on date: Date) -> [(sub: Subordinate, report: WeeklyReport)] {
+        lifeStore.subordinates.flatMap { sub in
+            sub.weeklyReports.filter { calendar.isDate($0.date, inSameDayAs: date) }.map { (sub: sub, report: $0) }
+        }
+    }
     private func subTasks(on date: Date) -> [(sub: Subordinate, task: SubordinateTask)] {
         lifeStore.subordinates.flatMap { sub in
             sub.tasks.filter { t in
@@ -911,6 +916,7 @@ struct MyCalendarView: View {
 
     private func subordinateAgendaSection(date: Date) -> some View {
         let leaves = subLeaves(on: date)
+        let reports = subReports(on: date)
         let meetings = subMeetings(on: date)
         let tasks = subTasks(on: date)
         return VStack(spacing: 16) {
@@ -918,6 +924,16 @@ struct MyCalendarView: View {
                 ForEach(Array(leaves.enumerated()), id: \.offset) { _, it in
                     subAgendaRow(name: it.sub.name, lead: it.rec.leaveType?.rawValue ?? "請假",
                                  sub: it.rec.content, accent: .teal, icon: "calendar.badge.minus")
+                }
+            }
+            subAgendaCard("部屬報告", "doc.text.fill", .purple, count: reports.count, empty: "當日無報告") {
+                ForEach(Array(reports.enumerated()), id: \.element.report.id) { _, it in
+                    subAgendaCheckRow(name: it.sub.name,
+                                      text: it.report.topic.isEmpty ? "未命名報告" : it.report.topic,
+                                      detail: it.report.note.isEmpty ? nil : it.report.note,
+                                      done: it.report.isCompleted, accent: .purple) {
+                        lifeStore.toggleWeeklyReportCompletion(subordinateId: it.sub.id, reportId: it.report.id)
+                    }
                 }
             }
             subAgendaCard("部屬會議", "person.3.fill", .indigo, count: meetings.count, empty: "當日無會議") {

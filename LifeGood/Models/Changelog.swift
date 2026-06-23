@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.54", build: 521, date: "2026/06/23", notes: [
+            "部屬班表：改用 onScrollGeometryChange 直接讀取捲動位移，修正左右滑動時頂部日期表頭不跟著移動的問題（iOS 17 保留量測後援）。",
+            "『週報』章節更名為『報告』（含編輯頁與評分明細）。",
+            "部屬總覽於『會議』上方新增『報告』彙整章節（可勾選完成、點擊編輯）。",
+            "我的行事曆部屬事項於『部屬會議』上方新增『部屬報告』卡片（可勾選完成）。"
+        ]),
         ChangelogEntry(version: "22.53", build: 520, date: "2026/06/23", notes: [
             "部屬班表：修正左右捲動表格時，頂部凍結日期表頭未跟著水平移動的問題（改以 overlayPreferenceValue 即時同步位移）。"
         ]),

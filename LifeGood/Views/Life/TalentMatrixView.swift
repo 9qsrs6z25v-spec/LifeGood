@@ -38,7 +38,7 @@ extension Subordinate {
         var score = 60.0
         score += Double(completedTasks) * 3      // 每完成一項任務 +3
         score += Double(completedItems) * 2      // 每完成一個議程項目 +2
-        score += Double(completedReports) * 3    // 每完成一份週報 +3
+        score += Double(completedReports) * 3    // 每完成一份報告 +3
         score -= leaveHours / 8 * 2              // 每請假 8 小時 -2
         return max(0, min(100, Int(score.rounded())))
     }
@@ -89,7 +89,7 @@ extension Subordinate {
         let leaveHours = records.filter { $0.type == .leave }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         if completedTasks > 0 { items.append(("完成任務 ×\(completedTasks)", completedTasks * 3)) }
         if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems * 2)) }
-        if completedReports > 0 { items.append(("完成週報 ×\(completedReports)", completedReports * 3)) }
+        if completedReports > 0 { items.append(("完成報告 ×\(completedReports)", completedReports * 3)) }
         if leaveHours > 0 {
             let h = leaveHours.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(leaveHours))" : String(format: "%.1f", leaveHours)
             items.append(("請假 \(h) 小時", -Int((leaveHours / 8 * 2).rounded())))

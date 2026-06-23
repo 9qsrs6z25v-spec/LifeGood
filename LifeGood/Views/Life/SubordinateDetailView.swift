@@ -359,12 +359,12 @@ struct SubordinateDetailView: View {
 
     // MARK: - 會議章節
 
-    // MARK: - 週報章節
+    // MARK: - 報告章節
 
     private var weeklyReportSection: some View {
         let items = subordinate.weeklyReports.sorted { $0.date > $1.date }
         return VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("週報", icon: "doc.text.fill", color: .purple, count: items.count) {
+            sectionHeader("報告", icon: "doc.text.fill", color: .purple, count: items.count) {
                 Button {
                     if subscription.isPremium { addingReport = true } else { showPremiumAlert = true }
                 } label: {
@@ -389,7 +389,7 @@ struct SubordinateDetailView: View {
                             if subscription.isPremium { editingReport = r } else { showPremiumAlert = true }
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(r.topic.isEmpty ? "未命名週報" : r.topic)
+                                Text(r.topic.isEmpty ? "未命名報告" : r.topic)
                                     .font(.subheadline.weight(.medium))
                                     .strikethrough(r.isCompleted, color: .secondary)
                                     .foregroundStyle(r.isCompleted ? .secondary : .primary)
@@ -1309,7 +1309,7 @@ struct TaskEditorSheet: View {
     }
 }
 
-// MARK: - 週報編輯
+// MARK: - 報告編輯
 
 struct WeeklyReportEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -1326,8 +1326,8 @@ struct WeeklyReportEditorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("週報") {
-                    TextField("週報題目", text: $topic)
+                Section("報告") {
+                    TextField("報告題目", text: $topic)
                     HStack {
                         Text("日期")
                         Spacer()
@@ -1346,11 +1346,11 @@ struct WeeklyReportEditorSheet: View {
                 }
                 if editing != nil {
                     Section {
-                        Button(role: .destructive) { deleteReport() } label: { Label("刪除週報", systemImage: "trash") }
+                        Button(role: .destructive) { deleteReport() } label: { Label("刪除報告", systemImage: "trash") }
                     }
                 }
             }
-            .navigationTitle(editing != nil ? "編輯週報" : "新增週報")
+            .navigationTitle(editing != nil ? "編輯報告" : "新增報告")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
