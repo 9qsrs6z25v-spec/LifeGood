@@ -313,35 +313,7 @@ struct MyCalendarView: View {
             }
         }
 
-        // 部屬會議
-        for sub in lifeStore.subordinates {
-            for m in sub.meetings where calendar.isDate(m.date, inSameDayAs: day) {
-                events.append(CalendarEvent(
-                    id: "mtg-\(m.id.uuidString)",
-                    type: .meeting,
-                    title: m.topic.isEmpty ? "未命名會議" : m.topic,
-                    time: m.date,
-                    detail: "\(sub.name) · \(m.durationMinutes) 分鐘"
-                ))
-            }
-        }
-
-        // 部屬任務（建立日或截止日落於當天）
-        for sub in lifeStore.subordinates {
-            for t in sub.tasks {
-                let onCreate = calendar.isDate(t.date, inSameDayAs: day)
-                let onDue = t.dueDate.map { calendar.isDate($0, inSameDayAs: day) } ?? false
-                if onCreate || onDue {
-                    events.append(CalendarEvent(
-                        id: "task-\(t.id.uuidString)\(onDue ? "-due" : "")",
-                        type: .task,
-                        title: t.topic.isEmpty ? "未命名任務" : t.topic,
-                        time: onCreate ? t.date : t.dueDate,
-                        detail: "\(sub.name)\(onDue ? " · 今日截止" : "")"
-                    ))
-                }
-            }
-        }
+        // 部屬會議 / 部屬任務不再列入當日事件卡（下方已有獨立的部屬事項卡片）
 
         // 人生里程碑（精準日期）
         for ms in lifeStore.milestones where calendar.isDate(ms.date, inSameDayAs: day) {
