@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.52", build: 519, date: "2026/06/11", notes: [
+            "部屬卡片新增『週報』章節（會議上方）：可新增週報題目、勾選完成；每完成一份週報 +3 併入主動性評分。"
+        ]),
         ChangelogEntry(version: "22.50", build: 517, date: "2026/06/11", notes: [
             "部屬列表左側分數改為『潛力 × 主動性』的綜合平均（頂部平均/優秀統計同步）。",
             "部屬卡片『主動性 / 潛力性』分頁按鈕，標題旁加上各自分數。"

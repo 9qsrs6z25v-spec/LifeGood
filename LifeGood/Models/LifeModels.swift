@@ -1171,6 +1171,29 @@ struct SubordinateTask: Identifiable, Codable {
 
 // MARK: - 部屬
 
+/// 部屬週報題目（可勾選完成；完成數併入主動性評分）
+struct WeeklyReport: Identifiable, Codable {
+    let id: UUID
+    var topic: String
+    var date: Date
+    var note: String
+    var isCompleted: Bool
+
+    init(id: UUID = UUID(), topic: String = "", date: Date = Date(), note: String = "", isCompleted: Bool = false) {
+        self.id = id; self.topic = topic; self.date = date; self.note = note; self.isCompleted = isCompleted
+    }
+
+    enum CodingKeys: String, CodingKey { case id, topic, date, note, isCompleted }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        topic = (try? c.decode(String.self, forKey: .topic)) ?? ""
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        isCompleted = (try? c.decode(Bool.self, forKey: .isCompleted)) ?? false
+    }
+}
+
 struct Subordinate: Identifiable, Codable {
     let id: UUID
     var name: String
@@ -1186,17 +1209,19 @@ struct Subordinate: Identifiable, Codable {
     var shifts: [SubordinateShift]
     /// 廠區（選填，例如 A / B、P1 / P2）；空字串代表未分廠區
     var plantArea: String
+    /// 週報題目（可勾選完成；完成數併入主動性評分）
+    var weeklyReports: [WeeklyReport]
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
          department: String = "", note: String = "", gradeTitleId: UUID? = nil,
          departmentId: UUID? = nil, records: [SubordinateRecord] = [], joinDate: Date? = nil,
          meetings: [SubordinateMeeting] = [], tasks: [SubordinateTask] = [],
-         shifts: [SubordinateShift] = [], plantArea: String = "") {
+         shifts: [SubordinateShift] = [], plantArea: String = "", weeklyReports: [WeeklyReport] = []) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
         self.departmentId = departmentId; self.records = records; self.joinDate = joinDate
         self.meetings = meetings; self.tasks = tasks; self.shifts = shifts
-        self.plantArea = plantArea
+        self.plantArea = plantArea; self.weeklyReports = weeklyReports
     }
 
     init(from decoder: Decoder) throws {
@@ -1214,6 +1239,7 @@ struct Subordinate: Identifiable, Codable {
         tasks = (try? c.decode([SubordinateTask].self, forKey: .tasks)) ?? []
         shifts = (try? c.decode([SubordinateShift].self, forKey: .shifts)) ?? []
         plantArea = (try? c.decode(String.self, forKey: .plantArea)) ?? ""
+        weeklyReports = (try? c.decode([WeeklyReport].self, forKey: .weeklyReports)) ?? []
     }
 }
 

@@ -144,6 +144,14 @@ class LifeStore: ObservableObject {
         save()
     }
 
+    /// 切換某份週報的完成狀態。
+    func toggleWeeklyReportCompletion(subordinateId: UUID, reportId: UUID) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
+              let ri = subordinates[si].weeklyReports.firstIndex(where: { $0.id == reportId }) else { return }
+        subordinates[si].weeklyReports[ri].isCompleted.toggle()
+        save()
+    }
+
     // MARK: - 班表（班別指派）
 
     /// 設定某位部屬某一天的班別；type 傳 nil 表示清除該天班別。

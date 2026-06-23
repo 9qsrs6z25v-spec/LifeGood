@@ -33,10 +33,12 @@ extension Subordinate {
     var proactivityScore: Int {
         let completedTasks = tasks.filter { $0.isCompleted }.count
         let completedItems = meetings.flatMap { $0.items }.filter { $0.isCompleted }.count
+        let completedReports = weeklyReports.filter { $0.isCompleted }.count
         let leaveHours = records.filter { $0.type == .leave }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         var score = 60.0
         score += Double(completedTasks) * 3      // 每完成一項任務 +3
         score += Double(completedItems) * 2      // 每完成一個議程項目 +2
+        score += Double(completedReports) * 3    // 每完成一份週報 +3
         score -= leaveHours / 8 * 2              // 每請假 8 小時 -2
         return max(0, min(100, Int(score.rounded())))
     }
@@ -83,9 +85,11 @@ extension Subordinate {
         var items: [(String, Int)] = [("基礎分", 60)]
         let completedTasks = tasks.filter { $0.isCompleted }.count
         let completedItems = meetings.flatMap { $0.items }.filter { $0.isCompleted }.count
+        let completedReports = weeklyReports.filter { $0.isCompleted }.count
         let leaveHours = records.filter { $0.type == .leave }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         if completedTasks > 0 { items.append(("完成任務 ×\(completedTasks)", completedTasks * 3)) }
         if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems * 2)) }
+        if completedReports > 0 { items.append(("完成週報 ×\(completedReports)", completedReports * 3)) }
         if leaveHours > 0 {
             let h = leaveHours.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(leaveHours))" : String(format: "%.1f", leaveHours)
             items.append(("請假 \(h) 小時", -Int((leaveHours / 8 * 2).rounded())))
