@@ -18,6 +18,20 @@ import MapKit
 //      對齊 basicInfoSection / savingsCalcSection 已有的設計規格，達到全頁 section 標題均值性：
 //      分類(橘/藍)、關聯資產(teal/blue)、股票(橘)、汽車(teal)、儲蓄險(綠)、房地產(紫)、
 //      保險類別(綠)、貸款類別(藍)、稅務(綠)、房地產資訊(紫)、繳費設定(綠)。
+// [2026-06 v3] 本次美化方向：
+//   7. categorySection（變動支出）：系統 Picker 升級為 FilterChip 橫向膠囊列，
+//      每個分類依 VariableCategory.accentColor 各自著色（選中：純色底+白字；未選：secondarySystemFill），
+//      spring 動畫切換，對齊 AddIncomeView.categoryChipPicker 設計語言；
+//      人員多選按鈕移至獨立行（僅進階模式顯示），與分類行分離提升可讀性。
+//   8. amountPreviewCard 分類膠囊：分類標籤從純 .caption .secondary 文字升級為彩色 Capsule
+//      （accent.opacity(0.12) 底 + accent 文字 + .caption.semibold），
+//      對齊 AddIncomeView.amountPreviewCard 膠囊標籤規格。
+//   9. amountPreviewCard 動態主題色（variable）：accentColor 從靜態 .orange 改為
+//      selectedVariableCategory.accentColor，讓預覽卡顏色隨分類選擇即時更新，
+//      視覺層次更豐富，對齊 AddIncomeView 動態分類色設計語言。
+//  10. amountPreviewCard glass shine：背景 ZStack 末層加入 LinearGradient
+//      [.white.opacity(0.16), .clear] top→center 玻璃高光覆層，
+//      對齊全 App 英雄卡 glass shine 統一規格（AddIncomeView / OverviewView.monthlyBalanceCard）。
 
 struct AddExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -1302,33 +1316,44 @@ struct AddExpenseView: View {
     private var categorySection: some View {
         Section {
             if expenseType == .variable {
-                HStack {
-                    Picker("類別", selection: $selectedVariableCategory) {
-                        ForEach(VariableCategory.allCases) { cat in
-                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                // [v3] FilterChip 橫向膠囊列（對齊 AddIncomeView.categoryChipPicker + VariableExpenseView.categoryFilter 規格）
+                variableCategoryChipPicker
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
+                // [v3] 人員多選移至獨立行（進階模式，支援多選）
+                if advancedMode && Self.memberCategories.contains(selectedVariableCategory) && !familyNames.isEmpty {
+                    Button {
+                        showDiningMemberPopover = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color(.secondarySystemFill))
+                                    .frame(width: 28, height: 28)
+                                Image(systemName: "person.2.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("同行人員")
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text(diningMembersLabel)
+                                .font(.subheadline)
+                                .foregroundStyle(selectedDiningMembers.isEmpty ? .secondary : .primary)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                         }
                     }
-                    .frame(maxWidth: .infinity)
-
-                    // 人員選擇（飲食 / 娛樂 / 購物 / 日用 / 醫療 / 教育 / 社交 / 其他）只在進階模式才顯示，支援多選 + 點外部才關閉
-                    if advancedMode && Self.memberCategories.contains(selectedVariableCategory) && !familyNames.isEmpty {
-                        Divider()
-                        Button {
-                            showDiningMemberPopover = true
-                        } label: {
-                            HStack(spacing: 2) {
-                                Image(systemName: "person.2.fill").font(.caption)
-                                Text(diningMembersLabel).lineLimit(1)
-                                Image(systemName: "chevron.down").font(.caption2)
-                            }
-                            .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .sheet(isPresented: $showDiningMemberPopover) {
-                            diningMemberSelectorList
-                                .presentationDetents([.height(380), .medium])
-                                .presentationDragIndicator(.visible)
-                        }
+                    .buttonStyle(.plain)
+                    .sheet(isPresented: $showDiningMemberPopover) {
+                        diningMemberSelectorList
+                            .presentationDetents([.height(380), .medium])
+                            .presentationDragIndicator(.visible)
                     }
                 }
 
@@ -1391,8 +1416,52 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
+            // [v3] variable 分類區塊標題顏色跟隨當前選取分類（與預覽卡保持一致）
             sectionHeader(title: "分類",
-                          accentColor: expenseType == .variable ? .orange : .blue)
+                          accentColor: expenseType == .variable
+                            ? selectedVariableCategory.accentColor
+                            : .blue)
+        }
+    }
+
+    // [v3] 變動支出分類 FilterChip 橫向膠囊列
+    // 14 個分類可橫向捲動；選中時主題色底+白字+投影；未選時 secondarySystemFill
+    // 對齊 AddIncomeView.categoryChipPicker / VariableExpenseView.categoryFilter 設計規格
+    private var variableCategoryChipPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(VariableCategory.allCases) { cat in
+                    let isSelected = selectedVariableCategory == cat
+                    let accent = cat.accentColor
+                    Button {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                            selectedVariableCategory = cat
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: cat.icon)
+                                .font(.caption)
+                                .foregroundStyle(isSelected ? .white : accent)
+                            Text(cat.rawValue)
+                                .font(.caption.weight(isSelected ? .semibold : .medium))
+                                .foregroundStyle(isSelected ? .white : .primary)
+                        }
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 8)
+                        .background(isSelected ? accent : Color(.secondarySystemFill))
+                        .clipShape(Capsule())
+                        .shadow(
+                            color: isSelected ? accent.opacity(0.30) : .clear,
+                            radius: 5, x: 0, y: 3
+                        )
+                        .scaleEffect(isSelected ? 1.04 : 1.0)
+                    }
+                    .buttonStyle(.plain)
+                    .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
     }
 
@@ -1866,7 +1935,10 @@ struct AddExpenseView: View {
     /// 頂端即時金額預覽卡：漸層背景 + 48pt 類別圖示圓 + 萬/億大字金額
     private var amountPreviewCard: some View {
         let amount = Double(amountText) ?? 0
-        let accentColor: Color = expenseType == .variable ? .orange : .blue
+        // [v3] variable 依選取分類動態著色；fixed 維持藍色
+        let accentColor: Color = expenseType == .variable
+            ? selectedVariableCategory.accentColor
+            : .blue
         let icon = expenseType == .variable ? selectedVariableCategory.icon : selectedFixedCategory.icon
         let label = expenseType == .variable ? selectedVariableCategory.rawValue : selectedFixedCategory.rawValue
 
@@ -1890,14 +1962,23 @@ struct AddExpenseView: View {
                     .foregroundStyle(accentColor)
             }
             .shadow(color: accentColor.opacity(0.22), radius: 6, x: 0, y: 3)
+            // [v3] 圖示圓隨分類切換有 spring 動畫
+            .animation(.spring(response: 0.30, dampingFraction: 0.70), value: accentColor.description)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
+                // [v3] 分類標籤升級為彩色 Capsule（對齊 AddIncomeView.amountPreviewCard 膠囊規格）
                 Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(accentColor.opacity(0.12))
+                    .clipShape(Capsule())
+                    .animation(.spring(response: 0.28, dampingFraction: 0.72), value: label)
+
                 Text(previewAmountString(amount))
                     .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundStyle(accentColor)
+                    .foregroundStyle(.primary)
                     .contentTransition(.numericText())
                     .minimumScaleFactor(0.65)
                     .lineLimit(1)
@@ -1916,12 +1997,19 @@ struct AddExpenseView: View {
         .padding(.vertical, 12)
         .background(
             ZStack {
-                accentColor.opacity(0.05)
+                Color(.systemBackground)
+                accentColor.opacity(0.04)
                 Circle()
                     .fill(accentColor.opacity(0.06))
                     .frame(width: 110, height: 110)
                     .offset(x: 90, y: -15)
                     .blur(radius: 18)
+                // [v3] glass shine 頂部白色高光（對齊全 App 英雄卡 glass shine 規格）
+                LinearGradient(
+                    colors: [.white.opacity(0.16), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -1929,6 +2017,8 @@ struct AddExpenseView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(accentColor.opacity(0.14), lineWidth: 0.75)
         )
+        .shadow(color: accentColor.opacity(0.10), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 2)
         .opacity(amountCardAppeared ? 1 : 0)
         .offset(y: amountCardAppeared ? 0 : 14)
         .onAppear {
