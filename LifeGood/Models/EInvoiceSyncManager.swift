@@ -160,7 +160,7 @@ final class EInvoiceSyncManager: ObservableObject {
 
         // 一次性 append，只觸發一次 didSet → save() → CloudKit push
         if !pendingExpenses.isEmpty {
-            expenseStore.expenses.append(contentsOf: pendingExpenses)
+            expenseStore.addExpenses(pendingExpenses)
         }
 
         // Trim history to most recent 500

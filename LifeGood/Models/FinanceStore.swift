@@ -28,7 +28,8 @@ class FinanceStore: ObservableObject {
     }
 
     @objc private func reloadFromCloud() {
-        load()
+        // NotificationCenter 未指定 queue 時在發送方執行緒觸發，需回主執行緒再讀寫 @Published 屬性
+        DispatchQueue.main.async { [weak self] in self?.load() }
     }
 
     // MARK: - 儲蓄險 CRUD

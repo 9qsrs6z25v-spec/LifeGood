@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.61", build: 528, date: "2026/06/24", notes: [
+            "【靜態除錯 v22.61】修復三個問題：① FinanceStore.reloadFromCloud：NotificationCenter 在發送方執行緒觸發，load() 直接改寫 @Published 屬性可能在背景執行緒執行，補 DispatchQueue.main.async 保護；② ExpenseStore 新增 addExpenses(_ items:) 批次寫入方法，EInvoiceSyncManager 改用此 API，取代直接存取 expenseStore.expenses（@Published 陣列），確保封裝性與單次 save/push；③ ChartView DragGesture onChanged：每次拖曳都對 selectedDataPoint 賦值，即使目標不變也觸發 @State 更新與 body 重繪；補 label 比對守衛，只在資料點實際改變時才賦值，消除無效重繪。"
+        ]),
         ChangelogEntry(version: "22.59", build: 526, date: "2026/06/24", notes: [
             "【靜態除錯 v22.59】SubordinateOverviewView.reportDateText：每次呼叫都新建 DateFormatter（含 zh_Hant_TW locale 載入），在 ForEach 報告列表 render 時重複分配；改為 private static let reportDateFormatter 快取，對齊同檔 fmtTimeFormatter / fmtDateTimeFormatter 及 v22.58 MyCalendarView.subReportDateFormatter 既有規格。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
         ]),

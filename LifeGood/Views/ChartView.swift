@@ -576,7 +576,11 @@ struct ChartView: View {
                                         let plotOrigin = proxy.plotFrame.map { geometry[$0].origin.x } ?? 0
                                         let x = value.location.x - plotOrigin
                                         if let label: String = proxy.value(atX: x) {
-                                            selectedDataPoint = chartData.first { $0.label == label }
+                                            let newPoint = chartData.first { $0.label == label }
+                                            // 只在資料點實際改變時才賦值，避免拖曳時持續觸發無效 @State 更新
+                                            if newPoint?.label != selectedDataPoint?.label {
+                                                selectedDataPoint = newPoint
+                                            }
                                         }
                                     }
                                     .onEnded { _ in

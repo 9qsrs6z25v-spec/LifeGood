@@ -45,6 +45,13 @@ class ExpenseStore: ObservableObject {
         expenses.append(expense)
     }
 
+    /// 批次新增多筆支出：只觸發一次 didSet → save() → CloudKit push，
+    /// 避免逐筆 add() 造成 N 次序列化與 N 次 CloudKit 推送。
+    func addExpenses(_ items: [Expense]) {
+        guard !items.isEmpty else { return }
+        expenses.append(contentsOf: items)
+    }
+
     func update(_ expense: Expense) {
         if let index = expenses.firstIndex(where: { $0.id == expense.id }) {
             expenses[index] = expense
