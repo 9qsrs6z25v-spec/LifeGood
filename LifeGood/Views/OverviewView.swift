@@ -25,6 +25,20 @@ import SwiftUI
 //      對齊 categoryRow 的 stroke 規格，兩個 Section 圖示圓視覺一致。
 //   5. todayCard 右側計數膠囊：有支出時顯示「今日 N 筆」灰底膠囊（取代空白 Spacer），
 //      對齊 recentTransactionsSection / categoryBreakdownSection 計數膠囊設計語言。
+// [2026-06 v4] 本次美化方向（KPI 橫列補齊 + 設計細節對齊）：
+//   6. monthlyBalanceCard KPI 橫列：在頂部收入/支出行與分隔線之間補入三格 KPI
+//      （今日花費 / 日均支出 / 本月固定），對齊 IncomeView / VariableExpenseView /
+//      FixedExpenseView summaryHeader KPI 三格設計規格；
+//      OverviewView 原是全 App 唯一缺少 KPI 橫列的英雄卡，此次補齊均值。
+//   7. monthlyBalanceCard 頂部「本月收入」/「本月支出」金額：補入 minimumScaleFactor(0.72) +
+//      lineLimit(1) + contentTransition(.numericText())，防止大數字截斷並加平滑數字動畫，
+//      對齊 IncomeView.summaryHeader 大字已有的規格（title3 系列原本缺失）。
+//   8. monthlyBalanceCard 背景：補入第三顆散景圓（55pt white.opacity(0.06) 中右 blur 8），
+//      對齊 IncomeView / VariableExpenseView summaryHeader 三顆散景圓設計規格，
+//      讓 OverviewView 英雄卡散景層次與其他頁面完全一致。
+//   9. recentRow 分類 Capsule 膠囊：補入 overlay Capsule stroke 細邊框（accent.opacity(0.22) 0.6pt），
+//      對齊 ExpenseRow / incomeRow category Capsule 膠囊設計規格，
+//      消除最近交易行分類標籤無邊框、其他列表行有邊框的視覺不均衡。
 
 struct OverviewView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -184,6 +198,23 @@ struct OverviewView: View {
         }
     }
 
+    // MARK: - KPI 格（對齊 IncomeView / VariableExpenseView / FixedExpenseView kpiCell 規格）
+
+    private func kpiCell(label: String, value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
+    }
+
     // MARK: - 本月收支摘要卡片
 
     private var monthlyBalanceCard: some View {
@@ -199,6 +230,10 @@ struct OverviewView: View {
             if spendingRatio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90) }
             return .white.opacity(0.85)
         }()
+        // [v4] KPI 橫列計算：一次讀取，避免 closure 內重複呼叫 store
+        let day = Calendar.current.component(.day, from: Date())
+        let todayTotalKPI = store.todayTotal
+        let fixedTotalKPI = store.currentMonthFixedTotal
 
         return VStack(spacing: 0) {
             // 頂部：收入 vs 支出
@@ -217,20 +252,46 @@ struct OverviewView: View {
                                 .foregroundStyle(.white)
                         }
                     }
+                    // [v4] 補入 minimumScaleFactor + lineLimit + contentTransition，防大數字截斷
                     Text(smartCurrency(income))
                         .font(.title3.bold())
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .contentTransition(.numericText())
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
                     Text("本月支出")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.75))
+                    // [v4] 補入 minimumScaleFactor + lineLimit + contentTransition
                     Text(smartCurrency(total))
                         .font(.title3.bold())
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .contentTransition(.numericText())
                 }
             }
+
+            // [v4] KPI 橫列：今日花費 / 日均支出 / 本月固定，
+            // 對齊 IncomeView / VariableExpenseView / FixedExpenseView summaryHeader KPI 三格規格
+            HStack(spacing: 0) {
+                kpiCell(label: "今日花費", value: smartCurrency(todayTotalKPI))
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                kpiCell(label: "日均支出", value: smartCurrency(total / Double(max(day, 1))))
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                kpiCell(label: "本月固定", value: smartCurrency(fixedTotalKPI))
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 12)
 
             // 分隔線
             Rectangle()
@@ -354,6 +415,12 @@ struct OverviewView: View {
                     .frame(width: 90, height: 90)
                     .offset(x: -70, y: 55)
                     .blur(radius: 10)
+                // [v4] 第三顆散景圓（中右微光），對齊 IncomeView / VariableExpenseView 三顆散景設計規格
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 30, y: 42)
+                    .blur(radius: 8)
                 // [v3] 頂部玻璃光澤：LinearGradient white→clear，對齊 FinanceOverviewView totalAssetsCard 規格
                 LinearGradient(
                     colors: [.white.opacity(0.18), .clear],
@@ -861,6 +928,7 @@ struct OverviewView: View {
                 Text(item.title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
+                // [v4] 補入 overlay stroke 細邊框，對齊 ExpenseRow / incomeRow category Capsule 規格
                 Text(item.category)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(accentColor)
@@ -868,6 +936,7 @@ struct OverviewView: View {
                     .padding(.vertical, 2.5)
                     .background(accentColor.opacity(0.10))
                     .clipShape(Capsule())
+                    .overlay(Capsule().stroke(accentColor.opacity(0.22), lineWidth: 0.6))
             }
 
             Spacer(minLength: 4)
