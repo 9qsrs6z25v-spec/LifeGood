@@ -20,6 +20,16 @@ import SwiftUI
 //   8. smartCurrency：formatCurrency 支援「萬、億」量級顯示
 //      ≥1億 → "X.X 億"，≥1萬 → "X.X 萬"，其餘 → "NT$X"
 //      讓試算大金額在小型裝置上更易讀
+//
+// [2026-06 v3] 三次美化方向：
+//   9. amountPreviewCard 對齊 AddExpenseView v3 規格：
+//      - 圖示圓加 Circle().stroke(accent.opacity(0.22), lineWidth:1.2) 細邊框
+//      - shadow 移至 ZStack 層級（而非 Circle 本身），視覺更集中
+//      - 背景 ZStack 新增大散景圓（110pt, offset x:90 y:-15, blur 18）+ 玻璃光澤層
+//        (LinearGradient [white.opacity(0.16)→clear], .top→.center)
+//      - HStack 右側新增小散景裝飾圓（70pt, blur 12, offset x:10）
+//      - 金額大字加 .minimumScaleFactor(0.65) + .lineLimit(1) 防長數字溢出
+//      - 分類膠囊加 .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth:0.6))
 
 struct AddIncomeView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -333,7 +343,7 @@ struct AddIncomeView: View {
         let amount = parsedAmount
 
         return HStack(spacing: 16) {
-            // 分類圖示圓
+            // 分類圖示圓（v3：LinearGradient fill + stroke 細邊 + shadow 移至 ZStack 層）
             ZStack {
                 Circle()
                     .fill(
@@ -344,15 +354,18 @@ struct AddIncomeView: View {
                         )
                     )
                     .frame(width: 52, height: 52)
-                    .shadow(color: accent.opacity(0.20), radius: 8, x: 0, y: 4)
+                Circle()
+                    .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                    .frame(width: 52, height: 52)
                 Image(systemName: category.icon)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(accent)
             }
+            .shadow(color: accent.opacity(0.22), radius: 8, x: 0, y: 4)
             .animation(.spring(response: 0.30, dampingFraction: 0.70), value: category)
 
             VStack(alignment: .leading, spacing: 4) {
-                // 分類名膠囊
+                // 分類名膠囊（v3：加 stroke overlay 細邊框）
                 Text(category.rawValue)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(accent)
@@ -360,13 +373,16 @@ struct AddIncomeView: View {
                     .padding(.vertical, 3)
                     .background(accent.opacity(0.12))
                     .clipShape(Capsule())
+                    .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                     .animation(.spring(response: 0.28, dampingFraction: 0.72), value: category)
 
-                // 金額大字
+                // 金額大字（v3：minimumScaleFactor 防長數字溢出）
                 if let amt = amount {
                     Text(smartCurrency(amt))
                         .font(.system(size: 26, weight: .bold, design: .rounded))
                         .foregroundStyle(.primary)
+                        .minimumScaleFactor(0.65)
+                        .lineLimit(1)
                         .contentTransition(.numericText())
                 } else {
                     Text("輸入金額")
@@ -376,6 +392,13 @@ struct AddIncomeView: View {
             }
 
             Spacer(minLength: 0)
+
+            // v3：右側小散景裝飾圓
+            Circle()
+                .fill(accent.opacity(0.06))
+                .frame(width: 70, height: 70)
+                .blur(radius: 12)
+                .offset(x: 10)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -383,6 +406,18 @@ struct AddIncomeView: View {
             ZStack {
                 Color(.systemBackground)
                 accent.opacity(0.04)
+                // v3：大散景圓（右上角深度感）
+                Circle()
+                    .fill(accent.opacity(0.07))
+                    .frame(width: 110, height: 110)
+                    .blur(radius: 18)
+                    .offset(x: 90, y: -15)
+                // v3：玻璃光澤層（頂部白光掃過）
+                LinearGradient(
+                    colors: [.white.opacity(0.16), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 18))
