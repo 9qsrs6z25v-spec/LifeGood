@@ -348,11 +348,15 @@ struct SubordinateOverviewView: View {
         .onTapGesture { editTarget = .report(subId: sub.id, report: report) }
     }
 
-    private func reportDateText(_ date: Date) -> String {
+    private static let reportDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_Hant_TW")
         f.dateFormat = "M/d (E)"
-        return f.string(from: date)
+        return f
+    }()
+
+    private func reportDateText(_ date: Date) -> String {
+        Self.reportDateFormatter.string(from: date)
     }
 
     // MARK: - 會議

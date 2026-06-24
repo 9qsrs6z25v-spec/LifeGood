@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.59", build: 526, date: "2026/06/24", notes: [
+            "【靜態除錯 v22.59】SubordinateOverviewView.reportDateText：每次呼叫都新建 DateFormatter（含 zh_Hant_TW locale 載入），在 ForEach 報告列表 render 時重複分配；改為 private static let reportDateFormatter 快取，對齊同檔 fmtTimeFormatter / fmtDateTimeFormatter 及 v22.58 MyCalendarView.subReportDateFormatter 既有規格。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
+        ]),
         ChangelogEntry(version: "22.58", build: 525, date: "2026/06/24", notes: [
             "【靜態除錯 v22.58】全面複查 79 個 Swift 檔，發現並修復五個問題：① LifeStore.toggleMeetingItemCompletion / toggleWeeklyReportCompletion：兩個方法均缺少 isLoading 批次保護，對 subordinates 的 subscript 寫入觸發 didSet → save()，再加上方法尾部的顯式 save() 呼叫，每次打勾共觸發兩次磁碟序列化與兩次 CloudKit pushAll；補 isLoading = true / false 包圍寫入，確保只有顯式 save() 執行一次，對齊 toggleTaskCompletion / setShift 既有規格。② MyCalendarView.annualOccurrence：對非閏年的 2/29 生日，Calendar.date(from:) 不回傳 nil 而是自動溢位到 3/1，導致閏日生日在非閏年顯示於錯誤月份；改以 calendar.range(of: .day, in: .month) 取得該年該月實際天數，提前截斷 comp.day，完全避開溢位行為。③ MyCalendarView.subReportDateText：每次呼叫都新建 DateFormatter（含完整 locale 載入），view body render 期間重複分配；改為 private static let 快取，對齊同檔其他所有格式器規格。④ AddExpenseView.formatCurrency：每次呼叫都新建 NumberFormatter（建立成本高），在儲蓄保險區塊於 view body render 時重複分配；改為 private static let savingsCurrencyFmt 複用同一物件，每次只更新 currencySymbol 與 maximumFractionDigits 屬性。⑤ ChildDetailView 院所自動完成（MKLocalSearchCompleter）：onChange(of: detail) 在每次按鍵時立即發出查詢，無防抖保護，造成大量不必要的 MapKit 網路請求；補 300ms 防抖 Task（clinicDebounceTask），對齊 AddExpenseView / VariableExpenseView 餐廳 / 支出搜尋既有規格。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
         ]),
