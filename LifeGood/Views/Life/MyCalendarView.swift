@@ -952,7 +952,8 @@ struct MyCalendarView: View {
                     subAgendaCheckRow(name: it.sub.name,
                                       text: it.report.topic.isEmpty ? "未命名報告" : it.report.topic,
                                       detail: detail,
-                                      done: it.report.isCompleted, accent: meta.color) {
+                                      done: it.report.isCompleted, accent: meta.color,
+                                      completedAt: it.report.completedAt, due: it.report.date) {
                         lifeStore.toggleWeeklyReportCompletion(subordinateId: it.sub.id, reportId: it.report.id)
                     }
                 }
@@ -1032,7 +1033,8 @@ struct MyCalendarView: View {
     }
 
     private func subAgendaCheckRow(name: String, text: String, detail: String?, done: Bool,
-                                   accent: Color, toggle: @escaping () -> Void) -> some View {
+                                   accent: Color, completedAt: Date? = nil, due: Date? = nil,
+                                   toggle: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
             Button(action: toggle) {
                 Image(systemName: done ? "checkmark.circle.fill" : "circle")
@@ -1044,6 +1046,7 @@ struct MyCalendarView: View {
                     .strikethrough(done, color: .secondary)
                     .foregroundStyle(done ? .secondary : .primary).lineLimit(2)
                 if let detail { Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+                if done { CompletionStamp(completedAt: completedAt, due: due) }
             }
             Spacer(minLength: 4)
             Text(name).font(.caption2).foregroundStyle(.secondary)

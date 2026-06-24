@@ -1,6 +1,76 @@
 import SwiftUI
 import UIKit
 
+// MARK: - 完成準時度 UI（共用：部屬卡片 / 總覽 / 行事曆）
+
+extension CompletionTiming {
+    /// 標籤文字
+    var label: String {
+        switch self {
+        case .ahead:   return "超前"
+        case .onTime:  return "準時"
+        case .overdue: return "逾期"
+        }
+    }
+    /// 標籤顏色
+    var color: Color {
+        switch self {
+        case .ahead:   return .green
+        case .onTime:  return .blue
+        case .overdue: return .red
+        }
+    }
+    /// 標籤圖示
+    var icon: String {
+        switch self {
+        case .ahead:   return "hare.fill"
+        case .onTime:  return "checkmark.seal.fill"
+        case .overdue: return "exclamationmark.triangle.fill"
+        }
+    }
+}
+
+/// 完成時間戳 + 準時度膠囊（打勾後顯示）。
+/// completedAt 為 nil 時不顯示任何內容；due 為 nil 時只顯示時間戳、不判定準時度。
+struct CompletionStamp: View {
+    let completedAt: Date?
+    let due: Date?
+
+    private static let stampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d HH:mm"
+        return f
+    }()
+
+    var body: some View {
+        if let completedAt {
+            let timing = completionTiming(completedAt: completedAt, due: due)
+            HStack(spacing: 5) {
+                HStack(spacing: 3) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 9))
+                    Text("完成 \(Self.stampFormatter.string(from: completedAt))")
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color(.tertiarySystemFill)).clipShape(Capsule())
+
+                if let timing {
+                    HStack(spacing: 3) {
+                        Image(systemName: timing.icon).font(.system(size: 9))
+                        Text(timing.label)
+                    }
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(timing.color)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(timing.color.opacity(0.15)).clipShape(Capsule())
+                }
+            }
+        }
+    }
+}
+
 // MARK: - 美化紀錄（SubordinateDetailView）
 // [2026-06] 本次美化方向：
 //   1. headerCard：升級為藍色漸層英雄卡片，含縮寫頭像圓、姓名大字、
@@ -404,6 +474,9 @@ struct SubordinateDetailView: View {
                                 if !r.note.isEmpty {
                                     Text(r.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
+                                if r.isCompleted {
+                                    CompletionStamp(completedAt: r.completedAt, due: r.date)
+                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -550,11 +623,16 @@ struct SubordinateDetailView: View {
             }
             .buttonStyle(.plain)
 
-            Text(item.content.isEmpty ? "未填內容" : item.content)
-                .font(.caption)
-                .strikethrough(item.isCompleted, color: .secondary)
-                .foregroundStyle(item.isCompleted ? .secondary : .primary)
-                .lineLimit(3)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.content.isEmpty ? "未填內容" : item.content)
+                    .font(.caption)
+                    .strikethrough(item.isCompleted, color: .secondary)
+                    .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                    .lineLimit(3)
+                if item.isCompleted {
+                    CompletionStamp(completedAt: item.completedAt, due: item.dueDate)
+                }
+            }
 
             Spacer(minLength: 0)
 
@@ -635,6 +713,9 @@ struct SubordinateDetailView: View {
                                         .foregroundStyle(due < Date() && !t.isCompleted ? .red : .cyan)
                                         .clipShape(Capsule())
                                     }
+                                }
+                                if t.isCompleted {
+                                    CompletionStamp(completedAt: t.completedAt, due: t.dueDate)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1377,7 +1458,9 @@ struct WeeklyReportEditorSheet: View {
             topic: topic.trimmingCharacters(in: .whitespaces),
             date: date,
             note: note.trimmingCharacters(in: .whitespaces),
-            isCompleted: isCompleted
+            isCompleted: isCompleted,
+            // 由切換保留／補上完成時間：仍完成→沿用既有戳記（首次完成則記為現在）；取消完成→清空
+            completedAt: isCompleted ? (editing?.completedAt ?? Date()) : nil
         )
         if let idx = sub.weeklyReports.firstIndex(where: { $0.id == report.id }) { sub.weeklyReports[idx] = report }
         else { sub.weeklyReports.append(report) }

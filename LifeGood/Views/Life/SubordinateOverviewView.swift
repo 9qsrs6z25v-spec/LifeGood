@@ -339,6 +339,9 @@ struct SubordinateOverviewView: View {
                         Text(report.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
+                if report.isCompleted {
+                    CompletionStamp(completedAt: report.completedAt, due: report.date)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -784,6 +787,9 @@ struct SubordinateOverviewView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                }
+                if task.isCompleted {
+                    CompletionStamp(completedAt: task.completedAt, due: task.dueDate)
                 }
             }
             Spacer(minLength: 4)

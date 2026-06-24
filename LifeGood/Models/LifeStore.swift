@@ -136,6 +136,7 @@ class LifeStore: ObservableObject {
     }
 
     /// 切換某場會議底下某個議程項目的完成狀態（部屬詳情頁與總覽頁的打勾共用）。
+    /// 標記完成時記下 completedAt，取消完成則清空。
     func toggleMeetingItemCompletion(subordinateId: UUID, meetingId: UUID, itemId: UUID) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
               let mi = subordinates[si].meetings.firstIndex(where: { $0.id == meetingId }),
@@ -143,17 +144,19 @@ class LifeStore: ObservableObject {
         // isLoading 阻斷 didSet → save() 的隱式觸發，確保只有下方的顯式 save() 被執行一次
         isLoading = true
         subordinates[si].meetings[mi].items[ii].isCompleted.toggle()
+        subordinates[si].meetings[mi].items[ii].completedAt = subordinates[si].meetings[mi].items[ii].isCompleted ? Date() : nil
         isLoading = false
         save()
     }
 
-    /// 切換某份週報的完成狀態。
+    /// 切換某份週報的完成狀態。標記完成時記下 completedAt，取消完成則清空。
     func toggleWeeklyReportCompletion(subordinateId: UUID, reportId: UUID) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
               let ri = subordinates[si].weeklyReports.firstIndex(where: { $0.id == reportId }) else { return }
         // isLoading 阻斷 didSet → save() 的隱式觸發，確保只有下方的顯式 save() 被執行一次
         isLoading = true
         subordinates[si].weeklyReports[ri].isCompleted.toggle()
+        subordinates[si].weeklyReports[ri].completedAt = subordinates[si].weeklyReports[ri].isCompleted ? Date() : nil
         isLoading = false
         save()
     }

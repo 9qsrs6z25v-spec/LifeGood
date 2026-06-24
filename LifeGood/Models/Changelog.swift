@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.64", build: 531, date: "2026/06/24", notes: [
+            "任務 / 會議項目 / 報告打勾完成時，自動記下完成時間戳，並依目標日期標示『超前(綠) / 準時(藍) / 逾期(紅)』。",
+            "完成戳記顯示於部屬卡片、部屬總覽與我的行事曆；取消打勾會清除戳記，編輯時保留原戳記。"
+        ]),
         ChangelogEntry(version: "22.63", build: 530, date: "2026/06/24", notes: [
             "【靜態除錯 v22.63】全面複查 79 個 Swift 檔（強制解包、Optional 處理、型別錯誤、index 越界、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）：發現並修復一個問題：project.pbxproj 版本號停留在 22.61/528，未隨 v22.62 UI 美化提交同步更新，補正 MARKETING_VERSION 至 22.63、CURRENT_PROJECT_VERSION 至 530。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、FinanceStore reloadFromCloud DispatchQueue.main.async 保護、CloudKitManager fetchRecordZoneChangesResultBlock DispatchQueue.main.async 保護、EInvoiceSyncManager @MainActor 批次寫入、ChartView DragGesture label 比對守衛、MultiPhotoGallery Task.detached 背景讀圖、所有 DateFormatter/NumberFormatter 均為 private static let 快取）均確認正常。"
         ]),

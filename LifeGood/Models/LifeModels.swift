@@ -1093,13 +1093,14 @@ struct MeetingItem: Identifiable, Codable {
     var assigneeId: UUID?
     var dueDate: Date?
     var isCompleted: Bool
+    var completedAt: Date?
 
-    init(id: UUID = UUID(), content: String = "", assigneeId: UUID? = nil, dueDate: Date? = nil, isCompleted: Bool = false) {
+    init(id: UUID = UUID(), content: String = "", assigneeId: UUID? = nil, dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil) {
         self.id = id; self.content = content; self.assigneeId = assigneeId
-        self.dueDate = dueDate; self.isCompleted = isCompleted
+        self.dueDate = dueDate; self.isCompleted = isCompleted; self.completedAt = completedAt
     }
 
-    enum CodingKeys: String, CodingKey { case id, content, assigneeId, dueDate, isCompleted }
+    enum CodingKeys: String, CodingKey { case id, content, assigneeId, dueDate, isCompleted, completedAt }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1109,6 +1110,7 @@ struct MeetingItem: Identifiable, Codable {
         dueDate = try? c.decodeIfPresent(Date.self, forKey: .dueDate)
         // 舊資料沒有 isCompleted → 視為未完成（避免整批會議解碼失敗）
         isCompleted = (try? c.decode(Bool.self, forKey: .isCompleted)) ?? false
+        completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
     }
 }
 
@@ -1178,12 +1180,13 @@ struct WeeklyReport: Identifiable, Codable {
     var date: Date
     var note: String
     var isCompleted: Bool
+    var completedAt: Date?
 
-    init(id: UUID = UUID(), topic: String = "", date: Date = Date(), note: String = "", isCompleted: Bool = false) {
-        self.id = id; self.topic = topic; self.date = date; self.note = note; self.isCompleted = isCompleted
+    init(id: UUID = UUID(), topic: String = "", date: Date = Date(), note: String = "", isCompleted: Bool = false, completedAt: Date? = nil) {
+        self.id = id; self.topic = topic; self.date = date; self.note = note; self.isCompleted = isCompleted; self.completedAt = completedAt
     }
 
-    enum CodingKeys: String, CodingKey { case id, topic, date, note, isCompleted }
+    enum CodingKeys: String, CodingKey { case id, topic, date, note, isCompleted, completedAt }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -1191,6 +1194,7 @@ struct WeeklyReport: Identifiable, Codable {
         date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         isCompleted = (try? c.decode(Bool.self, forKey: .isCompleted)) ?? false
+        completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
     }
 }
 
@@ -1778,4 +1782,24 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
         dayComp.minute = timeComp.minute
         return calendar.date(from: dayComp) ?? date
     }
+}
+
+// MARK: - 完成準時度（打勾時間戳與逾期/準時/超前判定）
+
+/// 相對於目標日期的完成準時度
+enum CompletionTiming {
+    case ahead    // 超前（完成日早於目標日）
+    case onTime   // 準時（同一天完成）
+    case overdue  // 逾期（完成日晚於目標日）
+}
+
+/// 依「完成時間」與「目標日期」判定準時度（以日為粒度）。
+/// 任一為 nil（未完成或無目標日）→ 回傳 nil（不顯示準時度，只顯示時間戳）。
+func completionTiming(completedAt: Date?, due: Date?, calendar: Calendar = .current) -> CompletionTiming? {
+    guard let completedAt, let due else { return nil }
+    let c = calendar.startOfDay(for: completedAt)
+    let d = calendar.startOfDay(for: due)
+    if c < d { return .ahead }
+    if c > d { return .overdue }
+    return .onTime
 }
