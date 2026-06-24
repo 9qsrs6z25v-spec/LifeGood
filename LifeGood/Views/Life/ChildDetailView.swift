@@ -1101,6 +1101,7 @@ struct ChildRecordEditorSheet: View {
     @FocusState private var detailFieldFocused: Bool
     @State private var clinicSuppressNextUpdate: Bool = false
     @State private var clinicExpandedSuggestions: Bool = false
+    @State private var clinicDebounceTask: Task<Void, Never>? = nil
     @State private var photoFileName: String?
     @State private var photoItem: PhotosPickerItem?
     @State private var sketchMode = true
@@ -1298,8 +1299,15 @@ struct ChildRecordEditorSheet: View {
                 clinicSuppressNextUpdate = false
                 return
             }
-            clinicCompleter.queryFragment = newValue
-            clinicExpandedSuggestions = false
+            // 300ms 防抖，對齊 AddExpenseView / VariableExpenseView 院所/餐廳搜尋規格，
+            // 避免每次按鍵都即時發出 MKLocalSearchCompleter 網路請求
+            clinicDebounceTask?.cancel()
+            clinicDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+                clinicCompleter.queryFragment = newValue
+                clinicExpandedSuggestions = false
+            }
         }
         .onChange(of: locationProvider.lastLocation) { _, _ in
             clinicCompleter.setRegion(LocationProvider.shared.searchRegion)

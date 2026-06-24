@@ -273,9 +273,14 @@ struct MyCalendarView: View {
     private func annualOccurrence(of date: Date, year: Int) -> Date {
         var comp = calendar.dateComponents([.month, .day], from: date)
         comp.year = year
-        if let result = calendar.date(from: comp) { return result }
-        // 2/29 在非閏年不存在時，改用 2/28，避免回傳原始日期造成跨年錯誤
-        comp.day = (comp.day ?? 1) - 1
+        // Calendar.date(from:) 對不存在的日期（如非閏年 2/29）不回傳 nil，
+        // 而是自動溢位到下個月（2/29 → 3/1），導致生日顯示在錯誤的月份。
+        // 提前把 day 截至該年該月實際天數，確保 2/29 在非閏年對應到 2/28。
+        if let month = comp.month, let day = comp.day {
+            let refDate = calendar.date(from: DateComponents(year: year, month: month, day: 1)) ?? date
+            let maxDay = calendar.range(of: .day, in: .month, for: refDate)?.count ?? day
+            if day > maxDay { comp.day = maxDay }
+        }
         return calendar.date(from: comp) ?? date
     }
 
@@ -892,11 +897,15 @@ struct MyCalendarView: View {
         }
     }
 
-    private func subReportDateText(_ date: Date) -> String {
+    private static let subReportDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_Hant_TW")
         f.dateFormat = "M/d (E)"
-        return f.string(from: date)
+        return f
+    }()
+
+    private func subReportDateText(_ date: Date) -> String {
+        Self.subReportDateFormatter.string(from: date)
     }
 
     private func subTasks(on date: Date) -> [(sub: Subordinate, task: SubordinateTask)] {

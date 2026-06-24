@@ -2824,9 +2824,14 @@ struct AddExpenseView: View {
         }
     }
 
+    // 複用同一個 NumberFormatter 物件（只更新 currencySymbol/maximumFractionDigits），
+    // 避免每次 view body render 都 alloc 新的 NumberFormatter（建立成本高）。
+    private static let savingsCurrencyFmt: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .currency; return f
+    }()
+
     private func formatCurrency(_ value: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
+        let f = Self.savingsCurrencyFmt
         f.currencySymbol = isSavingsInsurance ? insCurrencySymbol : "NT$"
         f.maximumFractionDigits = isSavingsInsurance && insIsUSD ? 2 : 0
         return f.string(from: NSNumber(value: value)) ?? "NT$0"

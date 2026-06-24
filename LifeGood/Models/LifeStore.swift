@@ -140,7 +140,10 @@ class LifeStore: ObservableObject {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
               let mi = subordinates[si].meetings.firstIndex(where: { $0.id == meetingId }),
               let ii = subordinates[si].meetings[mi].items.firstIndex(where: { $0.id == itemId }) else { return }
+        // isLoading 阻斷 didSet → save() 的隱式觸發，確保只有下方的顯式 save() 被執行一次
+        isLoading = true
         subordinates[si].meetings[mi].items[ii].isCompleted.toggle()
+        isLoading = false
         save()
     }
 
@@ -148,7 +151,10 @@ class LifeStore: ObservableObject {
     func toggleWeeklyReportCompletion(subordinateId: UUID, reportId: UUID) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
               let ri = subordinates[si].weeklyReports.firstIndex(where: { $0.id == reportId }) else { return }
+        // isLoading 阻斷 didSet → save() 的隱式觸發，確保只有下方的顯式 save() 被執行一次
+        isLoading = true
         subordinates[si].weeklyReports[ri].isCompleted.toggle()
+        isLoading = false
         save()
     }
 
