@@ -39,6 +39,20 @@ import ImageIO
 //      對齊全 App 統一 Capsule 標籤規格。
 //  11. calcRow 金額字型：.subheadline.bold() → .system(size:14,weight:.bold,design:.rounded)
 //      對齊 kpiCell / collapsibleSection summary 字型層級。
+//
+// [2026-06 v3] 本次美化方向：
+//  12. flashCard 背景升級：加入三個 bokeh 裝飾圓（opacity 0.06 / 0.04 / 0.035）+
+//      頂部→中央玻璃光澤覆層（LinearGradient [.white.opacity(0.18), .clear]），
+//      對齊 VehicleView / StockView / IncomeView summaryHeader 英雄卡規格；
+//      背景改為 ZStack 包裹，所有裝飾層均 allowsHitTesting(false)。
+//  13. flashCard 主金額文字（52pt currentValue）加入 minimumScaleFactor(0.5) +
+//      lineLimit(1) + contentTransition(.numericText())，防止長數字溢出並對齊
+//      全 App 數值動態縮放規格（OverviewView / FinanceOverviewView / RealEstateView）。
+//  14. houseInfoSection 空狀態升級：56pt teal 漸層圖示圓（doc.text.magnifyingglass）
+//      + Circle stroke 細邊框 + .weight(.medium) 標題，對齊 CareerView /
+//      VariableExpenseView 空狀態 ZStack 漸層圓規格。
+//  15. assetsSection 空狀態升級：56pt 藍色漸層圖示圓（shippingbox）+ Circle stroke 細邊框，
+//      .weight(.medium) 標題，視覺均值化。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -318,6 +332,9 @@ struct RealEstateDetailView: View {
                 Text("\(fmtWan(estate.currentValue))")
                     .font(.system(size: 52, weight: .bold, design: .rounded))
                     .foregroundStyle(rarity.textColor)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
                 Text("萬元")
                     .font(.subheadline)
                     .foregroundStyle(rarity == .legendary ? .white.opacity(0.6) : .secondary)
@@ -350,8 +367,31 @@ struct RealEstateDetailView: View {
             .padding(.bottom, 16)
         }
         .background(
-            LinearGradient(colors: rarity.bgGradient,
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            // [v3] 背景升級：漸層 + 三個 bokeh 裝飾圓 + 玻璃光澤，對齊 VehicleView 英雄卡規格
+            ZStack {
+                LinearGradient(colors: rarity.bgGradient,
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Circle()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(width: 130, height: 130)
+                    .offset(x: 90, y: -50)
+                    .allowsHitTesting(false)
+                Circle()
+                    .fill(Color.white.opacity(0.04))
+                    .frame(width: 80, height: 80)
+                    .offset(x: -70, y: 60)
+                    .allowsHitTesting(false)
+                Circle()
+                    .fill(Color.white.opacity(0.035))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 40, y: 90)
+                    .allowsHitTesting(false)
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top, endPoint: .center
+                )
+                .allowsHitTesting(false)
+            }
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
@@ -874,14 +914,29 @@ struct RealEstateDetailView: View {
             // 空狀態
             if !hasBasic && estate.floors.isEmpty && !hasUtilities
                 && estate.insuranceItems.isEmpty && estate.propertyAssets.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 36)).foregroundStyle(.tertiary)
-                    Text("尚未填寫房屋資料").font(.subheadline).foregroundStyle(.secondary)
-                    Text("點擊下方編輯按鈕填寫").font(.caption).foregroundStyle(.tertiary)
+                // [v3] 空狀態升級：56pt teal 漸層圖示圓，對齊 CareerView 空狀態規格
+                VStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.teal.opacity(0.20), Color.teal.opacity(0.08)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ))
+                            .frame(width: 56, height: 56)
+                            .overlay(Circle().stroke(Color.teal.opacity(0.18), lineWidth: 0.8))
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(.teal)
+                    }
+                    Text("尚未填寫房屋資料")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text("點擊下方編輯按鈕填寫")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 32)
+                .padding(.vertical, 36)
             }
         }
         .padding(.bottom, 8)
@@ -1107,12 +1162,26 @@ struct RealEstateDetailView: View {
     private var assetsSection: some View {
         VStack(spacing: 16) {
             if estate.floors.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "shippingbox")
-                        .font(.system(size: 36)).foregroundStyle(.tertiary)
-                    Text("尚未建立樓層").font(.subheadline).foregroundStyle(.secondary)
+                // [v3] 空狀態升級：56pt 藍色漸層圖示圓，視覺均值化
+                VStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.blue.opacity(0.20), Color.blue.opacity(0.08)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ))
+                            .frame(width: 56, height: 56)
+                            .overlay(Circle().stroke(Color.blue.opacity(0.18), lineWidth: 0.8))
+                        Image(systemName: "shippingbox")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
+                    Text("尚未建立樓層")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
                     Text("請先用上方「編輯」新增樓層，再回來這裡建立各樓層的資產物件")
-                        .font(.caption).foregroundStyle(.tertiary)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.62", build: 529, date: "2026/06/24", notes: [
+            "【UI 美化 v3】RealEstateDetailView：① flashCard 英雄卡背景升級為 ZStack（漸層 + 三個 bokeh 裝飾圓 opacity 0.06/0.04/0.035 + 頂部玻璃光澤 LinearGradient [.white.opacity(0.18), .clear]），對齊 VehicleView / StockView 英雄卡規格；② 主金額 52pt 文字補 minimumScaleFactor(0.5) + lineLimit(1) + contentTransition(.numericText())，防長數字溢出；③ 房屋資料分頁與資產分頁空狀態升級為 56pt 漸層圖示圓（teal / 藍色 + 細邊框 stroke），對齊 CareerView 空狀態規格。"
+        ]),
         ChangelogEntry(version: "22.61", build: 528, date: "2026/06/24", notes: [
             "【靜態除錯 v22.61】修復三個問題：① FinanceStore.reloadFromCloud：NotificationCenter 在發送方執行緒觸發，load() 直接改寫 @Published 屬性可能在背景執行緒執行，補 DispatchQueue.main.async 保護；② ExpenseStore 新增 addExpenses(_ items:) 批次寫入方法，EInvoiceSyncManager 改用此 API，取代直接存取 expenseStore.expenses（@Published 陣列），確保封裝性與單次 save/push；③ ChartView DragGesture onChanged：每次拖曳都對 selectedDataPoint 賦值，即使目標不變也觸發 @State 更新與 body 重繪；補 label 比對守衛，只在資料點實際改變時才賦值，消除無效重繪。"
         ]),
