@@ -36,6 +36,8 @@ struct MyCalendarView: View {
     @State private var selectedDate = Date()
     @State private var showAdd = false
     @State private var editingEvent: PersonalEvent?
+    @State private var searchText = ""
+    @State private var showSubCompleted = false
 
     // 進場動畫旗標
     @State private var heroCardAppeared = false
@@ -69,6 +71,11 @@ struct MyCalendarView: View {
         let heroWeekTotal = heroWeekDates.reduce(0) { $0 + (heroEventsMap[$1]?.count ?? 0) }
         NavigationStack {
             ScrollView {
+              let trimmedQuery = searchText.trimmingCharacters(in: .whitespaces)
+              if !trimmedQuery.isEmpty {
+                searchResultsView(query: trimmedQuery)
+                    .padding(.vertical)
+              } else {
                 VStack(spacing: 16) {
                     calendarHeroCard(todayEvCount: heroTodayCount, weekTotal: heroWeekTotal, upcomingCount: upcomingMS.count)
                         .opacity(heroCardAppeared ? 1 : 0)
@@ -115,8 +122,11 @@ struct MyCalendarView: View {
                     }
                 }
                 .padding(.vertical)
+              }
             }
             .background(Color(.systemGroupedBackground))
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic),
+                        prompt: "搜尋報告/會議/任務/里程碑/事件（標題或內容）")
             .navigationTitle("我的行事曆")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -997,8 +1007,171 @@ struct MyCalendarView: View {
                     }
                 }
             }
+            // 當日完成的項目（報告/會議項目/任務）收合於最下方
+            CompletedCollapsibleCard(entries: subCompletedEntries(on: date),
+                                     expanded: $showSubCompleted,
+                                     title: "已完成（當日）")
         }
         .padding(.horizontal)
+    }
+
+    /// 當日（依 completedAt）完成的部屬項目，供底部收合卡使用
+    private func subCompletedEntries(on date: Date) -> [CompletedEntry] {
+        var out: [CompletedEntry] = []
+        for sub in lifeStore.subordinates {
+            let who = sub.name.isEmpty ? "未命名" : sub.name
+            for r in sub.weeklyReports where r.isCompleted {
+                if let at = r.completedAt, calendar.isDate(at, inSameDayAs: date) {
+                    out.append(CompletedEntry(id: r.id, kind: .report, title: r.topic,
+                                              subtitle: who, completedAt: at, due: r.date, onTap: {}))
+                }
+            }
+            for m in sub.meetings {
+                for item in m.items where item.isCompleted {
+                    if let at = item.completedAt, calendar.isDate(at, inSameDayAs: date) {
+                        out.append(CompletedEntry(id: item.id, kind: .meeting, title: item.content,
+                                                  subtitle: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)",
+                                                  completedAt: at, due: item.dueDate, onTap: {}))
+                    }
+                }
+            }
+            for t in sub.tasks where t.isCompleted {
+                if let at = t.completedAt, calendar.isDate(at, inSameDayAs: date) {
+                    out.append(CompletedEntry(id: t.id, kind: .task, title: t.topic,
+                                              subtitle: who, completedAt: at, due: t.dueDate, onTap: {}))
+                }
+            }
+        }
+        return out
+    }
+
+    // MARK: - 搜尋（標題 + 內容）
+
+    private struct SearchHit: Identifiable {
+        let id: String
+        let icon: String
+        let color: Color
+        let typeLabel: String
+        let title: String
+        let snippet: String?
+        let date: Date
+    }
+
+    private static let searchHitDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    /// 跨部屬報告/會議/任務/請假 + 里程碑 + 個人事件，比對標題與內容/備註
+    private func searchHits(_ q: String) -> [SearchHit] {
+        func hit(_ fields: [String]) -> Bool { fields.contains { $0.localizedCaseInsensitiveContains(q) } }
+        var out: [SearchHit] = []
+        for sub in lifeStore.subordinates {
+            let who = sub.name.isEmpty ? "未命名" : sub.name
+            for r in sub.weeklyReports where hit([r.topic, r.note]) {
+                out.append(SearchHit(id: "r_\(r.id)", icon: "doc.text.fill", color: .purple,
+                    typeLabel: "報告", title: r.topic.isEmpty ? "未命名報告" : r.topic,
+                    snippet: r.note.isEmpty ? who : "\(who)・\(r.note)", date: r.date))
+            }
+            for t in sub.tasks where hit([t.topic, t.content, t.note]) {
+                out.append(SearchHit(id: "t_\(t.id)", icon: "checklist", color: .cyan,
+                    typeLabel: "任務", title: t.topic.isEmpty ? "未命名任務" : t.topic,
+                    snippet: t.content.isEmpty ? who : "\(who)・\(t.content)", date: t.date))
+            }
+            for m in sub.meetings {
+                if hit([m.topic, m.note]) {
+                    out.append(SearchHit(id: "m_\(m.id)", icon: "person.3.fill", color: .indigo,
+                        typeLabel: "會議", title: m.topic.isEmpty ? "未命名會議" : m.topic,
+                        snippet: who, date: m.date))
+                }
+                for item in m.items where hit([item.content]) {
+                    out.append(SearchHit(id: "mi_\(item.id)", icon: "person.3.sequence.fill", color: .indigo,
+                        typeLabel: "會議項目", title: item.content.isEmpty ? "未填內容" : item.content,
+                        snippet: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)", date: m.date))
+                }
+            }
+            for rec in sub.records where hit([rec.content, rec.note]) {
+                out.append(SearchHit(id: "rec_\(rec.id)", icon: "calendar.badge.clock", color: .teal,
+                    typeLabel: rec.type.rawValue, title: rec.content.isEmpty ? rec.type.rawValue : rec.content,
+                    snippet: who, date: rec.date))
+            }
+        }
+        for ms in lifeStore.milestones where hit([ms.title, ms.note]) {
+            out.append(SearchHit(id: "ms_\(ms.id)", icon: "flag.fill", color: .pink,
+                typeLabel: "里程碑", title: ms.title.isEmpty ? "未命名里程碑" : ms.title,
+                snippet: ms.note.isEmpty ? nil : ms.note, date: ms.date))
+        }
+        for pe in lifeStore.personalEvents where hit([pe.title, pe.note, pe.location]) {
+            out.append(SearchHit(id: "pe_\(pe.id)", icon: "calendar", color: .green,
+                typeLabel: pe.kind.rawValue, title: pe.title.isEmpty ? "未命名事件" : pe.title,
+                snippet: pe.note.isEmpty ? (pe.location.isEmpty ? nil : pe.location) : pe.note, date: pe.date))
+        }
+        return out.sorted { $0.date > $1.date }
+    }
+
+    @ViewBuilder
+    private func searchResultsView(query: String) -> some View {
+        let hits = searchHits(query)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("搜尋結果").font(.headline)
+                Spacer()
+                Text("\(hits.count) 筆").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+
+            if hits.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 32)).foregroundStyle(.secondary)
+                    Text("找不到「\(query)」相關項目").font(.subheadline).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 44)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(hits.enumerated()), id: \.element.id) { idx, h in
+                        Button {
+                            selectedDate = h.date
+                            searchText = ""
+                        } label: { searchHitRow(h) }
+                        .buttonStyle(.plain)
+                        if idx < hits.count - 1 { Divider().padding(.leading, 58) }
+                    }
+                }
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+                .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+                .padding(.horizontal)
+
+                Text("點一下可跳到該項目的日期")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private func searchHitRow(_ h: SearchHit) -> some View {
+        HStack(spacing: 11) {
+            ZStack {
+                Circle().fill(LinearGradient(colors: [h.color.opacity(0.20), h.color.opacity(0.08)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 34, height: 34)
+                Image(systemName: h.icon).font(.system(size: 13, weight: .semibold)).foregroundStyle(h.color)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(h.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                    Text(h.typeLabel).font(.caption2.weight(.bold))
+                        .padding(.horizontal, 6).padding(.vertical, 1.5)
+                        .background(h.color.opacity(0.14)).foregroundStyle(h.color).clipShape(Capsule())
+                }
+                if let s = h.snippet, !s.isEmpty {
+                    Text(s).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            Text(Self.searchHitDateFormatter.string(from: h.date)).font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .contentShape(Rectangle())
     }
 
     private func subAgendaCard<Content: View>(_ title: String, _ icon: String, _ color: Color,

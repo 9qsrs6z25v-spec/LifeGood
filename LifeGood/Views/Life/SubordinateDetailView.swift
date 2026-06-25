@@ -71,6 +71,125 @@ struct CompletionStamp: View {
     }
 }
 
+// MARK: - 已完成項目收合卡（共用：部屬卡片 / 總覽 / 行事曆）
+
+/// 已完成的單筆項目（報告 / 會議項目 / 任務）
+struct CompletedEntry: Identifiable {
+    enum Kind { case report, meeting, task
+        var icon: String {
+            switch self { case .report: return "doc.text.fill"; case .meeting: return "person.3.fill"; case .task: return "checklist" }
+        }
+        var color: Color {
+            switch self { case .report: return .purple; case .meeting: return .indigo; case .task: return .cyan }
+        }
+        var label: String {
+            switch self { case .report: return "報告"; case .meeting: return "會議"; case .task: return "任務" }
+        }
+    }
+    let id: UUID
+    let kind: Kind
+    let title: String
+    let subtitle: String?
+    let completedAt: Date?
+    let due: Date?
+    let onTap: () -> Void
+}
+
+/// 已完成項目收合卡：可展開 / 收合，列出報告 / 會議 / 任務的完成項目 + 完成時間戳。
+struct CompletedCollapsibleCard: View {
+    let entries: [CompletedEntry]
+    @Binding var expanded: Bool
+    var title: String = "已完成"
+
+    private var sorted: [CompletedEntry] {
+        entries.sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
+    }
+
+    var body: some View {
+        if entries.isEmpty {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [.green, .green.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4, height: 18)
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(colors: [Color.green.opacity(0.20), Color.green.opacity(0.08)],
+                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 28, height: 28)
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.green)
+                        }
+                        Text(title).font(.subheadline.weight(.bold)).foregroundStyle(.primary)
+                        Spacer()
+                        Text("\(entries.count) 筆")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.green)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.green.opacity(0.10)).clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14).padding(.top, 13).padding(.bottom, expanded ? 9 : 13)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if expanded {
+                    ForEach(Array(sorted.enumerated()), id: \.element.id) { idx, e in
+                        Button(action: e.onTap) {
+                            HStack(spacing: 11) {
+                                ZStack {
+                                    Circle()
+                                        .fill(LinearGradient(colors: [e.kind.color.opacity(0.20), e.kind.color.opacity(0.08)],
+                                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                                        .frame(width: 32, height: 32)
+                                    Image(systemName: e.kind.icon).font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(e.kind.color)
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 6) {
+                                        Text(e.title.isEmpty ? "未命名\(e.kind.label)" : e.title)
+                                            .font(.subheadline.weight(.medium))
+                                            .strikethrough(true, color: .secondary)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                        Text(e.kind.label)
+                                            .font(.caption2.weight(.bold))
+                                            .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                            .background(e.kind.color.opacity(0.14))
+                                            .foregroundStyle(e.kind.color)
+                                            .clipShape(Capsule())
+                                    }
+                                    if let sub = e.subtitle, !sub.isEmpty {
+                                        Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                    CompletionStamp(completedAt: e.completedAt, due: e.due)
+                                }
+                                Spacer(minLength: 4)
+                            }
+                            .padding(.horizontal, 14).padding(.vertical, 9)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if idx < sorted.count - 1 { Divider().padding(.leading, 57) }
+                    }
+                    .padding(.bottom, 6)
+                }
+            }
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        }
+    }
+}
+
 // MARK: - 美化紀錄（SubordinateDetailView）
 // [2026-06] 本次美化方向：
 //   1. headerCard：升級為藍色漸層英雄卡片，含縮寫頭像圓、姓名大字、
@@ -105,6 +224,7 @@ struct SubordinateDetailView: View {
 
     let subordinateId: UUID
     @State private var showEdit = false
+    @State private var showCompleted = false
     @State private var addingType: SubordinateRecordType?
     @State private var editingRecord: SubordinateRecord?
     @State private var addingMeeting = false
@@ -216,6 +336,10 @@ struct SubordinateDetailView: View {
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.10), value: tabSectionsAppeared)
+                        completedSection
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.13), value: tabSectionsAppeared)
                     } else {
                         proConSection
                             .opacity(tabSectionsAppeared ? 1 : 0)
@@ -432,7 +556,7 @@ struct SubordinateDetailView: View {
     // MARK: - 報告章節
 
     private var weeklyReportSection: some View {
-        let items = subordinate.weeklyReports.sorted { $0.date > $1.date }
+        let items = subordinate.weeklyReports.filter { !$0.isCompleted }.sorted { $0.date > $1.date }
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("報告", icon: "doc.text.fill", color: .purple, count: items.count) {
                 Button {
@@ -494,6 +618,38 @@ struct SubordinateDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+    }
+
+    // MARK: - 已完成（報告 / 會議項目 / 任務）收合於最下方
+
+    private var completedEntries: [CompletedEntry] {
+        var out: [CompletedEntry] = []
+        for r in subordinate.weeklyReports where r.isCompleted {
+            out.append(CompletedEntry(id: r.id, kind: .report, title: r.topic,
+                                      subtitle: r.note.isEmpty ? nil : r.note,
+                                      completedAt: r.completedAt, due: r.date,
+                                      onTap: { if subscription.isPremium { editingReport = r } else { showPremiumAlert = true } }))
+        }
+        for m in subordinate.meetings {
+            for item in m.items where item.isCompleted {
+                out.append(CompletedEntry(id: item.id, kind: .meeting, title: item.content,
+                                          subtitle: m.topic.isEmpty ? "會議" : m.topic,
+                                          completedAt: item.completedAt, due: item.dueDate,
+                                          onTap: { if subscription.isPremium { editingMeeting = m } else { showPremiumAlert = true } }))
+            }
+        }
+        for t in subordinate.tasks where t.isCompleted {
+            out.append(CompletedEntry(id: t.id, kind: .task, title: t.topic,
+                                      subtitle: t.content.isEmpty ? nil : t.content,
+                                      completedAt: t.completedAt, due: t.dueDate,
+                                      onTap: { if subscription.isPremium { editingTask = t } else { showPremiumAlert = true } }))
+        }
+        return out
+    }
+
+    private var completedSection: some View {
+        CompletedCollapsibleCard(entries: completedEntries, expanded: $showCompleted)
+            .padding(.horizontal)
     }
 
     private var meetingSection: some View {
@@ -565,8 +721,9 @@ struct SubordinateDetailView: View {
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
                                     }
-                                    if !m.items.isEmpty {
-                                        Text("\(m.items.count) 個項目")
+                                    let pending = m.items.filter { !$0.isCompleted }
+                                    if !pending.isEmpty {
+                                        Text("\(pending.count) 個待辦項目")
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
                                     }
@@ -583,10 +740,11 @@ struct SubordinateDetailView: View {
                     }
                     .buttonStyle(.plain)
 
-                    // 議程項目（可打勾完成）
-                    if !m.items.isEmpty {
+                    // 議程項目（僅未完成；已完成移至底部「已完成」收合區）
+                    let pendingItems = m.items.filter { !$0.isCompleted }
+                    if !pendingItems.isEmpty {
                         VStack(spacing: 0) {
-                            ForEach(m.items) { item in
+                            ForEach(pendingItems) { item in
                                 meetingItemRow(meeting: m, item: item)
                             }
                         }
@@ -649,10 +807,8 @@ struct SubordinateDetailView: View {
     // MARK: - 任務章節
 
     private var taskSection: some View {
-        // 未完成在前、已完成在後；各自再依日期新到舊
-        let items = subordinate.tasks.sorted {
-            $0.isCompleted != $1.isCompleted ? (!$0.isCompleted && $1.isCompleted) : ($0.date > $1.date)
-        }
+        // 僅顯示未完成；已完成移至底部「已完成」收合區
+        let items = subordinate.tasks.filter { !$0.isCompleted }.sorted { $0.date > $1.date }
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("任務", icon: "checklist", color: .cyan, count: items.count) {
                 Button {

@@ -157,13 +157,6 @@ struct SubordinateOverviewView: View {
         .sorted { $0.meeting.date > $1.meeting.date }
     }
 
-    /// 所有「已完成」任務（依完成時間新到舊，無完成時間者退用日期）
-    private var completedTasks: [(sub: Subordinate, task: SubordinateTask)] {
-        lifeStore.subordinates.flatMap { sub in
-            sub.tasks.filter { $0.isCompleted }.map { (sub, $0) }
-        }
-        .sorted { ($0.task.completedAt ?? $0.task.date) > ($1.task.completedAt ?? $1.task.date) }
-    }
 
     var body: some View {
         NavigationStack {
@@ -257,7 +250,8 @@ struct SubordinateOverviewView: View {
     // MARK: - 報告彙整
 
     private var reportSection: some View {
-        let rows = displayedReports
+        // 已完成移至底部「已完成」收合區，這裡只顯示未完成（逾期/本週/待辦）
+        let rows = displayedReports.filter { $0.status != .done }
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("報告（本週 / 待辦）", icon: "doc.text.fill", color: .purple, count: rows.count)
 
@@ -408,12 +402,37 @@ struct SubordinateOverviewView: View {
             taskGroupCard(title: "未完成任務", icon: "tray.full.fill", color: .orange,
                           items: incompleteTasks, emptyText: "沒有未完成任務")
 
-            // 已完成（可收合；無已完成時不顯示）
-            if !completedTasks.isEmpty {
-                completedCard
-            }
+            // 已完成（報告 / 會議項目 / 任務，可收合；無已完成時不顯示）
+            CompletedCollapsibleCard(entries: overviewCompletedEntries, expanded: $showCompleted)
         }
         .padding(.horizontal)
+    }
+
+    /// 跨所有部屬的已完成項目（報告 / 會議議程項目 / 任務），供底部收合卡使用
+    private var overviewCompletedEntries: [CompletedEntry] {
+        var out: [CompletedEntry] = []
+        for sub in lifeStore.subordinates {
+            let who = sub.name.isEmpty ? "未命名" : sub.name
+            for r in sub.weeklyReports where r.isCompleted {
+                out.append(CompletedEntry(id: r.id, kind: .report, title: r.topic,
+                                          subtitle: who, completedAt: r.completedAt, due: r.date,
+                                          onTap: { editTarget = .report(subId: sub.id, report: r) }))
+            }
+            for m in sub.meetings {
+                for item in m.items where item.isCompleted {
+                    out.append(CompletedEntry(id: item.id, kind: .meeting, title: item.content,
+                                              subtitle: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)",
+                                              completedAt: item.completedAt, due: item.dueDate,
+                                              onTap: { editTarget = .meeting(subId: sub.id, meeting: m) }))
+                }
+            }
+            for t in sub.tasks where t.isCompleted {
+                out.append(CompletedEntry(id: t.id, kind: .task, title: t.topic,
+                                          subtitle: who, completedAt: t.completedAt, due: t.dueDate,
+                                          onTap: { editTarget = .task(subId: sub.id, task: t) }))
+            }
+        }
+        return out
     }
 
     /// 未完成會議條目卡
@@ -494,52 +513,6 @@ struct SubordinateOverviewView: View {
                     ForEach(Array(items.enumerated()), id: \.element.task.id) { idx, item in
                         taskRow(item.sub, item.task)
                         if idx < items.count - 1 { Divider().padding(.leading, 62) }
-                    }
-                }
-            }
-        }
-    }
-
-    private var completedCard: some View {
-        let tasks = completedTasks
-        return cardWrap {
-            VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { showCompleted.toggle() }
-                } label: {
-                    HStack(spacing: 10) {
-                        Capsule()
-                            .fill(LinearGradient(colors: [.green, .green.opacity(0.55)],
-                                                 startPoint: .top, endPoint: .bottom))
-                            .frame(width: 4, height: 18)
-                        ZStack {
-                            Circle()
-                                .fill(LinearGradient(colors: [Color.green.opacity(0.20), Color.green.opacity(0.08)],
-                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                                .frame(width: 28, height: 28)
-                            Circle().stroke(Color.green.opacity(0.22), lineWidth: 0.75).frame(width: 28, height: 28)
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.green)
-                        }
-                        Text("已完成").font(.subheadline.weight(.bold)).foregroundStyle(.primary)
-                        Spacer()
-                        Text("\(tasks.count) 筆")
-                            .font(.caption2.weight(.semibold)).foregroundStyle(.green)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.green.opacity(0.10)).clipShape(Capsule())
-                            .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.75))
-                        Image(systemName: showCompleted ? "chevron.up" : "chevron.down")
-                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 14).padding(.top, 13).padding(.bottom, 9)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if showCompleted {
-                    ForEach(Array(tasks.enumerated()), id: \.element.task.id) { idx, item in
-                        taskRow(item.sub, item.task)
-                        if idx < tasks.count - 1 { Divider().padding(.leading, 62) }
                     }
                 }
             }
