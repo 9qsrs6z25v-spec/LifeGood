@@ -28,8 +28,10 @@ class FinanceStore: ObservableObject {
     }
 
     @objc private func reloadFromCloud() {
-        // NotificationCenter 未指定 queue 時在發送方執行緒觸發，需回主執行緒再讀寫 @Published 屬性
-        DispatchQueue.main.async { [weak self] in self?.load() }
+        // cloudSyncDidPullChanges 由 CloudSyncManager.handleKVChanges 在 main thread 上 post，
+        // 與 LifeStore / ExpenseStore 保持一致：直接呼叫 load()，消除多一個 run-loop 的空窗期，
+        // 避免該期間使用者操作觸發 save() 後被雲端資料覆蓋。
+        load()
     }
 
     // MARK: - 儲蓄險 CRUD

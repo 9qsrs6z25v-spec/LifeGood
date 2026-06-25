@@ -293,7 +293,7 @@ final class CloudKitManager {
         }
     }
 
-    private func runFetch(completion: ((Bool) -> Void)?) {
+    private func runFetch(retriesLeft: Int = 1, completion: ((Bool) -> Void)?) {
         var token: CKServerChangeToken? = loadChangeToken()
         let configuration = CKFetchRecordZoneChangesOperation.ZoneConfiguration(
             previousServerChangeToken: token,
@@ -386,9 +386,15 @@ final class CloudKitManager {
                 case .failure(let err):
                     if let ck = err as? CKError, ck.code == .changeTokenExpired {
                         // token 過期：不發部分資料通知，避免以不完整資料觸發 Store reload 造成畫面閃爍；
-                        // 清掉 token 後重抓完整變更，retry 成功時才一次性發通知
+                        // 清掉 token 後重抓完整變更，retry 成功時才一次性發通知。
+                        // 限制重試次數，防止 token 持續失效時的無限遞迴。
                         self.clearChangeToken()
-                        self.fetchChanges(completion: completion)
+                        if retriesLeft > 0 {
+                            self.queue.async { self.runFetch(retriesLeft: retriesLeft - 1, completion: completion) }
+                        } else {
+                            self.report(err, context: "拉取雲端變更（token 反覆過期）")
+                            completion?(false)
+                        }
                     } else if let ck = err as? CKError, ck.code == .zoneNotFound || ck.code == .userDeletedZone {
                         // zone 被刪 → 清掉本地旗標讓下次重建；已拉取的部分資料仍發通知
                         if !pulledKVKeys.isEmpty {

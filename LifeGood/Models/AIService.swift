@@ -264,10 +264,15 @@ final class AIExpenseParserService {
         availableBankAccounts: [String] = [],
         availableRealEstates: [String] = []
     ) async throws -> ParsedAIExpense {
-        let settings = await AISettingsStore.shared
-        guard let provider = await settings.activeProvider else { throw AIParseError.noProvider }
-        let key = await settings.key(for: provider)
-        guard !key.isEmpty else { throw AIParseError.noKey }
+        // 在同一個 MainActor 切換中讀取 provider + key，避免兩次分開的 await
+        // 之間使用者切換供應商導致 provider 與 key 來自不同供應商
+        let (provider, key) = try await MainActor.run {
+            let settings = AISettingsStore.shared
+            guard let p = settings.activeProvider else { throw AIParseError.noProvider }
+            let k = settings.key(for: p)
+            guard !k.isEmpty else { throw AIParseError.noKey }
+            return (p, k)
+        }
 
         // 取得使用者目前位置（reverse geocode 結果，5 分鐘 cache），讓 AI 判斷分店
         let locationContext = await LocationContextProvider.shared.currentContext()

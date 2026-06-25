@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.66", build: 532, date: "2026/06/25", notes: [
+            "【靜態除錯 v22.66】修復三個問題：① CloudKitManager.runFetch changeTokenExpired 分支：原本直接呼叫 fetchChanges(completion:)，若 CloudKit 持續回傳 token 過期錯誤會無限遞迴；改為對 runFetch 傳入 retriesLeft 計數器，重試一次失敗後即報錯並呼叫 completion(false)，防止無限遞迴。② AIExpenseParserService.parse：activeProvider 與 key 分成兩次獨立的 await MainActor 切換讀取，使用者若在兩次 await 之間切換 AI 供應商，會以 provider-A 的身份呼叫 provider-B 的金鑰；改以單一 MainActor.run 閉包一次性讀取，確保兩值永遠屬於同一個供應商。③ FinanceStore.reloadFromCloud：cloudSyncDidPullChanges 已由 CloudSyncManager 在主執行緒 post，多一層 DispatchQueue.main.async 會增加一個 run-loop 空窗，期間若使用者操作觸發 save() 則雲端資料覆蓋編輯；移除多餘的 async 包裝，改直接呼叫 load()，與 LifeStore / ExpenseStore 保持一致。"
+        ]),
         ChangelogEntry(version: "22.64", build: 531, date: "2026/06/24", notes: [
             "任務 / 會議項目 / 報告打勾完成時，自動記下完成時間戳，並依目標日期標示『超前(綠) / 準時(藍) / 逾期(紅)』。",
             "完成戳記顯示於部屬卡片、部屬總覽與我的行事曆；取消打勾會清除戳記，編輯時保留原戳記。"
