@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.70", build: 535, date: "2026/06/25", notes: [
+            "修正匯入時部屬『報告』未被合併的問題：部屬資料合併匯入現在會一併帶入週報；摘要新增『報告 +N』。",
+            "完整 JSON 合併匯入改為更新既有部屬的子項目（班表/任務/會議/報告/紀錄），不再只新增全新的人，避免部屬資料看似未完整匯入。"
+        ]),
         ChangelogEntry(version: "22.68", build: 534, date: "2026/06/25", notes: [
             "【靜態除錯 v22.68】修復 SubordinateOverviewView 效能瓶頸：leaveSection、meetingSection、meetingItemsCard、completedCard 四個計算屬性（computed view properties）內部各自重複存取同一個 O(n×m) 計算屬性 2–4 次：todayLeaves 在 leaveSection 內存取 4 次（sectionHeader count ×1、isEmpty ×1、enumerated ×1、count-1 ×1），todayMeetings 在 meetingSection 內存取 4 次，incompleteMeetingItems 在 meetingItemsCard 內存取 3 次，completedTasks 在 completedCard 內存取 3 次；每次 body 重繪（例如 CloudKit pull 後 @Published 觸發）各計算屬性即被重複執行。修復方式：在四個 computed view property 頂部各新增一個 let 區域常數快取（let leaves / meetings / items / tasks），將後續引用全數改為存取此常數，每次 property 求值只觸發一次 O(n×m) flatMap/filter，消除每次 body render 的冗餘計算。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
         ]),

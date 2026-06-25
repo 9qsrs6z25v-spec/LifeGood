@@ -517,8 +517,31 @@ enum UnifiedImporter {
             result.schedules = newSchs.count
 
             if let subs = payload.life.subordinates {
-                let newSubs = mergeItems(existing: life.subordinates, incoming: subs)
-                life.subordinates.append(contentsOf: newSubs)
+                // 既有部屬：補進新的子項目（班表/任務/會議/報告/紀錄）；不存在的部屬整筆新增
+                var arr = life.subordinates
+                func appendNewByID<T: Identifiable>(_ dst: inout [T], _ src: [T]) {
+                    let ids = Set(dst.map(\.id))
+                    dst.append(contentsOf: src.filter { !ids.contains($0.id) })
+                }
+                let cal = Calendar.current
+                for inc in subs {
+                    if let idx = arr.firstIndex(where: { $0.id == inc.id }) {
+                        var s = arr[idx]
+                        appendNewByID(&s.records,  inc.records)
+                        appendNewByID(&s.meetings, inc.meetings)
+                        appendNewByID(&s.tasks,    inc.tasks)
+                        appendNewByID(&s.weeklyReports, inc.weeklyReports)
+                        for sh in inc.shifts where !s.shifts.contains(where: { cal.isDate($0.date, inSameDayAs: sh.date) }) {
+                            s.shifts.append(sh)
+                        }
+                        if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
+                        if s.joinDate == nil { s.joinDate = inc.joinDate }
+                        arr[idx] = s
+                    } else {
+                        arr.append(inc)
+                    }
+                }
+                life.subordinates = arr
             }
 
             if let depts = payload.life.departments {
@@ -573,11 +596,12 @@ enum SubordinateImporter {
         var recordsMerged = 0
         var meetingsMerged = 0
         var tasksMerged = 0
+        var reportsMerged = 0
         var shiftsMerged = 0
         var departmentsAdded = 0
         var gradeTitlesAdded = 0
         var summary: String {
-            "新增 \(added) 人、更新 \(updated) 人；班別 +\(shiftsMerged)、任務 +\(tasksMerged)、會議 +\(meetingsMerged)、紀錄 +\(recordsMerged)"
+            "新增 \(added) 人、更新 \(updated) 人；班別 +\(shiftsMerged)、任務 +\(tasksMerged)、會議 +\(meetingsMerged)、報告 +\(reportsMerged)、紀錄 +\(recordsMerged)"
         }
     }
 
@@ -621,6 +645,7 @@ enum SubordinateImporter {
                     r.recordsMerged  += appendNew(&s.records,  inc.records)
                     r.meetingsMerged += appendNew(&s.meetings, inc.meetings)
                     r.tasksMerged    += appendNew(&s.tasks,    inc.tasks)
+                    r.reportsMerged  += appendNew(&s.weeklyReports, inc.weeklyReports)
                     r.shiftsMerged   += appendNewShifts(&s.shifts, inc.shifts)
                     if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
                     if s.joinDate == nil { s.joinDate = inc.joinDate }
