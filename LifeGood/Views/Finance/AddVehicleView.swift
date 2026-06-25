@@ -12,6 +12,23 @@ import SwiftUI
 //      對齊 AddExpenseView.calcPreviewRows 設計語言。
 //   5. noteSection：加入 Capsule 色條標題，提升視覺一致性。
 //   6. 輔助函式 vehicleSectionHeader / calcRow 集中維護，方便日後均值對齊。
+// [2026-06 v2] 本次美化方向：
+//   7. vehiclePreviewCard（英雄預覽卡）：Form 頂部新增翠綠漸層英雄預覽卡，
+//      即時顯示車名 + 購入價大字 + 目前估值 / 折舊金額 / 月固定支出 KPI 橫列，
+//      動力類型白色膠囊 + 折舊率膠囊；三顆散景裝飾圓 + 頂部玻璃光澤，
+//      cardAppeared spring 進場動畫，對齊 AddStockView.amountPreviewCard /
+//      AddSavingsInsuranceView.calcPreviewCard 規格。
+//   8. errorBanner：從純紅字 Text 升級為帶圖示的橘色警告橫幅卡
+//      （exclamationmark.triangle.fill + 說明文字），對齊 AddExpenseView errorBanner 規格。
+//   9. .tint(.teal)：青藍主題色統一套用，Toggle / DatePicker 等系統元件配色與車輛主題一致，
+//      對齊 AddStockView(.orange) / AddRealEstateView(.purple) 主題色規格。
+//  10. vehicleSectionHeader 計數膠囊：補入 .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+//      細邊框，對齊全 App 計數膠囊細邊框規格（OverviewView / StockView sectionHeader）。
+//  11. variableExpenseSection 日期膠囊：背景從 .systemGray5 改為 .tertiarySystemFill，
+//      深色模式相容，對齊 OverviewView.recentRow / CareerView 日期膠囊規格；
+//      shortDateFormatter 改為靜態共用實例，避免每次 render 重新分配。
+//  12. calcSection 進場動畫：加入 calcSectionAppeared spring 旗標 + opacity+Y offset 進場，
+//      對齊 AddSavingsInsuranceView.cardAppeared / AddStockView 進場規格。
 
 struct AddVehicleView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -41,6 +58,9 @@ struct AddVehicleView: View {
     @State private var note = ""
     @State private var showError = false
     @State private var hasAutoSaved: Bool = false
+    // v2 進場動畫旗標
+    @State private var cardAppeared = false
+    @State private var calcSectionAppeared = false
 
     // MARK: - 編輯/新增項目
 
@@ -68,6 +88,19 @@ struct AddVehicleView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // v2：翠綠英雄預覽卡（常態顯示，即時反映填入數值）
+                Section {
+                    vehiclePreviewCard
+                        .opacity(cardAppeared ? 1 : 0)
+                        .offset(y: cardAppeared ? 0 : 18)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.50, dampingFraction: 0.78)) {
+                                cardAppeared = true
+                            }
+                        }
+                }
                 vehicleInfoSection
                 valueSection
                 fixedExpenseSection
@@ -77,11 +110,13 @@ struct AddVehicleView: View {
 
                 if showError {
                     Section {
-                        Text("請輸入車名和購入價格")
-                            .foregroundStyle(.red).font(.caption)
+                        errorBanner
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
                     }
                 }
             }
+            .tint(.teal) // v2: 青藍主題色
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -298,12 +333,16 @@ struct AddVehicleView: View {
                             Text(ve.category.rawValue)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.primary)
-                            Text(formatShortDate(ve.date))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 5).padding(.vertical, 1.5)
-                                .background(Color(.systemGray5))
-                                .clipShape(Capsule())
+                            HStack(spacing: 3) {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 9, weight: .medium))
+                                Text(formatShortDate(ve.date))
+                                    .font(.caption2.weight(.medium))
+                            }
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
                         }
                         Spacer()
                         Text(ve.amount > 0 ? formatCurrency(ve.amount) : "未填")
@@ -363,6 +402,14 @@ struct AddVehicleView: View {
                 }
             } header: {
                 vehicleSectionHeader("試算", icon: "chart.bar.fill", color: .purple)
+            }
+            // v2：試算區塊進場動畫
+            .opacity(calcSectionAppeared ? 1 : 0)
+            .offset(y: calcSectionAppeared ? 0 : 12)
+            .onAppear {
+                withAnimation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.20)) {
+                    calcSectionAppeared = true
+                }
             }
         }
     }
@@ -551,6 +598,169 @@ struct AddVehicleView: View {
 
     // MARK: - 美化輔助元件
 
+    // MARK: - v2 新增：英雄預覽卡 & 錯誤橫幅
+
+    // v2：翠綠漸層英雄預覽卡（即時反映購入價 / 估值 / 折舊 / 月固定支出）
+    private var vehiclePreviewCard: some View {
+        let purchaseWan = Double(purchasePriceText) ?? 0
+        let currentWan  = Double(currentValueText) ?? 0
+        let purchase    = purchaseWan * 10000
+        let current     = currentWan  * 10000
+        let depAmt      = purchase > 0 && current > 0 && purchase > current ? purchase - current : 0.0
+        let depRate     = purchase > 0 && current > 0 ? (purchase - current) / purchase * 100 : 0.0
+        let monthlyFix  = fixedExpenses.reduce(0.0) { $0 + $1.period.toMonthly($1.amount) }
+        let accentA     = Color(red: 0.15, green: 0.72, blue: 0.65)
+        let accentB     = Color(red: 0.05, green: 0.55, blue: 0.60)
+        return ZStack(alignment: .topLeading) {
+            // 漸層背景
+            RoundedRectangle(cornerRadius: 20)
+                .fill(LinearGradient(
+                    colors: [accentA, accentB],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+            // 散景裝飾圓
+            Circle()
+                .fill(Color.white.opacity(0.07))
+                .frame(width: 90, height: 90)
+                .offset(x: -20, y: -30)
+                .blur(radius: 6)
+            Circle()
+                .fill(Color.white.opacity(0.07))
+                .frame(width: 70, height: 70)
+                .offset(x: 250, y: 4)
+                .blur(radius: 5)
+            Circle()
+                .fill(Color.white.opacity(0.05))
+                .frame(width: 55, height: 55)
+                .offset(x: 190, y: 52)
+                .blur(radius: 8)
+            // 玻璃光澤高光
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top, endPoint: .center
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            // 卡片內容
+            VStack(alignment: .leading, spacing: 12) {
+                // 頂列：動力類型 + 折舊率
+                HStack {
+                    HStack(spacing: 5) {
+                        Image(systemName: powerType.icon)
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(powerType.rawValue)
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.90))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(.white.opacity(0.22))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.6))
+                    Spacer()
+                    if purchaseWan > 0 && currentWan > 0 {
+                        Text(String(format: "%.1f%% 折舊", max(0, depRate)))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(depAmt > 0
+                                ? Color(red: 1.0, green: 0.82, blue: 0.50)
+                                : .white.opacity(0.80))
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(.white.opacity(0.18))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 0.5))
+                    }
+                }
+                // 車名
+                Text(name.isEmpty ? "車輛名稱" : name)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(name.isEmpty ? .white.opacity(0.45) : .white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                // 購入價大字
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(purchaseWan > 0 ? purchase.ntdWanString : "NT$ —")
+                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        .foregroundStyle(purchaseWan > 0 ? .white : .white.opacity(0.45))
+                        .contentTransition(.numericText())
+                        .minimumScaleFactor(0.72)
+                    Text("購入價")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                // KPI 橫列（三格）
+                if purchaseWan > 0 {
+                    Rectangle()
+                        .fill(.white.opacity(0.20))
+                        .frame(height: 0.5)
+                    HStack(spacing: 0) {
+                        // 目前估值
+                        VStack(spacing: 2) {
+                            Text(currentWan > 0 ? current.ntdWanString : "—")
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .contentTransition(.numericText())
+                            Text("目前估值")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.70))
+                        }
+                        .frame(maxWidth: .infinity)
+                        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                        // 折舊金額
+                        VStack(spacing: 2) {
+                            Text(depAmt > 0 ? depAmt.ntdWanString : "—")
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                .foregroundStyle(depAmt > 0
+                                    ? Color(red: 1.0, green: 0.82, blue: 0.50)
+                                    : .white.opacity(0.45))
+                                .contentTransition(.numericText())
+                            Text("折舊金額")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.70))
+                        }
+                        .frame(maxWidth: .infinity)
+                        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                        // 月固定支出
+                        VStack(spacing: 2) {
+                            Text(monthlyFix > 0 ? monthlyFix.ntdWanString : "—")
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .contentTransition(.numericText())
+                            Text("月固定支出")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.70))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+            .padding(20)
+        }
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(.white.opacity(0.18), lineWidth: 0.75)
+        )
+        .shadow(color: accentB.opacity(0.28), radius: 12, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
+    }
+
+    // v2：橘色警告橫幅（取代純紅字）
+    private var errorBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.orange)
+            Text("請輸入車名和購入價格")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.orange)
+            Spacer()
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .background(Color.orange.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.25), lineWidth: 0.75))
+    }
+
     @ViewBuilder
     private func vehicleSectionHeader(_ title: String, icon: String, color: Color, count: Int? = nil) -> some View {
         HStack(spacing: 7) {
@@ -573,6 +783,7 @@ struct AddVehicleView: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(color.opacity(0.12))
                     .clipShape(Capsule())
+                    .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6)) // v2
             }
             Spacer()
         }
@@ -610,9 +821,12 @@ struct AddVehicleView: View {
         value.ntdWanString
     }
 
+    // v2：靜態共用實例，避免每次 render 重新分配
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
+
     private func formatShortDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "M/d"
-        return f.string(from: date)
+        Self.shortDateFormatter.string(from: date)
     }
 }
