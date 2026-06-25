@@ -914,25 +914,21 @@ struct MyCalendarView: View {
     /// 報告呈現狀態（與部屬總覽一致）
     enum SubReportStatus { case overdue, thisWeek, pending, done }
 
-    /// 顯示規則：所在週的全部報告（含已完成）+ 任何未完成報告（含逾期、未來週）
-    /// 排序：未完成優先（逾期最前→日期舊到新），其後已完成（日期新到舊）
+    /// 顯示規則：所在週的未完成報告 + 任何未完成報告（含逾期、未來週）。
+    /// 已完成一律不在此列出，改由底部「已完成」收合卡歸納。
     private func subReports(on date: Date) -> [(sub: Subordinate, report: WeeklyReport, status: SubReportStatus)] {
         let wk = calendar.dateInterval(of: .weekOfYear, for: date)
             ?? DateInterval(start: calendar.startOfDay(for: date), duration: 86_400)
         return lifeStore.subordinates.flatMap { sub in
             sub.weeklyReports.compactMap { r -> (sub: Subordinate, report: WeeklyReport, status: SubReportStatus)? in
+                if r.isCompleted { return nil }                      // 已完成 → 移至「已完成」收合卡
                 let inWeek = wk.contains(r.date)
-                if r.isCompleted { return inWeek ? (sub, r, .done) : nil }
                 if r.date < wk.start { return (sub, r, .overdue) }
                 if inWeek            { return (sub, r, .thisWeek) }
                 return (sub, r, .pending)
             }
         }
-        .sorted { a, b in
-            if a.report.isCompleted != b.report.isCompleted { return !a.report.isCompleted }
-            return a.report.isCompleted ? a.report.date > b.report.date
-                                        : a.report.date < b.report.date
-        }
+        .sorted { $0.report.date < $1.report.date }
     }
     /// 報告狀態 → 標籤文字與強調色
     private func subReportMeta(_ status: SubReportStatus) -> (label: String?, color: Color) {
