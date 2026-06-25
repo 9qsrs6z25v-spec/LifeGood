@@ -56,6 +56,11 @@ struct SubordinateView: View {
     @State private var showTalentMatrix = false
     @AppStorage("subordinateSortOption") private var sortOptionRaw = SubordinateSortOption.dateAdded.rawValue
     @AppStorage("subordinateSortAscending") private var sortAscending = false
+    @AppStorage("subordinateFilterDeptRaw") private var filterDeptRaw = ""   // "" = 全部部門
+
+    private var selectedDeptId: UUID? {
+        filterDeptRaw.isEmpty ? nil : UUID(uuidString: filterDeptRaw)
+    }
 
     // 進場動畫旗標
     @State private var summaryAppeared = false
@@ -113,6 +118,48 @@ struct SubordinateView: View {
         return sorted
     }
 
+    /// 部門標籤（代號 + 名稱）
+    private func deptLabel(_ dept: Department) -> String {
+        if dept.code.isEmpty { return dept.name.isEmpty ? "未命名部門" : dept.name }
+        return dept.name.isEmpty ? dept.code : "\(dept.code) \(dept.name)"
+    }
+
+    /// 套用部門篩選後的清單（保留排序）
+    private var filteredSubordinates: [Subordinate] {
+        guard let id = selectedDeptId else { return sortedSubordinates }
+        return sortedSubordinates.filter { $0.departmentId == id }
+    }
+
+    /// 列表顯示列：依廠區分組（標題 + 人員）；手動排序時維持平面以便拖曳。
+    private enum ListRow: Identifiable {
+        case header(String)
+        case person(Subordinate)
+        var id: String {
+            switch self {
+            case .header(let s): return "h_\(s)"
+            case .person(let p): return "p_\(p.id.uuidString)"
+            }
+        }
+    }
+
+    private var displayRows: [ListRow] {
+        let list = filteredSubordinates
+        if sortOption == .manual { return list.map { .person($0) } }
+        let grouped = Dictionary(grouping: list) { $0.plantArea }
+        let areas = grouped.keys.filter { !$0.isEmpty }.sorted()
+        if areas.isEmpty { return list.map { .person($0) } }   // 無人分廠區 → 平面顯示
+        var rows: [ListRow] = []
+        for area in areas {
+            rows.append(.header(area))
+            rows.append(contentsOf: (grouped[area] ?? []).map { .person($0) })
+        }
+        if let unassigned = grouped[""], !unassigned.isEmpty {
+            rows.append(.header("未分廠區"))
+            rows.append(contentsOf: unassigned.map { .person($0) })
+        }
+        return rows
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -141,6 +188,16 @@ struct SubordinateView: View {
                             .listRowSeparator(.hidden)
                     }
                 } else {
+                    // 部門篩選列（有定義部門才顯示）
+                    if !lifeStore.departments.isEmpty {
+                        Section {
+                            departmentFilterBar
+                                .listRowInsets(EdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 12))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                        }
+                    }
+
                     // [2026-06 v2] 部屬列表 sectionHeader（4pt Capsule 側條 + 計數徽章）
                     Section {
                         activeSubordinatesSectionHeader
@@ -156,28 +213,51 @@ struct SubordinateView: View {
                             }
                     }
 
-                    ForEach(Array(sortedSubordinates.enumerated()), id: \.element.id) { idx, sub in
-                        subordinateRow(sub)
-                            .contentShape(Rectangle())
-                            .onTapGesture { viewingItem = sub }
-                            .opacity(rowsAppeared ? 1 : 0)
-                            .offset(y: rowsAppeared ? 0 : 14)
-                            .animation(
-                                .spring(response: 0.45, dampingFraction: 0.82)
-                                    .delay(0.05 * Double(min(idx, 12))),
-                                value: rowsAppeared
-                            )
-                    }
-                    .onDelete { offsets in
-                        guard subscription.isPremium else { showPremiumAlert = true; return }
-                        let snapshot = sortedSubordinates
-                        let items = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
-                        items.forEach { lifeStore.deleteSubordinate($0) }
-                    }
-                    .onMove { from, to in
-                        guard subscription.isPremium else { showPremiumAlert = true; return }
-                        guard sortOption == .manual else { return }
-                        lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
+                    if filteredSubordinates.isEmpty {
+                        Section {
+                            Text("此部門尚無部屬")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 24)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                        }
+                    } else {
+                        ForEach(Array(displayRows.enumerated()), id: \.element.id) { idx, row in
+                            switch row {
+                            case .header(let area):
+                                plantAreaHeader(area)
+                                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                            case .person(let sub):
+                                subordinateRow(sub)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { viewingItem = sub }
+                                    .opacity(rowsAppeared ? 1 : 0)
+                                    .offset(y: rowsAppeared ? 0 : 14)
+                                    .animation(
+                                        .spring(response: 0.45, dampingFraction: 0.82)
+                                            .delay(0.05 * Double(min(idx, 12))),
+                                        value: rowsAppeared
+                                    )
+                            }
+                        }
+                        .onDelete { offsets in
+                            guard subscription.isPremium else { showPremiumAlert = true; return }
+                            let rows = displayRows
+                            let items = offsets.compactMap { off -> Subordinate? in
+                                guard off < rows.count, case .person(let s) = rows[off] else { return nil }
+                                return s
+                            }
+                            items.forEach { lifeStore.deleteSubordinate($0) }
+                        }
+                        .onMove { from, to in
+                            guard subscription.isPremium else { showPremiumAlert = true; return }
+                            // 僅在「手動排序 + 全部部門」的平面清單下允許拖曳，offset 才與底層陣列一致
+                            guard sortOption == .manual, selectedDeptId == nil else { return }
+                            lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
+                        }
                     }
                 }
             }
@@ -419,9 +499,51 @@ struct SubordinateView: View {
 
     // MARK: - 部屬列表 sectionHeader [2026-06 v2]
 
+    // MARK: - 部門篩選列 / 廠區分組標題
+
+    private var departmentFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                filterChip(title: "全部部門", active: selectedDeptId == nil) { filterDeptRaw = "" }
+                ForEach(lifeStore.departments) { dept in
+                    filterChip(title: deptLabel(dept), active: selectedDeptId == dept.id) {
+                        filterDeptRaw = dept.id.uuidString
+                    }
+                }
+            }
+            .padding(.horizontal, 4).padding(.vertical, 2)
+        }
+    }
+
+    private func filterChip(title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(active ? Color.blue : Color(.secondarySystemBackground))
+                .foregroundStyle(active ? .white : .primary)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(active ? Color.blue : Color(.separator).opacity(0.3), lineWidth: 0.75))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 廠區分組標題列（對齊部屬班表的廠區分段樣式）
+    private func plantAreaHeader(_ area: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "building.2.fill").font(.system(size: 10, weight: .semibold))
+            Text(area).font(.system(size: 12, weight: .bold)).lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.blue)
+    }
+
     private var activeSubordinatesSectionHeader: some View {
-        let count = sortedSubordinates.count
+        let count = filteredSubordinates.count
         let accent = Color(red: 0.22, green: 0.53, blue: 0.98)
+        let title = selectedDeptId.flatMap { id in lifeStore.departments.first { $0.id == id } }
+            .map { deptLabel($0) } ?? "部屬成員"
         return HStack(spacing: 8) {
             // 4pt Capsule 漸層側條（對齊 StockView.activeStocksSectionHeader 規格）
             Capsule()
@@ -433,9 +555,10 @@ struct SubordinateView: View {
                     )
                 )
                 .frame(width: 4, height: 16)
-            Text("部屬成員")
+            Text(title)
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
+                .lineLimit(1)
             Spacer()
             // 計數徽章
             Text("\(count) 位")
