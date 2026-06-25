@@ -17,6 +17,20 @@ import StoreKit
 //   5. limitedFreeNotice：禮物卡加 giftAppeared spring 進場動畫（opacity + scale），
 //      卡片邊框加粗至 1pt + 加入右側散景圓提升立體感，
 //      對齊 FinanceOverviewView.cashFlowSection 精緻卡片規格。
+// [2026-06 v2] 本次美化方向：
+//   6. productRow / fallbackProductRow 背景 ZStack：補入第二（左下）、第三（中右）顆散景裝飾圓，
+//      並在 ZStack 末層加 LinearGradient [.white.opacity(0.18), .clear] top→center 玻璃光澤，
+//      對齊 VariableExpenseView / FixedExpenseView / RealEstateView 英雄卡三圓 + glass shine 規格；
+//      價格 Capsule 補 .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75)) 細邊框，
+//      對齊 summaryHeader 月現金流 Capsule 邊框規格。
+//   7. limitedFreeNotice 卡片：在 .clipShape 之後追加
+//      LinearGradient [.white.opacity(0.12), .clear] top→center overlay，
+//      讓推廣卡頂部有同款玻璃光澤，與 productRow 視覺語言一致。
+//   8. benefitRow 彩色 icon badge：補
+//      .overlay(RoundedRectangle(cornerRadius:10,style:.continuous).stroke(color.opacity(0.25),lineWidth:0.75))
+//      細邊框，對齊 SettingsView.actionRow badge 邊框規格，深色模式下 badge 輪廓更清晰。
+//   9. PremiumBanner 背景：補第二顆散景圓（左下）+ 頂部玻璃光澤，
+//      對齊 productRow v2 規格，橫幅與升級卡視覺語言統一。
 
 // MARK: - 升級訂閱頁
 
@@ -205,6 +219,16 @@ struct PaywallView: View {
         .background(Color.green.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.green.opacity(0.32), lineWidth: 1))
+        // [v2] 頂部玻璃光澤，與 productRow 卡片視覺語言一致
+        .overlay(alignment: .top) {
+            LinearGradient(
+                colors: [.white.opacity(0.12), .clear],
+                startPoint: .top,
+                endPoint: .center
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .allowsHitTesting(false)
+        }
         .opacity(giftAppeared ? 1 : 0)
         .scaleEffect(giftAppeared ? 1.0 : 0.96)
         .animation(.spring(response: 0.50, dampingFraction: 0.82), value: giftAppeared)
@@ -297,6 +321,11 @@ struct PaywallView: View {
                     .foregroundStyle(.white)
                     .symbolRenderingMode(.hierarchical)
             }
+            // [v2] 細邊框，深色模式下 badge 輪廓更清晰，對齊 SettingsView.actionRow badge 規格
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(color.opacity(0.25), lineWidth: 0.75)
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -372,6 +401,8 @@ struct PaywallView: View {
                     .padding(.vertical, 8)
                     .background(.white.opacity(0.22))
                     .clipShape(Capsule())
+                    // [v2] 細邊框，對齊 summaryHeader 月現金流 Capsule 邊框規格
+                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 18)
@@ -385,12 +416,30 @@ struct PaywallView: View {
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
-                    // 裝飾性高光
+                    // [v2] 右上主散景圓
                     Circle()
                         .fill(.white.opacity(0.10))
                         .frame(width: 80, height: 80)
                         .offset(x: 80, y: -32)
                         .blur(radius: 10)
+                    // [v2] 左下次散景圓
+                    Circle()
+                        .fill(.white.opacity(0.07))
+                        .frame(width: 55, height: 55)
+                        .offset(x: -80, y: 30)
+                        .blur(radius: 10)
+                    // [v2] 中右小散景圓
+                    Circle()
+                        .fill(.white.opacity(0.05))
+                        .frame(width: 36, height: 36)
+                        .offset(x: 55, y: 28)
+                        .blur(radius: 7)
+                    // [v2] 頂部玻璃光澤，對齊全 App 英雄卡 glass shine 統一規格
+                    LinearGradient(
+                        colors: [.white.opacity(0.18), .clear],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
                 }
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -419,6 +468,8 @@ struct PaywallView: View {
                 .padding(.vertical, 8)
                 .background(.white.opacity(0.22))
                 .clipShape(Capsule())
+                // [v2] 細邊框，與 productRow 價格膠囊一致
+                .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 18)
@@ -432,11 +483,30 @@ struct PaywallView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // [v2] 右上主散景圓
                 Circle()
                     .fill(.white.opacity(0.10))
                     .frame(width: 80, height: 80)
                     .offset(x: 80, y: -32)
                     .blur(radius: 10)
+                // [v2] 左下次散景圓
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 55, height: 55)
+                    .offset(x: -80, y: 30)
+                    .blur(radius: 10)
+                // [v2] 中右小散景圓
+                Circle()
+                    .fill(.white.opacity(0.05))
+                    .frame(width: 36, height: 36)
+                    .offset(x: 55, y: 28)
+                    .blur(radius: 7)
+                // [v2] 頂部玻璃光澤，對齊全 App 英雄卡 glass shine 統一規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -579,6 +649,18 @@ struct PremiumBanner: View {
                         .frame(width: 60, height: 60)
                         .offset(x: 100, y: -20)
                         .blur(radius: 12)
+                    // [v2] 左下次散景圓，對齊 productRow v2 規格
+                    Circle()
+                        .fill(.white.opacity(0.07))
+                        .frame(width: 40, height: 40)
+                        .offset(x: -90, y: 18)
+                        .blur(radius: 8)
+                    // [v2] 頂部玻璃光澤，讓橫幅與升級卡視覺語言一致
+                    LinearGradient(
+                        colors: [.white.opacity(0.18), .clear],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
                 }
             )
         }
