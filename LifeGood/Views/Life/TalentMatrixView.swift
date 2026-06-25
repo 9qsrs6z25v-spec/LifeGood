@@ -117,6 +117,20 @@ extension Subordinate {
 //      + 分數 capsule 徽章（帶 stroke），對齊 VariableExpenseView section header 規格；
 //      明細列分數從純色字升級為彩色 Capsule 膠囊（綠加 / 紅扣），
 //      對齊 StockDetailView.infoRow 損益膠囊規格。
+// [2026-06 v2] 本次美化方向：
+//   6. summaryHeroCard：deptFilter 下方新增藍紫漸層英雄摘要卡，顯示篩選後人數大字 +
+//      部門膠囊副標 + 四格 KPI 橫列（明星/潛力股/苦勞型/待加強計數），
+//      三顆散景裝飾圓 + 頂部玻璃光澤（white.opacity(0.18)→clear），
+//      heroCardAppeared spring 進場動畫（opacity + Y 位移 18pt），
+//      對齊 SubordinateView.summaryStatsBar / SubordinateDetailView.headerCard 設計語言。
+//   7. deptFilter 選取態升級：selectedDeptId != nil 時 pill 從 secondarySystemBackground
+//      改為 indigo 淺底色（opacity 0.10）+ indigo 文字 + 細邊框（0.6pt），
+//      對齊 VariableExpenseView.FilterChip 選取態規格。
+//   8. chartSectionHeader：chart 上方新增 Capsule 漸層側條 + chart.dots.scatter 圖示 +
+//      「散布圖分析」標題 + 人數計數膠囊，
+//      對齊 SubordinateView.activeSubordinatesSectionHeader / TaxOverviewView sectionHeader 規格。
+//   9. 主 VStack 包裹於 ScrollView：因英雄卡 + 散布圖 + 圖例總高超出螢幕，
+//      包裹 ScrollView 使用戶可自然上滑查閱圖例；breakdownCard 懸浮層維持 ZStack 疊加不受影響。
 
 // MARK: - 人才矩陣（主動性 × 潛力 散布圖）
 
@@ -127,6 +141,8 @@ struct TalentMatrixView: View {
     @State private var selected: Subordinate?
     // [v1] 空狀態脈衝動畫旗標
     @State private var emptyPulse = false
+    // [v2] 英雄摘要卡進場動畫旗標
+    @State private var heroCardAppeared = false
 
     private var members: [Subordinate] {
         lifeStore.subordinates
@@ -141,18 +157,24 @@ struct TalentMatrixView: View {
 
     var body: some View {
         NavigationStack {
+            // [v2] ZStack：ScrollView 為底層主內容；breakdownCard 懸浮層疊加其上
             ZStack {
-                VStack(spacing: 12) {
-                    deptFilter
-                    if members.isEmpty {
-                        emptyHint
-                    } else {
-                        chart
-                        quadrantLegend
-                        Spacer(minLength: 0)
+                ScrollView {
+                    VStack(spacing: 12) {
+                        deptFilter
+                        if members.isEmpty {
+                            emptyHint
+                        } else {
+                            // [v2] 英雄摘要卡 + section header
+                            summaryHeroCard
+                            chartSectionHeader
+                            chart
+                            quadrantLegend
+                        }
                     }
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
                 }
-                .padding(.top, 8)
 
                 // 點選某點 → 展開計算明細指示窗；點窗外關閉
                 if let m = selected {
@@ -173,8 +195,10 @@ struct TalentMatrixView: View {
         }
     }
 
+    // [v2] 選取特定部門時改為 indigo 淺底 + 細邊框，對齊 FilterChip 選取態規格
     private var deptFilter: some View {
-        Menu {
+        let isFiltered = selectedDeptId != nil
+        return Menu {
             Button("全部部門") { selectedDeptId = nil }
             ForEach(lifeStore.departments) { d in
                 Button(d.name.isEmpty ? d.code : d.name) { selectedDeptId = d.id }
@@ -186,9 +210,161 @@ struct TalentMatrixView: View {
                 Image(systemName: "chevron.down").font(.caption2)
             }
             .font(.subheadline.weight(.medium))
+            .foregroundStyle(isFiltered ? Color.indigo : Color.primary)
             .padding(.horizontal, 14).padding(.vertical, 7)
-            .background(Color(.secondarySystemBackground))
+            .background(isFiltered ? Color.indigo.opacity(0.10) : Color(.secondarySystemBackground))
             .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.indigo.opacity(isFiltered ? 0.22 : 0.0), lineWidth: 0.6))
+        }
+        .padding(.horizontal)
+    }
+
+    // MARK: - [v2] 英雄摘要卡（藍紫漸層 + 散景 + 玻璃光澤 + 四格 KPI）
+
+    private var summaryHeroCard: some View {
+        let total = members.count
+        let starCount = members.filter { Double($0.proactivityScore) >= xMid && Double($0.potentialScore) >= yMid }.count
+        let potentialCount = members.filter { Double($0.proactivityScore) < xMid && Double($0.potentialScore) >= yMid }.count
+        let hardWorkerCount = members.filter { Double($0.proactivityScore) >= xMid && Double($0.potentialScore) < yMid }.count
+        let needsImprovCount = members.filter { Double($0.proactivityScore) < xMid && Double($0.potentialScore) < yMid }.count
+
+        return VStack(spacing: 0) {
+            // 頂部：人數大字 + 部門膠囊副標
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                Text("\(total)")
+                    .font(.system(size: 44, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .contentTransition(.numericText())
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("人")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                    Text(selectedDeptName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.82))
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(.white.opacity(0.18))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.6))
+                }
+                Spacer()
+            }
+            .padding(.bottom, 14)
+
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.bottom, 12)
+
+            // KPI 四格：明星 / 潛力股 / 苦勞型 / 待加強
+            HStack(spacing: 0) {
+                heroKpiCell(count: starCount, label: "明星", color: .green)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                heroKpiCell(count: potentialCount, label: "潛力股", color: Color(red: 0.50, green: 0.65, blue: 1.0))
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                heroKpiCell(count: hardWorkerCount, label: "苦勞型", color: Color(red: 1.0, green: 0.78, blue: 0.35))
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                heroKpiCell(count: needsImprovCount, label: "待加強", color: Color(red: 1.0, green: 0.50, blue: 0.50))
+            }
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .background(
+            ZStack {
+                // 藍紫漸層底色
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.30, green: 0.25, blue: 0.90),
+                        Color(red: 0.18, green: 0.40, blue: 0.92)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // 右上主散景圓
+                Circle()
+                    .fill(.white.opacity(0.10))
+                    .frame(width: 120, height: 120)
+                    .offset(x: 80, y: -45)
+                    .blur(radius: 14)
+                    .allowsHitTesting(false)
+                // 左下次散景圓
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 80, height: 80)
+                    .offset(x: -50, y: 45)
+                    .blur(radius: 10)
+                    .allowsHitTesting(false)
+                // 中右微型散景圓（三顆散景圓標準）
+                Circle()
+                    .fill(.white.opacity(0.05))
+                    .frame(width: 50, height: 50)
+                    .offset(x: 55, y: 18)
+                    .blur(radius: 8)
+                    .allowsHitTesting(false)
+                // 頂部玻璃光澤
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+                .allowsHitTesting(false)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.18, green: 0.25, blue: 0.88).opacity(0.38), radius: 16, x: 0, y: 8)
+        .padding(.horizontal)
+        .opacity(heroCardAppeared ? 1 : 0)
+        .offset(y: heroCardAppeared ? 0 : 18)
+        .onAppear {
+            withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
+                heroCardAppeared = true
+            }
+        }
+    }
+
+    // KPI 單格：白色大數字 + 小標籤
+    private func heroKpiCell(count: Int, label: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text("\(count)")
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.white.opacity(0.75))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - [v2] 散布圖 Section Header（Capsule 側條 + 計數膠囊）
+
+    private var chartSectionHeader: some View {
+        HStack(spacing: 10) {
+            Capsule()
+                .fill(LinearGradient(
+                    colors: [.indigo, .indigo.opacity(0.55)],
+                    startPoint: .top, endPoint: .bottom
+                ))
+                .frame(width: 4, height: 16)
+            Image(systemName: "chart.dots.scatter")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.indigo)
+            Text("散布圖分析")
+                .font(.subheadline.weight(.bold))
+            Spacer()
+            Text("\(members.count) 人")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.indigo)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.indigo.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
         }
         .padding(.horizontal)
     }
