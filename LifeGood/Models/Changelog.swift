@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.68", build: 534, date: "2026/06/25", notes: [
+            "【靜態除錯 v22.68】修復 SubordinateOverviewView 效能瓶頸：leaveSection、meetingSection、meetingItemsCard、completedCard 四個計算屬性（computed view properties）內部各自重複存取同一個 O(n×m) 計算屬性 2–4 次：todayLeaves 在 leaveSection 內存取 4 次（sectionHeader count ×1、isEmpty ×1、enumerated ×1、count-1 ×1），todayMeetings 在 meetingSection 內存取 4 次，incompleteMeetingItems 在 meetingItemsCard 內存取 3 次，completedTasks 在 completedCard 內存取 3 次；每次 body 重繪（例如 CloudKit pull 後 @Published 觸發）各計算屬性即被重複執行。修復方式：在四個 computed view property 頂部各新增一個 let 區域常數快取（let leaves / meetings / items / tasks），將後續引用全數改為存取此常數，每次 property 求值只觸發一次 O(n×m) flatMap/filter，消除每次 body render 的冗餘計算。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
+        ]),
         ChangelogEntry(version: "22.67", build: 533, date: "2026/06/25", notes: [
             "【靜態除錯 v22.67】修復一個邏輯 bug：AddVehicleView.calcSection 試算區塊的折舊金額 / 折舊率列，僅以 purchase > 0, current > 0 為條件顯示，當目前估值 > 購入價時（升值情況，如古典車 / 收藏車），顯示負數折舊，對使用者造成誤導；補加 purchase > current 守衛，對齊 vehiclePreviewCard（depAmt 以 purchase > current 判斷、depRate 以 max(0,…) 保護）的行為，兩處顯示邏輯一致。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
         ]),

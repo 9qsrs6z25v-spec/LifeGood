@@ -227,16 +227,17 @@ struct SubordinateOverviewView: View {
     // MARK: - 請假
 
     private var leaveSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("請假", icon: "calendar.badge.minus", color: .teal, count: todayLeaves.count)
+        let leaves = todayLeaves
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("請假", icon: "calendar.badge.minus", color: .teal, count: leaves.count)
 
-            if todayLeaves.isEmpty {
+            if leaves.isEmpty {
                 emptyHint("當日無人請假", icon: "calendar.badge.minus", color: .teal)
             } else {
-                ForEach(Array(todayLeaves.enumerated()), id: \.element.rec.id) { idx, item in
+                ForEach(Array(leaves.enumerated()), id: \.element.rec.id) { idx, item in
                     leaveRow(item.sub, item.rec)
 
-                    if idx < todayLeaves.count - 1 {
+                    if idx < leaves.count - 1 {
                         Divider().padding(.leading, 62)
                     }
                 }
@@ -365,16 +366,17 @@ struct SubordinateOverviewView: View {
     // MARK: - 會議
 
     private var meetingSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("會議", icon: "person.3.fill", color: .indigo, count: todayMeetings.count)
+        let meetings = todayMeetings
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("會議", icon: "person.3.fill", color: .indigo, count: meetings.count)
 
-            if todayMeetings.isEmpty {
+            if meetings.isEmpty {
                 emptyHint("當日無會議", icon: "person.3.fill", color: .indigo)
             } else {
-                ForEach(Array(todayMeetings.enumerated()), id: \.element.meeting.id) { idx, item in
+                ForEach(Array(meetings.enumerated()), id: \.element.meeting.id) { idx, item in
                     meetingRow(item.sub, item.meeting)
 
-                    if idx < todayMeetings.count - 1 {
+                    if idx < meetings.count - 1 {
                         Divider().padding(.leading, 62)
                     }
                 }
@@ -416,16 +418,17 @@ struct SubordinateOverviewView: View {
 
     /// 未完成會議條目卡
     private var meetingItemsCard: some View {
-        cardWrap {
+        let items = incompleteMeetingItems
+        return cardWrap {
             VStack(alignment: .leading, spacing: 0) {
                 sectionHeader("未完成會議條目", icon: "person.3.sequence.fill", color: .indigo,
-                              count: incompleteMeetingItems.count)
-                if incompleteMeetingItems.isEmpty {
+                              count: items.count)
+                if items.isEmpty {
                     emptyHint("沒有未完成的會議條目", icon: "person.3.sequence.fill", color: .indigo)
                 } else {
-                    ForEach(Array(incompleteMeetingItems.enumerated()), id: \.element.item.id) { idx, it in
+                    ForEach(Array(items.enumerated()), id: \.element.item.id) { idx, it in
                         meetingItemOverviewRow(it.sub, it.meeting, it.item)
-                        if idx < incompleteMeetingItems.count - 1 { Divider().padding(.leading, 62) }
+                        if idx < items.count - 1 { Divider().padding(.leading, 62) }
                     }
                 }
             }
@@ -498,7 +501,8 @@ struct SubordinateOverviewView: View {
     }
 
     private var completedCard: some View {
-        cardWrap {
+        let tasks = completedTasks
+        return cardWrap {
             VStack(alignment: .leading, spacing: 0) {
                 Button {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { showCompleted.toggle() }
@@ -519,7 +523,7 @@ struct SubordinateOverviewView: View {
                         }
                         Text("已完成").font(.subheadline.weight(.bold)).foregroundStyle(.primary)
                         Spacer()
-                        Text("\(completedTasks.count) 筆")
+                        Text("\(tasks.count) 筆")
                             .font(.caption2.weight(.semibold)).foregroundStyle(.green)
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(Color.green.opacity(0.10)).clipShape(Capsule())
@@ -533,9 +537,9 @@ struct SubordinateOverviewView: View {
                 .buttonStyle(.plain)
 
                 if showCompleted {
-                    ForEach(Array(completedTasks.enumerated()), id: \.element.task.id) { idx, item in
+                    ForEach(Array(tasks.enumerated()), id: \.element.task.id) { idx, item in
                         taskRow(item.sub, item.task)
-                        if idx < completedTasks.count - 1 { Divider().padding(.leading, 62) }
+                        if idx < tasks.count - 1 { Divider().padding(.leading, 62) }
                     }
                 }
             }
