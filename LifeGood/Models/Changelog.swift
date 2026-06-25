@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.73", build: 538, date: "2026/06/25", notes: [
+            "我的行事曆『已完成』改為歸納所有已勾選完成的部屬報告/會議項目/任務（不再只限當日）。",
+            "搜尋結果與已完成項目改為點一下直接開啟該項目編輯（報告/任務/會議/請假/里程碑/個人事件），不再跳到日期。"
+        ]),
         ChangelogEntry(version: "22.72", build: 537, date: "2026/06/25", notes: [
             "部屬頁面新增部門篩選列（全部部門 / 各部門膠囊），減少一次顯示過多。",
             "部屬清單依廠區分組顯示（與部屬班表一致）；標題顯示所選部門與人數。手動排序時維持平面以便拖曳。"

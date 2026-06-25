@@ -38,6 +38,27 @@ struct MyCalendarView: View {
     @State private var editingEvent: PersonalEvent?
     @State private var searchText = ""
     @State private var showSubCompleted = false
+    @State private var openTarget: CalendarOpenTarget?
+
+    /// 從搜尋結果 / 已完成卡片點擊要開啟的編輯目標
+    enum CalendarOpenTarget: Identifiable {
+        case report(subId: UUID, report: WeeklyReport)
+        case task(subId: UUID, task: SubordinateTask)
+        case meeting(subId: UUID, meeting: SubordinateMeeting)
+        case leave(subId: UUID, rec: SubordinateRecord)
+        case milestone(LifeMilestone)
+        case event(PersonalEvent)
+        var id: String {
+            switch self {
+            case .report(_, let r):  return "r_\(r.id.uuidString)"
+            case .task(_, let t):    return "t_\(t.id.uuidString)"
+            case .meeting(_, let m): return "m_\(m.id.uuidString)"
+            case .leave(_, let rec): return "l_\(rec.id.uuidString)"
+            case .milestone(let ms): return "ms_\(ms.id.uuidString)"
+            case .event(let e):      return "e_\(e.id.uuidString)"
+            }
+        }
+    }
 
     // 進場動畫旗標
     @State private var heroCardAppeared = false
@@ -141,6 +162,22 @@ struct MyCalendarView: View {
             }
             .sheet(item: $editingEvent) { ev in
                 PersonalEventEditor(initialDate: ev.date, editing: ev)
+            }
+            .sheet(item: $openTarget) { target in
+                switch target {
+                case .report(let subId, let report):
+                    WeeklyReportEditorSheet(subordinateId: subId, editing: report)
+                case .task(let subId, let task):
+                    TaskEditorSheet(subordinateId: subId, editing: task)
+                case .meeting(let subId, let meeting):
+                    MeetingEditorSheet(subordinateId: subId, editing: meeting)
+                case .leave(let subId, let rec):
+                    RecordEditorSheet(subordinateId: subId, type: rec.type, editing: rec)
+                case .milestone(let ms):
+                    AddMilestoneView(editing: ms)
+                case .event(let ev):
+                    PersonalEventEditor(initialDate: ev.date, editing: ev)
+                }
             }
             .task {
                 if appleCal.authorizationStatus == .notDetermined {
@@ -1007,39 +1044,36 @@ struct MyCalendarView: View {
                     }
                 }
             }
-            // 當日完成的項目（報告/會議項目/任務）收合於最下方
-            CompletedCollapsibleCard(entries: subCompletedEntries(on: date),
+            // 所有已勾選完成的項目（報告/會議項目/任務）收合於最下方
+            CompletedCollapsibleCard(entries: subCompletedEntries,
                                      expanded: $showSubCompleted,
-                                     title: "已完成（當日）")
+                                     title: "已完成")
         }
         .padding(.horizontal)
     }
 
-    /// 當日（依 completedAt）完成的部屬項目，供底部收合卡使用
-    private func subCompletedEntries(on date: Date) -> [CompletedEntry] {
+    /// 全部已完成的部屬項目（不限日期），供底部收合卡使用；點一下開啟該項目
+    private var subCompletedEntries: [CompletedEntry] {
         var out: [CompletedEntry] = []
         for sub in lifeStore.subordinates {
             let who = sub.name.isEmpty ? "未命名" : sub.name
             for r in sub.weeklyReports where r.isCompleted {
-                if let at = r.completedAt, calendar.isDate(at, inSameDayAs: date) {
-                    out.append(CompletedEntry(id: r.id, kind: .report, title: r.topic,
-                                              subtitle: who, completedAt: at, due: r.date, onTap: {}))
-                }
+                out.append(CompletedEntry(id: r.id, kind: .report, title: r.topic,
+                                          subtitle: who, completedAt: r.completedAt, due: r.date,
+                                          onTap: { openTarget = .report(subId: sub.id, report: r) }))
             }
             for m in sub.meetings {
                 for item in m.items where item.isCompleted {
-                    if let at = item.completedAt, calendar.isDate(at, inSameDayAs: date) {
-                        out.append(CompletedEntry(id: item.id, kind: .meeting, title: item.content,
-                                                  subtitle: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)",
-                                                  completedAt: at, due: item.dueDate, onTap: {}))
-                    }
+                    out.append(CompletedEntry(id: item.id, kind: .meeting, title: item.content,
+                                              subtitle: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)",
+                                              completedAt: item.completedAt, due: item.dueDate,
+                                              onTap: { openTarget = .meeting(subId: sub.id, meeting: m) }))
                 }
             }
             for t in sub.tasks where t.isCompleted {
-                if let at = t.completedAt, calendar.isDate(at, inSameDayAs: date) {
-                    out.append(CompletedEntry(id: t.id, kind: .task, title: t.topic,
-                                              subtitle: who, completedAt: at, due: t.dueDate, onTap: {}))
-                }
+                out.append(CompletedEntry(id: t.id, kind: .task, title: t.topic,
+                                          subtitle: who, completedAt: t.completedAt, due: t.dueDate,
+                                          onTap: { openTarget = .task(subId: sub.id, task: t) }))
             }
         }
         return out
@@ -1055,6 +1089,7 @@ struct MyCalendarView: View {
         let title: String
         let snippet: String?
         let date: Date
+        let target: CalendarOpenTarget
     }
 
     private static let searchHitDateFormatter: DateFormatter = {
@@ -1070,40 +1105,47 @@ struct MyCalendarView: View {
             for r in sub.weeklyReports where hit([r.topic, r.note]) {
                 out.append(SearchHit(id: "r_\(r.id)", icon: "doc.text.fill", color: .purple,
                     typeLabel: "報告", title: r.topic.isEmpty ? "未命名報告" : r.topic,
-                    snippet: r.note.isEmpty ? who : "\(who)・\(r.note)", date: r.date))
+                    snippet: r.note.isEmpty ? who : "\(who)・\(r.note)", date: r.date,
+                    target: .report(subId: sub.id, report: r)))
             }
             for t in sub.tasks where hit([t.topic, t.content, t.note]) {
                 out.append(SearchHit(id: "t_\(t.id)", icon: "checklist", color: .cyan,
                     typeLabel: "任務", title: t.topic.isEmpty ? "未命名任務" : t.topic,
-                    snippet: t.content.isEmpty ? who : "\(who)・\(t.content)", date: t.date))
+                    snippet: t.content.isEmpty ? who : "\(who)・\(t.content)", date: t.date,
+                    target: .task(subId: sub.id, task: t)))
             }
             for m in sub.meetings {
                 if hit([m.topic, m.note]) {
                     out.append(SearchHit(id: "m_\(m.id)", icon: "person.3.fill", color: .indigo,
                         typeLabel: "會議", title: m.topic.isEmpty ? "未命名會議" : m.topic,
-                        snippet: who, date: m.date))
+                        snippet: who, date: m.date,
+                        target: .meeting(subId: sub.id, meeting: m)))
                 }
                 for item in m.items where hit([item.content]) {
                     out.append(SearchHit(id: "mi_\(item.id)", icon: "person.3.sequence.fill", color: .indigo,
                         typeLabel: "會議項目", title: item.content.isEmpty ? "未填內容" : item.content,
-                        snippet: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)", date: m.date))
+                        snippet: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)", date: m.date,
+                        target: .meeting(subId: sub.id, meeting: m)))
                 }
             }
             for rec in sub.records where hit([rec.content, rec.note]) {
                 out.append(SearchHit(id: "rec_\(rec.id)", icon: "calendar.badge.clock", color: .teal,
                     typeLabel: rec.type.rawValue, title: rec.content.isEmpty ? rec.type.rawValue : rec.content,
-                    snippet: who, date: rec.date))
+                    snippet: who, date: rec.date,
+                    target: .leave(subId: sub.id, rec: rec)))
             }
         }
         for ms in lifeStore.milestones where hit([ms.title, ms.note]) {
             out.append(SearchHit(id: "ms_\(ms.id)", icon: "flag.fill", color: .pink,
                 typeLabel: "里程碑", title: ms.title.isEmpty ? "未命名里程碑" : ms.title,
-                snippet: ms.note.isEmpty ? nil : ms.note, date: ms.date))
+                snippet: ms.note.isEmpty ? nil : ms.note, date: ms.date,
+                target: .milestone(ms)))
         }
         for pe in lifeStore.personalEvents where hit([pe.title, pe.note, pe.location]) {
             out.append(SearchHit(id: "pe_\(pe.id)", icon: "calendar", color: .green,
                 typeLabel: pe.kind.rawValue, title: pe.title.isEmpty ? "未命名事件" : pe.title,
-                snippet: pe.note.isEmpty ? (pe.location.isEmpty ? nil : pe.location) : pe.note, date: pe.date))
+                snippet: pe.note.isEmpty ? (pe.location.isEmpty ? nil : pe.location) : pe.note, date: pe.date,
+                target: .event(pe)))
         }
         return out.sorted { $0.date > $1.date }
     }
@@ -1128,10 +1170,7 @@ struct MyCalendarView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(hits.enumerated()), id: \.element.id) { idx, h in
-                        Button {
-                            selectedDate = h.date
-                            searchText = ""
-                        } label: { searchHitRow(h) }
+                        Button { openTarget = h.target } label: { searchHitRow(h) }
                         .buttonStyle(.plain)
                         if idx < hits.count - 1 { Divider().padding(.leading, 58) }
                     }
@@ -1142,7 +1181,7 @@ struct MyCalendarView: View {
                 .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
 
-                Text("點一下可跳到該項目的日期")
+                Text("點一下可開啟該項目編輯")
                     .font(.caption2).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
             }
