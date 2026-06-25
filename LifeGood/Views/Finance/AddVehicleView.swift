@@ -386,7 +386,7 @@ struct AddVehicleView: View {
 
         if purchase > 0 || fixedMonthly > 0 {
             Section {
-                if purchase > 0, current > 0 {
+                if purchase > 0, current > 0, purchase > current {
                     calcRow(icon: "arrow.down.circle.fill", label: "折舊金額",
                             value: formatCurrency(purchase - current), color: .red)
                     calcRow(icon: "percent", label: "折舊率",

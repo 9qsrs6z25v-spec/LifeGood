@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.67", build: 533, date: "2026/06/25", notes: [
+            "【靜態除錯 v22.67】修復一個邏輯 bug：AddVehicleView.calcSection 試算區塊的折舊金額 / 折舊率列，僅以 purchase > 0, current > 0 為條件顯示，當目前估值 > 購入價時（升值情況，如古典車 / 收藏車），顯示負數折舊，對使用者造成誤導；補加 purchase > current 守衛，對齊 vehiclePreviewCard（depAmt 以 purchase > current 判斷、depRate 以 max(0,…) 保護）的行為，兩處顯示邏輯一致。其餘防護機制（force unwrap 全無、as! 全無、fatalError 僅 EInvoiceClient 啟動守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、所有 @Published 更新主執行緒隔離）均確認正常。"
+        ]),
         ChangelogEntry(version: "22.66", build: 532, date: "2026/06/25", notes: [
             "【靜態除錯 v22.66】修復三個問題：① CloudKitManager.runFetch changeTokenExpired 分支：原本直接呼叫 fetchChanges(completion:)，若 CloudKit 持續回傳 token 過期錯誤會無限遞迴；改為對 runFetch 傳入 retriesLeft 計數器，重試一次失敗後即報錯並呼叫 completion(false)，防止無限遞迴。② AIExpenseParserService.parse：activeProvider 與 key 分成兩次獨立的 await MainActor 切換讀取，使用者若在兩次 await 之間切換 AI 供應商，會以 provider-A 的身份呼叫 provider-B 的金鑰；改以單一 MainActor.run 閉包一次性讀取，確保兩值永遠屬於同一個供應商。③ FinanceStore.reloadFromCloud：cloudSyncDidPullChanges 已由 CloudSyncManager 在主執行緒 post，多一層 DispatchQueue.main.async 會增加一個 run-loop 空窗，期間若使用者操作觸發 save() 則雲端資料覆蓋編輯；移除多餘的 async 包裝，改直接呼叫 load()，與 LifeStore / ExpenseStore 保持一致。"
         ]),
