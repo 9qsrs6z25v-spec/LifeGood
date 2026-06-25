@@ -24,6 +24,17 @@ import SwiftUI
 //                    對齊 SubordinateDetailView.sectionHeader 規格。
 //   Form 背景      — 補 .scrollContentBackground(.hidden) + .background(systemGroupedBackground)，
 //                    深色模式不再出現白色 List 背景，對齊 FixedExpenseView / ResumeView 規格。
+// v3 美化方向（視覺一致性修正 + ShiftScheduleSettingsView 全面升級）：
+//   關閉按鈕位置   — RosterCellDetailSheet 與 ShiftScheduleSettingsView 的「完成」按鈕
+//                    從 .topBarTrailing 修正為 .topBarLeading，全 App 統一關閉鈕在左側規則。
+//   ShiftScheduleSettingsView：
+//     Form 背景    — 補 .scrollContentBackground(.hidden) + .background(systemGroupedBackground)；
+//     sectionHeader — 各班別 Section 標題升級為 Capsule 漸層色條 + 班別圖示圓 + 班別名稱，
+//                     使用 rosterShiftColor 著色，對齊 RosterCellDetailSheet.sectionHeader 規格；
+//     重置 Section  — 補紅色 Capsule 色條標題；
+//     timeRow       — 假日列標題以紅色呈現，與 dayHeader 週末紅字視覺一致；
+//     shiftIcon()   — 班別圖示對照函式（nightShift: moon.fill / eveningShift: moon.stars /
+//                     holidayDuty: sun.max.fill / dayDuty: sun.min.fill）。
 
 // MARK: - 班別時間設定（可自訂，存於本機 UserDefaults）
 
@@ -604,7 +615,7 @@ private struct RosterCellDetailSheet: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle(headerTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } } }
             .sheet(isPresented: $showAddLeave) {
                 RecordEditorSheet(subordinateId: cell.subId, type: .leave, editing: nil)
             }
@@ -940,28 +951,88 @@ private struct ShiftScheduleSettingsView: View {
         NavigationStack {
             Form {
                 ForEach(editable) { t in
-                    Section(t.rawValue) {
+                    Section {
                         timeRow("平日 開始", t, isHoliday: false, isStart: true)
                         timeRow("平日 結束", t, isHoliday: false, isStart: false)
                         timeRow("假日 開始", t, isHoliday: true, isStart: true)
                         timeRow("假日 結束", t, isHoliday: true, isStart: false)
+                    } header: {
+                        shiftSectionHeader(t)
                     }
                 }
                 Section {
                     Button("恢復預設時間", role: .destructive) { scheduleStore.schedule = .default }
+                } header: {
+                    resetSectionHeader
                 } footer: {
                     Text("時差假與休息沒有上下班時間。班別時間僅存於本機。")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("班別時間設定")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } } }
         }
     }
 
+    // 班別 Section 標題：Capsule 色條 + 班別圖示 + 名稱（對齊 RosterCellDetailSheet.sectionHeader）
+    private func shiftSectionHeader(_ t: ShiftType) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(
+                    colors: [rosterShiftColor(t), rosterShiftColor(t).opacity(0.55)],
+                    startPoint: .top, endPoint: .bottom))
+                .frame(width: 3, height: 16)
+            Image(systemName: shiftIcon(t))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(rosterShiftColor(t))
+            Text(t.rawValue)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .textCase(nil)
+    }
+
+    // 重置 Section 標題：紅色 Capsule 色條
+    private var resetSectionHeader: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(
+                    colors: [Color.red, Color.red.opacity(0.55)],
+                    startPoint: .top, endPoint: .bottom))
+                .frame(width: 3, height: 16)
+            Image(systemName: "arrow.counterclockwise")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.red)
+            Text("重置")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .textCase(nil)
+    }
+
+    // 班別圖示對照（對齊各班別語意）
+    private func shiftIcon(_ t: ShiftType) -> String {
+        switch t {
+        case .nightShift:   return "moon.fill"
+        case .eveningShift: return "moon.stars"
+        case .holidayDuty:  return "sun.max.fill"
+        case .dayDuty:      return "sun.min.fill"
+        default:            return "clock"
+        }
+    }
+
+    // 時間列：假日標題以紅色呈現，與班表日格週末紅字視覺一致
     private func timeRow(_ title: String, _ t: ShiftType, isHoliday: Bool, isStart: Bool) -> some View {
-        DatePicker(title, selection: timeBinding(t, isHoliday: isHoliday, isStart: isStart),
-                   displayedComponents: .hourAndMinute)
+        HStack {
+            Text(title)
+                .foregroundStyle(isHoliday ? Color.red.opacity(0.85) : Color.primary)
+            Spacer()
+            DatePicker("", selection: timeBinding(t, isHoliday: isHoliday, isStart: isStart),
+                       displayedComponents: .hourAndMinute)
+                .labelsHidden()
+        }
     }
 
     private func timeBinding(_ t: ShiftType, isHoliday: Bool, isStart: Bool) -> Binding<Date> {
