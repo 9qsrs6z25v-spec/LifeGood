@@ -53,6 +53,18 @@ import ImageIO
 //      VariableExpenseView 空狀態 ZStack 漸層圓規格。
 //  15. assetsSection 空狀態升級：56pt 藍色漸層圖示圓（shippingbox）+ Circle stroke 細邊框，
 //      .weight(.medium) 標題，視覺均值化。
+//
+// [2026-06 v4] 本次美化方向：
+//  16. elevatorContent 列 → 36pt 藍綠色漸層圖示圓（wrench.and.screwdriver.fill）替代
+//      原 .caption icon，日期升級為 tertiarySystemFill Capsule 膠囊，對齊其他列規格；
+//      照片圖示由 .foregroundStyle(.blue) 升級加入 Capsule 背景標籤。
+//  17. utilityRow → 36pt 對應色（水=藍/電=黃/瓦斯=橘）漸層圖示圓替代原 24pt icon；
+//      水號/電號欄位文字升級 font(.subheadline.weight(.medium))，對齊 infoRow 規格。
+//  18. paymentRow → 36pt 對應色漸層圖示圓替代原 caption icon；金額字型升級
+//      .system(size:15,weight:.bold,design:.rounded) + contentTransition(.numericText())，
+//      對齊 mortgageItems / paidItems 金額規格。
+//  19. latestPaymentRow → 金額字型升級 .system(size:14,weight:.bold,design:.rounded) +
+//      contentTransition(.numericText())，對齊 calcRow 規格。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -1016,27 +1028,48 @@ struct RealEstateDetailView: View {
         } else {
             ForEach(estate.elevatorMaintenances) { m in
                 Button { editingElevatorMaintenance = m } label: {
-                    HStack {
-                        Image(systemName: "wrench.and.screwdriver")
-                            .font(.caption).foregroundStyle(.blue)
-                        Text(fmtDate(m.date))
-                            .font(.subheadline).foregroundStyle(.primary)
-                        Spacer()
+                    // [v4] 36pt teal 漸層圖示圓 + 日期 Capsule 膠囊，對齊 paidItems 列規格
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [Color.teal.opacity(0.18), Color.teal.opacity(0.07)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 36, height: 36)
+                                .shadow(color: Color.teal.opacity(0.16), radius: 4, x: 0, y: 2)
+                                .overlay(Circle().stroke(Color.teal.opacity(0.18), lineWidth: 0.8))
+                            Image(systemName: "wrench.and.screwdriver.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.teal)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(fmtDate(m.date))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.teal)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.teal.opacity(0.10))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.teal.opacity(0.22), lineWidth: 0.6))
+                        }
+                        Spacer(minLength: 4)
                         if m.photoFileName != nil {
                             Button {
-                                if let url = m.photoURL {
-                                    viewingPhotoURL = url
-                                }
+                                if let url = m.photoURL { viewingPhotoURL = url }
                             } label: {
                                 Image(systemName: "photo.fill")
-                                    .font(.caption).foregroundStyle(.blue)
+                                    .font(.caption2)
+                                    .foregroundStyle(.teal)
+                                    .padding(5)
+                                    .background(Color.teal.opacity(0.10))
+                                    .clipShape(Circle())
                             }
                             .buttonStyle(.plain)
                         }
                         Image(systemName: "chevron.right")
                             .font(.caption2).foregroundStyle(.tertiary)
                     }
-                    .padding(.horizontal).padding(.vertical, 6)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1947,21 +1980,37 @@ struct RealEstateDetailView: View {
         .padding(.horizontal).padding(.vertical, 6)
     }
 
+    // [v4] 36pt 對應色漸層圖示圓 + 升級欄位字型，對齊 infoRow / mortgageItems 視覺規格
     private func utilityRow(icon: String, color: Color, number: String, owner: String, numberLabel: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).foregroundStyle(color).frame(width: 24)
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [color.opacity(0.18), color.opacity(0.07)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 36, height: 36)
+                    .shadow(color: color.opacity(0.16), radius: 4, x: 0, y: 2)
+                    .overlay(Circle().stroke(color.opacity(0.18), lineWidth: 0.8))
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(color)
+            }
             VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text(numberLabel).font(.caption2).foregroundStyle(.secondary)
-                    Text(number.isEmpty ? "—" : number).font(.subheadline.weight(.medium))
+                HStack(spacing: 5) {
+                    Text(numberLabel)
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Text(number.isEmpty ? "—" : number)
+                        .font(.subheadline.weight(.medium))
                 }
                 if !owner.isEmpty {
-                    Text("所有權人：\(owner)").font(.caption2).foregroundStyle(.tertiary)
+                    Text("所有權人：\(owner)")
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
             }
             Spacer()
         }
-        .padding(.horizontal).padding(.vertical, 8)
+        .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
     // MARK: - 輔助
@@ -1981,13 +2030,19 @@ struct RealEstateDetailView: View {
         return false
     }
 
+    // [v4] 最新一筆繳費：金額字型升級 + contentTransition，對齊 calcRow 規格
     @ViewBuilder
     private func latestPaymentRow(type: UtilityType) -> some View {
         if let p = latestPayment(for: type) {
             Button { editingUtilityPayment = p } label: {
                 HStack(spacing: 8) {
                     Rectangle().fill(Color.clear).frame(width: 20)
-                    Text(fmtDate(p.date)).font(.caption2).foregroundStyle(.tertiary)
+                    Text(fmtDate(p.date))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                     if p.photoFileName != nil {
                         Button {
                             if let url = p.photoURL { viewingPhotoURL = url }
@@ -1998,41 +2053,75 @@ struct RealEstateDetailView: View {
                     }
                     Spacer()
                     Text(fmt(p.amount))
-                        .font(.caption.bold()).foregroundStyle(.red)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(.red)
+                        .contentTransition(.numericText())
                     Image(systemName: "chevron.right")
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal).padding(.vertical, 4)
+                .padding(.horizontal, 12).padding(.vertical, 5)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
     }
 
+    // [v4] 36pt 對應色漸層圖示圓 + 金額字型升級 + contentTransition，對齊 paidItems 規格
     private func paymentRow(_ p: UtilityPayment) -> some View {
-        Button { editingUtilityPayment = p } label: {
-            HStack {
-                Image(systemName: p.type.icon)
-                    .font(.caption).foregroundStyle(utilityColor(p.type)).frame(width: 16)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(p.type.rawValue).font(.caption.weight(.medium)).foregroundStyle(.primary)
-                    Text(fmtDate(p.date)).font(.caption2).foregroundStyle(.tertiary)
+        let color = utilityColor(p.type)
+        return Button { editingUtilityPayment = p } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [color.opacity(0.18), color.opacity(0.07)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 36, height: 36)
+                        .shadow(color: color.opacity(0.16), radius: 4, x: 0, y: 2)
+                        .overlay(Circle().stroke(color.opacity(0.18), lineWidth: 0.8))
+                    Image(systemName: p.type.icon)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(color)
                 }
-                Spacer()
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        Text(p.type.rawValue)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(color)
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(color.opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+                        Text(fmtDate(p.date))
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(Capsule())
+                    }
+                    Text(fmt(p.amount))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.red)
+                        .contentTransition(.numericText())
+                }
+                Spacer(minLength: 4)
                 if p.photoFileName != nil {
                     Button {
                         if let url = p.photoURL { viewingPhotoURL = url }
                     } label: {
-                        Image(systemName: "photo.fill").font(.caption).foregroundStyle(.blue)
+                        Image(systemName: "photo.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                            .padding(5)
+                            .background(Color.blue.opacity(0.10))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                 }
-                Text(fmt(p.amount))
-                    .font(.subheadline.bold()).foregroundStyle(.red)
                 Image(systemName: "chevron.right")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal).padding(.vertical, 6)
+            .padding(.horizontal, 12).padding(.vertical, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
