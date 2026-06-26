@@ -174,7 +174,8 @@ final class CloudSyncManager: ObservableObject {
     }
 
     private func flushPushAll() {
-        guard isEnabled, isAccountAvailable else { return }
+        // isSyncing 期間跳過：避免與進行中的 performSync 並行打同一批 key 導致 serverRecordChanged 衝突
+        guard isEnabled, isAccountAvailable, !isSyncing else { return }
         let keys = Self.syncKeys
         let group = DispatchGroup()
         for key in keys {
@@ -332,8 +333,13 @@ final class CloudSyncManager: ObservableObject {
                         self.isSyncing = false
                         return
                     }
-                    CloudKitManager.shared.fetchChanges { [weak self] _ in
+                    CloudKitManager.shared.fetchChanges { [weak self] ok in
                         // fetchChanges completion 已保證在主執行緒執行，直接重置旗標
+                        // 拉取失敗時不推送：避免以過期本地資料覆蓋雲端（潛在資料遺失）
+                        guard ok else {
+                            self?.isSyncing = false
+                            return
+                        }
                         CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
                         CloudKitManager.shared.uploadAllLocalPhotos()
                         self?.isSyncing = false

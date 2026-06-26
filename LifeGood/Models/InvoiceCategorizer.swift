@@ -6,6 +6,8 @@ final class InvoiceCategorizer: ObservableObject {
 
     @Published private(set) var rules: [CategoryRule] = []
 
+    private let persistQueue = DispatchQueue(label: "com.lifegood.invoicecategorizer.persist", qos: .utility)
+
     private let storageURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory,
                                            in: .userDomainMask).first
@@ -77,8 +79,12 @@ final class InvoiceCategorizer: ObservableObject {
     }
 
     private func persist() {
-        guard let data = try? JSONEncoder().encode(rules) else { return }
-        try? data.write(to: storageURL, options: .atomic)
+        let snapshot = rules
+        let url = storageURL
+        persistQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
     }
 
     // MARK: - 預設規則
