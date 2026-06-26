@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.75", build: 540, date: "2026/06/26", notes: [
+            "【靜態除錯 v22.75】MyCalendarView 搜尋加入 300ms 防抖（debouncedSearchText + .task(id: searchText)），每次按鍵不再直接觸發 O(n) 全量 searchHits() 掃描，改為停止輸入 300ms 後才執行搜尋，消除快速輸入時的主執行緒卡頓。",
+            "MyCalendarView.subordinateAgendaSection 內 subIncompleteMeetingItems、subIncompleteTasks 兩個計算屬性從各呼叫兩次（.count + ForEach enumerated）減為各呼叫一次，以 let 區域常數快取，消除每次 body render 的冗餘 flatMap/filter/sorted。"
+        ]),
         ChangelogEntry(version: "22.74", build: 539, date: "2026/06/25", notes: [
             "我的行事曆『部屬報告』章節不再列出已完成報告，已完成統一歸納到底部『已完成』收合卡。"
         ]),

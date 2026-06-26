@@ -37,6 +37,7 @@ struct MyCalendarView: View {
     @State private var showAdd = false
     @State private var editingEvent: PersonalEvent?
     @State private var searchText = ""
+    @State private var debouncedSearchText = ""
     @State private var showSubCompleted = false
     @State private var openTarget: CalendarOpenTarget?
 
@@ -92,7 +93,7 @@ struct MyCalendarView: View {
         let heroWeekTotal = heroWeekDates.reduce(0) { $0 + (heroEventsMap[$1]?.count ?? 0) }
         NavigationStack {
             ScrollView {
-              let trimmedQuery = searchText.trimmingCharacters(in: .whitespaces)
+              let trimmedQuery = debouncedSearchText.trimmingCharacters(in: .whitespaces)
               if !trimmedQuery.isEmpty {
                 searchResultsView(query: trimmedQuery)
                     .padding(.vertical)
@@ -185,6 +186,11 @@ struct MyCalendarView: View {
                 } else {
                     appleCal.refreshStatus()
                 }
+            }
+            .task(id: searchText) {
+                guard !searchText.isEmpty else { debouncedSearchText = ""; return }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                debouncedSearchText = searchText
             }
         }
     }
@@ -978,6 +984,8 @@ struct MyCalendarView: View {
         let reports = subReports(on: date)
         let meetings = subMeetings(on: date)
         let tasks = subTasks(on: date)
+        let allIncompleteMeetings = subIncompleteMeetingItems
+        let allIncompleteTasks = subIncompleteTasks
         return VStack(spacing: 16) {
             subAgendaCard("部屬請假", "calendar.badge.minus", .teal, count: leaves.count, empty: "當日無人請假") {
                 ForEach(Array(leaves.enumerated()), id: \.offset) { _, it in
@@ -1018,8 +1026,8 @@ struct MyCalendarView: View {
                 }
             }
             subAgendaCard("未完成會議條目", "person.3.sequence.fill", .indigo,
-                          count: subIncompleteMeetingItems.count, empty: "沒有未完成的會議條目") {
-                ForEach(Array(subIncompleteMeetingItems.enumerated()), id: \.element.item.id) { _, it in
+                          count: allIncompleteMeetings.count, empty: "沒有未完成的會議條目") {
+                ForEach(Array(allIncompleteMeetings.enumerated()), id: \.element.item.id) { _, it in
                     subAgendaCheckRow(name: it.sub.name,
                                       text: it.item.content.isEmpty ? "未填內容" : it.item.content,
                                       detail: (it.meeting.topic.isEmpty ? "會議" : it.meeting.topic)
@@ -1030,8 +1038,8 @@ struct MyCalendarView: View {
                 }
             }
             subAgendaCard("未完成任務", "tray.full.fill", .orange,
-                          count: subIncompleteTasks.count, empty: "沒有未完成任務") {
-                ForEach(Array(subIncompleteTasks.enumerated()), id: \.element.task.id) { _, it in
+                          count: allIncompleteTasks.count, empty: "沒有未完成任務") {
+                ForEach(Array(allIncompleteTasks.enumerated()), id: \.element.task.id) { _, it in
                     subAgendaCheckRow(name: it.sub.name,
                                       text: it.task.topic.isEmpty ? "未命名任務" : it.task.topic,
                                       detail: it.task.dueDate.map { "截止 " + subAgendaTime($0) },
