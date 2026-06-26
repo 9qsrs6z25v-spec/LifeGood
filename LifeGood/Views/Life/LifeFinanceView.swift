@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - 美化紀錄（LifeFinanceView）
+// MARK: - 美化紀錄（LifeFinanceView · v3 · 2026-06-26）
 // [2026-06 v1] 本次美化方向：
 //   1. summaryHeader → 升級為藍色漸層英雄卡片（對齊 SavingsInsuranceView summaryHeader 規格）：
 //      銀行總餘額台幣等值大字 + 計數膠囊 + 餘額正負色 + 散景裝飾圓；
@@ -27,6 +27,16 @@ import SwiftUI
 //      日期從純文字改為 Capsule 徽章（tertiarySystemFill 底）；
 //      金額字型升為 .system(size:14, weight:.bold, design:.rounded) + contentTransition；
 //      對齊 OverviewView.recentRow 視覺語言，形成帳戶詳頁統一 row 規格。
+// [2026-06 v3] summaryHeader + milestoneRow 細節升級：
+//   9. summaryHeader background ZStack → 補上玻璃光澤 overlay（LinearGradient .white.opacity(0.18)→.clear
+//      top→center），對齊全 App 英雄卡三散景＋玻璃光澤標準（AddVehicleView / SavingsInsuranceView 同款）。
+//  10. KPI 圖示圓 → 從 Circle().fill(.white.opacity(0.16)) 升級為
+//      LinearGradient([.white.opacity(0.26), .white.opacity(0.10)]) + strokeBorder(.white.opacity(0.30), 0.75pt)，
+//      對齊 FinanceChartView KPI 圖示圓規格（多一層光澤感，白色比例梯度更柔和）。
+//  11. KPI 數字加入 contentTransition(.numericText())，資料切換時平滑捲動。
+//  12. KPI 背景條 → 補上 .white.opacity(0.18) strokeBorder，增加容器定義感。
+//  13. milestoneRow 非銀行類日期 → 從純文字升級為 Capsule 徽章（tertiarySystemFill 底），
+//      對齊 MyCalendarView / creditCardChartSection 日期 Badge 規格。
 
 // MARK: - 固定支出週期展開（共用）
 
@@ -328,7 +338,16 @@ struct LifeFinanceView: View {
                     VStack(spacing: 5) {
                         ZStack {
                             Circle()
-                                .fill(.white.opacity(0.16))
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.26), .white.opacity(0.10)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 30, height: 30)
+                            Circle()
+                                .strokeBorder(.white.opacity(0.30), lineWidth: 0.75)
                                 .frame(width: 30, height: 30)
                             Image(systemName: sub.icon)
                                 .font(.system(size: 13, weight: .semibold))
@@ -337,6 +356,7 @@ struct LifeFinanceView: View {
                         Text("\(count)")
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
+                            .contentTransition(.numericText())
                         Text(sub.rawValue)
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(.white.opacity(0.72))
@@ -353,6 +373,10 @@ struct LifeFinanceView: View {
             .padding(.vertical, 6)
             .background(.white.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.75)
+            )
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
@@ -381,9 +405,14 @@ struct LifeFinanceView: View {
                     .frame(width: 55, height: 55)
                     .offset(x: 60, y: 40)
                     .blur(radius: 8)
+                // 玻璃光澤：頂部白色漸層 → 透明，對齊全 App 英雄卡規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 0))
         .shadow(color: heroAccentDark.opacity(0.35), radius: 12, x: 0, y: 6)
     }
 
@@ -574,7 +603,16 @@ struct LifeFinanceView: View {
                         .contentTransition(.numericText())
                 }
             } else {
-                Text(formatDate(item.date)).font(.caption).foregroundStyle(.tertiary)
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 9, weight: .medium))
+                    Text(formatDate(item.date))
+                        .font(.caption2.weight(.medium))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(Capsule())
             }
         }
         .padding(.vertical, 4)
