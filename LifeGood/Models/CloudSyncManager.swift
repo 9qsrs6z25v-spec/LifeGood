@@ -375,18 +375,20 @@ final class CloudSyncManager: ObservableObject {
 
     private func markSynced() {
         let now = Date()
-        // 所有呼叫端都已確保在主執行緒，直接更新 @Published 屬性，
-        // 避免多一次 async enqueue 造成 lastSyncDate 短暫未更新、30 秒節流判斷出現空窗
+        // @Published 屬性與 UserDefaults 必須在同一執行緒/批次寫入，
+        // 避免非主執行緒路徑下 UserDefaults 先更新完畢、lastSyncDate 尚未更新，
+        // 導致 syncNowIfDue 在空窗內讀到舊值而誤觸一次完整同步。
         if Thread.isMainThread {
             lastSyncDate = now
             lastErrorMessage = nil
+            UserDefaults.standard.set(now, forKey: Self.lastSyncKey)
         } else {
             DispatchQueue.main.async { [weak self] in
                 self?.lastSyncDate = now
                 self?.lastErrorMessage = nil
+                UserDefaults.standard.set(now, forKey: Self.lastSyncKey)
             }
         }
-        UserDefaults.standard.set(now, forKey: Self.lastSyncKey)
     }
 }
 

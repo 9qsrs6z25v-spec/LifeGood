@@ -419,12 +419,16 @@ struct LifeFinanceView: View {
     // MARK: - 篩選
 
     private var filterChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        // 一次 reduce 建立計數表，避免 ForEach 內對每個分類各做一次 O(n) filter
+        let countBySub: [FinanceSubCategory: Int] = financeMilestones.reduce(into: [:]) { dict, m in
+            if let sub = m.financeSubCategory { dict[sub, default: 0] += 1 }
+        }
+        return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 chipButton(label: "全部", icon: "tray.full.fill",
                            tint: heroAccent, isSelected: selectedSub == nil) { selectedSub = nil }
                 ForEach(FinanceSubCategory.allCases) { sub in
-                    let count = financeMilestones.filter { $0.financeSubCategory == sub }.count
+                    let count = countBySub[sub, default: 0]
                     if count > 0 {
                         chipButton(label: "\(sub.rawValue) \(count)", icon: sub.icon,
                                    tint: colorFor(sub), isSelected: selectedSub == sub) { selectedSub = sub }
@@ -1429,7 +1433,9 @@ struct FinanceCardView: View {
     }
 
     private var creditCardChartSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // 預先求值一次，避免同一 body 內兩次呼叫各自重算所有展開條目
+        let dailyTotals = creditCardDailyTotals
+        return VStack(alignment: .leading, spacing: 0) {
             // 標題列：Capsule 側條（橙色）+ 筆數膠囊，對齊 depositSection 標題規格
             HStack(spacing: 10) {
                 Capsule()
@@ -1443,7 +1449,7 @@ struct FinanceCardView: View {
                 Text("消費趨勢")
                     .font(.subheadline.weight(.bold))
                 Spacer()
-                let dailyCount = creditCardDailyTotals.count
+                let dailyCount = dailyTotals.count
                 if dailyCount > 0 {
                     Text("\(dailyCount) 筆")
                         .font(.caption2.weight(.semibold))
@@ -1456,7 +1462,7 @@ struct FinanceCardView: View {
             }
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
 
-            if creditCardDailyTotals.isEmpty {
+            if dailyTotals.isEmpty {
                 Text("尚無扣款記錄").font(.caption).foregroundStyle(.tertiary)
                     .padding(.horizontal).padding(.bottom, 12)
             } else {
