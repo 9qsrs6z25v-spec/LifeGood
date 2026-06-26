@@ -454,6 +454,10 @@ struct GradeTitleView: View {
             p.departmentId = nil
             lifeStore.update(p)
         }
+        for var sub in lifeStore.subordinates where sub.departmentId == dept.id {
+            sub.departmentId = nil
+            lifeStore.update(sub)
+        }
         lifeStore.deleteDepartment(dept)
     }
 }
@@ -726,6 +730,10 @@ struct DepartmentEditor: View {
         for var p in lifeStore.orgPeople where p.departmentId == dept.id {
             p.departmentId = nil
             lifeStore.update(p)
+        }
+        for var sub in lifeStore.subordinates where sub.departmentId == dept.id {
+            sub.departmentId = nil
+            lifeStore.update(sub)
         }
         lifeStore.deleteDepartment(dept)
     }

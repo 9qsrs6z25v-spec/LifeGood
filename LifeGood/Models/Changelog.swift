@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.76", build: 541, date: "2026/06/26", notes: [
+            "【Bug 修復】GradeTitleView.deleteDepartment / DepartmentEditor.deleteSelf：刪除部門時只清除了 OrgPerson.departmentId，未清除 Subordinate.departmentId，導致部屬保留孤立的 UUID 參照（resolvedDeptName 退為空字串，部門篩選 UI 無法正確高亮）。兩個刪除路徑均補上同步清零 sub.departmentId 的迴圈，對齊既有 orgPeople 清零規格。",
+            "【Bug 修復】SubordinateView：刪除已篩選的部門後，filterDeptRaw（AppStorage）仍保存該部門 UUID，篩選列無任何膠囊高亮，且搭配上一項修復後會顯示空列表，無法自行恢復。補入 .onChange(of: lifeStore.departments) 觀察器，偵測到所選部門已不存在時自動歸零 filterDeptRaw，恢復顯示全部部屬。",
+            "【確認安全】全面複查 79 個 Swift 檔：無 force unwrap（!）、無 as! 強制轉型、無 fatalError；CloudKit 30 秒節流、2 秒防抖、isSyncing 主執行緒守衛、saveQueue 值型快照均正常；所有 @Published 更新在主執行緒；本次修復為上述兩個因部門篩選功能引入的實際 bug，其餘程式碼無問題。"
+        ]),
         ChangelogEntry(version: "22.75", build: 540, date: "2026/06/26", notes: [
             "【靜態除錯 v22.75】MyCalendarView 搜尋加入 300ms 防抖（debouncedSearchText + .task(id: searchText)），每次按鍵不再直接觸發 O(n) 全量 searchHits() 掃描，改為停止輸入 300ms 後才執行搜尋，消除快速輸入時的主執行緒卡頓。",
             "MyCalendarView.subordinateAgendaSection 內 subIncompleteMeetingItems、subIncompleteTasks 兩個計算屬性從各呼叫兩次（.count + ForEach enumerated）減為各呼叫一次，以 let 區域常數快取，消除每次 body render 的冗餘 flatMap/filter/sorted。"

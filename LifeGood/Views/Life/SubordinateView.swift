@@ -332,6 +332,11 @@ struct SubordinateView: View {
                     headerAppeared = false
                 }
             }
+            .onChange(of: lifeStore.departments) { _, depts in
+                if let id = selectedDeptId, !depts.contains(where: { $0.id == id }) {
+                    filterDeptRaw = ""
+                }
+            }
             .sheet(isPresented: $showAdd) { AddSubordinateView() }
             .sheet(item: $editingItem) { item in AddSubordinateView(editing: item) }
             .sheet(item: $viewingItem) { item in SubordinateDetailView(subordinate: item) }
