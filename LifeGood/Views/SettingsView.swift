@@ -23,6 +23,19 @@ import UniformTypeIdentifiers
 //      「同步狀態」/ 「最近同步」/ 「最近事件」/ 「同步錯誤」右側值 → Capsule 徽章；
 //      「立即同步」/ 「重新選擇同步方式」補 36pt 漸層圖示圓，對齊 dataManagementSection 規格。
 //   9. restoreSection：復原按鈕補 36pt 橘色漸層圖示圓，對齊 dataManagementSection 規格。
+// [2026-06] v4 美化方向：
+//  10. settingsHeroCard 背景：補第三顆散景圓（55pt, white.opacity(0.06), offset x:30 y:42, blur 8）
+//      + 頂部玻璃光澤（LinearGradient [.white.opacity(0.18),.clear] top→center），
+//      對齊 OverviewView.monthlyBalanceCard v3/v4 / IncomeView v4 / VariableExpenseView v4
+//      英雄卡三圓+玻璃光澤規格，消除 settingsHeroCard 是全 App 唯一缺漏兩層裝飾的視覺不均衡。
+//  11. settingsHeroCard KPI 橫列 padding：.vertical 8 → 10 + background opacity 0.10 → 0.08，
+//      對齊 OverviewView / IncomeView / VariableExpenseView KPI 橫列標準規格。
+//  12. settingsHeroStatCell count Text：補 lineLimit(1) + minimumScaleFactor(0.75)，
+//      防止筆數過多時數字換行，對齊全 App kpiCell 防截斷規格。
+//  13. aboutInfoCell 圖示圓：32pt pure fill(0.12) → 34pt LinearGradient(0.20→0.08) +
+//      Circle().stroke(color.opacity(0.18), 0.75pt)，對齊 OverviewView.summaryCard v3 /
+//      FinanceOverviewView.assetCard v3 / CareerView v3 圖示圓規格，補齊「關於」欄唯一
+//      未升級的圖示圓視覺落差。
 
 // MARK: - Share Sheet (UIKit bridge)
 
@@ -369,8 +382,8 @@ struct SettingsView: View {
                     count: lifeStore.milestones.count + lifeStore.familyMembers.count
                 )
             }
-            .padding(.vertical, 8)
-            .background(.white.opacity(0.10))
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .padding(.horizontal, 20)
@@ -398,6 +411,18 @@ struct SettingsView: View {
                     .frame(width: 80, height: 80)
                     .offset(x: -60, y: 50)
                     .blur(radius: 10)
+                // [v4] 中右微光（第三顆散景圓），對齊 IncomeView / VariableExpenseView 三圓規格
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 30, y: 42)
+                    .blur(radius: 8)
+                // [v4] 頂部玻璃光澤，對齊全 App 英雄卡 glass shine 規格
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -418,6 +443,8 @@ struct SettingsView: View {
             Text("\(count)")
                 .font(.system(size: 15, weight: .bold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .contentTransition(.numericText())
             Text("筆")
                 .font(.system(size: 9, weight: .medium))
@@ -1298,9 +1325,17 @@ struct SettingsView: View {
     private func aboutInfoCell(icon: String, label: String, value: String, color: Color) -> some View {
         VStack(spacing: 6) {
             ZStack {
+                // [v4] 升級為 LinearGradient + stroke，對齊全 App 標準圖示圓規格
                 Circle()
-                    .fill(color.opacity(0.12))
-                    .frame(width: 32, height: 32)
+                    .fill(LinearGradient(
+                        colors: [color.opacity(0.20), color.opacity(0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 34, height: 34)
+                Circle()
+                    .stroke(color.opacity(0.18), lineWidth: 0.75)
+                    .frame(width: 34, height: 34)
                 Image(systemName: icon)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(color)
