@@ -26,6 +26,29 @@ import MapKit
 //      對齊 StockDetailView.transactionsSection stagger 規格
 //  10. RestaurantDetailSheet.companionCard：升級為粉紅漸層英雄小卡（含散景圓 + 36pt 漸層
 //      圖示圓 + 粉紅膠囊強調標籤），對齊 SpouseResumeView.heroCard 設計語言
+// [2026-06 v3] 本次美化方向：
+//  11. statsCard 散景圓升至三顆（新增 55pt 中右側裝飾圓），
+//      頂部加入玻璃光澤覆層（LinearGradient [.white.opacity(0.18), .clear], top→center），
+//      對齊 IncomeView.summaryHeader / VariableExpenseView.monthSummaryHeader v3 規格；
+//      「N 間」計數膠囊補入 Capsule().stroke 邊框，大字金額加 minimumScaleFactor(0.6)。
+//  12. RestaurantDetailSheet.headerCard 散景圓升至三顆（新增 50pt 中右側），
+//      頂部加入玻璃光澤覆層，對齊全 App 英雄卡三圓散景 + 玻璃光澤規格；
+//      在 KPI 列上方加入餐廳名稱（.title3.bold 白色大字 + mappin 地址副標），
+//      強化視覺層次感，對齊 SpouseResumeView.heroCard 姓名大字設計。
+//  13. restaurantRow 44pt 圖示圓：補入 Circle().stroke(accent.opacity(0.22), lineWidth:0.75)
+//      overlay 細邊框，對齊 FamilyView v2 / CareerView v2 圖示圓邊框規格；
+//      「造訪 N 次」膠囊補入 Capsule().stroke 邊框；
+//      最近造訪日從純文字升級為 tertiarySystemFill Capsule 徽章，
+//      對齊 OverviewView.recentRow / ChildrenResumeView.childCard 日期膠囊設計語言。
+//  14. visitsSection 34pt 圖示圓：補入 Circle().stroke(accent.opacity(0.18), lineWidth:0.75)；
+//      日期膠囊補入 Capsule().stroke(accent.opacity(0.22), lineWidth:0.6)；
+//      同行者粉紅膠囊補入 Capsule().stroke(.pink.opacity(0.22), lineWidth:0.6)，
+//      對齊全 App 膠囊徽章統一描邊規格。
+//  15. companionCard 散景圓升至兩顆（新增 45pt 左下角）；
+//      玻璃光澤覆層（top→center white.opacity(0.15)）；
+//      「TOP」膠囊補入 Capsule().stroke(.white.opacity(0.35), lineWidth:0.75)；
+//      36pt 圖示圓補入 Circle().stroke(.white.opacity(0.25), lineWidth:0.75)，
+//      對齊 SpouseResumeView.heroCard 整體規格。
 
 // MARK: - 餐廳聚合資料
 
@@ -466,6 +489,8 @@ struct FoodMapView: View {
                     Text("NT$ \(fmtShort(total))")
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
                         .contentTransition(.numericText())
                 }
                 Spacer()
@@ -474,6 +499,7 @@ struct FoodMapView: View {
                     .padding(.horizontal, 11).padding(.vertical, 5)
                     .background(.white.opacity(0.22))
                     .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
                     .foregroundStyle(.white)
             }
 
@@ -502,7 +528,7 @@ struct FoodMapView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                // 裝飾性散景圓，增加卡片層次感
+                // [v3] 三顆散景裝飾圓
                 Circle()
                     .fill(.white.opacity(0.12))
                     .frame(width: 120, height: 120)
@@ -513,6 +539,17 @@ struct FoodMapView: View {
                     .frame(width: 70, height: 70)
                     .offset(x: -55, y: 42)
                     .blur(radius: 8)
+                Circle()
+                    .fill(.white.opacity(0.05))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 50, y: 30)
+                    .blur(radius: 6)
+                // [v3] 頂部玻璃光澤
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top, endPoint: .center
+                )
+                .allowsHitTesting(false)
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -562,6 +599,7 @@ struct FoodMapView: View {
                     )
                     .frame(width: 44, height: 44)
                     .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
+                    .overlay(Circle().stroke(accent.opacity(0.22), lineWidth: 0.75))
                 Image(systemName: "fork.knife")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(accent)
@@ -577,7 +615,7 @@ struct FoodMapView: View {
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
-                // 造訪次數膠囊 + 最近造訪日
+                // [v3] 造訪次數膠囊 + 最近造訪日膠囊徽章
                 HStack(spacing: 5) {
                     Text("造訪 \(agg.visitCount) 次")
                         .font(.system(size: 10, weight: .semibold))
@@ -585,10 +623,18 @@ struct FoodMapView: View {
                         .padding(.horizontal, 7).padding(.vertical, 2.5)
                         .background(accent.opacity(0.12))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                     if let last = agg.lastVisit {
-                        Text(fmtRelative(last))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 3) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 8, weight: .medium))
+                            Text(fmtRelative(last))
+                                .font(.system(size: 9, weight: .medium))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
                     }
                 }
             }
@@ -782,22 +828,31 @@ struct RestaurantDetailSheet: View {
         }
     }
 
-    // 餐廳詳情英雄卡（橘色漸層，對齊 FinanceOverviewView.totalAssetsCard 設計語言）
+    // [v3] 餐廳詳情英雄卡（橘色漸層 + 三顆散景圓 + 玻璃光澤，對齊全 App 英雄卡規格）
     private var headerCard: some View {
         VStack(spacing: 0) {
-            // 地址列
-            if !aggregate.address.isEmpty {
-                HStack(spacing: 5) {
-                    Image(systemName: "mappin.circle.fill")
-                        .font(.caption)
-                    Text(aggregate.address)
-                        .font(.caption)
-                        .lineLimit(1)
+            // [v3] 餐廳名稱大字（.title3.bold 白色，提升視覺層次）
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(aggregate.name)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
+                    if !aggregate.address.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "mappin.circle.fill")
+                                .font(.system(size: 10, weight: .medium))
+                            Text(aggregate.address)
+                                .font(.caption2)
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(.white.opacity(0.80))
+                    }
                 }
-                .foregroundStyle(.white.opacity(0.82))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 12)
+                Spacer()
             }
+            .padding(.bottom, 14)
 
             // KPI 三格：造訪次數 / 總花費 / 平均每次
             HStack(spacing: 0) {
@@ -805,11 +860,14 @@ struct RestaurantDetailSheet: View {
                               value: "\(aggregate.visitCount) 次")
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
                 detailKpiCell(icon: "yensign.circle.fill", label: "總花費",
-                              value: "NT$ \(fmtNum(aggregate.totalSpent))")
+                              value: fmtWan(aggregate.totalSpent))
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
                 detailKpiCell(icon: "chart.bar.fill", label: "平均每次",
                               value: "NT$ \(fmtNum(aggregate.averageSpent))")
             }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
@@ -824,6 +882,7 @@ struct RestaurantDetailSheet: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // [v3] 三顆散景裝飾圓
                 Circle()
                     .fill(.white.opacity(0.12))
                     .frame(width: 110, height: 110)
@@ -834,6 +893,17 @@ struct RestaurantDetailSheet: View {
                     .frame(width: 65, height: 65)
                     .offset(x: -50, y: 35)
                     .blur(radius: 8)
+                Circle()
+                    .fill(.white.opacity(0.04))
+                    .frame(width: 50, height: 50)
+                    .offset(x: 40, y: 28)
+                    .blur(radius: 6)
+                // [v3] 玻璃光澤
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top, endPoint: .center
+                )
+                .allowsHitTesting(false)
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -962,7 +1032,7 @@ struct RestaurantDetailSheet: View {
             VStack(spacing: 0) {
                 ForEach(Array(sorted.enumerated()), id: \.element.id) { idx, exp in
                     HStack(spacing: 10) {
-                        // 34pt 漸層圖示圓
+                        // [v3] 34pt 漸層圖示圓 + stroke 邊框
                         ZStack {
                             Circle()
                                 .fill(LinearGradient(
@@ -970,20 +1040,22 @@ struct RestaurantDetailSheet: View {
                                     startPoint: .topLeading, endPoint: .bottomTrailing
                                 ))
                                 .frame(width: 34, height: 34)
+                                .overlay(Circle().stroke(accent.opacity(0.18), lineWidth: 0.75))
                             Image(systemName: "fork.knife")
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(accent.opacity(0.85))
                         }
 
                         VStack(alignment: .leading, spacing: 3) {
-                            // 日期膠囊徽章
+                            // [v3] 日期膠囊徽章 + stroke
                             Text(fmtDate(exp.date))
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(accent)
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(accent.opacity(0.10))
                                 .clipShape(Capsule())
-                            // 同行者粉紅膠囊
+                                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                            // [v3] 同行者粉紅膠囊 + stroke
                             if let raw = exp.diningMember, !raw.isEmpty {
                                 HStack(spacing: 3) {
                                     Image(systemName: "person.2.fill")
@@ -995,6 +1067,7 @@ struct RestaurantDetailSheet: View {
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(Color.pink.opacity(0.10))
                                 .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.pink.opacity(0.22), lineWidth: 0.6))
                             }
                         }
 
@@ -1037,7 +1110,7 @@ struct RestaurantDetailSheet: View {
         let pinkLight = Color(red: 0.96, green: 0.35, blue: 0.60)
         let pinkDark  = Color(red: 0.76, green: 0.18, blue: 0.42)
         return HStack(spacing: 14) {
-            // 36pt 粉紅漸層圖示圓
+            // [v3] 36pt 粉紅漸層圖示圓 + stroke
             ZStack {
                 Circle()
                     .fill(LinearGradient(
@@ -1046,6 +1119,7 @@ struct RestaurantDetailSheet: View {
                     ))
                     .frame(width: 36, height: 36)
                     .shadow(color: pinkLight.opacity(0.22), radius: 5, x: 0, y: 2)
+                    .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.75))
                 Image(systemName: "person.2.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(pinkLight)
@@ -1064,7 +1138,7 @@ struct RestaurantDetailSheet: View {
 
             Spacer()
 
-            // 粉紅膠囊強調標籤
+            // [v3] 粉紅膠囊強調標籤 + stroke
             Text("TOP")
                 .font(.system(size: 9, weight: .heavy))
                 .tracking(1.5)
@@ -1072,6 +1146,7 @@ struct RestaurantDetailSheet: View {
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(.white.opacity(0.22))
                 .clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
@@ -1082,11 +1157,23 @@ struct RestaurantDetailSheet: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // [v3] 兩顆散景裝飾圓
                 Circle()
                     .fill(.white.opacity(0.10))
                     .frame(width: 80, height: 80)
                     .offset(x: 60, y: -25)
                     .blur(radius: 10)
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 45, height: 45)
+                    .offset(x: -50, y: 20)
+                    .blur(radius: 7)
+                // [v3] 玻璃光澤
+                LinearGradient(
+                    colors: [.white.opacity(0.15), .clear],
+                    startPoint: .top, endPoint: .center
+                )
+                .allowsHitTesting(false)
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -1116,6 +1203,19 @@ struct RestaurantDetailSheet: View {
 
     private func fmtNum(_ v: Double) -> String {
         Self.decimalFormatter.string(from: NSNumber(value: v)) ?? "0"
+    }
+
+    // [v3] 萬/億 量級顯示，對齊全 App 金額規格
+    private func fmtWan(_ v: Double) -> String {
+        if abs(v) >= 1_0000_0000 {
+            let s = Self.decimalFormatter.string(from: NSNumber(value: v / 1_0000_0000)) ?? "0"
+            return "\(s)億"
+        }
+        if abs(v) >= 10_000 {
+            let s = Self.decimalFormatter.string(from: NSNumber(value: v / 10_000)) ?? "0"
+            return "\(s)萬"
+        }
+        return "NT$ \(fmtNum(v))"
     }
 
     private func fmtDate(_ date: Date) -> String {
