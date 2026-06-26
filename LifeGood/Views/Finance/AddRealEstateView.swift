@@ -16,6 +16,23 @@ import PhotosUI
 //   5. calcSection 數值列：加入彩色 Capsule 背景標籤，使正負值（綠/紅）更一目了然，
 //      對齊 RealEstateDetailView cashFlow 的正負色彩規格。
 //   6. Form 整體套用 .tint(.purple)，DatePicker / Toggle 等系統元件統一房地產主題色。
+// [2026-06 v2] 本次美化方向：
+//   7. estatePreviewCard（英雄預覽卡）：Form 頂部新增紫色→靛藍漸層英雄預覽卡，
+//      即時顯示物件名稱大字 + 購入價 + 估值/增值/月租 KPI 橫列；
+//      三顆散景裝飾圓 + 頂部玻璃光澤（white.opacity(0.18)→clear）；
+//      cardAppeared spring 進場動畫（opacity + Y 位移 20pt），
+//      對齊 AddVehicleView.vehiclePreviewCard / AddStockView.amountPreviewCard 規格。
+//   8. Tab 切換器升級：Picker(.segmented) → @Namespace + matchedGeometryEffect 自訂彩色 Capsule Pill，
+//      理財→紫色（chart.bar.fill）/ 房屋資料→青藍（house.fill），
+//      spring(response:0.30, dampingFraction:0.72) 平滑滑動，
+//      對齊 RealEstateDetailView.tabPicker / SubordinateDetailView.detailTab 設計規格。
+//   9. reIconCircle：補入 Circle().stroke(color.opacity(0.22), lineWidth:0.75) overlay，
+//      對齊 CareerView v2 / FamilyView v2 / ChildDetailView v2 圖示圓邊框規格。
+//  10. 各 Capsule 膠囊補細邊框：
+//      貸款期數膠囊 → Capsule().stroke(blue.opacity(0.22), 0.6pt)；
+//      已支出日期膠囊 → Capsule().stroke(separator.opacity(0.25), 0.6pt)；
+//      變動支出類別膠囊 → Capsule().stroke(orange.opacity(0.22), 0.6pt)，
+//      對齊全 App 膠囊統一描邊規格（FinanceChartView v5 / EInvoiceSetupView v2）。
 
 struct AddRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -73,6 +90,10 @@ struct AddRealEstateView: View {
     @State private var monthlyRentalText = ""
     @State private var note = ""
     @State private var showError = false
+    // v2 進場動畫旗標
+    @State private var cardAppeared = false
+    // matchedGeometryEffect：Tab 切換器平滑滑動（對齊 RealEstateDetailView.tabPicker 規格）
+    @Namespace private var tabNamespace
 
     // MARK: - 功能選別
     @State private var showRental = false
@@ -170,16 +191,55 @@ struct AddRealEstateView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // ── 英雄預覽卡（物件名稱 / 購入價 / KPI）──
+                Section {
+                    estatePreviewCard
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .opacity(cardAppeared ? 1 : 0)
+                        .offset(y: cardAppeared ? 0 : 20)
+                }
+
                 infoSection
 
-                Picker("", selection: $editTab) {
-                    ForEach(EditTab.allCases, id: \.self) { tab in
-                        Text(tab.rawValue).tag(tab)
+                // ── 自訂 Tab 切換器（matchedGeometryEffect Capsule Pill）──
+                // 理財(紫) / 房屋資料(青藍)，Tab 切換 spring 平滑滑動
+                Section {
+                    HStack(spacing: 0) {
+                        ForEach(EditTab.allCases, id: \.self) { tab in
+                            Button {
+                                withAnimation(.spring(response: 0.30, dampingFraction: 0.72)) {
+                                    editTab = tab
+                                }
+                            } label: {
+                                let isActive = editTab == tab
+                                ZStack {
+                                    if isActive {
+                                        Capsule()
+                                            .fill(reTabGradient(tab))
+                                            .matchedGeometryEffect(id: "reTabIndicator", in: tabNamespace)
+                                    }
+                                    HStack(spacing: 5) {
+                                        Image(systemName: tab == .finance ? "chart.bar.fill" : "house.fill")
+                                            .font(.system(size: 11, weight: .semibold))
+                                        Text(tab.rawValue)
+                                            .font(.system(size: 13, weight: .semibold))
+                                    }
+                                    .foregroundStyle(isActive ? .white : Color.secondary)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
+                    .padding(3)
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color(.separator).opacity(0.20), lineWidth: 0.75))
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 }
-                .pickerStyle(.segmented)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
 
                 if editTab == .finance {
                     valueSection
@@ -244,7 +304,12 @@ struct AddRealEstateView: View {
                     }
                 }
             }
-            .onAppear { loadEditing() }
+            .onAppear {
+                loadEditing()
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                    cardAppeared = true
+                }
+            }
             .sheet(item: $viewingPhotoURL) { url in
                 PhotoViewerSheet(url: url)
             }
@@ -451,6 +516,7 @@ struct AddRealEstateView: View {
                                         .padding(.horizontal, 6).padding(.vertical, 2)
                                         .background(Color.blue.opacity(0.10))
                                         .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
                                 }
                                 Text("已繳 \(formatCurrency(m.paidAmount))")
                                     .font(.caption2).foregroundStyle(.secondary)
@@ -511,6 +577,7 @@ struct AddRealEstateView: View {
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(Color(.tertiarySystemFill))
                                 .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color(.separator).opacity(0.25), lineWidth: 0.6))
                         }
                         Spacer()
                         Text(formatCurrency(p.amount))
@@ -571,6 +638,7 @@ struct AddRealEstateView: View {
                                 .padding(.horizontal, 7).padding(.vertical, 2.5)
                                 .background(Color.orange.opacity(0.12))
                                 .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
                             HStack(spacing: 5) {
                                 if !ve.name.isEmpty {
                                     Text(ve.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
@@ -1546,7 +1614,7 @@ struct AddRealEstateView: View {
         .textCase(nil)
     }
 
-    // MARK: - 美化輔助：漸層圖示圓（32pt，對齊 FixedExpenseRow 規格）
+    // MARK: - 美化輔助：漸層圖示圓（32pt + stroke 邊框，對齊 CareerView v2 / FamilyView v2 規格）
 
     private func reIconCircle(icon: String, color: Color) -> some View {
         ZStack {
@@ -1563,6 +1631,175 @@ struct AddRealEstateView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(color)
         }
+        .overlay(Circle().stroke(color.opacity(0.22), lineWidth: 0.75))
+    }
+
+    // MARK: - 美化輔助：Tab 切換器漸層（對齊 RealEstateDetailView.tabPicker 規格）
+
+    private func reTabGradient(_ tab: EditTab) -> LinearGradient {
+        switch tab {
+        case .finance:
+            return LinearGradient(colors: [.purple, .indigo], startPoint: .leading, endPoint: .trailing)
+        case .house:
+            return LinearGradient(colors: [.teal, Color(red: 0.12, green: 0.50, blue: 0.88)], startPoint: .leading, endPoint: .trailing)
+        }
+    }
+
+    // MARK: - 美化輔助：英雄預覽卡（紫藍漸層 + 三顆散景圓 + 玻璃光澤）
+
+    private var estatePreviewCard: some View {
+        let purchaseWan = Double(purchasePriceText) ?? 0
+        let currentWan  = Double(currentValueText)  ?? 0
+        let apprecWan   = (purchaseWan > 0 && currentWan > 0) ? currentWan - purchaseWan : 0
+        let rentalAmt   = Double(monthlyRentalText) ?? 0
+        let isUp        = apprecWan >= 0
+        let accentTop   = Color(red: 0.52, green: 0.20, blue: 0.88)
+        let accentBot   = Color(red: 0.28, green: 0.10, blue: 0.68)
+
+        return ZStack(alignment: .topLeading) {
+            // 背景漸層
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(LinearGradient(colors: [accentTop, accentBot],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+            // 散景裝飾圓 ①（右上大圓）
+            Circle()
+                .fill(Color.white.opacity(0.10))
+                .frame(width: 110, height: 110)
+                .offset(x: 240, y: -30)
+                .blur(radius: 12)
+            // 散景裝飾圓 ②（左下中圓）
+            Circle()
+                .fill(Color.white.opacity(0.07))
+                .frame(width: 70, height: 70)
+                .offset(x: 18, y: 100)
+                .blur(radius: 8)
+            // 散景裝飾圓 ③（中右小圓）
+            Circle()
+                .fill(Color.white.opacity(0.06))
+                .frame(width: 55, height: 55)
+                .offset(x: 175, y: 72)
+                .blur(radius: 8)
+            // 頂部玻璃光澤（white.opacity(0.18)→clear，top→center）
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(LinearGradient(colors: [.white.opacity(0.18), .clear],
+                                     startPoint: .top, endPoint: .center))
+
+            VStack(alignment: .leading, spacing: 14) {
+                // ── 標題列 ──
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(name.isEmpty ? "新增房地產" : name)
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.80)
+                        if !city.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "mappin.circle.fill").font(.system(size: 10))
+                                Text(city).font(.caption)
+                            }
+                            .foregroundStyle(.white.opacity(0.80))
+                        }
+                    }
+                    Spacer()
+                    if isSold {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.seal.fill").font(.system(size: 9))
+                            Text("已售出")
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.white.opacity(0.20))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.6))
+                    }
+                }
+
+                // ── 購入價大字 ──
+                if purchaseWan > 0 {
+                    HStack(alignment: .lastTextBaseline, spacing: 4) {
+                        Text(purchaseWan >= 10000
+                             ? String(format: "%.1f億", purchaseWan / 10000)
+                             : String(format: "%.0f萬", purchaseWan))
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .minimumScaleFactor(0.65)
+                            .contentTransition(.numericText())
+                        Text("NT$").font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.70))
+                    }
+                } else {
+                    Text("請輸入購入價格")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+
+                // ── KPI 橫列（估值 / 增值 / 月租）──
+                HStack(spacing: 0) {
+                    reHeroKpiCell(
+                        icon: "building.2.fill",
+                        label: "目前估值",
+                        value: currentWan > 0
+                            ? (currentWan >= 10000
+                               ? String(format: "%.1f億", currentWan / 10000)
+                               : String(format: "%.0f萬", currentWan))
+                            : "—"
+                    )
+                    Divider().frame(height: 32).opacity(0.35)
+                    reHeroKpiCell(
+                        icon: isUp ? "arrow.up.right" : "arrow.down.right",
+                        label: "增值",
+                        value: (purchaseWan > 0 && currentWan > 0)
+                            ? (isUp
+                               ? "+\(String(format: "%.0f", apprecWan))萬"
+                               : "\(String(format: "%.0f", apprecWan))萬")
+                            : "—",
+                        tint: (purchaseWan > 0 && currentWan > 0)
+                            ? (isUp ? Color.green.opacity(0.90) : Color.red.opacity(0.90))
+                            : Color.white.opacity(0.80)
+                    )
+                    Divider().frame(height: 32).opacity(0.35)
+                    reHeroKpiCell(
+                        icon: "dollarsign.circle.fill",
+                        label: "月租收入",
+                        value: rentalAmt > 0 ? "NT$\(Int(rentalAmt).formatted())" : "—"
+                    )
+                }
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .padding(18)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(.white.opacity(0.18), lineWidth: 0.75)
+        )
+        .shadow(color: accentTop.opacity(0.30), radius: 16, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
+    }
+
+    private func reHeroKpiCell(icon: String, label: String, value: String,
+                                tint: Color = .white) -> some View {
+        VStack(spacing: 5) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [.white.opacity(0.18), .white.opacity(0.08)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 28, height: 28)
+                Image(systemName: icon).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+            }
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.white.opacity(0.70))
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
