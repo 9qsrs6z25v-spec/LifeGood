@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.80", build: 544, date: "2026/06/26", notes: [
+            "【靜態除錯 v22.80】全面複查 79 個 Swift 檔（強制解包、Optional 處理、型別錯誤、index 越界、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
+            "【Bug 修復】RestaurantDetailSheet.fmtWan（FoodMapView.swift）：v3 新增的萬/億量級格式函式在金額 ≥ NT$10,000 時回傳「X.X萬」或「X.X億」（無貨幣前綴），金額 < NT$10,000 時才回傳「NT$ X,XXX」，導致同一 headerCard 內「總花費」KPI 格在不同金額大小下顯示格式不一致（有/無 NT$ 前綴）。已將億、萬兩個分支均補入「NT$ 」前綴，使三個量級輸出格式統一為「NT$ X.X億 / NT$ X.X萬 / NT$ X,XXX」，與相鄰「平均每次」KPI 格的格式對齊。",
+            "【確認安全】CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 主執行緒守衛、flushPushAll !isSyncing guard、saveQueue 值型快照、NSLock fetchLock 均正常；所有 @Published 更新在主執行緒；weekdays index 已有 .indices.contains 守衛；estimatedMonthlyIncome 中位數計算有 isEmpty guard；weeklyData O(n×12) 優化正常；MyCalendarView 搜尋 300ms 防抖（.task(id:)）正常；subordinateAgendaSection 計算屬性已快取為 let 常數；其餘程式碼無問題。"
+        ]),
         ChangelogEntry(version: "22.76", build: 541, date: "2026/06/26", notes: [
             "【Bug 修復】GradeTitleView.deleteDepartment / DepartmentEditor.deleteSelf：刪除部門時只清除了 OrgPerson.departmentId，未清除 Subordinate.departmentId，導致部屬保留孤立的 UUID 參照（resolvedDeptName 退為空字串，部門篩選 UI 無法正確高亮）。兩個刪除路徑均補上同步清零 sub.departmentId 的迴圈，對齊既有 orgPeople 清零規格。",
             "【Bug 修復】SubordinateView：刪除已篩選的部門後，filterDeptRaw（AppStorage）仍保存該部門 UUID，篩選列無任何膠囊高亮，且搭配上一項修復後會顯示空列表，無法自行恢復。補入 .onChange(of: lifeStore.departments) 觀察器，偵測到所選部門已不存在時自動歸零 filterDeptRaw，恢復顯示全部部屬。",

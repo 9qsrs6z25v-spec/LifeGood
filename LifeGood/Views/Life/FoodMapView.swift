@@ -1209,11 +1209,11 @@ struct RestaurantDetailSheet: View {
     private func fmtWan(_ v: Double) -> String {
         if abs(v) >= 1_0000_0000 {
             let s = Self.decimalFormatter.string(from: NSNumber(value: v / 1_0000_0000)) ?? "0"
-            return "\(s)億"
+            return "NT$ \(s)億"
         }
         if abs(v) >= 10_000 {
             let s = Self.decimalFormatter.string(from: NSNumber(value: v / 10_000)) ?? "0"
-            return "\(s)萬"
+            return "NT$ \(s)萬"
         }
         return "NT$ \(fmtNum(v))"
     }
