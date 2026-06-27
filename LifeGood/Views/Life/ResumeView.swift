@@ -306,6 +306,19 @@ struct EditProfileView: View {
 //   9. spendingRow 日期：純 tertiary 文字 → tertiarySystemFill 底色 Capsule 徽章，
 //      對齊 OverviewView.recentRow / CareerView.careerRow 日期膠囊規格。
 //  10. spendingRow 同行人員：純橘文字 → pink Capsule 膠囊（person.2.fill 圖示），
+// [2026-06 v3] resumeHeroCard 英雄統計卡 + milestoneRow 細節對齊：
+//  13. resumeHeroCard：頂部新增橘色→琥珀漸層英雄統計卡（唯一主要列表頁缺少頂部英雄卡的均值補齊）：
+//      左上 trophy.fill 圖示圓 + 「我的履歷」小標；大字：總里程碑 N 項；
+//      右上：今年新增白色膠囊（sparkles 圖示）；三顆散景裝飾圓 + 頂部玻璃光澤；
+//      KPI 橫列三格（涵蓋分類 / 今年新增 / 最近一筆）；
+//      heroCardAppeared spring 進場動畫，對齊 ChildrenResumeView.heroStatsCard /
+//      CareerView.summaryCard / BusinessCardView.summaryHeader 英雄卡規格。
+//  14. milestoneRow 44pt 圖示圓：補入 Circle().stroke(accent.opacity(0.18), lineWidth:0.75) overlay
+//      細邊框，對齊 CareerView v2 / FamilyView v2 / OverviewView.recentRow v3 圖示圓邊框規格。
+//  15. milestoneRow 分類膠囊：補入 .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth:0.6))
+//      細邊框，對齊 SubordinateView v2 / FamilyView v2 / LifeOverviewView.categoryBreakdownSection 膠囊規格。
+//  16. milestoneRow 日期膠囊：補入 .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth:0.5))
+//      細邊框，對齊 CareerView v2 / SpouseResumeView v2 / ChildDetailView v2 日期膠囊邊框規格。
 //      對齊 VariableExpenseView.ExpenseRow diningMember 規格，強化資訊辨識度。
 //  11. spendingRow 金額：formatCurrency → ntdWanString，支援萬/億量級自動切換；
 //      改用紅色 Capsule 徽章顯示（含細邊框），對齊 ResumeGiftSection.giftRow 金額規格。
@@ -324,6 +337,8 @@ struct ResumeView: View {
     @State private var showPremiumAlert = false
     @State private var emptyStatePulse = false
     @State private var rowsAppeared = false
+    // [v3] 英雄卡進場動畫旗標
+    @State private var heroCardAppeared = false
 
     private var realMilestoneIDs: Set<UUID> { Set(store.milestones.map(\.id)) }
 
@@ -359,6 +374,19 @@ struct ResumeView: View {
         let sorted = allSorted
         return NavigationStack {
             VStack(spacing: 0) {
+                // [v3] 頂部英雄統計卡：補齊全 App 主要列表頁均值
+                resumeHeroCard(sorted)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 4)
+                    .opacity(heroCardAppeared ? 1 : 0)
+                    .offset(y: heroCardAppeared ? 0 : 20)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                            heroCardAppeared = true
+                        }
+                    }
+
                 categoryFilter
 
                 if sorted.isEmpty {
@@ -865,7 +893,7 @@ struct ResumeView: View {
                 .padding(.vertical, 8)
                 .padding(.trailing, 12)
 
-            // 分類圖示圓：44pt 漸層底 + 陰影，對齊 ExpenseRow / CareerView.careerRow 圖示圓規格
+            // 分類圖示圓：44pt 漸層底 + 陰影 + [v3] stroke 細邊框（對齊 CareerView v2 / FamilyView v2 規格）
             ZStack {
                 Circle()
                     .fill(
@@ -877,6 +905,9 @@ struct ResumeView: View {
                     )
                     .frame(width: 44, height: 44)
                     .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
+                Circle()
+                    .stroke(accent.opacity(0.18), lineWidth: 0.75)
+                    .frame(width: 44, height: 44)
                 Image(systemName: item.careerSubCategory?.icon ?? item.category.icon)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(accent)
@@ -890,13 +921,14 @@ struct ResumeView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 5) {
-                    // 分類膠囊徽章
+                    // 分類膠囊徽章：[v3] 補 Capsule stroke 細邊框（對齊 FamilyView v2 / SubordinateView v2 規格）
                     Text(item.category.displayName)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(accent)
                         .padding(.horizontal, 7).padding(.vertical, 2.5)
                         .background(accent.opacity(0.12))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
 
                     if let sub = item.careerSubCategory {
                         careerSubtitle(item, sub: sub)
@@ -911,15 +943,177 @@ struct ResumeView: View {
 
             Spacer(minLength: 6)
 
-            // 日期徽章
+            // 日期膠囊：[v3] 補 Capsule stroke 細邊框（對齊 CareerView v2 / SpouseResumeView v2 規格）
             Text(formatDate(item.date))
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundStyle(accent.opacity(0.85))
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(accent.opacity(0.10))
                 .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.5))
         }
         .padding(.vertical, 5)
+    }
+
+    // MARK: - [v3] 英雄統計卡（橘色→琥珀漸層）
+
+    /// 頂部英雄統計卡：顯示總里程碑數 + 三格 KPI + 散景裝飾圓 + 玻璃光澤。
+    /// 補齊 ResumeView 是全 App 主要列表頁唯一缺少英雄卡的均值落差。
+    private func resumeHeroCard(_ sorted: [LifeMilestone]) -> some View {
+        let accent = Color.orange
+        let totalCount = sorted.count
+        let cal = Calendar.current
+        let thisYear = cal.component(.year, from: Date())
+        let thisYearCount = sorted.filter { cal.component(.year, from: $0.date) == thisYear }.count
+        let categoryCount = Set(sorted.map(\.category)).count
+        let mostRecent = sorted.first
+
+        return ZStack(alignment: .topLeading) {
+            // 漸層背景（橘色→琥珀，象徵人生里程碑的黃金主題）
+            LinearGradient(
+                colors: [accent, Color(red: 0.92, green: 0.62, blue: 0.12)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            // 散景裝飾圓 1（右上主光暈）
+            Circle()
+                .fill(.white.opacity(0.13))
+                .frame(width: 110, height: 110)
+                .offset(x: 80, y: -30)
+                .blur(radius: 16)
+
+            // 散景裝飾圓 2（左下次光暈）
+            Circle()
+                .fill(.white.opacity(0.08))
+                .frame(width: 80, height: 80)
+                .offset(x: -70, y: 40)
+                .blur(radius: 12)
+
+            // 散景裝飾圓 3（中右微光）
+            Circle()
+                .fill(.white.opacity(0.06))
+                .frame(width: 55, height: 55)
+                .offset(x: 40, y: 15)
+                .blur(radius: 8)
+
+            // 頂部玻璃光澤（對齊全 App 英雄卡 glass shine 統一規格）
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top,
+                endPoint: .center
+            )
+
+            // 卡片內容
+            VStack(alignment: .leading, spacing: 0) {
+                // 頂部列：trophy 圖示圓 + 小標 + 今年計數膠囊
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(.white.opacity(0.22))
+                            .frame(width: 36, height: 36)
+                            .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.75))
+                        Image(systemName: "trophy.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    Text("我的履歷")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.88))
+                    Spacer()
+                    // 今年新增計數膠囊
+                    if thisYearCount > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text("今年 \(thisYearCount) 項")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .foregroundStyle(.white.opacity(0.90))
+                        .padding(.horizontal, 9).padding(.vertical, 3.5)
+                        .background(.white.opacity(0.22))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+
+                // 總數大字
+                HStack(alignment: .lastTextBaseline, spacing: 6) {
+                    Text("\(totalCount)")
+                        .font(.system(size: 42, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .minimumScaleFactor(0.65)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                    Text("項里程碑")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 10)
+
+                // 分隔線
+                Rectangle()
+                    .fill(.white.opacity(0.20))
+                    .frame(height: 0.5)
+                    .padding(.horizontal, 16)
+
+                // KPI 橫列（涵蓋分類 / 今年新增 / 最近一筆）
+                HStack(spacing: 0) {
+                    heroKpiCell(
+                        value: categoryCount > 0 ? "\(categoryCount) 類" : "—",
+                        label: "涵蓋分類",
+                        icon: "square.grid.2x2.fill"
+                    )
+                    Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5)
+                    heroKpiCell(
+                        value: thisYearCount > 0 ? "\(thisYearCount) 項" : "—",
+                        label: "今年新增",
+                        icon: "calendar.badge.plus"
+                    )
+                    Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5)
+                    heroKpiCell(
+                        value: mostRecent != nil ? formatDate(mostRecent!.date) : "—",
+                        label: "最近一筆",
+                        icon: "clock.fill"
+                    )
+                }
+                .background(.white.opacity(0.10))
+                .padding(.top, 10)
+                .padding(.bottom, 14)
+                .padding(.horizontal, 8)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(.white.opacity(0.18), lineWidth: 0.75)
+        )
+        .shadow(color: accent.opacity(0.35), radius: 14, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
+    }
+
+    /// 英雄卡 KPI 格（值大字 + 說明小字 + 圖示），對齊 ChildrenResumeView.heroStatsCard kpi 規格。
+    private func heroKpiCell(value: String, label: String, icon: String) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.80))
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .minimumScaleFactor(0.72)
+                .lineLimit(1)
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
