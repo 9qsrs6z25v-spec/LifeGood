@@ -148,7 +148,10 @@ final class RemoteAdminManager: ObservableObject {
                 case .failure(let err):
                     // 兩位使用者同時 +1 → 重抓最新再加
                     if (err as? CKError)?.code == .serverRecordChanged, retriesLeft > 0 {
-                        self.incrementUserCount(retriesLeft: retriesLeft - 1)
+                        // 延遲 0.5s 再重試，避免兩台同時遞增時立即重打造成 CK rate-limit
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                            self?.incrementUserCount(retriesLeft: retriesLeft - 1)
+                        }
                     }
                 }
             }

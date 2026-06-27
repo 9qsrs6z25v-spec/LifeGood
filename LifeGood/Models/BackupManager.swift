@@ -33,15 +33,15 @@ class BackupManager {
         let data = UnifiedExporter.exportJSON(expense: expense, finance: finance, life: life)
         let ts = Int(Date().timeIntervalSince1970)
         let url = backupDir.appendingPathComponent("backup_\(ts).json")
-        lastSnapshotDate = Date()
         // 檔案寫入與清理移到背景佇列，避免阻塞主執行緒造成 UI 卡頓
+        // lastSnapshotDate 在寫入成功後才更新，避免 App 被 kill 時留下
+        // 指向不存在檔案的時間戳，導致 debounce 誤判跳過下次快照。
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
                 try data.write(to: url, options: .atomic)
+                DispatchQueue.main.async { self?.lastSnapshotDate = Date() }
             } catch {
-                // 寫入失敗時重置時間戳，讓下次 createSnapshotIfNeeded 能再試一次
-                // 回主執行緒寫入，與 createSnapshotIfNeeded 的讀取保持同一執行緒
-                DispatchQueue.main.async { self?.lastSnapshotDate = nil }
+                // 寫入失敗：不更新時間戳，讓下次 createSnapshotIfNeeded 能再試一次
             }
             self?.cleanOldBackups()
         }

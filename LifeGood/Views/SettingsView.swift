@@ -310,9 +310,8 @@ struct SettingsView: View {
                 Button("復原", role: .destructive) { performRestore() }
                 Button("取消", role: .cancel) {}
             } message: {
-                if let candidate = restoreCandidate {
-                    Text("將復原至 \(formatRestoreDate(candidate.date)) 的資料快照。目前的所有資料將被覆蓋。")
-                }
+                Text(restoreCandidate.map { "將復原至 \(formatRestoreDate($0.date)) 的資料快照。目前的所有資料將被覆蓋。" }
+                     ?? "目前的所有資料將被覆蓋。")
             }
             // 復原結果
             .alert("復原結果", isPresented: $showRestoreResult) {

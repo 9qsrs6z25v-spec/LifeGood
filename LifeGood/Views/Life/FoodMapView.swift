@@ -166,7 +166,7 @@ struct FoodMapView: View {
                     .environmentObject(expenseStore)
             }
             .sheet(isPresented: $showListSheet) {
-                listSheet
+                listSheet(aggs)
             }
         }
     }
@@ -365,8 +365,8 @@ struct FoodMapView: View {
 
     // MARK: - 清單 sheet
 
-    private var listSheet: some View {
-        let items = sortedAggregates
+    private func listSheet(_ aggs: [RestaurantAggregate]) -> some View {
+        let items = sortedAggregates(from: aggs)
         return NavigationStack {
             VStack(spacing: 0) {
                 statsCard(items)
@@ -695,14 +695,15 @@ struct FoodMapView: View {
         return all
     }
 
-    private var sortedAggregates: [RestaurantAggregate] {
+    // 接收 body 中已計算的 aggs，避免在 listSheet 內再次觸發 aggregates 的 Dictionary(grouping:) 計算
+    private func sortedAggregates(from base: [RestaurantAggregate]) -> [RestaurantAggregate] {
         switch sort {
         case .visits:
-            return aggregates.sorted { $0.visitCount > $1.visitCount }
+            return base.sorted { $0.visitCount > $1.visitCount }
         case .spent:
-            return aggregates.sorted { $0.totalSpent > $1.totalSpent }
+            return base.sorted { $0.totalSpent > $1.totalSpent }
         case .recent:
-            return aggregates.sorted { ($0.lastVisit ?? .distantPast) > ($1.lastVisit ?? .distantPast) }
+            return base.sorted { ($0.lastVisit ?? .distantPast) > ($1.lastVisit ?? .distantPast) }
         }
     }
 

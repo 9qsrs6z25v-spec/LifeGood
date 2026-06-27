@@ -86,9 +86,10 @@ enum FullBackup {
         let total = files.count
         var lastPct = -1
         for (i, f) in files.enumerated() {
-            if let data = try? Data(contentsOf: f.url, options: .mappedIfSafe) {
-                try fh.write(contentsOf: data)
-            }
+            // 讀取失敗應 throw 而非靜默略過：若略過會造成後續附件的位元組偏移量錯誤，
+            // 使還原時每筆附件的二進位讀取位置全部錯位，導致整份備份損壞。
+            let data = try Data(contentsOf: f.url, options: .mappedIfSafe)
+            try fh.write(contentsOf: data)
             if total > 0 {
                 let pct = Int(Double(i + 1) / Double(total) * 100)
                 if pct != lastPct { lastPct = pct; progress?(Double(i + 1) / Double(total)) }
