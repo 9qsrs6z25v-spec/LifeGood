@@ -1,5 +1,26 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（AdminConsoleView）
+// [2026-06 v1] 本次美化方向：
+//   1. pinGate 鎖定頁：插入 56pt 鎖頭漸層圓（紫→靛，含 shadow + stroke 0.75pt）作視覺錨點，
+//      說明文字雙行分層（標題 .headline / 副說明 .caption），
+//      PIN 輸入錯誤從純 .red Text 升級為 Capsule 錯誤徽章（紅底半透明 + stroke 0.75pt），
+//      對齊 SettingsView / PaywallView 頁頭視覺規格。
+//   2. 控制台使用者人數列：升級為 36pt 藍色漸層圓圖示 + Circle().stroke(0.75pt) 邊框 + shadow，
+//      對齊 SettingsView settingsActionRow 圖示圓規格。
+//   3. 訂閱狀態值（已解鎖/已上鎖）：從純色 .foregroundStyle 升級為彩色 Capsule 狀態徽章，
+//      綠底 / 紅底（0.12~0.15 透明度）+ 對應色 stroke 0.75pt，
+//      對齊 OverviewView / StockView 狀態 Capsule 設計語言。
+//   4. 解鎖過渡動畫：解鎖按鈕改以 withAnimation(.spring(response:0.5, dampingFraction:0.78))
+//      切換 unlocked 狀態，console Form 加 .onAppear fade-in（opacity + Y 12pt 偏移），
+//      讓 PIN 閘門→控制台的切換更流暢，對齊全 App spring 進場動畫規格。
+//   5. ChangelogListView 版本標頭：版本號從純 .headline Text 升級為
+//      LinearGradient Capsule 徽章（藍→靛 + .white 文字），
+//      日期改 Capsule 徽章（.tertiarySystemFill 底色 + separator stroke 0.6pt），
+//      build 號維持 .caption 輔助文字；更新條目 bullet 圓從 5pt 升為 7pt 並加藍色漸層填色，
+//      對齊 StockDetailView sectionHeader / FamilyMembersResumeView 日期 Capsule 規格。
+// ─────────────────────────────────────────────
+
 /// 隱藏管理控制台（關於頁連點版本卡 20 下開啟，需輸入 PIN）。
 /// 可：查看不重複 iCloud 使用者人數、切換「全功能免費」總開關、設定對外人數顯示、改 PIN。
 struct AdminConsoleView: View {
@@ -17,11 +38,24 @@ struct AdminConsoleView: View {
     @State private var thresholdText = ""
     @State private var newPIN = ""
 
+    // 控制台進場動畫
+    @State private var consoleAppeared = false
+
     var body: some View {
         NavigationStack {
             Group {
-                if unlocked { console } else { pinGate }
+                if unlocked {
+                    console
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .move(edge: .bottom)),
+                            removal: .opacity
+                        ))
+                } else {
+                    pinGate
+                        .transition(.opacity)
+                }
             }
+            .animation(.spring(response: 0.5, dampingFraction: 0.78), value: unlocked)
             .navigationTitle("管理控制台")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -41,18 +75,74 @@ struct AdminConsoleView: View {
 
     private var pinGate: some View {
         Form {
+            // 視覺錨點：56pt 鎖頭漸層圓 + 標題 / 副說明文字
+            Section {
+                VStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.purple, Color.indigo],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 56, height: 56)
+                            .shadow(color: .purple.opacity(0.28), radius: 10, y: 4)
+                        Circle()
+                            .stroke(Color.purple.opacity(0.20), lineWidth: 0.75)
+                            .frame(width: 56, height: 56)
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.top, 8)
+
+                    Text("輸入管理員 PIN")
+                        .font(.headline)
+
+                    Text("僅限授權管理員使用")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .padding(.bottom, 4)
+            }
+
             Section {
                 SecureField("輸入 PIN", text: $enteredPIN)
                     .keyboardType(.numberPad)
                 Button("解鎖") {
                     if enteredPIN == admin.adminPIN {
-                        unlocked = true; pinError = false; syncMirrors()
+                        pinError = false
+                        syncMirrors()
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.78)) {
+                            unlocked = true
+                        }
                     } else {
-                        pinError = true
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                            pinError = true
+                        }
                     }
                 }
             } footer: {
-                if pinError { Text("PIN 錯誤").foregroundStyle(.red) }
+                if pinError {
+                    // 升級：Capsule 錯誤徽章（半透明紅底 + stroke）
+                    HStack(spacing: 4) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption2)
+                        Text("PIN 錯誤，請重新輸入")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.red.opacity(0.12)))
+                    .overlay(Capsule().stroke(Color.red.opacity(0.28), lineWidth: 0.75))
+                    .foregroundStyle(.red)
+                    .transition(.scale(scale: 0.95).combined(with: .opacity))
+                }
             }
         }
     }
@@ -63,11 +153,32 @@ struct AdminConsoleView: View {
         Form {
             // 人數
             Section("使用者人數（不重複 iCloud）") {
-                HStack {
-                    Image(systemName: "person.3.fill").foregroundStyle(.blue)
+                HStack(spacing: 12) {
+                    // 36pt 藍色漸層圓圖示（對齊 SettingsView settingsActionRow）
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.blue, Color.blue.opacity(0.65)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 36, height: 36)
+                            .shadow(color: .blue.opacity(0.22), radius: 6, y: 2)
+                        Circle()
+                            .stroke(Color.blue.opacity(0.18), lineWidth: 0.75)
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "person.3.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
                     Text("目前人數")
                     Spacer()
-                    Text("\(admin.userCount)").bold().monospacedDigit()
+                    Text("\(admin.userCount)")
+                        .bold()
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                 }
                 Button {
                     admin.refresh()
@@ -86,8 +197,22 @@ struct AdminConsoleView: View {
                 HStack {
                     Text("本機目前狀態")
                     Spacer()
-                    Text(subscription.isPremium ? "已解鎖" : "已上鎖")
-                        .foregroundStyle(subscription.isPremium ? .green : .red)
+                    // 升級：彩色 Capsule 狀態徽章（綠/紅）
+                    let isPremium = subscription.isPremium
+                    Text(isPremium ? "已解鎖" : "已上鎖")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule().fill(isPremium ? Color.green.opacity(0.15) : Color.red.opacity(0.12))
+                        )
+                        .overlay(
+                            Capsule().stroke(
+                                isPremium ? Color.green.opacity(0.30) : Color.red.opacity(0.25),
+                                lineWidth: 0.75
+                            )
+                        )
+                        .foregroundStyle(isPremium ? .green : .red)
                 }
                 Toggle("本機開發者強制解鎖", isOn: $subscription.devOverride)
             } header: {
@@ -148,6 +273,15 @@ struct AdminConsoleView: View {
                 }
             }
         }
+        // 控制台整體淡入 + 上移進場動畫（解鎖後觸發）
+        .opacity(consoleAppeared ? 1 : 0)
+        .offset(y: consoleAppeared ? 0 : 12)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.78).delay(0.08)) {
+                consoleAppeared = true
+            }
+        }
+        .onDisappear { consoleAppeared = false }
     }
 
     private func applyPublicDisplay() {
@@ -165,24 +299,56 @@ struct ChangelogListView: View {
             ForEach(Changelog.entries) { entry in
                 Section {
                     ForEach(Array(entry.notes.enumerated()), id: \.offset) { _, note in
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "circle.fill")
-                                .font(.system(size: 5))
-                                .foregroundStyle(.blue)
-                                .padding(.top, 6)
+                        HStack(alignment: .top, spacing: 10) {
+                            // 升級：7pt 藍色漸層 bullet 點（對齊 StockDetailView bullet 規格）
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.blue, Color.indigo.opacity(0.80)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 7, height: 7)
+                                .padding(.top, 5)
                             Text(note).font(.subheadline)
                         }
                     }
                 } header: {
-                    HStack {
+                    HStack(spacing: 6) {
+                        // 升級：版本號 LinearGradient Capsule 徽章（藍→靛）
                         Text("v\(entry.version)")
-                            .font(.headline)
+                            .font(.caption.weight(.bold))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 3.5)
+                            .background(
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.blue, Color.indigo],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                            )
+                            .foregroundStyle(.white)
+
                         Text("build \(entry.build)")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
                         Spacer()
+
+                        // 升級：日期 Capsule 徽章（tertiarySystemFill + stroke 0.6pt）
                         Text(entry.date)
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color(.tertiarySystemFill)))
+                            .overlay(Capsule().stroke(Color.separator.opacity(0.40), lineWidth: 0.6))
+                            .foregroundStyle(.secondary)
                     }
+                    .textCase(nil)
                 }
             }
         }
@@ -190,4 +356,3 @@ struct ChangelogListView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 }
-
