@@ -9,6 +9,25 @@ import SwiftUI
 //      加入 spring 進場動畫（cardAppeared），對齊 AddExpenseView.loanCalcRow 設計語言。
 //   3. errorBanner：從純紅文字升級為帶圖示的橘色警告膠囊卡，對齊 AddExpenseView 驗證錯誤規格。
 //   4. Form tint 套用 .tint(.green)，與儲蓄險整體綠色主題一致。
+// [2026-06 v2] 本次美化方向：
+//   5. calcPreviewCard 玻璃光澤：背景 ZStack 末層加入 LinearGradient [white.opacity(0.18), clear]
+//      top→center 玻璃反光覆層，對齊 OverviewView.monthlyBalanceCard / FinanceOverviewView
+//      totalAssetsCard / AddVehicleView.vehiclePreviewCard 英雄卡玻璃光澤規格。
+//   6. calcPreviewCard 第三顆散景圓：左下角新增 60pt white.opacity(0.05) blur(7) 裝飾圓，
+//      對齊 VariableExpenseView.monthSummaryHeader v4 / OverviewView.monthlyBalanceCard v3 規格。
+//   7. calcPreviewCard 卡片邊框：RoundedRectangle stroke(.white.opacity(0.18), 0.75pt)，
+//      提升深色模式下卡片邊界感，對齊 AddVehicleView.vehiclePreviewCard 邊框規格。
+//   8. 年利率 Capsule 補邊框：stroke(.white.opacity(0.25), 0.6pt) overlay，
+//      對齊全 App 膠囊描邊規格（BusinessCardView v2 / ChildrenResumeView v2）。
+//   9. previewKpiCell 數字平滑過渡：加入 .contentTransition(.numericText())，
+//      保費金額即時修改時 KPI 數字以滾動效果平滑切換，
+//      對齊 OverviewView.summaryCard / IncomeView.summaryHeader 數字動畫規格。
+//  10. 繳費資訊 section 列：升級為「30pt LinearGradient 漸層圖示圓（含 stroke） +
+//      Capsule 彩色值徽章」，對齊 AddVehicleView.calcSection /
+//      AddStockView.calcSection 設計規格；值膠囊補 stroke 邊框 0.6pt。
+//  11. 自動計算結果 section 列：目前帳戶價值 / 期滿預估領回 / 預估總報酬率 / 複利增值
+//      的右側數值從純色 Text 升級為彩色 Capsule 徽章（含半透明底 + stroke 0.6pt），
+//      對齊 AddStockView 報酬率膠囊 / FinanceOverviewView.allocationSection 規格。
 
 struct AddSavingsInsuranceView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -165,24 +184,25 @@ struct AddSavingsInsuranceView: View {
                 }
 
                 Section {
-                    HStack {
-                        Text("繳費期數")
-                        Spacer()
-                        Text("\(totalPeriods) 期")
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("已繳期數")
-                        Spacer()
-                        Text("\(elapsedPeriods) 期")
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("已繳總額")
-                        Spacer()
-                        Text(formatCurrency(totalPaid))
-                            .foregroundStyle(.secondary)
-                    }
+                    // v2：繳費資訊列升級為圖示圓 + Capsule 值徽章
+                    calcInfoRow(icon: "calendar.badge.clock",
+                                gradient: [Color(red: 0.42, green: 0.22, blue: 0.82),
+                                           Color(red: 0.62, green: 0.42, blue: 1.00)],
+                                label: "繳費期數",
+                                value: "\(totalPeriods) 期",
+                                accent: Color(red: 0.52, green: 0.32, blue: 0.92))
+                    calcInfoRow(icon: "checkmark.circle.fill",
+                                gradient: [Color(red: 0.22, green: 0.52, blue: 0.88),
+                                           Color(red: 0.32, green: 0.72, blue: 1.00)],
+                                label: "已繳期數",
+                                value: "\(elapsedPeriods) 期",
+                                accent: Color(red: 0.22, green: 0.52, blue: 0.88))
+                    calcInfoRow(icon: "banknote.fill",
+                                gradient: [Color(red: 0.10, green: 0.60, blue: 0.42),
+                                           Color(red: 0.18, green: 0.80, blue: 0.52)],
+                                label: "已繳總額",
+                                value: formatCurrency(totalPaid),
+                                accent: Color(red: 0.10, green: 0.60, blue: 0.42))
                 } header: {
                     sectionHeader("繳費資訊", icon: "chart.bar.fill",
                                   gradient: [Color(red: 0.42, green: 0.22, blue: 0.82),
@@ -190,36 +210,36 @@ struct AddSavingsInsuranceView: View {
                 }
 
                 Section {
-                    HStack {
-                        Text("目前帳戶價值")
-                        Spacer()
-                        Text(formatCurrency(calculatedCurrentValue))
-                            .font(.body.bold())
-                            .foregroundStyle(.blue)
-                    }
-                    HStack {
-                        Text("期滿預估領回")
-                        Spacer()
-                        Text(formatCurrency(calculatedExpectedReturn))
-                            .font(.body.bold())
-                            .foregroundStyle(.green)
-                    }
+                    // v2：計算結果列升級為彩色 Capsule 徽章
+                    calcResultRow(icon: "creditcard.fill",
+                                  gradient: [Color(red: 0.22, green: 0.42, blue: 0.88),
+                                             Color(red: 0.32, green: 0.62, blue: 1.00)],
+                                  label: "目前帳戶價值",
+                                  value: formatCurrency(calculatedCurrentValue),
+                                  accent: .blue)
+                    calcResultRow(icon: "leaf.fill",
+                                  gradient: [Color(red: 0.10, green: 0.68, blue: 0.48),
+                                             Color(red: 0.18, green: 0.88, blue: 0.38)],
+                                  label: "期滿預估領回",
+                                  value: formatCurrency(calculatedExpectedReturn),
+                                  accent: .green)
                     if totalPaid > 0 {
-                        HStack {
-                            Text("預估總報酬率")
-                            Spacer()
-                            let roi = (calculatedExpectedReturn - premium * Double(totalPeriods)) / (premium * Double(totalPeriods)) * 100
-                            Text(String(format: "%.2f%%", roi))
-                                .font(.body.bold())
-                                .foregroundStyle(roi >= 0 ? .green : .red)
-                        }
-                        HStack {
-                            Text("複利增值")
-                            Spacer()
-                            let gain = calculatedExpectedReturn - premium * Double(totalPeriods)
-                            Text((gain >= 0 ? "+" : "") + formatCurrency(gain))
-                                .foregroundStyle(gain >= 0 ? .green : .red)
-                        }
+                        let roi = (calculatedExpectedReturn - premium * Double(totalPeriods)) / (premium * Double(totalPeriods)) * 100
+                        calcResultRow(icon: "chart.line.uptrend.xyaxis",
+                                      gradient: roi >= 0
+                                          ? [Color(red: 0.10, green: 0.68, blue: 0.48), Color(red: 0.18, green: 0.88, blue: 0.38)]
+                                          : [Color(red: 0.88, green: 0.22, blue: 0.22), Color(red: 1.00, green: 0.42, blue: 0.32)],
+                                      label: "預估總報酬率",
+                                      value: String(format: "%.2f%%", roi),
+                                      accent: roi >= 0 ? .green : .red)
+                        let gain = calculatedExpectedReturn - premium * Double(totalPeriods)
+                        calcResultRow(icon: "sparkles",
+                                      gradient: gain >= 0
+                                          ? [Color(red: 0.10, green: 0.68, blue: 0.48), Color(red: 0.18, green: 0.88, blue: 0.38)]
+                                          : [Color(red: 0.88, green: 0.22, blue: 0.22), Color(red: 1.00, green: 0.42, blue: 0.32)],
+                                      label: "複利增值",
+                                      value: (gain >= 0 ? "+" : "") + formatCurrency(gain),
+                                      accent: gain >= 0 ? .green : .red)
                     }
                 } header: {
                     sectionHeader("自動計算結果", icon: "sparkles",
@@ -302,15 +322,24 @@ struct AddSavingsInsuranceView: View {
     /// 即時試算預覽卡（綠色漸層英雄卡）
     private var calcPreviewCard: some View {
         ZStack(alignment: .topTrailing) {
-            // 散景裝飾圓
+            // 散景裝飾圓（三顆，對齊 OverviewView v3 / AddVehicleView.vehiclePreviewCard 規格）
             Circle()
                 .fill(Color.white.opacity(0.10))
                 .frame(width: 90, height: 90)
+                .blur(radius: 2)
                 .offset(x: 12, y: -24)
             Circle()
                 .fill(Color.white.opacity(0.07))
                 .frame(width: 55, height: 55)
+                .blur(radius: 6)
                 .offset(x: -18, y: 14)
+            // v2：第三顆散景圓（左下角）
+            Circle()
+                .fill(Color.white.opacity(0.05))
+                .frame(width: 60, height: 60)
+                .blur(radius: 7)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .offset(x: -8, y: 8)
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -322,12 +351,14 @@ struct AddSavingsInsuranceView: View {
                         .foregroundStyle(.white.opacity(0.90))
                     Spacer()
                     if annualRate > 0 {
+                        // v2：年利率膠囊補 stroke 邊框
                         Text("年利率 \(String(format: "%.2f%%", annualRate))")
                             .font(.caption2)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                             .background(Color.white.opacity(0.22))
                             .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 0.6))
                             .foregroundStyle(.white)
                     }
                 }
@@ -354,14 +385,24 @@ struct AddSavingsInsuranceView: View {
             .padding(16)
         }
         .background(
-            LinearGradient(
-                colors: [Color(red: 0.10, green: 0.64, blue: 0.44),
-                         Color(red: 0.16, green: 0.82, blue: 0.34)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            ZStack {
+                LinearGradient(
+                    colors: [Color(red: 0.10, green: 0.64, blue: 0.44),
+                             Color(red: 0.16, green: 0.82, blue: 0.34)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                // v2：頂部玻璃光澤（對齊 OverviewView / FinanceOverviewView 英雄卡規格）
+                LinearGradient(
+                    colors: [Color.white.opacity(0.18), Color.clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+            }
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        // v2：卡片細邊框提升深色模式邊界感
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.18), lineWidth: 0.75))
         .shadow(color: Color(red: 0.10, green: 0.64, blue: 0.44).opacity(0.32), radius: 10, y: 4)
         .padding(.horizontal, 4)
         .padding(.vertical, 6)
@@ -377,11 +418,75 @@ struct AddSavingsInsuranceView: View {
                 .foregroundStyle(tint)
                 .minimumScaleFactor(0.70)
                 .lineLimit(1)
+                // v2：數字平滑滾動過渡（對齊 OverviewView.summaryCard 規格）
+                .contentTransition(.numericText())
             Text(label)
                 .font(.caption2)
                 .foregroundStyle(Color.white.opacity(0.80))
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// v2：繳費資訊列（30pt 漸層圖示圓 + Capsule 值徽章）
+    private func calcInfoRow(icon: String, gradient: [Color], label: String, value: String, accent: Color) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 30, height: 30)
+                Circle()
+                    .stroke(accent.opacity(0.22), lineWidth: 0.75)
+                    .frame(width: 30, height: 30)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(accent)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                .contentTransition(.numericText())
+        }
+    }
+
+    /// v2：計算結果列（30pt 漸層圖示圓 + 彩色 Capsule 值徽章）
+    private func calcResultRow(icon: String, gradient: [Color], label: String, value: String, accent: Color) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 30, height: 30)
+                Circle()
+                    .stroke(accent.opacity(0.22), lineWidth: 0.75)
+                    .frame(width: 30, height: 30)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(accent)
+                .minimumScaleFactor(0.72)
+                .lineLimit(1)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3.5)
+                .background(accent.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                .contentTransition(.numericText())
+        }
     }
 
     /// 驗證失敗橘色錯誤卡
