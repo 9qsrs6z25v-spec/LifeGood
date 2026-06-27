@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.83", build: 546, date: "2026/06/27", notes: [
+            "【靜態除錯 v22.83】修復一個問題：RemoteAdmin.refresh() 的 perRecordResultBlock：外層 closure 以 [weak self] 捕捉，guard let self = self 在外層產生強引用後，內層 DispatchQueue.main.async { } 無 capture list，強捕捉外層的 self，部分抵銷 [weak self] 防護，CloudKit 操作期間使 RemoteAdminManager 被 GCD block 額外強持。修復方式：內層 async 補加 [weak self] 並加 guard let self 守衛，與全 App 其他 CloudKit callback 二層弱捕捉模式保持一致。其餘：force unwrap 全無、as! 全無、陣列 index 越界全有守衛、CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 主執行緒守衛、EInvoiceSyncManager @MainActor 批次寫入、AddSavingsInsuranceView v2 新增視覺元素（玻璃光澤/散景圓/邊框/漸層圖示圓/KPI 動畫）靜態分析確認安全，無新問題。"
+        ]),
         ChangelogEntry(version: "22.81", build: 545, date: "2026/06/27", notes: [
             "【靜態除錯 v22.81】全面複查 79 個 Swift 檔（強制解包、Optional 處理、型別錯誤、index 越界、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。確認安全：無 force unwrap（!）、無 as! 強制轉型；AppleCalendarBridge.writeOrUpdate calendarId 接受 String? 無崩潰風險；MainTabView DragGesture Task 無 retain cycle（View 為值型別）；weekdays 索引有 .indices.contains 守衛；LifeOverviewView.allMS 單次計算後傳入三個子 section；OverviewView.monthlyBalanceCard KPI 以 let 一次計算；ChartView totalForPeriod 雙呼叫因 chartData 陣列極小（≤30 筆）可忽略；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 主執行緒守衛、saveQueue 值型快照、EInvoiceSyncManager @MainActor 批次寫入、FinanceStore reloadFromCloud 直接呼叫 load() 均正常；fmtWan（FoodMapView）NT$ 前綴三分支一致（v22.80 已修正）；無新問題。"
         ]),

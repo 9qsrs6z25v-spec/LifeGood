@@ -79,7 +79,10 @@ final class RemoteAdminManager: ObservableObject {
         op.qualityOfService = .utility
         op.perRecordResultBlock = { [weak self] recID, result in
             guard let self = self, case .success(let rec) = result else { return }
-            DispatchQueue.main.async {
+            // 內層 async 區塊必須再加 [weak self]：guard let self 的強引用只存活於外層
+            // closure，若不加 capture list，內層會強捕捉 self，部分抵銷 [weak self] 的防護。
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
                 if recID == self.configID {
                     if let v = rec["allFree"] as? NSNumber { self.allFree = (v.intValue != 0) }
                     if let v = rec["showCountPublicly"] as? NSNumber { self.showCountPublicly = (v.intValue != 0) }
