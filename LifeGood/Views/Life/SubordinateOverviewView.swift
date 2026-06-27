@@ -27,6 +27,24 @@ import SwiftUI
 //   9. 雙層 shadow 升級：各卡片由單層 black.opacity(0.06) 升級為雙層
 //      （色調主光暈 + 黑底基礎陰影），提升立體感，
 //      對齊 SubordinateDetailView.headerCard / FamilyMembersResumeView v2 規格
+// [2026-06 v3] 本次美化方向：
+//  10. heroKpiCell 補圖示圓：icon 參數原未渲染，補 28pt LinearGradient 白色半透明
+//      圖示圓（white.opacity(0.20)）+ 圖示，讓每格 KPI 有視覺錨點，
+//      對齊 vehicleKpiCell（VehicleDetailView）/ statsStrip（FamilyView）設計規格；
+//      KPI 分隔線高度由 36 升為 48 以配合新高度
+//  11. summaryHeroCard 散景圓升級：右上主圓由 90pt/opacity 0.10 升至
+//      140pt/opacity 0.13，對齊全 App 三顆散景標準規格（140/90/55 pt）
+//  12. summaryHeroCard「共 N 人」徽章：補
+//      .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))，
+//      對齊全 App Capsule 計數徽章細邊框規格
+//  13. summaryHeroCard shadow 強化：主色光暈 opacity 由 0.30 升至 0.38，
+//      對齊 SubordinateDetailView.headerCard / MyCalendarView.calendarHeroCard 規格
+//  14. leaveRow / meetingRow 圖示圓：補
+//      .shadow(color: color.opacity(0.18), radius: 5, x: 0, y: 2)，
+//      對齊 SubordinateDetailView.recordRow / meetingSection 規格
+//  15. meetingItemOverviewRow / reportRow 切換按鈕：從裸 circle 圖示
+//      升級為 36pt LinearGradient 漸層圓 ZStack，
+//      對齊 taskRow / SubordinateDetailView.weeklyReportSection 視覺規格
 
 struct SubordinateOverviewView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -290,13 +308,27 @@ struct SubordinateOverviewView: View {
 
     private func reportRow(_ sub: Subordinate, _ report: WeeklyReport, status: ReportStatus) -> some View {
         let badge = reportStatusBadge(status)
+        let reportAccent: Color = report.isCompleted ? .green : .purple
         return HStack(spacing: 12) {
+            // v3：裸 circle 圖示升級為 36pt 漸層圓，對齊 taskRow 視覺規格
             Button {
                 lifeStore.toggleWeeklyReportCompletion(subordinateId: sub.id, reportId: report.id)
             } label: {
-                Image(systemName: report.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(report.isCompleted ? Color.green : Color.purple)
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [reportAccent.opacity(0.22), reportAccent.opacity(0.08)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 36, height: 36)
+                        .shadow(color: reportAccent.opacity(0.18), radius: 5, x: 0, y: 2)
+                    Circle()
+                        .stroke(reportAccent.opacity(0.22), lineWidth: 1)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: report.isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(reportAccent)
+                }
             }
             .buttonStyle(.plain)
 
@@ -455,13 +487,27 @@ struct SubordinateOverviewView: View {
     }
 
     private func meetingItemOverviewRow(_ sub: Subordinate, _ meeting: SubordinateMeeting, _ item: MeetingItem) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        let itemAccent: Color = item.isCompleted ? .green : .indigo
+        return HStack(alignment: .center, spacing: 12) {
+            // v3：裸 circle 圖示升級為 36pt 漸層圓，對齊 taskRow / leaveRow 視覺規格
             Button {
                 lifeStore.toggleMeetingItemCompletion(subordinateId: sub.id, meetingId: meeting.id, itemId: item.id)
             } label: {
-                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18))
-                    .foregroundStyle(item.isCompleted ? Color.green : Color.indigo)
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [itemAccent.opacity(0.22), itemAccent.opacity(0.08)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 36, height: 36)
+                        .shadow(color: itemAccent.opacity(0.18), radius: 5, x: 0, y: 2)
+                    Circle()
+                        .stroke(itemAccent.opacity(0.22), lineWidth: 1)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(itemAccent)
+                }
             }
             .buttonStyle(.plain)
 
@@ -536,7 +582,7 @@ struct SubordinateOverviewView: View {
 
     private func leaveRow(_ sub: Subordinate, _ rec: SubordinateRecord) -> some View {
         HStack(alignment: .center, spacing: 12) {
-            // 36pt 漸層圖示圓（對齊全域規格）
+            // v3：補 shadow，對齊 SubordinateDetailView.recordRow / meetingSection 規格
             ZStack {
                 Circle()
                     .fill(
@@ -546,6 +592,7 @@ struct SubordinateOverviewView: View {
                         )
                     )
                     .frame(width: 36, height: 36)
+                    .shadow(color: Color.teal.opacity(0.18), radius: 5, x: 0, y: 2)
                 Circle()
                     .stroke(Color.teal.opacity(0.22), lineWidth: 1)
                     .frame(width: 36, height: 36)
@@ -609,6 +656,7 @@ struct SubordinateOverviewView: View {
 
     private func meetingRow(_ sub: Subordinate, _ meeting: SubordinateMeeting) -> some View {
         HStack(alignment: .center, spacing: 12) {
+            // v3：補 shadow，對齊 SubordinateDetailView.meetingSection 規格
             ZStack {
                 Circle()
                     .fill(
@@ -618,6 +666,7 @@ struct SubordinateOverviewView: View {
                         )
                     )
                     .frame(width: 36, height: 36)
+                    .shadow(color: Color.indigo.opacity(0.18), radius: 5, x: 0, y: 2)
                 Circle()
                     .stroke(Color.indigo.opacity(0.22), lineWidth: 1)
                     .frame(width: 36, height: 36)
@@ -790,24 +839,25 @@ struct SubordinateOverviewView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 20))
 
-            // 散景裝飾圓：右上
+            // v3：散景裝飾圓升級至全 App 標準規格（140/90/55 pt，opacity 0.13/0.08/0.06）
+            // 右上主散景圓
             Circle()
-                .fill(Color.white.opacity(0.10))
-                .frame(width: 90, height: 90)
-                .blur(radius: 10)
-                .offset(x: 250, y: -20)
-            // 散景裝飾圓：左下
+                .fill(Color.white.opacity(0.13))
+                .frame(width: 140, height: 140)
+                .blur(radius: 14)
+                .offset(x: 200, y: -50)
+            // 左下次散景圓
             Circle()
                 .fill(Color.white.opacity(0.08))
-                .frame(width: 65, height: 65)
-                .blur(radius: 8)
-                .offset(x: -10, y: 62)
-            // 散景裝飾圓：中右（第三顆）
+                .frame(width: 90, height: 90)
+                .blur(radius: 10)
+                .offset(x: -30, y: 60)
+            // 中右微散景圓
             Circle()
-                .fill(Color.white.opacity(0.05))
+                .fill(Color.white.opacity(0.06))
                 .frame(width: 55, height: 55)
                 .blur(radius: 8)
-                .offset(x: 185, y: 52)
+                .offset(x: 180, y: 52)
 
             VStack(alignment: .leading, spacing: 12) {
                 // 標題列
@@ -830,20 +880,22 @@ struct SubordinateOverviewView: View {
                         .padding(.horizontal, 10).padding(.vertical, 4)
                         .background(Color.white.opacity(0.20))
                         .clipShape(Capsule())
+                        // v3：補 stroke 細邊框，對齊全 App Capsule 計數徽章規格
+                        .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
                 }
 
                 Rectangle()
                     .fill(Color.white.opacity(0.22))
                     .frame(height: 0.5)
 
-                // KPI 三格
+                // KPI 三格（v3：分隔線高度由 36 升至 48 以配合圖示圓高度）
                 HStack(spacing: 0) {
                     heroKpiCell(value: "\(todayLeaves.count)", label: "今日請假",
                                 icon: "calendar.badge.minus")
-                    Rectangle().fill(Color.white.opacity(0.22)).frame(width: 0.5, height: 36)
+                    Rectangle().fill(Color.white.opacity(0.22)).frame(width: 0.5, height: 48)
                     heroKpiCell(value: "\(todayMeetings.count)", label: "今日會議",
                                 icon: "person.3.fill")
-                    Rectangle().fill(Color.white.opacity(0.22)).frame(width: 0.5, height: 36)
+                    Rectangle().fill(Color.white.opacity(0.22)).frame(width: 0.5, height: 48)
                     heroKpiCell(value: "\(incompleteTasks.count)", label: "待辦任務",
                                 icon: "tray.full.fill")
                 }
@@ -860,19 +912,29 @@ struct SubordinateOverviewView: View {
         }
         .frame(maxWidth: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.17, green: 0.54, blue: 0.90).opacity(0.30), radius: 14, x: 0, y: 6)
+        // v3：主色光暈 opacity 由 0.30 升至 0.38，對齊 SubordinateDetailView.headerCard 規格
+        .shadow(color: Color(red: 0.17, green: 0.54, blue: 0.90).opacity(0.38), radius: 14, x: 0, y: 6)
         .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
         .padding(.horizontal)
     }
 
+    // v3：補渲染 icon 圓（原 icon 參數未使用），對齊 vehicleKpiCell / statsStrip 規格
     private func heroKpiCell(value: String, label: String, icon: String) -> some View {
         VStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .fill(.white.opacity(0.20))
+                    .frame(width: 28, height: 28)
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
             Text(value)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .font(.system(size: 17, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
                 .contentTransition(.numericText())
             Text(label)
-                .font(.caption2)
+                .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(.white.opacity(0.80))
         }
         .frame(maxWidth: .infinity)
