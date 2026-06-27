@@ -1076,7 +1076,7 @@ struct ResumeView: View {
                     )
                     Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5)
                     heroKpiCell(
-                        value: mostRecent != nil ? formatDate(mostRecent!.date) : "—",
+                        value: mostRecent.map { formatDate($0.date) } ?? "—",
                         label: "最近一筆",
                         icon: "clock.fill"
                     )

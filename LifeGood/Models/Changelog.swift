@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.89", build: 552, date: "2026/06/27", notes: [
+            "【靜態除錯 v22.89 / build 552】修復 ResumeView v3（build 551）引入的 force unwrap：resumeHeroCard 的「最近一筆」KPI 以 mostRecent != nil ? formatDate(mostRecent!.date) : \"—\" 取值，違反全 App 無 force unwrap（!）原則；雖 nil 檢查在前不會實際崩潰，但若後續程式碼調整先後順序便有潛在風險。改為 Swift 慣用的 mostRecent.map { formatDate($0.date) } ?? \"—\"，消除強制解包運算子。其餘：無 as! 強制轉型、無 fatalError（EInvoiceClient 啟動守衛除外）；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、@Published 主執行緒隔離均正常。"
+        ]),
         ChangelogEntry(version: "22.87", build: 550, date: "2026/06/27", notes: [
             "【靜態除錯 v22.87 / build 550】全面複查 21 個核心 Swift 檔（所有 Model 層 + 主要 View 層），涵蓋 CloudKitManager、CloudSyncManager、LifeStore、ExpenseStore、FinanceStore、EInvoiceSyncManager、SubscriptionManager、RemoteAdminManager、BackupManager 等所有資料層，以及 OverviewView、MainTabView、AdminConsoleView、ChartView、SettingsView、PaywallView、FinanceOverviewView、FoodMapView、RestaurantSearch 等主要視圖層。確認安全：① 無 force unwrap（PaywallView static let URL 常數為已知合法 ASCII 字串，安全）、無 as! 強制轉型；② CloudKit 30 秒節流（syncNowIfDue）、pushAll 2 秒防抖、isSyncing 並行守衛均正常；③ 所有 @Published 更新隔離至主執行緒；④ AdminConsoleView 最新美化版（v22.86）：allFreeMirror onChange guard、applyPublicDisplay 安全解析、consoleAppeared onDisappear 歸零均確認無誤；⑤ ChartView 量測層（隱形 TabView 背景）與可見輪播共用 rowsAppeared 旗標，onAppear 觸發時由同一 state 變化驅動雙層動畫，可見圖例列進場動畫正常播放（非 Bug）；⑥ FoodMapView aggregates / companionOptions 均以 let aggs / let options 單次計算、sortedAggregates(from:) 接收預算 aggs 避免重複 Dictionary(grouping:)；⑦ RestaurantSearch LocationProvider 與 RestaurantSearchCompleter 所有 delegate callback 均以 [weak self] 防止 retain cycle；⑧ FinanceOverviewView ntdAllocations 在 body 以 let 計算一次傳入 totalAssetsCard + allocationSection，消除雙重計算；⑨ 所有 View 動畫旗標（heroAppeared、consoleAppeared、allocationBarAppeared 等）均在 onDisappear 正確歸零。全面確認後無新問題。"
         ]),
