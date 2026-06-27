@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - 美化紀錄（AddStockView）
-// [2026-06] 本次美化方向：
+// [2026-06 v1] 本次美化方向：
 //   1. amountPreviewCard：頂部橘色漸層英雄卡，即時顯示持倉市值/損益 + 張數/買入均價/報酬率 KPI，
 //      數字用 .contentTransition(.numericText()) 動畫，散景裝飾圓，
 //      對齊 AddIncomeView.amountPreviewCard / FinanceOverviewView.totalAssetsCard 規格
@@ -15,6 +15,15 @@ import SwiftUI
 //   6. .tint(.orange)：股票主題色統一套用，Toggle/DatePicker 等系統元件配色一致
 //   7. 儲存/新增按鈕：改為橘色，對齊股票主題色
 //   8. fetchButton：查詢圖示保留 .orange，與主題色一致
+// [2026-06 v2] 本次美化方向：
+//   9. amountPreviewCard：補第三顆散景裝飾圓（中右側 55pt, white.opacity(0.06), blur 8）
+//      + 玻璃光澤高光覆層（LinearGradient [.white.opacity(0.18), .clear] 頂→中），
+//      對齊 IncomeView / VariableExpenseView v4 三圓散景 + 玻璃光澤規格。
+//  10. quoteHeroCard：同上補第三顆散景圓 + 玻璃光澤覆層，對齊全 App 英雄卡統一規格。
+//  11. fetchError 行內錯誤：從 plain 紅字 HStack 升級為 errorBanner styled component
+//      (橘色圓角橫幅 + 警告圖示)，對齊 showError 時已使用的 errorBanner 規格。
+//  12. calcKPICell 標籤圓點：7pt 純色小圓點 → 26pt LinearGradient 漸層填色圓 + stroke 描邊，
+//      對齊 IncomeView / FinanceOverviewView 圖示圓規格，讓試算欄位標籤更具層次。
 
 // MARK: - 台股報價資料
 
@@ -94,15 +103,12 @@ struct AddStockView: View {
                         fetchButton
                     }
                     TextField("股票名稱", text: $name)
+                    // v2：從 plain 紅字升級為 errorBanner styled component，對齊全 App 錯誤橫幅規格
                     if !fetchError.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                            Text(fetchError)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
+                        errorBanner(fetchError)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
                     if !bankMilestones.isEmpty || !securitiesMilestones.isEmpty {
                         accountPicker
@@ -391,9 +397,24 @@ struct AddStockView: View {
                     .frame(width: 90, height: 90)
                     .offset(x: -70, y: 55)
                     .blur(radius: 10)
+                // v2：第三顆散景裝飾圓（中右側），對齊三圓散景標準
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 20, y: 30)
+                    .blur(radius: 8)
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
+        // v2：玻璃光澤高光覆層，對齊全 App 英雄卡規格
+        .overlay(
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top,
+                endPoint: .center
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        )
         .shadow(color: Color(red: 0.72, green: 0.33, blue: 0.05).opacity(0.42), radius: 18, x: 0, y: 9)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -748,9 +769,24 @@ struct AddStockView: View {
                     .frame(width: 70, height: 70)
                     .offset(x: -55, y: 45)
                     .blur(radius: 8)
+                // v2：第三顆散景裝飾圓（中右側），對齊三圓散景標準
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 50, height: 50)
+                    .offset(x: 18, y: 28)
+                    .blur(radius: 7)
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
+        // v2：玻璃光澤高光覆層，對齊全 App 英雄卡規格
+        .overlay(
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top,
+                endPoint: .center
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        )
         .shadow(color: (isUp ? Color.green : Color.red).opacity(0.35), radius: 16, x: 0, y: 7)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -856,22 +892,41 @@ struct AddStockView: View {
         .background(Color(.secondarySystemGroupedBackground))
     }
 
+    // v2：calcKPICell 標籤從 7pt 純色小圓點升級為 26pt 漸層圓 + stroke 描邊，對齊圖示圓設計語言
     private func calcKPICell(label: String, value: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
+        HStack(spacing: 10) {
+            // 26pt 漸層圖示圓（對齊 FinanceOverviewView / IncomeView 圖示圓規格）
+            ZStack {
                 Circle()
-                    .fill(color.opacity(0.18))
-                    .frame(width: 7, height: 7)
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.22), color.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 26, height: 26)
+                Circle()
+                    .stroke(color.opacity(0.22), lineWidth: 0.75)
+                    .frame(width: 26, height: 26)
+                Image(systemName: label == "投入成本" ? "arrow.down.circle.fill" : "chart.line.uptrend.xyaxis.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
                 Text(label)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(color)
+                Text(value)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .contentTransition(.numericText())
             }
-            Text(value)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .contentTransition(.numericText())
+
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12).padding(.vertical, 10)
