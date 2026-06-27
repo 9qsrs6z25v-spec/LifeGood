@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.81", build: 545, date: "2026/06/27", notes: [
+            "【靜態除錯 v22.81】全面複查 79 個 Swift 檔（強制解包、Optional 處理、型別錯誤、index 越界、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。確認安全：無 force unwrap（!）、無 as! 強制轉型；AppleCalendarBridge.writeOrUpdate calendarId 接受 String? 無崩潰風險；MainTabView DragGesture Task 無 retain cycle（View 為值型別）；weekdays 索引有 .indices.contains 守衛；LifeOverviewView.allMS 單次計算後傳入三個子 section；OverviewView.monthlyBalanceCard KPI 以 let 一次計算；ChartView totalForPeriod 雙呼叫因 chartData 陣列極小（≤30 筆）可忽略；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 主執行緒守衛、saveQueue 值型快照、EInvoiceSyncManager @MainActor 批次寫入、FinanceStore reloadFromCloud 直接呼叫 load() 均正常；fmtWan（FoodMapView）NT$ 前綴三分支一致（v22.80 已修正）；無新問題。"
+        ]),
         ChangelogEntry(version: "22.80", build: 544, date: "2026/06/26", notes: [
             "【靜態除錯 v22.80】全面複查 79 個 Swift 檔（強制解包、Optional 處理、型別錯誤、index 越界、retain cycle、競態條件、CloudKit 節流、畫面閃爍、效能瓶頸）。",
             "【Bug 修復】RestaurantDetailSheet.fmtWan（FoodMapView.swift）：v3 新增的萬/億量級格式函式在金額 ≥ NT$10,000 時回傳「X.X萬」或「X.X億」（無貨幣前綴），金額 < NT$10,000 時才回傳「NT$ X,XXX」，導致同一 headerCard 內「總花費」KPI 格在不同金額大小下顯示格式不一致（有/無 NT$ 前綴）。已將億、萬兩個分支均補入「NT$ 」前綴，使三個量級輸出格式統一為「NT$ X.X億 / NT$ X.X萬 / NT$ X,XXX」，與相鄰「平均每次」KPI 格的格式對齊。",
