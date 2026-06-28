@@ -32,6 +32,21 @@ import SwiftUI
 //      對齊 transactionsSection / dividendsSection 已有的橙色/粉色 section header 設計語言。
 //  14. flashCard 股票代號：RoundedRectangle(cornerRadius:6) → Capsule，
 //      補入 Capsule().stroke(…opacity(0.25), 0.75pt)，對齊全 App 標籤膠囊統一規格。
+// [2026-06 v3] 本次美化方向：
+//  15. flashCard 背景升級：加入三顆散景裝飾圓（opacity 0.07/0.05/0.04, blur 15/12/9）+
+//      頂部→中央玻璃光澤覆層（LinearGradient [.white.opacity(0.18), .clear]），
+//      對齊 VehicleView v3 / StockView v3 / IncomeView v3 英雄卡規格。
+//  16. flashCard 進場動畫：新增 cardAppeared 旗標（spring 0.50/0.78 delay 0.04），
+//      透明度 0→1 + Y 位移 14→0，對齊 SavingsInsuranceView / SpouseResumeView 閃卡進場規格。
+//  17. flashCard 市值大字（52pt）：加入 minimumScaleFactor(0.55) + lineLimit(1) +
+//      contentTransition(.numericText())，防長數字溢出並對齊全 App 數值縮放規格。
+//  18. flashCard 損益膠囊：補入 overlay Capsule().stroke(color.opacity(0.22), 0.6pt)，
+//      對齊 StockView.stockCard / FinanceOverviewView 膠囊細邊框設計語言。
+//  19. infoRow 購入日期 / 賣出日期：純 .secondary 文字 → tertiarySystemFill Capsule 徽章
+//      （帶 separator.opacity(0.20) stroke），對齊 CareerView v2 / OverviewView.recentRow 日期規格。
+//  20. accountSection 圖示圓：38pt → 44pt + Circle().stroke(color.opacity(0.18), 0.75pt)，
+//      對齊 VehicleView v3 / StockView v3 / IncomeView 44pt 圖示圓邊框規格。
+//  21. noteCard Capsule 側條：height 16 → 20，對齊全 App sectionHeader 標準 Capsule 高度規格。
 
 struct StockDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -48,7 +63,8 @@ struct StockDetailView: View {
     @State private var editingTransaction: StockTransaction?
     @State private var addingDividend = false
     @State private var editingDividend: StockDividend?
-    // 進場動畫：交易紀錄 / 股利紀錄各自獨立控制
+    // 進場動畫：閃卡 / 交易紀錄 / 股利紀錄各自獨立控制
+    @State private var cardAppeared = false          // [v3] 閃卡進場動畫旗標
     @State private var transactionsAppeared = false
     @State private var dividendsAppeared = false
 
@@ -182,9 +198,13 @@ struct StockDetailView: View {
 
             // 市值（大字）
             VStack(spacing: 4) {
+                // [v3] minimumScaleFactor + contentTransition 防長數字溢出並平滑過渡
                 Text(fmtWan(stock.marketValue))
                     .font(.system(size: 52, weight: .bold, design: .rounded))
                     .foregroundStyle(rarity.textColor)
+                    .minimumScaleFactor(0.55)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
                 Text(stock.isSold ? "賣出市值（萬元）" : "目前市值（萬元）")
                     .font(.subheadline)
                     .foregroundStyle(rarity == .legendary ? .white.opacity(0.6) : .secondary)
@@ -206,6 +226,11 @@ struct StockDetailView: View {
                 (stock.profitLoss >= 0 ? Color.green : Color.red).opacity(0.15),
                 in: Capsule()
             )
+            // [v3] 補入 stroke 細邊框，對齊全 App 膠囊邊框設計語言
+            .overlay(Capsule().stroke(
+                (stock.profitLoss >= 0 ? Color.green : Color.red).opacity(0.22),
+                lineWidth: 0.6
+            ))
             .foregroundStyle(stock.profitLoss >= 0 ? .green : .red)
             .padding(.bottom, 16)
 
@@ -241,10 +266,36 @@ struct StockDetailView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
         }
-        .background(
-            LinearGradient(colors: rarity.bgGradient,
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
+        // [v3] 散景裝飾圓 + 玻璃光澤，對齊 VehicleView v3 / StockView v3 英雄卡規格
+        .background {
+            ZStack {
+                LinearGradient(colors: rarity.bgGradient,
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Circle()
+                    .fill(Color.white.opacity(0.07))
+                    .frame(width: 95, height: 95)
+                    .blur(radius: 15)
+                    .offset(x: 65, y: -35)
+                    .allowsHitTesting(false)
+                Circle()
+                    .fill(Color.white.opacity(0.05))
+                    .frame(width: 70, height: 70)
+                    .blur(radius: 12)
+                    .offset(x: -60, y: 25)
+                    .allowsHitTesting(false)
+                Circle()
+                    .fill(Color.white.opacity(0.04))
+                    .frame(width: 55, height: 55)
+                    .blur(radius: 9)
+                    .offset(x: 55, y: 45)
+                    .allowsHitTesting(false)
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top, endPoint: .center
+                )
+                .allowsHitTesting(false)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
@@ -258,6 +309,15 @@ struct StockDetailView: View {
             if stock.isSold {
                 SoldStamp(size: 32)
                     .offset(x: -10, y: -14)
+            }
+        }
+        // [v3] 進場動畫，對齊 SavingsInsuranceView / RealEstateDetailView 閃卡規格
+        .opacity(cardAppeared ? 1 : 0)
+        .offset(y: cardAppeared ? 0 : 14)
+        .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04), value: cardAppeared)
+        .onAppear {
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04)) {
+                cardAppeared = true
             }
         }
         .padding(.horizontal, 24)
@@ -288,10 +348,10 @@ struct StockDetailView: View {
                     color: pl >= 0 ? .green : .red,
                     useCapsule: true)
             Divider().padding(.leading, 14)
-            infoRow(label: "購入日期", value: fmtDate(stock.purchaseDate), color: .secondary, useCapsule: false)
+            infoRow(label: "購入日期", value: fmtDate(stock.purchaseDate), color: .secondary, useDateBadge: true)
             if stock.isSold, let sd = stock.soldDate {
                 Divider().padding(.leading, 14)
-                infoRow(label: "賣出日期", value: fmtDate(sd), color: .secondary, useCapsule: false)
+                infoRow(label: "賣出日期", value: fmtDate(sd), color: .secondary, useDateBadge: true)
             }
         }
         .background(Color(.systemBackground))
@@ -749,6 +809,7 @@ struct StockDetailView: View {
     }
 
     // 【美化】圖示改用彩色圓形背景，加 overlay 邊框，對齊 FinanceOverviewView 卡片規格
+    // [v3] 圖示圓：38pt → 44pt + stroke，對齊 StockView.stockCard / VehicleView v3 規格
     private func accountSection(label: String, icon: String, value: String, color: Color) -> some View {
         HStack(spacing: 12) {
             ZStack {
@@ -757,10 +818,13 @@ struct StockDetailView: View {
                         colors: [color.opacity(0.20), color.opacity(0.08)],
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     ))
-                    .frame(width: 38, height: 38)
+                    .frame(width: 44, height: 44)
                     .shadow(color: color.opacity(0.15), radius: 5, x: 0, y: 2)
+                Circle()
+                    .stroke(color.opacity(0.18), lineWidth: 0.75)
+                    .frame(width: 44, height: 44)
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(color)
             }
             VStack(alignment: .leading, spacing: 2) {
@@ -784,12 +848,13 @@ struct StockDetailView: View {
     private var noteCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
+                // [v3] height 16 → 20，對齊全 App sectionHeader Capsule 高度規格
                 Capsule()
                     .fill(LinearGradient(
                         colors: [.brown, .brown.opacity(0.55)],
                         startPoint: .top, endPoint: .bottom
                     ))
-                    .frame(width: 4, height: 16)
+                    .frame(width: 4, height: 20)
                 Image(systemName: "text.quote")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -858,7 +923,8 @@ struct StockDetailView: View {
     }
 
     // [v2] useCapsule: 損益/報酬率用彩色 Capsule + stroke，其他欄位維持純文字
-    private func infoRow(label: String, value: String, color: Color, useCapsule: Bool = false) -> some View {
+    // [v3] useDateBadge: 日期欄位升級為 tertiarySystemFill Capsule 徽章，對齊 CareerView / OverviewView 日期規格
+    private func infoRow(label: String, value: String, color: Color, useCapsule: Bool = false, useDateBadge: Bool = false) -> some View {
         HStack {
             Text(label).font(.subheadline).foregroundStyle(.secondary)
             Spacer()
@@ -870,6 +936,13 @@ struct StockDetailView: View {
                     .background(color.opacity(0.10))
                     .clipShape(Capsule())
                     .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+            } else if useDateBadge {
+                Text(value)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
+                    .overlay(Capsule().stroke(Color(.separator).opacity(0.20), lineWidth: 0.6))
             } else {
                 Text(value).font(.subheadline.weight(.medium)).foregroundStyle(color)
             }

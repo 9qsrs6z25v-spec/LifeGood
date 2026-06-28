@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.95", build: 555, date: "2026/06/28", notes: [
+            "【UI 美化】StockDetailView v3：① flashCard 背景升級為三顆散景裝飾圓（opacity 0.07/0.05/0.04, blur 15/12/9）+ 頂部→中央玻璃光澤覆層（LinearGradient [.white.opacity(0.18), .clear]），對齊全 App 英雄卡視覺規格。② 新增 cardAppeared spring 進場動畫（response:0.50/dampingFraction:0.78, delay:0.04）：透明度 0→1 + Y 位移 14→0，對齊 SavingsInsuranceView 閃卡進場規格。③ 市值大字（52pt）加入 minimumScaleFactor(0.55) + lineLimit(1) + contentTransition(.numericText())，防長數字溢出並對齊全 App 數值縮放規格。④ 損益膠囊補入 Capsule().stroke(color.opacity(0.22), 0.6pt)，對齊全 App 膠囊細邊框設計語言。⑤ 購入日期 / 賣出日期升級為 tertiarySystemFill Capsule 徽章（+ separator stroke 0.6pt），對齊 CareerView v2 / OverviewView.recentRow 日期規格。⑥ accountSection 圖示圓：38pt → 44pt + Circle().stroke(color.opacity(0.18), 0.75pt)，對齊 StockView.stockCard / VehicleView v3 圖示圓規格。⑦ noteCard Capsule 側條高度 16 → 20，對齊全 App sectionHeader Capsule 標準高度。"
+        ]),
         ChangelogEntry(version: "22.93", build: 554, date: "2026/06/28", notes: [
             "【靜態除錯 v22.93 / build 554】修復 LifeRealEstateView v3（build 553 最新美化）引入的效能瓶頸：propertiesByCity（執行 Dictionary(grouping:) 全量分組）在 body 單次 render 中被重複計算三次——① summaryHeader 以 propertiesByCity.count >= 2 檢查是否顯示彩條、② miniCityBar 以 propertiesByCity.sorted{} 建立排序陣列、③ mapView 以 propertiesByCity 驅動 ForEach 圖釘。修復方式：在 body 頂部以 let cities = propertiesByCity 單次快取，summaryHeader / miniCityBar / mapView 由 var 改為 func 接收 cities 參數，由呼叫端傳入預算結果，計算次數由 3 降為 1，對齊 v22.85 FoodMapView.sortedAggregates(from:) 及 v22.91 SubordinateOverviewView 同型修復規格。其餘：無 force unwrap（!）、無 as! 強制轉型、無 fatalError（EInvoiceClient 啟動守衛除外）；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、@Published 主執行緒隔離均正常。"
         ]),
