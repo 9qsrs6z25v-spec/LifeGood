@@ -216,6 +216,21 @@ struct CompletedCollapsibleCard: View {
 //      Tab 切換時加 spring(response:0.3, dampingFraction:0.72) 動畫
 //   9. tabSectionsAppeared：Tab 切換時重置進場動畫旗標並重播，
 //      區塊以 opacity+Y offset stagger 進場，對齊 CareerView.milestoneListSection 規格
+// [2026-06 v3] 英雄卡 + 圖示圓精修：
+//  10. headerCard 背景：補第三顆散景圓（55pt, white.opacity(0.06), blur 8, offset(30,28)）
+//      + 玻璃光澤高光覆層（LinearGradient [.white.opacity(0.18), .clear] top→center），
+//      對齊 SubordinateOverviewView v2 / ChildDetailView v2 三圓散景 + 玻璃光澤規格。
+//  11. headerCard shadow：從單層 black.opacity(0.42) 升級為雙層
+//      （藍色主光暈 opacity 0.42 + 黑底基礎 0.09），提升立體感，
+//      對齊 SubordinateOverviewView v3 / MyCalendarView.calendarHeroCard 雙層 shadow 規格。
+//  12. joinDate 入職日期列：從裸 caption2 文字升級為 tertiarySystemFill 底色 Capsule 徽章
+//      + calendar.badge.clock 圖示，對齊 CareerView.careerRow / OverviewView.recentRow 日期膠囊規格。
+//  13. recordRow 圖示圓：補 Circle().stroke(color.opacity(0.22), lineWidth: 1.0)，
+//      對齊 ChildDetailView v2 / SpouseResumeView v2 的 36pt 圓形邊框規格。
+//  14. recordRow 假別/嚴重度膠囊：補 Capsule().stroke(color.opacity(0.22), lineWidth: 0.6)，
+//      對齊 taskSection 截止日膠囊 / SubordinateOverviewView v2 彩色膠囊細邊框規格。
+//  15. meetingSection 圖示圓：補 Circle().stroke(Color.indigo.opacity(0.22), lineWidth: 1.0)，
+//      統一 meetingSection / recordSection 圖示圓邊框語言。
 
 struct SubordinateDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -460,16 +475,22 @@ struct SubordinateDetailView: View {
                 Spacer(minLength: 0)
             }
 
-            // 入職日期列
+            // [v3] 入職日期 Capsule 徽章（對齊 CareerView / OverviewView.recentRow 規格）
             if let jd = subordinate.joinDate {
-                HStack(spacing: 4) {
-                    Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 10))
-                    Text("入職 \(formatDate(jd))")
-                        .font(.caption2.weight(.medium))
+                HStack(spacing: 0) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 9))
+                        Text("入職 \(formatDate(jd))")
+                            .font(.caption2.weight(.medium))
+                    }
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(.white.opacity(0.16))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 0.6))
                     Spacer()
                 }
-                .foregroundStyle(.white.opacity(0.78))
                 .padding(.top, 10)
             }
 
@@ -518,10 +539,23 @@ struct SubordinateDetailView: View {
                     .frame(width: 80, height: 80)
                     .offset(x: -60, y: 50)
                     .blur(radius: 10)
+                // [v3] 第三顆散景圓（中右側）
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 30, y: 28)
+                    .blur(radius: 8)
+                // [v3] 頂部玻璃光澤
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.42), radius: 18, x: 0, y: 9)
+        .shadow(color: .black.opacity(0.09), radius: 8, x: 0, y: 4)
         .padding(.horizontal)
         .opacity(headerAppeared ? 1 : 0)
         .offset(y: headerAppeared ? 0 : 20)
@@ -674,7 +708,7 @@ struct SubordinateDetailView: View {
                         else { showPremiumAlert = true }
                     } label: {
                         HStack(alignment: .center, spacing: 12) {
-                            // 36pt 漸層圖示圓（對齊 recordRow 規格）
+                            // [v3] 36pt 漸層圖示圓 + 陰影 + 細邊框（對齊 recordRow v3 規格）
                             ZStack {
                                 Circle()
                                     .fill(
@@ -685,6 +719,9 @@ struct SubordinateDetailView: View {
                                     )
                                     .frame(width: 36, height: 36)
                                     .shadow(color: Color.indigo.opacity(0.18), radius: 5, x: 0, y: 2)
+                                Circle()
+                                    .stroke(Color.indigo.opacity(0.22), lineWidth: 1.0)
+                                    .frame(width: 36, height: 36)
                                 Image(systemName: "person.3.fill")
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(.indigo)
@@ -858,6 +895,8 @@ struct SubordinateDetailView: View {
                                     .clipShape(Capsule())
 
                                     if let due = t.dueDate {
+                                        let isOverdue = due < Date() && !t.isCompleted
+                                        let dueColor: Color = isOverdue ? .red : .cyan
                                         HStack(spacing: 3) {
                                             Image(systemName: "flag.fill")
                                                 .font(.system(size: 7))
@@ -865,9 +904,10 @@ struct SubordinateDetailView: View {
                                         }
                                         .font(.caption2.weight(.semibold))
                                         .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(due < Date() && !t.isCompleted ? Color.red.opacity(0.12) : Color.cyan.opacity(0.12))
-                                        .foregroundStyle(due < Date() && !t.isCompleted ? .red : .cyan)
+                                        .background(dueColor.opacity(0.12))
+                                        .foregroundStyle(dueColor)
                                         .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(dueColor.opacity(0.22), lineWidth: 0.6))
                                     }
                                 }
                                 if t.isCompleted {
@@ -1046,7 +1086,7 @@ struct SubordinateDetailView: View {
             else { showPremiumAlert = true }
         } label: {
             HStack(alignment: .center, spacing: 12) {
-                // 36pt 漸層圖示圓 + 陰影
+                // [v3] 36pt 漸層圖示圓 + 陰影 + 細邊框
                 ZStack {
                     Circle()
                         .fill(
@@ -1057,6 +1097,9 @@ struct SubordinateDetailView: View {
                         )
                         .frame(width: 36, height: 36)
                         .shadow(color: color.opacity(0.20), radius: 5, x: 0, y: 2)
+                    Circle()
+                        .stroke(color.opacity(0.22), lineWidth: 1.0)
+                        .frame(width: 36, height: 36)
                     Image(systemName: rec.type.icon)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(color)
@@ -1080,7 +1123,7 @@ struct SubordinateDetailView: View {
                         .background(Color(.tertiarySystemFill))
                         .clipShape(Capsule())
 
-                        // 嚴重度 Capsule（失誤操作）
+                        // [v3] 嚴重度 Capsule + stroke 細邊框（失誤操作）
                         if rec.type == .missOperation, let sev = rec.severity {
                             Text(sev.rawValue)
                                 .font(.caption2.weight(.semibold))
@@ -1088,8 +1131,9 @@ struct SubordinateDetailView: View {
                                 .background(severityColor(sev).opacity(0.15))
                                 .foregroundStyle(severityColor(sev))
                                 .clipShape(Capsule())
+                                .overlay(Capsule().stroke(severityColor(sev).opacity(0.22), lineWidth: 0.6))
                         }
-                        // 假別 + 時數（請假）
+                        // [v3] 假別 Capsule + stroke 細邊框（請假）
                         if rec.type == .leave {
                             if let lt = rec.leaveType {
                                 Text(lt.rawValue)
@@ -1098,6 +1142,7 @@ struct SubordinateDetailView: View {
                                     .background(Color.teal.opacity(0.15))
                                     .foregroundStyle(.teal)
                                     .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(Color.teal.opacity(0.22), lineWidth: 0.6))
                             }
                             if let h = rec.leaveHours, h > 0 {
                                 Text(h.truncatingRemainder(dividingBy: 1) == 0
