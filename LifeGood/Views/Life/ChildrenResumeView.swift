@@ -22,6 +22,28 @@ import SwiftUI
 //  10. childCard 圖示圓：補入 Circle().stroke(accent.opacity(0.18), lineWidth:0.75) overlay，
 //      對齊 OverviewView.recentRow v3 stroke border 規格，視覺與 categoryRow 圖示圓一致。
 //  11. .navigationBarTitleDisplayMode(.large) 補齊，與其他列表頁 (IncomeView / StockView) 對齊。
+// [2026-06 v3] 本次美化方向：
+//  12. heroStatsCard 第三顆散景圓（中右 55pt, white.opacity(0.06), blur 8）：
+//      補齊第三顆，對齊 IncomeView / VariableExpenseView v4 /
+//      SubordinateDetailView v3 三圓散景標準規格（140/90/55 pt）。
+//  13. heroStatsCard 頂部玻璃光澤：white.opacity(0.15)→clear 升為 white.opacity(0.18)→clear，
+//      對齊全 App 英雄卡玻璃光澤統一規格（OverviewView / IncomeView / VariableExpenseView v3）。
+//  14. heroStatsCard KPI 橫列前補入 white.opacity(0.20) 分隔線（0.5pt），
+//      對齊 IncomeView.summaryHeader / VehicleView summaryHeader KPI 分隔線規格。
+//  15. heroKpiCell 補 28pt LinearGradient 半透明圖示圓（icon 參數）+
+//      contentTransition(.numericText()) 讓 KPI 有視覺錨點且數字切換流暢，
+//      對齊 SubordinateOverviewView v3 heroKpiCell / TalentMatrixView.heroKpiCell 規格。
+//  16. heroStatsCard 兒子/女兒計數膠囊補 Capsule stroke 邊框（white.opacity(0.30) 0.75pt），
+//      對齊全 App Capsule 計數徽章細邊框規格（SubordinateOverviewView v3 /
+//      TalentMatrixView.summaryHeroCard 計數膠囊規格）。
+//  17. childCardNameRow 角色膠囊補 Capsule stroke 細邊框（accent.opacity(0.22) 0.6pt），
+//      對齊 FamilyView.memberRow v2 / CareerView v3 膠囊細邊框規格，消除同頁膠囊
+//      有無邊框不均衡。
+//  18. childCardBirthdayRow 年齡膠囊補 Capsule stroke 細邊框（accent.opacity(0.22) 0.6pt），
+//      對齊 childCardNameRow 膠囊規格，讓同卡片兩種膠囊視覺語言一致。
+//  19. childCard shadow 升級為雙層：accent 色調光暈（radius 6, opacity 0.18）+
+//      黑底基礎（radius 8, opacity 0.06），對齊 SubordinateOverviewView v3 /
+//      MyCalendarView 雙層 shadow 規格，提升卡片立體感。
 
 struct ChildrenResumeView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -125,6 +147,7 @@ struct ChildrenResumeView: View {
                     }
                 }
                 Spacer()
+                // [v3] 計數膠囊補 Capsule stroke 邊框，對齊全 App 計數徽章細邊框規格
                 VStack(alignment: .trailing, spacing: 6) {
                     if sons > 0 {
                         HStack(spacing: 4) {
@@ -136,6 +159,7 @@ struct ChildrenResumeView: View {
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background(.white.opacity(0.22))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
                         .foregroundStyle(.white)
                     }
                     if daughters > 0 {
@@ -148,27 +172,34 @@ struct ChildrenResumeView: View {
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background(.white.opacity(0.22))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
                         .foregroundStyle(.white)
                     }
                 }
             }
 
+            // [v3] KPI 橫列前分隔線（對齊 IncomeView / VehicleView summaryHeader 分隔線規格）
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.top, 12)
+
             // KPI 橫列：兒子 / 女兒 / 生涯紀錄
             HStack(spacing: 0) {
-                heroKpiCell(label: "兒子", value: "\(sons) 位")
+                heroKpiCell(icon: "figure.child", label: "兒子", value: "\(sons) 位")
                 Rectangle()
                     .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
-                heroKpiCell(label: "女兒", value: "\(daughters) 位")
+                    .frame(width: 0.5, height: 36)
+                heroKpiCell(icon: "figure.child.and.lock", label: "女兒", value: "\(daughters) 位")
                 Rectangle()
                     .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
-                heroKpiCell(label: "生涯紀錄", value: "\(totalRecords) 筆")
+                    .frame(width: 0.5, height: 36)
+                heroKpiCell(icon: "list.clipboard.fill", label: "生涯紀錄", value: "\(totalRecords) 筆")
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10))
-            .padding(.top, 12)
+            .padding(.top, 8)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
@@ -180,24 +211,35 @@ struct ChildrenResumeView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                // 右上散景裝飾圓（增加卡片層次感）
+                // 右上主散景圓（對齊三圓散景 140pt 主圓規格）
                 Circle()
                     .fill(.white.opacity(0.13))
                     .frame(width: 130, height: 130)
                     .offset(x: 85, y: -50)
                     .blur(radius: 14)
-                // 左下補光
+                    .allowsHitTesting(false)
+                // 左下次散景圓（對齊三圓散景 90pt 次圓規格）
                 Circle()
                     .fill(.white.opacity(0.08))
                     .frame(width: 80, height: 80)
                     .offset(x: -60, y: 40)
                     .blur(radius: 10)
-                // 頂部玻璃光澤（對齊 OverviewView.monthlyBalanceCard v3 規格）
+                    .allowsHitTesting(false)
+                // [v3] 中右微型散景圓（55pt），補齊三圓散景標準規格
+                // 對齊 IncomeView / VariableExpenseView v4 / SubordinateDetailView v3
+                Circle()
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 55, height: 55)
+                    .offset(x: 30, y: 28)
+                    .blur(radius: 8)
+                    .allowsHitTesting(false)
+                // [v3] 頂部玻璃光澤升為 0.18（對齊全 App 英雄卡統一規格）
                 LinearGradient(
-                    colors: [.white.opacity(0.15), .clear],
+                    colors: [.white.opacity(0.18), .clear],
                     startPoint: .top,
                     endPoint: .center
                 )
+                .allowsHitTesting(false)
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -207,20 +249,36 @@ struct ChildrenResumeView: View {
         .padding(.bottom, 4)
     }
 
-    // KPI 格（對齊 IncomeView / VariableExpenseView kpiCell 規格）
-    private func heroKpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
+    // [v3] KPI 格：補 28pt LinearGradient 圖示圓 + contentTransition
+    // 對齊 SubordinateOverviewView v3 heroKpiCell / TalentMatrixView.heroKpiCell 規格
+    private func heroKpiCell(icon: String, label: String, value: String) -> some View {
+        VStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.22), .white.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 28, height: 28)
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
             Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .contentTransition(.numericText())
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.white.opacity(0.65))
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     // MARK: - [v2] 清單 Section Header
@@ -311,6 +369,8 @@ struct ChildrenResumeView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(accent.opacity(0.10), lineWidth: 0.75)
         )
+        // [v3] 雙層陰影：色調光暈 + 黑底基礎，對齊 SubordinateOverviewView v3 規格
+        .shadow(color: accent.opacity(0.18), radius: 6, x: 0, y: 2)
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
@@ -335,12 +395,14 @@ struct ChildrenResumeView: View {
             Text(childDisplayName(child))
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
+            // [v3] 角色膠囊補細邊框，對齊 FamilyView v2 / CareerView v3 膠囊規格
             Text(child.role.rawValue)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(accent)
                 .padding(.horizontal, 7).padding(.vertical, 2.5)
                 .background(accent.opacity(0.12))
                 .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
         }
     }
 
@@ -352,12 +414,14 @@ struct ChildrenResumeView: View {
             Text(Self.dateFormatter.string(from: bd))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
+            // [v3] 年齡膠囊補細邊框，對齊 childCardNameRow 膠囊設計語言
             Text(ageString(from: bd))
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(accent)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(accent.opacity(0.10))
                 .clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
         }
     }
 
