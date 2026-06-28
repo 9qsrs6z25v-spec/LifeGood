@@ -27,6 +27,15 @@ import SwiftUI
 //      對齊全 App 英雄卡片 glass shine 統一規格（v3+）
 //  11. allocationMiniBar → 彩條 GeometryReader 加入 glow overlay（白色頂光 + 底部柔化），
 //      對齊 FinanceOverviewView.totalAssetsCard / IncomeView 持倉彩條 glow overlay 規格
+// [2026-06 v4] 第四輪美化方向：
+//  12. stockCard 44pt 圖示圓 → 補齊 Circle().stroke 描邊 overlay（accent.opacity(0.22) 1pt），
+//      對齊 RealEstateView estateCard / IncomeView incomeRow / OverviewView categoryRow v4 圖示圓規格
+//  13. stockCard 代號膠囊 → 補齊 Capsule().stroke 描邊 overlay（accent.opacity(0.22) 0.6pt），
+//      對齊 ExpenseRow category capsule / OverviewView recentRow capsule 視覺規格
+//  14. summaryHeader 主數值 → 補齊 minimumScaleFactor(0.65) + lineLimit(1)，
+//      防止超大金額換行溢出，對齊 RealEstateView / VariableExpenseView 英雄卡金額規格
+//  15. summaryHeader KPI 統計列 → activeStocks 計數與整體報酬率均補 contentTransition(.numericText())，
+//      對齊 OverviewView / IncomeView 英雄卡數字動畫規格
 
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
@@ -389,6 +398,8 @@ struct StockView: View {
                     Text(fmt(store.totalStockValue))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .minimumScaleFactor(0.65)
+                        .lineLimit(1)
                         .contentTransition(.numericText())
                     if store.totalStockCost > 0 {
                         Text("總成本 " + fmtShort(store.totalStockCost))
@@ -441,6 +452,7 @@ struct StockView: View {
                         Text("\(activeStocks.count) 檔")
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
+                            .contentTransition(.numericText())
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
@@ -452,6 +464,7 @@ struct StockView: View {
                             .foregroundStyle(returnRate >= 0
                                 ? Color(red: 0.60, green: 1.00, blue: 0.75)
                                 : Color(red: 1.0, green: 0.78, blue: 0.75))
+                            .contentTransition(.numericText())
                     }
                 }
 
@@ -636,6 +649,7 @@ struct StockView: View {
                             )
                         )
                         .frame(width: 44, height: 44)
+                        .overlay(Circle().stroke(accent.opacity(0.22), lineWidth: 1))
                         .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
                     Image(systemName: "chart.line.uptrend.xyaxis")
                         .font(.system(size: 18, weight: .semibold))
@@ -663,6 +677,7 @@ struct StockView: View {
                                 .padding(.horizontal, 7).padding(.vertical, 2.5)
                                 .background(accent.opacity(0.12))
                                 .clipShape(Capsule())
+                                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                         }
                         if item.isSold {
                             Text("已賣出")
