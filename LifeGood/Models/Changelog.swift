@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.91", build: 553, date: "2026/06/28", notes: [
+            "【靜態除錯 v22.91 / build 553】修復 SubordinateOverviewView v3（build 552）引入的效能瓶頸：summaryHeroCard（v2 新增）直接呼叫 todayLeaves.count、todayMeetings.count、incompleteTasks.count，而 leaveSection / meetingSection / taskSection 在同一次 body 求值時各自也執行一次完整的 flatMap+filter+sorted，導致三個 O(n×m) 計算各被重複執行一次（共多出 3 次 flatMap+filter+sort 呼叫）。修復方式：在 body 頂部以 let leaves、meetings、tasks 各快取一次，summaryHeroCard / leaveSection / meetingSection / taskSection 改為接受預算陣列的函式（從 var 改為 func），由呼叫端傳入已算好的結果，每次 body render 的計算次數由 6 降為 3，對齊 v22.68 SubordinateOverviewView 同型修復規格及 LifeOverviewView let allMS 單次捕捉規格。其餘：無 force unwrap（!）、無 as! 強制轉型、無 fatalError（EInvoiceClient 啟動守衛除外）；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、@Published 主執行緒隔離均正常。"
+        ]),
         ChangelogEntry(version: "22.89", build: 552, date: "2026/06/27", notes: [
             "【靜態除錯 v22.89 / build 552】修復 ResumeView v3（build 551）引入的 force unwrap：resumeHeroCard 的「最近一筆」KPI 以 mostRecent != nil ? formatDate(mostRecent!.date) : \"—\" 取值，違反全 App 無 force unwrap（!）原則；雖 nil 檢查在前不會實際崩潰，但若後續程式碼調整先後順序便有潛在風險。改為 Swift 慣用的 mostRecent.map { formatDate($0.date) } ?? \"—\"，消除強制解包運算子。其餘：無 as! 強制轉型、無 fatalError（EInvoiceClient 啟動守衛除外）；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、@Published 主執行緒隔離均正常。"
         ]),

@@ -177,17 +177,23 @@ struct SubordinateOverviewView: View {
 
 
     var body: some View {
-        NavigationStack {
+        // body 單次計算，傳入各子區塊，避免 summaryHeroCard 與各 section 各自重複 flatMap+filter+sort
+        let leaves   = todayLeaves
+        let meetings = todayMeetings
+        let tasks    = incompleteTasks
+        return NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    summaryHeroCard
+                    summaryHeroCard(leaveCnt: leaves.count,
+                                    meetCnt:  meetings.count,
+                                    taskCnt:  tasks.count)
                         .opacity(heroAppeared ? 1 : 0)
                         .offset(y: heroAppeared ? 0 : 16)
                         .animation(.spring(response: 0.52, dampingFraction: 0.80), value: heroAppeared)
 
                     MacaronDatePicker(selectedDate: $selectedDate)
 
-                    leaveSection
+                    leaveSection(leaves)
                         .opacity(sectionAppeared ? 1 : 0)
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.05), value: sectionAppeared)
@@ -197,12 +203,12 @@ struct SubordinateOverviewView: View {
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.11), value: sectionAppeared)
 
-                    meetingSection
+                    meetingSection(meetings)
                         .opacity(sectionAppeared ? 1 : 0)
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.15), value: sectionAppeared)
 
-                    taskSection
+                    taskSection(incompleteTasks: tasks)
                         .opacity(sectionAppeared ? 1 : 0)
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.19), value: sectionAppeared)
@@ -237,8 +243,7 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 請假
 
-    private var leaveSection: some View {
-        let leaves = todayLeaves
+    private func leaveSection(_ leaves: [(sub: Subordinate, rec: SubordinateRecord)]) -> some View {
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("請假", icon: "calendar.badge.minus", color: .teal, count: leaves.count)
 
@@ -391,8 +396,7 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 會議
 
-    private var meetingSection: some View {
-        let meetings = todayMeetings
+    private func meetingSection(_ meetings: [(sub: Subordinate, meeting: SubordinateMeeting)]) -> some View {
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("會議", icon: "person.3.fill", color: .indigo, count: meetings.count)
 
@@ -421,7 +425,7 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 任務
 
-    private var taskSection: some View {
+    private func taskSection(incompleteTasks tasks: [(sub: Subordinate, task: SubordinateTask)]) -> some View {
         VStack(spacing: 16) {
             // 當日任務（選取日期、未完成）
             taskGroupCard(title: "當日任務", icon: "checklist", color: .cyan,
@@ -432,7 +436,7 @@ struct SubordinateOverviewView: View {
 
             // 未完成任務（跨所有日期 / 部屬的待辦總清單，逾期排最前）
             taskGroupCard(title: "未完成任務", icon: "tray.full.fill", color: .orange,
-                          items: incompleteTasks, emptyText: "沒有未完成任務")
+                          items: tasks, emptyText: "沒有未完成任務")
 
             // 已完成（報告 / 會議項目 / 任務，可收合；無已完成時不顯示）
             CompletedCollapsibleCard(entries: overviewCompletedEntries, expanded: $showCompleted)
@@ -829,7 +833,7 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 英雄摘要卡
 
-    private var summaryHeroCard: some View {
+    private func summaryHeroCard(leaveCnt: Int, meetCnt: Int, taskCnt: Int) -> some View {
         ZStack(alignment: .topLeading) {
             // 主漸層背景
             LinearGradient(
@@ -890,13 +894,13 @@ struct SubordinateOverviewView: View {
 
                 // KPI 三格（v3：分隔線高度由 36 升至 48 以配合圖示圓高度）
                 HStack(spacing: 0) {
-                    heroKpiCell(value: "\(todayLeaves.count)", label: "今日請假",
+                    heroKpiCell(value: "\(leaveCnt)", label: "今日請假",
                                 icon: "calendar.badge.minus")
                     Rectangle().fill(Color.white.opacity(0.22)).frame(width: 0.5, height: 48)
-                    heroKpiCell(value: "\(todayMeetings.count)", label: "今日會議",
+                    heroKpiCell(value: "\(meetCnt)", label: "今日會議",
                                 icon: "person.3.fill")
                     Rectangle().fill(Color.white.opacity(0.22)).frame(width: 0.5, height: 48)
-                    heroKpiCell(value: "\(incompleteTasks.count)", label: "待辦任務",
+                    heroKpiCell(value: "\(taskCnt)", label: "待辦任務",
                                 icon: "tray.full.fill")
                 }
             }
