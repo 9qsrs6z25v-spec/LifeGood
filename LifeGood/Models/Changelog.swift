@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.99", build: 557, date: "2026/06/28", notes: [
+            "【靜態除錯 v22.99 / build 557】修復 SubordinateDetailView v3（build 556 最新美化）引入的效能瓶頸：headerCard 的 KPI 橫列呼叫 countFor([.pro/con/achievement/missOperation/leave]) 共 5 次，每次均對 subordinate.records 執行 O(n) filter；每次 body render 共掃描 records 陣列 5 遍。修復方式：在 headerCard 頂部以 let recordCounts = subordinate.records.reduce(into:[SubordinateRecordType:Int]()) 一次計算所有類型計數（O(n)），5 個 statBadge 改為查字典（O(1)），並移除已無呼叫者的 countFor 方法。計算次數由 5 降為 1，對齊 v22.93 LifeRealEstateView.propertiesByCity / v22.91 SubordinateOverviewView.todayLeaves/todayMeetings/incompleteTasks 同型效能修復規格。其餘：無 force unwrap（!）、無 as! 強制轉型、無 fatalError（EInvoiceClient 啟動守衛除外）；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、@Published 主執行緒隔離均正常。"
+        ]),
         ChangelogEntry(version: "22.97", build: 556, date: "2026/06/28", notes: [
             "【靜態除錯 v22.97 / build 556】修復四項靜態層級問題：① StockDetailView.deleteStock()：直接以 removeAll 刪除連結支出時不會執行 Expense.deletePhoto()，導致照片檔案孤兒化；改用 expenseStore.delete(exp) 與 expenseStore.deleteIncome(inc)，確保照片清除與持久化均走 Store CRUD 路徑。② StockDetailView.syncCashDividendIncome / removeCashDividendIncome：直接讀寫 expenseStore.incomes 陣列，繞過 ExpenseStore 的 CRUD 方法；改用 expenseStore.update(_:) / expenseStore.add(_:) / expenseStore.deleteIncome(_:)，統一持久化入口。③ LifeStore add/update/deleteSubordinate：isLoading = true … isLoading = false 之間若未來加入 guard/return，isLoading 將永久卡死為 true，導致所有後續 save() 被靜默抑制；加入 defer { isLoading = false } 防止此類潛在卡死。④ FinanceOverviewView.rateForCode：每次呼叫對 currencyRates 做線性掃描，insuranceValueNTD 與 insurancePaidNTD 各對 N 筆保單逐一查詢，總複雜度 O(N×M)；改為在各屬性內以 reduce(into:) 預建字典（O(M)），後續 N 次查詢降為 O(1)，整體降至 O(N+M)。"
         ]),

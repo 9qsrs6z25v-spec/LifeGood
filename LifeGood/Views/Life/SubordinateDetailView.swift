@@ -425,6 +425,8 @@ struct SubordinateDetailView: View {
 
     private var headerCard: some View {
         let initials = String(subordinate.name.prefix(2))
+        // 一次計算所有類型計數，避免 KPI 橫列 5 個 statBadge 各自 O(n) 掃描 records
+        let recordCounts = subordinate.records.reduce(into: [SubordinateRecordType: Int]()) { $0[$1.type, default: 0] += 1 }
         return VStack(spacing: 0) {
             // 頂部：縮寫頭像 + 姓名 + 職等/部門膠囊
             HStack(alignment: .center, spacing: 14) {
@@ -502,15 +504,15 @@ struct SubordinateDetailView: View {
 
             // KPI 橫列：優點 / 缺點 / 成就 / Miss / 請假
             HStack(spacing: 0) {
-                statBadge(count: countFor([.pro]),           label: "優點", color: .green)
+                statBadge(count: recordCounts[.pro] ?? 0,           label: "優點", color: .green)
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
-                statBadge(count: countFor([.con]),           label: "缺點", color: .red)
+                statBadge(count: recordCounts[.con] ?? 0,           label: "缺點", color: .red)
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
-                statBadge(count: countFor([.achievement]),   label: "成就", color: .orange)
+                statBadge(count: recordCounts[.achievement] ?? 0,   label: "成就", color: .orange)
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
-                statBadge(count: countFor([.missOperation]), label: "Miss", color: .purple)
+                statBadge(count: recordCounts[.missOperation] ?? 0, label: "Miss", color: .purple)
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
-                statBadge(count: countFor([.leave]),         label: "請假", color: .teal)
+                statBadge(count: recordCounts[.leave] ?? 0,         label: "請假", color: .teal)
             }
             .padding(.vertical, 8)
             .background(.white.opacity(0.08))
@@ -579,10 +581,6 @@ struct SubordinateDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)
-    }
-
-    private func countFor(_ types: [SubordinateRecordType]) -> Int {
-        subordinate.records.filter { types.contains($0.type) }.count
     }
 
     // MARK: - 會議章節
