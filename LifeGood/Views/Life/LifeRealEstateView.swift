@@ -113,14 +113,16 @@ struct LifeRealEstateView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        // 單次計算，避免 summaryHeader / miniCityBar / mapView 各自重複 Dictionary(grouping:)
+        let cities = propertiesByCity
+        return NavigationStack {
             VStack(spacing: 0) {
-                summaryHeader
+                summaryHeader(cities)
 
                 if financeStore.realEstates.isEmpty {
                     emptyState
                 } else {
-                    mapView
+                    mapView(cities)
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -144,7 +146,7 @@ struct LifeRealEstateView: View {
 
     // MARK: - 摘要英雄卡片
 
-    private var summaryHeader: some View {
+    private func summaryHeader(_ cities: [(city: String, items: [RealEstate])]) -> some View {
         VStack(spacing: 0) {
             // 頂部：總物件數大字 + 計數膠囊
             HStack(alignment: .top) {
@@ -205,8 +207,8 @@ struct LifeRealEstateView: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
             // [v3] 縣市分配彩條（≥2 個縣市時顯示）
-            if propertiesByCity.count >= 2 {
-                miniCityBar
+            if cities.count >= 2 {
+                miniCityBar(cities)
                     .padding(.top, 10)
             }
         }
@@ -298,8 +300,8 @@ struct LifeRealEstateView: View {
 
     // MARK: - [v3] 縣市分配彩條
     // 各縣市按物件筆數高低由左到右排列，最多顯示 5 個縣市，其餘合併為「其他」
-    private var miniCityBar: some View {
-        let all = propertiesByCity.sorted { $0.items.count > $1.items.count }
+    private func miniCityBar(_ cities: [(city: String, items: [RealEstate])]) -> some View {
+        let all = cities.sorted { $0.items.count > $1.items.count }
         let top5 = Array(all.prefix(5))
         let rest = all.count > 5 ? all.dropFirst(5).reduce(0) { $0 + $1.items.count } : 0
         let total = Double(top5.reduce(0) { $0 + $1.items.count } + rest)
@@ -462,10 +464,10 @@ struct LifeRealEstateView: View {
 
     // MARK: - 地圖
 
-    private var mapView: some View {
+    private func mapView(_ cities: [(city: String, items: [RealEstate])]) -> some View {
         ZStack(alignment: .bottom) {
             Map(position: $cameraPosition) {
-                ForEach(propertiesByCity, id: \.city) { entry in
+                ForEach(cities, id: \.city) { entry in
                     if let coord = Self.cityCoords[entry.city] {
                         Annotation(entry.city, coordinate: coord, anchor: .bottom) {
                             pinView(city: entry.city, count: entry.items.count)

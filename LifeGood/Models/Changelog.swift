@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.93", build: 554, date: "2026/06/28", notes: [
+            "【靜態除錯 v22.93 / build 554】修復 LifeRealEstateView v3（build 553 最新美化）引入的效能瓶頸：propertiesByCity（執行 Dictionary(grouping:) 全量分組）在 body 單次 render 中被重複計算三次——① summaryHeader 以 propertiesByCity.count >= 2 檢查是否顯示彩條、② miniCityBar 以 propertiesByCity.sorted{} 建立排序陣列、③ mapView 以 propertiesByCity 驅動 ForEach 圖釘。修復方式：在 body 頂部以 let cities = propertiesByCity 單次快取，summaryHeader / miniCityBar / mapView 由 var 改為 func 接收 cities 參數，由呼叫端傳入預算結果，計算次數由 3 降為 1，對齊 v22.85 FoodMapView.sortedAggregates(from:) 及 v22.91 SubordinateOverviewView 同型修復規格。其餘：無 force unwrap（!）、無 as! 強制轉型、無 fatalError（EInvoiceClient 啟動守衛除外）；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、@Published 主執行緒隔離均正常。"
+        ]),
         ChangelogEntry(version: "22.91", build: 553, date: "2026/06/28", notes: [
             "【靜態除錯 v22.91 / build 553】修復 SubordinateOverviewView v3（build 552）引入的效能瓶頸：summaryHeroCard（v2 新增）直接呼叫 todayLeaves.count、todayMeetings.count、incompleteTasks.count，而 leaveSection / meetingSection / taskSection 在同一次 body 求值時各自也執行一次完整的 flatMap+filter+sorted，導致三個 O(n×m) 計算各被重複執行一次（共多出 3 次 flatMap+filter+sort 呼叫）。修復方式：在 body 頂部以 let leaves、meetings、tasks 各快取一次，summaryHeroCard / leaveSection / meetingSection / taskSection 改為接受預算陣列的函式（從 var 改為 func），由呼叫端傳入已算好的結果，每次 body render 的計算次數由 6 降為 3，對齊 v22.68 SubordinateOverviewView 同型修復規格及 LifeOverviewView let allMS 單次捕捉規格。其餘：無 force unwrap（!）、無 as! 強制轉型、無 fatalError（EInvoiceClient 啟動守衛除外）；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、@Published 主執行緒隔離均正常。"
         ]),
