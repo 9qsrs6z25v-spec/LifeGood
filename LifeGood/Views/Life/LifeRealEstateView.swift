@@ -29,6 +29,18 @@ import MapKit
 //      對齊 RealEstateView.estateCard 估值 + 增值率膠囊設計語言。
 //  10. cityPanel 物件列交錯進場動畫：加入 cityPanelRowsAppeared 旗標 + 0.04s stagger，
 //      對齊 IncomeView.incomeListSections / StockView.cardsAppeared 規格。
+// [2026-06 v3] 本次美化方向：
+//  11. summaryHeader 縣市分配彩條（miniCityBar）：KPI 橫列下方（≥2 個縣市時）新增縣市物件
+//      數量佔比彩條 + 圖例點陣列（色點 + 縣市名稱）；5 種固定漸層色按筆數高低排列；
+//      miniBarAppeared 左展開 spring 動畫（scaleEffect x 0.04→1.0，anchor:.leading）
+//      + glow overlay（白頂光 + 黑底柔化），
+//      對齊 VehicleView.summaryHeader v2 / FinanceOverviewView.totalAssetsCard v4 彩條規格。
+//  12. summaryHeader shadow 升級雙層：主色光暈 opacity 0.45→0.52；
+//      疊加 .shadow(color:.black.opacity(0.08), radius:8, y:4)，
+//      對齊 SubordinateOverviewView v3 / SubordinateDetailView.headerCard 雙層 shadow 規格。
+//  13. itemRow 日期膠囊補 stroke border：購入日期 green + 售出日期 red 膠囊各補
+//      .overlay(Capsule().stroke(color.opacity(0.22), lineWidth:0.6))，
+//      對齊 CareerView v2 / OverviewView.recentRow v3 日期膠囊細邊框規格。
 
 struct LifeRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -42,6 +54,8 @@ struct LifeRealEstateView: View {
     @State private var emptyIconPulse = false
     // [v2] cityPanel 物件列交錯進場動畫旗標
     @State private var cityPanelRowsAppeared = false
+    // [v3] 縣市分配彩條左展開動畫旗標
+    @State private var miniBarAppeared = false
 
     private static let taiwanRegion = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 23.75, longitude: 121.0),
@@ -189,6 +203,12 @@ struct LifeRealEstateView: View {
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            // [v3] 縣市分配彩條（≥2 個縣市時顯示）
+            if propertiesByCity.count >= 2 {
+                miniCityBar
+                    .padding(.top, 10)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
@@ -230,7 +250,9 @@ struct LifeRealEstateView: View {
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.32, green: 0.14, blue: 0.72).opacity(0.45), radius: 18, x: 0, y: 9)
+        // [v3] 雙層 shadow：主色光暈 + 黑底基礎陰影（對齊 SubordinateOverviewView v3 規格）
+        .shadow(color: Color(red: 0.32, green: 0.14, blue: 0.72).opacity(0.52), radius: 18, x: 0, y: 9)
+        .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 8)
@@ -272,6 +294,85 @@ struct LifeRealEstateView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)
+    }
+
+    // MARK: - [v3] 縣市分配彩條
+    // 各縣市按物件筆數高低由左到右排列，最多顯示 5 個縣市，其餘合併為「其他」
+    private var miniCityBar: some View {
+        let all = propertiesByCity.sorted { $0.items.count > $1.items.count }
+        let top5 = Array(all.prefix(5))
+        let rest = all.count > 5 ? all.dropFirst(5).reduce(0) { $0 + $1.items.count } : 0
+        let total = Double(top5.reduce(0) { $0 + $1.items.count } + rest)
+        let pal: [Color] = [
+            Color(red: 0.72, green: 0.55, blue: 1.00), // 紫
+            Color(red: 0.60, green: 1.00, blue: 0.75), // 翠綠
+            Color(red: 1.00, green: 0.78, blue: 0.75), // 珊瑚粉
+            Color(red: 0.55, green: 0.85, blue: 1.00), // 天藍
+            Color(red: 1.00, green: 0.88, blue: 0.55), // 暖黃
+        ]
+        return VStack(spacing: 6) {
+            // 比例彩條
+            GeometryReader { geo in
+                HStack(spacing: 2) {
+                    ForEach(top5.indices, id: \.self) { idx in
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(pal[idx % pal.count])
+                            .frame(
+                                width: max(4, geo.size.width * CGFloat(top5[idx].items.count) / CGFloat(max(1, total))),
+                                height: 6
+                            )
+                    }
+                    if rest > 0 {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.white.opacity(0.25))
+                            .frame(
+                                width: max(4, geo.size.width * CGFloat(rest) / CGFloat(max(1, total))),
+                                height: 6
+                            )
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            .frame(height: 6)
+            // 左展開 spring 動畫（對齊 VehicleView.summaryHeader v2 彩條規格）
+            .scaleEffect(x: miniBarAppeared ? 1.0 : 0.04, anchor: .leading)
+            // Glow overlay：頂部白光 + 底部柔化
+            .overlay(
+                LinearGradient(
+                    colors: [.white.opacity(0.35), .clear, .black.opacity(0.08)],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .allowsHitTesting(false)
+            )
+            // 圖例點陣列
+            HStack(spacing: 8) {
+                ForEach(top5.indices, id: \.self) { idx in
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(pal[idx % pal.count])
+                            .frame(width: 5, height: 5)
+                        Text(top5[idx].city)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
+                    }
+                }
+                if rest > 0 {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.white.opacity(0.30)).frame(width: 5, height: 5)
+                        Text("其他")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                }
+                Spacer()
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.58, dampingFraction: 0.78).delay(0.20)) {
+                miniBarAppeared = true
+            }
+        }
     }
 
     // MARK: - 空狀態
@@ -614,6 +715,8 @@ struct LifeRealEstateView: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Color.green.opacity(0.10))
                     .clipShape(Capsule())
+                    // [v3] 補 stroke border，對齊全 App 日期膠囊細邊框規格
+                    .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
 
                     if let sd = item.soldDate {
                         HStack(spacing: 3) {
@@ -626,6 +729,8 @@ struct LifeRealEstateView: View {
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color.red.opacity(0.10))
                         .clipShape(Capsule())
+                        // [v3] 補 stroke border，對齊全 App 日期膠囊細邊框規格
+                        .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
                     }
                 }
             }
