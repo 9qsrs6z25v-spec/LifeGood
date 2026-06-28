@@ -60,17 +60,14 @@ struct FinanceOverviewView: View {
     // [v4] totalAssetsCard mini 彩條左展開動畫旗標
     @State private var miniBarAppeared = false
 
-    private func rateForCode(_ code: String) -> Double {
-        if code == "NT$" { return 1 }
-        return expenseStore.currencyRates.first(where: { $0.code == code })?.rate ?? 1
-    }
-
     private var insuranceValueNTD: Double {
-        store.insurances.reduce(0) { $0 + $1.currentValue * rateForCode($1.currencyCode) }
+        let rates = expenseStore.currencyRates.reduce(into: ["NT$": 1.0]) { $0[$1.code] = $1.rate }
+        return store.insurances.reduce(0) { $0 + $1.currentValue * (rates[$1.currencyCode] ?? 1) }
     }
 
     private var insurancePaidNTD: Double {
-        store.insurances.reduce(0) { $0 + $1.totalPaid * rateForCode($1.currencyCode) }
+        let rates = expenseStore.currencyRates.reduce(into: ["NT$": 1.0]) { $0[$1.code] = $1.rate }
+        return store.insurances.reduce(0) { $0 + $1.totalPaid * (rates[$1.currencyCode] ?? 1) }
     }
 
     private var insuranceProfitLoss: Double {

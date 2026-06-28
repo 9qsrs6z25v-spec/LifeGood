@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "22.97", build: 556, date: "2026/06/28", notes: [
+            "【靜態除錯 v22.97 / build 556】修復四項靜態層級問題：① StockDetailView.deleteStock()：直接以 removeAll 刪除連結支出時不會執行 Expense.deletePhoto()，導致照片檔案孤兒化；改用 expenseStore.delete(exp) 與 expenseStore.deleteIncome(inc)，確保照片清除與持久化均走 Store CRUD 路徑。② StockDetailView.syncCashDividendIncome / removeCashDividendIncome：直接讀寫 expenseStore.incomes 陣列，繞過 ExpenseStore 的 CRUD 方法；改用 expenseStore.update(_:) / expenseStore.add(_:) / expenseStore.deleteIncome(_:)，統一持久化入口。③ LifeStore add/update/deleteSubordinate：isLoading = true … isLoading = false 之間若未來加入 guard/return，isLoading 將永久卡死為 true，導致所有後續 save() 被靜默抑制；加入 defer { isLoading = false } 防止此類潛在卡死。④ FinanceOverviewView.rateForCode：每次呼叫對 currencyRates 做線性掃描，insuranceValueNTD 與 insurancePaidNTD 各對 N 筆保單逐一查詢，總複雜度 O(N×M)；改為在各屬性內以 reduce(into:) 預建字典（O(M)），後續 N 次查詢降為 O(1)，整體降至 O(N+M)。"
+        ]),
         ChangelogEntry(version: "22.95", build: 555, date: "2026/06/28", notes: [
             "【UI 美化】StockDetailView v3：① flashCard 背景升級為三顆散景裝飾圓（opacity 0.07/0.05/0.04, blur 15/12/9）+ 頂部→中央玻璃光澤覆層（LinearGradient [.white.opacity(0.18), .clear]），對齊全 App 英雄卡視覺規格。② 新增 cardAppeared spring 進場動畫（response:0.50/dampingFraction:0.78, delay:0.04）：透明度 0→1 + Y 位移 14→0，對齊 SavingsInsuranceView 閃卡進場規格。③ 市值大字（52pt）加入 minimumScaleFactor(0.55) + lineLimit(1) + contentTransition(.numericText())，防長數字溢出並對齊全 App 數值縮放規格。④ 損益膠囊補入 Capsule().stroke(color.opacity(0.22), 0.6pt)，對齊全 App 膠囊細邊框設計語言。⑤ 購入日期 / 賣出日期升級為 tertiarySystemFill Capsule 徽章（+ separator stroke 0.6pt），對齊 CareerView v2 / OverviewView.recentRow 日期規格。⑥ accountSection 圖示圓：38pt → 44pt + Circle().stroke(color.opacity(0.18), 0.75pt)，對齊 StockView.stockCard / VehicleView v3 圖示圓規格。⑦ noteCard Capsule 側條高度 16 → 20，對齊全 App sectionHeader Capsule 標準高度。"
         ]),

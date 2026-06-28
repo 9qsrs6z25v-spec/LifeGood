@@ -98,26 +98,26 @@ class LifeStore: ObservableObject {
 
     func add(_ item: Subordinate) {
         isLoading = true
+        defer { isLoading = false }
         subordinates.append(item)
         syncOrgPersonFor(subordinate: item)
-        isLoading = false
         save()
     }
     func update(_ item: Subordinate) {
         isLoading = true
+        defer { isLoading = false }
         if let i = subordinates.firstIndex(where: { $0.id == item.id }) { subordinates[i] = item }
         syncOrgPersonFor(subordinate: item)
-        isLoading = false
         save()
     }
     func deleteSubordinate(_ item: Subordinate) {
         isLoading = true
+        defer { isLoading = false }
         subordinates.removeAll { $0.id == item.id }
         // 解除與公司組織人員的連結（保留人員資料以維持歷史）
         if let i = orgPeople.firstIndex(where: { $0.linkedSubordinateId == item.id }) {
             orgPeople[i].linkedSubordinateId = nil
         }
-        isLoading = false
         save()
     }
 

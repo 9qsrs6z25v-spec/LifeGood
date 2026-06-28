@@ -880,11 +880,13 @@ struct StockDetailView: View {
     // MARK: - 刪除
 
     private func deleteStock() {
-        if let expId = stock.linkedExpenseId {
-            expenseStore.expenses.removeAll { $0.id == expId }
+        if let expId = stock.linkedExpenseId,
+           let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+            expenseStore.delete(exp)
         }
-        if let incId = stock.linkedIncomeId {
-            expenseStore.incomes.removeAll { $0.id == incId }
+        if let incId = stock.linkedIncomeId,
+           let inc = expenseStore.incomes.first(where: { $0.id == incId }) {
+            expenseStore.deleteIncome(inc)
         }
         for accId in [stock.linkedBankMilestoneId, stock.linkedSecuritiesMilestoneId].compactMap({ $0 }) {
             if var ms = lifeStore.milestones.first(where: { $0.id == accId }) {
@@ -1474,16 +1476,18 @@ struct StockDividendEditor: View {
             linkedBankMilestoneId: stockHasBank,
             linkedBankCurrency: stock?.linkedBankCurrency
         )
-        if let idx = expenseStore.incomes.firstIndex(where: { $0.id == id }) {
-            expenseStore.incomes[idx] = income
+        if expenseStore.incomes.contains(where: { $0.id == id }) {
+            expenseStore.update(income)
         } else {
-            expenseStore.incomes.append(income)
+            expenseStore.add(income)
         }
         return id
     }
 
     private func removeCashDividendIncome(incomeId: UUID) {
-        expenseStore.incomes.removeAll { $0.id == incomeId }
+        if let inc = expenseStore.incomes.first(where: { $0.id == incomeId }) {
+            expenseStore.deleteIncome(inc)
+        }
     }
 
     /// 寫入 / 更新對應的銀行 BankDeposit（依 dividendId 當 stable 識別）
