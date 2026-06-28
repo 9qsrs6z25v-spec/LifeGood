@@ -144,15 +144,15 @@ struct VehicleView: View {
                                             showPremiumAlert = true
                                             return
                                         }
+                                        var linkedIds = Set<UUID>()
                                         for fe in item.fixedExpenses {
-                                            if let linkedId = fe.linkedExpenseId {
-                                                expenseStore.expenses.removeAll { $0.id == linkedId }
-                                            }
+                                            if let id = fe.linkedExpenseId { linkedIds.insert(id) }
                                         }
                                         for ve in item.variableExpenses {
-                                            if let linkedId = ve.linkedExpenseId {
-                                                expenseStore.expenses.removeAll { $0.id == linkedId }
-                                            }
+                                            if let id = ve.linkedExpenseId { linkedIds.insert(id) }
+                                        }
+                                        if !linkedIds.isEmpty {
+                                            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
                                         }
                                         store.deleteVehicle(item)
                                     } label: {

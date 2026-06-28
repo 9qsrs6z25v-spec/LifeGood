@@ -44,6 +44,7 @@ struct VariableExpenseView: View {
     @State private var searchText: String = ""
     @State private var listRowsAppeared = false
     @State private var cachedTrailingMonthlyAvg: Double = 0
+    @State private var cachedTodayVariableTotal: Double = 0
     @State private var debouncedSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var cachedFilteredExpenses: [Expense] = []
@@ -152,6 +153,9 @@ struct VariableExpenseView: View {
             }
             .task(id: store.modifyID) {
                 cachedTrailingMonthlyAvg = computeTrailingMonthlyAvg()
+                cachedTodayVariableTotal = store.variableExpenses
+                    .filter { Calendar.current.isDateInToday($0.date) }
+                    .reduce(0) { $0 + $1.amount }
             }
             .task(id: "\(store.modifyID)-\(selectedCategory?.rawValue ?? "")-\(debouncedSearchText)") {
                 cachedFilteredExpenses = buildFilteredExpenses()
@@ -177,11 +181,7 @@ struct VariableExpenseView: View {
         return totals.reduce(0, +) / Double(totals.count)
     }
 
-    private var todayVariableTotal: Double {
-        store.variableExpenses
-            .filter { Calendar.current.isDateInToday($0.date) }
-            .reduce(0) { $0 + $1.amount }
-    }
+    private var todayVariableTotal: Double { cachedTodayVariableTotal }
 
     private var trailingMonthlyAverageVariable: Double { cachedTrailingMonthlyAvg }
 

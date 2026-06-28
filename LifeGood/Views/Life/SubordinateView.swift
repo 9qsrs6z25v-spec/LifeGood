@@ -86,14 +86,14 @@ struct SubordinateView: View {
         if sortOption == .manual { return list }
         // 預先建立 id→index 對照，避免 sort closure 內部重複呼叫 firstIndex 造成 O(n² log n)
         let indexMap: [UUID: Int] = sortOption == .dateAdded
-            ? Dictionary(uniqueKeysWithValues: list.indices.map { (list[$0].id, $0) })
+            ? Dictionary(list.indices.map { (list[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
             : [:]
         // 預先建立部門標籤快取；deptLabel() 內部做 departments.first(where:) O(n)，
         // 若放在 sort closure 內每次比較都執行，整體排序退化為 O(n² log n)。
         let deptCache: [UUID: String] = sortOption == .department
-            ? Dictionary(uniqueKeysWithValues: lifeStore.departments.map {
+            ? Dictionary(lifeStore.departments.map {
                 ($0.id, $0.code.isEmpty ? $0.name : "\($0.code) \($0.name)")
-            })
+            }, uniquingKeysWith: { first, _ in first })
             : [:]
         let sorted = list.sorted { a, b in
             let result: Bool
@@ -348,17 +348,6 @@ struct SubordinateView: View {
 
     // MARK: - 統計摘要卡
 
-    private var averageScore: Int {
-        let list = lifeStore.subordinates
-        guard !list.isEmpty else { return 0 }
-        let total = list.map { subordinateScore($0) }.reduce(0, +)
-        return total / list.count
-    }
-
-    private var excellentCount: Int {
-        lifeStore.subordinates.filter { subordinateScore($0) >= 90 }.count
-    }
-
     private func summaryKpiCell(label: String, value: String, icon: String) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
@@ -378,9 +367,12 @@ struct SubordinateView: View {
     }
 
     private var summaryStatsCard: some View {
-        let total = lifeStore.subordinates.count
-        let avg = averageScore
-        let excellent = excellentCount
+        let subordinates = lifeStore.subordinates
+        let scores = subordinates.map { subordinateScore($0) }
+        let total = subordinates.count
+        let avg: Int = scores.isEmpty ? 0 : scores.reduce(0, +) / scores.count
+        let excellent = scores.filter { $0 >= 90 }.count
+        let needImprovement = scores.filter { $0 < 70 }.count
         let avgColor: Color = avg >= 90 ? .green : avg >= 80 ? .blue : avg >= 70 ? .orange : .red
 
         return VStack(spacing: 0) {
@@ -422,7 +414,7 @@ struct SubordinateView: View {
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
                 summaryKpiCell(label: "待提升（<70）",
-                               value: "\(lifeStore.subordinates.filter { subordinateScore($0) < 70 }.count) 位",
+                               value: "\(needImprovement) 位",
                                icon: "exclamationmark.triangle.fill")
             }
             .padding(.vertical, 10)
