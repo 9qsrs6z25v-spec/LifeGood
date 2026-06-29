@@ -22,6 +22,17 @@ import SwiftUI
 //  12. 新增 statsStrip：地圖與成員列表間加入統計徽章橫列（總成員 / 配偶 / 兒女計數），
 //      42pt 漸層圖示圓 + 數字 + 標籤，對齊 LifeOverviewView.statBadge 設計語言；
 //      加入 statsAppeared spring 錯落進場動畫（0.07s stagger），對齊 LifeOverviewView.statsCard 規格。
+// [2026-06 v3] 本次美化方向：
+//  13. statsStrip 統計卡：背景 ZStack 加入裝飾性 bokeh 光暈圓（右上偏移，blur 10pt），
+//      對齊 SettingsView / ChartView / VariableExpenseView hero card bokeh 設計語言。
+//  14. statsStrip 統計卡：補入玻璃光澤 overlay（白色 LinearGradient 頂部→透明 0.15 opacity），
+//      對齊 OverviewView.monthlyBalanceCard / IncomeView.summaryHeader 玻璃光澤規格；
+//      同一 overlay ZStack 收納既有邊框 stroke（減少 modifier 層數）。
+//  15. emptyMembersPlaceholder：補入粉紅 CTA 按鈕（漸層膠囊底色 + 陰影），
+//      對齊 CareerView v3 / FixedExpenseView / VariableExpenseView emptyState CTA button 規格；
+//      按鈕觸發同導覽列「＋」的 showAdd／showPremiumAlert 邏輯，無新增商業邏輯。
+//  16. memberRow 圖示圓陰影：radius 6→8、opacity 0.22→0.28，增強圖示立體感，
+//      對齊 FixedExpenseRow / CareerRow v3 圖示圓陰影強度規格。
 
 struct FamilyView: View {
     @EnvironmentObject var store: LifeStore
@@ -194,12 +205,28 @@ struct FamilyView: View {
                     ZStack {
                         Color(.systemBackground)
                         item.color.opacity(0.03)
+                        // [v3] 裝飾性 bokeh 光暈圓（右上偏移，對齊 hero card bokeh 設計語言）
+                        Circle()
+                            .fill(item.color.opacity(0.12))
+                            .blur(radius: 10)
+                            .frame(width: 36, height: 36)
+                            .offset(x: 16, y: -14)
+                            .allowsHitTesting(false)
                     }
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 14))
+                // [v3] 玻璃光澤 + 邊框合併為單一 overlay（減少 modifier 層數）
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(item.color.opacity(0.10), lineWidth: 0.75)
+                    ZStack {
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.15), Color.clear],
+                            startPoint: .top,
+                            endPoint: .center
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(item.color.opacity(0.10), lineWidth: 0.75)
+                    }
                 )
                 .shadow(color: item.color.opacity(0.12), radius: 8, x: 0, y: 3)
                 .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
@@ -273,11 +300,37 @@ struct FamilyView: View {
                 Text("尚無家庭成員")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.primary.opacity(0.65))
-                Text("點右上角 + 新增第一位家庭成員")
+                Text("建立家庭成員檔案，記錄生日與重要紀念日")
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
             }
+
+            // [v3] CTA 按鈕：對齊 CareerView v3 / FixedExpenseView / VariableExpenseView emptyState 規格
+            Button {
+                if subscription.isPremium { showAdd = true }
+                else { showPremiumAlert = true }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("新增家庭成員")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 11)
+                .background(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.78)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(Capsule())
+                .shadow(color: accent.opacity(0.38), radius: 8, x: 0, y: 4)
+            }
+            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
@@ -334,7 +387,8 @@ struct FamilyView: View {
                             )
                         )
                         .frame(width: 44, height: 44)
-                        .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
+                        // [v3] 陰影強度提升（radius 6→8, opacity 0.22→0.28），對齊 FixedExpenseRow / CareerRow v3 規格
+                        .shadow(color: accent.opacity(0.28), radius: 8, x: 0, y: 4)
                     // [v2] 細邊框：對齊 CareerView v2 / VehicleView v3 / StockView v3 圖示圓規格
                     Circle()
                         .stroke(accent.opacity(0.18), lineWidth: 0.75)
