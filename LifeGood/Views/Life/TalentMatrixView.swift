@@ -131,6 +131,20 @@ extension Subordinate {
 //      對齊 SubordinateView.activeSubordinatesSectionHeader / TaxOverviewView sectionHeader 規格。
 //   9. 主 VStack 包裹於 ScrollView：因英雄卡 + 散布圖 + 圖例總高超出螢幕，
 //      包裹 ScrollView 使用戶可自然上滑查閱圖例；breakdownCard 懸浮層維持 ZStack 疊加不受影響。
+// [2026-06 v3] 本次美化方向：
+//  10. chart 散布點標籤：從灰色純文字升級為彩色 Capsule 徽章（顏色對應象限），
+//      視覺上名字與點顏色一致，對齊全 App Capsule stroke 膠囊規格。
+//  11. legendRow 人數徽章：各象限圖例列右側新增「X 人」Capsule 計數膠囊，
+//      對齊 SubordinateView / TaxOverviewView sectionHeader 計數膠囊規格。
+//  12. breakdownCard 象限標籤：評分卡頭部在主動/潛力分數膠囊旁新增「明星/潛力股/
+//      苦勞型/待加強」象限膠囊，顏色對應象限色，直觀顯示矩陣位置。
+//  13. heroKpiCell 計數著色：KPI 格象限人數從固定白色改為對應象限色（>0 時），
+//      視覺對照更直觀，對齊 FinanceChartView.heroKpiCell 動態著色規格。
+//  14. chart + quadrantLegend 進場動畫：補 opacity 淡入（延遲 0.10s / 0.18s），
+//      與英雄卡 heroCardAppeared spring 動畫形成視覺梯次感。
+//  15. 象限人數計算抽取為 computed properties（starCount / potentialCount /
+//      hardWorkerCount / needsImprovCount）+ quadrantLabel() helper，
+//      供英雄卡與圖例雙用，消除重複計算。
 
 // MARK: - 人才矩陣（主動性 × 潛力 散布圖）
 
@@ -143,6 +157,9 @@ struct TalentMatrixView: View {
     @State private var emptyPulse = false
     // [v2] 英雄摘要卡進場動畫旗標
     @State private var heroCardAppeared = false
+    // [v3] 散布圖 + 圖例進場動畫旗標
+    @State private var chartAppeared = false
+    @State private var legendAppeared = false
 
     private var members: [Subordinate] {
         lifeStore.subordinates
@@ -223,10 +240,6 @@ struct TalentMatrixView: View {
 
     private var summaryHeroCard: some View {
         let total = members.count
-        let starCount = members.filter { Double($0.proactivityScore) >= xMid && Double($0.potentialScore) >= yMid }.count
-        let potentialCount = members.filter { Double($0.proactivityScore) < xMid && Double($0.potentialScore) >= yMid }.count
-        let hardWorkerCount = members.filter { Double($0.proactivityScore) >= xMid && Double($0.potentialScore) < yMid }.count
-        let needsImprovCount = members.filter { Double($0.proactivityScore) < xMid && Double($0.potentialScore) < yMid }.count
 
         return VStack(spacing: 0) {
             // 頂部：人數大字 + 部門膠囊副標
@@ -327,12 +340,12 @@ struct TalentMatrixView: View {
         }
     }
 
-    // KPI 單格：白色大數字 + 小標籤
+    // [v3] KPI 單格：>0 時數字用象限對應色，視覺對照更直觀
     private func heroKpiCell(count: Int, label: String, color: Color) -> some View {
         VStack(spacing: 4) {
             Text("\(count)")
                 .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(count > 0 ? color : .white.opacity(0.38))
                 .contentTransition(.numericText())
             Text(label)
                 .font(.system(size: 9, weight: .medium))
@@ -383,6 +396,24 @@ struct TalentMatrixView: View {
     private var xMid: Double { (xDomain.lowerBound + xDomain.upperBound) / 2 }
     private var yMid: Double { (yDomain.lowerBound + yDomain.upperBound) / 2 }
 
+    // [v3] 象限人數 computed properties（供英雄卡 + 圖例雙用，消除重複計算）
+    private var starCount: Int        { members.filter { Double($0.proactivityScore) >= xMid && Double($0.potentialScore) >= yMid }.count }
+    private var potentialCount: Int   { members.filter { Double($0.proactivityScore) < xMid  && Double($0.potentialScore) >= yMid }.count }
+    private var hardWorkerCount: Int  { members.filter { Double($0.proactivityScore) >= xMid && Double($0.potentialScore) < yMid  }.count }
+    private var needsImprovCount: Int { members.filter { Double($0.proactivityScore) < xMid  && Double($0.potentialScore) < yMid  }.count }
+
+    // [v3] 象限標籤 helper（依個人分數回傳名稱與對應色）
+    private func quadrantLabel(_ m: Subordinate) -> (name: String, color: Color) {
+        let hiX = Double(m.proactivityScore) >= xMid
+        let hiY = Double(m.potentialScore) >= yMid
+        switch (hiY, hiX) {
+        case (true, true):   return ("明星", .green)
+        case (true, false):  return ("潛力股", .blue)
+        case (false, true):  return ("苦勞型", .orange)
+        default:             return ("待加強", .red)
+        }
+    }
+
     private func pointColor(_ m: Subordinate) -> Color {
         let hiX = Double(m.proactivityScore) >= xMid
         let hiY = Double(m.potentialScore) >= yMid
@@ -411,11 +442,16 @@ struct TalentMatrixView: View {
                 )
                 .symbolSize(140)
                 .foregroundStyle(pointColor(m))
+                // [v3] 升級為彩色 Capsule 徽章，顏色對應象限色，與散點視覺一致
                 .annotation(position: .top, spacing: 1) {
                     Text(m.name.isEmpty ? "未命名" : m.name)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(pointColor(m))
                         .lineLimit(1)
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(pointColor(m).opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(pointColor(m).opacity(0.22), lineWidth: 0.5))
                 }
             }
         }
@@ -436,6 +472,11 @@ struct TalentMatrixView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.15), lineWidth: 0.75))
         .padding(.horizontal)
+        // [v3] 進場淡入，英雄卡後輕微延遲呈現
+        .opacity(chartAppeared ? 1 : 0)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.38).delay(0.10)) { chartAppeared = true }
+        }
     }
 
     // [v1] 升級為白底卡片 + Capsule 漸層側條 section header，對齊全 App 設計語言
@@ -457,10 +498,10 @@ struct TalentMatrixView: View {
             }
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
 
-            legendRow(.green,  "明星",  "高潛力・高主動")
-            legendRow(.blue,   "潛力股", "高潛力・低主動")
-            legendRow(.orange, "苦勞型", "低潛力・高主動")
-            legendRow(.red,    "待加強", "低潛力・低主動")
+            legendRow(.green,  "明星",  "高潛力・高主動", count: starCount)
+            legendRow(.blue,   "潛力股", "高潛力・低主動", count: potentialCount)
+            legendRow(.orange, "苦勞型", "低潛力・高主動", count: hardWorkerCount)
+            legendRow(.red,    "待加強", "低潛力・低主動", count: needsImprovCount)
 
             Spacer(minLength: 10)
         }
@@ -469,10 +510,16 @@ struct TalentMatrixView: View {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.10), lineWidth: 0.75))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+        // [v3] 進場淡入，最後出現形成視覺梯次
+        .opacity(legendAppeared ? 1 : 0)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.38).delay(0.18)) { legendAppeared = true }
+        }
     }
 
     // [v1] 升級為 28pt 漸層圓 + stroke + 主/副標題，對齊 FinanceChartView 圖例列規格
-    private func legendRow(_ color: Color, _ title: String, _ subtitle: String) -> some View {
+    // [v3] 新增 count 人數膠囊，讓圖例同時顯示各象限實際人數
+    private func legendRow(_ color: Color, _ title: String, _ subtitle: String, count: Int) -> some View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
@@ -495,6 +542,14 @@ struct TalentMatrixView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            // [v3] 象限人數膠囊
+            Text("\(count) 人")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(color.opacity(0.10))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.5))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
@@ -542,6 +597,8 @@ struct TalentMatrixView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(m.name.isEmpty ? "未命名" : m.name)
                         .font(.subheadline.weight(.bold))
+                    // [v3] 象限標籤：直觀顯示此人的矩陣位置，對應象限色
+                    let ql = quadrantLabel(m)
                     HStack(spacing: 5) {
                         Text("主動 \(m.proactivityScore)")
                             .font(.caption2.weight(.semibold))
@@ -557,6 +614,13 @@ struct TalentMatrixView: View {
                             .background(Color.indigo.opacity(0.10))
                             .clipShape(Capsule())
                             .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.5))
+                        Text(ql.name)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(ql.color)
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(ql.color.opacity(0.10))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(ql.color.opacity(0.25), lineWidth: 0.75))
                     }
                 }
                 Spacer()
