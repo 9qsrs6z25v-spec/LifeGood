@@ -152,6 +152,9 @@ struct VehicleView: View {
                                             if let id = ve.linkedExpenseId { linkedIds.insert(id) }
                                         }
                                         if !linkedIds.isEmpty {
+                                            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
+                                                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+                                            }
                                             expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
                                         }
                                         store.deleteVehicle(item)

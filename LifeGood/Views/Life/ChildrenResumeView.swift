@@ -346,7 +346,7 @@ struct ChildrenResumeView: View {
                     Circle()
                         .stroke(accent.opacity(0.18), lineWidth: 0.75)
                         .frame(width: 44, height: 44)
-                    Image(systemName: isSon ? "figure.child" : "figure.child")
+                    Image(systemName: isSon ? "figure.child" : "figure.child.and.lock")
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(accent)
                 }
