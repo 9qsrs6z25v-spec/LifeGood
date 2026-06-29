@@ -370,8 +370,9 @@ struct StockView: View {
     // MARK: - 刪除
 
     private func deleteStock(_ item: Stock) {
-        if let expId = item.linkedExpenseId {
-            expenseStore.expenses.removeAll { $0.id == expId }
+        if let expId = item.linkedExpenseId,
+           let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
+            expenseStore.delete(exp)
         }
         if let incId = item.linkedIncomeId {
             expenseStore.incomes.removeAll { $0.id == incId }

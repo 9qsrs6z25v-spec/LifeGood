@@ -392,6 +392,7 @@ struct AddExpenseView: View {
             .onChange(of: fixedLinkVehicleId) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: selectedFixedCategory) { _, _ in applyAutoTitleIfLinked() }
             .onChange(of: selectedLoanSubCategory) { _, _ in applyAutoTitleIfLinked() }
+            .onDisappear { completerDebounceTask?.cancel() }
         }
     }
 

@@ -59,6 +59,8 @@ struct FinanceOverviewView: View {
     @State private var cashFlowSectionAppeared = false
     // [v4] totalAssetsCard mini 彩條左展開動畫旗標
     @State private var miniBarAppeared = false
+    // mini 彩條延遲 Task（可在 onDisappear 取消，防止孤兒更新造成動畫時序錯誤）
+    @State private var miniBarTask: Task<Void, Never>?
 
     private var insuranceValueNTD: Double {
         let rates = expenseStore.currencyRates.reduce(into: ["NT$": 1.0]) { $0[$1.code] = $1.rate }
@@ -88,12 +90,23 @@ struct FinanceOverviewView: View {
                             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                                 _ = appearedCards.insert("total")
                             }
-                            // [v4] 卡片進場後 0.45s 觸發 mini 彩條左展開
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                            // [v4] 卡片進場後 0.45s 觸發 mini 彩條左展開；
+                            // 使用 Task 取代 DispatchQueue.main.asyncAfter，
+                            // 使 onDisappear 能取消進行中的計時，防止孤兒更新在
+                            // 快速離開/返回時造成彩條動畫略過（miniBarAppeared 提早被設為 true）
+                            miniBarTask?.cancel()
+                            miniBarTask = Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 450_000_000)
+                                guard !Task.isCancelled else { return }
                                 miniBarAppeared = true
                             }
                         }
-                        .onDisappear { appearedCards.remove("total"); miniBarAppeared = false }
+                        .onDisappear {
+                            appearedCards.remove("total")
+                            miniBarAppeared = false
+                            miniBarTask?.cancel()
+                            miniBarTask = nil
+                        }
 
                     assetCards
                     allocationSection(allocations)
