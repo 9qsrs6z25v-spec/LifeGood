@@ -160,6 +160,87 @@ struct SubordinateView: View {
         return rows
     }
 
+    // MARK: - 列表內容（拆分以降低型別檢查負擔）
+
+    @ViewBuilder
+    private var subordinateSections: some View {
+        // 部門篩選列（有定義部門才顯示）
+        if !lifeStore.departments.isEmpty {
+            Section {
+                departmentFilterBar
+                    .listRowInsets(EdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 12))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+        }
+
+        // 部屬列表 sectionHeader（4pt Capsule 側條 + 計數徽章）
+        Section {
+            activeSubordinatesSectionHeader
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 2, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .opacity(headerAppeared ? 1 : 0)
+                .offset(y: headerAppeared ? 0 : 8)
+                .onAppear {
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.80).delay(0.12)) {
+                        headerAppeared = true
+                    }
+                }
+        }
+
+        if filteredSubordinates.isEmpty {
+            Section {
+                Text("此部門尚無部屬")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 24)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+        } else {
+            ForEach(Array(displayRows.enumerated()), id: \.element.id) { idx, row in
+                listRow(row, idx: idx)
+            }
+            .onDelete { offsets in
+                guard subscription.isPremium else { showPremiumAlert = true; return }
+                let rows = displayRows
+                let items = offsets.compactMap { off -> Subordinate? in
+                    guard off < rows.count, case .person(let s) = rows[off] else { return nil }
+                    return s
+                }
+                items.forEach { lifeStore.deleteSubordinate($0) }
+            }
+            .onMove { from, to in
+                guard subscription.isPremium else { showPremiumAlert = true; return }
+                // 僅在「手動排序 + 全部部門」的平面清單下允許拖曳，offset 才與底層陣列一致
+                guard sortOption == .manual, selectedDeptId == nil else { return }
+                lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func listRow(_ row: ListRow, idx: Int) -> some View {
+        switch row {
+        case .header(let area):
+            plantAreaHeader(area)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        case .person(let sub):
+            subordinateRow(sub)
+                .contentShape(Rectangle())
+                .onTapGesture { viewingItem = sub }
+                .opacity(rowsAppeared ? 1 : 0)
+                .offset(y: rowsAppeared ? 0 : 14)
+                .animation(
+                    .spring(response: 0.45, dampingFraction: 0.82).delay(0.05 * Double(min(idx, 12))),
+                    value: rowsAppeared
+                )
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -188,77 +269,7 @@ struct SubordinateView: View {
                             .listRowSeparator(.hidden)
                     }
                 } else {
-                    // 部門篩選列（有定義部門才顯示）
-                    if !lifeStore.departments.isEmpty {
-                        Section {
-                            departmentFilterBar
-                                .listRowInsets(EdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 12))
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                        }
-                    }
-
-                    // [2026-06 v2] 部屬列表 sectionHeader（4pt Capsule 側條 + 計數徽章）
-                    Section {
-                        activeSubordinatesSectionHeader
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 2, trailing: 16))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .opacity(headerAppeared ? 1 : 0)
-                            .offset(y: headerAppeared ? 0 : 8)
-                            .onAppear {
-                                withAnimation(.spring(response: 0.45, dampingFraction: 0.80).delay(0.12)) {
-                                    headerAppeared = true
-                                }
-                            }
-                    }
-
-                    if filteredSubordinates.isEmpty {
-                        Section {
-                            Text("此部門尚無部屬")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.vertical, 24)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                        }
-                    } else {
-                        ForEach(Array(displayRows.enumerated()), id: \.element.id) { idx, row in
-                            switch row {
-                            case .header(let area):
-                                plantAreaHeader(area)
-                                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
-                                    .listRowBackground(Color.clear)
-                                    .listRowSeparator(.hidden)
-                            case .person(let sub):
-                                subordinateRow(sub)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { viewingItem = sub }
-                                    .opacity(rowsAppeared ? 1 : 0)
-                                    .offset(y: rowsAppeared ? 0 : 14)
-                                    .animation(
-                                        .spring(response: 0.45, dampingFraction: 0.82)
-                                            .delay(0.05 * Double(min(idx, 12))),
-                                        value: rowsAppeared
-                                    )
-                            }
-                        }
-                        .onDelete { offsets in
-                            guard subscription.isPremium else { showPremiumAlert = true; return }
-                            let rows = displayRows
-                            let items = offsets.compactMap { off -> Subordinate? in
-                                guard off < rows.count, case .person(let s) = rows[off] else { return nil }
-                                return s
-                            }
-                            items.forEach { lifeStore.deleteSubordinate($0) }
-                        }
-                        .onMove { from, to in
-                            guard subscription.isPremium else { showPremiumAlert = true; return }
-                            // 僅在「手動排序 + 全部部門」的平面清單下允許拖曳，offset 才與底層陣列一致
-                            guard sortOption == .manual, selectedDeptId == nil else { return }
-                            lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
-                        }
-                    }
+                    subordinateSections
                 }
             }
             .environment(\.editMode, sortOption == .manual ? .constant(.active) : .constant(.inactive))

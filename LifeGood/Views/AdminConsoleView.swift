@@ -299,60 +299,69 @@ struct ChangelogListView: View {
             ForEach(Changelog.entries) { entry in
                 Section {
                     ForEach(Array(entry.notes.enumerated()), id: \.offset) { _, note in
-                        HStack(alignment: .top, spacing: 10) {
-                            // 升級：7pt 藍色漸層 bullet 點（對齊 StockDetailView bullet 規格）
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.blue, Color.indigo.opacity(0.80)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 7, height: 7)
-                                .padding(.top, 5)
-                            Text(note).font(.subheadline)
-                        }
+                        changelogRow(note)
                     }
                 } header: {
-                    HStack(spacing: 6) {
-                        // 升級：版本號 LinearGradient Capsule 徽章（藍→靛）
-                        Text("v\(entry.version)")
-                            .font(.caption.weight(.bold))
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 3.5)
-                            .background(
-                                Capsule()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [Color.blue, Color.indigo],
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        )
-                                    )
-                            )
-                            .foregroundStyle(.white)
-
-                        Text("build \(entry.build)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Spacer()
-
-                        // 升級：日期 Capsule 徽章（tertiarySystemFill + stroke 0.6pt）
-                        Text(entry.date)
-                            .font(.caption2)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color(.tertiarySystemFill)))
-                            .overlay(Capsule().stroke(Color.separator.opacity(0.40), lineWidth: 0.6))
-                            .foregroundStyle(.secondary)
-                    }
-                    .textCase(nil)
+                    changelogHeader(entry)
                 }
             }
         }
         .navigationTitle("版本更新紀錄")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // 拆分為獨立子視圖，避免單一表達式過於複雜導致型別檢查逾時
+    private func changelogRow(_ note: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            // 7pt 藍色漸層 bullet 點
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.blue, Color.indigo.opacity(0.80)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 7, height: 7)
+                .padding(.top, 5)
+            Text(note).font(.subheadline)
+        }
+    }
+
+    private func changelogHeader(_ entry: ChangelogEntry) -> some View {
+        HStack(spacing: 6) {
+            // 版本號 LinearGradient Capsule 徽章（藍→靛）
+            Text("v\(entry.version)")
+                .font(.caption.weight(.bold))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3.5)
+                .background(
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.blue, Color.indigo],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+                .foregroundStyle(.white)
+
+            Text("build \(entry.build)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            // 日期 Capsule 徽章（tertiarySystemFill + stroke 0.6pt）
+            Text(entry.date)
+                .font(.caption2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color(.tertiarySystemFill)))
+                .overlay(Capsule().stroke(Color.separator.opacity(0.40), lineWidth: 0.6))
+                .foregroundStyle(.secondary)
+        }
+        .textCase(nil)
     }
 }

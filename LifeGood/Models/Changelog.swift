@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.09", build: 565, date: "2026/06/29", notes: [
+            "修正建置失敗（兩個型別檢查逾時錯誤）：將 SubordinateView 的清單內容（部門篩選 / 廠區分組 / 列表）拆分為 subordinateSections、listRow 子視圖；將 ChangelogListView 的版本列與標題拆分為 changelogRow、changelogHeader 子視圖。"
+        ]),
         ChangelogEntry(version: "23.07", build: 564, date: "2026/06/29", notes: [
             "【靜態除錯 v23.07 / build 564】修復六個空狀態脈衝動畫旗標未在 onAppear 重置的問題。根本原因：DispatchQueue.main.asyncAfter 排定的 block 可能在 onDisappear 之後才觸發（例如使用者在延遲時間內快速切換頁籤），導致 emptyIconPulse / orgEmptyPulse 被設為 true 後停留不歸零；下次進入頁面時旗標已為 true，.animation(.repeatForever, value:) 等不到 false→true 轉換，脈衝圓停在展開/淡出的終止狀態（opacity 0、scale 放大），空狀態圖示旁的呼吸動畫消失。修復方式：在每個 onAppear 閉包內的 asyncAfter 呼叫之前先將旗標重置為 false，確保每次進場均能觸發完整的 false→true 動畫轉換，對齊既有 LifeOverviewView.emptyMilestonePulse / CareerView / FoodMapView / SubordinateRosterView 以 onDisappear 歸零的正確規格。受影響檔案：① SubordinateView（emptyIconPulse）② OrganizationView（orgEmptyPulse）③ LifeRealEstateView（emptyIconPulse）④ SpouseResumeView（emptyIconPulse）⑤ ChildrenResumeView（emptyIconPulse）⑥ BusinessCardView（emptyIconPulse，僅非搜尋分支）。其餘：無 force unwrap（!）、無 as! 強制轉型；CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、@Published 主執行緒隔離均正常。"
         ]),
