@@ -220,6 +220,51 @@ struct SubordinateView: View {
         }
     }
 
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            HStack(spacing: 12) {
+                Button { showTalentMatrix = true } label: {
+                    Image(systemName: "chart.dots.scatter").font(.title3).foregroundStyle(.blue)
+                }
+                Button { showRoster = true } label: {
+                    Image(systemName: "calendar.day.timeline.left").font(.title3).foregroundStyle(.blue)
+                }
+                sortMenu
+                Button {
+                    if subscription.isPremium { showAdd = true } else { showPremiumAlert = true }
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                }
+            }
+        }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(SubordinateSortOption.allCases) { option in
+                Button {
+                    if sortOption == option {
+                        sortAscending.toggle()
+                    } else {
+                        sortOptionRaw = option.rawValue
+                        sortAscending = true
+                    }
+                } label: {
+                    Label {
+                        Text(option.rawValue)
+                    } icon: {
+                        Image(systemName: sortOption == option
+                              ? (sortAscending ? "chevron.up" : "chevron.down")
+                              : option.icon)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle").font(.title3).foregroundStyle(.green)
+        }
+    }
+
     @ViewBuilder
     private func listRow(_ row: ListRow, idx: Int) -> some View {
         switch row {
@@ -278,58 +323,7 @@ struct SubordinateView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("部屬")
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button {
-                            showTalentMatrix = true
-                        } label: {
-                            Image(systemName: "chart.dots.scatter")
-                                .font(.title3).foregroundStyle(.blue)
-                        }
-
-                        Button {
-                            showRoster = true
-                        } label: {
-                            Image(systemName: "calendar.day.timeline.left")
-                                .font(.title3).foregroundStyle(.blue)
-                        }
-
-                        Menu {
-                            ForEach(SubordinateSortOption.allCases) { option in
-                                Button {
-                                    if sortOption == option {
-                                        sortAscending.toggle()
-                                    } else {
-                                        sortOptionRaw = option.rawValue
-                                        sortAscending = true
-                                    }
-                                } label: {
-                                    Label {
-                                        Text(option.rawValue)
-                                    } icon: {
-                                        if sortOption == option {
-                                            Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
-                                        } else {
-                                            Image(systemName: option.icon)
-                                        }
-                                    }
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "arrow.up.arrow.down.circle")
-                                .font(.title3).foregroundStyle(.green)
-                        }
-
-                        Button {
-                            if subscription.isPremium { showAdd = true }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
-                        }
-                    }
-                }
-            }
+            .toolbar { toolbarContent }
             .onAppear {
                 withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
                     rowsAppeared = true

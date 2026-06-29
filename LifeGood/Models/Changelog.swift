@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.10", build: 566, date: "2026/06/29", notes: [
+            "修正建置失敗：① ChangelogListView 誤用 Color.separator（應為 Color(.separator)）導致型別不符；② SubordinateView 工具列表達式過大，抽出 toolbarContent 與 sortMenu 子視圖以通過型別檢查。"
+        ]),
         ChangelogEntry(version: "23.09", build: 565, date: "2026/06/29", notes: [
             "修正建置失敗（兩個型別檢查逾時錯誤）：將 SubordinateView 的清單內容（部門篩選 / 廠區分組 / 列表）拆分為 subordinateSections、listRow 子視圖；將 ChangelogListView 的版本列與標題拆分為 changelogRow、changelogHeader 子視圖。"
         ]),

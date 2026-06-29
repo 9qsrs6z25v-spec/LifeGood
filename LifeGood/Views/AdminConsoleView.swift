@@ -359,7 +359,7 @@ struct ChangelogListView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(Capsule().fill(Color(.tertiarySystemFill)))
-                .overlay(Capsule().stroke(Color.separator.opacity(0.40), lineWidth: 0.6))
+                .overlay(Capsule().stroke(Color(.separator).opacity(0.40), lineWidth: 0.6))
                 .foregroundStyle(.secondary)
         }
         .textCase(nil)
