@@ -337,8 +337,9 @@ struct SubordinateView: View {
                     headerAppeared = false
                 }
             }
-            .onChange(of: lifeStore.departments) { _, depts in
-                if let id = selectedDeptId, !depts.contains(where: { $0.id == id }) {
+            .onChange(of: lifeStore.departments.map(\.id)) { _, ids in
+                // 所選部門被刪除時，篩選回復為「全部部門」（用 id 陣列觀察，避免 Department 需 Equatable）
+                if let id = selectedDeptId, !ids.contains(id) {
                     filterDeptRaw = ""
                 }
             }
