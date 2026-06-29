@@ -31,7 +31,10 @@ class BackupManager {
     func createSnapshot(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> URL? {
         // JSON 編碼需存取 @Published 屬性，必須在呼叫端（主執行緒）完成
         let data = UnifiedExporter.exportJSON(expense: expense, finance: finance, life: life)
-        let ts = Int(Date().timeIntervalSince1970)
+        // 統一使用同一個 Date 實例：檔名時間戳與 lastSnapshotDate 保持一致，
+        // 避免兩次 Date() 因執行緒切換產生些微落差造成 availableSnapshots() 比對偏差。
+        let now = Date()
+        let ts = Int(now.timeIntervalSince1970)
         let url = backupDir.appendingPathComponent("backup_\(ts).json")
         // 檔案寫入與清理移到背景佇列，避免阻塞主執行緒造成 UI 卡頓
         // lastSnapshotDate 在寫入成功後才更新，避免 App 被 kill 時留下
@@ -39,7 +42,7 @@ class BackupManager {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
                 try data.write(to: url, options: .atomic)
-                DispatchQueue.main.async { self?.lastSnapshotDate = Date() }
+                DispatchQueue.main.async { self?.lastSnapshotDate = now }
             } catch {
                 // 寫入失敗：不更新時間戳，讓下次 createSnapshotIfNeeded 能再試一次
             }

@@ -190,12 +190,12 @@ struct StockView: View {
         var success = 0
         var fail = 0
 
+        var priceUpdates: [UUID: Double] = [:]
         for stock in targets {
             if let price = await fetchPrice(symbol: stock.symbol) {
-                // 每次 await 後直接更新對應條目，避免 snapshot 覆蓋期間其他人（CloudKit sync）的修改
-                if let idx = store.stocks.firstIndex(where: { $0.id == stock.id }) {
-                    store.stocks[idx].currentPrice = price
-                }
+                priceUpdates[stock.id] = price
+                // fetchStatus 逐筆更新提供即時角標回饋（綠/紅點），
+                // 本次 @State 更新不引發 store 序列化，成本可接受
                 fetchStatus[stock.id] = true
                 success += 1
             } else {
@@ -203,6 +203,10 @@ struct StockView: View {
                 fail += 1
             }
         }
+        // 批次套用全部現價：單次 @Published → 單次重繪 + 單次 JSON 序列化 + 單次 CloudKit push，
+        // 避免逐筆 stocks[idx] 賦值造成 N 次連鎖重繪與 N 次 UserDefaults 寫入。
+        // 僅修改 currentPrice，其餘欄位保留最新值，不影響並行 CloudKit 同步其他欄位。
+        store.batchUpdateStockPrices(priceUpdates)
 
         withAnimation { isUpdating = false }
 

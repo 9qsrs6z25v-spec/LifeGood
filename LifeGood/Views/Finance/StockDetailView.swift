@@ -312,14 +312,11 @@ struct StockDetailView: View {
             }
         }
         // [v3] 進場動畫，對齊 SavingsInsuranceView / RealEstateDetailView 閃卡規格
+        // 只保留 .animation modifier，移除重複的 withAnimation wrapper，避免兩個動畫上下文同時作用
         .opacity(cardAppeared ? 1 : 0)
         .offset(y: cardAppeared ? 0 : 14)
         .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04), value: cardAppeared)
-        .onAppear {
-            withAnimation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04)) {
-                cardAppeared = true
-            }
-        }
+        .onAppear { cardAppeared = true }
         .padding(.horizontal, 24)
         .padding(.top, 16)
     }

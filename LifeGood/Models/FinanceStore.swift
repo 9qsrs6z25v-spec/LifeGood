@@ -52,6 +52,19 @@ class FinanceStore: ObservableObject {
     func deleteStock(at offsets: IndexSet) { stocks.remove(atOffsets: offsets) }
     func deleteStock(_ item: Stock) { stocks.removeAll { $0.id == item.id } }
 
+    /// 批次更新多筆股票現價：單次 @Published 觸發（一次重繪、一次 JSON 序列化、一次 CloudKit 推送），
+    /// 避免逐筆 stocks[idx].currentPrice = price 造成 N 次串聯重繪。
+    func batchUpdateStockPrices(_ updates: [UUID: Double]) {
+        guard !updates.isEmpty else { return }
+        var updated = stocks
+        for idx in updated.indices {
+            if let price = updates[updated[idx].id] {
+                updated[idx].currentPrice = price
+            }
+        }
+        stocks = updated
+    }
+
     // MARK: - 汽車 CRUD
 
     func add(_ item: Vehicle) { vehicles.append(item) }

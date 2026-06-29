@@ -181,9 +181,11 @@ final class CloudKitManager {
             }
             let record = existing ?? CKRecord(recordType: Self.kvBlobRecordType, recordID: recID)
 
-            // JSON 寫到暫存檔做為 CKAsset
+            // JSON 寫到暫存檔做為 CKAsset；使用確定性檔名（不含 UUID），
+            // 若行程在 write 後、cleanup 前被 kill，下次上傳同一 key 會直接覆蓋舊檔，
+            // 避免 UUID 命名造成孤兒檔無限累積。queue 為 serial，同一 key 不會並行上傳。
             let tmp = FileManager.default.temporaryDirectory
-                .appendingPathComponent("kv_\(key)_\(UUID().uuidString).json")
+                .appendingPathComponent("kv_\(key).json")
             do {
                 try data.write(to: tmp, options: .atomic)
             } catch {

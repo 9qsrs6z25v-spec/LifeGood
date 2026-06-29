@@ -399,7 +399,8 @@ class ExpenseStore: ObservableObject {
         let formatter = Self.chartDayFormatter
         let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
 
-        // 預先計算每週的起訖時間（O(12)），再 O(n) 掃描所有支出指派到對應的週
+        // 預先計算每週的起訖時間（O(12)），再以「日期偏移量 ÷ 7」直接計算週索引（真正 O(n)），
+        // 修正原本 O(n×12) 內層迴圈與注釋不符的問題。
         var weekRanges: [(start: Date, end: Date)] = []
         for weekOffset in (0..<12).reversed() {
             guard let ws = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: now) else { continue }
@@ -408,10 +409,14 @@ class ExpenseStore: ObservableObject {
             weekRanges.append((startOfWs, we))
         }
         var variableByWeek: [Date: Double] = [:]
-        for e in expenses where e.expenseType == .variable {
-            for range in weekRanges where e.date >= range.start && e.date < range.end {
-                variableByWeek[range.start, default: 0] += e.amount
-                break
+        if let cutoff = weekRanges.first?.start {
+            for e in expenses where e.expenseType == .variable {
+                let eDay = calendar.startOfDay(for: e.date)
+                guard eDay >= cutoff,
+                      let dayOffset = calendar.dateComponents([.day], from: cutoff, to: eDay).day else { continue }
+                let weekIndex = dayOffset / 7
+                guard weekIndex < weekRanges.count else { continue }
+                variableByWeek[weekRanges[weekIndex].start, default: 0] += e.amount
             }
         }
 
