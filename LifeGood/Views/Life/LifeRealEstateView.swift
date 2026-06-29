@@ -421,6 +421,7 @@ struct LifeRealEstateView: View {
                     .foregroundStyle(accent.opacity(0.75))
             }
             .onAppear {
+                emptyIconPulse = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     emptyIconPulse = true
                 }

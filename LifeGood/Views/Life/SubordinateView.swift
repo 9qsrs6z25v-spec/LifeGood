@@ -612,6 +612,7 @@ struct SubordinateView: View {
                     .foregroundStyle(accent.opacity(0.72))
             }
             .onAppear {
+                emptyIconPulse = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     emptyIconPulse = true
                 }

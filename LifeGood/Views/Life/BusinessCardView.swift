@@ -650,6 +650,7 @@ struct BusinessCardView: View {
             }
             .onAppear {
                 if !isSearching {
+                    emptyIconPulse = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         emptyIconPulse = true
                     }

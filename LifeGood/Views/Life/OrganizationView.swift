@@ -194,6 +194,7 @@ struct OrganizationView: View {
                     .foregroundStyle(Color.indigo.opacity(0.72))
             }
             .onAppear {
+                orgEmptyPulse = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     orgEmptyPulse = true
                 }
