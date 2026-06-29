@@ -22,6 +22,37 @@ import PhotosUI
 //       - memberGiftsSection 金額改 Capsule 徽章（pink.opacity(0.10) 底色 + stroke 0.6pt）
 //       - smartGiftAmount()：萬/億 智慧量級顯示（≥1億→億，≥1萬→萬，其餘 NT$）
 //       - photoCard 加 shadow（black.opacity(0.06)，radius 4）
+// [2026-06 v3] 本次美化方向（familyHeroCard + 圖示圓精修 + 詳細頁細節對齊）：
+//   1. FamilyMembersResumeView 頂部新增粉紅漸層英雄統計卡（familyHeroCard）：
+//      補齊全 App 主要列表頁唯一缺少頂部英雄卡的均值落差；
+//      粉紅→洋紅漸層 + 三顆散景裝飾圓 + 頂部玻璃光澤 + 白色 RoundedRectangle stroke overlay；
+//      左上 figure.2.and.child.holdinghands 圖示圓 + 「家人履歷」小標 + 右上人數膠囊；
+//      大字：總家人人數；KPI 橫列三格（直系親屬 / 兄弟姐妹 / 其他親屬）；
+//      heroCardAppeared spring 進場動畫，對齊 ResumeView.resumeHeroCard /
+//      ChildrenResumeView.heroStatsCard / CareerView.summaryCard 英雄卡規格。
+//   2. memberRow 44pt 圖示圓：補入 Circle().stroke(.white.opacity(0.30), lineWidth:0.75) overlay，
+//      對齊 FamilyView v2 / CareerView v2 / SubordinateView v2 / ResumeGiftSection 圖示圓邊框規格。
+//   3. memberRow 角色膠囊：補入 Capsule().stroke(roleColor.opacity(0.22), lineWidth:0.6)，
+//      對齊 FamilyView v2 / LifeOverviewView.categoryBreakdownSection 膠囊細邊框規格。
+//   4. memberRow familySide 膠囊：補入 Capsule().stroke(Color.secondary.opacity(0.18), lineWidth:0.6)，
+//      對齊 VehicleView v3 / StockView v3 次要資訊膠囊細邊框規格。
+//   5. sectionHeader 計數徽章：從 frame(width:32,height:18) 固定尺寸改為 padding 自適應方式，
+//      對齊 ResumeView.sectionHeader / ChildrenResumeView 計數徽章標準規格。
+//   6. List 補入 .scrollContentBackground(.hidden) + .background(systemGroupedBackground)，
+//      深色模式不再出現白色 List 背景，對齊 FixedExpenseView / ResumeView / CareerView 規格。
+//   7. FamilyMemberDetailView.headerCard：補第三顆散景圓（55pt white.opacity(0.06) offset(30,30) blur 8）
+//      + RoundedRectangle stroke(.white.opacity(0.18), 0.75pt) overlay，
+//      對齊 ChartView v4 / StockDetailView v3 / SubordinateDetailView v3 英雄卡三圓+邊框規格；
+//      角色 Capsule 補入 Capsule().stroke(.white.opacity(0.28), 0.6pt) 細邊框。
+//   8. eventsSection 入場動畫：.easeOut(duration:0.4) → .spring(response:0.5, dampingFraction:0.82)，
+//      對齊 FamilyView.statsStrip / SubordinateDetailView.eventsAppeared spring 規格。
+//   9. eventsSection event row 日曆圖示圓：補入 Circle().stroke(.orange.opacity(0.22), lineWidth:0.75)，
+//      對齊 FamilyMemberDetailView memberGiftsSection 36pt 圖示圓邊框規格統一。
+//  10. eventsSection 日期 Capsule：補入 Capsule().stroke(Color(.separator).opacity(0.20), lineWidth:0.5)，
+//      對齊 ChildDetailView v2 / SpouseResumeView v2 / CareerView v2 日期膠囊邊框規格。
+//  11. photoCard 照片日期：從純 tertiary 小字升級為「calendar icon + 日期」Capsule 徽章
+//      （tertiarySystemFill 底色 + separator 細邊框），
+//      對齊 eventsSection 日期 Capsule / ChildDetailView v2 / CareerView v2 日期規格。
 // ─────────────────────────────────────────────
 
 // MARK: - 家人履歷 列表
@@ -32,6 +63,8 @@ struct FamilyMembersResumeView: View {
     @State private var viewingMember: FamilyMember?
     @State private var rowsAppeared = false
     @State private var emptyIconPulse = false
+    // [v3] 英雄卡進場動畫旗標
+    @State private var heroCardAppeared = false
 
     private var directRelatives: [FamilyMember] {
         lifeStore.familyMembers
@@ -56,7 +89,23 @@ struct FamilyMembersResumeView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            // [v3] VStack 包住英雄卡 + 列表，補齊全 App 列表頁均值
+            VStack(spacing: 0) {
+                // [v3] 頂部英雄統計卡（有家人時才顯示）
+                if !allMembers.isEmpty {
+                    familyHeroCard
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 4)
+                        .opacity(heroCardAppeared ? 1 : 0)
+                        .offset(y: heroCardAppeared ? 0 : 20)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                heroCardAppeared = true
+                            }
+                        }
+                }
+
                 if allMembers.isEmpty {
                     emptyState
                 } else {
@@ -99,11 +148,18 @@ struct FamilyMembersResumeView: View {
                         }
                     }
                     .listStyle(.insetGrouped)
+                    // [v3] 深色模式不再顯示白色 List 背景，對齊 FixedExpenseView / ResumeView 規格
+                    .scrollContentBackground(.hidden)
+                    .background(Color(.systemGroupedBackground))
                     .onAppear {
-                        withAnimation(.easeOut(duration: 0.5).delay(0.1)) { rowsAppeared = true }
+                        // [v3] easeOut → spring，對齊全 App stagger 動畫規格
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                            rowsAppeared = true
+                        }
                     }
                 }
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("家人履歷")
             .sheet(item: $viewingMember) { member in
                 FamilyMemberDetailView(memberId: member.id)
@@ -111,7 +167,161 @@ struct FamilyMembersResumeView: View {
         }
     }
 
+    // MARK: - [v3] 頂部英雄統計卡（粉紅→洋紅漸層）
+
+    /// 補齊全 App 主要列表頁均值，列出直系 / 兄弟姐妹 / 其他親屬人數 KPI。
+    private var familyHeroCard: some View {
+        let accent = Color.pink
+        let accentDark = Color(red: 0.90, green: 0.22, blue: 0.55)
+        let total = allMembers.count
+
+        return ZStack(alignment: .topLeading) {
+            // 漸層背景（粉紅→洋紅，象徵家庭溫暖主題）
+            LinearGradient(
+                colors: [accent, accentDark],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            // 散景裝飾圓 1（右上主光暈）
+            Circle()
+                .fill(.white.opacity(0.13))
+                .frame(width: 110, height: 110)
+                .offset(x: 80, y: -35)
+                .blur(radius: 16)
+
+            // 散景裝飾圓 2（左下次光暈）
+            Circle()
+                .fill(.white.opacity(0.08))
+                .frame(width: 80, height: 80)
+                .offset(x: -70, y: 45)
+                .blur(radius: 12)
+
+            // 散景裝飾圓 3（中右微光，對齊全 App 三圓規格）
+            Circle()
+                .fill(.white.opacity(0.06))
+                .frame(width: 55, height: 55)
+                .offset(x: 35, y: 20)
+                .blur(radius: 8)
+
+            // 頂部玻璃光澤（對齊全 App 英雄卡 glass shine 統一規格）
+            LinearGradient(
+                colors: [.white.opacity(0.18), .clear],
+                startPoint: .top,
+                endPoint: .center
+            )
+
+            // 卡片內容
+            VStack(alignment: .leading, spacing: 0) {
+                // 頂部列：圖示圓 + 小標 + 人數計數膠囊
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(.white.opacity(0.22))
+                            .frame(width: 36, height: 36)
+                            .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.75))
+                        Image(systemName: "figure.2.and.child.holdinghands")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    Text("家人履歷")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.88))
+                    Spacer()
+                    HStack(spacing: 3) {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("\(total) 位")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.90))
+                    .padding(.horizontal, 9).padding(.vertical, 3.5)
+                    .background(.white.opacity(0.22))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+
+                // 大字：總人數
+                HStack(alignment: .lastTextBaseline, spacing: 6) {
+                    Text("\(total)")
+                        .font(.system(size: 42, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .minimumScaleFactor(0.65)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                    Text("位家人")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 10)
+
+                // 分隔線
+                Rectangle()
+                    .fill(.white.opacity(0.20))
+                    .frame(height: 0.5)
+                    .padding(.horizontal, 16)
+
+                // KPI 橫列（直系親屬 / 兄弟姐妹 / 其他親屬）
+                HStack(spacing: 0) {
+                    heroKpiCell(
+                        value: directRelatives.isEmpty ? "—" : "\(directRelatives.count) 位",
+                        label: "直系親屬",
+                        icon: "person.2.fill"
+                    )
+                    Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5)
+                    heroKpiCell(
+                        value: siblings.isEmpty ? "—" : "\(siblings.count) 位",
+                        label: "兄弟姐妹",
+                        icon: "person.3.fill"
+                    )
+                    Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5)
+                    heroKpiCell(
+                        value: others.isEmpty ? "—" : "\(others.count) 位",
+                        label: "其他親屬",
+                        icon: "person.circle.fill"
+                    )
+                }
+                .background(.white.opacity(0.10))
+                .padding(.top, 10)
+                .padding(.bottom, 14)
+                .padding(.horizontal, 8)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(.white.opacity(0.18), lineWidth: 0.75)
+        )
+        .shadow(color: accent.opacity(0.35), radius: 14, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
+    }
+
+    /// 英雄卡 KPI 格（值大字 + 說明小字 + 圖示），對齊 ResumeView.heroKpiCell 規格。
+    private func heroKpiCell(value: String, label: String, icon: String) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.80))
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .minimumScaleFactor(0.72)
+                .lineLimit(1)
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+
     // MARK: Section Header（Capsule 側條 + 計數徽章）
+    // [v3] 計數徽章從 frame 固定尺寸改為 padding 自適應，對齊 ResumeView.sectionHeader 規格
     private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
         HStack(spacing: 8) {
             Capsule()
@@ -121,14 +331,12 @@ struct FamilyMembersResumeView: View {
             Text(title)
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
-            Capsule()
-                .fill(color.opacity(0.12))
-                .frame(width: 32, height: 18)
-                .overlay(
-                    Text("\(count)")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(color)
-                )
+            Text("\(count) 位")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(color.opacity(0.85))
+                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                .background(color.opacity(0.10))
+                .clipShape(Capsule())
                 .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
             Spacer()
         }
@@ -146,6 +354,10 @@ struct FamilyMembersResumeView: View {
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 44, height: 44)
                     .shadow(color: roleColor.opacity(0.35), radius: 5, x: 0, y: 3)
+                // [v3] stroke 細邊框，對齊 FamilyView v2 / CareerView v2 圖示圓邊框規格
+                Circle()
+                    .stroke(.white.opacity(0.30), lineWidth: 0.75)
+                    .frame(width: 44, height: 44)
                 Image(systemName: m.role.icon)
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(.white)
@@ -161,6 +373,8 @@ struct FamilyMembersResumeView: View {
                         .background(roleColor.opacity(0.12))
                         .foregroundStyle(roleColor)
                         .clipShape(Capsule())
+                        // [v3] 角色膠囊細邊框，對齊 FamilyView v2 膠囊規格
+                        .overlay(Capsule().stroke(roleColor.opacity(0.22), lineWidth: 0.6))
                     if let side = m.familySide {
                         Text(side.rawValue)
                             .font(.caption2)
@@ -168,6 +382,8 @@ struct FamilyMembersResumeView: View {
                             .background(Color.secondary.opacity(0.10))
                             .foregroundStyle(.secondary)
                             .clipShape(Capsule())
+                            // [v3] familySide 膠囊細邊框，對齊 VehicleView v3 次要膠囊規格
+                            .overlay(Capsule().stroke(Color.secondary.opacity(0.18), lineWidth: 0.6))
                     }
                 }
                 HStack(spacing: 8) {
@@ -431,17 +647,24 @@ struct FamilyMemberDetailView: View {
                     )
                 )
 
-            // Bokeh decoration
+            // 散景裝飾圓 1（左上）
             Circle()
                 .fill(.white.opacity(0.12))
                 .blur(radius: 20)
                 .frame(width: 110, height: 110)
                 .offset(x: -70, y: -40)
+            // 散景裝飾圓 2（右下）
             Circle()
                 .fill(.white.opacity(0.07))
                 .blur(radius: 28)
                 .frame(width: 150, height: 150)
                 .offset(x: 80, y: 50)
+            // [v3] 散景裝飾圓 3（中右微光，對齊全 App 三圓規格）
+            Circle()
+                .fill(.white.opacity(0.06))
+                .frame(width: 55, height: 55)
+                .offset(x: 30, y: 30)
+                .blur(radius: 8)
 
             // 玻璃光澤（頂部高光）
             RoundedRectangle(cornerRadius: 20)
@@ -473,6 +696,8 @@ struct FamilyMemberDetailView: View {
                     .background(.white.opacity(0.2))
                     .foregroundStyle(.white)
                     .clipShape(Capsule())
+                    // [v3] 角色膠囊細邊框，對齊 ChildDetailView v2 / SpouseResumeView v2 規格
+                    .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.6))
 
                 if let bd = member.birthday {
                     Label(Self.dateFormatter.string(from: bd), systemImage: "birthday.cake.fill")
@@ -491,6 +716,11 @@ struct FamilyMemberDetailView: View {
             .padding(.vertical, 24)
         }
         .clipShape(RoundedRectangle(cornerRadius: 20))
+        // [v3] RoundedRectangle stroke overlay，對齊 StockDetailView v3 / SubordinateDetailView v3 規格
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(.white.opacity(0.18), lineWidth: 0.75)
+        )
         .shadow(color: roleColor.opacity(0.3), radius: 12, x: 0, y: 6)
         .padding(.horizontal)
         .scaleEffect(cardAppeared ? 1 : 0.96)
@@ -523,8 +753,12 @@ struct FamilyMemberDetailView: View {
                                     .fill(LinearGradient(colors: [.orange, .orange.opacity(0.65)],
                                                           startPoint: .topLeading, endPoint: .bottomTrailing))
                                     .frame(width: 36, height: 36)
+                                // [v3] 統一雙層邊框（白色外 + 橘色細描），對齊 memberGiftsSection 36pt 圖示圓規格
                                 Circle()
-                                    .stroke(.orange.opacity(0.22), lineWidth: 1)
+                                    .stroke(.white.opacity(0.25), lineWidth: 1)
+                                    .frame(width: 36, height: 36)
+                                Circle()
+                                    .stroke(.orange.opacity(0.22), lineWidth: 0.75)
                                     .frame(width: 36, height: 36)
                                 Image(systemName: "calendar")
                                     .font(.system(size: 14, weight: .medium))
@@ -554,6 +788,8 @@ struct FamilyMemberDetailView: View {
                             .padding(.horizontal, 7).padding(.vertical, 3)
                             .background(Color(.tertiarySystemFill))
                             .clipShape(Capsule())
+                            // [v3] 日期膠囊細邊框，對齊 ChildDetailView v2 / SpouseResumeView v2 規格
+                            .overlay(Capsule().stroke(Color(.separator).opacity(0.20), lineWidth: 0.5))
                         }
                         .padding(.horizontal).padding(.vertical, 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -574,7 +810,10 @@ struct FamilyMemberDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
         .onAppear {
-            withAnimation(.easeOut(duration: 0.4).delay(0.25)) { eventsAppeared = true }
+            // [v3] easeOut → spring，對齊 FamilyView.statsStrip / SubordinateDetailView spring 規格
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.18)) {
+                eventsAppeared = true
+            }
         }
     }
 
@@ -635,9 +874,19 @@ struct FamilyMemberDetailView: View {
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
                 .frame(width: 130, alignment: .leading)
-            Text(Self.dateFormatter.string(from: p.date))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            // [v3] 日期升級為 Capsule 徽章，對齊 eventsSection 日期規格
+            HStack(spacing: 4) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                Text(Self.dateFormatter.string(from: p.date))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 2.5)
+            .background(Color(.tertiarySystemFill))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color(.separator).opacity(0.20), lineWidth: 0.5))
         }
         .padding(8)
         .background(Color(.secondarySystemBackground))
