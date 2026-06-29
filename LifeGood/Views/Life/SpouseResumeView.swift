@@ -31,6 +31,25 @@ import SwiftUI
 //      對齊 IncomeView.incomeRow / OverviewView.recentRow 的圓形邊框規格
 //   E. expenseRow 日期文字 → 改為膠囊徽章（tertiarySystemFill 背景），
 //      對齊 VariableExpenseView.expenseRow 日期膠囊標準
+// [2026-06 v3] 細節升級（對齊全 App 最新標準元素）：
+//   F. heroCard 愛心圖示圓：Circle().fill(.white.opacity(0.20)) →
+//      LinearGradient([.white.opacity(0.30), .white.opacity(0.12)]) 底 +
+//      Circle().stroke(.white.opacity(0.35), 0.75pt)，對齊 ChildDetailView v2 / OrganizationView v2 英雄圖示圓規格。
+//   G. kpiCell 加入 28pt LinearGradient 半透明圖示圓（依 KPI 語意分配圖示）+
+//      contentTransition(.numericText())，對齊 ChildrenResumeView v3 heroKpiCell /
+//      SubordinateOverviewView v3 heroKpiCell 規格。
+//   H. sectionHeader 加入 icon 參數（Image(systemName:) 圖示，對齊 TaxOverviewView.sectionHeader /
+//      CareerView.milestoneListSection 標題規格），補足全 App section header 圖示元素。
+//   I. expenseRow 分類膠囊補 Capsule stroke 細邊框（accent.opacity(0.22) 0.6pt），
+//      對齊 CareerView v2 / FoodMapView v3 / LifeOverviewView.categoryBreakdownSection 膠囊邊框規格。
+//   J. 合計列（sumRow）圖示圓補 Circle().stroke(Color.red.opacity(0.18), 0.75pt)，
+//      對齊 taxSavingSection 彙總列 v3 / expenseRow 圖示圓統一描邊規格。
+//   K. emptyPlaceholder 升級：38pt 裸圓 → 雙層脈衝光環 + 漸層底圓 + 圖示，
+//      加入 emptyIconPulse 動畫旗標，對齊 TaxOverviewView v2 / VariableExpenseView emptyStateView 規格。
+//   L. milestoneRow 左側強調條：3pt RoundedRectangle(cornerRadius:2) → 4pt Capsule，
+//      對齊全 App 統一 4pt Capsule 強調條規格（TaxOverviewView.taxRecordsSection / VehicleView.vehicleCard）。
+//   M. heroCard shadow 升級雙層：補加 .shadow(color:.black.opacity(0.06), radius:8, y:4)，
+//      對齊 FamilyMembersResumeView v3 / SubordinateOverviewView v3 雙層 shadow 規格。
 
 struct SpouseResumeView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -40,6 +59,8 @@ struct SpouseResumeView: View {
     @State private var cardAppeared = false
     @State private var milestonesAppeared = false
     @State private var expensesAppeared = false
+    // [v3] 空狀態脈衝光環動畫旗標
+    @State private var emptyIconPulse = false
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
@@ -148,9 +169,18 @@ struct SpouseResumeView: View {
                     }
                 }
                 Spacer()
+                // [v3] 圖示圓升級：LinearGradient 底 + stroke 細邊框，對齊 ChildDetailView v2 規格
                 ZStack {
                     Circle()
-                        .fill(.white.opacity(0.20))
+                        .fill(
+                            LinearGradient(
+                                colors: [.white.opacity(0.30), .white.opacity(0.12)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 52, height: 52)
+                    Circle()
+                        .stroke(.white.opacity(0.35), lineWidth: 0.75)
                         .frame(width: 52, height: 52)
                     Image(systemName: s.isDivorced ? "heart.slash.fill" : "heart.fill")
                         .font(.system(size: 22, weight: .bold))
@@ -164,23 +194,23 @@ struct SpouseResumeView: View {
                 .frame(height: 0.5)
                 .padding(.vertical, 14)
 
-            // 三欄 KPI
+            // 三欄 KPI（[v3] 各格加 28pt 漸層圖示圓 + contentTransition，對齊 ChildrenResumeView v3 規格）
             HStack(spacing: 0) {
-                kpiCell(label: "結婚年數",
+                kpiCell(icon: "calendar", label: "結婚年數",
                         value: marriageComp.map { "\($0.year)年\($0.month)月" } ?? "未填寫")
 
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
 
-                kpiCell(label: "共同消費",
+                kpiCell(icon: "bag.fill", label: "共同消費",
                         value: spouseExpenseTotal.ntdWanString)
 
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
 
-                kpiCell(label: "禮金紀錄",
+                kpiCell(icon: "gift.fill", label: "禮金紀錄",
                         value: "\(spouseGifts.count) 筆")
             }
             .padding(.vertical, 8)
@@ -232,22 +262,39 @@ struct SpouseResumeView: View {
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
+        // [v3] 雙層 shadow：主色光暈 + 黑底基礎，對齊 FamilyMembersResumeView v3 / SubordinateOverviewView v3 規格
         .shadow(color: accentDark.opacity(0.42), radius: 16, x: 0, y: 8)
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 4)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)
     }
 
-    private func kpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
+    // [v3] 加入 icon 參數 + 28pt 漸層圖示圓 + contentTransition，對齊 ChildrenResumeView v3 heroKpiCell 規格
+    private func kpiCell(icon: String, label: String, value: String) -> some View {
+        VStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.28), .white.opacity(0.10)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 28, height: 28)
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+            }
             Text(value)
                 .font(.system(size: 12, weight: .bold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(1)
                 .minimumScaleFactor(0.60)
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)
@@ -255,7 +302,8 @@ struct SpouseResumeView: View {
 
     // MARK: - Section Header 共用
 
-    private func sectionHeader(title: String, color: Color, count: Int? = nil) -> some View {
+    // [v3] 加入 icon 參數，對齊 TaxOverviewView.sectionHeader / CareerView 標題規格
+    private func sectionHeader(title: String, icon: String, color: Color, count: Int? = nil) -> some View {
         HStack(spacing: 10) {
             Capsule()
                 .fill(
@@ -265,6 +313,9 @@ struct SpouseResumeView: View {
                     )
                 )
                 .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(color)
             Text(title)
                 .font(.subheadline.weight(.bold))
             Spacer()
@@ -285,7 +336,7 @@ struct SpouseResumeView: View {
 
     private func marriageSection(_ s: FamilyMember) -> some View {
         let accent = Self.heroAccent
-        return Section(header: sectionHeader(title: "婚姻紀錄", color: accent)) {
+        return Section(header: sectionHeader(title: "婚姻紀錄", icon: "heart.fill", color: accent)) {
             // 結婚日期
             marriageRow(
                 icon: "calendar.badge.checkmark",
@@ -383,7 +434,7 @@ struct SpouseResumeView: View {
             .sorted { $0.date > $1.date }
 
         return Section(
-            header: sectionHeader(title: "相關里程碑", color: accent,
+            header: sectionHeader(title: "相關里程碑", icon: "star.fill", color: accent,
                                   count: derived.isEmpty ? nil : derived.count)
         ) {
             if derived.isEmpty {
@@ -412,15 +463,15 @@ struct SpouseResumeView: View {
 
     private func milestoneRow(_ m: LifeMilestone, accent: Color) -> some View {
         HStack(alignment: .center, spacing: 0) {
-            // 左側粉紅強調條
-            RoundedRectangle(cornerRadius: 2)
+            // [v3] 左側強調條：3pt RoundedRectangle → 4pt Capsule，對齊全 App 統一強調條規格
+            Capsule()
                 .fill(
                     LinearGradient(
                         colors: [accent, accent.opacity(0.45)],
                         startPoint: .top, endPoint: .bottom
                     )
                 )
-                .frame(width: 3)
+                .frame(width: 4)
                 .padding(.vertical, 10)
                 .padding(.trailing, 12)
 
@@ -476,12 +527,12 @@ struct SpouseResumeView: View {
     private var expenseSection: some View {
         let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
         Section(
-            header: sectionHeader(title: "共同消費", color: accent,
+            header: sectionHeader(title: "共同消費", icon: "bag.fill", color: accent,
                                   count: spouseExpenses.isEmpty ? nil : spouseExpenses.count),
             footer: Text("變動支出中將「\(spouse?.chineseName ?? "配偶")」加入人員的紀錄會自動同步到此。")
         ) {
             if spouseExpenses.isEmpty {
-                emptyPlaceholder(icon: "bag", text: "尚無共同消費紀錄")
+                emptyPlaceholder(icon: "bag", text: "尚無共同消費紀錄", color: accent)
             } else {
                 // 合計列
                 HStack(spacing: 12) {
@@ -493,6 +544,10 @@ struct SpouseResumeView: View {
                                     startPoint: .topLeading, endPoint: .bottomTrailing
                                 )
                             )
+                            .frame(width: 36, height: 36)
+                        // [v3] 補 stroke 邊框，對齊 taxSavingSection 彙總列 v3 規格
+                        Circle()
+                            .stroke(Color.red.opacity(0.18), lineWidth: 0.75)
                             .frame(width: 36, height: 36)
                         Image(systemName: "sum")
                             .font(.system(size: 15, weight: .semibold))
@@ -573,6 +628,8 @@ struct SpouseResumeView: View {
                             .padding(.horizontal, 7).padding(.vertical, 2.5)
                             .background(accent.opacity(0.12))
                             .clipShape(Capsule())
+                            // [v3] 補 stroke 邊框，對齊 CareerView v2 / FoodMapView v3 膠囊邊框規格
+                            .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                     }
                     if let raw = e.diningMember, !raw.isEmpty {
                         HStack(spacing: 3) {
@@ -603,27 +660,39 @@ struct SpouseResumeView: View {
     }
 
     // MARK: - 空狀態佔位
+    // [v3] 升級：雙層脈衝光環 + 漸層底圓，對齊 TaxOverviewView v2 / VariableExpenseView emptyStateView 規格
 
-    private func emptyPlaceholder(icon: String, text: String) -> some View {
-        HStack(spacing: 14) {
+    private func emptyPlaceholder(icon: String, text: String, color: Color = Self.heroAccent) -> some View {
+        VStack(spacing: 14) {
             ZStack {
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(.secondarySystemFill), Color(.systemFill)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 38, height: 38)
+                    .stroke(color.opacity(emptyIconPulse ? 0 : 0.26), lineWidth: 1.5)
+                    .frame(width: 88, height: 88)
+                    .scaleEffect(emptyIconPulse ? 1.38 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .stroke(color.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                    .frame(width: 88, height: 88)
+                    .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [color.opacity(0.14), color.opacity(0.05)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 70, height: 70)
+                    .overlay(Circle().stroke(color.opacity(0.18), lineWidth: 1.2))
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .light))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(color.opacity(0.65))
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyIconPulse = true }
             }
             Text(text)
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-            Spacer()
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
     }
 }
