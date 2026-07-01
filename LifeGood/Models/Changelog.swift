@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.13", build: 569, date: "2026/06/29", notes: [
+            "開啟部屬班表時自動水平捲動，將今天置中顯示，不必再從 1 號往左滑。"
+        ]),
         ChangelogEntry(version: "23.12", build: 568, date: "2026/06/29", notes: [
             "編輯任務新增『指派給』人員選單，可把任務移交給其他部屬。",
             "部屬班表快速新增請假：日期預設帶入所點格子的日期，時間預設 08:30–17:30。",

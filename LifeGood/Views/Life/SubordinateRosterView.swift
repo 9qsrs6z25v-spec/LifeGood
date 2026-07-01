@@ -115,6 +115,7 @@ struct SubordinateRosterView: View {
     @State private var showSettings = false
     @State private var hOffset: CGFloat = 0   // 日格水平捲動位移（同步凍結表頭）
     @State private var emptyIconPulse = false
+    @State private var didAutoScroll = false  // 開啟時自動捲到今天（僅一次）
 
     private let nameColWidth: CGFloat = 88
     private let cellW: CGFloat = 40
@@ -399,11 +400,41 @@ struct SubordinateRosterView: View {
         .padding(.bottom, 8)
     }
 
-    /// 日格水平捲動區：iOS 18 直接讀 contentOffset 同步表頭；iOS 17 退回偏好值量測。
+    /// 今天若落在目前顯示的月份，回傳對應的日期（供自動捲動用）
+    private var todayInMonth: Date? {
+        let cal = Calendar.current
+        return days.first { cal.isDate($0, inSameDayAs: Date()) }
+    }
+
+    /// 日格欄位的捲動錨點 id（避免與 cell 的 ForEach 隱式 id 衝突）
+    private func dayColID(_ d: Date) -> String { "rcol-\(Int(d.timeIntervalSinceReferenceDate))" }
+
+    /// 日格水平捲動區：開啟時自動捲到今天；iOS 18 直接讀 contentOffset 同步表頭。
     @ViewBuilder
     private func rosterHScroll(bodyWidth: CGFloat) -> some View {
+        ScrollViewReader { proxy in
+            hScrollContent(bodyWidth: bodyWidth)
+                .onAppear {
+                    guard !didAutoScroll, let today = todayInMonth else { return }
+                    didAutoScroll = true
+                    // 延遲一拍待版面完成，直接跳到今天（置中），不做動畫避免閃動
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        proxy.scrollTo(dayColID(today), anchor: .center)
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func hScrollContent(bodyWidth: CGFloat) -> some View {
         let content = ScrollView(.horizontal, showsIndicators: true) {
             VStack(spacing: 0) {
+                // 隱形錨點列（height 0）：供 ScrollViewReader 自動捲到今天
+                HStack(spacing: 0) {
+                    ForEach(days, id: \.self) { d in
+                        Color.clear.frame(width: cellW, height: 0).id(dayColID(d))
+                    }
+                }
                 ForEach(rosterRows) { row in
                     switch row {
                     case .header:        gridHeaderRow()
