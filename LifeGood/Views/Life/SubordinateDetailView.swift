@@ -1857,22 +1857,33 @@ extension LifeStore {
     }
 }
 
-/// 標註文字工具：以 Markdown 連結格式存放 `[@名字](lifegood://person/<kind>/<uuid>)`
+/// 標註文字工具：文字內以乾淨的 `@名字` 儲存，顯示時再依名字解析為可點連結。
 enum MentionText {
-    static func token(for p: MentionPerson) -> String {
-        let safe = p.name
-            .replacingOccurrences(of: "[", with: "")
-            .replacingOccurrences(of: "]", with: "")
-            .replacingOccurrences(of: "(", with: "")
-            .replacingOccurrences(of: ")", with: "")
-        return "[@\(safe)](lifegood://person/\(p.kind.rawValue)/\(p.id.uuidString))"
-    }
+    /// 插入時使用的純文字（只有名字，不含代碼）
+    static func plainToken(for p: MentionPerson) -> String { "@\(p.name)" }
 
-    /// 轉為 AttributedString（標註會成為可點連結）；失敗則回傳純文字
-    static func attributed(_ raw: String) -> AttributedString {
-        let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        if let a = try? AttributedString(markdown: raw, options: opts) { return a }
-        return AttributedString(raw)
+    /// 將文字內的 `@名字` 依人員清單解析為可點連結（藍字）；找不到對應者則維持純文字。
+    static func attributed(_ raw: String, people: [MentionPerson]) -> AttributedString {
+        // 以最長名字優先比對，避免「王」先於「王小明」誤配
+        let sorted = people.filter { !$0.name.isEmpty }.sorted { $0.name.count > $1.name.count }
+        var out = AttributedString()
+        var s = Substring(raw)
+        while let atIdx = s.firstIndex(of: "@") {
+            out += AttributedString(String(s[s.startIndex..<atIdx]))          // @ 前的文字
+            let afterAt = s[s.index(after: atIdx)...]
+            if let p = sorted.first(where: { afterAt.hasPrefix($0.name) }) {
+                var link = AttributedString("@\(p.name)")
+                link.link = URL(string: "lifegood://person/\(p.kind.rawValue)/\(p.id.uuidString)")
+                link.foregroundColor = .blue
+                out += link
+                s = afterAt[afterAt.index(afterAt.startIndex, offsetBy: p.name.count)...]
+            } else {
+                out += AttributedString("@")
+                s = afterAt
+            }
+        }
+        out += AttributedString(String(s))
+        return out
     }
 }
 
@@ -1947,7 +1958,7 @@ struct MentionTextField: View {
 
     private func insert(_ p: MentionPerson) {
         guard let atRange = text.range(of: "@", options: .backwards) else { activeQuery = nil; return }
-        text.replaceSubrange(atRange.lowerBound..<text.endIndex, with: MentionText.token(for: p) + " ")
+        text.replaceSubrange(atRange.lowerBound..<text.endIndex, with: MentionText.plainToken(for: p) + " ")
         activeQuery = nil
     }
 }
@@ -2017,17 +2028,23 @@ struct SubordinateItemCard: View {
         }
     }
 
+    /// 供標註解析用的人員清單
+    private var people: [MentionPerson] { lifeStore.mentionPeople() }
+
     @ViewBuilder
     private var cardBody: some View {
+        // 每個 case 都從 lifeStore 取最新資料（編輯儲存後即時反映），找不到才退回快照
         switch ref {
-        case .task(_, let t):
+        case .task(let subId, let snap):
+            let t = lifeStore.subordinates.first { $0.id == subId }?.tasks.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "checklist", color: .cyan, title: t.topic.isEmpty ? "未命名任務" : t.topic)
             field("任務日期", fmt(t.date))
             if let due = t.dueDate { field("截止日期", fmt(due)) }
             if t.isCompleted, let at = t.completedAt { field("完成時間", fmt(at)) }
             richBlock("內容", t.content)
             richBlock("備註", t.note)
-        case .meeting(_, let m):
+        case .meeting(let subId, let snap):
+            let m = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "person.3.fill", color: .indigo, title: m.topic.isEmpty ? "未命名會議" : m.topic)
             field("會議時間", fmt(m.date))
             field("會議長度", "\(m.durationMinutes) 分鐘")
@@ -2038,8 +2055,8 @@ struct SubordinateItemCard: View {
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
                                 .font(.system(size: 13)).foregroundStyle(item.isCompleted ? .green : .indigo)
-                            Text(MentionText.attributed(item.content.isEmpty ? "未填內容" : item.content))
-                                .font(.subheadline)
+                            Text(MentionText.attributed(item.content.isEmpty ? "未填內容" : item.content, people: people))
+                                .font(.subheadline).tint(.blue)
                         }
                     }
                 }
@@ -2048,12 +2065,14 @@ struct SubordinateItemCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             richBlock("備註", m.note)
-        case .report(_, let r):
+        case .report(let subId, let snap):
+            let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic)
             field("報告日期", fmt(r.date))
             if r.isCompleted, let at = r.completedAt { field("完成時間", fmt(at)) }
             richBlock("備註", r.note)
-        case .leave(_, let rec):
+        case .leave(let subId, let snap):
+            let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "calendar.badge.minus", color: .teal, title: rec.leaveType?.rawValue ?? "請假")
             field("開始", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
@@ -2091,7 +2110,7 @@ struct SubordinateItemCard: View {
         if !content.trimmingCharacters(in: .whitespaces).isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text(label).font(.caption).foregroundStyle(.secondary)
-                Text(MentionText.attributed(content))
+                Text(MentionText.attributed(content, people: people))
                     .font(.subheadline).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .tint(.blue)

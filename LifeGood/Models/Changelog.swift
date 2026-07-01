@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.15", build: 571, date: "2026/06/29", notes: [
+            "@ 標註改為只在文字中存『@名字』，輸入框不再顯示整串連結代碼；顯示時再依名字解析為藍色可點連結。",
+            "預覽卡片改為即時讀取最新資料，編輯儲存後立即更新（不需重新開啟）。"
+        ]),
         ChangelogEntry(version: "23.14", build: 570, date: "2026/06/29", notes: [
             "部屬總覽點項目改為先顯示預覽卡片，右上角『編輯』才進入編輯（任務/會議/報告/請假）。",
             "任務/會議/報告的內容與備註欄位新增 @ 標註：打 @ 或 @關鍵字可從名片與部屬中選人，存成連結。",
