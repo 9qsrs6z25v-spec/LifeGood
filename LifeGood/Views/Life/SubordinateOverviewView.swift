@@ -68,6 +68,15 @@ struct SubordinateOverviewView: View {
             case .report(_, let r):  return "r_\(r.id.uuidString)"
             }
         }
+        /// 轉為預覽卡片參照
+        var itemRef: SubordinateItemRef {
+            switch self {
+            case .leave(let s, let r):   return .leave(subId: s, rec: r)
+            case .meeting(let s, let m): return .meeting(subId: s, meeting: m)
+            case .task(let s, let t):    return .task(subId: s, task: t)
+            case .report(let s, let r):  return .report(subId: s, report: r)
+            }
+        }
     }
 
     private let calendar = Calendar.current
@@ -227,16 +236,8 @@ struct SubordinateOverviewView: View {
             }
             .onDisappear { heroAppeared = false; sectionAppeared = false }
             .sheet(item: $editTarget) { target in
-                switch target {
-                case .leave(let subId, let rec):
-                    RecordEditorSheet(subordinateId: subId, type: rec.type, editing: rec)
-                case .meeting(let subId, let meeting):
-                    MeetingEditorSheet(subordinateId: subId, editing: meeting)
-                case .task(let subId, let task):
-                    TaskEditorSheet(subordinateId: subId, editing: task)
-                case .report(let subId, let report):
-                    WeeklyReportEditorSheet(subordinateId: subId, editing: report)
-                }
+                // 點項目先顯示預覽卡片（右上角「編輯」才進入編輯）
+                SubordinateItemCard(ref: target.itemRef)
             }
         }
     }

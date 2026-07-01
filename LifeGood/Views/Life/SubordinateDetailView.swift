@@ -1329,7 +1329,7 @@ struct RecordEditorSheet: View {
                     }
                 }
                 Section("備註") {
-                    TextField("選填", text: $note, axis: .vertical).lineLimit(2...5)
+                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
                 }
                 if editing != nil {
                     Section {
@@ -1470,7 +1470,7 @@ struct MeetingEditorSheet: View {
                 } header: { Text("會議項目") }
 
                 Section("備註") {
-                    TextField("選填", text: $note, axis: .vertical).lineLimit(2...5)
+                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
                 }
                 if editing != nil {
                     Section {
@@ -1546,7 +1546,7 @@ struct TaskEditorSheet: View {
             Form {
                 Section("任務資訊") {
                     TextField("任務主題", text: $topic)
-                    TextField("任務內容", text: $content, axis: .vertical).lineLimit(2...5)
+                    MentionTextField(text: $content, placeholder: "任務內容（可打 @ 標註人員）", people: lifeStore.mentionPeople())
                     HStack {
                         Text("任務日期")
                         Spacer()
@@ -1584,7 +1584,7 @@ struct TaskEditorSheet: View {
                     .tint(.green)
                 }
                 Section("備註") {
-                    TextField("選填", text: $note, axis: .vertical).lineLimit(2...5)
+                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
                 }
                 if editing != nil {
                     Section {
@@ -1682,7 +1682,7 @@ struct WeeklyReportEditorSheet: View {
                     .tint(.green)
                 }
                 Section("備註") {
-                    TextField("選填", text: $note, axis: .vertical).lineLimit(2...5)
+                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
                 }
                 if editing != nil {
                     Section {
@@ -1828,5 +1828,299 @@ struct FiveMinuteDateTimePicker: UIViewRepresentable {
         let target = Int((Double(minute) / 5.0).rounded()) * 5
         let base = cal.date(byAdding: .second, value: -second, to: date) ?? date
         return cal.date(byAdding: .minute, value: target - minute, to: base) ?? date
+    }
+}
+
+// MARK: - @標註（名片 / 部屬）系統
+
+/// 可被 @ 標註的人員（來源：部屬 + 名片）
+struct MentionPerson: Identifiable, Hashable {
+    enum Kind: String { case sub, card }
+    let id: UUID
+    let kind: Kind
+    let name: String
+    let subtitle: String
+}
+
+extension LifeStore {
+    /// 供 @ 標註使用的人員清單（部屬 + 名片）
+    func mentionPeople() -> [MentionPerson] {
+        var out: [MentionPerson] = []
+        for s in subordinates where !s.name.trimmingCharacters(in: .whitespaces).isEmpty {
+            out.append(MentionPerson(id: s.id, kind: .sub, name: s.name,
+                                     subtitle: s.jobTitle.isEmpty ? s.department : s.jobTitle))
+        }
+        for c in businessCards where !c.name.trimmingCharacters(in: .whitespaces).isEmpty {
+            out.append(MentionPerson(id: c.id, kind: .card, name: c.name, subtitle: c.company))
+        }
+        return out
+    }
+}
+
+/// 標註文字工具：以 Markdown 連結格式存放 `[@名字](lifegood://person/<kind>/<uuid>)`
+enum MentionText {
+    static func token(for p: MentionPerson) -> String {
+        let safe = p.name
+            .replacingOccurrences(of: "[", with: "")
+            .replacingOccurrences(of: "]", with: "")
+            .replacingOccurrences(of: "(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+        return "[@\(safe)](lifegood://person/\(p.kind.rawValue)/\(p.id.uuidString))"
+    }
+
+    /// 轉為 AttributedString（標註會成為可點連結）；失敗則回傳純文字
+    static func attributed(_ raw: String) -> AttributedString {
+        let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        if let a = try? AttributedString(markdown: raw, options: opts) { return a }
+        return AttributedString(raw)
+    }
+}
+
+/// 帶 @ 標註下拉選單的輸入框（純文字 + 建議清單）
+struct MentionTextField: View {
+    @Binding var text: String
+    var placeholder: String
+    var lineLimit: ClosedRange<Int> = 2...6
+    let people: [MentionPerson]
+
+    @State private var activeQuery: String? = nil
+
+    private var suggestions: [MentionPerson] {
+        guard let q = activeQuery else { return [] }
+        let query = q.lowercased()
+        let base = query.isEmpty ? people : people.filter { $0.name.lowercased().contains(query) }
+        return Array(base.prefix(8))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField(placeholder, text: $text, axis: .vertical)
+                .lineLimit(lineLimit)
+                .onChange(of: text) { _, v in updateQuery(v) }
+
+            if !suggestions.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(suggestions) { p in
+                        Button { insert(p) } label: { row(p) }
+                            .buttonStyle(.plain)
+                        if p.id != suggestions.last?.id { Divider().padding(.leading, 40) }
+                    }
+                }
+                .background(Color(.tertiarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(.separator).opacity(0.25), lineWidth: 0.75))
+            }
+        }
+    }
+
+    private func row(_ p: MentionPerson) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: p.kind == .sub ? "person.fill" : "person.crop.rectangle.stack.fill")
+                .font(.system(size: 13)).foregroundStyle(p.kind == .sub ? Color.blue : Color.teal)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(p.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                if !p.subtitle.isEmpty {
+                    Text(p.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            Text(p.kind == .sub ? "部屬" : "名片")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(p.kind == .sub ? Color.blue : Color.teal)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
+
+    /// 偵測游標前最後一段 `@查詢`（其後不能有空白/換行；@ 前須為開頭或空白）
+    private func updateQuery(_ s: String) {
+        guard let atRange = s.range(of: "@", options: .backwards) else { activeQuery = nil; return }
+        let after = s[atRange.upperBound...]
+        if after.contains(where: { $0 == " " || $0 == "\n" || $0 == "\t" }) { activeQuery = nil; return }
+        if atRange.lowerBound > s.startIndex {
+            let before = s[s.index(before: atRange.lowerBound)]
+            if before != " " && before != "\n" && before != "\t" { activeQuery = nil; return }
+        }
+        activeQuery = String(after)
+    }
+
+    private func insert(_ p: MentionPerson) {
+        guard let atRange = text.range(of: "@", options: .backwards) else { activeQuery = nil; return }
+        text.replaceSubrange(atRange.lowerBound..<text.endIndex, with: MentionText.token(for: p) + " ")
+        activeQuery = nil
+    }
+}
+
+// MARK: - 部屬事項預覽卡（點開先看卡片，右上角編輯才進入編輯）
+
+/// 部屬事項參照（任務 / 會議 / 報告 / 請假）
+enum SubordinateItemRef: Identifiable {
+    case task(subId: UUID, task: SubordinateTask)
+    case meeting(subId: UUID, meeting: SubordinateMeeting)
+    case report(subId: UUID, report: WeeklyReport)
+    case leave(subId: UUID, rec: SubordinateRecord)
+    var id: String {
+        switch self {
+        case .task(_, let t):    return "t_\(t.id.uuidString)"
+        case .meeting(_, let m): return "m_\(m.id.uuidString)"
+        case .report(_, let r):  return "r_\(r.id.uuidString)"
+        case .leave(_, let rec): return "l_\(rec.id.uuidString)"
+        }
+    }
+}
+
+private struct IDBox: Identifiable { let id: UUID }
+
+struct SubordinateItemCard: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    let ref: SubordinateItemRef
+
+    @State private var showEdit = false
+    @State private var openSub: Subordinate?
+    @State private var openCard: IDBox?
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
+    }()
+    private func fmt(_ d: Date) -> String { Self.dateFmt.string(from: d) }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    cardBody
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle(navTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button("編輯") { showEdit = true }.bold().foregroundStyle(.green) }
+            }
+            .sheet(isPresented: $showEdit) { editor }
+            .sheet(item: $openSub) { s in SubordinateDetailView(subordinate: s) }
+            .sheet(item: $openCard) { box in BusinessCardDetailView(cardId: box.id) }
+            .environment(\.openURL, OpenURLAction { url in handleMention(url) })
+        }
+    }
+
+    private var navTitle: String {
+        switch ref {
+        case .task: return "任務"
+        case .meeting: return "會議"
+        case .report: return "報告"
+        case .leave: return "請假"
+        }
+    }
+
+    @ViewBuilder
+    private var cardBody: some View {
+        switch ref {
+        case .task(_, let t):
+            titleBlock(icon: "checklist", color: .cyan, title: t.topic.isEmpty ? "未命名任務" : t.topic)
+            field("任務日期", fmt(t.date))
+            if let due = t.dueDate { field("截止日期", fmt(due)) }
+            if t.isCompleted, let at = t.completedAt { field("完成時間", fmt(at)) }
+            richBlock("內容", t.content)
+            richBlock("備註", t.note)
+        case .meeting(_, let m):
+            titleBlock(icon: "person.3.fill", color: .indigo, title: m.topic.isEmpty ? "未命名會議" : m.topic)
+            field("會議時間", fmt(m.date))
+            field("會議長度", "\(m.durationMinutes) 分鐘")
+            if !m.items.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("議程項目").font(.caption).foregroundStyle(.secondary)
+                    ForEach(m.items) { item in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 13)).foregroundStyle(item.isCompleted ? .green : .indigo)
+                            Text(MentionText.attributed(item.content.isEmpty ? "未填內容" : item.content))
+                                .font(.subheadline)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding().background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            richBlock("備註", m.note)
+        case .report(_, let r):
+            titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic)
+            field("報告日期", fmt(r.date))
+            if r.isCompleted, let at = r.completedAt { field("完成時間", fmt(at)) }
+            richBlock("備註", r.note)
+        case .leave(_, let rec):
+            titleBlock(icon: "calendar.badge.minus", color: .teal, title: rec.leaveType?.rawValue ?? "請假")
+            field("開始", fmt(rec.date))
+            if let end = rec.endDate { field("結束", fmt(end)) }
+            if let h = rec.leaveHours { field("請假時數", String(format: "%.1f 小時", h)) }
+            richBlock("事由", rec.content)
+            richBlock("備註", rec.note)
+        }
+    }
+
+    private func titleBlock(icon: String, color: Color, title: String) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0.08)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 44, height: 44)
+                Image(systemName: icon).font(.system(size: 18, weight: .semibold)).foregroundStyle(color)
+            }
+            Text(title).font(.title3.weight(.bold)).foregroundStyle(.primary)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func field(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func richBlock(_ label: String, _ content: String) -> some View {
+        if !content.trimmingCharacters(in: .whitespaces).isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(label).font(.caption).foregroundStyle(.secondary)
+                Text(MentionText.attributed(content))
+                    .font(.subheadline).foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tint(.blue)
+            }
+            .padding().background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    @ViewBuilder
+    private var editor: some View {
+        switch ref {
+        case .task(let subId, let task):     TaskEditorSheet(subordinateId: subId, editing: task)
+        case .meeting(let subId, let meeting): MeetingEditorSheet(subordinateId: subId, editing: meeting)
+        case .report(let subId, let report):  WeeklyReportEditorSheet(subordinateId: subId, editing: report)
+        case .leave(let subId, let rec):       RecordEditorSheet(subordinateId: subId, type: rec.type, editing: rec)
+        }
+    }
+
+    /// 點標註連結 → 開啟該人員的部屬卡片 / 名片
+    private func handleMention(_ url: URL) -> OpenURLAction.Result {
+        guard url.scheme == "lifegood", url.host == "person" else { return .systemAction }
+        let parts = url.pathComponents.filter { $0 != "/" }   // [kind, uuid]
+        guard parts.count == 2, let uid = UUID(uuidString: parts[1]) else { return .handled }
+        if parts[0] == "sub" {
+            if let s = lifeStore.subordinates.first(where: { $0.id == uid }) { openSub = s }
+        } else if parts[0] == "card" {
+            if lifeStore.businessCards.contains(where: { $0.id == uid }) { openCard = IDBox(id: uid) }
+        }
+        return .handled
     }
 }
