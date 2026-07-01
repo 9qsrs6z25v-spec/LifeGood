@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.12", build: 568, date: "2026/06/29", notes: [
+            "編輯任務新增『指派給』人員選單，可把任務移交給其他部屬。",
+            "部屬班表快速新增請假：日期預設帶入所點格子的日期，時間預設 08:30–17:30。",
+            "班別時間設定新增休息時間（日值班 12:00–13:00、小夜班 17:30–18:30，可自訂）；請假時數會自動扣除與休息時段重疊的時間。"
+        ]),
         ChangelogEntry(version: "23.11", build: 567, date: "2026/06/29", notes: [
             "修正建置失敗：SubordinateView 的 onChange 改為觀察部門 id 陣列（[UUID]），避免要求 Department 遵從 Equatable。"
         ]),

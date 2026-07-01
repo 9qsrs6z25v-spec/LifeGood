@@ -617,7 +617,7 @@ private struct RosterCellDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } } }
             .sheet(isPresented: $showAddLeave) {
-                RecordEditorSheet(subordinateId: cell.subId, type: .leave, editing: nil)
+                RecordEditorSheet(subordinateId: cell.subId, type: .leave, editing: nil, initialDate: selectedDate)
             }
             .sheet(isPresented: $goDetail) {
                 if let sub = sub { SubordinateDetailView(subordinate: sub) }
@@ -956,6 +956,11 @@ private struct ShiftScheduleSettingsView: View {
                         timeRow("平日 結束", t, isHoliday: false, isStart: false)
                         timeRow("假日 開始", t, isHoliday: true, isStart: true)
                         timeRow("假日 結束", t, isHoliday: true, isStart: false)
+                        // 休息時間（用於請假時數自動扣除）；大夜班預設無休息
+                        if t != .nightShift {
+                            restRow("休息 開始", t, isStart: true)
+                            restRow("休息 結束", t, isStart: false)
+                        }
                     } header: {
                         shiftSectionHeader(t)
                     }
@@ -965,7 +970,7 @@ private struct ShiftScheduleSettingsView: View {
                 } header: {
                     resetSectionHeader
                 } footer: {
-                    Text("時差假與休息沒有上下班時間。班別時間僅存於本機。")
+                    Text("時差假與休息（班別）沒有上下班時間。休息時間會在請假時數計算時自動扣除（例如日值班 12:00–13:00、小夜班 17:30–18:30）。班別時間僅存於本機。")
                 }
             }
             .scrollContentBackground(.hidden)
@@ -1050,6 +1055,34 @@ private struct ShiftScheduleSettingsView: View {
                     ?? ShiftTimeRange(startMinutes: 0, endMinutes: 0)
                 if isStart { r.startMinutes = mins } else { r.endMinutes = mins }
                 scheduleStore.schedule.set(r, for: t, isHoliday: isHoliday)
+            }
+        )
+    }
+
+    // 休息時間列（橘色標題），用於請假時數自動扣除
+    private func restRow(_ title: String, _ t: ShiftType, isStart: Bool) -> some View {
+        HStack {
+            Text(title).foregroundStyle(.orange)
+            Spacer()
+            DatePicker("", selection: restBinding(t, isStart: isStart), displayedComponents: .hourAndMinute)
+                .labelsHidden()
+        }
+    }
+
+    private func restBinding(_ t: ShiftType, isStart: Bool) -> Binding<Date> {
+        let fallback = ShiftTimeRange(startMinutes: 12 * 60, endMinutes: 13 * 60)
+        return Binding(
+            get: {
+                let r = scheduleStore.schedule.restRange(for: t) ?? fallback
+                let mins = isStart ? r.startMinutes : r.endMinutes
+                return Calendar.current.date(bySettingHour: mins / 60, minute: mins % 60, second: 0, of: Date()) ?? Date()
+            },
+            set: { newDate in
+                let cal = Calendar.current
+                let mins = cal.component(.hour, from: newDate) * 60 + cal.component(.minute, from: newDate)
+                var r = scheduleStore.schedule.restRange(for: t) ?? fallback
+                if isStart { r.startMinutes = mins } else { r.endMinutes = mins }
+                scheduleStore.schedule.setRest(r, for: t)
             }
         )
     }

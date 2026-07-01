@@ -1029,6 +1029,7 @@ struct ShiftTimeRange: Codable, Equatable {
 struct ShiftSchedule: Codable {
     var weekday: [String: ShiftTimeRange]   // key = ShiftType.rawValue
     var holiday: [String: ShiftTimeRange]
+    var rest: [String: ShiftTimeRange]      // 休息時間（不分平假日）；用於請假時數自動扣除
 
     func range(for type: ShiftType, isHoliday: Bool) -> ShiftTimeRange? {
         (isHoliday ? holiday : weekday)[type.rawValue]
@@ -1036,6 +1037,30 @@ struct ShiftSchedule: Codable {
     mutating func set(_ range: ShiftTimeRange, for type: ShiftType, isHoliday: Bool) {
         if isHoliday { holiday[type.rawValue] = range } else { weekday[type.rawValue] = range }
     }
+    /// 該班別的休息時間（可自訂；請假時數會自動扣除與休息時段重疊的部分）
+    func restRange(for type: ShiftType) -> ShiftTimeRange? { rest[type.rawValue] }
+    mutating func setRest(_ range: ShiftTimeRange, for type: ShiftType) { rest[type.rawValue] = range }
+
+    init(weekday: [String: ShiftTimeRange], holiday: [String: ShiftTimeRange],
+         rest: [String: ShiftTimeRange] = ShiftSchedule.defaultRest) {
+        self.weekday = weekday; self.holiday = holiday; self.rest = rest
+    }
+
+    // 容錯解碼：rest 為後加欄位，舊存檔沒有此 key，缺少時套用預設休息時間
+    enum CodingKeys: String, CodingKey { case weekday, holiday, rest }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        weekday = (try? c.decode([String: ShiftTimeRange].self, forKey: .weekday)) ?? ShiftSchedule.default.weekday
+        holiday = (try? c.decode([String: ShiftTimeRange].self, forKey: .holiday)) ?? ShiftSchedule.default.holiday
+        rest = (try? c.decode([String: ShiftTimeRange].self, forKey: .rest)) ?? ShiftSchedule.defaultRest
+    }
+
+    /// 預設休息時間：日值班 / 假日值班 12:00–13:00；小夜班 17:30–18:30（大夜班預設無）
+    static let defaultRest: [String: ShiftTimeRange] = [
+        ShiftType.dayDuty.rawValue:      ShiftTimeRange(startMinutes: 12 * 60,      endMinutes: 13 * 60),      // 12:00–13:00
+        ShiftType.holidayDuty.rawValue:  ShiftTimeRange(startMinutes: 12 * 60,      endMinutes: 13 * 60),      // 12:00–13:00
+        ShiftType.eveningShift.rawValue: ShiftTimeRange(startMinutes: 17 * 60 + 30, endMinutes: 18 * 60 + 30)  // 17:30–18:30
+    ]
 
     static let `default` = ShiftSchedule(
         weekday: [
@@ -1049,7 +1074,8 @@ struct ShiftSchedule: Codable {
             ShiftType.eveningShift.rawValue: ShiftTimeRange(startMinutes: 12 * 60, endMinutes: 20 * 60 + 30),     // 12:00–20:30
             ShiftType.holidayDuty.rawValue:  ShiftTimeRange(startMinutes: 8 * 60 + 30, endMinutes: 20 * 60 + 30), // 08:30–20:30
             ShiftType.dayDuty.rawValue:      ShiftTimeRange(startMinutes: 8 * 60 + 30, endMinutes: 17 * 60 + 30)  // 08:30–17:30
-        ]
+        ],
+        rest: defaultRest
     )
 }
 

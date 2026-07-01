@@ -1236,6 +1236,7 @@ struct RecordEditorSheet: View {
     let subordinateId: UUID
     let type: SubordinateRecordType
     var editing: SubordinateRecord?
+    var initialDate: Date? = nil   // 新請假時的預設日期（例如從班表格子帶入）
 
     @State private var content = ""
     @State private var date = Date()
@@ -1248,8 +1249,32 @@ struct RecordEditorSheet: View {
         !content.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// 請假時數 = 總時長 − 與當日班別休息時段重疊的時間
     private var computedLeaveHours: Double {
-        max(0, endDate.timeIntervalSince(date) / 3600)
+        max(0, endDate.timeIntervalSince(date) / 3600 - restDeductionHours)
+    }
+
+    /// 依當日班別的休息時段，計算需扣除的休息時數（跨日則逐日累加）
+    private var restDeductionHours: Double {
+        guard type == .leave, endDate > date,
+              let sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { return 0 }
+        let cal = Calendar.current
+        let schedule = ShiftScheduleStore.shared.schedule
+        var total = 0.0
+        var day = cal.startOfDay(for: date)
+        let last = cal.startOfDay(for: endDate)
+        while day <= last {
+            if let shift = sub.shifts.first(where: { cal.isDate($0.date, inSameDayAs: day) })?.type,
+               let rest = schedule.restRange(for: shift),
+               let rStart = cal.date(byAdding: .minute, value: rest.startMinutes, to: day),
+               let rEnd = cal.date(byAdding: .minute, value: rest.endMinutes, to: day), rEnd > rStart {
+                let s = max(date, rStart), e = min(endDate, rEnd)
+                if e > s { total += e.timeIntervalSince(s) / 3600 }
+            }
+            guard let n = cal.date(byAdding: .day, value: 1, to: day) else { break }
+            day = n
+        }
+        return total
     }
 
     var body: some View {
@@ -1274,6 +1299,14 @@ struct RecordEditorSheet: View {
                             Text("結束時間")
                             Spacer()
                             FiveMinuteDateTimePicker(selection: $endDate, minimumDate: date).fixedSize()
+                        }
+                        if restDeductionHours > 0 {
+                            HStack {
+                                Text("扣除休息").foregroundStyle(.secondary)
+                                Spacer()
+                                Text(String(format: "−%.1f 小時", restDeductionHours))
+                                    .foregroundStyle(.orange)
+                            }
                         }
                         HStack {
                             Text("請假時數").foregroundStyle(.secondary)
@@ -1330,10 +1363,12 @@ struct RecordEditorSheet: View {
 
     private func loadEditing() {
         guard let e = editing else {
-            // 新請假：預設用排程時段（整點/半點，過 18:00 則隔天 09:30），結束預設 +1 小時
+            // 新請假：預設用點選的格子日期（無則今日），時間預設 08:30–17:30
             if type == .leave {
-                date = FiveMinuteDateTimePicker.defaultSchedulingTime()
-                endDate = Calendar.current.date(byAdding: .hour, value: 1, to: date) ?? date
+                let cal = Calendar.current
+                let base = initialDate ?? Date()
+                date = cal.date(bySettingHour: 8, minute: 30, second: 0, of: base) ?? base
+                endDate = cal.date(bySettingHour: 17, minute: 30, second: 0, of: base) ?? base
             }
             return
         }
@@ -1504,6 +1539,7 @@ struct TaskEditorSheet: View {
     @State private var dueDate = Date()
     @State private var note = ""
     @State private var isCompleted = false
+    @State private var assignedSubId = UUID()   // 指派給哪位部屬（可換人處理）
 
     var body: some View {
         NavigationStack {
@@ -1523,6 +1559,21 @@ struct TaskEditorSheet: View {
                             Spacer()
                             FiveMinuteDateTimePicker(selection: $dueDate).fixedSize()
                         }
+                    }
+                }
+                Section {
+                    Picker(selection: $assignedSubId) {
+                        ForEach(lifeStore.subordinates) { s in
+                            Text(s.name.isEmpty ? "未命名" : s.name).tag(s.id)
+                        }
+                    } label: {
+                        Label("指派給", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                } header: {
+                    Text("指派人員")
+                } footer: {
+                    if assignedSubId != subordinateId {
+                        Text("儲存後此任務會移交給所選人員。")
                     }
                 }
                 Section {
@@ -1552,6 +1603,7 @@ struct TaskEditorSheet: View {
                 }
             }
             .onAppear {
+                assignedSubId = subordinateId
                 if let e = editing {
                     topic = e.topic; content = e.content; date = e.date; note = e.note
                     isCompleted = e.isCompleted
@@ -1566,7 +1618,6 @@ struct TaskEditorSheet: View {
     }
 
     private func save() {
-        guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
         // 完成時間：原本未完成→改完成時記下現在；維持完成則沿用舊時間；取消完成則清空
         let completedAt: Date? = isCompleted ? (editing?.completedAt ?? Date()) : nil
         let task = SubordinateTask(
@@ -1577,9 +1628,18 @@ struct TaskEditorSheet: View {
             note: note.trimmingCharacters(in: .whitespaces),
             isCompleted: isCompleted, completedAt: completedAt
         )
-        if let idx = sub.tasks.firstIndex(where: { $0.id == task.id }) { sub.tasks[idx] = task }
-        else { sub.tasks.append(task) }
-        lifeStore.update(sub); dismiss()
+        let targetId = assignedSubId
+        // 換人：先從原持有者移除該任務
+        if targetId != subordinateId,
+           var old = lifeStore.subordinates.first(where: { $0.id == subordinateId }) {
+            old.tasks.removeAll { $0.id == task.id }
+            lifeStore.update(old)
+        }
+        // 寫入目標人員（同一人則原地更新 / 新增；換人則加到新人員）
+        guard var target = lifeStore.subordinates.first(where: { $0.id == targetId }) else { dismiss(); return }
+        if let idx = target.tasks.firstIndex(where: { $0.id == task.id }) { target.tasks[idx] = task }
+        else { target.tasks.append(task) }
+        lifeStore.update(target); dismiss()
     }
 
     private func deleteTask() {
