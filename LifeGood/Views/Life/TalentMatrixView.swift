@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UIKit
 
 // MARK: - 部屬評分（潛力 / 主動性）
 
@@ -148,11 +149,27 @@ extension Subordinate {
 
 // MARK: - 人才矩陣（主動性 × 潛力 散布圖）
 
+private struct MatrixShareURL: Identifiable { let id = UUID(); let url: URL }
+
 struct TalentMatrixView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedDeptId: UUID? = nil
+    @AppStorage("talentMatrixDeptFilter") private var deptFilterRaw = ""  // 逗號分隔 UUID；空=全部部門
     @State private var selected: Subordinate?
+    @State private var shareItem: MatrixShareURL?
+
+    /// 目前選取的部門（多選，持久化於 @AppStorage）
+    private var selectedDeptIds: Set<UUID> {
+        Set(deptFilterRaw.split(separator: ",").compactMap { UUID(uuidString: String($0)) })
+    }
+    private func toggleDept(_ id: UUID) {
+        var s = selectedDeptIds
+        if s.contains(id) { s.remove(id) } else { s.insert(id) }
+        deptFilterRaw = s.map(\.uuidString).joined(separator: ",")
+    }
+    private func deptName(_ d: Department) -> String {
+        d.name.isEmpty ? (d.code.isEmpty ? "未命名部門" : d.code) : d.name
+    }
     // [v1] 空狀態脈衝動畫旗標
     @State private var emptyPulse = false
     // [v2] 英雄摘要卡進場動畫旗標
@@ -162,14 +179,16 @@ struct TalentMatrixView: View {
     @State private var legendAppeared = false
 
     private var members: [Subordinate] {
-        lifeStore.subordinates
-            .filter { selectedDeptId == nil || $0.departmentId == selectedDeptId }
+        let ids = selectedDeptIds
+        return lifeStore.subordinates.filter { ids.isEmpty || ($0.departmentId.map { ids.contains($0) } ?? false) }
     }
 
+    /// 篩選摘要（全部部門 / 單一部門名 / N 個部門）
     private var selectedDeptName: String {
-        guard let id = selectedDeptId,
-              let d = lifeStore.departments.first(where: { $0.id == id }) else { return "全部部門" }
-        return d.name.isEmpty ? (d.code.isEmpty ? "未命名部門" : d.code) : d.name
+        let ids = selectedDeptIds
+        if ids.isEmpty { return "全部部門" }
+        if ids.count == 1, let d = lifeStore.departments.first(where: { ids.contains($0.id) }) { return deptName(d) }
+        return "\(ids.count) 個部門"
     }
 
     var body: some View {
@@ -208,17 +227,29 @@ struct TalentMatrixView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("人才矩陣")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { exportJPG() } label: { Label("匯出 JPG", systemImage: "square.and.arrow.up") }
+                }
+            }
+            .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
         }
     }
 
-    // [v2] 選取特定部門時改為 indigo 淺底 + 細邊框，對齊 FilterChip 選取態規格
+    // [v2] 選取特定部門時改為 indigo 淺底 + 細邊框，對齊 FilterChip 選取態規格；支援多選
     private var deptFilter: some View {
-        let isFiltered = selectedDeptId != nil
+        let isFiltered = !selectedDeptIds.isEmpty
         return Menu {
-            Button("全部部門") { selectedDeptId = nil }
+            Button { deptFilterRaw = "" } label: {
+                if selectedDeptIds.isEmpty { Label("全部部門", systemImage: "checkmark") }
+                else { Text("全部部門") }
+            }
             ForEach(lifeStore.departments) { d in
-                Button(d.name.isEmpty ? d.code : d.name) { selectedDeptId = d.id }
+                Button { toggleDept(d.id) } label: {
+                    if selectedDeptIds.contains(d.id) { Label(deptName(d), systemImage: "checkmark") }
+                    else { Text(deptName(d)) }
+                }
             }
         } label: {
             HStack(spacing: 6) {
@@ -234,6 +265,50 @@ struct TalentMatrixView: View {
             .overlay(Capsule().stroke(Color.indigo.opacity(isFiltered ? 0.22 : 0.0), lineWidth: 0.6))
         }
         .padding(.horizontal)
+    }
+
+    // MARK: - 匯出 JPG
+
+    /// 匯出整頁（摘要 + 散布圖 + 圖例）為 JPG 並開啟分享
+    @MainActor
+    private func exportJPG() {
+        let content = exportContent
+            .frame(width: 420)
+            .padding(20)
+            .background(Color(.systemBackground))
+            .environmentObject(lifeStore)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage, let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        let name = "人才矩陣_\(Self.stampFormatter.string(from: Date())).jpg"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do {
+            try data.write(to: url)
+            shareItem = MatrixShareURL(url: url)
+        } catch { }
+    }
+
+    private static let stampFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
+
+    /// 供 ImageRenderer 使用的靜態版面（不含互動）
+    private var exportContent: some View {
+        VStack(spacing: 14) {
+            HStack {
+                Image(systemName: "chart.dots.scatter").foregroundStyle(.indigo)
+                Text("人才矩陣").font(.headline)
+                Spacer()
+                Text(selectedDeptName).font(.caption).foregroundStyle(.secondary)
+            }
+            if members.isEmpty {
+                Text("尚無部屬資料").font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 40)
+            } else {
+                summaryHeroCard
+                chart
+                quadrantLegend
+            }
+        }
     }
 
     // MARK: - [v2] 英雄摘要卡（藍紫漸層 + 散景 + 玻璃光澤 + 四格 KPI）
@@ -724,7 +799,7 @@ struct TalentMatrixView: View {
                 }
             }
             .onAppear { emptyPulse = true }
-            Text(selectedDeptId == nil ? "尚無部屬資料" : "此部門沒有部屬")
+            Text(selectedDeptIds.isEmpty ? "尚無部屬資料" : "所選部門沒有部屬")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text("請先新增部屬並記錄評分")

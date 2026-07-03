@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.17", build: 573, date: "2026/06/29", notes: [
+            "人才矩陣右上角新增『匯出 JPG』，可將整頁（摘要+散布圖+圖例）匯出分享。",
+            "人才矩陣單位選別改為多選並記住設定（下次開啟維持），可同時檢視多個部門。"
+        ]),
         ChangelogEntry(version: "23.16", build: 572, date: "2026/06/29", notes: [
             "部屬卡片任務下方新增『被標註的項目』：列出其他部屬的任務/會議/報告中 @ 標註到本人的項目，點擊開預覽卡。",
             "部屬卡片頂部看板重新規劃：改為並排顯示『主動性 / 潛力性 / 綜合』三個分數。"
