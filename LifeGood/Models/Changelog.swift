@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.19", build: 575, date: "2026/06/29", notes: [
+            "強化匯入容錯：部屬的任務/會議/報告/班表/紀錄改為『逐筆容錯解碼』，單一壞紀錄只跳過該筆，不再整個陣列一起消失（改善匯入完整資料時部屬任務等未被帶入的問題）。",
+            "部屬姓名/職稱/部門/備註缺欄位時不再讓整筆部屬解碼失敗。"
+        ]),
         ChangelogEntry(version: "23.18", build: 574, date: "2026/06/29", notes: [
             "部屬卡片頂部看板新增第二列統計：報告 / 會議 / 任務 / 被標註 / 請假。",
             "被標註的項目併入主動性分數計算（每被標註一項 +2），人才矩陣、部屬列表、部屬卡片分數同步。"

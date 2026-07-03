@@ -1257,19 +1257,41 @@ struct Subordinate: Identifiable, Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
-        name = try c.decode(String.self, forKey: .name)
-        jobTitle = try c.decode(String.self, forKey: .jobTitle)
-        department = try c.decode(String.self, forKey: .department)
-        note = try c.decode(String.self, forKey: .note)
-        gradeTitleId = try c.decodeIfPresent(UUID.self, forKey: .gradeTitleId)
-        departmentId = try c.decodeIfPresent(UUID.self, forKey: .departmentId)
-        records = (try? c.decode([SubordinateRecord].self, forKey: .records)) ?? []
-        joinDate = try c.decodeIfPresent(Date.self, forKey: .joinDate)
-        meetings = (try? c.decode([SubordinateMeeting].self, forKey: .meetings)) ?? []
-        tasks = (try? c.decode([SubordinateTask].self, forKey: .tasks)) ?? []
-        shifts = (try? c.decode([SubordinateShift].self, forKey: .shifts)) ?? []
+        // name/jobTitle/department/note 舊資料若缺欄位不應讓整筆部屬解碼失敗
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        jobTitle = (try? c.decode(String.self, forKey: .jobTitle)) ?? ""
+        department = (try? c.decode(String.self, forKey: .department)) ?? ""
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        gradeTitleId = try? c.decodeIfPresent(UUID.self, forKey: .gradeTitleId)
+        departmentId = try? c.decodeIfPresent(UUID.self, forKey: .departmentId)
+        joinDate = try? c.decodeIfPresent(Date.self, forKey: .joinDate)
+        // 逐元素容錯：單一壞紀錄只跳過該筆，不會整個陣列（任務 / 會議 / 報告…）一起消失
+        records = (try? c.decode(LossyArray<SubordinateRecord>.self, forKey: .records))?.elements ?? []
+        meetings = (try? c.decode(LossyArray<SubordinateMeeting>.self, forKey: .meetings))?.elements ?? []
+        tasks = (try? c.decode(LossyArray<SubordinateTask>.self, forKey: .tasks))?.elements ?? []
+        shifts = (try? c.decode(LossyArray<SubordinateShift>.self, forKey: .shifts))?.elements ?? []
         plantArea = (try? c.decode(String.self, forKey: .plantArea)) ?? ""
-        weeklyReports = (try? c.decode([WeeklyReport].self, forKey: .weeklyReports)) ?? []
+        weeklyReports = (try? c.decode(LossyArray<WeeklyReport>.self, forKey: .weeklyReports))?.elements ?? []
+    }
+}
+
+/// 逐元素容錯解碼陣列：單一壞元素只跳過該筆，不會導致整個陣列解碼失敗（回傳空陣列）。
+struct LossyArray<Element: Decodable>: Decodable {
+    let elements: [Element]
+    private struct AnyDecodable: Decodable {}   // 用來消耗（跳過）無法解碼的元素
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var result: [Element] = []
+        while !container.isAtEnd {
+            let before = container.currentIndex
+            do {
+                result.append(try container.decode(Element.self))
+            } catch {
+                _ = try? container.decode(AnyDecodable.self)   // 跳過壞元素
+            }
+            if container.currentIndex == before { break }       // 無法前進 → 中止避免無限迴圈
+        }
+        elements = result
     }
 }
 
