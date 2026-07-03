@@ -30,8 +30,9 @@ extension Subordinate {
         return max(0, min(100, Int(score.rounded())))
     }
 
-    /// 主動性分數（日常，0~100）：完成任務 / 完成會議議程項目加分，請假時數扣分。
-    var proactivityScore: Int {
+    /// 主動性分數（日常，0~100）：完成任務 / 完成會議議程項目 / 報告加分、被標註加分，請假時數扣分。
+    /// mentionedCount = 此人被其他項目 @ 標註的項目數（由 LifeStore 計算後傳入）。
+    func proactivityScore(mentionedCount: Int = 0) -> Int {
         let completedTasks = tasks.filter { $0.isCompleted }.count
         let completedItems = meetings.flatMap { $0.items }.filter { $0.isCompleted }.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
@@ -40,13 +41,14 @@ extension Subordinate {
         score += Double(completedTasks) * 3      // 每完成一項任務 +3
         score += Double(completedItems) * 2      // 每完成一個議程項目 +2
         score += Double(completedReports) * 3    // 每完成一份報告 +3
+        score += Double(mentionedCount) * 2      // 每被標註一項 +2
         score -= leaveHours / 8 * 2              // 每請假 8 小時 -2
         return max(0, min(100, Int(score.rounded())))
     }
 
     /// 綜合分數＝潛力與主動性的平均（部屬列表左側顯示用）
-    var overallScore: Int {
-        Int(((Double(potentialScore) + Double(proactivityScore)) / 2).rounded())
+    func overallScore(mentionedCount: Int = 0) -> Int {
+        Int(((Double(potentialScore) + Double(proactivityScore(mentionedCount: mentionedCount))) / 2).rounded())
     }
 
     /// 潛力評分的計算明細（分組條目 + 加減分）
@@ -82,7 +84,7 @@ extension Subordinate {
     }
 
     /// 主動性評分的計算明細（分組條目 + 加減分）
-    var proactivityBreakdown: [(label: String, points: Int)] {
+    func proactivityBreakdown(mentionedCount: Int = 0) -> [(label: String, points: Int)] {
         var items: [(String, Int)] = [("基礎分", 60)]
         let completedTasks = tasks.filter { $0.isCompleted }.count
         let completedItems = meetings.flatMap { $0.items }.filter { $0.isCompleted }.count
@@ -91,6 +93,7 @@ extension Subordinate {
         if completedTasks > 0 { items.append(("完成任務 ×\(completedTasks)", completedTasks * 3)) }
         if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems * 2)) }
         if completedReports > 0 { items.append(("完成報告 ×\(completedReports)", completedReports * 3)) }
+        if mentionedCount > 0 { items.append(("被標註 ×\(mentionedCount)", mentionedCount * 2)) }
         if leaveHours > 0 {
             let h = leaveHours.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(leaveHours))" : String(format: "%.1f", leaveHours)
             items.append(("請假 \(h) 小時", -Int((leaveHours / 8 * 2).rounded())))
@@ -181,6 +184,13 @@ struct TalentMatrixView: View {
     private var members: [Subordinate] {
         let ids = selectedDeptIds
         return lifeStore.subordinates.filter { ids.isEmpty || ($0.departmentId.map { ids.contains($0) } ?? false) }
+    }
+
+    /// 各人員被 @ 標註的項目數（併入主動性分數）
+    private var mentionCounts: [UUID: Int] { lifeStore.mentionedCounts() }
+    /// 含被標註加分的主動性分數
+    private func proactivity(_ m: Subordinate) -> Int {
+        proactivity(m)(mentionedCount: mentionCounts[m.id] ?? 0)
     }
 
     /// 篩選摘要（全部部門 / 單一部門名 / N 個部門）
@@ -466,20 +476,20 @@ struct TalentMatrixView: View {
         return (lo - pad)...(hi + pad)
     }
 
-    private var xDomain: ClosedRange<Double> { domain(members.map { $0.proactivityScore }) }
+    private var xDomain: ClosedRange<Double> { domain(members.map { proactivity($0) }) }
     private var yDomain: ClosedRange<Double> { domain(members.map { $0.potentialScore }) }
     private var xMid: Double { (xDomain.lowerBound + xDomain.upperBound) / 2 }
     private var yMid: Double { (yDomain.lowerBound + yDomain.upperBound) / 2 }
 
     // [v3] 象限人數 computed properties（供英雄卡 + 圖例雙用，消除重複計算）
-    private var starCount: Int        { members.filter { Double($0.proactivityScore) >= xMid && Double($0.potentialScore) >= yMid }.count }
-    private var potentialCount: Int   { members.filter { Double($0.proactivityScore) < xMid  && Double($0.potentialScore) >= yMid }.count }
-    private var hardWorkerCount: Int  { members.filter { Double($0.proactivityScore) >= xMid && Double($0.potentialScore) < yMid  }.count }
-    private var needsImprovCount: Int { members.filter { Double($0.proactivityScore) < xMid  && Double($0.potentialScore) < yMid  }.count }
+    private var starCount: Int        { members.filter { Double(proactivity($0)) >= xMid && Double($0.potentialScore) >= yMid }.count }
+    private var potentialCount: Int   { members.filter { Double(proactivity($0)) < xMid  && Double($0.potentialScore) >= yMid }.count }
+    private var hardWorkerCount: Int  { members.filter { Double(proactivity($0)) >= xMid && Double($0.potentialScore) < yMid  }.count }
+    private var needsImprovCount: Int { members.filter { Double(proactivity($0)) < xMid  && Double($0.potentialScore) < yMid  }.count }
 
     // [v3] 象限標籤 helper（依個人分數回傳名稱與對應色）
     private func quadrantLabel(_ m: Subordinate) -> (name: String, color: Color) {
-        let hiX = Double(m.proactivityScore) >= xMid
+        let hiX = Double(proactivity(m)) >= xMid
         let hiY = Double(m.potentialScore) >= yMid
         switch (hiY, hiX) {
         case (true, true):   return ("明星", .green)
@@ -490,7 +500,7 @@ struct TalentMatrixView: View {
     }
 
     private func pointColor(_ m: Subordinate) -> Color {
-        let hiX = Double(m.proactivityScore) >= xMid
+        let hiX = Double(proactivity(m)) >= xMid
         let hiY = Double(m.potentialScore) >= yMid
         switch (hiY, hiX) {
         case (true, true):   return .green     // 高潛力高主動：明星
@@ -512,7 +522,7 @@ struct TalentMatrixView: View {
 
             ForEach(members) { m in
                 PointMark(
-                    x: .value("主動性", m.proactivityScore),
+                    x: .value("主動性", proactivity(m)),
                     y: .value("潛力", m.potentialScore)
                 )
                 .symbolSize(140)
@@ -637,7 +647,7 @@ struct TalentMatrixView: View {
         var best: Subordinate?
         var bestDist = CGFloat.greatestFiniteMagnitude
         for m in members {
-            guard let px = proxy.position(forX: m.proactivityScore),
+            guard let px = proxy.position(forX: proactivity(m)),
                   let py = proxy.position(forY: m.potentialScore) else { continue }
             let p = CGPoint(x: rect.minX + px, y: rect.minY + py)
             let d = hypot(p.x - loc.x, p.y - loc.y)
@@ -675,7 +685,7 @@ struct TalentMatrixView: View {
                     // [v3] 象限標籤：直觀顯示此人的矩陣位置，對應象限色
                     let ql = quadrantLabel(m)
                     HStack(spacing: 5) {
-                        Text("主動 \(m.proactivityScore)")
+                        Text("主動 \(proactivity(m))")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.blue)
                             .padding(.horizontal, 7).padding(.vertical, 2.5)
@@ -710,7 +720,7 @@ struct TalentMatrixView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    breakdownGroup("主動性（日常）", color: .blue, total: m.proactivityScore, items: m.proactivityBreakdown)
+                    breakdownGroup("主動性（日常）", color: .blue, total: proactivity(m), items: m.proactivityBreakdown(mentionedCount: mentionCounts[m.id] ?? 0))
                     breakdownGroup("潛力（評分）", color: .indigo, total: m.potentialScore, items: m.potentialBreakdown)
                 }
                 .padding(.vertical, 4)

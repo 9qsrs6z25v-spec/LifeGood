@@ -804,10 +804,13 @@ struct SubordinateView: View {
         Self.dateFormatter.string(from: date)
     }
 
-    /// 列表顯示分數：潛力與主動性的平均（Subordinate.overallScore）。
+    /// 列表顯示分數：潛力與主動性的平均（含被標註加分）。
     private func subordinateScore(_ sub: Subordinate) -> Int {
-        sub.overallScore
+        sub.overallScore(mentionedCount: mentionCounts[sub.id] ?? 0)
     }
+
+    /// 各人員被 @ 標註的項目數（單次掃描快取，供分數計算）
+    private var mentionCounts: [UUID: Int] { lifeStore.mentionedCounts() }
 
     private func scoreColor(_ score: Int) -> Color {
         switch score {

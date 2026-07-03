@@ -308,7 +308,7 @@ struct SubordinateDetailView: View {
                                         .font(.caption2)
                                     Text(tab.rawValue)
                                         .font(.subheadline.weight(.semibold))
-                                    Text("\(tab == .daily ? subordinate.proactivityScore : subordinate.potentialScore)")
+                                    Text("\(tab == .daily ? subordinate.proactivityScore(mentionedCount: mentionedItems.count) : subordinate.potentialScore)")
                                         .font(.caption.weight(.bold))
                                 }
                                 .padding(.horizontal, 16)
@@ -506,11 +506,11 @@ struct SubordinateDetailView: View {
 
             // 分數看板：主動性 / 潛力性 / 綜合
             HStack(spacing: 0) {
-                scoreCell("主動性", subordinate.proactivityScore)
+                scoreCell("主動性", subordinate.proactivityScore(mentionedCount: mentionedItems.count))
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 34)
                 scoreCell("潛力性", subordinate.potentialScore)
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 34)
-                scoreCell("綜合", subordinate.overallScore)
+                scoreCell("綜合", subordinate.overallScore(mentionedCount: mentionedItems.count))
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.12))
@@ -539,6 +539,23 @@ struct SubordinateDetailView: View {
             .padding(.vertical, 8)
             .background(.white.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            // 第二列 KPI：報告 / 會議 / 任務 / 被標註 / 請假
+            HStack(spacing: 0) {
+                statBadge(count: subordinate.weeklyReports.count, label: "報告", color: .purple)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                statBadge(count: subordinate.meetings.count,      label: "會議", color: .indigo)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                statBadge(count: subordinate.tasks.count,         label: "任務", color: .cyan)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                statBadge(count: mentionedItems.count,            label: "被標註", color: .pink)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                statBadge(count: recordCounts[.leave] ?? 0,       label: "請假", color: .teal)
+            }
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 8)
         }
         .padding(20)
         .background(
@@ -1975,6 +1992,32 @@ extension LifeStore {
         }
         return out
     }
+
+    /// 一次掃描所有部屬的任務/會議/報告，統計每個人被 @ 標註到的「項目數」。
+    /// 同一項目同一人只計一次。用於主動性加分與看板「被標註」計數。
+    func mentionedCounts() -> [UUID: Int] {
+        let people = mentionPeople()
+        var counts: [UUID: Int] = [:]
+        for s in subordinates {
+            for t in s.tasks {
+                let ids = MentionText.mentionedIDs(in: t.content, people: people)
+                    .union(MentionText.mentionedIDs(in: t.note, people: people))
+                for id in ids { counts[id, default: 0] += 1 }
+            }
+            for m in s.meetings {
+                var ids = MentionText.mentionedIDs(in: m.note, people: people)
+                for item in m.items { ids.formUnion(MentionText.mentionedIDs(in: item.content, people: people)) }
+                for id in ids { counts[id, default: 0] += 1 }
+            }
+            for r in s.weeklyReports {
+                for id in MentionText.mentionedIDs(in: r.note, people: people) { counts[id, default: 0] += 1 }
+            }
+        }
+        return counts
+    }
+
+    /// 某人被 @ 標註到的項目數
+    func mentionedCount(for subId: UUID) -> Int { mentionedCounts()[subId] ?? 0 }
 }
 
 /// 標註文字工具：文字內以乾淨的 `@名字` 儲存，顯示時再依名字解析為可點連結。
