@@ -240,6 +240,7 @@ struct SubordinateDetailView: View {
     let subordinateId: UUID
     @State private var showEdit = false
     @State private var showCompleted = false
+    @State private var previewItem: SubordinateItemRef?
     @State private var addingType: SubordinateRecordType?
     @State private var editingRecord: SubordinateRecord?
     @State private var addingMeeting = false
@@ -347,6 +348,10 @@ struct SubordinateDetailView: View {
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05), value: tabSectionsAppeared)
+                        mentionedSection
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.07), value: tabSectionsAppeared)
                         recordSection(.leave)
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
@@ -417,6 +422,9 @@ struct SubordinateDetailView: View {
             }
             .sheet(item: $editingTask) { t in
                 TaskEditorSheet(subordinateId: subordinateId, editing: t)
+            }
+            .sheet(item: $previewItem) { ref in
+                SubordinateItemCard(ref: ref)
             }
         }
     }
@@ -495,6 +503,20 @@ struct SubordinateDetailView: View {
                 }
                 .padding(.top, 10)
             }
+
+            // 分數看板：主動性 / 潛力性 / 綜合
+            HStack(spacing: 0) {
+                scoreCell("主動性", subordinate.proactivityScore)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 34)
+                scoreCell("潛力性", subordinate.potentialScore)
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 34)
+                scoreCell("綜合", subordinate.overallScore)
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.18), lineWidth: 0.75))
+            .padding(.top, 14)
 
             // 分隔線
             Rectangle()
@@ -581,6 +603,20 @@ struct SubordinateDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)
+    }
+
+    // 分數看板單格：大白數字 + 標籤
+    private func scoreCell(_ label: String, _ value: Int) -> some View {
+        VStack(spacing: 3) {
+            Text("\(value)")
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.82))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 會議章節
@@ -682,6 +718,90 @@ struct SubordinateDetailView: View {
     private var completedSection: some View {
         CompletedCollapsibleCard(entries: completedEntries, expanded: $showCompleted)
             .padding(.horizontal)
+    }
+
+    // MARK: - 被標註的項目（此部屬被 @ 標註的任務/會議/報告）
+
+    /// 全部部屬的任務/會議/報告中，內容或備註 @ 標註到「本人」的項目
+    private var mentionedItems: [SubordinateItemRef] {
+        let me = subordinate.id
+        let people = lifeStore.mentionPeople()
+        func hit(_ texts: String...) -> Bool {
+            texts.contains { MentionText.mentionedIDs(in: $0, people: people).contains(me) }
+        }
+        var out: [SubordinateItemRef] = []
+        for s in lifeStore.subordinates {
+            for t in s.tasks where hit(t.content, t.note) {
+                out.append(.task(subId: s.id, task: t))
+            }
+            for m in s.meetings {
+                let itemsText = m.items.map(\.content).joined(separator: "\n")
+                if hit(m.note, itemsText) { out.append(.meeting(subId: s.id, meeting: m)) }
+            }
+            for r in s.weeklyReports where hit(r.note) {
+                out.append(.report(subId: s.id, report: r))
+            }
+        }
+        return out
+    }
+
+    private func mentionedRowInfo(_ ref: SubordinateItemRef)
+        -> (icon: String, color: Color, title: String, owner: String, kind: String) {
+        func owner(_ id: UUID) -> String {
+            let n = lifeStore.subordinates.first { $0.id == id }?.name ?? ""
+            return n.isEmpty ? "未命名" : n
+        }
+        switch ref {
+        case .task(let s, let t):    return ("checklist", .cyan, t.topic.isEmpty ? "未命名任務" : t.topic, owner(s), "任務")
+        case .meeting(let s, let m): return ("person.3.fill", .indigo, m.topic.isEmpty ? "未命名會議" : m.topic, owner(s), "會議")
+        case .report(let s, let r):  return ("doc.text.fill", .purple, r.topic.isEmpty ? "未命名報告" : r.topic, owner(s), "報告")
+        case .leave(let s, let rec): return ("calendar.badge.minus", .teal, rec.leaveType?.rawValue ?? "請假", owner(s), "請假")
+        }
+    }
+
+    private var mentionedSection: some View {
+        let items = mentionedItems
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("被標註的項目", icon: "at", color: .pink, count: items.count) { EmptyView() }
+            if items.isEmpty {
+                emptyHint
+            } else {
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, ref in
+                    Button { previewItem = ref } label: { mentionedRow(ref) }
+                        .buttonStyle(.plain)
+                    if idx < items.count - 1 { Divider().padding(.leading, 58) }
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+    }
+
+    private func mentionedRow(_ ref: SubordinateItemRef) -> some View {
+        let info = mentionedRowInfo(ref)
+        return HStack(spacing: 11) {
+            ZStack {
+                Circle().fill(LinearGradient(colors: [info.color.opacity(0.20), info.color.opacity(0.08)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 34, height: 34)
+                Image(systemName: info.icon).font(.system(size: 13, weight: .semibold)).foregroundStyle(info.color)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(info.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                    Text(info.kind).font(.caption2.weight(.bold))
+                        .padding(.horizontal, 6).padding(.vertical, 1.5)
+                        .background(info.color.opacity(0.14)).foregroundStyle(info.color).clipShape(Capsule())
+                }
+                Text("來自 \(info.owner)").font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .contentShape(Rectangle())
     }
 
     private var meetingSection: some View {
@@ -1861,6 +1981,23 @@ extension LifeStore {
 enum MentionText {
     /// 插入時使用的純文字（只有名字，不含代碼）
     static func plainToken(for p: MentionPerson) -> String { "@\(p.name)" }
+
+    /// 取出文字中所有被 @ 標註且能對應到人員的 id（用於「被標註的項目」）
+    static func mentionedIDs(in raw: String, people: [MentionPerson]) -> Set<UUID> {
+        let sorted = people.filter { !$0.name.isEmpty }.sorted { $0.name.count > $1.name.count }
+        var ids = Set<UUID>()
+        var s = Substring(raw)
+        while let atIdx = s.firstIndex(of: "@") {
+            let afterAt = s[s.index(after: atIdx)...]
+            if let p = sorted.first(where: { afterAt.hasPrefix($0.name) }) {
+                ids.insert(p.id)
+                s = afterAt[afterAt.index(afterAt.startIndex, offsetBy: p.name.count)...]
+            } else {
+                s = afterAt
+            }
+        }
+        return ids
+    }
 
     /// 將文字內的 `@名字` 依人員清單解析為可點連結（藍字）；找不到對應者則維持純文字。
     static func attributed(_ raw: String, people: [MentionPerson]) -> AttributedString {
