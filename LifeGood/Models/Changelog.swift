@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.20", build: 576, date: "2026/07/05", notes: [
+            "美化多照片廊（MultiPhotoGallery）：全螢幕看照片的關閉按鈕改到左上角，與全 App「關閉／取消」統一放左側的慣例一致。",
+            "看照片時圖片改為淡入顯示，不再從讀取中直接跳成圖片；點縮圖新增輕量按下縮放回饋。"
+        ]),
         ChangelogEntry(version: "23.19", build: 575, date: "2026/06/29", notes: [
             "強化匯入容錯：部屬的任務/會議/報告/班表/紀錄改為『逐筆容錯解碼』，單一壞紀錄只跳過該筆，不再整個陣列一起消失（改善匯入完整資料時部屬任務等未被帶入的問題）。",
             "部屬姓名/職稱/部門/備註缺欄位時不再讓整筆部屬解碼失敗。"

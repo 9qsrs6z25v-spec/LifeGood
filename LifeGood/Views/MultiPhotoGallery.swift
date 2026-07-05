@@ -13,6 +13,15 @@ import UIKit
 //   xmark 刪除按鈕加 shadow 提升暗背景可見度
 // • PhotoLightbox 關閉按鈕：改用 36pt Circle + .ultraThinMaterial 背景＋陰影，
 //   視覺層次清晰，暗色 / 明色模式皆自適應
+//
+// [2026-07 v2] 一致性 + 動畫小步美化：
+// • PhotoLightbox 關閉按鈕：右上角 → 左上角，對齊全 App 慣例
+//   （ChildDetailView / DailyRecordEditorSheet / ChildRecordEditorSheet 等
+//   均以 ToolbarItem(.topBarLeading) 放置「關閉／取消」，此為唯一例外，已統一）
+// • PhotoLightbox 圖片載入：背景模糊層 + 前景大圖改為載入完成後淡入（0.28s ease），
+//   取代原本從 ProgressView 直接跳成圖片的生硬切換
+// • 縮圖 thumbnail：按下時加入輕量 scaleEffect(0.96) 回饋，提升點擊可感知性
+//   （下次美化本元件時，可從這裡接著找其他可統一之處）
 
 // MARK: - 多照片廊（可拍照 / 從相簿多選 / 點看大圖 / 刪除）
 
@@ -179,7 +188,7 @@ struct MultiPhotoGallery: View {
             } label: {
                 AsyncThumbnailView(url: url, size: thumbnailSize)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableScaleStyle())
             .shadow(color: .black.opacity(0.10), radius: 6, x: 0, y: 3)
             .shadow(color: .black.opacity(0.04), radius: 2, x: 0, y: 1)
 
@@ -196,6 +205,17 @@ struct MultiPhotoGallery: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+}
+
+// MARK: - 輕量按下回饋（縮圖點擊用）
+
+/// 縮放至 0.96 + 0.12s ease-out，讓點擊縮圖時有明確的觸控回饋
+private struct PressableScaleStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -260,6 +280,7 @@ struct PhotoLightbox: View {
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var image: UIImage?
+    @State private var imageAppeared = false
 
     var body: some View {
         ZStack {
@@ -274,12 +295,14 @@ struct PhotoLightbox: View {
                     .blur(radius: 38, opaque: true)
                     .overlay(Color.black.opacity(0.30))
                     .ignoresSafeArea()
+                    .opacity(imageAppeared ? 1 : 0)
 
                 // 前景：原圖
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFit()
                     .scaleEffect(scale)
+                    .opacity(imageAppeared ? 1 : 0)
                     .gesture(
                         MagnificationGesture()
                             .onChanged { value in
@@ -292,14 +315,16 @@ struct PhotoLightbox: View {
                     .onTapGesture(count: 2) {
                         withAnimation { scale = scale > 1 ? 1 : 2; lastScale = scale }
                     }
+                    .onAppear {
+                        withAnimation(.easeOut(duration: 0.28)) { imageAppeared = true }
+                    }
             } else {
                 ProgressView().tint(.white)
             }
 
-            // 關閉按鈕：Circle + ultraThinMaterial，暗色 / 明色模式皆自適應
+            // 關閉按鈕：左上角，對齊全 App「關閉／取消」統一放在左側的慣例
             VStack {
                 HStack {
-                    Spacer()
                     Button {
                         dismiss()
                     } label: {
@@ -314,6 +339,7 @@ struct PhotoLightbox: View {
                             )
                     }
                     .padding()
+                    Spacer()
                 }
                 Spacer()
             }
