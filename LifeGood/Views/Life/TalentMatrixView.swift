@@ -190,7 +190,7 @@ struct TalentMatrixView: View {
     private var mentionCounts: [UUID: Int] { lifeStore.mentionedCounts() }
     /// 含被標註加分的主動性分數
     private func proactivity(_ m: Subordinate) -> Int {
-        proactivity(m)(mentionedCount: mentionCounts[m.id] ?? 0)
+        m.proactivityScore(mentionedCount: mentionCounts[m.id] ?? 0)
     }
 
     /// 篩選摘要（全部部門 / 單一部門名 / N 個部門）

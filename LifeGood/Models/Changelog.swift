@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.21", build: 577, date: "2026/07/05", notes: [
+            "修正建置失敗：TalentMatrixView 的 proactivity(_:) 輔助方法誤寫成遞迴呼叫自己再帶參數（proactivity(m)(mentionedCount:)），導致『Cannot call value of non-function type Int』。改為正確呼叫模型方法 m.proactivityScore(mentionedCount:)。"
+        ]),
         ChangelogEntry(version: "23.20", build: 576, date: "2026/07/05", notes: [
             "美化多照片廊（MultiPhotoGallery）：全螢幕看照片的關閉按鈕改到左上角，與全 App「關閉／取消」統一放左側的慣例一致。",
             "看照片時圖片改為淡入顯示，不再從讀取中直接跳成圖片；點縮圖新增輕量按下縮放回饋。"
