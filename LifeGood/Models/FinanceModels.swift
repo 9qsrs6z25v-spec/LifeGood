@@ -593,6 +593,15 @@ struct RealEstateMortgageItem: Identifiable, Codable {
 
     /// 已繳貸款金額
     var paidAmount: Double { amount * Double(elapsedPeriods) }
+
+    /// 本月是否仍需繳款：已開始（今天 ≥ 起始日）且尚未繳滿期數。
+    /// 尚未開始的未來貸款區段、已繳滿的貸款都不算入當期月付。
+    var isPayingNow: Bool {
+        let now = Date()
+        guard now >= startDate else { return false }   // 未開始
+        let months = Calendar.current.dateComponents([.month], from: startDate, to: now).month ?? 0
+        return months < totalPeriods                   // 未繳滿
+    }
 }
 
 // MARK: - 房地產已支出金額項目
@@ -1448,8 +1457,8 @@ struct RealEstate: Identifiable, Codable {
     /// 是否已售出
     var isSold: Bool { soldDate != nil }
 
-    /// 每月房貸合計
-    var monthlyMortgage: Double { mortgageItems.reduce(0) { $0 + $1.amount } }
+    /// 每月房貸合計（只計入當期實際要繳的貸款，排除尚未開始或已繳滿的區段）
+    var monthlyMortgage: Double { mortgageItems.filter { $0.isPayingNow }.reduce(0) { $0 + $1.amount } }
     /// 貸款總額
     var totalMortgageAmount: Double { mortgageItems.reduce(0) { $0 + $1.totalAmount } }
     /// 已繳貸款金額合計

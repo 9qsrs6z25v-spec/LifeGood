@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.35", build: 591, date: "2026/07/06", notes: [
+            "【正確性修復】房地產每月淨現金流：原本 monthlyMortgage 會把該物件『所有』貸款區段的月付都加總，導致尚未開始（未來才生效）或已繳滿的貸款也被算進當期月付；例如設了『今年～明年』與『明年～後年』兩個區段時，明年才開始的那筆會被提前計入。改為只計入當期實際要繳的貸款（今天 ≥ 起始日且尚未繳滿期數）。",
+            "同步影響：物件卡片與詳情頁的『每月淨現金流』、理財總覽的房產現金流彙總、以及列表『月貸』顯示，皆改為只反映當期實際月付；『貸款總額 / 已繳貸款』仍為含全部區段的終生金額，不變。"
+        ]),
         ChangelogEntry(version: "23.34", build: 590, date: "2026/07/06", notes: [
             "修正建置失敗：AddExpenseView 的 bankPicker 改用 allBankBalances() 批次建表後，信用卡區塊仍殘留一處舊呼叫 bankBalance(for: bank)（該函式已移除），導致『Cannot find bankBalance in scope』。改為與銀行區塊一致查表 balances[bank.id] ?? 0。"
         ]),
