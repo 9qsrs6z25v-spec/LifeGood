@@ -84,10 +84,6 @@ struct SpouseResumeView: View {
             .sorted { $0.date > $1.date }
     }
 
-    private var spouseExpenseTotal: Double {
-        spouseExpenses.reduce(0) { $0 + $1.amount }
-    }
-
     /// 變動支出 .social 中將配偶列為收受人的紀錄
     private var spouseGifts: [Expense] {
         guard let s = spouse, !s.chineseName.isEmpty else { return [] }
@@ -105,11 +101,17 @@ struct SpouseResumeView: View {
 
     var body: some View {
         NavigationStack {
+            // spouseExpenses／spouseGifts（全量 filter+字串切分+sort）改在此算一次，
+            // 往下傳給 heroCard／giftSection／expenseSection，避免原本各自重複呼叫
+            // spouseExpenses／spouseExpenseTotal／spouseGifts 造成單次 render 十次上下的全量掃描。
+            let expenses = spouseExpenses
+            let expenseTotal = expenses.reduce(0) { $0 + $1.amount }
+            let gifts = spouseGifts
             List {
                 if let s = spouse {
                     // 英雄卡
                     Section {
-                        heroCard(s)
+                        heroCard(s, expenseTotal: expenseTotal, giftCount: gifts.count)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -123,8 +125,8 @@ struct SpouseResumeView: View {
                     }
                     marriageSection(s)
                     milestoneSection
-                    giftSection
-                    expenseSection
+                    giftSection(gifts)
+                    expenseSection(expenses, expenseTotal: expenseTotal)
                 }
             }
             .listStyle(.insetGrouped)
@@ -140,7 +142,7 @@ struct SpouseResumeView: View {
     private static let heroAccent      = Color(red: 0.96, green: 0.35, blue: 0.58)
     private static let heroAccentDark  = Color(red: 0.76, green: 0.18, blue: 0.40)
 
-    private func heroCard(_ s: FamilyMember) -> some View {
+    private func heroCard(_ s: FamilyMember, expenseTotal: Double, giftCount: Int) -> some View {
         let accent     = Self.heroAccent
         let accentDark = Self.heroAccentDark
         let marriageComp: (year: Int, month: Int)? = s.marriageDate.map { md in
@@ -204,14 +206,14 @@ struct SpouseResumeView: View {
                     .frame(width: 0.5, height: 28)
 
                 kpiCell(icon: "bag.fill", label: "共同消費",
-                        value: spouseExpenseTotal.ntdWanString)
+                        value: expenseTotal.ntdWanString)
 
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
 
                 kpiCell(icon: "gift.fill", label: "禮金紀錄",
-                        value: "\(spouseGifts.count) 筆")
+                        value: "\(giftCount) 筆")
             }
             .padding(.vertical, 8)
             .background(
@@ -515,23 +517,23 @@ struct SpouseResumeView: View {
     // MARK: - 禮金（共用元件）
 
     @ViewBuilder
-    private var giftSection: some View {
-        if !spouseGifts.isEmpty {
-            ResumeGiftSection(gifts: spouseGifts, recipientName: spouse?.chineseName ?? "配偶")
+    private func giftSection(_ gifts: [Expense]) -> some View {
+        if !gifts.isEmpty {
+            ResumeGiftSection(gifts: gifts, recipientName: spouse?.chineseName ?? "配偶")
         }
     }
 
     // MARK: - 共同消費
 
     @ViewBuilder
-    private var expenseSection: some View {
+    private func expenseSection(_ expenses: [Expense], expenseTotal: Double) -> some View {
         let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
         Section(
             header: sectionHeader(title: "共同消費", icon: "bag.fill", color: accent,
-                                  count: spouseExpenses.isEmpty ? nil : spouseExpenses.count),
+                                  count: expenses.isEmpty ? nil : expenses.count),
             footer: Text("變動支出中將「\(spouse?.chineseName ?? "配偶")」加入人員的紀錄會自動同步到此。")
         ) {
-            if spouseExpenses.isEmpty {
+            if expenses.isEmpty {
                 emptyPlaceholder(icon: "bag", text: "尚無共同消費紀錄", color: accent)
             } else {
                 // 合計列
@@ -553,11 +555,11 @@ struct SpouseResumeView: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color(red: 0.90, green: 0.25, blue: 0.25))
                     }
-                    Text("合計 \(spouseExpenses.count) 筆")
+                    Text("合計 \(expenses.count) 筆")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text(spouseExpenseTotal.ntdWanString)
+                    Text(expenseTotal.ntdWanString)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(Color(red: 0.90, green: 0.25, blue: 0.25))
                         .contentTransition(.numericText())
@@ -565,7 +567,7 @@ struct SpouseResumeView: View {
                 .padding(.vertical, 4)
 
                 // 消費列（交錯進場）
-                ForEach(Array(spouseExpenses.prefix(20).enumerated()), id: \.element.id) { idx, e in
+                ForEach(Array(expenses.prefix(20).enumerated()), id: \.element.id) { idx, e in
                     expenseRow(e)
                         .opacity(expensesAppeared ? 1 : 0)
                         .offset(y: expensesAppeared ? 0 : 12)
@@ -583,8 +585,8 @@ struct SpouseResumeView: View {
                         }
                 }
 
-                if spouseExpenses.count > 20 {
-                    Text("還有 \(spouseExpenses.count - 20) 筆…")
+                if expenses.count > 20 {
+                    Text("還有 \(expenses.count - 20) 筆…")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .padding(.vertical, 4)

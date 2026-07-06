@@ -60,9 +60,9 @@ final class CloudKitManager {
     // 加鎖避免跨執行緒讀寫同一屬性的競態條件。
     private let statusLock = NSLock()
     private var _accountStatus: CKAccountStatus = .couldNotDetermine
-    private(set) var accountStatus: CKAccountStatus {
+    var accountStatus: CKAccountStatus {
         get { statusLock.lock(); defer { statusLock.unlock() }; return _accountStatus }
-        set { statusLock.lock(); _accountStatus = newValue; statusLock.unlock() }
+        private set { statusLock.lock(); _accountStatus = newValue; statusLock.unlock() }
     }
 
     private init() {

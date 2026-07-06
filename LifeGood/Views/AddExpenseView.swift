@@ -1026,29 +1026,38 @@ struct AddExpenseView: View {
         return unique.isEmpty ? ["NT$"] : unique
     }
 
-    /// 計算銀行的目前總額（含信用卡彙總扣款）
-    private func bankBalance(for ms: LifeMilestone) -> Double {
+    /// 計算全部銀行的目前總額（含信用卡彙總扣款），一次算好整批供 bankPicker 查表。
+    /// 原本 bankBalance(for:) 每次呼叫都對 store.expenses 做 first(where:)/filter 全量掃描，
+    /// 而 bankPicker 是 Form body 的一部分，金額欄位每次按鍵都會觸發整個 body 重新求值——
+    /// 銀行/信用卡選單因此在打字時對 expenses 反覆全量掃描（O(deposits × expenses) 每次按鍵）。
+    /// 改為批次建表：expensesById／expensesByCardMilestone 各建一次，銀行逐筆查表 O(1)。
+    private func allBankBalances() -> [UUID: Double] {
         let now = Date()
-        var total: Double = 0
-        for dep in ms.bankDeposits ?? [] {
-            guard dep.date <= now else { continue }
-            if let expId = dep.linkedExpenseId,
-               let exp = store.expenses.first(where: { $0.id == expId }),
-               exp.linkedCreditCardMilestoneId != nil {
-                continue
+        let expensesById = Dictionary(store.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let expensesByCardMilestone = Dictionary(grouping: store.expenses.filter {
+            $0.linkedCreditCardMilestoneId != nil && $0.date <= now
+        }, by: { $0.linkedCreditCardMilestoneId! })
+        var result: [UUID: Double] = [:]
+        for ms in bankMilestones {
+            var total: Double = 0
+            for dep in ms.bankDeposits ?? [] {
+                guard dep.date <= now else { continue }
+                if let expId = dep.linkedExpenseId,
+                   let exp = expensesById[expId],
+                   exp.linkedCreditCardMilestoneId != nil {
+                    continue
+                }
+                total += dep.isWithdrawal ? -dep.amount : dep.amount
             }
-            total += dep.isWithdrawal ? -dep.amount : dep.amount
-        }
-        let cards = lifeStore.milestones.filter {
-            $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
-        }
-        for card in cards {
-            let exps = store.expenses.filter {
-                $0.linkedCreditCardMilestoneId == card.id && $0.date <= now
+            let cards = lifeStore.milestones.filter {
+                $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
             }
-            for exp in exps { total -= exp.amount }
+            for card in cards {
+                for exp in expensesByCardMilestone[card.id] ?? [] { total -= exp.amount }
+            }
+            result[ms.id] = total
         }
-        return total
+        return result
     }
 
     private func formatBankBalance(_ value: Double) -> String {
@@ -1082,7 +1091,8 @@ struct AddExpenseView: View {
     }
 
     private var bankPicker: some View {
-        HStack {
+        let balances = allBankBalances()
+        return HStack {
             Text("扣款目標").foregroundStyle(.secondary)
             Spacer()
             Menu {
@@ -1096,7 +1106,7 @@ struct AddExpenseView: View {
                         ForEach(bankMilestones) { ms in
                             let currencies = bankCurrencies(for: ms)
                             let name = ms.bankName ?? ms.title
-                            let balanceLabel = "\(name)（\(formatBankBalance(bankBalance(for: ms)))）"
+                            let balanceLabel = "\(name)（\(formatBankBalance(balances[ms.id] ?? 0))）"
                             if currencies.count > 1 {
                                 Menu(balanceLabel) {
                                     ForEach(currencies, id: \.self) { code in

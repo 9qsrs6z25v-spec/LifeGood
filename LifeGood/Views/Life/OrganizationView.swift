@@ -69,10 +69,11 @@ struct OrganizationView: View {
                     emptyState
                 } else {
                     ScrollView([.horizontal, .vertical]) {
+                        let ctx = makeOrgContext()
                         VStack(spacing: 24) {
                             statsHeader
                             ForEach(rootDepartments) { root in
-                                deptTreeNode(root, visited: [])
+                                deptTreeNode(root, visited: [], ctx: ctx)
                             }
                         }
                         .padding(24)
@@ -222,6 +223,7 @@ struct OrganizationView: View {
     @MainActor
     private func generatePDFURL() -> URL? {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("公司組織圖.pdf")
+        let exportCtx = makeOrgContext()
         let exportContent = VStack(spacing: 32) {
             HStack {
                 Text("公司組織圖")
@@ -231,7 +233,7 @@ struct OrganizationView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             ForEach(rootDepartments) { root in
-                deptTreeNode(root, visited: [])
+                deptTreeNode(root, visited: [], ctx: exportCtx)
             }
         }
         .padding(40)
@@ -263,16 +265,38 @@ struct OrganizationView: View {
         return f.string(from: Date())
     }
 
+    /// 組織樹批次查表：children/人員計數/peer 名稱原本在 deptTreeNode／departmentCard
+    /// 每個節點各自對 departments／orgPeople 全量 filter（O(D²) + O(D×P)），
+    /// 部門/人員數一多，每次 render（含任何導致本頁重繪的狀態變化）都會重複整棵樹的全量掃描。
+    /// 改為 body 進入樹狀繪製前一次建表，遞迴節點全部改查表 O(1)。
+    private struct OrgContext {
+        let byId: [UUID: Department]
+        let childrenByParent: [UUID: [Department]]
+        let peopleCountByDept: [UUID: Int]
+    }
+    private func makeOrgContext() -> OrgContext {
+        let byId = Dictionary(lifeStore.departments.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var childrenByParent: [UUID: [Department]] = [:]
+        for dept in lifeStore.departments {
+            childrenByParent[dept.id] = dept.downstreamIds.compactMap { byId[$0] }
+        }
+        var peopleCountByDept: [UUID: Int] = [:]
+        for person in lifeStore.orgPeople where !person.isInactive {
+            if let deptId = person.departmentId {
+                peopleCountByDept[deptId, default: 0] += 1
+            }
+        }
+        return OrgContext(byId: byId, childrenByParent: childrenByParent, peopleCountByDept: peopleCountByDept)
+    }
+
     /// 遞迴繪製：本節點 + 下方連線 + 下游節點 HStack。
     /// 回傳 AnyView 是必要的——SwiftUI 對遞迴 some View 無法推論型別。
-    private func deptTreeNode(_ dept: Department, visited: Set<UUID>) -> AnyView {
+    private func deptTreeNode(_ dept: Department, visited: Set<UUID>, ctx: OrgContext) -> AnyView {
         let nextVisited = visited.union([dept.id])
-        let children = lifeStore.departments.filter {
-            dept.downstreamIds.contains($0.id) && !visited.contains($0.id)
-        }
+        let children = (ctx.childrenByParent[dept.id] ?? []).filter { !visited.contains($0.id) }
         return AnyView(
             VStack(spacing: 12) {
-                departmentCard(dept)
+                departmentCard(dept, ctx: ctx)
                     .onTapGesture { viewingDeptId = dept.id }
 
                 if !children.isEmpty {
@@ -281,7 +305,7 @@ struct OrganizationView: View {
                         .frame(width: 2, height: 16)
                     HStack(alignment: .top, spacing: 24) {
                         ForEach(children) { child in
-                            deptTreeNode(child, visited: nextVisited)
+                            deptTreeNode(child, visited: nextVisited, ctx: ctx)
                         }
                     }
                     .overlay(alignment: .top) {
@@ -302,10 +326,10 @@ struct OrganizationView: View {
     }
 
     // 美化：人員計數改為彩色膠囊、陰影升級雙層、code 膠囊加細邊框
-    private func departmentCard(_ dept: Department) -> some View {
-        let peopleCount = lifeStore.orgPeople.filter { $0.departmentId == dept.id && !$0.isInactive }.count
+    private func departmentCard(_ dept: Department, ctx: OrgContext) -> some View {
+        let peopleCount = ctx.peopleCountByDept[dept.id] ?? 0
         let peerNames = dept.peerIds.compactMap { id in
-            lifeStore.departments.first(where: { $0.id == id })?.name
+            ctx.byId[id]?.name
         }.filter { !$0.isEmpty }
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 5) {
@@ -1166,8 +1190,9 @@ struct OrgPersonDetailView: View {
                     if !person.children.isEmpty {
                         childrenCard
                     }
-                    if !giftHistory.isEmpty {
-                        giftCard
+                    let gifts = giftHistory
+                    if !gifts.isEmpty {
+                        giftCard(gifts)
                     }
                 }
                 .padding(.vertical)
@@ -1480,7 +1505,9 @@ struct OrgPersonDetailView: View {
     }
 
     // [v2] 累計列升級為 36pt 漸層圖示圓 + ntdWanString Capsule 金額；日期改 Capsule；子分類標籤改 Capsule
-    private var giftCard: some View {
+    // giftHistory（全量 filter+字串切分+sort）改由呼叫端（body）算一次傳入，避免本卡片
+    // 內的累計/列表/計數三處各自重觸發一次全量掃描（比照 memberGiftsSection(_ gifts:) 既有規格）。
+    private func giftCard(_ giftHistory: [Expense]) -> some View {
         sectionCard("我送過他的禮金", systemImage: "gift.fill", color: .pink) {
             let total = giftHistory.reduce(0) { $0 + $1.amount }
             VStack(alignment: .leading, spacing: 6) {

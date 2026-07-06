@@ -456,8 +456,8 @@ struct BusinessCardView: View {
         }
     }
 
-    private var groupedByCompany: [(key: String, value: [BusinessCard])] {
-        let grouped = Dictionary(grouping: filteredCards) { $0.company.isEmpty ? "未分類" : $0.company }
+    private func groupedByCompany(_ cards: [BusinessCard]) -> [(key: String, value: [BusinessCard])] {
+        let grouped = Dictionary(grouping: cards) { $0.company.isEmpty ? "未分類" : $0.company }
         return grouped.sorted { $0.key < $1.key }
     }
 
@@ -701,7 +701,10 @@ struct BusinessCardView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        // filteredCards（全量 sort + 多欄位 contains 篩選）改在此算一次，往下傳給
+        // List／groupedByCompany／toolbar 多選按鈕，避免原本 4 處各自獨立重新計算。
+        let cards = filteredCards
+        return NavigationStack {
             VStack(spacing: 0) {
                 // 有名片時顯示搜尋列（帶圖示 + 圓角背景，對齊其他 searchable 頁面規格）
                 if !lifeStore.businessCards.isEmpty {
@@ -737,7 +740,7 @@ struct BusinessCardView: View {
                     .animation(.spring(response: 0.3, dampingFraction: 0.8), value: searchText.isEmpty)
                 }
 
-                if filteredCards.isEmpty {
+                if cards.isEmpty {
                     // 改版空狀態（雙層脈衝光環 + CTA 按鈕）
                     emptyStateView
                 } else {
@@ -753,7 +756,7 @@ struct BusinessCardView: View {
                         }
 
                         // 各公司分組（加入交錯進場動畫）
-                        ForEach(Array(groupedByCompany.enumerated()), id: \.element.key) { sectionIdx, pair in
+                        ForEach(Array(groupedByCompany(cards).enumerated()), id: \.element.key) { sectionIdx, pair in
                             let (company, cards) = pair
                             Section(header: companyHeader(company, cards)) {
                                 ForEach(Array(cards.enumerated()), id: \.element.id) { rowIdx, card in
@@ -837,10 +840,10 @@ struct BusinessCardView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 12) {
                             Button {
-                                let all = Set(filteredCards.map { $0.id })
+                                let all = Set(cards.map { $0.id })
                                 selectedIds = (selectedIds == all) ? [] : all
                             } label: {
-                                Image(systemName: selectedIds.count == filteredCards.count && !filteredCards.isEmpty
+                                Image(systemName: selectedIds.count == cards.count && !cards.isEmpty
                                       ? "checkmark.circle.fill" : "checklist")
                                     .foregroundStyle(.blue)
                             }

@@ -13,6 +13,16 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.30", build: 586, date: "2026/07/06", notes: [
+            "【穩健性修復】TalentMatrixView.makeAxisContext()：scores／potentialScores 兩處建表原本用 Dictionary(uniqueKeysWithValues:)，若 lifeStore.subordinates 出現重複 id（例如逐筆容錯匯入或合併匯入時的 ID 碰撞）會直接 fatalError，導致打開「人才矩陣」頁面閃退；比照 SubordinateView.sortedSubordinates 既有修復規格，改用 Dictionary(_:uniquingKeysWith:) 容忍重複鍵。",
+            "【穩健性修復】CloudKitManager：accountStatus 先前僅將「寫入」移到主執行緒，但 isAvailable 大量在背景 queue（push/pull 序列佇列）上直接讀取，形成跨執行緒讀寫同一屬性的競態條件；改為以 NSLock 保護 getter/setter，讀寫皆加鎖。",
+            "【效能修復】OrganizationView：組織樹每個節點（deptTreeNode／departmentCard）原本各自對 departments／orgPeople 全量 filter 找子部門與人員數（O(部門數²) + O(部門數×人數)），部門/人員一多，任何導致本頁重繪的狀態變化都會重複整棵樹的全量掃描；改為進入樹狀繪製前一次建表（childrenByParent／peopleCountByDept／byId），遞迴節點全部改查表 O(1)。",
+            "【效能修復】OrgPersonDetailView.giftHistory：原本被 body／giftCard 內累計/列表/計數三處各自呼叫，一次觸發三次全量 filter+字串切分+sort；改由 body 算一次傳入 giftCard(_:)，對齊既有 memberGiftsSection(_ gifts:) 查表傳遞規格。",
+            "【效能修復】SpouseResumeView：spouseExpenses／spouseExpenseTotal／spouseGifts 原本在 heroCard／giftSection／expenseSection 各自獨立重複呼叫，單次 render 對 expenseStore.expenses 全量掃描達十次上下；改為 body 算一次（expenses／expenseTotal／gifts）往下傳入三個子視圖。",
+            "【效能修復】AddExpenseView.bankPicker：bankBalance(for:) 原本每次呼叫都對 store.expenses 做 first(where:)/filter 全量掃描，而 bankPicker 是 Form body 一部分，金額欄位每次按鍵都會觸發整個 body 重新求值，銀行/信用卡選單因此在打字時反覆全量掃描 expenses；改為 allBankBalances() 一次批次建表（expensesById／expensesByCardMilestone），bankPicker 內查表 O(1)。",
+            "【效能修復】BusinessCardView：filteredCards（全量 sort + 多欄位 contains 篩選）原本被 List／groupedByCompany／toolbar 多選按鈕 4 處各自獨立重新計算；改為 body 算一次傳入，groupedByCompany 改為接受參數的函式。",
+            "本次為靜態除錯健檢：另檢查 force unwrap／try!／as!／陣列越界／retain cycle，未發現額外問題（既有 CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、StockView 30 秒節流、AppleCalendarBridge 防抖等維持不變）。"
+        ]),
         ChangelogEntry(version: "23.29", build: 585, date: "2026/07/06", notes: [
             "UI 小步美化（空狀態 CTA）：子女詳情頁（ChildDetailView）的日常記錄／生涯紀錄兩類分類卡，空白時原本只顯示「尚無記錄」純文字，改為補上與該分類同色系的迷你漸層 CTA『新增』按鈕，可直接點擊新增，對齊家庭成員頁（FamilyView）空狀態 CTA 按鈕的視覺規格與操作直覺性。",
             "消費區塊（連動變動支出、非本頁可手動新增）維持原本純文字空狀態，不套用 CTA 按鈕，避免誤導使用者以為能在此直接新增消費。",
