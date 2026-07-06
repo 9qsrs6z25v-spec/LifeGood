@@ -21,8 +21,13 @@ import MapKit
 //     對齊 ResumeGiftSection / CareerView / EInvoiceSetupView 全 App 金額顯示規格。
 //     影響範圍：childGiftsSection 合計與各 SocialSubCategory 小計、consumptionSection 合計、
 //               consumptionRow 單筆金額。純顯示層變更，未動支出/禮金篩選與加總邏輯。
-//   （下次美化本元件時，可考慮：空狀態補粉紅／橘色 CTA 按鈕對齊 FamilyView v3、
-//     headerCard 年齡/生日改用 ntdWanString 同款 Capsule 光澤描邊統一節奏）
+// [2026-07 v4] 空狀態補 CTA 按鈕：
+//   • 新增 emptyRecordRow(accent:action:) 共用元件，dailySection／recordSection 的「尚無記錄」
+//     從純文字改為「tray 圖示 + 文字 + 右側迷你新增膠囊按鈕」，按鈕採 accent 漸層底 + 陰影，
+//     對齊 FamilyView v3 emptyMembersPlaceholder CTA 規格，縮小適配卡片內單行高度。
+//   • consumptionSection 維持純文字空狀態（消費為連動同步、非本頁可手動新增，不適用 CTA）。
+//   （下次美化本元件時，可考慮：headerCard 生日 Capsule 補 stroke 光澤邊框，
+//     對齊角色/年齡 Capsule 已有的 stroke 規格，統一三顆膠囊的描邊節奏）
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -473,17 +478,10 @@ struct ChildDetailView: View {
             .padding(.bottom, 8)
 
             if items.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "tray")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                    Text("尚無記錄")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                emptyRecordRow(accent: accent) {
+                    if subscription.isPremium { addingDailyType = type }
+                    else { showPremiumAlert = true }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
             } else {
                 ForEach(Array(items.prefix(20).enumerated()), id: \.element.id) { idx, rec in
                     Button {
@@ -828,17 +826,10 @@ struct ChildDetailView: View {
             .padding(.bottom, 8)
 
             if items.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "tray")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                    Text("尚無記錄")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                emptyRecordRow(accent: accent) {
+                    if subscription.isPremium { addingType = type }
+                    else { showPremiumAlert = true }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
             } else {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, rec in
                     recordRow(rec)
@@ -959,6 +950,46 @@ struct ChildDetailView: View {
 
     private func severityColor(_ s: AllergySeverity) -> Color {
         switch s { case .mild: return .yellow; case .moderate: return .orange; case .severe: return .red }
+    }
+
+    // MARK: - 章節空狀態（tray 圖示 + 文字 + 迷你 CTA 按鈕）
+    // [2026-07 v4] 對齊 FamilyView v3 emptyMembersPlaceholder 的漸層膠囊 CTA 規格（accent 漸層底 + 陰影），
+    // 縮小成適合卡片內單行使用的尺寸，取代原本純文字「尚無記錄」；dailySection / recordSection 共用。
+    // consumptionSection 空狀態不適用（消費為連動同步、非本頁可手動新增，維持純文字）。
+    private func emptyRecordRow(accent: Color, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "tray")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Text("尚無記錄")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Spacer()
+            Button(action: action) {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("新增")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    LinearGradient(
+                        colors: [accent, accent.opacity(0.78)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(Capsule())
+                .shadow(color: accent.opacity(0.30), radius: 4, x: 0, y: 2)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 14)
     }
 
 }

@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.29", build: 585, date: "2026/07/06", notes: [
+            "UI 小步美化（空狀態 CTA）：子女詳情頁（ChildDetailView）的日常記錄／生涯紀錄兩類分類卡，空白時原本只顯示「尚無記錄」純文字，改為補上與該分類同色系的迷你漸層 CTA『新增』按鈕，可直接點擊新增，對齊家庭成員頁（FamilyView）空狀態 CTA 按鈕的視覺規格與操作直覺性。",
+            "消費區塊（連動變動支出、非本頁可手動新增）維持原本純文字空狀態，不套用 CTA 按鈕，避免誤導使用者以為能在此直接新增消費。",
+            "以上均為純視覺調整，未變動任何資料邏輯或既有功能。"
+        ]),
         ChangelogEntry(version: "23.28", build: 584, date: "2026/07/06", notes: [
             "【效能修復】TalentMatrixView：yDomain／yMid 為 computed property，內部對 members 全體重新呼叫 potentialScore（O(records)）並重算 Y 軸範圍；此 getter 被 4 個象限人數統計 filter 閉包、quadrantLabel、pointColor（散布圖每個點的顏色/文字/背景/邊框共 4 處呼叫點）大量重複讀取，M 位成員單次 render 保守估計觸發 4M 次以上的全量 Y 軸重算，是繼 v23.24 AxisContext 修復 X 軸（主動性）重複掃描後，Y 軸（潛力）仍殘留的同型效能瓶頸。修復方式：AxisContext 新增 potentialScores 字典、yRange、yMid 三個欄位，於 makeAxisContext() 一次算好；quadrantLabel／pointColor／四個象限計數函式／圖表 RuleMark／PointMark／chartYScale／selectNearest 命中測試全部改為透過 ctx 查表（O(1)），對齊既有 proactivity(_:ctx:) 查表模式，全頁 Y 軸計算降為每次 render 1 次。",
             "【效能修復】ChildDetailView.childGiftsSection：v23.27 剛美化過的「收到的禮金」分類列，ForEach(SocialSubCategory.allCases) 內對同一份 gifts 陣列逐分類各自呼叫一次 filter（O(分類數 × n)）；對齊 v23.26 FamilyMembersResumeView.memberGiftsSection 同型修復規格，改為進入 ForEach 前以單一迴圈依 socialSubCategory 一次分桶（O(n)），各分類列改查字典，計算次數由 O(分類數) 降為 1 次全量掃描。",
