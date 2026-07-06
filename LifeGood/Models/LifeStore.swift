@@ -19,9 +19,10 @@ class LifeStore: ObservableObject {
 
     init() {
         load()
+        // 用 defer 重置，避免日後在中間加入 guard/return 導致 isLoading 卡死為 true（save() 永久停擺）
         isLoading = true
+        defer { isLoading = false }
         let didBackfill = backfillOrgPeopleFromSubordinates()
-        isLoading = false
         if didBackfill { save() }
         NotificationCenter.default.addObserver(
             self,
@@ -37,10 +38,11 @@ class LifeStore: ObservableObject {
 
     @objc private func reloadFromCloud() {
         load()
-        // backfill 期間暫停 save()，避免剛從雲端拉取就立刻回寫
+        // backfill 期間暫停 save()，避免剛從雲端拉取就立刻回寫；用 defer 重置，
+        // 避免日後在中間加入 guard/return 導致 isLoading 卡死為 true（save() 永久停擺）
         isLoading = true
+        defer { isLoading = false }
         let didBackfill = backfillOrgPeopleFromSubordinates()
-        isLoading = false
         // 若 backfill 新建了 OrgPerson/BusinessCard，立即持久化避免重啟後消失
         if didBackfill { save() }
     }

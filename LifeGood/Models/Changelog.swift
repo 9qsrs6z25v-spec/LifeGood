@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.28", build: 584, date: "2026/07/06", notes: [
+            "【效能修復】TalentMatrixView：yDomain／yMid 為 computed property，內部對 members 全體重新呼叫 potentialScore（O(records)）並重算 Y 軸範圍；此 getter 被 4 個象限人數統計 filter 閉包、quadrantLabel、pointColor（散布圖每個點的顏色/文字/背景/邊框共 4 處呼叫點）大量重複讀取，M 位成員單次 render 保守估計觸發 4M 次以上的全量 Y 軸重算，是繼 v23.24 AxisContext 修復 X 軸（主動性）重複掃描後，Y 軸（潛力）仍殘留的同型效能瓶頸。修復方式：AxisContext 新增 potentialScores 字典、yRange、yMid 三個欄位，於 makeAxisContext() 一次算好；quadrantLabel／pointColor／四個象限計數函式／圖表 RuleMark／PointMark／chartYScale／selectNearest 命中測試全部改為透過 ctx 查表（O(1)），對齊既有 proactivity(_:ctx:) 查表模式，全頁 Y 軸計算降為每次 render 1 次。",
+            "【效能修復】ChildDetailView.childGiftsSection：v23.27 剛美化過的「收到的禮金」分類列，ForEach(SocialSubCategory.allCases) 內對同一份 gifts 陣列逐分類各自呼叫一次 filter（O(分類數 × n)）；對齊 v23.26 FamilyMembersResumeView.memberGiftsSection 同型修復規格，改為進入 ForEach 前以單一迴圈依 socialSubCategory 一次分桶（O(n)），各分類列改查字典，計算次數由 O(分類數) 降為 1 次全量掃描。",
+            "【穩健性修復】LifeStore：init() 與 reloadFromCloud() 的 isLoading 批次保護旗標，原本以手動賦值 isLoading = false 結尾，日後若在 backfillOrgPeopleFromSubordinates() 呼叫與重置之間加入 guard/return 會讓旗標永久卡在 true、save() 從此靜默停擺；比照 v22.66 起其餘 12 處批次保護方法的既有規格，改為 defer { isLoading = false }。",
+            "本次為純靜態健檢：另檢查 force unwrap／try!／as!／陣列越界／retain cycle／競態條件，未發現額外問題（既有 CloudKit 30 秒節流、pushAll 2 秒防抖、isSyncing 並行守衛、StockView 30 秒節流、AppleCalendarBridge 防抖等維持不變）。"
+        ]),
         ChangelogEntry(version: "23.27", build: 583, date: "2026/07/06", notes: [
             "UI 小步美化（金額單位）：子女詳情頁（ChildDetailView）的「收到的禮金」總計/分類小計、消費區塊合計、單筆消費金額，原本直接顯示台幣整數（高額時字串偏長），改為與全 App 一致的「萬 / 億」智慧量級顯示，對齊履歷禮金區塊／職涯調薪的顯示規格。",
             "程式碼清理：移除該檔案中從未被呼叫的舊版金額格式化函式與其專用 NumberFormatter（顯示已全面改用共用的萬/億智慧量級字串）。",

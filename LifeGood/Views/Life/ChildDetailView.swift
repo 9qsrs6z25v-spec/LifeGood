@@ -340,6 +340,14 @@ struct ChildDetailView: View {
 
     private func childGiftsSection(_ gifts: [Expense]) -> some View {
         let total = gifts.reduce(0) { $0 + $1.amount }
+        // 依社交子分類一次分桶（O(n)），取代原本 ForEach 內對 gifts 逐分類各 filter 一次（O(分類數 × n)），
+        // 對齊 FamilyMembersResumeView.memberGiftsSection 同型修復；無子分類的項目不歸類到任何分類列
+        var grouped: [SocialSubCategory: [Expense]] = [:]
+        for e in gifts {
+            if let sub = e.socialSubCategory {
+                grouped[sub, default: []].append(e)
+            }
+        }
         return VStack(alignment: .leading, spacing: 0) {
             // 段落標題：Capsule 漸層側條 + 計數膠囊 + 合計
             HStack(spacing: 10) {
@@ -373,7 +381,7 @@ struct ChildDetailView: View {
             .padding(.bottom, 8)
 
             ForEach(SocialSubCategory.allCases) { sub in
-                let items = gifts.filter { $0.socialSubCategory == sub }
+                let items = grouped[sub] ?? []
                 if !items.isEmpty {
                     HStack(spacing: 10) {
                         ZStack {
