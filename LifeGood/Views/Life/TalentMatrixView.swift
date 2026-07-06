@@ -201,11 +201,11 @@ struct TalentMatrixView: View {
     }
     private func makeAxisContext() -> AxisContext {
         let mentionCounts = lifeStore.mentionedCounts()
-        let scores = Dictionary(uniqueKeysWithValues: members.map {
+        let scores = Dictionary(members.map {
             ($0.id, $0.proactivityScore(mentionedCount: mentionCounts[$0.id] ?? 0))
-        })
+        }, uniquingKeysWith: { first, _ in first })
         let range = domain(members.map { scores[$0.id] ?? 0 })
-        let potentialScores = Dictionary(uniqueKeysWithValues: members.map { ($0.id, $0.potentialScore) })
+        let potentialScores = Dictionary(members.map { ($0.id, $0.potentialScore) }, uniquingKeysWith: { first, _ in first })
         let yRange = domain(members.map { potentialScores[$0.id] ?? 0 })
         return AxisContext(
             mentionCounts: mentionCounts, scores: scores, xRange: range, xMid: (range.lowerBound + range.upperBound) / 2,

@@ -55,7 +55,15 @@ final class CloudKitManager {
     private let serverChangeTokenKey = "ck_server_change_token"
     private let initialPullDoneKey = "ck_initial_pull_done"
 
-    private(set) var accountStatus: CKAccountStatus = .couldNotDetermine
+    // accountStatus 由 accountChanged/refreshAccountStatus 在主執行緒寫入，
+    // 但 isAvailable 被 queue（背景 utility 佇列）上的 push/pull 大量讀取，
+    // 加鎖避免跨執行緒讀寫同一屬性的競態條件。
+    private let statusLock = NSLock()
+    private var _accountStatus: CKAccountStatus = .couldNotDetermine
+    private(set) var accountStatus: CKAccountStatus {
+        get { statusLock.lock(); defer { statusLock.unlock() }; return _accountStatus }
+        set { statusLock.lock(); _accountStatus = newValue; statusLock.unlock() }
+    }
 
     private init() {
         self.container = CKContainer(identifier: Self.containerID)
