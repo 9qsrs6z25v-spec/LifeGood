@@ -13,6 +13,15 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.22", build: 578, date: "2026/07/06", notes: [
+            "【效能/閃爍修復】StockView 開啟頁面即打網路更新股價且無節流：切換理財子分頁再切回會整個重建 View，@State 無法擋下重複請求；加入 30 秒節流（比照 CloudSyncManager 既有節流秒數），改善頻繁切換分頁造成的重複網路請求與『更新報價中』橫幅閃爍。",
+            "【閃爍修復】AppleCalendarBridge：EKEventStoreChanged 對同一次使用者操作常連續觸發多次（iOS 已知行為），原本每次都直接更新 lastChange 觸發 MyCalendarView 整頁重繪；加入 0.3 秒防抖合併。",
+            "【效能修復】LifeFinanceView.body：allBankBalanceInTWD（含固定支出/信用卡分期展開，O(n×1200)）被 toolbar 與 summaryHeader 各自獨立計算共 3 次；改為 body 頂端算一次後傳入，降為 1 次。",
+            "【效能修復】TaxOverviewView：節稅子分類的直接/固定支出金額原本由 taxSavingDirectTotal / taxSavingFromFixedTotal / taxSavingTotal 對每個子分類各自重新 filter 全部支出（10 個子分類 × 最多 4 次 O(n) 掃描 ≈ 40 次）；改為一次分桶計算的 taxSavingBySub 字典，body 算一次後傳入各 section，降為固定 2 次全量掃描。",
+            "【穩健性修復】LifeStore：toggleTaskCompletion / toggleMeetingItemCompletion / toggleWeeklyReportCompletion / setShift / applyNightShiftRotation / applyEveningShiftWeekdays / deleteOrgPerson / deleteBusinessCard / clearAll 的 isLoading 批次保護旗標，補上 defer 重置（原本以手動賦值 isLoading = false 結尾，日後若在中間加入 guard/return 會讓旗標永久卡在 true、save() 從此停擺且不易察覺）。",
+            "【正確性修復】RemoteAdmin：writeConfig / incrementUserCount 原本忽略 CloudKit fetch 的錯誤，把任何 fetch 失敗（含網路中斷等暫時性錯誤）都當成『查無此筆』直接建立無 change tag 的全新 record 寫入，可能覆蓋或衝突伺服器既有版本；比照 CloudKitManager.modifyKV 既有作法，非『查無此筆』的真錯誤直接中止並回報，不再嘗試寫入。",
+            "本次為純靜態健檢：另檢查了 force unwrap／陣列越界／retain cycle／競態條件，未發現額外問題（詳見程式內註解與此前多輪稽核紀錄）。"
+        ]),
         ChangelogEntry(version: "23.21", build: 577, date: "2026/07/05", notes: [
             "修正建置失敗：TalentMatrixView 的 proactivity(_:) 輔助方法誤寫成遞迴呼叫自己再帶參數（proactivity(m)(mentionedCount:)），導致『Cannot call value of non-function type Int』。改為正確呼叫模型方法 m.proactivityScore(mentionedCount:)。"
         ]),

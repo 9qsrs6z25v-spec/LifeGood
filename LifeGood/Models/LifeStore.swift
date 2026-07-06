@@ -128,10 +128,11 @@ class LifeStore: ObservableObject {
               let ti = subordinates[si].tasks.firstIndex(where: { $0.id == taskId }) else { return }
         // isLoading = true 防止兩次 subscript 寫回各自觸發 didSet → save()，
         // 避免「isCompleted 已翻轉但 completedAt 尚未設定」的中間態被持久化。
+        // 用 defer 重置，避免日後在中間加入 guard/return 導致 isLoading 卡死為 true（save() 永久停擺）。
         isLoading = true
+        defer { isLoading = false }
         subordinates[si].tasks[ti].isCompleted.toggle()
         subordinates[si].tasks[ti].completedAt = subordinates[si].tasks[ti].isCompleted ? Date() : nil
-        isLoading = false
         save()
     }
 
@@ -143,9 +144,9 @@ class LifeStore: ObservableObject {
               let ii = subordinates[si].meetings[mi].items.firstIndex(where: { $0.id == itemId }) else { return }
         // isLoading 阻斷 didSet → save() 的隱式觸發，確保只有下方的顯式 save() 被執行一次
         isLoading = true
+        defer { isLoading = false }
         subordinates[si].meetings[mi].items[ii].isCompleted.toggle()
         subordinates[si].meetings[mi].items[ii].completedAt = subordinates[si].meetings[mi].items[ii].isCompleted ? Date() : nil
-        isLoading = false
         save()
     }
 
@@ -155,9 +156,9 @@ class LifeStore: ObservableObject {
               let ri = subordinates[si].weeklyReports.firstIndex(where: { $0.id == reportId }) else { return }
         // isLoading 阻斷 didSet → save() 的隱式觸發，確保只有下方的顯式 save() 被執行一次
         isLoading = true
+        defer { isLoading = false }
         subordinates[si].weeklyReports[ri].isCompleted.toggle()
         subordinates[si].weeklyReports[ri].completedAt = subordinates[si].weeklyReports[ri].isCompleted ? Date() : nil
-        isLoading = false
         save()
     }
 
@@ -170,11 +171,11 @@ class LifeStore: ObservableObject {
         let day = cal.startOfDay(for: date)
         // 以 isLoading 批次保護：removeAll 與 append 之間的中間態（班別已刪但未寫入）不應被持久化。
         isLoading = true
+        defer { isLoading = false }
         subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: day) }
         if let type = type {
             subordinates[si].shifts.append(SubordinateShift(date: day, type: type))
         }
-        isLoading = false
         save()
     }
 
@@ -192,13 +193,13 @@ class LifeStore: ObservableObject {
         // 以 isLoading 批次保護整個迴圈：8 次 removeAll+append 否則每次都觸發 didSet → save()，
         // 共產生 16 次不必要的背景序列化，且各次中間態（部分班別已寫、部分尚未）也會被持久化。
         isLoading = true
+        defer { isLoading = false }
         for (offset, type) in plan {
             guard let noon = cal.date(byAdding: .day, value: offset, to: start) else { continue }
             let day = cal.startOfDay(for: noon)
             subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: day) }
             subordinates[si].shifts.append(SubordinateShift(date: day, type: type))
         }
-        isLoading = false
         save()
     }
 
@@ -216,13 +217,13 @@ class LifeStore: ObservableObject {
         guard let monday = cal.date(byAdding: .day, value: -offsetToMonday, to: anchor) else { return }
         // 批次保護：避免迴圈中每次 append 都觸發 didSet → save()
         isLoading = true
+        defer { isLoading = false }
         for i in 0..<5 {
             guard let noon = cal.date(byAdding: .day, value: i, to: monday) else { continue }
             let d = cal.startOfDay(for: noon)
             subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: d) }
             subordinates[si].shifts.append(SubordinateShift(date: d, type: .eveningShift))
         }
-        isLoading = false
         save()
     }
 
@@ -344,6 +345,7 @@ class LifeStore: ObservableObject {
     func deleteOrgPerson(_ item: OrgPerson) {
         if let name = item.photoFileName { OrgPerson.deletePhoto(name) }
         isLoading = true
+        defer { isLoading = false }
         // 解除名片反向連結
         if let cid = item.linkedBusinessCardId,
            let i = businessCards.firstIndex(where: { $0.id == cid }),
@@ -351,7 +353,6 @@ class LifeStore: ObservableObject {
             businessCards[i].linkedOrgPersonId = nil
         }
         orgPeople.removeAll { $0.id == item.id }
-        isLoading = false
         save()
     }
 
@@ -362,6 +363,7 @@ class LifeStore: ObservableObject {
     func deleteBusinessCard(_ item: BusinessCard) {
         if let name = item.photoFileName { BusinessCard.deletePhoto(name) }
         isLoading = true
+        defer { isLoading = false }
         // 解除組織人員反向連結
         if let pid = item.linkedOrgPersonId,
            let i = orgPeople.firstIndex(where: { $0.id == pid }),
@@ -369,7 +371,6 @@ class LifeStore: ObservableObject {
             orgPeople[i].linkedBusinessCardId = nil
         }
         businessCards.removeAll { $0.id == item.id }
-        isLoading = false
         save()
     }
 
@@ -562,6 +563,7 @@ class LifeStore: ObservableObject {
 
     func clearAll() {
         isLoading = true
+        defer { isLoading = false }
         profile = UserProfile()
         familyMembers.removeAll()
         milestones.removeAll()
@@ -574,7 +576,6 @@ class LifeStore: ObservableObject {
         businessCards.removeAll()
         personalEvents.removeAll()
         orgPeople.removeAll()
-        isLoading = false
         save()
     }
 }

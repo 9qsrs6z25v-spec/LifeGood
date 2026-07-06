@@ -180,11 +180,20 @@ struct StockView: View {
 
     // MARK: - 自動更新報價
 
+    // 切換到其他理財子分頁再切回「股票」會整個重建 StockView（financeContent 為 switch
+    // 分支，@State 不會保留），故節流時間戳記須用 static var 才能跨重建存活；
+    // 30 秒節流對齊 CloudSyncManager.performSync 的既有節流秒數。
+    private static var lastPriceFetchDate: Date?
+
     @MainActor
     private func refreshAllPrices() async {
         guard !isUpdating else { return }
+        if let last = Self.lastPriceFetchDate, Date().timeIntervalSince(last) < 30 {
+            return
+        }
         let targets = activeStocks.filter { !$0.symbol.isEmpty }
         guard !targets.isEmpty else { return }
+        Self.lastPriceFetchDate = Date()
 
         withAnimation { isUpdating = true; fetchStatus = [:] }
         var success = 0

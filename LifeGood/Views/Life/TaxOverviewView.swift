@@ -74,32 +74,31 @@ struct TaxOverviewView: View {
         .sorted { $0.date > $1.date }
     }
 
-    private var totalTaxSaving: Double {
-        // 所有節稅子分類之直接支出合計即為 taxSavingExpenses 全量，一次 reduce 即可，
-        // 避免原本 10 個子分類 × taxSavingExpenses（O(n) filter+sort）= 10 次掃描
-        let directTotal = taxSavingExpenses.reduce(0.0) { $0 + $1.amount }
-        let fixedTotal = TaxSavingSubCategory.allCases.reduce(0.0) { $0 + taxSavingFromFixedTotal(for: $1) }
-        return directTotal + fixedTotal
+    private struct TaxSavingAmounts {
+        let direct: Double
+        let fixed: Double
+        var total: Double { direct + fixed }
     }
 
-    private func taxSavingDirectTotal(for sub: TaxSavingSubCategory) -> Double {
-        taxSavingExpenses
-            .filter { $0.taxSavingSubCategory == sub }
-            .reduce(0) { $0 + $1.amount }
-    }
-
-    private func taxSavingFromFixedTotal(for sub: TaxSavingSubCategory) -> Double {
-        expenseStore.expenses
-            .filter {
-                $0.expenseType == .fixed &&
-                $0.effectivelyTaxDeductible &&
-                $0.inferredTaxSavingSubCategory == sub
+    /// 一次掃描 taxSavingExpenses + expenseStore.expenses，依子分類分桶存好直接/固定支出金額，
+    /// 供 taxSavingSection / deductionTipsSection 共用，避免對每個子分類各自重複整批 filter+reduce
+    /// （原本每個子分類需 4 次 O(n) 掃描，10 個子分類 = 近 40 次；改為固定 2 次）。
+    private var taxSavingBySub: [TaxSavingSubCategory: TaxSavingAmounts] {
+        var direct: [TaxSavingSubCategory: Double] = [:]
+        for exp in taxSavingExpenses {
+            if let sub = exp.taxSavingSubCategory { direct[sub, default: 0] += exp.amount }
+        }
+        var fixed: [TaxSavingSubCategory: Double] = [:]
+        for exp in expenseStore.expenses where exp.expenseType == .fixed && exp.effectivelyTaxDeductible {
+            if let sub = exp.inferredTaxSavingSubCategory {
+                fixed[sub, default: 0] += yearEquivalentAmount(exp, year: selectedYear)
             }
-            .reduce(0) { $0 + yearEquivalentAmount($1, year: selectedYear) }
-    }
-
-    private func taxSavingTotal(for sub: TaxSavingSubCategory) -> Double {
-        taxSavingDirectTotal(for: sub) + taxSavingFromFixedTotal(for: sub)
+        }
+        var result: [TaxSavingSubCategory: TaxSavingAmounts] = [:]
+        for sub in TaxSavingSubCategory.allCases {
+            result[sub] = TaxSavingAmounts(direct: direct[sub] ?? 0, fixed: fixed[sub] ?? 0)
+        }
+        return result
     }
 
     private func yearEquivalentAmount(_ exp: Expense, year: Int) -> Double {
@@ -153,8 +152,10 @@ struct TaxOverviewView: View {
     // MARK: - 主體
 
     var body: some View {
-        // 一次計算，避免 annualSummaryCard / taxSavingSection 各自重算（共 2 次）
-        let savingTotal = totalTaxSaving
+        // 一次計算子分類明細，供 annualSummaryCard / taxSavingSection / deductionTipsSection 共用
+        let breakdown = taxSavingBySub
+        let savingTotal = taxSavingExpenses.reduce(0.0) { $0 + $1.amount }
+            + breakdown.values.reduce(0.0) { $0 + $1.fixed }
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
@@ -169,9 +170,9 @@ struct TaxOverviewView: View {
                         }
                     taxRecordsSection
                     monthlyBreakdown
-                    taxSavingSection(savingTotal)
+                    taxSavingSection(savingTotal, breakdown: breakdown)
                     taxChecklistSection
-                    deductionTipsSection
+                    deductionTipsSection(breakdown: breakdown)
                 }
                 .padding(.vertical)
             }
@@ -694,7 +695,7 @@ struct TaxOverviewView: View {
 
     // MARK: - 節稅累積（升級：漸層圖示圓 + 更精緻進度條）
 
-    private func taxSavingSection(_ savingTotal: Double) -> some View {
+    private func taxSavingSection(_ savingTotal: Double, breakdown: [TaxSavingSubCategory: TaxSavingAmounts]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("節稅累積", icon: "leaf.fill", color: .green, count: nil)
 
@@ -771,9 +772,9 @@ struct TaxOverviewView: View {
                 Divider().padding(.leading, 62)
 
                 ForEach(TaxSavingSubCategory.allCases) { sub in
-                    let total = taxSavingTotal(for: sub)
-                    if total > 0 {
-                        taxSavingRow(sub: sub, total: total)
+                    let amounts = breakdown[sub] ?? TaxSavingAmounts(direct: 0, fixed: 0)
+                    if amounts.total > 0 {
+                        taxSavingRow(sub: sub, amounts: amounts)
                         Divider().padding(.leading, 58)
                     }
                 }
@@ -786,15 +787,16 @@ struct TaxOverviewView: View {
         .padding(.horizontal)
     }
 
-    private func taxSavingRow(sub: TaxSavingSubCategory, total: Double) -> some View {
+    private func taxSavingRow(sub: TaxSavingSubCategory, amounts: TaxSavingAmounts) -> some View {
+        let total = amounts.total
         let limit = sub.annualLimit
         let progress: Double = {
             guard let limit = limit, limit > 0 else { return 0 }
             return min(1, total / limit)
         }()
         let reachedCap = limit != nil && total >= (limit ?? 0)
-        let direct   = taxSavingDirectTotal(for: sub)
-        let fromFixed = taxSavingFromFixedTotal(for: sub)
+        let direct   = amounts.direct
+        let fromFixed = amounts.fixed
         let rowColor: Color = reachedCap ? .orange : .green
 
         return VStack(alignment: .leading, spacing: 8) {
@@ -899,13 +901,13 @@ struct TaxOverviewView: View {
 
     // MARK: - 節稅項目提醒（升級：34pt 漸層圖示圓）
 
-    private var deductionTipsSection: some View {
+    private func deductionTipsSection(breakdown: [TaxSavingSubCategory: TaxSavingAmounts]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("節稅項目提醒", icon: "lightbulb.fill", color: Color(red: 1.00, green: 0.78, blue: 0.20))
 
             // [v2] 交錯淡入進場動畫（對齊 taxChecklistSection stagger 規格）
             ForEach(Array(TaxSavingSubCategory.allCases.enumerated()), id: \.element) { idx, sub in
-                let acc = taxSavingTotal(for: sub)
+                let acc = breakdown[sub]?.total ?? 0
                 let iconColor: Color = acc > 0 ? .green : .blue
 
                 HStack(alignment: .top, spacing: 12) {

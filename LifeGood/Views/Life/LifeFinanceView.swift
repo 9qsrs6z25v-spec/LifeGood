@@ -233,9 +233,11 @@ struct LifeFinanceView: View {
     }
 
     var body: some View {
+        // 一次取出，避免 toolbar + summaryHeader 各自重複計算 O(n×1200) 的銀行餘額展開
+        let bankBalanceTWD = allBankBalanceInTWD
         NavigationStack {
             VStack(spacing: 0) {
-                summaryHeader
+                summaryHeader(balance: bankBalanceTWD)
                     .opacity(headerAppeared ? 1 : 0)
                     .offset(y: headerAppeared ? 0 : 22)
                     .onAppear {
@@ -251,9 +253,9 @@ struct LifeFinanceView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 8) {
-                        Text(formatTwdShort(allBankBalanceInTWD))
+                        Text(formatTwdShort(bankBalanceTWD))
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(allBankBalanceInTWD >= 0 ? Color.blue : Color.red)
+                            .foregroundStyle(bankBalanceTWD >= 0 ? Color.blue : Color.red)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                         Button {
@@ -280,8 +282,7 @@ struct LifeFinanceView: View {
     private let heroAccent     = Color(red: 0.22, green: 0.53, blue: 0.98)
     private let heroAccentDark = Color(red: 0.10, green: 0.35, blue: 0.82)
 
-    private var summaryHeader: some View {
-        let balance = allBankBalanceInTWD
+    private func summaryHeader(balance: Double) -> some View {
         let isPositive = balance >= 0
         // 一次取出，避免 ForEach 內 4 次重複 O(n) filter
         let milestones = allFinanceMilestones

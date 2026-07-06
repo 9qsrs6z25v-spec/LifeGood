@@ -133,8 +133,13 @@ final class RemoteAdminManager: ObservableObject {
     }
 
     private func incrementUserCount(retriesLeft: Int = 3) {
-        db.fetch(withRecordID: statsID) { [weak self] existing, _ in
+        db.fetch(withRecordID: statsID) { [weak self] existing, fetchError in
             guard let self = self else { return }
+            // fetch 失敗但「不是查無此筆」→ 真錯誤（如網路中斷），不可當成新建，
+            // 否則會用空白計數覆蓋伺服器既有版本，之後放棄本次遞增即可（下次啟動仍會重試）
+            if existing == nil, let fe = fetchError as? CKError, fe.code != .unknownItem {
+                return
+            }
             let rec = existing ?? CKRecord(recordType: "GlobalStats", recordID: self.statsID)
             let next = (((rec["userCount"] as? NSNumber)?.int64Value) ?? 0) + 1
             rec["userCount"] = next as Int64
@@ -192,8 +197,18 @@ final class RemoteAdminManager: ObservableObject {
     private func writeConfig(_ mutate: @escaping (CKRecord) -> Void,
                              completion: @escaping (Bool) -> Void) {
         DispatchQueue.main.async { [weak self] in self?.isBusy = true }
-        db.fetch(withRecordID: configID) { [weak self] existing, _ in
+        db.fetch(withRecordID: configID) { [weak self] existing, fetchError in
             guard let self = self else { return }
+            // fetch 失敗但「不是查無此筆」→ 真錯誤（如網路中斷），不可當成新建，
+            // 否則會用沒有 change tag 的全新 record 覆蓋，之後寫入時與伺服器版本衝突
+            if existing == nil, let fe = fetchError as? CKError, fe.code != .unknownItem {
+                DispatchQueue.main.async {
+                    self.isBusy = false
+                    self.lastError = CloudKitManager.describe(fe)
+                    completion(false)
+                }
+                return
+            }
             let rec = existing ?? CKRecord(recordType: "AppConfig", recordID: self.configID)
             mutate(rec)
             let op = CKModifyRecordsOperation(recordsToSave: [rec], recordIDsToDelete: nil)

@@ -15,6 +15,10 @@ final class AppleCalendarBridge: ObservableObject {
 
     private let eventStore = EKEventStore()
     private var notificationObserver: NSObjectProtocol?
+    // EKEventStoreChanged 對同一次使用者操作常連續觸發多次（iOS 已知行為），
+    // 用短暫防抖合併成一次 lastChange 更新，避免 MyCalendarView 為同一操作
+    // 連續全頁重繪多次造成畫面閃爍。
+    private var changeDebounceTimer: Timer?
 
     private init() {
         authorizationStatus = EKEventStore.authorizationStatus(for: .event)
@@ -24,6 +28,13 @@ final class AppleCalendarBridge: ObservableObject {
             object: eventStore,
             queue: .main
         ) { [weak self] _ in
+            self?.scheduleChangeUpdate()
+        }
+    }
+
+    private func scheduleChangeUpdate() {
+        changeDebounceTimer?.invalidate()
+        changeDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
             self?.lastChange = Date()
         }
     }
@@ -32,6 +43,7 @@ final class AppleCalendarBridge: ObservableObject {
         if let token = notificationObserver {
             NotificationCenter.default.removeObserver(token)
         }
+        changeDebounceTimer?.invalidate()
     }
 
     /// 是否拿到讀取權限（iOS 17 改名為 .fullAccess，舊版用 .authorized）
