@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.34", build: 590, date: "2026/07/06", notes: [
+            "修正建置失敗：AddExpenseView 的 bankPicker 改用 allBankBalances() 批次建表後，信用卡區塊仍殘留一處舊呼叫 bankBalance(for: bank)（該函式已移除），導致『Cannot find bankBalance in scope』。改為與銀行區塊一致查表 balances[bank.id] ?? 0。"
+        ]),
         ChangelogEntry(version: "23.33", build: 589, date: "2026/07/06", notes: [
             "修正建置失敗：CloudKitManager 的 accountStatus 計算屬性誤將存取修飾詞寫在 accessor 內（private set { ... }），Swift 不允許，導致『Expected get/set/willSet/didSet keyword』。改為把 private(set) 標在屬性宣告上、set 保持乾淨；外部只讀、內部可寫的語意與加鎖行為不變。"
         ]),

@@ -1135,7 +1135,7 @@ struct AddExpenseView: View {
                                 guard let bankId = card.linkedBankMilestoneId,
                                       let bank = bankMilestones.first(where: { $0.id == bankId }) else { return nil }
                                 let bankName = bank.bankName ?? bank.title
-                                return "\(bankName)（\(formatBankBalance(bankBalance(for: bank)))）"
+                                return "\(bankName)（\(formatBankBalance(balances[bank.id] ?? 0))）"
                             }()
                             Button(bankInfo.map { "\(cardName) → \($0)" } ?? cardName) {
                                 selectedCreditCardMilestoneId = card.id
