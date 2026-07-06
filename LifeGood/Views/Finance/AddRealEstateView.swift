@@ -1807,6 +1807,14 @@ extension URL: @retroactive Identifiable {
     public var id: String { absoluteString }
 }
 
+// MARK: - 美化紀錄（PhotoViewerSheet）
+// [2026-07] 本次美化方向：
+//   本元件為全 App 共用的縮放照片檢視器（AddRealEstateView 內物件照片 / RealEstateDetailView
+//   房屋資料照片 / FamilyMembersResumeView 家人照片皆呼叫此同一個 struct），
+//   1. 「關閉」按鈕：topBarTrailing → topBarLeading，修正與全 App「關閉／取消統一置左」
+//      慣例不符的殘留個案（MultiPhotoGallery.PhotoLightbox v2 當時誤判為「唯一例外」，
+//      實際上此處也是同一慣例的漏網之魚，一併補上）。
+//   2. 「重設縮放」圖示鈕：原本佔用左側，改移至 topBarTrailing，避免與關閉鈕位置衝突。
 struct PhotoViewerSheet: View {
     let url: URL
     @Environment(\.dismiss) private var dismiss
@@ -1872,7 +1880,12 @@ struct PhotoViewerSheet: View {
             .navigationTitle("照片瀏覽")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // 關閉按鈕：統一移至左側，對齊全 App「關閉／取消置左」慣例
                 ToolbarItem(placement: .topBarLeading) {
+                    Button("關閉") { dismiss() }
+                }
+                // 重設縮放：讓出左側給關閉鈕，改置右側
+                ToolbarItem(placement: .topBarTrailing) {
                     if scale > 1 {
                         Button {
                             withAnimation(.spring(duration: 0.3)) { resetView() }
@@ -1881,9 +1894,6 @@ struct PhotoViewerSheet: View {
                                 .foregroundStyle(.white)
                         }
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("關閉") { dismiss() }
                 }
             }
         }

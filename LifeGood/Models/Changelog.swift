@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.31", build: 587, date: "2026/07/06", notes: [
+            "UI 小步美化（一致性修正）：全 App 共用的縮放照片檢視器 PhotoViewerSheet（AddRealEstateView 物件照片／RealEstateDetailView 房屋資料照片／FamilyMembersResumeView 家人照片皆共用同一元件）「關閉」按鈕原本放在畫面右上角，與全 App「關閉／取消統一置左」的既有慣例不一致；改為移至左上角，「重設縮放」圖示鈕改置右側補位。",
+            "同步修正 MultiPhotoGallery.swift 內舊註解：v2 當時誤判 PhotoLightbox 是「唯一的關閉按鈕置右例外」，實際上 PhotoViewerSheet 也是同一慣例的漏網之魚，已於註解中補充說明，方便日後查找。",
+            "以上均為純視覺調整，未變動任何照片載入/縮放/刪除邏輯，也未影響其他既有功能。"
+        ]),
         ChangelogEntry(version: "23.30", build: 586, date: "2026/07/06", notes: [
             "【穩健性修復】TalentMatrixView.makeAxisContext()：scores／potentialScores 兩處建表原本用 Dictionary(uniqueKeysWithValues:)，若 lifeStore.subordinates 出現重複 id（例如逐筆容錯匯入或合併匯入時的 ID 碰撞）會直接 fatalError，導致打開「人才矩陣」頁面閃退；比照 SubordinateView.sortedSubordinates 既有修復規格，改用 Dictionary(_:uniquingKeysWith:) 容忍重複鍵。",
             "【穩健性修復】CloudKitManager：accountStatus 先前僅將「寫入」移到主執行緒，但 isAvailable 大量在背景 queue（push/pull 序列佇列）上直接讀取，形成跨執行緒讀寫同一屬性的競態條件；改為以 NSLock 保護 getter/setter，讀寫皆加鎖。",

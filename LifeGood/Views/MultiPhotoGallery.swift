@@ -17,7 +17,10 @@ import UIKit
 // [2026-07 v2] 一致性 + 動畫小步美化：
 // • PhotoLightbox 關閉按鈕：右上角 → 左上角，對齊全 App 慣例
 //   （ChildDetailView / DailyRecordEditorSheet / ChildRecordEditorSheet 等
-//   均以 ToolbarItem(.topBarLeading) 放置「關閉／取消」，此為唯一例外，已統一）
+//   均以 ToolbarItem(.topBarLeading) 放置「關閉／取消」）
+//   [2026-07 修正] 當時誤判為「唯一例外」：AddRealEstateView.PhotoViewerSheet
+//   （全 App 共用照片檢視器）也曾把「關閉」放在 topBarTrailing，已於該檔案同步修正，
+//   詳見 AddRealEstateView.swift 內 PhotoViewerSheet 美化紀錄。
 // • PhotoLightbox 圖片載入：背景模糊層 + 前景大圖改為載入完成後淡入（0.28s ease），
 //   取代原本從 ProgressView 直接跳成圖片的生硬切換
 // • 縮圖 thumbnail：按下時加入輕量 scaleEffect(0.96) 回饋，提升點擊可感知性
