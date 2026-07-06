@@ -517,8 +517,16 @@ struct FamilyMemberDetailView: View {
             .sorted { $0.date > $1.date }
     }
 
-    private var memberGiftsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private func memberGiftsSection(_ gifts: [Expense]) -> some View {
+        // 依社交子分類一次分桶（O(n)），取代原本 ForEach 內對 gifts 逐分類各 filter 一次（O(分類數 × n)）；
+        // 只桶入有 socialSubCategory 的項目，維持與原本 filter 相同的行為（無子分類的項目不歸類到任何分類列）
+        var grouped: [SocialSubCategory: [Expense]] = [:]
+        for e in gifts {
+            if let sub = e.socialSubCategory {
+                grouped[sub, default: []].append(e)
+            }
+        }
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Capsule()
                     .fill(LinearGradient(colors: [.pink, .pink.opacity(0.6)],
@@ -531,7 +539,7 @@ struct FamilyMemberDetailView: View {
                     .font(.subheadline.weight(.bold))
                 Spacer()
                 // 禮金總計 Capsule 徽章
-                Text(smartGiftAmount(memberGifts.reduce(0) { $0 + $1.amount }))
+                Text(smartGiftAmount(gifts.reduce(0) { $0 + $1.amount }))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.pink)
                     .padding(.horizontal, 8).padding(.vertical, 3)
@@ -542,7 +550,7 @@ struct FamilyMemberDetailView: View {
             .padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
 
             ForEach(SocialSubCategory.allCases) { sub in
-                let items = memberGifts.filter { $0.socialSubCategory == sub }
+                let items = grouped[sub] ?? []
                 if !items.isEmpty {
                     HStack(spacing: 10) {
                         // 36pt 粉色漸層圖示圓 + stroke 邊框
@@ -592,13 +600,16 @@ struct FamilyMemberDetailView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        // memberGifts 對全部支出做雙重 filter + sort，整頁只算一次快照後共用，
+        // 避免 isEmpty 判斷與 memberGiftsSection 內部分類統計各自重新全量掃描
+        let gifts = memberGifts
+        return NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     headerCard
                     eventsSection
-                    if !memberGifts.isEmpty {
-                        memberGiftsSection
+                    if !gifts.isEmpty {
+                        memberGiftsSection(gifts)
                     }
                     photosSection
                 }

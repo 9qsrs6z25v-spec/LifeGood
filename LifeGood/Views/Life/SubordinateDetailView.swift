@@ -282,10 +282,14 @@ struct SubordinateDetailView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        // mentionedItems 會對「全部部屬」的 tasks/meetings/reports 做一次全量標註掃描，
+        // 整頁需要用到 5 次（tab 徽章、分數看板 x2、KPI 統計、mentionedSection），
+        // 這裡只算一次快取供全部呼叫點共用，避免同一次 render 重複掃描 5 次。
+        let mentionedItemsCache = mentionedItems
+        return NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    headerCard
+                    headerCard(mentionedCount: mentionedItemsCache.count)
 
                     // 自訂 Capsule Pill Tab 切換器（matchedGeometryEffect 讓指示器平滑滑動）
                     // 日常→藍色 / 評分系統→橘色，對齊 RealEstateDetailView.tabPicker 規格
@@ -308,7 +312,7 @@ struct SubordinateDetailView: View {
                                         .font(.caption2)
                                     Text(tab.rawValue)
                                         .font(.subheadline.weight(.semibold))
-                                    Text("\(tab == .daily ? subordinate.proactivityScore(mentionedCount: mentionedItems.count) : subordinate.potentialScore)")
+                                    Text("\(tab == .daily ? subordinate.proactivityScore(mentionedCount: mentionedItemsCache.count) : subordinate.potentialScore)")
                                         .font(.caption.weight(.bold))
                                 }
                                 .padding(.horizontal, 16)
@@ -348,7 +352,7 @@ struct SubordinateDetailView: View {
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05), value: tabSectionsAppeared)
-                        mentionedSection
+                        mentionedSection(mentionedItemsCache)
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.07), value: tabSectionsAppeared)
@@ -431,7 +435,7 @@ struct SubordinateDetailView: View {
 
     // MARK: - 英雄頭部卡片
 
-    private var headerCard: some View {
+    private func headerCard(mentionedCount: Int) -> some View {
         let initials = String(subordinate.name.prefix(2))
         // 一次計算所有類型計數，避免 KPI 橫列 5 個 statBadge 各自 O(n) 掃描 records
         let recordCounts = subordinate.records.reduce(into: [SubordinateRecordType: Int]()) { $0[$1.type, default: 0] += 1 }
@@ -506,11 +510,11 @@ struct SubordinateDetailView: View {
 
             // 分數看板：主動性 / 潛力性 / 綜合
             HStack(spacing: 0) {
-                scoreCell("主動性", subordinate.proactivityScore(mentionedCount: mentionedItems.count))
+                scoreCell("主動性", subordinate.proactivityScore(mentionedCount: mentionedCount))
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 34)
                 scoreCell("潛力性", subordinate.potentialScore)
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 34)
-                scoreCell("綜合", subordinate.overallScore(mentionedCount: mentionedItems.count))
+                scoreCell("綜合", subordinate.overallScore(mentionedCount: mentionedCount))
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.12))
@@ -548,7 +552,7 @@ struct SubordinateDetailView: View {
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
                 statBadge(count: subordinate.tasks.count,         label: "任務", color: .cyan)
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
-                statBadge(count: mentionedItems.count,            label: "被標註", color: .pink)
+                statBadge(count: mentionedCount,                   label: "被標註", color: .pink)
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
                 statBadge(count: recordCounts[.leave] ?? 0,       label: "請假", color: .teal)
             }
@@ -776,9 +780,8 @@ struct SubordinateDetailView: View {
         }
     }
 
-    private var mentionedSection: some View {
-        let items = mentionedItems
-        return VStack(alignment: .leading, spacing: 0) {
+    private func mentionedSection(_ items: [SubordinateItemRef]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             sectionHeader("被標註的項目", icon: "at", color: .pink, count: items.count) { EmptyView() }
             if items.isEmpty {
                 emptyHint

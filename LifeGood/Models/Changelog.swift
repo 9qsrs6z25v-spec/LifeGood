@@ -13,6 +13,13 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.26", build: 582, date: "2026/07/06", notes: [
+            "【正確性修復】SubscriptionManager.refreshStatus()：判斷「保留到期日最晚的訂閱」時，原本用單一複合條件 if let existingExp = foundExp, let newExp = transaction.expirationDate 當作唯一分支，只要本筆 entitlement 剛好沒有 expirationDate，就會誤判成「還沒找到過」而把已經找到的合法訂閱洗成 nil；改為先判斷是否為第一筆命中，再判斷是否要用更晚到期日取代，避免這種情況下把使用者誤判為未訂閱。",
+            "【效能修復】SubordinateDetailView：mentionedItems（對全部部屬 tasks/meetings/reports 做全量 @ 標註掃描）在單次 render 中被 tab 徽章、分數看板 x2、KPI 統計、mentionedSection 共呼叫 5 次；改為在 body 頂端算一次快取，headerCard／mentionedSection 皆改為接受參數，降為 1 次。",
+            "【效能修復】CareerView：careerMilestones 對 store.milestones 的 filter+sort，以及其 6 個衍生統計值（currentCompany／currentPosition／totalCompanies／yearsAtCurrentCompany／subCounts／filtered），原本由 dashboardSection／subCategoryBreakdown／milestoneListSection 各自獨立重算，單頁合計約 10 次重複掃描；改為新增 CareerStats 並在 body 頂端算一次，三個 section 全部改為接受參數。",
+            "【效能修復】FamilyMemberDetailView：memberGiftsSection 內對 8 個禮金子分類各自重新 filter 一次（O(分類數 × n)），且 memberGifts 本身（雙重 filter + sort）在 body 與 section 內合計被存取約 10 次；改為 body 頂端算一次快照，並在 memberGiftsSection 內一次性分桶（維持原本「無子分類項目不歸類」的既有行為），降為 O(n)。",
+            "本次為純靜態健檢：檢查 force unwrap／try!／陣列越界／retain cycle／競態條件／CloudKit 節流／畫面重複重繪，除上述 4 處外未發現新增問題（既有 StockView 30 秒節流、CloudSyncManager 30 秒節流、AppleCalendarBridge 防抖等維持不變）。"
+        ]),
         ChangelogEntry(version: "23.25", build: 581, date: "2026/07/06", notes: [
             "UI 小步美化（一致性）：多個履歷頁共用的「收到的禮金」區塊（ResumeGiftSection，用於配偶／子女／部屬等 6 個履歷頁）——單筆禮金列 28pt 圖示圓補上細邊框，統一同區塊已有描邊的總計圓與分類圓；新增交錯淡入進場動畫，與全 App 其他列表列一致。",
             "UI 小步美化（大字自適應）：同區塊三處金額文字補上自動縮小（最小縮至 65%）且不換行，家族禮金總額換算到「億」量級的長字串時可自動縮小顯示、不會被裁切，也不會小到無法辨識。",

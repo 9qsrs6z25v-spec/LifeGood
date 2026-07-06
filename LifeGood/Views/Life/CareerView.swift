@@ -53,70 +53,84 @@ struct CareerView: View {
     @State private var milestoneRowsAppeared = false
     @State private var emptyIconPulse = false
 
-    private var careerMilestones: [LifeMilestone] {
-        store.milestones
+    /// careerMilestones 及其衍生統計值整包快取，避免 dashboardSection / subCategoryBreakdown /
+    /// milestoneListSection 各自重新對 store.milestones 做 filter+sort（原本每次 render 約重跑 10 次）
+    private struct CareerStats {
+        let milestones: [LifeMilestone]
+        let currentCompany: String?
+        let currentPosition: String?
+        let totalCompanies: Int
+        let yearsAtCurrentCompany: Double?
+        let subCounts: [CareerSubCategory: Int]
+    }
+
+    private func makeCareerStats() -> CareerStats {
+        let milestones = store.milestones
             .filter { $0.category == .career }
             .sorted { $0.date > $1.date }
-    }
 
-    private var filtered: [LifeMilestone] {
-        guard let sub = selectedSub else { return careerMilestones }
-        return careerMilestones.filter { $0.careerSubCategory == sub }
-    }
-
-    private var currentCompany: String? {
         // 以最近一筆入職為基準，若之後有對應離職則視為已離職
-        let sorted = careerMilestones
-        guard let latestJoin = sorted.first(where: { $0.careerSubCategory == .join && !($0.companyName ?? "").isEmpty }) else {
-            return nil
-        }
-        if sorted.first(where: { $0.careerSubCategory == .resign && $0.date > latestJoin.date }) != nil {
-            return nil
-        }
-        return latestJoin.companyName
-    }
+        let currentCompany: String? = {
+            guard let latestJoin = milestones.first(where: { $0.careerSubCategory == .join && !($0.companyName ?? "").isEmpty }) else {
+                return nil
+            }
+            if milestones.first(where: { $0.careerSubCategory == .resign && $0.date > latestJoin.date }) != nil {
+                return nil
+            }
+            return latestJoin.companyName
+        }()
 
-    private var currentPosition: String? {
         // 最新一筆有 jobTitle 的里程碑（入職/升職/轉職/降職）
-        careerMilestones.first(where: {
+        let currentPosition = milestones.first(where: {
             let sub = $0.careerSubCategory
             return (sub == .join || sub == .promote || sub == .transfer || sub == .demote)
                 && !($0.jobTitle ?? "").isEmpty
         })?.jobTitle
-    }
 
-    private var totalCompanies: Int {
-        let names = careerMilestones
-            .filter { $0.careerSubCategory == .join }
-            .compactMap { $0.companyName?.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        return Set(names).count
-    }
+        let totalCompanies: Int = {
+            let names = milestones
+                .filter { $0.careerSubCategory == .join }
+                .compactMap { $0.companyName?.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            return Set(names).count
+        }()
 
-    private var yearsAtCurrentCompany: Double? {
-        guard currentCompany != nil else { return nil }
-        guard let latestJoin = careerMilestones.first(where: { $0.careerSubCategory == .join && !($0.companyName ?? "").isEmpty }) else {
-            return nil
+        let yearsAtCurrentCompany: Double? = {
+            guard currentCompany != nil,
+                  let latestJoin = milestones.first(where: { $0.careerSubCategory == .join && !($0.companyName ?? "").isEmpty }) else {
+                return nil
+            }
+            let days = Calendar.current.dateComponents([.day], from: latestJoin.date, to: Date()).day ?? 0
+            return max(0, Double(days) / 365.0)
+        }()
+
+        var subCounts: [CareerSubCategory: Int] = [:]
+        for m in milestones {
+            if let s = m.careerSubCategory { subCounts[s, default: 0] += 1 }
         }
-        let days = Calendar.current.dateComponents([.day], from: latestJoin.date, to: Date()).day ?? 0
-        return max(0, Double(days) / 365.0)
-    }
 
-    private var subCounts: [CareerSubCategory: Int] {
-        var dict: [CareerSubCategory: Int] = [:]
-        for m in careerMilestones {
-            if let s = m.careerSubCategory { dict[s, default: 0] += 1 }
-        }
-        return dict
+        return CareerStats(milestones: milestones,
+                            currentCompany: currentCompany,
+                            currentPosition: currentPosition,
+                            totalCompanies: totalCompanies,
+                            yearsAtCurrentCompany: yearsAtCurrentCompany,
+                            subCounts: subCounts)
     }
 
     var body: some View {
-        NavigationStack {
+        // stats 整頁只算一次，供三個 section 共用，避免各自重新 filter+sort 全部 store.milestones
+        let stats = makeCareerStats()
+        let filteredMilestones: [LifeMilestone] = {
+            guard let sub = selectedSub else { return stats.milestones }
+            return stats.milestones.filter { $0.careerSubCategory == sub }
+        }()
+
+        return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    dashboardSection
-                    subCategoryBreakdown
-                    milestoneListSection
+                    dashboardSection(stats)
+                    subCategoryBreakdown(stats)
+                    milestoneListSection(stats, filtered: filteredMilestones)
                 }
                 .padding(.vertical)
             }
@@ -140,21 +154,21 @@ struct CareerView: View {
 
     // MARK: - 看板
 
-    private var dashboardSection: some View {
+    private func dashboardSection(_ stats: CareerStats) -> some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                summaryCard(title: "目前公司", value: currentCompany ?? "—",
+                summaryCard(title: "目前公司", value: stats.currentCompany ?? "—",
                             icon: "building.2.fill", color: .blue, delay: 0.06)
-                summaryCard(title: "目前職位", value: currentPosition ?? "—",
+                summaryCard(title: "目前職位", value: stats.currentPosition ?? "—",
                             icon: "person.badge.key.fill", color: .indigo, delay: 0.12)
             }
             HStack(spacing: 12) {
                 statCard(title: "任職年資",
-                         value: yearsAtCurrentCompany.map { String(format: "%.1f 年", $0) } ?? "—",
+                         value: stats.yearsAtCurrentCompany.map { String(format: "%.1f 年", $0) } ?? "—",
                          icon: "clock.fill", color: .orange, delay: 0.18)
-                statCard(title: "任職公司數", value: "\(totalCompanies)",
+                statCard(title: "任職公司數", value: "\(stats.totalCompanies)",
                          icon: "building.columns.fill", color: .teal, delay: 0.24)
-                statCard(title: "職涯里程碑", value: "\(careerMilestones.count)",
+                statCard(title: "職涯里程碑", value: "\(stats.milestones.count)",
                          icon: "trophy.fill", color: Color(red: 1.00, green: 0.72, blue: 0.18), delay: 0.30)
             }
         }
@@ -288,11 +302,11 @@ struct CareerView: View {
     // MARK: - 子分類統計
 
     @ViewBuilder
-    private var subCategoryBreakdown: some View {
-        let validSubs = CareerSubCategory.allCases.filter { subCounts[$0, default: 0] > 0 }
-        let maxCount = validSubs.map { subCounts[$0, default: 0] }.max() ?? 1
+    private func subCategoryBreakdown(_ stats: CareerStats) -> some View {
+        let validSubs = CareerSubCategory.allCases.filter { stats.subCounts[$0, default: 0] > 0 }
+        let maxCount = validSubs.map { stats.subCounts[$0, default: 0] }.max() ?? 1
 
-        if !subCounts.isEmpty {
+        if !stats.subCounts.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 // 標準化區塊標題：Capsule 側條 + 計數膠囊
                 HStack(spacing: 10) {
@@ -319,7 +333,7 @@ struct CareerView: View {
 
                 VStack(spacing: 0) {
                     ForEach(Array(validSubs.enumerated()), id: \.element) { idx, sub in
-                        let count = subCounts[sub, default: 0]
+                        let count = stats.subCounts[sub, default: 0]
                         let accent = subColor(sub)
                         let ratio = maxCount > 0 ? Double(count) / Double(maxCount) : 0
 
@@ -417,7 +431,7 @@ struct CareerView: View {
 
     // MARK: - 里程碑列表
 
-    private var milestoneListSection: some View {
+    private func milestoneListSection(_ stats: CareerStats, filtered: [LifeMilestone]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // 標準化區塊標題：Capsule 側條 + 計數膠囊
             HStack(spacing: 10) {
@@ -433,7 +447,7 @@ struct CareerView: View {
                     .font(.subheadline.weight(.bold))
                 Spacer()
                 if !filtered.isEmpty {
-                    let totalCount = careerMilestones.count
+                    let totalCount = stats.milestones.count
                     let shownCount = filtered.count
                     Text(selectedSub == nil ? "\(totalCount) 筆" : "\(shownCount) / \(totalCount) 筆")
                         .font(.caption2.weight(.semibold))
