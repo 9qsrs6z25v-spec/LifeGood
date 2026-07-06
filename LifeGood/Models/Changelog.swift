@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.32", build: 588, date: "2026/07/06", notes: [
+            "部屬詳情頁的項目點擊行為對齊部屬總覽：任務 / 會議 / 報告 / 請假 / 優缺點 / 成就 / 改善 / 缺失 / Miss Operation 各列，點擊改為先顯示預覽卡片，右上角『編輯』才進入編輯畫面（原本為直接進編輯）。",
+            "預覽卡片（SubordinateItemCard）新增通用記錄卡：支援優點 / 缺點 / 成就 / 改善 / 缺失 / Miss Operation，顯示類型、日期、嚴重度、內容與備註，並可由『編輯』進入對應編輯器。"
+        ]),
         ChangelogEntry(version: "23.31", build: 587, date: "2026/07/06", notes: [
             "UI 小步美化（一致性修正）：全 App 共用的縮放照片檢視器 PhotoViewerSheet（AddRealEstateView 物件照片／RealEstateDetailView 房屋資料照片／FamilyMembersResumeView 家人照片皆共用同一元件）「關閉」按鈕原本放在畫面右上角，與全 App「關閉／取消統一置左」的既有慣例不一致；改為移至左上角，「重設縮放」圖示鈕改置右側補位。",
             "同步修正 MultiPhotoGallery.swift 內舊註解：v2 當時誤判 PhotoLightbox 是「唯一的關閉按鈕置右例外」，實際上 PhotoViewerSheet 也是同一慣例的漏網之魚，已於註解中補充說明，方便日後查找。",

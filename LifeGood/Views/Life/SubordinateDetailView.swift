@@ -669,7 +669,7 @@ struct SubordinateDetailView: View {
                         .buttonStyle(.plain)
 
                         Button {
-                            if subscription.isPremium { editingReport = r } else { showPremiumAlert = true }
+                            if subscription.isPremium { previewItem = .report(subId: subordinateId, report: r) } else { showPremiumAlert = true }
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(r.topic.isEmpty ? "未命名報告" : r.topic)
@@ -717,21 +717,21 @@ struct SubordinateDetailView: View {
             out.append(CompletedEntry(id: r.id, kind: .report, title: r.topic,
                                       subtitle: r.note.isEmpty ? nil : r.note,
                                       completedAt: r.completedAt, due: r.date,
-                                      onTap: { if subscription.isPremium { editingReport = r } else { showPremiumAlert = true } }))
+                                      onTap: { if subscription.isPremium { previewItem = .report(subId: subordinateId, report: r) } else { showPremiumAlert = true } }))
         }
         for m in subordinate.meetings {
             for item in m.items where item.isCompleted {
                 out.append(CompletedEntry(id: item.id, kind: .meeting, title: item.content,
                                           subtitle: m.topic.isEmpty ? "會議" : m.topic,
                                           completedAt: item.completedAt, due: item.dueDate,
-                                          onTap: { if subscription.isPremium { editingMeeting = m } else { showPremiumAlert = true } }))
+                                          onTap: { if subscription.isPremium { previewItem = .meeting(subId: subordinateId, meeting: m) } else { showPremiumAlert = true } }))
             }
         }
         for t in subordinate.tasks where t.isCompleted {
             out.append(CompletedEntry(id: t.id, kind: .task, title: t.topic,
                                       subtitle: t.content.isEmpty ? nil : t.content,
                                       completedAt: t.completedAt, due: t.dueDate,
-                                      onTap: { if subscription.isPremium { editingTask = t } else { showPremiumAlert = true } }))
+                                      onTap: { if subscription.isPremium { previewItem = .task(subId: subordinateId, task: t) } else { showPremiumAlert = true } }))
         }
         return out
     }
@@ -777,6 +777,7 @@ struct SubordinateDetailView: View {
         case .meeting(let s, let m): return ("person.3.fill", .indigo, m.topic.isEmpty ? "未命名會議" : m.topic, owner(s), "會議")
         case .report(let s, let r):  return ("doc.text.fill", .purple, r.topic.isEmpty ? "未命名報告" : r.topic, owner(s), "報告")
         case .leave(let s, let rec): return ("calendar.badge.minus", .teal, rec.leaveType?.rawValue ?? "請假", owner(s), "請假")
+        case .record(let s, let rec): return (rec.type.icon, colorFor(rec.type), rec.content.isEmpty ? rec.type.rawValue : rec.content, owner(s), rec.type.rawValue)
         }
     }
 
@@ -842,7 +843,7 @@ struct SubordinateDetailView: View {
             } else {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, m in
                     Button {
-                        if subscription.isPremium { editingMeeting = m }
+                        if subscription.isPremium { previewItem = .meeting(subId: subordinateId, meeting: m) }
                         else { showPremiumAlert = true }
                     } label: {
                         HStack(alignment: .center, spacing: 12) {
@@ -1011,7 +1012,7 @@ struct SubordinateDetailView: View {
                         .buttonStyle(.plain)
 
                         Button {
-                            if subscription.isPremium { editingTask = t }
+                            if subscription.isPremium { previewItem = .task(subId: subordinateId, task: t) }
                             else { showPremiumAlert = true }
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
@@ -1220,8 +1221,9 @@ struct SubordinateDetailView: View {
     private func recordRow(_ rec: SubordinateRecord) -> some View {
         let color = colorFor(rec.type)
         return Button {
-            if subscription.isPremium { editingRecord = rec }
-            else { showPremiumAlert = true }
+            guard subscription.isPremium else { showPremiumAlert = true; return }
+            previewItem = rec.type == .leave ? .leave(subId: subordinateId, rec: rec)
+                                             : .record(subId: subordinateId, rec: rec)
         } label: {
             HStack(alignment: .center, spacing: 12) {
                 // [v3] 36pt 漸層圖示圓 + 陰影 + 細邊框
@@ -2154,12 +2156,14 @@ enum SubordinateItemRef: Identifiable {
     case meeting(subId: UUID, meeting: SubordinateMeeting)
     case report(subId: UUID, report: WeeklyReport)
     case leave(subId: UUID, rec: SubordinateRecord)
+    case record(subId: UUID, rec: SubordinateRecord)   // 通用記錄（優點/缺點/成就/改善/缺失/Miss Operation）
     var id: String {
         switch self {
         case .task(_, let t):    return "t_\(t.id.uuidString)"
         case .meeting(_, let m): return "m_\(m.id.uuidString)"
         case .report(_, let r):  return "r_\(r.id.uuidString)"
         case .leave(_, let rec): return "l_\(rec.id.uuidString)"
+        case .record(_, let rec): return "rec_\(rec.id.uuidString)"
         }
     }
 }
@@ -2208,11 +2212,22 @@ struct SubordinateItemCard: View {
         case .meeting: return "會議"
         case .report: return "報告"
         case .leave: return "請假"
+        case .record(_, let rec): return rec.type.rawValue
         }
     }
 
     /// 供標註解析用的人員清單
     private var people: [MentionPerson] { lifeStore.mentionPeople() }
+
+    /// 通用記錄類型對應色（與 SubordinateDetailView.colorFor 一致）
+    private func recordColor(_ type: SubordinateRecordType) -> Color {
+        switch type {
+        case .pro: return .green; case .con: return .red
+        case .achievement: return .orange; case .improvement: return .blue
+        case .fault: return .pink; case .missOperation: return .purple
+        case .leave: return .teal
+        }
+    }
 
     @ViewBuilder
     private var cardBody: some View {
@@ -2262,6 +2277,14 @@ struct SubordinateItemCard: View {
             if let h = rec.leaveHours { field("請假時數", String(format: "%.1f 小時", h)) }
             richBlock("事由", rec.content)
             richBlock("備註", rec.note)
+        case .record(let subId, let snap):
+            let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
+            titleBlock(icon: rec.type.icon, color: recordColor(rec.type), title: rec.type.rawValue)
+            field("日期", fmt(rec.date))
+            if let end = rec.endDate { field("結束", fmt(end)) }
+            if let sev = rec.severity { field("嚴重度", sev.rawValue) }
+            richBlock("內容", rec.content)
+            richBlock("備註", rec.note)
         }
     }
 
@@ -2310,6 +2333,7 @@ struct SubordinateItemCard: View {
         case .meeting(let subId, let meeting): MeetingEditorSheet(subordinateId: subId, editing: meeting)
         case .report(let subId, let report):  WeeklyReportEditorSheet(subordinateId: subId, editing: report)
         case .leave(let subId, let rec):       RecordEditorSheet(subordinateId: subId, type: rec.type, editing: rec)
+        case .record(let subId, let rec):      RecordEditorSheet(subordinateId: subId, type: rec.type, editing: rec)
         }
     }
 
