@@ -826,11 +826,14 @@ struct OverviewView: View {
     private var recentItems: [RecentItem] { cachedRecentItems }
 
     private func buildRecentItems() -> [RecentItem] {
-        let recentExp = store.expenses.sorted { $0.date > $1.date }.prefix(5).map { e in
+        // 「最近交易」只顯示已發生的紀錄；排除未來日期（如尚未開始的分階段貸款等固定支出投射），
+        // 避免未來項目因日期最大而排到最前、擠掉真正的近期消費。
+        let now = Date()
+        let recentExp = store.expenses.filter { $0.date <= now }.sorted { $0.date > $1.date }.prefix(5).map { e in
             RecentItem(id: e.id, title: e.title, icon: e.categoryIcon,
                        category: e.categoryName, amount: e.amount, date: e.date, isIncome: false)
         }
-        let recentInc = store.incomes.sorted { $0.date > $1.date }.prefix(5).map { i in
+        let recentInc = store.incomes.filter { $0.date <= now }.sorted { $0.date > $1.date }.prefix(5).map { i in
             RecentItem(id: i.id, title: i.title, icon: i.category.icon,
                        category: i.category.rawValue, amount: i.amount, date: i.date, isIncome: true)
         }
