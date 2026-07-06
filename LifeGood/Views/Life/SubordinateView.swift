@@ -163,7 +163,7 @@ struct SubordinateView: View {
     // MARK: - 列表內容（拆分以降低型別檢查負擔）
 
     @ViewBuilder
-    private var subordinateSections: some View {
+    private func subordinateSections(mentionCounts: [UUID: Int]) -> some View {
         // 部門篩選列（有定義部門才顯示）
         if !lifeStore.departments.isEmpty {
             Section {
@@ -200,7 +200,7 @@ struct SubordinateView: View {
             }
         } else {
             ForEach(Array(displayRows.enumerated()), id: \.element.id) { idx, row in
-                listRow(row, idx: idx)
+                listRow(row, idx: idx, mentionCounts: mentionCounts)
             }
             .onDelete { offsets in
                 guard subscription.isPremium else { showPremiumAlert = true; return }
@@ -266,7 +266,7 @@ struct SubordinateView: View {
     }
 
     @ViewBuilder
-    private func listRow(_ row: ListRow, idx: Int) -> some View {
+    private func listRow(_ row: ListRow, idx: Int, mentionCounts: [UUID: Int]) -> some View {
         switch row {
         case .header(let area):
             plantAreaHeader(area)
@@ -274,7 +274,7 @@ struct SubordinateView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
         case .person(let sub):
-            subordinateRow(sub)
+            subordinateRow(sub, mentionCounts: mentionCounts)
                 .contentShape(Rectangle())
                 .onTapGesture { viewingItem = sub }
                 .opacity(rowsAppeared ? 1 : 0)
@@ -287,12 +287,15 @@ struct SubordinateView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        // 一次計算被標註計數（O(N×M) 全量掃描），供頂部統計卡與每一列共用，
+        // 避免 summaryStatsCard 的 subordinates.map 與每一列 subordinateRow 各自重複觸發全量重算。
+        let mentionCounts = lifeStore.mentionedCounts()
+        return NavigationStack {
             List {
                 // 頂部統計摘要卡（有部屬才顯示）
                 if !lifeStore.subordinates.isEmpty {
                     Section {
-                        summaryStatsCard
+                        summaryStatsCard(mentionCounts: mentionCounts)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -314,7 +317,7 @@ struct SubordinateView: View {
                             .listRowSeparator(.hidden)
                     }
                 } else {
-                    subordinateSections
+                    subordinateSections(mentionCounts: mentionCounts)
                 }
             }
             .environment(\.editMode, sortOption == .manual ? .constant(.active) : .constant(.inactive))
@@ -372,9 +375,9 @@ struct SubordinateView: View {
         .padding(.vertical, 4)
     }
 
-    private var summaryStatsCard: some View {
+    private func summaryStatsCard(mentionCounts: [UUID: Int]) -> some View {
         let subordinates = lifeStore.subordinates
-        let scores = subordinates.map { subordinateScore($0) }
+        let scores = subordinates.map { subordinateScore($0, mentionCounts: mentionCounts) }
         let total = subordinates.count
         let avg: Int = scores.isEmpty ? 0 : scores.reduce(0, +) / scores.count
         let excellent = scores.filter { $0 >= 90 }.count
@@ -662,8 +665,8 @@ struct SubordinateView: View {
 
     // MARK: - 部屬列
 
-    private func subordinateRow(_ sub: Subordinate) -> some View {
-        let score = subordinateScore(sub)
+    private func subordinateRow(_ sub: Subordinate, mentionCounts: [UUID: Int]) -> some View {
+        let score = subordinateScore(sub, mentionCounts: mentionCounts)
         let accent = scoreColor(score)
 
         return HStack(spacing: 0) {
@@ -805,12 +808,11 @@ struct SubordinateView: View {
     }
 
     /// 列表顯示分數：潛力與主動性的平均（含被標註加分）。
-    private func subordinateScore(_ sub: Subordinate) -> Int {
+    /// mentionCounts 由呼叫端（body）以 lifeStore.mentionedCounts() 算好一次傳入，
+    /// 避免每一列各自重新全量掃描所有部屬的任務/會議/報告。
+    private func subordinateScore(_ sub: Subordinate, mentionCounts: [UUID: Int]) -> Int {
         sub.overallScore(mentionedCount: mentionCounts[sub.id] ?? 0)
     }
-
-    /// 各人員被 @ 標註的項目數（單次掃描快取，供分數計算）
-    private var mentionCounts: [UUID: Int] { lifeStore.mentionedCounts() }
 
     private func scoreColor(_ score: Int) -> Color {
         switch score {

@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.24", build: 580, date: "2026/07/06", notes: [
+            "【效能修復】SubordinateView：頂部統計卡（summaryStatsCard）以 subordinates.map 對每位部屬呼叫 subordinateScore，且每一列 subordinateRow 也各自呼叫一次；兩者都會讀取 mentionCounts 計算屬性，而該屬性每次被存取都重新呼叫 lifeStore.mentionedCounts()（對全部部屬的任務/會議/報告做 O(N×M) 全量 @ 標註掃描）。N 位部屬的畫面單次 render 因此觸發約 2N 次全量掃描。改為在 body 頂端以 let mentionCounts = lifeStore.mentionedCounts() 算一次，summaryStatsCard / subordinateSections / listRow / subordinateRow / subordinateScore 全部改為接受此字典的參數，全頁降為 1 次全量掃描。",
+            "【效能修復】TalentMatrixView（人才矩陣）：proactivity(_:) 同樣每次呼叫都讀取會重新計算 lifeStore.mentionedCounts() 的計算屬性，而此函式被散布圖座標、四象限人數統計（各自呼叫一次共 4 次）、圖表點位、命中測試、明細卡等十餘處呼叫點使用，M 位成員的單次 render 保守估計觸發 5M 次以上全量掃描，是本次發現中最嚴重的一處。改為新增 AxisContext（含分數字典 + X 軸中位數，由 body / exportJPG 匯出流程各自算一次），summaryHeroCard / chart / quadrantLegend / breakdownCard 等改為接受 ctx 參數，全頁降為 1 次全量掃描。",
+            "本次為純靜態健檢，聚焦近期新增的 @ 標註 / 人才矩陣功能：另檢查 force unwrap／陣列越界／retain cycle／競態條件／CloudKit 30 秒節流／pushAll 2 秒防抖，未發現額外問題。"
+        ]),
         ChangelogEntry(version: "23.23", build: 579, date: "2026/07/06", notes: [
             "UI 小步美化（一致性）：餐廳清單（FoodMapView）與名片 QR Code 全螢幕（BusinessCardView）的「關閉」按鈕，從右上角改到左上角，統一全 App「關閉／取消」一律置左的慣例。",
             "UI 小步美化（金額單位）：職涯履歷「薪資調整」的調薪前後金額，原本直接顯示台幣整數（高薪資時字串偏長），改為與全 App 一致的「萬 / 億」智慧量級顯示。",
