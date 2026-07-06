@@ -15,6 +15,14 @@ import MapKit
 //   • consumptionRow 分類 Capsule + stroke(orange.opacity(0.22), 0.6pt)
 //   • childGiftsSection sub 圖示從純色 28pt 升至 36pt LinearGradient + stroke
 //   • 段落分隔線 leading: 50→56（對齊 36pt 圖示 + 14pt padding + 6pt spacing）
+// [2026-07 v3] 金額顯示量級統一：
+//   • 私有 formatCurrency(_:) / Self.currencyFormatter 停用（純 NT$ 整數，高額時字串過長）
+//     全面改用共用 Double.ntdWanString（FinanceModels.swift），支援萬/億智慧量級，
+//     對齊 ResumeGiftSection / CareerView / EInvoiceSetupView 全 App 金額顯示規格。
+//     影響範圍：childGiftsSection 合計與各 SocialSubCategory 小計、consumptionSection 合計、
+//               consumptionRow 單筆金額。純顯示層變更，未動支出/禮金篩選與加總邏輯。
+//   （下次美化本元件時，可考慮：空狀態補粉紅／橘色 CTA 按鈕對齊 FamilyView v3、
+//     headerCard 年齡/生日改用 ntdWanString 同款 Capsule 光澤描邊統一節奏）
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -47,12 +55,6 @@ struct ChildDetailView: View {
     }()
     private static let shortDateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "M/d"; return f
-    }()
-    // 靜態貨幣格式器
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f
     }()
 
     enum DetailTab: String, CaseIterable {
@@ -362,7 +364,7 @@ struct ChildDetailView: View {
                     .clipShape(Capsule())
                     .overlay(Capsule().stroke(Color.pink.opacity(0.22), lineWidth: 0.6))
                 Spacer()
-                Text(formatCurrency(total))
+                Text(total.ntdWanString)
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(.pink)
             }
@@ -395,7 +397,7 @@ struct ChildDetailView: View {
                         Spacer()
                         Text("\(items.count) 筆")
                             .font(.caption2).foregroundStyle(.secondary)
-                        Text(formatCurrency(items.reduce(0) { $0 + $1.amount }))
+                        Text(items.reduce(0) { $0 + $1.amount }.ntdWanString)
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(.pink)
                     }
@@ -642,7 +644,7 @@ struct ChildDetailView: View {
                 Spacer()
                 if !exps.isEmpty {
                     let total = exps.reduce(0) { $0 + $1.amount }
-                    Text(formatCurrency(total))
+                    Text(total.ntdWanString)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(.red)
                 }
@@ -748,17 +750,13 @@ struct ChildDetailView: View {
                 }
             }
             Spacer()
-            Text(formatCurrency(e.amount))
+            Text(e.amount.ntdWanString)
                 .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundStyle(.red)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .contentShape(Rectangle())
-    }
-
-    private func formatCurrency(_ v: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     // MARK: - 生涯頁面

@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.27", build: 583, date: "2026/07/06", notes: [
+            "UI 小步美化（金額單位）：子女詳情頁（ChildDetailView）的「收到的禮金」總計/分類小計、消費區塊合計、單筆消費金額，原本直接顯示台幣整數（高額時字串偏長），改為與全 App 一致的「萬 / 億」智慧量級顯示，對齊履歷禮金區塊／職涯調薪的顯示規格。",
+            "程式碼清理：移除該檔案中從未被呼叫的舊版金額格式化函式與其專用 NumberFormatter（顯示已全面改用共用的萬/億智慧量級字串）。",
+            "以上均為純視覺調整，未變動任何禮金/消費篩選或加總邏輯，也未影響其他既有功能。"
+        ]),
         ChangelogEntry(version: "23.26", build: 582, date: "2026/07/06", notes: [
             "【正確性修復】SubscriptionManager.refreshStatus()：判斷「保留到期日最晚的訂閱」時，原本用單一複合條件 if let existingExp = foundExp, let newExp = transaction.expirationDate 當作唯一分支，只要本筆 entitlement 剛好沒有 expirationDate，就會誤判成「還沒找到過」而把已經找到的合法訂閱洗成 nil；改為先判斷是否為第一筆命中，再判斷是否要用更晚到期日取代，避免這種情況下把使用者誤判為未訂閱。",
             "【效能修復】SubordinateDetailView：mentionedItems（對全部部屬 tasks/meetings/reports 做全量 @ 標註掃描）在單次 render 中被 tab 徽章、分數看板 x2、KPI 統計、mentionedSection 共呼叫 5 次；改為在 body 頂端算一次快取，headerCard／mentionedSection 皆改為接受參數，降為 1 次。",
