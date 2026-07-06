@@ -33,6 +33,11 @@ import SwiftUI
 //      對齊全 App 膠囊細邊框設計語言（VariableExpenseView.ExpenseRow / IncomeView.incomeRow）。
 //  18. emptyMilestoneState CTA 按鈕：非篩選狀態下補入「新增第一個里程碑」橘色漸層膠囊按鈕，
 //      對齊 IncomeView.emptyState / VariableExpenseView.emptyStateView CTA 按鈕設計規格。
+// [2026-07 v4] 金額單位一致性小步美化：
+//  19. subtitleText salaryAdjust 薪前後金額：String(format:"NT$%.0f") 原樣輸出整數台幣，
+//      高薪資時字串過長（例：NT$1200000 → NT$1500000）；改用 .ntdWanString 萬/億智慧量級，
+//      對齊全 App 金額顯示規格（IncomeView / FinanceOverviewView 等），且不換行更省寬度。
+//      （下次美化本檔案時，可從這裡接著找其他可統一之處）
 
 struct CareerView: View {
     @EnvironmentObject var store: LifeStore
@@ -695,7 +700,7 @@ struct CareerView: View {
             let pctColor: Color = pct >= 0 ? .green : .red
             // 薪前後金額（輔助文字） + 漲跌百分比 Capsule 膠囊（對齊 IncomeView.incomeRow 數值排版）
             HStack(spacing: 5) {
-                Text(String(format: "NT$%.0f → NT$%.0f", before, after))
+                Text("\(before.ntdWanString) → \(after.ntdWanString)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

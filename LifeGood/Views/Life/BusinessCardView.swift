@@ -1282,6 +1282,10 @@ struct BusinessCardView: View {
 //   5. metaRow：圖示圓 32pt → 36pt + LinearGradient + stroke，對齊 contactRow 規格。
 //   6. noteCard：加入 section header（Capsule 漸層側條 + "備註"），
 //      對齊全 App section 標題設計語言；容器加 overlay + shadow，對齊 noteCard 統一規格。
+// [2026-07 v3] 一致性小步美化：
+//   7. qrFullscreenView「關閉」按鈕：topBarTrailing → topBarLeading，
+//      對齊本檔案 BusinessCardDetailView 主頁與全 App「關閉／取消」一律置左的慣例
+//      （下次美化本檔案時，可從這裡接著找其他可統一之處）
 
 // MARK: - 名片詳細頁（點 row 開啟）
 
@@ -1677,7 +1681,7 @@ struct BusinessCardDetailView: View {
             .navigationTitle("名片 QR Code")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("關閉") { showQRFullscreen = false }
                 }
             }

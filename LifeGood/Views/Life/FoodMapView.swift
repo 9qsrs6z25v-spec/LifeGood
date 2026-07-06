@@ -49,6 +49,10 @@ import MapKit
 //      「TOP」膠囊補入 Capsule().stroke(.white.opacity(0.35), lineWidth:0.75)；
 //      36pt 圖示圓補入 Circle().stroke(.white.opacity(0.25), lineWidth:0.75)，
 //      對齊 SpouseResumeView.heroCard 整體規格。
+// [2026-07 v4] 一致性小步美化：
+//  16. 餐廳清單 sheet「關閉」按鈕：topBarTrailing → topBarLeading，
+//      對齊全 App「關閉／取消」一律置左的慣例（此為此檔案唯一例外，已統一）
+//      （下次美化本檔案時，可從這裡接著找其他可統一之處）
 
 // MARK: - 餐廳聚合資料
 
@@ -399,7 +403,7 @@ struct FoodMapView: View {
             .navigationTitle("餐廳清單（\(items.count)）")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("關閉") { showListSheet = false }
                 }
             }

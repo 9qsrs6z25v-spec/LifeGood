@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.23", build: 579, date: "2026/07/06", notes: [
+            "UI 小步美化（一致性）：餐廳清單（FoodMapView）與名片 QR Code 全螢幕（BusinessCardView）的「關閉」按鈕，從右上角改到左上角，統一全 App「關閉／取消」一律置左的慣例。",
+            "UI 小步美化（金額單位）：職涯履歷「薪資調整」的調薪前後金額，原本直接顯示台幣整數（高薪資時字串偏長），改為與全 App 一致的「萬 / 億」智慧量級顯示。",
+            "以上均為純視覺調整，未變動任何資料邏輯或既有功能。"
+        ]),
         ChangelogEntry(version: "23.22", build: 578, date: "2026/07/06", notes: [
             "【效能/閃爍修復】StockView 開啟頁面即打網路更新股價且無節流：切換理財子分頁再切回會整個重建 View，@State 無法擋下重複請求；加入 30 秒節流（比照 CloudSyncManager 既有節流秒數），改善頻繁切換分頁造成的重複網路請求與『更新報價中』橫幅閃爍。",
             "【閃爍修復】AppleCalendarBridge：EKEventStoreChanged 對同一次使用者操作常連續觸發多次（iOS 已知行為），原本每次都直接更新 lastChange 觸發 MyCalendarView 整頁重繪；加入 0.3 秒防抖合併。",
