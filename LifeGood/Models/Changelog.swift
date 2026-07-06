@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.25", build: 581, date: "2026/07/06", notes: [
+            "UI 小步美化（一致性）：多個履歷頁共用的「收到的禮金」區塊（ResumeGiftSection，用於配偶／子女／部屬等 6 個履歷頁）——單筆禮金列 28pt 圖示圓補上細邊框，統一同區塊已有描邊的總計圓與分類圓；新增交錯淡入進場動畫，與全 App 其他列表列一致。",
+            "UI 小步美化（大字自適應）：同區塊三處金額文字補上自動縮小（最小縮至 65%）且不換行，家族禮金總額換算到「億」量級的長字串時可自動縮小顯示、不會被裁切，也不會小到無法辨識。",
+            "程式碼清理：移除該檔案中從未被呼叫的舊版金額格式化函式（顯示已全面改用萬/億智慧量級字串）。",
+            "以上均為純視覺調整，未變動任何資料邏輯或既有功能。"
+        ]),
         ChangelogEntry(version: "23.24", build: 580, date: "2026/07/06", notes: [
             "【效能修復】SubordinateView：頂部統計卡（summaryStatsCard）以 subordinates.map 對每位部屬呼叫 subordinateScore，且每一列 subordinateRow 也各自呼叫一次；兩者都會讀取 mentionCounts 計算屬性，而該屬性每次被存取都重新呼叫 lifeStore.mentionedCounts()（對全部部屬的任務/會議/報告做 O(N×M) 全量 @ 標註掃描）。N 位部屬的畫面單次 render 因此觸發約 2N 次全量掃描。改為在 body 頂端以 let mentionCounts = lifeStore.mentionedCounts() 算一次，summaryStatsCard / subordinateSections / listRow / subordinateRow / subordinateScore 全部改為接受此字典的參數，全頁降為 1 次全量掃描。",
             "【效能修復】TalentMatrixView（人才矩陣）：proactivity(_:) 同樣每次呼叫都讀取會重新計算 lifeStore.mentionedCounts() 的計算屬性，而此函式被散布圖座標、四象限人數統計（各自呼叫一次共 4 次）、圖表點位、命中測試、明細卡等十餘處呼叫點使用，M 位成員的單次 render 保守估計觸發 5M 次以上全量掃描，是本次發現中最嚴重的一處。改為新增 AxisContext（含分數字典 + X 軸中位數，由 body / exportJPG 匯出流程各自算一次），summaryHeroCard / chart / quadrantLegend / breakdownCard 等改為接受 ctx 參數，全頁降為 1 次全量掃描。",

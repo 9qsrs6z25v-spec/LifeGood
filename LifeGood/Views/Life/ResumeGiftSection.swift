@@ -14,19 +14,25 @@ import SwiftUI
 //      金額改用 .ntdWanString，支援萬/億量級自動切換，防止長數字溢出。
 //   5. 靜態 NumberFormatter / DateFormatter 共用實例，避免每次 render 重新分配（效能優化），
 //      對齊 SpouseResumeView / ChildDetailView 靜態格式器設計規格。
+// [2026-07 v2] 一致性 + 大字自適應細節補強（本元件被 6 個履歷頁共用，此處統一即全 App 一致）：
+//   A. giftRow 28pt 圖示圓補 Circle().stroke(accent.opacity(0.20), 0.75pt) 細邊框，
+//      對齊本檔總計列（34pt）/ 分類列（32pt）圖示圓皆已有的描邊規格，避免同頁三種圓形只有一種缺邊框。
+//   B. 總計 / 分類 / giftRow 三處金額 Text 補 .lineLimit(1) + .minimumScaleFactor(0.65)，
+//      家族禮金總額進入「億」量級時可自動縮字不裁切，不會小到無法辨識。
+//   C. giftRow 補交錯淡入 + 向上進場動畫（沿用 rowsAppeared 旗標，依攤平後索引 stagger），
+//      對齊 SpouseResumeView.milestoneRow / expenseRow 已有的列表進場動畫規格。
+//   D. 移除從未被呼叫的 formatCurrency 死碼（金額顯示已全面改用 .ntdWanString）。
+//   （下次美化本元件時，可考慮：DisclosureGroup 展開/收合的 chevron 動畫、giftRow 左側強調色條）
 
 /// 履歷頁通用：列出某人收到的禮金紀錄，依社交子分類分組顯示。
 struct ResumeGiftSection: View {
     let gifts: [Expense]
     let recipientName: String
 
-    // 靜態共用格式器，避免每次 render 重新分配昂貴的 NumberFormatter/DateFormatter
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f
-    }()
+    // [v2] giftRow 交錯進場動畫旗標
+    @State private var rowsAppeared = false
 
+    // 靜態共用格式器，避免每次 render 重新分配昂貴的 DateFormatter
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
     }()
@@ -75,18 +81,33 @@ struct ResumeGiftSection: View {
                 Text(totalAmount.ntdWanString)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
                     .padding(.horizontal, 10).padding(.vertical, 4)
                     .background(accent.opacity(0.10))
                     .clipShape(Capsule())
                     .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.75))
             }
             .padding(.vertical, 4)
+            .onAppear {
+                // [v2-C] 觸發 giftRow 交錯進場動畫
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                    rowsAppeared = true
+                }
+            }
 
             // 各子分類 DisclosureGroup
             ForEach(byCategory, id: \.sub) { group in
                 DisclosureGroup {
-                    ForEach(group.items.prefix(20)) { exp in
+                    ForEach(Array(group.items.prefix(20).enumerated()), id: \.element.id) { rowIdx, exp in
                         giftRow(exp)
+                            .opacity(rowsAppeared ? 1 : 0)
+                            .offset(y: rowsAppeared ? 0 : 10)
+                            .animation(
+                                .spring(response: 0.44, dampingFraction: 0.82)
+                                    .delay(0.03 * Double(min(rowIdx, 12))),
+                                value: rowsAppeared
+                            )
                     }
                     if group.items.count > 20 {
                         Text("還有 \(group.items.count - 20) 筆…")
@@ -131,6 +152,8 @@ struct ResumeGiftSection: View {
                             Text(group.items.reduce(0) { $0 + $1.amount }.ntdWanString)
                                 .font(.system(size: 13, weight: .bold, design: .rounded))
                                 .foregroundStyle(accent)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.65)
                         }
                     }
                 }
@@ -168,7 +191,7 @@ struct ResumeGiftSection: View {
     // giftRow：28pt 漸層圖示圓 + 日期 Capsule 膠囊 + 付款人 Capsule 標籤
     private func giftRow(_ e: Expense) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            // 28pt 粉紅漸層圖示圓
+            // 28pt 粉紅漸層圖示圓 [v2-A] 補 stroke 細邊框，對齊本檔總計/分類圖示圓描邊規格
             ZStack {
                 Circle()
                     .fill(
@@ -178,6 +201,9 @@ struct ResumeGiftSection: View {
                             endPoint: .bottomTrailing
                         )
                     )
+                    .frame(width: 28, height: 28)
+                Circle()
+                    .stroke(accent.opacity(0.20), lineWidth: 0.75)
                     .frame(width: 28, height: 28)
                 Image(systemName: "gift")
                     .font(.system(size: 11, weight: .medium))
@@ -216,13 +242,11 @@ struct ResumeGiftSection: View {
             Text(e.amount.ntdWanString)
                 .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundStyle(accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
                 .contentTransition(.numericText())
         }
         .padding(.vertical, 4)
-    }
-
-    private func formatCurrency(_ value: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
     }
 
     private func formatDate(_ date: Date) -> String {
