@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.33", build: 589, date: "2026/07/06", notes: [
+            "修正建置失敗：CloudKitManager 的 accountStatus 計算屬性誤將存取修飾詞寫在 accessor 內（private set { ... }），Swift 不允許，導致『Expected get/set/willSet/didSet keyword』。改為把 private(set) 標在屬性宣告上、set 保持乾淨；外部只讀、內部可寫的語意與加鎖行為不變。"
+        ]),
         ChangelogEntry(version: "23.32", build: 588, date: "2026/07/06", notes: [
             "部屬詳情頁的項目點擊行為對齊部屬總覽：任務 / 會議 / 報告 / 請假 / 優缺點 / 成就 / 改善 / 缺失 / Miss Operation 各列，點擊改為先顯示預覽卡片，右上角『編輯』才進入編輯畫面（原本為直接進編輯）。",
             "預覽卡片（SubordinateItemCard）新增通用記錄卡：支援優點 / 缺點 / 成就 / 改善 / 缺失 / Miss Operation，顯示類型、日期、嚴重度、內容與備註，並可由『編輯』進入對應編輯器。"
