@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.45", build: 601, date: "2026/07/07", notes: [
+            "UI 小步美化：兒女詳情頁（ChildDetailView）頂部英雄卡右側「雙層同心圓」大圖示，原本只有 fill 底色、沒有描邊，是卡片內唯一沒有邊框的圖形元素，與同卡角色/年齡/生日三顆膠囊、外框皆已有的描邊語言不一致；外圈補 stroke(.white.opacity(0.16), 0.75pt)、內圈補 stroke(.white.opacity(0.26), 1pt)，對齊本頁 dailyRow/recordRow 36pt 圖示圓既有的描邊規格。純視覺加強，未變動任何年齡/生日計算或既有功能。"
+        ]),
         ChangelogEntry(version: "23.44", build: 600, date: "2026/07/07", notes: [
             "【靜態除錯 v23.44】四組並行掃描分別覆蓋 Models／Views‧Life／Views‧Finance／頂層 Views，找到並修復同一類 UI 閃爍問題：多個空狀態雙層脈衝光環／進場動畫旗標（emptyIconPulse／headerAppeared／cardsAppeared／miniBarAppeared 等）透過 onAppear 內的 DispatchQueue.main.asyncAfter 延遲設為 true，卻未在畫面離開時歸零、也未在下次進入前重置，一旦使用者切換分頁又切回（旗標維持 true），下次進入頁面就不會再有 false→true 的變化，脈衝／進場動畫因而不再播放。依各檔既有姊妹寫法（onDisappear 歸零或 onAppear 開頭先重置）補齊：FamilyView／ResumeView／GradeTitleView／TaxOverviewView（Life）、RealEstateView／StockView／SavingsInsuranceView／VehicleView／FinanceChartView（Finance）、FixedExpenseView／VariableExpenseView／IncomeView（頂層）共 12 個檔案；其中 SavingsInsuranceView／VehicleView 的 miniBarAppeared 原本用不可取消的 asyncAfter 觸發，一併改為可在 onDisappear 取消的 Task（對齊 FinanceOverviewView.miniBarTask 既有規格），避免孤兒延遲在畫面離開後才觸發、寫入已重置的旗標。另外修復 VariableExpenseView／IncomeView 的搜尋 300ms 防抖 Task 未在 onDisappear 取消（對齊 AddExpenseView／ChildDetailView 既有修復）。Models 目錄（CloudSyncManager／CloudKitManager／BackupManager／EInvoiceSyncManager／ExpenseStore／FinanceStore／LifeStore 等 12 個核心檔案）逐一複查強制解包／Optional／index／retain cycle／競態條件／CloudKit 30 秒節流，確認皆已正確處理、無新增問題。"
         ]),

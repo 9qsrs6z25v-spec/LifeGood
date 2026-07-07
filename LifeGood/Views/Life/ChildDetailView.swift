@@ -31,8 +31,13 @@ import MapKit
 //     改為 Capsule 徽章（bg white.opacity(0.12) + stroke white.opacity(0.20), 0.6pt），
 //     文字不透明度 0.78→0.85 補償底色後的可讀性，與角色(0.22/0.30)、年齡(0.16/0.25)
 //     形成三段漸淡節奏（主要 → 次要 → 輔助資訊）。純視覺層調整，未動生日資料或年齡計算邏輯。
-//   （下次美化本元件時，可考慮：右側圖示圓雙層同心圓補 stroke 細邊框，
-//     對齊 dailyRow/recordRow 圖示圓已有的 Circle stroke(accent.opacity(0.22), 1pt) 規格）
+// [2026-07 v6] headerCard 右側大圖示圓補描邊：
+//   • 雙層同心圓（86pt / 74pt）原本只有 fill、無 stroke，是卡片內唯一沒有邊框的圖形元素，
+//     與同卡 RoundedRectangle 外框（0.18/0.75pt）、角色/年齡/生日三顆膠囊皆已有描邊不一致；
+//     外圈補 stroke(.white.opacity(0.16), 0.75pt)、內圈補 stroke(.white.opacity(0.26), 1pt)，
+//     對齊 dailyRow/recordRow 36pt 圖示圓已有的 Circle stroke(accent.opacity(0.22), 1pt) 規格節奏。
+//   • 純視覺加強，未動任何年齡/生日計算或圖示邏輯。
+//   （下次美化本元件時，可從這裡接著找其他可統一之處）
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -245,13 +250,20 @@ struct ChildDetailView: View {
                 }
             }
             Spacer()
-            // 右側大圖示圓（雙層同心圓製造層次）
+            // 右側大圖示圓（雙層同心圓製造層次 + 細邊框，對齊 dailyRow/recordRow 36pt 圖示圓
+            // 已有的 Circle stroke 規格，避免本卡唯一沒有描邊的圖形元素）
             ZStack {
                 Circle()
                     .fill(.white.opacity(0.10))
                     .frame(width: 86, height: 86)
                 Circle()
+                    .stroke(.white.opacity(0.16), lineWidth: 0.75)
+                    .frame(width: 86, height: 86)
+                Circle()
                     .fill(.white.opacity(0.18))
+                    .frame(width: 74, height: 74)
+                Circle()
+                    .stroke(.white.opacity(0.26), lineWidth: 1)
                     .frame(width: 74, height: 74)
                 Image(systemName: "figure.child.circle.fill")
                     .font(.system(size: 48, weight: .medium))
