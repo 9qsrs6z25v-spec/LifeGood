@@ -36,6 +36,7 @@
 		A01B00000100001E /* VehicleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001E /* VehicleDetailView.swift */; };
 		A01B00000100001F /* RealEstateDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001F /* RealEstateDetailView.swift */; };
 		A01B000001000020 /* LifeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000020 /* LifeModels.swift */; };
+		A01B000001000201 /* HealthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000201 /* HealthModels.swift */; };
 		A01B000001000021 /* LifeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000021 /* LifeStore.swift */; };
 		A01B000001000022 /* LifeOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000022 /* LifeOverviewView.swift */; };
 		A01B000001000023 /* ResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000023 /* ResumeView.swift */; };
@@ -121,6 +122,7 @@
 		A01A00000100001E /* VehicleDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleDetailView.swift; sourceTree = "<group>"; };
 		A01A00000100001F /* RealEstateDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealEstateDetailView.swift; sourceTree = "<group>"; };
 		A01A000001000020 /* LifeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeModels.swift; sourceTree = "<group>"; };
+		A01A000001000201 /* HealthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthModels.swift; sourceTree = "<group>"; };
 		A01A000001000021 /* LifeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeStore.swift; sourceTree = "<group>"; };
 		A01A000001000022 /* LifeOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000023 /* ResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeView.swift; sourceTree = "<group>"; };
@@ -220,6 +222,7 @@
 				A01A00000100000F /* FinanceModels.swift */,
 				A01A000001000010 /* FinanceStore.swift */,
 				A01A000001000020 /* LifeModels.swift */,
+				A01A000001000201 /* HealthModels.swift */,
 				A01A000001000021 /* LifeStore.swift */,
 				A01A000001000027 /* UnifiedExport.swift */,
 				A01A000001000030 /* BackupManager.swift */,
@@ -435,6 +438,7 @@
 				A01B00000100001C /* IncomeView.swift in Sources */,
 				A01B00000100001D /* AddIncomeView.swift in Sources */,
 				A01B000001000020 /* LifeModels.swift in Sources */,
+				A01B000001000201 /* HealthModels.swift in Sources */,
 				A01B000001000021 /* LifeStore.swift in Sources */,
 				A01B000001000022 /* LifeOverviewView.swift in Sources */,
 				A01B000001000023 /* ResumeView.swift in Sources */,

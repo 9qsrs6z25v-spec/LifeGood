@@ -13,6 +13,7 @@ class LifeStore: ObservableObject {
     @Published var businessCards: [BusinessCard] = [] { didSet { if !isLoading { save() } } }
     @Published var personalEvents: [PersonalEvent] = [] { didSet { if !isLoading { save() } } }
     @Published var orgPeople: [OrgPerson] = [] { didSet { if !isLoading { save() } } }
+    @Published var healthProfile: HealthProfile = HealthProfile() { didSet { if !isLoading { save() } } }
 
     private var isLoading = false
     private let saveQueue = DispatchQueue(label: "com.lifegood.lifestore.save", qos: .utility)
@@ -50,6 +51,10 @@ class LifeStore: ObservableObject {
     // MARK: - 個人檔案
 
     func updateProfile(_ profile: UserProfile) { self.profile = profile }
+
+    // MARK: - 健康檔案
+
+    func updateHealthProfile(_ profile: HealthProfile) { self.healthProfile = profile }
 
     // MARK: - 家庭成員 CRUD
 
@@ -495,7 +500,8 @@ class LifeStore: ObservableObject {
             profile: profile, familyMembers: familyMembers, milestones: milestones,
             relationships: relationships, pets: pets, schedules: schedules,
             subordinates: subordinates, departments: departments, gradeTitles: gradeTitles,
-            businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople
+            businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople,
+            healthProfile: healthProfile
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -512,6 +518,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.businessCards)  { ud.set(d, forKey: "life_business_cards") }
             if let d = try? encoder.encode(snap.personalEvents) { ud.set(d, forKey: "life_personal_events") }
             if let d = try? encoder.encode(snap.orgPeople)      { ud.set(d, forKey: "life_org_people") }
+            if let d = try? encoder.encode(snap.healthProfile)  { ud.set(d, forKey: "life_health_profile") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -537,6 +544,10 @@ class LifeStore: ObservableObject {
         if let items = Self.lossyDecodeArray([BusinessCard].self, key: "life_business_cards", decoder: decoder) { businessCards = items }
         if let items = Self.lossyDecodeArray([PersonalEvent].self, key: "life_personal_events", decoder: decoder) { personalEvents = items }
         if let items = Self.lossyDecodeArray([OrgPerson].self, key: "life_org_people", decoder: decoder) { orgPeople = items }
+        if let data = UserDefaults.standard.data(forKey: "life_health_profile"),
+           let h = try? decoder.decode(HealthProfile.self, from: data) {
+            healthProfile = h
+        }
     }
 
     /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
@@ -578,6 +589,7 @@ class LifeStore: ObservableObject {
         businessCards.removeAll()
         personalEvents.removeAll()
         orgPeople.removeAll()
+        healthProfile = HealthProfile()
         save()
     }
 }

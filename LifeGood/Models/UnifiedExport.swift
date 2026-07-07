@@ -32,6 +32,7 @@ struct UnifiedExport: Codable {
         var subordinates: [Subordinate]?
         var departments: [Department]?
         var gradeTitles: [GradeTitle]?
+        var healthProfile: HealthProfile?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> UnifiedExport {
@@ -54,7 +55,8 @@ struct UnifiedExport: Codable {
                 schedules: life.schedules,
                 subordinates: life.subordinates,
                 departments: life.departments,
-                gradeTitles: life.gradeTitles
+                gradeTitles: life.gradeTitles,
+                healthProfile: life.healthProfile
             )
         )
     }
@@ -452,6 +454,7 @@ enum UnifiedImporter {
             if let subs = payload.life.subordinates { life.subordinates = subs }
             if let depts = payload.life.departments { life.departments = depts }
             if let gts = payload.life.gradeTitles { life.gradeTitles = gts }
+            if let hp = payload.life.healthProfile { life.healthProfile = hp }
 
             result.expenses = payload.expense.expenses.count
             result.incomes = payload.expense.incomes.count
@@ -471,6 +474,8 @@ enum UnifiedImporter {
                 expense.currencyRates.append(contentsOf: newRates)
             }
             if let profile = payload.life.profile { life.profile = profile }
+            // 健康檔案為單一物件：合併模式僅在本機尚無資料時填入，避免覆蓋既有健康檔案
+            if let hp = payload.life.healthProfile, life.healthProfile.isEmpty { life.healthProfile = hp }
             if let members = payload.life.familyMembers {
                 let newFamily = mergeItems(existing: life.familyMembers, incoming: members)
                 life.familyMembers.append(contentsOf: newFamily)
