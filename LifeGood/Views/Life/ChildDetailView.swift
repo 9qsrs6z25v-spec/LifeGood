@@ -26,8 +26,13 @@ import MapKit
 //     從純文字改為「tray 圖示 + 文字 + 右側迷你新增膠囊按鈕」，按鈕採 accent 漸層底 + 陰影，
 //     對齊 FamilyView v3 emptyMembersPlaceholder CTA 規格，縮小適配卡片內單行高度。
 //   • consumptionSection 維持純文字空狀態（消費為連動同步、非本頁可手動新增，不適用 CTA）。
-//   （下次美化本元件時，可考慮：headerCard 生日 Capsule 補 stroke 光澤邊框，
-//     對齊角色/年齡 Capsule 已有的 stroke 規格，統一三顆膠囊的描邊節奏）
+// [2026-07 v5] headerCard 三顆膠囊描邊節奏統一：
+//   • 生日原本只是「calendar 圖示 + 純文字」、無底色無描邊，與角色/年齡膠囊質感不一致；
+//     改為 Capsule 徽章（bg white.opacity(0.12) + stroke white.opacity(0.20), 0.6pt），
+//     文字不透明度 0.78→0.85 補償底色後的可讀性，與角色(0.22/0.30)、年齡(0.16/0.25)
+//     形成三段漸淡節奏（主要 → 次要 → 輔助資訊）。純視覺層調整，未動生日資料或年齡計算邏輯。
+//   （下次美化本元件時，可考慮：右側圖示圓雙層同心圓補 stroke 細邊框，
+//     對齊 dailyRow/recordRow 圖示圓已有的 Circle stroke(accent.opacity(0.22), 1pt) 規格）
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -224,15 +229,19 @@ struct ChildDetailView: View {
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                // 生日（calendar 圖示 + 日期文字）
+                // 生日（calendar 圖示 + 日期文字 → Capsule 徽章，對齊角色/年齡膠囊描邊節奏）
                 if let bd = child.birthday {
                     HStack(spacing: 4) {
                         Image(systemName: "calendar")
-                            .font(.caption2)
+                            .font(.system(size: 9, weight: .medium))
                         Text(Self.dateFormatter.string(from: bd))
                             .font(.caption2.weight(.medium))
                     }
-                    .foregroundStyle(.white.opacity(0.78))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(.white.opacity(0.12))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.20), lineWidth: 0.6))
                 }
             }
             Spacer()

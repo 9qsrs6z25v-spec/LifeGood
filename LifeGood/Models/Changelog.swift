@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.40", build: 596, date: "2026/07/07", notes: [
+            "UI 小步美化：ChildDetailView（兒女詳情頁）頂部英雄卡「生日」原本只是純文字＋calendar 圖示、無底色無描邊，與同排「角色 / 年齡」兩顆膠囊質感不一致；改為 Capsule 徽章（白底 12% + 描邊 20%），三顆膠囊形成主要／次要／輔助資訊的漸淡描邊節奏，視覺更統一。純視覺調整，未變動生日資料或年齡計算邏輯。"
+        ]),
         ChangelogEntry(version: "23.39", build: 595, date: "2026/07/07", notes: [
             "【靜態除錯 v23.39】修復六項問題：① ChildDetailView 新增兒童紀錄時，選圖／切換素描 Toggle／存檔三處各自用 editing?.id ?? UUID() 產生不同亂數 id 來組素描檔名，導致存下的素描檔名與 ChildRecord.sketchURL 實際推導出的檔名對不上，重新開啟編輯時素描預覽會誤顯示原圖、且每次切換 Toggle 都會留下用不到的孤兒素描檔；改為一律由 photoFileName 推導素描檔名（對齊 sketchURL 的邏輯），三處呼叫點統一。② AddExpenseView 記帳「用餐人員」多選：儲存時以目前家人姓名清單反向 filter 已選集合，若某位成員後續改名或被刪除，舊記錄一旦被重新編輯儲存就會靜默把該用餐人員洗掉、清單顯示也會誤縮成『不指定』；改為保留清單中已找不到的舊名字，僅用目前家人清單決定顯示排序。③ FinanceStore／ExpenseStore 讀取 UserDefaults：整批 JSONDecoder.decode 若因單一筆資料損壞（舊格式／CloudKit 合併壞掉）而失敗，try? 會讓保單/股票/車輛/房地產或記帳/收入整個集合原地保持空值，形同資料整批消失；改用與 LifeStore 相同的逐筆容錯解碼（單筆損壞只跳過該筆），並修復 RealEstate/Stock/Vehicle 內巢狀陣列（貸款分期、繳費紀錄、股票交易/配息、樓層物件、產權文件等）原本用整批 try? 解碼、一樣會被單筆壞資料拖累整批消失的同型風險。④ 八個模型的 savePhoto／saveSketch（房地產電梯/水電瓦斯/裝潢照片、家庭相簿、兒童紀錄、名片、組織人員）在磁碟寫入失敗時仍照樣觸發 CloudKit 上傳並回傳檔名，造成永遠讀不到的孤兒照片參照；補上寫入成功才上傳的守衛（對齊 Expense.savePhoto 既有作法）。⑤ RealEstateDetailView 水電瓦斯歷史紀錄展開：isLatestPayment 對每一筆繳費都重新掃描+排序整個 utilityPayments 三次找各類型最新一筆，形成 O(n²)；改為一次分組取得三個類型最新一筆的 id 集合再查表。⑥ TaxOverviewView.taxByMonth 迴圈仍對同一份支出清單跑 12 次全量 filter；改用 Dictionary(grouping:) 一次分月分組。"
         ]),
