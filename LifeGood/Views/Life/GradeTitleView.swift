@@ -115,6 +115,10 @@ struct GradeTitleView: View {
                     rowsAppeared = true
                 }
             }
+            .onDisappear {
+                heroAppeared = false
+                rowsAppeared = false
+            }
             .sheet(isPresented: $addingDepartment) {
                 DepartmentEditor(editingId: nil)
             }

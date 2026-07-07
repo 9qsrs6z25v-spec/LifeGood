@@ -114,6 +114,13 @@ struct FinanceChartView: View {
                     emptyPulse = true
                 }
             }
+            .onDisappear {
+                heroCardAppeared = false
+                sectionsAppeared = false
+                rowsAppeared = false
+                allocationRowsAppeared = false
+                emptyPulse = false
+            }
         }
     }
 

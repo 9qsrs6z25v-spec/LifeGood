@@ -235,6 +235,11 @@ struct RealEstateView: View {
                 }
                 // emptyIconPulse 由 emptyState ZStack .onAppear 觸發，不在此設定
             }
+            .onDisappear {
+                headerAppeared = false
+                cardsAppeared = false
+                emptyIconPulse = false
+            }
         }
     }
 

@@ -76,6 +76,7 @@ struct VehicleView: View {
     @State private var vehiclesSectionHeaderAppeared = false  // [v2] Section 標頭進場動畫旗標
     // [v3] mini allocation bar 左展開動畫旗標
     @State private var miniBarAppeared = false
+    @State private var miniBarTask: Task<Void, Never>?
 
     private let heroAccent    = Color(red: 0.18, green: 0.68, blue: 0.68)
     private let heroAccentDark = Color(red: 0.08, green: 0.46, blue: 0.48)
@@ -110,7 +111,10 @@ struct VehicleView: View {
                                 headerAppeared = true
                             }
                             // [v3] 英雄卡進場後 0.45s 觸發 mini 彩條左展開
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                            miniBarTask?.cancel()
+                            miniBarTask = Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 450_000_000)
+                                guard !Task.isCancelled else { return }
                                 miniBarAppeared = true
                             }
                         }
@@ -247,6 +251,15 @@ struct VehicleView: View {
                         }
                     }
                 }
+            }
+            .onDisappear {
+                headerAppeared = false
+                cardsAppeared = false
+                emptyIconPulse = false
+                vehiclesSectionHeaderAppeared = false
+                miniBarAppeared = false
+                miniBarTask?.cancel()
+                miniBarTask = nil
             }
         }
     }

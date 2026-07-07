@@ -147,6 +147,7 @@ struct IncomeView: View {
                     debouncedSearchText = newValue
                 }
             }
+            .onDisappear { searchDebounceTask?.cancel() }
             .task(id: "\(store.modifyID)-\(selectedCategory?.rawValue ?? "")-\(debouncedSearchText)") {
                 cachedFilteredIncomes = buildFilteredIncomes()
             }
@@ -610,6 +611,7 @@ struct IncomeView: View {
                     .foregroundStyle(isSearching ? .secondary : accent.opacity(0.72))
             }
             .onAppear {
+                emptyIconPulse = false
                 if !isSearching {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         emptyIconPulse = true

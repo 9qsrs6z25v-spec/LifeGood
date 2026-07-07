@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.44", build: 600, date: "2026/07/07", notes: [
+            "【靜態除錯 v23.44】四組並行掃描分別覆蓋 Models／Views‧Life／Views‧Finance／頂層 Views，找到並修復同一類 UI 閃爍問題：多個空狀態雙層脈衝光環／進場動畫旗標（emptyIconPulse／headerAppeared／cardsAppeared／miniBarAppeared 等）透過 onAppear 內的 DispatchQueue.main.asyncAfter 延遲設為 true，卻未在畫面離開時歸零、也未在下次進入前重置，一旦使用者切換分頁又切回（旗標維持 true），下次進入頁面就不會再有 false→true 的變化，脈衝／進場動畫因而不再播放。依各檔既有姊妹寫法（onDisappear 歸零或 onAppear 開頭先重置）補齊：FamilyView／ResumeView／GradeTitleView／TaxOverviewView（Life）、RealEstateView／StockView／SavingsInsuranceView／VehicleView／FinanceChartView（Finance）、FixedExpenseView／VariableExpenseView／IncomeView（頂層）共 12 個檔案；其中 SavingsInsuranceView／VehicleView 的 miniBarAppeared 原本用不可取消的 asyncAfter 觸發，一併改為可在 onDisappear 取消的 Task（對齊 FinanceOverviewView.miniBarTask 既有規格），避免孤兒延遲在畫面離開後才觸發、寫入已重置的旗標。另外修復 VariableExpenseView／IncomeView 的搜尋 300ms 防抖 Task 未在 onDisappear 取消（對齊 AddExpenseView／ChildDetailView 既有修復）。Models 目錄（CloudSyncManager／CloudKitManager／BackupManager／EInvoiceSyncManager／ExpenseStore／FinanceStore／LifeStore 等 12 個核心檔案）逐一複查強制解包／Optional／index／retain cycle／競態條件／CloudKit 30 秒節流，確認皆已正確處理、無新增問題。"
+        ]),
         ChangelogEntry(version: "23.43", build: 599, date: "2026/07/07", notes: [
             "UI 小步美化：ResumeGiftSection（六個履歷頁共用的「收到的禮金」區塊）分類 DisclosureGroup 展開箭頭原本是系統預設灰階樣式，與本區塊粉紅主題色不一致，展開時內容也是直接跳出、沒有過場；新增自訂 AccentChevronDisclosureGroupStyle，箭頭改為粉紅主題色並隨展開狀態以 spring 動畫平滑旋轉 90 度，展開內容補上淡入＋由上滑入的過場動畫。純視覺加強，未變動禮金分組或金額邏輯，展開/收合狀態行為不變。"
         ]),

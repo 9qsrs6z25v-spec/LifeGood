@@ -59,6 +59,7 @@ struct SavingsInsuranceView: View {
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
     @State private var miniBarAppeared = false
+    @State private var miniBarTask: Task<Void, Never>?
 
     private let heroAccent = Color(red: 0.22, green: 0.53, blue: 0.98)
     private let heroAccentDark = Color(red: 0.10, green: 0.35, blue: 0.82)
@@ -85,7 +86,10 @@ struct SavingsInsuranceView: View {
                             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                                 headerAppeared = true
                             }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                            miniBarTask?.cancel()
+                            miniBarTask = Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 450_000_000)
+                                guard !Task.isCancelled else { return }
                                 withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
                                     miniBarAppeared = true
                                 }
@@ -165,6 +169,14 @@ struct SavingsInsuranceView: View {
             .sheet(isPresented: $showAdd) { AddSavingsInsuranceView() }
             .sheet(item: $editingItem) { item in AddSavingsInsuranceView(editing: item) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+            .onDisappear {
+                headerAppeared = false
+                cardsAppeared = false
+                emptyIconPulse = false
+                miniBarAppeared = false
+                miniBarTask?.cancel()
+                miniBarTask = nil
+            }
         }
     }
 

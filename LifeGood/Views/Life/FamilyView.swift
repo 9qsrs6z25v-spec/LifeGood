@@ -295,6 +295,7 @@ struct FamilyView: View {
                     emptyIconPulse = true
                 }
             }
+            .onDisappear { emptyIconPulse = false }
 
             VStack(spacing: 8) {
                 Text("尚無家庭成員")

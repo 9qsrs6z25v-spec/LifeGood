@@ -181,6 +181,11 @@ struct StockView: View {
                 }
             }
             .onAppear { Task { await refreshAllPrices() } }
+            .onDisappear {
+                headerAppeared = false
+                cardsAppeared = false
+                emptyIconPulse = false
+            }
         }
     }
 

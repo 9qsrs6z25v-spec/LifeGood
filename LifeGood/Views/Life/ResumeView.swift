@@ -862,6 +862,7 @@ struct ResumeView: View {
                     emptyStatePulse = true
                 }
             }
+            .onDisappear { emptyStatePulse = false }
 
             VStack(spacing: 8) {
                 Text("尚無里程碑")

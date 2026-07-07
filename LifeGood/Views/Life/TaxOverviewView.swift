@@ -195,6 +195,13 @@ struct TaxOverviewView: View {
                     }
                 }
             }
+            .onDisappear {
+                heroCardAppeared = false
+                emptyIconPulse = false
+                taxRowsAppeared = false
+                checklistRowsAppeared = false
+                tipsRowsAppeared = false
+            }
         }
     }
 

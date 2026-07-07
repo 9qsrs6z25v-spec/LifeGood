@@ -400,6 +400,7 @@ struct FixedExpenseView: View {
                     .foregroundStyle(accent.opacity(0.70))
             }
             .onAppear {
+                emptyIconPulse = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     emptyIconPulse = true
                 }
