@@ -562,17 +562,31 @@ class ExpenseStore: ObservableObject {
     private func load() {
         isLoading = true
         defer { isLoading = false }
-        if let data = UserDefaults.standard.data(forKey: saveKey),
-           let decoded = try? JSONDecoder().decode([Expense].self, from: data) {
-            expenses = decoded
+        let decoder = JSONDecoder()
+        // 逐筆容錯解碼：單一筆損壞（舊資料格式／CloudKit 合併壞掉）不會讓整批記帳/收入資料消失
+        if let v = Self.lossyDecodeArray([Expense].self, key: saveKey, decoder: decoder) { expenses = v }
+        if let v = Self.lossyDecodeArray([Income].self, key: incomeKey, decoder: decoder) { incomes = v }
+        if let v = Self.lossyDecodeArray([CurrencyRate].self, key: currencyRatesKey, decoder: decoder) { currencyRates = v }
+    }
+
+    /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
+    /// key 不存在 → 回傳 nil（不覆蓋預設值）；存在但全空 → 回傳 []。
+    private static func lossyDecodeArray<Element: Decodable>(
+        _ type: [Element].Type, key: String, decoder: JSONDecoder
+    ) -> [Element]? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        if let items = try? decoder.decode([Element].self, from: data) { return items }
+        if let raw = try? decoder.decode([FailableDecodable<Element>].self, from: data) {
+            return raw.compactMap { $0.value }
         }
-        if let data = UserDefaults.standard.data(forKey: incomeKey),
-           let decoded = try? JSONDecoder().decode([Income].self, from: data) {
-            incomes = decoded
-        }
-        if let data = UserDefaults.standard.data(forKey: currencyRatesKey),
-           let decoded = try? JSONDecoder().decode([CurrencyRate].self, from: data) {
-            currencyRates = decoded
+        return nil
+    }
+
+    /// 包裝單一元素，解碼失敗時不丟錯、回傳 nil
+    private struct FailableDecodable<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws {
+            value = try? T(from: decoder)
         }
     }
 

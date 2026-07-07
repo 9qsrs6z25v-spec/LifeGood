@@ -1216,8 +1216,9 @@ struct ChildRecordEditorSheet: View {
             .onChange(of: photoItem) { _, _ in
                 Task {
                     guard let photoItem, let data = try? await photoItem.loadTransferable(type: Data.self) else { return }
+                    // 原圖永遠保留一份；素描檔名由 savePhoto 回傳的 photoFileName 推導（與 ChildRecord.sketchURL
+                    // 的推導邏輯一致，見 LifeModels.swift），不可各自另外亂數 UUID，否則檔名對不上、素描找不到
                     let recordId = editing?.id ?? UUID()
-                    // 原圖永遠保留一份
                     photoFileName = ChildRecord.savePhoto(data, id: recordId)
                     let origImage = UIImage(data: data)
                     // 素描版：CIContext 建立與 GPU 渲染移到背景執行緒，避免阻塞主執行緒
@@ -1229,7 +1230,7 @@ struct ChildRecordEditorSheet: View {
                             _ = ChildRecord.saveSketch(sketchData, id: recordId)
                         }
                     }
-                    previewImage = sketchMode ? loadSketchOrOrig(recordId) : origImage
+                    previewImage = sketchMode ? loadSketchOrOrig() : origImage
                 }
             }
             // 避免 300ms 防抖期間關閉表單後，Task 仍在背景驅動診所搜尋（對齊 AddExpenseView 的修復）
@@ -1237,21 +1238,27 @@ struct ChildRecordEditorSheet: View {
         }
     }
 
-    private func loadSketchOrOrig(_ recordId: UUID) -> UIImage? {
-        let sketchPath = ChildRecord.photosDirectory.appendingPathComponent("\(recordId.uuidString)_sketch.jpg")
+    /// 素描檔名一律由 photoFileName 推導（與 ChildRecord.sketchURL 邏輯一致），
+    /// 不可用另外亂數的 UUID，否則新增記錄時三處各自產生的 id 對不上，存的素描永遠找不到。
+    private func sketchFileName(for photoName: String) -> String {
+        photoName.replacingOccurrences(of: ".jpg", with: "_sketch.jpg")
+    }
+
+    private func loadSketchOrOrig() -> UIImage? {
+        guard let name = photoFileName else { return nil }
+        let sketchPath = ChildRecord.photosDirectory.appendingPathComponent(sketchFileName(for: name))
         if let data = try? Data(contentsOf: sketchPath), let img = UIImage(data: data) { return img }
-        guard let name = photoFileName,
-              let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)),
+        guard let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)),
               let img = UIImage(data: data) else { return nil }
         return img
     }
 
     private func regeneratePreview() {
         guard let name = photoFileName else { return }
-        let recordId = editing?.id ?? UUID()
+        let sketchName = sketchFileName(for: name)
 
         if sketchMode {
-            let sketchPath = ChildRecord.photosDirectory.appendingPathComponent("\(recordId.uuidString)_sketch.jpg")
+            let sketchPath = ChildRecord.photosDirectory.appendingPathComponent(sketchName)
             if !FileManager.default.fileExists(atPath: sketchPath.path) {
                 // 素描版不存在才需要讀原圖：避免每次切換 Toggle 都做一次不必要的主執行緒磁碟讀取 + JPEG 解碼
                 let origPath = ChildRecord.photosDirectory.appendingPathComponent(name)
@@ -1262,12 +1269,13 @@ struct ChildRecordEditorSheet: View {
                         ChildRecord.applySketchEffect(origImage)
                     }.value
                     if let sketched, let sketchData = sketched.jpegData(compressionQuality: 0.85) {
-                        _ = ChildRecord.saveSketch(sketchData, id: recordId)
+                        try? sketchData.write(to: sketchPath)
+                        PhotoCloudSync.upload(directory: "ChildRecordPhotos", fileName: sketchName)
                     }
-                    previewImage = loadSketchOrOrig(recordId)
+                    previewImage = loadSketchOrOrig()
                 }
             } else {
-                previewImage = loadSketchOrOrig(recordId)
+                previewImage = loadSketchOrOrig()
             }
         } else {
             let origPath = ChildRecord.photosDirectory.appendingPathComponent(name)
@@ -1509,7 +1517,7 @@ struct ChildRecordEditorSheet: View {
         dose = e.dose ?? ""; severity = e.severity ?? .mild
         photoFileName = e.photoFileName
         if e.photoFileName != nil {
-            previewImage = sketchMode ? loadSketchOrOrig(e.id) : {
+            previewImage = sketchMode ? loadSketchOrOrig() : {
                 guard let name = e.photoFileName,
                       let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)) else { return nil }
                 return UIImage(data: data)

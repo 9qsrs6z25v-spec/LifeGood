@@ -121,12 +121,12 @@ struct TaxOverviewView: View {
     }
 
     private var taxByMonth: [(month: Int, amount: Double)] {
-        let exps = taxExpenses  // 避免迴圈內重複執行 filter+sort（12 次 → 1 次）
+        let cal = Calendar.current
+        // 用 Dictionary(grouping:) 一次分組取代「12 次全量 filter」，避免 O(12n) 重複掃描
+        let byMonth = Dictionary(grouping: taxExpenses) { cal.component(.month, from: $0.date) }
         var result: [(Int, Double)] = []
         for m in 1...12 {
-            let amount = exps.filter {
-                Calendar.current.component(.month, from: $0.date) == m
-            }.reduce(0) { $0 + $1.amount }
+            let amount = (byMonth[m] ?? []).reduce(0) { $0 + $1.amount }
             if amount > 0 { result.append((m, amount)) }
         }
         return result

@@ -1214,10 +1214,18 @@ struct AddExpenseView: View {
         .buttonStyle(.plain)
     }
 
+    /// 依目前家人清單排序已選人員，並保留清單中已找不到（改名／被刪除）的舊名字，
+    /// 避免編輯既有記帳時因為家人名單變動而把舊的用餐人員資料整批洗掉
+    private var orderedSelectedDiningMembers: [String] {
+        let known = familyNames.filter { selectedDiningMembers.contains($0) }
+        let stale = selectedDiningMembers.subtracting(familyNames).sorted()
+        return known + stale
+    }
+
     /// 多選人員的顯示文字：未選 / 1 人 / N 人
     private var diningMembersLabel: String {
         if selectedDiningMembers.isEmpty { return "不指定" }
-        let ordered = familyNames.filter { selectedDiningMembers.contains($0) }
+        let ordered = orderedSelectedDiningMembers
         if ordered.count == 1 { return ordered[0] }
         return "\(ordered.count) 人"
     }
@@ -1225,8 +1233,7 @@ struct AddExpenseView: View {
     /// 將多選人員 Set 序列化為 `、` 分隔字串（向下相容單名格式）
     private var diningMembersString: String {
         guard !selectedDiningMembers.isEmpty else { return "" }
-        return familyNames.filter { selectedDiningMembers.contains($0) }
-            .joined(separator: "、")
+        return orderedSelectedDiningMembers.joined(separator: "、")
     }
 
     private var familyNames: [String] {

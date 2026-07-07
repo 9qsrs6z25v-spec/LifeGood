@@ -154,14 +154,33 @@ class FinanceStore: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         let decoder = JSONDecoder()
-        if let d = UserDefaults.standard.data(forKey: insKey),
-           let v = try? decoder.decode([SavingsInsurance].self, from: d) { insurances = v }
-        if let d = UserDefaults.standard.data(forKey: stockKey),
-           let v = try? decoder.decode([Stock].self, from: d) { stocks = v }
-        if let d = UserDefaults.standard.data(forKey: vehicleKey),
-           let v = try? decoder.decode([Vehicle].self, from: d) { vehicles = v }
-        if let d = UserDefaults.standard.data(forKey: reKey),
-           let v = try? decoder.decode([RealEstate].self, from: d) { realEstates = v }
+        // 各集合改用「逐筆容錯」解碼：單一筆損壞（例如舊資料/壞的 CloudKit 合併）
+        // 不會讓整批保單/股票/車輛/房地產資料整批消失（對齊 LifeStore.lossyDecodeArray 的作法）
+        if let v = Self.lossyDecodeArray([SavingsInsurance].self, key: insKey, decoder: decoder) { insurances = v }
+        if let v = Self.lossyDecodeArray([Stock].self, key: stockKey, decoder: decoder) { stocks = v }
+        if let v = Self.lossyDecodeArray([Vehicle].self, key: vehicleKey, decoder: decoder) { vehicles = v }
+        if let v = Self.lossyDecodeArray([RealEstate].self, key: reKey, decoder: decoder) { realEstates = v }
+    }
+
+    /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
+    /// key 不存在 → 回傳 nil（不覆蓋預設值）；存在但全空 → 回傳 []。
+    private static func lossyDecodeArray<Element: Decodable>(
+        _ type: [Element].Type, key: String, decoder: JSONDecoder
+    ) -> [Element]? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        if let items = try? decoder.decode([Element].self, from: data) { return items }
+        if let raw = try? decoder.decode([FailableDecodable<Element>].self, from: data) {
+            return raw.compactMap { $0.value }
+        }
+        return nil
+    }
+
+    /// 包裝單一元素，解碼失敗時不丟錯、回傳 nil
+    private struct FailableDecodable<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws {
+            value = try? T(from: decoder)
+        }
     }
 
     func clearAll() {

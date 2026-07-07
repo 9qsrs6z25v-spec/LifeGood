@@ -1,6 +1,14 @@
 import Foundation
 import SwiftUI
 
+/// 巢狀陣列的逐筆容錯解碼：單一壞元素只跳過該筆，不會讓整批（貸款分期/繳費紀錄/交易紀錄等）消失。
+/// 沿用 LifeModels.swift 既有的 LossyArray<Element>。
+private func lossyArray<Element: Decodable, Key: CodingKey>(
+    _ container: KeyedDecodingContainer<Key>, forKey key: Key
+) -> [Element] {
+    (try? container.decode(LossyArray<Element>.self, forKey: key))?.elements ?? []
+}
+
 // MARK: - 金額顯示（萬 / 億 量級單位）
 // 【美化方向 — ntdWanString 共用金額格式元件】
 // ① 量級單位從「千萬」改為「億」，統一全 App 僅使用「萬」與「億」兩個量級，
@@ -423,8 +431,8 @@ struct Stock: Identifiable, Codable {
         linkedBankMilestoneId = try c.decodeIfPresent(UUID.self, forKey: .linkedBankMilestoneId)
         linkedBankCurrency = try c.decodeIfPresent(String.self, forKey: .linkedBankCurrency)
         linkedSecuritiesMilestoneId = try c.decodeIfPresent(UUID.self, forKey: .linkedSecuritiesMilestoneId)
-        transactions = (try? c.decodeIfPresent([StockTransaction].self, forKey: .transactions)) ?? []
-        dividends = (try? c.decodeIfPresent([StockDividend].self, forKey: .dividends)) ?? []
+        transactions = lossyArray(c, forKey: .transactions)
+        dividends = lossyArray(c, forKey: .dividends)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -728,7 +736,8 @@ struct ElevatorMaintenance: Identifiable, Codable {
     static func savePhoto(_ data: Data, id: UUID) -> String {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        try? data.write(to: url)
+        // 只有寫入成功才觸發 CloudKit 上傳，避免上傳不存在的檔案
+        guard (try? data.write(to: url)) != nil else { return name }
         PhotoCloudSync.upload(directory: "ElevatorPhotos", fileName: name)
         return name
     }
@@ -792,7 +801,8 @@ struct UtilityPayment: Identifiable, Codable {
     static func savePhoto(_ data: Data, id: UUID) -> String {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        try? data.write(to: url)
+        // 只有寫入成功才觸發 CloudKit 上傳，避免上傳不存在的檔案
+        guard (try? data.write(to: url)) != nil else { return name }
         PhotoCloudSync.upload(directory: "UtilityPhotos", fileName: name)
         return name
     }
@@ -862,9 +872,9 @@ struct FloorInfo: Identifiable, Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         floorNumber = try c.decode(String.self, forKey: .floorNumber)
-        functions = (try? c.decode([FloorFunction].self, forKey: .functions)) ?? []
+        functions = lossyArray(c, forKey: .functions)
         area = (try? c.decode(Double.self, forKey: .area)) ?? 0
-        items = (try? c.decode([FloorItem].self, forKey: .items)) ?? []
+        items = lossyArray(c, forKey: .items)
     }
 }
 
@@ -956,7 +966,8 @@ struct RenovationPhoto: Identifiable, Codable {
     static func savePhoto(_ data: Data, id: UUID = UUID()) -> String {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        try? data.write(to: url)
+        // 只有寫入成功才觸發 CloudKit 上傳，避免上傳不存在的檔案
+        guard (try? data.write(to: url)) != nil else { return name }
         PhotoCloudSync.upload(directory: "RenovationPhotos", fileName: name)
         return name
     }
@@ -1324,16 +1335,16 @@ struct RealEstate: Identifiable, Codable {
         purchasePrice = (try? c.decode(Double.self, forKey: .purchasePrice)) ?? 0
         currentValue = (try? c.decode(Double.self, forKey: .currentValue)) ?? 0
         monthlyRental = (try? c.decode(Double.self, forKey: .monthlyRental)) ?? 0
-        mortgageItems = (try? c.decode([RealEstateMortgageItem].self, forKey: .mortgageItems)) ?? []
-        paidItems = (try? c.decode([RealEstatePaidItem].self, forKey: .paidItems)) ?? []
-        variableExpenses = (try? c.decode([RealEstateVariableExpense].self, forKey: .variableExpenses)) ?? []
+        mortgageItems = lossyArray(c, forKey: .mortgageItems)
+        paidItems = lossyArray(c, forKey: .paidItems)
+        variableExpenses = lossyArray(c, forKey: .variableExpenses)
         linkedExpenseId = try? c.decode(UUID.self, forKey: .linkedExpenseId)
         saleLinkedExpenseId = try? c.decode(UUID.self, forKey: .saleLinkedExpenseId)
         saleLinkedIncomeId = try? c.decode(UUID.self, forKey: .saleLinkedIncomeId)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         buildingType = (try? c.decode(BuildingType.self, forKey: .buildingType)) ?? .townhouse
         hasElevator = (try? c.decode(Bool.self, forKey: .hasElevator)) ?? false
-        elevatorMaintenances = (try? c.decode([ElevatorMaintenance].self, forKey: .elevatorMaintenances)) ?? []
+        elevatorMaintenances = lossyArray(c, forKey: .elevatorMaintenances)
         pingCount = (try? c.decode(Double.self, forKey: .pingCount)) ?? 0
         landOwner = (try? c.decode(String.self, forKey: .landOwner)) ?? ""
         landSituation = (try? c.decode(String.self, forKey: .landSituation)) ?? ""
@@ -1346,8 +1357,8 @@ struct RealEstate: Identifiable, Codable {
         bldgUsage = (try? c.decode(String.self, forKey: .bldgUsage)) ?? ""
         bldgAnnex = (try? c.decode(String.self, forKey: .bldgAnnex)) ?? ""
         bldgArea = (try? c.decode(Double.self, forKey: .bldgArea)) ?? 0
-        landDeeds = (try? c.decode([LandDeed].self, forKey: .landDeeds)) ?? []
-        buildingDeeds = (try? c.decode([BuildingDeed].self, forKey: .buildingDeeds)) ?? []
+        landDeeds = lossyArray(c, forKey: .landDeeds)
+        buildingDeeds = lossyArray(c, forKey: .buildingDeeds)
         // 向下相容：舊版單筆資料遷移至陣列
         if landDeeds.isEmpty && (!landSituation.isEmpty || !landNumber.isEmpty || landArea > 0) {
             landDeeds = [LandDeed(situation: landSituation, number: landNumber, area: landArea)]
@@ -1359,7 +1370,7 @@ struct RealEstate: Identifiable, Codable {
         totalFloors = (try? c.decode(Int.self, forKey: .totalFloors)) ?? 0
         fromFloor = (try? c.decode(Int.self, forKey: .fromFloor)) ?? 0
         toFloor = (try? c.decode(Int.self, forKey: .toFloor)) ?? 0
-        floors = (try? c.decode([FloorInfo].self, forKey: .floors)) ?? []
+        floors = lossyArray(c, forKey: .floors)
         waterMeterNumber = (try? c.decode(String.self, forKey: .waterMeterNumber)) ?? ""
         waterMeterOwner = (try? c.decode(String.self, forKey: .waterMeterOwner)) ?? ""
         electricityMeterNumber = (try? c.decode(String.self, forKey: .electricityMeterNumber)) ?? ""
@@ -1367,12 +1378,12 @@ struct RealEstate: Identifiable, Codable {
         gasMeterNumber = (try? c.decode(String.self, forKey: .gasMeterNumber)) ?? ""
         gasMeterOwner = (try? c.decode(String.self, forKey: .gasMeterOwner)) ?? ""
         gasUserNumber = (try? c.decode(String.self, forKey: .gasUserNumber)) ?? ""
-        insuranceItems = (try? c.decode([RealEstateInsuranceItem].self, forKey: .insuranceItems)) ?? []
-        propertyAssets = (try? c.decode([RealEstatePropertyAsset].self, forKey: .propertyAssets)) ?? []
-        utilityPayments = (try? c.decode([UtilityPayment].self, forKey: .utilityPayments)) ?? []
-        extraMeters = (try? c.decode([UtilityMeter].self, forKey: .extraMeters)) ?? []
-        renovationPhotos = (try? c.decode([RenovationPhoto].self, forKey: .renovationPhotos)) ?? []
-        documents = (try? c.decode([RealEstateDocument].self, forKey: .documents)) ?? []
+        insuranceItems = lossyArray(c, forKey: .insuranceItems)
+        propertyAssets = lossyArray(c, forKey: .propertyAssets)
+        utilityPayments = lossyArray(c, forKey: .utilityPayments)
+        extraMeters = lossyArray(c, forKey: .extraMeters)
+        renovationPhotos = lossyArray(c, forKey: .renovationPhotos)
+        documents = lossyArray(c, forKey: .documents)
 
         // 向下相容：舊版有 monthlyMortgage 欄位，轉為 mortgageItems
         if mortgageItems.isEmpty,
@@ -1677,8 +1688,8 @@ struct Vehicle: Identifiable, Codable {
         soldDate = try? c.decode(Date.self, forKey: .soldDate)
         purchasePrice = (try? c.decode(Double.self, forKey: .purchasePrice)) ?? 0
         currentValue = (try? c.decode(Double.self, forKey: .currentValue)) ?? 0
-        fixedExpenses = (try? c.decode([VehicleFixedExpense].self, forKey: .fixedExpenses)) ?? []
-        variableExpenses = (try? c.decode([VehicleVariableExpense].self, forKey: .variableExpenses)) ?? []
+        fixedExpenses = lossyArray(c, forKey: .fixedExpenses)
+        variableExpenses = lossyArray(c, forKey: .variableExpenses)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
     }
 

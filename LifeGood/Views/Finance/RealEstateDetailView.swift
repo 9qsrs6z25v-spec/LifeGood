@@ -1899,9 +1899,11 @@ struct RealEstateDetailView: View {
         latestPaymentRow(type: .gas)
 
         // 展開：顯示所有歷史繳費紀錄
+        // 各類型最新一筆的 id 只算一次，避免對每一筆繳費都重新掃描+排序整個 utilityPayments（O(n²)）
+        let latestIDs = latestPaymentIDs()
         let allPayments = estate.utilityPayments.sorted { $0.date > $1.date }
         let olderPayments = allPayments.filter { p in
-            !isLatestPayment(p)
+            !latestIDs.contains(p.id)
         }
         if utilityExpanded {
             if !olderPayments.isEmpty {
@@ -2018,11 +2020,14 @@ struct RealEstateDetailView: View {
             .first
     }
 
-    private func isLatestPayment(_ p: UtilityPayment) -> Bool {
-        for t in UtilityType.allCases {
-            if let latest = latestPayment(for: t), latest.id == p.id { return true }
+    /// 各水電瓦斯類型最新一筆繳費的 id 集合（一次分組取得，取代逐筆呼叫 latestPayment(for:) 的 O(n²) 掃描）
+    private func latestPaymentIDs() -> Set<UUID> {
+        var latestByType: [UtilityType: UtilityPayment] = [:]
+        for p in estate.utilityPayments {
+            if let cur = latestByType[p.type], cur.date >= p.date { continue }
+            latestByType[p.type] = p
         }
-        return false
+        return Set(latestByType.values.map { $0.id })
     }
 
     // [v4] 最新一筆繳費：金額字型升級 + contentTransition，對齊 calcRow 規格
