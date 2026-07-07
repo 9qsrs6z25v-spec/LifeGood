@@ -1,0 +1,439 @@
+import SwiftUI
+
+// MARK: - 健康檔案編輯
+// 編輯 LifeStore.healthProfile：基本資料（血型/身高）、過敏、用藥、量測（體重/血壓/心率）、健檢。
+// 以草稿（draft）編輯，按「儲存」才寫回 store，避免每次鍵入都觸發 iCloud 上傳。
+
+struct HealthProfileEditView: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var draft: HealthProfile
+
+    @State private var editingAllergy: HealthAllergy?
+    @State private var editingMedication: HealthMedication?
+    @State private var editingMeasurement: HealthMeasurement?
+    @State private var editingCheckup: HealthCheckup?
+    @State private var newCondition: String = ""
+
+    private let accent = Color.teal
+
+    init(profile: HealthProfile) {
+        _draft = State(initialValue: profile)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                basicSection
+                conditionsSection
+                allergySection
+                medicationSection
+                measurementSection
+                checkupSection
+                noteSection
+            }
+            .navigationTitle("健康檔案")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("儲存") {
+                        lifeStore.updateHealthProfile(draft)
+                        dismiss()
+                    }.bold()
+                }
+            }
+            .sheet(item: $editingAllergy) { item in
+                AllergyEditor(allergy: item) { upsert($0, into: &draft.allergies) }
+            }
+            .sheet(item: $editingMedication) { item in
+                MedicationEditor(medication: item) { upsert($0, into: &draft.medications) }
+            }
+            .sheet(item: $editingMeasurement) { item in
+                MeasurementEditor(measurement: item) { upsert($0, into: &draft.measurements) }
+            }
+            .sheet(item: $editingCheckup) { item in
+                CheckupEditor(checkup: item) { upsert($0, into: &draft.checkups) }
+            }
+        }
+    }
+
+    // MARK: - 基本資料
+
+    private var basicSection: some View {
+        Section("基本資料") {
+            HStack {
+                Text("血型")
+                Spacer()
+                TextField("例：O、A、AB+", text: $draft.bloodType)
+                    .multilineTextAlignment(.trailing)
+            }
+            HStack {
+                Text("身高")
+                Spacer()
+                TextField("公分", value: $draft.heightCm, format: .number)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 90)
+                Text("cm").foregroundStyle(.secondary)
+            }
+            if let bmi = draft.bmi {
+                HStack {
+                    Text("BMI")
+                    Spacer()
+                    Text(String(format: "%.1f", bmi)).fontWeight(.semibold)
+                    if let cat = draft.bmiCategory {
+                        Text(cat).font(.caption)
+                            .foregroundStyle(accent)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(accent.opacity(0.12)).clipShape(Capsule())
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 慢性病 / 病史
+
+    private var conditionsSection: some View {
+        Section("慢性病 / 病史") {
+            ForEach(Array(draft.conditions.enumerated()), id: \.offset) { idx, c in
+                Text(c)
+            }
+            .onDelete { draft.conditions.remove(atOffsets: $0) }
+            HStack {
+                TextField("新增病史（例：高血壓）", text: $newCondition)
+                Button {
+                    let t = newCondition.trimmingCharacters(in: .whitespaces)
+                    guard !t.isEmpty else { return }
+                    draft.conditions.append(t)
+                    newCondition = ""
+                } label: { Image(systemName: "plus.circle.fill").foregroundStyle(accent) }
+                .disabled(newCondition.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
+    // MARK: - 過敏
+
+    private var allergySection: some View {
+        Section {
+            ForEach(draft.allergies) { a in
+                Button { editingAllergy = a } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(a.name.isEmpty ? "未命名過敏原" : a.name).foregroundStyle(.primary)
+                            if let s = a.severity {
+                                Text(s.rawValue).font(.caption2)
+                                    .foregroundStyle(.orange)
+                                    .padding(.horizontal, 6).padding(.vertical, 1)
+                                    .background(Color.orange.opacity(0.12)).clipShape(Capsule())
+                            }
+                        }
+                        if !a.reaction.isEmpty {
+                            Text(a.reaction).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .onDelete { draft.allergies.remove(atOffsets: $0) }
+            Button { editingAllergy = HealthAllergy() } label: {
+                Label("新增過敏原", systemImage: "plus.circle.fill")
+            }
+        } header: { Text("過敏") }
+    }
+
+    // MARK: - 用藥
+
+    private var medicationSection: some View {
+        Section {
+            ForEach(draft.medications) { m in
+                Button { editingMedication = m } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(m.name.isEmpty ? "未命名藥物" : m.name).foregroundStyle(.primary)
+                            if !m.dosage.isEmpty {
+                                Text(m.dosage).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Text(m.isActive ? "服用中" : "已停用")
+                            .font(.caption2)
+                            .foregroundStyle(m.isActive ? .green : .secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background((m.isActive ? Color.green : Color.gray).opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+            .onDelete { draft.medications.remove(atOffsets: $0) }
+            Button { editingMedication = HealthMedication() } label: {
+                Label("新增藥物", systemImage: "plus.circle.fill")
+            }
+        } header: { Text("用藥") }
+    }
+
+    // MARK: - 量測（體重 / 血壓 / 心率）
+
+    private var measurementSection: some View {
+        Section {
+            ForEach(draft.measurements.sorted { $0.date > $1.date }) { m in
+                Button { editingMeasurement = m } label: {
+                    HStack {
+                        Text(Self.dateFmt.string(from: m.date)).foregroundStyle(.primary)
+                        Spacer()
+                        Text(measurementSummary(m)).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .onDelete { deleteMeasurements($0) }
+            Button { editingMeasurement = HealthMeasurement() } label: {
+                Label("新增量測", systemImage: "plus.circle.fill")
+            }
+        } header: { Text("量測（體重 / 血壓 / 心率）") }
+    }
+
+    // MARK: - 健檢
+
+    private var checkupSection: some View {
+        Section {
+            ForEach(draft.checkups.sorted { $0.date > $1.date }) { c in
+                Button { editingCheckup = c } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(c.title.isEmpty ? "健檢" : c.title).foregroundStyle(.primary)
+                        HStack(spacing: 6) {
+                            Text(Self.dateFmt.string(from: c.date))
+                            if !c.place.isEmpty { Text("· \(c.place)") }
+                        }
+                        .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .onDelete { deleteCheckups($0) }
+            Button { editingCheckup = HealthCheckup() } label: {
+                Label("新增健檢", systemImage: "plus.circle.fill")
+            }
+        } header: { Text("健檢紀錄") }
+    }
+
+    private var noteSection: some View {
+        Section("備註") {
+            TextField("其他健康備註", text: $draft.note, axis: .vertical).lineLimit(2...5)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func measurementSummary(_ m: HealthMeasurement) -> String {
+        var parts: [String] = []
+        if let w = m.weightKg { parts.append(String(format: "%.1fkg", w)) }
+        if let s = m.systolic, let d = m.diastolic { parts.append("\(s)/\(d)") }
+        if let h = m.heartRate { parts.append("\(h)bpm") }
+        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+    }
+
+    /// 依 id 取代或新增
+    private func upsert<T: Identifiable>(_ item: T, into arr: inout [T]) {
+        if let i = arr.firstIndex(where: { $0.id == item.id }) { arr[i] = item }
+        else { arr.append(item) }
+    }
+
+    private func deleteMeasurements(_ offsets: IndexSet) {
+        let sorted = draft.measurements.sorted { $0.date > $1.date }
+        let ids = offsets.map { sorted[$0].id }
+        draft.measurements.removeAll { ids.contains($0.id) }
+    }
+    private func deleteCheckups(_ offsets: IndexSet) {
+        let sorted = draft.checkups.sorted { $0.date > $1.date }
+        let ids = offsets.map { sorted[$0].id }
+        draft.checkups.removeAll { ids.contains($0.id) }
+    }
+
+    static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+}
+
+// MARK: - 過敏編輯
+
+private struct AllergyEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: HealthAllergy
+    let onSave: (HealthAllergy) -> Void
+
+    init(allergy: HealthAllergy, onSave: @escaping (HealthAllergy) -> Void) {
+        _draft = State(initialValue: allergy); self.onSave = onSave
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("過敏原（藥物 / 食物 / 環境）", text: $draft.name)
+                TextField("過敏反應", text: $draft.reaction)
+                Picker("嚴重度", selection: Binding(
+                    get: { draft.severity ?? .mild },
+                    set: { draft.severity = $0 })) {
+                    ForEach(AllergySeverity.allCases) { s in Text(s.rawValue).tag(s) }
+                }
+            }
+            .navigationTitle("過敏原")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { onSave(draft); dismiss() }.bold()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 用藥編輯
+
+private struct MedicationEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: HealthMedication
+    let onSave: (HealthMedication) -> Void
+
+    init(medication: HealthMedication, onSave: @escaping (HealthMedication) -> Void) {
+        _draft = State(initialValue: medication); self.onSave = onSave
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("藥名", text: $draft.name)
+                TextField("劑量 / 頻率（例：500mg 每日兩次）", text: $draft.dosage)
+                Toggle("服用中", isOn: $draft.isActive)
+                TextField("備註", text: $draft.note, axis: .vertical).lineLimit(1...4)
+            }
+            .navigationTitle("藥物")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { onSave(draft); dismiss() }.bold()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 量測編輯
+
+private struct MeasurementEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var date: Date
+    @State private var weight: Double
+    @State private var systolic: Int
+    @State private var diastolic: Int
+    @State private var heartRate: Int
+    @State private var note: String
+    private let id: UUID
+    let onSave: (HealthMeasurement) -> Void
+
+    init(measurement: HealthMeasurement, onSave: @escaping (HealthMeasurement) -> Void) {
+        id = measurement.id
+        _date = State(initialValue: measurement.date)
+        _weight = State(initialValue: measurement.weightKg ?? 0)
+        _systolic = State(initialValue: measurement.systolic ?? 0)
+        _diastolic = State(initialValue: measurement.diastolic ?? 0)
+        _heartRate = State(initialValue: measurement.heartRate ?? 0)
+        _note = State(initialValue: measurement.note)
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                DatePicker("日期", selection: $date, displayedComponents: .date)
+                numberRow("體重", value: $weight, unit: "kg")
+                Section("血壓") {
+                    intRow("收縮壓", value: $systolic, unit: "mmHg")
+                    intRow("舒張壓", value: $diastolic, unit: "mmHg")
+                }
+                intRow("心率", value: $heartRate, unit: "bpm")
+                TextField("備註", text: $note, axis: .vertical).lineLimit(1...4)
+            }
+            .navigationTitle("量測")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") {
+                        let m = HealthMeasurement(
+                            id: id, date: date,
+                            weightKg: weight > 0 ? weight : nil,
+                            systolic: systolic > 0 ? systolic : nil,
+                            diastolic: diastolic > 0 ? diastolic : nil,
+                            heartRate: heartRate > 0 ? heartRate : nil,
+                            note: note)
+                        onSave(m); dismiss()
+                    }.bold()
+                }
+            }
+        }
+    }
+
+    private func numberRow(_ label: String, value: Binding<Double>, unit: String) -> some View {
+        HStack {
+            Text(label); Spacer()
+            TextField("0", value: value, format: .number)
+                .keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
+            Text(unit).foregroundStyle(.secondary)
+        }
+    }
+    private func intRow(_ label: String, value: Binding<Int>, unit: String) -> some View {
+        HStack {
+            Text(label); Spacer()
+            TextField("0", value: value, format: .number)
+                .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 90)
+            Text(unit).foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - 健檢編輯
+
+private struct CheckupEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: HealthCheckup
+    @State private var hasNextDue: Bool
+    @State private var nextDue: Date
+    let onSave: (HealthCheckup) -> Void
+
+    init(checkup: HealthCheckup, onSave: @escaping (HealthCheckup) -> Void) {
+        _draft = State(initialValue: checkup)
+        _hasNextDue = State(initialValue: checkup.nextDueDate != nil)
+        _nextDue = State(initialValue: checkup.nextDueDate ?? Date())
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("項目（例：年度健檢、抽血）", text: $draft.title)
+                DatePicker("日期", selection: $draft.date, displayedComponents: .date)
+                TextField("院所", text: $draft.place)
+                TextField("結果摘要", text: $draft.result, axis: .vertical).lineLimit(1...4)
+                Toggle("設定下次回診 / 追蹤日", isOn: $hasNextDue)
+                if hasNextDue {
+                    DatePicker("下次日期", selection: $nextDue, displayedComponents: .date)
+                }
+                TextField("備註", text: $draft.note, axis: .vertical).lineLimit(1...4)
+            }
+            .navigationTitle("健檢")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") {
+                        draft.nextDueDate = hasNextDue ? nextDue : nil
+                        onSave(draft); dismiss()
+                    }.bold()
+                }
+            }
+        }
+    }
+}

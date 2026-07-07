@@ -52,7 +52,7 @@ enum FinanceFeature: String, CaseIterable, Identifiable {
 }
 
 enum LifeFeature: String, CaseIterable, Identifiable {
-    case overview, resume, finance, career, family, realEstate, tax, foodMap, travelMap
+    case overview, resume, finance, career, family, realEstate, tax, foodMap, travelMap, medicalMap
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -65,6 +65,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         case .tax: return "稅務"
         case .foodMap: return "美食地圖"
         case .travelMap: return "旅遊地圖"
+        case .medicalMap: return "醫療地圖"
         }
     }
     var icon: String {
@@ -78,6 +79,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         case .tax: return "doc.text.fill"
         case .foodMap: return "fork.knife.circle.fill"
         case .travelMap: return "airplane.circle.fill"
+        case .medicalMap: return "cross.case.circle.fill"
         }
     }
 }
@@ -1285,6 +1287,8 @@ struct MainTabView: View {
             FoodMapView()
         case .travelMap:
             TravelMapView()
+        case .medicalMap:
+            MedicalMapView()
         }
     }
 
@@ -1305,6 +1309,7 @@ struct MainTabView: View {
         if hasTaxData { list.append(.tax) }
         if hasFoodMapData { list.append(.foodMap) }
         if hasTravelMapData { list.append(.travelMap) }
+        if hasMedicalMapData { list.append(.medicalMap) }
         return list
     }
 
@@ -1330,6 +1335,13 @@ struct MainTabView: View {
         expenseStore.expenses.contains(where: {
             $0.variableCategory == .entertainment && $0.placeLatitude != nil && $0.placeLongitude != nil
         })
+    }
+
+    /// 有醫療支出、健康里程碑或已建立健康檔案 → 顯示醫療地圖頁
+    private var hasMedicalMapData: Bool {
+        if expenseStore.expenses.contains(where: { $0.variableCategory == .medical }) { return true }
+        if lifeStore.milestones.contains(where: { $0.category == .health }) { return true }
+        return !lifeStore.healthProfile.isEmpty
     }
 }
 

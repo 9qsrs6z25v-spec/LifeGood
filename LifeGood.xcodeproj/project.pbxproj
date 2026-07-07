@@ -59,6 +59,8 @@
 		A01B000001000101 /* RestaurantSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000101 /* RestaurantSearch.swift */; };
 		A01B000001000102 /* FoodMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000102 /* FoodMapView.swift */; };
 		A01B000001000200 /* TravelMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000200 /* TravelMapView.swift */; };
+		A01B000001000202 /* HealthProfileEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000202 /* HealthProfileEditView.swift */; };
+		A01B000001000203 /* MedicalMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000203 /* MedicalMapView.swift */; };
 		A01B000001000103 /* MultiPhotoGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000103 /* MultiPhotoGallery.swift */; };
 		A01B000001000104 /* ResumeGiftSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000104 /* ResumeGiftSection.swift */; };
 		A01B000001000105 /* OrganizationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000105 /* OrganizationView.swift */; };
@@ -145,6 +147,8 @@
 		A01A000001000101 /* RestaurantSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestaurantSearch.swift; sourceTree = "<group>"; };
 		A01A000001000102 /* FoodMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodMapView.swift; sourceTree = "<group>"; };
 		A01A000001000200 /* TravelMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelMapView.swift; sourceTree = "<group>"; };
+		A01A000001000202 /* HealthProfileEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthProfileEditView.swift; sourceTree = "<group>"; };
+		A01A000001000203 /* MedicalMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalMapView.swift; sourceTree = "<group>"; };
 		A01A000001000103 /* MultiPhotoGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiPhotoGallery.swift; sourceTree = "<group>"; };
 		A01A000001000104 /* ResumeGiftSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeGiftSection.swift; sourceTree = "<group>"; };
 		A01A000001000105 /* OrganizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationView.swift; sourceTree = "<group>"; };
@@ -316,6 +320,8 @@
 				A01A00000100004B /* FamilyMembersResumeView.swift */,
 				A01A000001000102 /* FoodMapView.swift */,
 				A01A000001000200 /* TravelMapView.swift */,
+				A01A000001000202 /* HealthProfileEditView.swift */,
+				A01A000001000203 /* MedicalMapView.swift */,
 				A01A000001000104 /* ResumeGiftSection.swift */,
 				A01A000001000105 /* OrganizationView.swift */,
 			);
@@ -461,6 +467,8 @@
 				A01B000001000101 /* RestaurantSearch.swift in Sources */,
 				A01B000001000102 /* FoodMapView.swift in Sources */,
 				A01B000001000200 /* TravelMapView.swift in Sources */,
+				A01B000001000202 /* HealthProfileEditView.swift in Sources */,
+				A01B000001000203 /* MedicalMapView.swift in Sources */,
 				A01B000001000103 /* MultiPhotoGallery.swift in Sources */,
 				A01B000001000104 /* ResumeGiftSection.swift in Sources */,
 				A01B000001000105 /* OrganizationView.swift in Sources */,
