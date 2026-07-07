@@ -36,7 +36,7 @@ struct FixedExpenseView: View {
     @EnvironmentObject var financeStore: FinanceStore
     @EnvironmentObject var lifeStore: LifeStore
     @State private var showingAddSheet = false
-    @State private var expenseToEdit: Expense?
+    @State private var previewExpense: Expense?
     @State private var headerAppeared = false
     @State private var emptyIconPulse = false
     @State private var categoryListAppeared = false
@@ -113,8 +113,9 @@ struct FixedExpenseView: View {
             .sheet(isPresented: $showingAddSheet) {
                 AddExpenseView(expenseType: .fixed)
             }
-            .sheet(item: $expenseToEdit) { expense in
-                AddExpenseView(expenseType: .fixed, editingExpense: expense)
+            .sheet(item: $previewExpense) { expense in
+                // 點項目先顯示預覽卡片（右上角「編輯」才進入編輯）
+                FixedExpenseCard(expense: expense)
             }
         }
     }
@@ -453,7 +454,7 @@ struct FixedExpenseView: View {
                     FixedExpenseRow(expense: expense)
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            expenseToEdit = expense
+                            previewExpense = expense
                         }
                         // 交錯進場：群組序 × 4 + 列序，確保每列入場稍有延遲
                         .opacity(categoryListAppeared ? 1 : 0)
@@ -871,6 +872,181 @@ struct FixedExpenseRow: View {
             return "\(str)萬"
         }
         return Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+}
+
+// MARK: - 固定支出預覽卡片（點項目先看卡片，右上角「編輯」才進入編輯）
+
+private struct FixedExpenseCard: View {
+    @EnvironmentObject var store: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    let expense: Expense
+    @State private var showEdit = false
+
+    /// 讀取 store 最新版本，編輯儲存後即時反映（找不到才退回快照）
+    private var current: Expense { store.expenses.first { $0.id == expense.id } ?? expense }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private static let decimalFmt: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+    }()
+
+    private var accent: Color {
+        switch current.fixedCategory {
+        case .rent:         return .blue
+        case .utilities:    return Color(red: 1.0, green: 0.75, blue: 0.10)
+        case .insurance:    return .green
+        case .subscription: return .purple
+        case .loan:         return Color(red: 0.90, green: 0.25, blue: 0.30)
+        case .telecom:      return .cyan
+        case .management:   return Color(red: 0.55, green: 0.45, blue: 0.35)
+        case .other, .none: return .secondary
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    titleBlock
+                    infoCard
+                    if !current.note.isEmpty { noteBlock }
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle(current.fixedCategory?.rawValue ?? "固定支出")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("編輯") { showEdit = true }.bold()
+                }
+            }
+            .sheet(isPresented: $showEdit) {
+                AddExpenseView(expenseType: .fixed, editingExpense: current)
+            }
+        }
+    }
+
+    private var titleBlock: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.10)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 48, height: 48)
+                Image(systemName: current.fixedCategory?.icon ?? "pin.circle.fill")
+                    .font(.system(size: 20, weight: .semibold)).foregroundStyle(accent)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(current.title.isEmpty ? "未命名項目" : current.title)
+                    .font(.title3.weight(.bold))
+                Text(formattedAmount)
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28))
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var infoCard: some View {
+        VStack(spacing: 0) {
+            if let recurrence = current.recurrence {
+                field("週期", recurrence.rawValue)
+                let monthly = monthlyEquivalent
+                if recurrence != .monthly, monthly > 0 {
+                    Divider().padding(.leading, 14)
+                    field("月均換算", "NT$ " + fmtShort(monthly))
+                }
+            }
+            Divider().padding(.leading, 14)
+            field("起始日期", Self.dateFmt.string(from: current.date))
+            if current.effectivelyTaxDeductible {
+                Divider().padding(.leading, 14)
+                field("節稅", "列入節稅追蹤")
+            }
+            if let target = deductionTargetLabel {
+                Divider().padding(.leading, 14)
+                field("扣款目標", target)
+            }
+        }
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var noteBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("備註").font(.caption).foregroundStyle(.secondary)
+            Text(current.note).font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func field(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.subheadline.weight(.medium))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+    }
+
+    // MARK: - 計算（與 FixedExpenseRow 邏輯一致）
+
+    private var formattedAmount: String {
+        let code = current.currencyCode
+        let isSavingsIns = current.fixedCategory == .insurance && current.insuranceSubCategory == .savings
+        if code != "NT$" && code != "TWD" && !code.isEmpty {
+            let displayAmount: Double
+            if isSavingsIns {
+                displayAmount = current.amount
+            } else if let rate = store.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+                displayAmount = current.amount / rate.rate
+            } else {
+                displayAmount = current.amount
+            }
+            let str = Self.decimalFmt.string(from: NSNumber(value: displayAmount)) ?? "0"
+            return "\(code) \(str)"
+        }
+        return current.amount.ntdWanString
+    }
+
+    private var monthlyEquivalent: Double {
+        switch current.recurrence {
+        case .monthly:   return current.amount
+        case .quarterly: return current.amount / 3
+        case .yearly:    return current.amount / 12
+        case .none:      return 0
+        }
+    }
+
+    private var deductionTargetLabel: String? {
+        if let cardId = current.linkedCreditCardMilestoneId,
+           let card = lifeStore.milestones.first(where: { $0.id == cardId }) {
+            return card.cardName ?? card.title
+        }
+        if let bankId = current.linkedBankMilestoneId,
+           let ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+            let name = ms.bankName ?? ms.title
+            let currency = current.linkedBankCurrency ?? "NT$"
+            return currency == "NT$" ? name : "\(name) · \(currency)"
+        }
+        return nil
+    }
+
+    private func fmtShort(_ v: Double) -> String {
+        if abs(v) >= 10_000 {
+            let s = Self.decimalFmt.string(from: NSNumber(value: v / 10_000)) ?? "0"
+            return "\(s)萬"
+        }
+        return Self.decimalFmt.string(from: NSNumber(value: v)) ?? "0"
     }
 }
 
