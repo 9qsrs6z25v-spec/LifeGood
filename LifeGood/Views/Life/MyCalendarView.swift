@@ -1574,6 +1574,8 @@ struct PersonalEventEditor: View {
             .onChange(of: selectedAppleCalendarId) { _, newValue in
                 if editing == nil, let id = newValue { lastAppleCalendarIdRaw = id }
             }
+            // 避免 300ms 防抖期間關閉表單後，Task 仍在背景驅動地點搜尋（對齊 AddExpenseView 的修復）
+            .onDisappear { locationDebounceTask?.cancel() }
         }
     }
 

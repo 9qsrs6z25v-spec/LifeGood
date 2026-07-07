@@ -478,10 +478,13 @@ struct LifeFinanceView: View {
     }
 
     private var milestoneList: some View {
-        List {
+        // 一次批次算好所有銀行帳戶餘額，避免每一列各自呼叫 bankBalances(for:)
+        // 對 expenses/incomes 做 O(deposits × expenses) 全量掃描（對齊 AddExpenseView.allBankBalances() 的批次建表作法）
+        let balancesByBank = allBankBalances()
+        return List {
             ForEach(Array(filteredMilestones.enumerated()), id: \.element.id) { idx, item in
                 VStack(spacing: 0) {
-                    milestoneRow(item)
+                    milestoneRow(item, balances: balancesByBank[item.id])
                         .contentShape(Rectangle())
                         .onTapGesture { viewingItem = item }
 
@@ -570,7 +573,7 @@ struct LifeFinanceView: View {
         .opacity(disabled ? 0.65 : 1.0)
     }
 
-    private func milestoneRow(_ item: LifeMilestone) -> some View {
+    private func milestoneRow(_ item: LifeMilestone, balances: [String: Double]?) -> some View {
         let accent = colorFor(item.financeSubCategory ?? .bank)
         return HStack(spacing: 12) {
             // 44pt 漸層圖示圓（對齊 IncomeView.incomeRow 規格）
@@ -600,8 +603,7 @@ struct LifeFinanceView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("開戶日期：\(formatDate(item.date))")
                         .font(.caption2).foregroundStyle(.tertiary)
-                    let balances = bankBalances(for: item)
-                    let display = bankBalanceDisplay(balances: balances)
+                    let display = bankBalanceDisplay(balances: balances ?? [:])
                     Text(display.text)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(display.amount >= 0 ? Color.blue : Color.red)
@@ -623,22 +625,43 @@ struct LifeFinanceView: View {
         .padding(.vertical, 4)
     }
 
-    /// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 股票交易 + 固定支出週期展開）
-    private func bankBalances(for ms: LifeMilestone) -> [String: Double] {
+    /// 一次批次算好所有銀行帳戶的餘額：expensesById／incomesById 各建一次表，
+    /// 銀行帳戶逐筆存款改為 O(1) 查表，取代原本 bankBalances(for:) 每次呼叫都對
+    /// expenseStore.expenses / incomes 做 first(where:) 全量掃描（O(deposits × expenses)），
+    /// 而 milestoneRow 是列表每一列都會呼叫的路徑，未批次化會在任何無關的 @Published 變動時
+    /// 對每一列重跑一次全量掃描。對齊 AddExpenseView.allBankBalances() 的批次建表作法。
+    private func allBankBalances() -> [UUID: [String: Double]] {
         let now = Date()
+        let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let banks = lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .bank
+        }
+        var result: [UUID: [String: Double]] = [:]
+        for ms in banks {
+            result[ms.id] = bankBalances(for: ms, now: now, expensesById: expensesById, incomesById: incomesById)
+        }
+        return result
+    }
+
+    /// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 股票交易 + 固定支出週期展開）
+    private func bankBalances(
+        for ms: LifeMilestone, now: Date,
+        expensesById: [UUID: Expense], incomesById: [UUID: Income]
+    ) -> [String: Double] {
         var totals: [String: Double] = [:]
         for dep in ms.bankDeposits ?? [] where dep.date <= now {
             // 跳過已連結到信用卡支出的存款（用信用卡彙總取代）
             if let expId = dep.linkedExpenseId,
-               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
+               let exp = expensesById[expId],
                exp.linkedCreditCardMilestoneId != nil { continue }
             // 跳過已連結到固定支出（含週期）的存款 — 改用展開的虛擬條目取代，避免漏算或重算
             if let expId = dep.linkedExpenseId,
-               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
+               let exp = expensesById[expId],
                exp.expenseType == .fixed, exp.recurrence != nil { continue }
             // 跳過已連結到週期性收入的存款 — 改用展開的虛擬條目取代
             if let incId = dep.linkedExpenseId,
-               let inc = expenseStore.incomes.first(where: { $0.id == incId }),
+               let inc = incomesById[incId],
                inc.period != .once { continue }
             totals[dep.currencyCode, default: 0] += dep.isWithdrawal ? -dep.amount : dep.amount
         }
@@ -690,10 +713,7 @@ struct LifeFinanceView: View {
 
     /// 所有銀行帳戶的台幣等值總和
     private var allBankBalanceInTWD: Double {
-        let banks = lifeStore.milestones.filter {
-            $0.category == .achievement && $0.financeSubCategory == .bank
-        }
-        return banks.reduce(0) { $0 + balanceInTWD(bankBalances(for: $1)) }
+        allBankBalances().values.reduce(0) { $0 + balanceInTWD($1) }
     }
 
     private static let decimalFormatter: NumberFormatter = {
@@ -1182,6 +1202,9 @@ struct FinanceCardView: View {
     }()
     private static let fmtNumFormatter: NumberFormatter = {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+    }()
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
     }()
 
     private func fmtDate(_ date: Date) -> String {
@@ -2063,7 +2086,7 @@ struct FinanceCardView: View {
     }
 
     private func shortDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "M/d"; return f.string(from: date)
+        Self.shortDateFormatter.string(from: date)
     }
 }
 
@@ -2126,17 +2149,19 @@ struct DepositEditorSheet: View {
         return bankBalance(for: ms)
     }
 
+    private static let numFormatter: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
+    }()
+
     private func fmtNum(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "0"
+        Self.numFormatter.string(from: NSNumber(value: v)) ?? "0"
     }
 
     private func fmtBal(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
         if abs(v) >= 10000 {
-            return "NT$ \(f.string(from: NSNumber(value: v / 10000)) ?? "0")萬"
+            return "NT$ \(Self.numFormatter.string(from: NSNumber(value: v / 10000)) ?? "0")萬"
         }
-        return "NT$ \(f.string(from: NSNumber(value: v)) ?? "0")"
+        return "NT$ \(Self.numFormatter.string(from: NSNumber(value: v)) ?? "0")"
     }
 
     var body: some View {

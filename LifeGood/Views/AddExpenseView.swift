@@ -458,7 +458,9 @@ struct AddExpenseView: View {
     }
 
     private func applyAutoTitleIfLinked() {
-        if let auto = linkedAssetTitle {
+        // 先比對再寫入，避免 isMortgage 時每次 note 打字都重新賦值 @State title，
+        // 造成金額/標題區塊不必要的 body 重新 diff
+        if let auto = linkedAssetTitle, auto != title {
             title = auto
         }
     }

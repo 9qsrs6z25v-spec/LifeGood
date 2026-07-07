@@ -1232,6 +1232,8 @@ struct ChildRecordEditorSheet: View {
                     previewImage = sketchMode ? loadSketchOrOrig(recordId) : origImage
                 }
             }
+            // 避免 300ms 防抖期間關閉表單後，Task 仍在背景驅動診所搜尋（對齊 AddExpenseView 的修復）
+            .onDisappear { clinicDebounceTask?.cancel() }
         }
     }
 
@@ -1247,13 +1249,14 @@ struct ChildRecordEditorSheet: View {
     private func regeneratePreview() {
         guard let name = photoFileName else { return }
         let recordId = editing?.id ?? UUID()
-        let origPath = ChildRecord.photosDirectory.appendingPathComponent(name)
-        guard let data = try? Data(contentsOf: origPath), let origImage = UIImage(data: data) else { return }
 
         if sketchMode {
             let sketchPath = ChildRecord.photosDirectory.appendingPathComponent("\(recordId.uuidString)_sketch.jpg")
             if !FileManager.default.fileExists(atPath: sketchPath.path) {
-                // 素描版不存在：GPU 運算移到背景執行緒，完成後再更新預覽
+                // 素描版不存在才需要讀原圖：避免每次切換 Toggle 都做一次不必要的主執行緒磁碟讀取 + JPEG 解碼
+                let origPath = ChildRecord.photosDirectory.appendingPathComponent(name)
+                guard let data = try? Data(contentsOf: origPath), let origImage = UIImage(data: data) else { return }
+                // GPU 運算移到背景執行緒，完成後再更新預覽
                 Task {
                     let sketched = await Task.detached(priority: .userInitiated) {
                         ChildRecord.applySketchEffect(origImage)
@@ -1267,6 +1270,8 @@ struct ChildRecordEditorSheet: View {
                 previewImage = loadSketchOrOrig(recordId)
             }
         } else {
+            let origPath = ChildRecord.photosDirectory.appendingPathComponent(name)
+            guard let data = try? Data(contentsOf: origPath), let origImage = UIImage(data: data) else { return }
             previewImage = origImage
         }
     }

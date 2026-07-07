@@ -851,10 +851,12 @@ struct OrgPersonEditor: View {
 
                 // 派系：跟其他公司組織人員的關係
                 Section {
+                    // 只算一次，避免在 ForEach($relations) 的每一列 row closure 中都重新掃描 lifeStore.orgPeople
+                    let candidates = otherPeopleCandidates
                     ForEach($relations) { $rel in
                         VStack(alignment: .leading, spacing: 6) {
                             Picker("對象", selection: $rel.personId) {
-                                ForEach(otherPeopleCandidates) { p in
+                                ForEach(candidates) { p in
                                     Text(p.name.isEmpty ? "未命名" : p.name).tag(p.id)
                                 }
                             }
@@ -868,7 +870,7 @@ struct OrgPersonEditor: View {
                     }
                     .onDelete { offsets in relations.remove(atOffsets: offsets) }
 
-                    if let firstCandidate = otherPeopleCandidates.first {
+                    if let firstCandidate = candidates.first {
                         Button {
                             relations.append(OrgPersonRelation(personId: firstCandidate.id, type: .neutral))
                         } label: {

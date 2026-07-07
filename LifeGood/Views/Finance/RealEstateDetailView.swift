@@ -94,7 +94,9 @@ struct RealEstateDetailView: View {
     /// 已展開備註的變動支出項目 IDs
     @State private var expandedVariableExpenseIds: Set<UUID> = []
     /// 用於在子 sheet 關閉後強制刷新水電瓦斯區塊（解決 SwiftUI 巢狀 sheet 偶爾不更新的問題）
-    @State private var dataRefreshID = UUID()
+    // 只給水電瓦斯區塊用（見 utilitiesContent.id(utilitiesRefreshID)）；
+    // 不要讓其他不相關的 sheet 也 bump 這個值，否則會強制整個水電瓦斯子樹重建身分、造成閃爍
+    @State private var utilitiesRefreshID = UUID()
 
     // 美化：閃卡進場動畫旗標（對齊 SavingsInsuranceView headerAppeared 規格）
     @State private var cardAppeared = false
@@ -199,28 +201,24 @@ struct RealEstateDetailView: View {
             .sheet(item: $viewingPhotoURL) { url in
                 PhotoViewerSheet(url: url)
             }
-            .sheet(isPresented: $addingElevatorMaintenance,
-                   onDismiss: { dataRefreshID = UUID() }) {
+            .sheet(isPresented: $addingElevatorMaintenance) {
                 ElevatorMaintenanceEditor(estateId: estateId, editing: nil)
             }
-            .sheet(item: $editingElevatorMaintenance,
-                   onDismiss: { dataRefreshID = UUID() }) { m in
+            .sheet(item: $editingElevatorMaintenance) { m in
                 ElevatorMaintenanceEditor(estateId: estateId, editing: m)
             }
             .sheet(isPresented: $addingUtilityPayment,
-                   onDismiss: { dataRefreshID = UUID() }) {
+                   onDismiss: { utilitiesRefreshID = UUID() }) {
                 UtilityPaymentEditor(estateId: estateId, editing: nil)
             }
             .sheet(item: $editingUtilityPayment,
-                   onDismiss: { dataRefreshID = UUID() }) { p in
+                   onDismiss: { utilitiesRefreshID = UUID() }) { p in
                 UtilityPaymentEditor(estateId: estateId, editing: p)
             }
-            .sheet(isPresented: $addingRenovationPhoto,
-                   onDismiss: { dataRefreshID = UUID() }) {
+            .sheet(isPresented: $addingRenovationPhoto) {
                 RenovationPhotoEditor(estateId: estateId, editing: nil)
             }
-            .sheet(item: $editingRenovationPhoto,
-                   onDismiss: { dataRefreshID = UUID() }) { p in
+            .sheet(item: $editingRenovationPhoto) { p in
                 RenovationPhotoEditor(estateId: estateId, editing: p)
             }
             .sheet(item: $cutePhotoDraft) { draft in
@@ -255,7 +253,7 @@ struct RealEstateDetailView: View {
                     }
                 }
             }
-            .sheet(isPresented: $addingMortgageItem, onDismiss: { dataRefreshID = UUID() }) {
+            .sheet(isPresented: $addingMortgageItem) {
                 AddExpenseView(
                     expenseType: .fixed,
                     preset: AddExpensePreset(
@@ -267,7 +265,7 @@ struct RealEstateDetailView: View {
                     )
                 )
             }
-            .sheet(isPresented: $addingPaidItem, onDismiss: { dataRefreshID = UUID() }) {
+            .sheet(isPresented: $addingPaidItem) {
                 AddExpenseView(
                     expenseType: .variable,
                     preset: AddExpensePreset(
@@ -279,7 +277,7 @@ struct RealEstateDetailView: View {
                     )
                 )
             }
-            .sheet(item: $addingVariableCategory, onDismiss: { dataRefreshID = UUID() }) { cat in
+            .sheet(item: $addingVariableCategory) { cat in
                 AddExpenseView(
                     expenseType: .variable,
                     preset: AddExpensePreset(
@@ -291,7 +289,7 @@ struct RealEstateDetailView: View {
                     )
                 )
             }
-            .sheet(item: $editingLinkedExpense, onDismiss: { dataRefreshID = UUID() }) { exp in
+            .sheet(item: $editingLinkedExpense) { exp in
                 AddExpenseView(expenseType: exp.expenseType, editingExpense: exp)
             }
             .alert("確定要刪除這筆房地產嗎？", isPresented: $showDeleteConfirm) {
@@ -893,7 +891,7 @@ struct RealEstateDetailView: View {
                     trailing: { addButton { addingUtilityPayment = true } }
                 ) {
                     utilitiesContent
-                        .id(dataRefreshID)
+                        .id(utilitiesRefreshID)
                 }
             }
 
@@ -1422,7 +1420,6 @@ struct RealEstateDetailView: View {
     private func commitFloorEstate(_ estate: RealEstate) {
         DispatchQueue.main.async {
             store.update(estate)
-            dataRefreshID = UUID()
         }
     }
 
@@ -1699,7 +1696,6 @@ struct RealEstateDetailView: View {
             }
         }
         store.update(estate)
-        dataRefreshID = UUID()
     }
 
     private func deleteDocument(_ doc: RealEstateDocument) {
@@ -1707,7 +1703,6 @@ struct RealEstateDetailView: View {
         RealEstateDocument.deleteDocument(doc.fileName)
         estate.documents.removeAll { $0.id == doc.id }
         store.update(estate)
-        dataRefreshID = UUID()
     }
 
     /// 通用堆疊照片視圖：用一個 urlFor 閉包來支援 RenovationPhoto / Expense 兩種來源
