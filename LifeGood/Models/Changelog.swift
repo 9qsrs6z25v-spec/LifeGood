@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.41", build: 597, date: "2026/07/07", notes: [
+            "UI 小步美化：ResumeGiftSection（六個履歷頁共用的「收到的禮金」區塊）giftRow 原本圖示圓直接貼齊卡片左緣，與同頁「總計列 / 分類列」皆已有的漸層側條層級不一致；補上 3pt 粉紅漸層側條，讓總計、分類、單筆禮金三層級一眼可辨識屬於同一組清單。純視覺加強，未變動禮金資料或分類邏輯。"
+        ]),
         ChangelogEntry(version: "23.40", build: 596, date: "2026/07/07", notes: [
             "UI 小步美化：ChildDetailView（兒女詳情頁）頂部英雄卡「生日」原本只是純文字＋calendar 圖示、無底色無描邊，與同排「角色 / 年齡」兩顆膠囊質感不一致；改為 Capsule 徽章（白底 12% + 描邊 20%），三顆膠囊形成主要／次要／輔助資訊的漸淡描邊節奏，視覺更統一。純視覺調整，未變動生日資料或年齡計算邏輯。"
         ]),

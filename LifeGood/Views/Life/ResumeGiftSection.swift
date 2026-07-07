@@ -22,7 +22,15 @@ import SwiftUI
 //   C. giftRow 補交錯淡入 + 向上進場動畫（沿用 rowsAppeared 旗標，依攤平後索引 stagger），
 //      對齊 SpouseResumeView.milestoneRow / expenseRow 已有的列表進場動畫規格。
 //   D. 移除從未被呼叫的 formatCurrency 死碼（金額顯示已全面改用 .ntdWanString）。
-//   （下次美化本元件時，可考慮：DisclosureGroup 展開/收合的 chevron 動畫、giftRow 左側強調色條）
+// [2026-07 v3] giftRow 左側強調色條：
+//   • giftRow 原本圖示圓直接貼齊卡片左緣，同頁其他列式元件（分類/總計）已用漸層 Capsule
+//     側條標示層級，giftRow 卻沒有，是本元件最後一處視覺不均衡；補上 3pt 粉紅漸層
+//     RoundedRectangle 側條（對齊 header 側條配色，高度貼合列高），
+//     讓「總計列 → 分類列 → giftRow」三層級都能一眼辨識屬於同一組禮金清單。
+//   • 純視覺加強，未動任何禮金資料或分類邏輯。
+//   （下次美化本元件時，可考慮：DisclosureGroup 展開/收合的 chevron 動畫，
+//     自訂 DisclosureGroupStyle 讓箭頭隨展開狀態平滑旋轉，對齊 SettingsView.disclosureBlock
+//     可作為下一步的展開/收合互動基礎）
 
 /// 履歷頁通用：列出某人收到的禮金紀錄，依社交子分類分組顯示。
 struct ResumeGiftSection: View {
@@ -188,9 +196,19 @@ struct ResumeGiftSection: View {
         }
     }
 
-    // giftRow：28pt 漸層圖示圓 + 日期 Capsule 膠囊 + 付款人 Capsule 標籤
+    // giftRow：3pt 漸層側條 + 28pt 漸層圖示圓 + 日期 Capsule 膠囊 + 付款人 Capsule 標籤
     private func giftRow(_ e: Expense) -> some View {
         HStack(alignment: .center, spacing: 10) {
+            // [v3] 左側強調色條，對齊 header 漸層 Capsule 側條配色，統一總計/分類/giftRow 三層級視覺語言
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [accent.opacity(0.85), accent.opacity(0.30)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 3, height: 28)
+
             // 28pt 粉紅漸層圖示圓 [v2-A] 補 stroke 細邊框，對齊本檔總計/分類圖示圓描邊規格
             ZStack {
                 Circle()
