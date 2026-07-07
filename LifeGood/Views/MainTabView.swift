@@ -52,7 +52,7 @@ enum FinanceFeature: String, CaseIterable, Identifiable {
 }
 
 enum LifeFeature: String, CaseIterable, Identifiable {
-    case overview, resume, finance, career, family, realEstate, tax, foodMap
+    case overview, resume, finance, career, family, realEstate, tax, foodMap, travelMap
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -64,6 +64,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         case .realEstate: return "房地產"
         case .tax: return "稅務"
         case .foodMap: return "美食地圖"
+        case .travelMap: return "旅遊地圖"
         }
     }
     var icon: String {
@@ -76,6 +77,7 @@ enum LifeFeature: String, CaseIterable, Identifiable {
         case .realEstate: return "building.2.fill"
         case .tax: return "doc.text.fill"
         case .foodMap: return "fork.knife.circle.fill"
+        case .travelMap: return "airplane.circle.fill"
         }
     }
 }
@@ -1281,6 +1283,8 @@ struct MainTabView: View {
             TaxOverviewView()
         case .foodMap:
             FoodMapView()
+        case .travelMap:
+            TravelMapView()
         }
     }
 
@@ -1300,6 +1304,7 @@ struct MainTabView: View {
         if !financeStore.realEstates.isEmpty { list.append(.realEstate) }
         if hasTaxData { list.append(.tax) }
         if hasFoodMapData { list.append(.foodMap) }
+        if hasTravelMapData { list.append(.travelMap) }
         return list
     }
 
@@ -1317,6 +1322,13 @@ struct MainTabView: View {
     private var hasFoodMapData: Bool {
         expenseStore.expenses.contains(where: {
             $0.variableCategory == .food && $0.placeLatitude != nil && $0.placeLongitude != nil
+        })
+    }
+
+    /// 任一娛樂紀錄已附經緯度 → 顯示旅遊地圖頁
+    private var hasTravelMapData: Bool {
+        expenseStore.expenses.contains(where: {
+            $0.variableCategory == .entertainment && $0.placeLatitude != nil && $0.placeLongitude != nil
         })
     }
 }
