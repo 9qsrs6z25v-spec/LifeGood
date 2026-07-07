@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.38", build: 594, date: "2026/07/07", notes: [
+            "UI 小步美化（金額單位一致性）：新增/編輯房地產畫面頂部英雄卡「月租收入」KPI 格，原本直接顯示 NT$ 裸整數（月租偏高時字串偏長），與同排「目前估值 / 增值」兩格已採用的萬/億智慧量級格式不一致；改為與同卡其餘欄位一致，改用萬/億智慧量級顯示。純視覺調整，未變動任何試算或儲存邏輯。"
+        ]),
         ChangelogEntry(version: "23.37", build: 593, date: "2026/07/07", notes: [
             "【靜態除錯 v23.37】修復兩個未取消的防抖 Task：MyCalendarView.PersonalEventEditor（地點搜尋）與 ChildDetailView.ChildRecordEditorSheet（診所搜尋）在 300ms 防抖期間關閉表單時，Task 仍會在背景繼續驅動搜尋，補上 onDisappear 取消（對齊 AddExpenseView 既有修復）。同時修復四項效能／閃爍問題：① LifeFinanceView 記帳總覽每一列銀行餘額改為批次建表查詢（O(1)），取代原本每列各自對 expenses/incomes 做全量掃描；連帶把兩個個位補建的 DateFormatter/NumberFormatter 改為快取。② RealEstateDetailView 水電瓦斯區塊的重繪旗標原本被 11 個不相關 sheet（電梯保養、裝潢照片、貸款/已支出項目、樓層物件、文件匯入等）共用，導致每次關閉這些無關表單都強制水電瓦斯子樹重建身分、造成閃爍；改為獨立旗標只給水電瓦斯編輯 sheet 使用。③ OrganizationView 派系關係編輯畫面的可選人員清單改為只算一次，取代原本在每一列關係都重新掃描全部組織人員。④ ChildDetailView 素描模式切換 Toggle 時，改為只在真正需要時才讀取原圖檔案，避免每次切換都做一次不必要的主執行緒磁碟讀取＋JPEG 解碼。⑤ AddExpenseView 貸款筆記自動帶入資產名稱時，改為先比對再賦值，避免打字時每個按鍵都觸發不必要的 @State 重新賦值。"
         ]),

@@ -33,6 +33,11 @@ import PhotosUI
 //      已支出日期膠囊 → Capsule().stroke(separator.opacity(0.25), 0.6pt)；
 //      變動支出類別膠囊 → Capsule().stroke(orange.opacity(0.22), 0.6pt)，
 //      對齊全 App 膠囊統一描邊規格（FinanceChartView v5 / EInvoiceSetupView v2）。
+// [2026-07 v3] 金額單位一致性補強：
+//  11. estatePreviewCard 月租收入 KPI 格：原本直接顯示 "NT$\(Int(rentalAmt).formatted())"
+//      裸台幣整數，與同排「目前估值 / 增值」兩格已採用的萬/億智慧量級格式不一致，
+//      月租偏高時字串明顯較長；改為 rentalAmt ≥1萬 顯示「X.X萬」、≥1億 顯示「X.X億」，
+//      對齊同卡其餘 KPI 格與 RealEstateDetailView.fmt(_:) 的顯示規格。
 
 struct AddRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -1762,7 +1767,17 @@ struct AddRealEstateView: View {
                     reHeroKpiCell(
                         icon: "dollarsign.circle.fill",
                         label: "月租收入",
-                        value: rentalAmt > 0 ? "NT$\(Int(rentalAmt).formatted())" : "—"
+                        // [2026-07 v3] 月租金額改用萬/億智慧量級，對齊同卡購入價/估值/增值三格已用的
+                        // wan 顯示規格；monthlyRentalText 本身以「原始台幣」輸入（非萬），需自行換算，
+                        // 不直接呼叫共用 ntdWanString（該函式會多帶「NT$」前綴，與同排其他三格純數字
+                        // + 量級字的簡潔風格不符）。
+                        value: rentalAmt > 0
+                            ? (rentalAmt >= 100_000_000
+                               ? String(format: "%.1f億", rentalAmt / 100_000_000)
+                               : rentalAmt >= 10_000
+                                 ? String(format: "%.1f萬", rentalAmt / 10_000)
+                                 : "NT$\(Int(rentalAmt).formatted())")
+                            : "—"
                     )
                 }
                 .padding(.vertical, 8)
