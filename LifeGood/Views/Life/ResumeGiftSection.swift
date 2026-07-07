@@ -28,9 +28,13 @@ import SwiftUI
 //     RoundedRectangle 側條（對齊 header 側條配色，高度貼合列高），
 //     讓「總計列 → 分類列 → giftRow」三層級都能一眼辨識屬於同一組禮金清單。
 //   • 純視覺加強，未動任何禮金資料或分類邏輯。
-//   （下次美化本元件時，可考慮：DisclosureGroup 展開/收合的 chevron 動畫，
-//     自訂 DisclosureGroupStyle 讓箭頭隨展開狀態平滑旋轉，對齊 SettingsView.disclosureBlock
-//     可作為下一步的展開/收合互動基礎）
+// [2026-07 v4] 分類 DisclosureGroup 展開/收合箭頭：
+//   • 系統預設箭頭固定灰階，與本元件粉紅主題不一致，且展開時內容是「跳出」沒有淡入；
+//     新增 AccentChevronDisclosureGroupStyle 自訂樣式，箭頭改為粉紅主題色、
+//     隨展開狀態以 spring 動畫平滑旋轉 90 度，展開內容補上淡入 + 由上滑入的過場，
+//     整體與 header/總計/giftRow 的粉紅視覺語言一致。
+//   • 純視覺加強，未動任何禮金篩選、分組或金額邏輯，展開/收合狀態行為不變。
+//   （下次美化本元件時，可從這裡接著找其他可統一之處）
 
 /// 履歷頁通用：列出某人收到的禮金紀錄，依社交子分類分組顯示。
 struct ResumeGiftSection: View {
@@ -165,6 +169,7 @@ struct ResumeGiftSection: View {
                         }
                     }
                 }
+                .disclosureGroupStyle(AccentChevronDisclosureGroupStyle(tint: accent))
             }
         } header: {
             // Capsule 側條 + 標題 + 計數膠囊（對齊 LifeOverviewView section header 規格）
@@ -269,5 +274,36 @@ struct ResumeGiftSection: View {
 
     private func formatDate(_ date: Date) -> String {
         Self.dateFormatter.string(from: date)
+    }
+}
+
+// MARK: - 展開/收合箭頭樣式（[v4] 箭頭改為主題色 + spring 平滑旋轉，內容補淡入滑入過場）
+private struct AccentChevronDisclosureGroupStyle: DisclosureGroupStyle {
+    var tint: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                    configuration.isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 0) {
+                    configuration.label
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(tint.opacity(0.70))
+                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if configuration.isExpanded {
+                configuration.content
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 }
