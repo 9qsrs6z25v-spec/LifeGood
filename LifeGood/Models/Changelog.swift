@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.42", build: 598, date: "2026/07/07", notes: [
+            "【靜態除錯 v23.42】三個並行掃描（強制解包／Optional／index／retain cycle／競態條件；UI 閃爍／過度重繪／CloudKit 節流；效能瓶頸／O(n²)／重複 I/O）覆蓋全部 79 個 Swift 檔，找到並修復兩項尚未處理的問題：① StockView 的 activeStocks／soldStocks 原本是即時 filter 的 computed property，被 summaryHeader／activeStocksSectionHeader／allocationMiniBar（含一次全量 sort）／soldStackSection／soldStackPreview 五處各自獨立重新呼叫；而頁面又用 onPreferenceChange 即時追蹤 scrollOffset 驅動整個 body 重繪，導致單純滑動股票列表就會反覆重新掃描/排序 store.stocks 達 7 次以上；改為 body 只計算一次 active／sold 陣列，往下以參數傳給五個子區塊。② SubordinateDetailView 的 MentionText.mentionedIDs／attributed 每次呼叫都重新 filter+sort 全部人員清單，而 mentionedCounts()／mentionedItems 卻在巢狀迴圈中對每位部屬的每筆任務/會議項目/報告各別呼叫一次，形成隨部屬與紀錄數同時增長的重複排序成本；新增 sortedPeople 版本的 mentionedIDs，讓這兩處迴圈改為排序一次、重複傳入。另外修復一項 UI 閃爍問題：③ ChildDetailView 兒童紀錄「接種院所」欄位的過往就醫紀錄本地比對，原本讀取即時 detail 字串、未跟 Apple Maps 搜尋走同一組 300ms 防抖，導致每個按鍵都先讓本地建議跳一次、0.3 秒後網路建議才到又重排一次，等同防抖形同虛設；改為本地比對也改讀防抖後的 clinicDebouncedQuery，兩種來源同步更新。強制解包／Optional／型別／index／retain cycle／競態條件經全面複查未發現新問題（力 unwrap 全無、as! 全無、既有鎖/weak self 防護皆確認正常）。"
+        ]),
         ChangelogEntry(version: "23.41", build: 597, date: "2026/07/07", notes: [
             "UI 小步美化：ResumeGiftSection（六個履歷頁共用的「收到的禮金」區塊）giftRow 原本圖示圓直接貼齊卡片左緣，與同頁「總計列 / 分類列」皆已有的漸層側條層級不一致；補上 3pt 粉紅漸層側條，讓總計、分類、單筆禮金三層級一眼可辨識屬於同一組清單。純視覺加強，未變動禮金資料或分類邏輯。"
         ]),

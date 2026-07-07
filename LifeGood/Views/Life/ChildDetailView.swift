@@ -1148,6 +1148,9 @@ struct ChildRecordEditorSheet: View {
     @State private var clinicSuppressNextUpdate: Bool = false
     @State private var clinicExpandedSuggestions: Bool = false
     @State private var clinicDebounceTask: Task<Void, Never>? = nil
+    // 過往就醫紀錄的本地比對也要跟 Apple Maps 搜尋走同一組 300ms 防抖後的字串，
+    // 避免打字時本地建議先跳、0.3 秒後網路建議才到造成清單重排兩次的閃爍感。
+    @State private var clinicDebouncedQuery: String = ""
     @State private var photoFileName: String?
     @State private var photoItem: PhotosPickerItem?
     @State private var sketchMode = true
@@ -1351,20 +1354,24 @@ struct ChildRecordEditorSheet: View {
         .onAppear {
             LocationProvider.shared.requestIfNeeded()
             clinicCompleter.setRegion(LocationProvider.shared.searchRegion)
+            clinicDebouncedQuery = detail
             if !detail.isEmpty { clinicCompleter.queryFragment = detail }
         }
         .onChange(of: detail) { _, newValue in
             if clinicSuppressNextUpdate {
                 clinicSuppressNextUpdate = false
+                clinicDebouncedQuery = newValue
                 return
             }
             // 300ms 防抖，對齊 AddExpenseView / VariableExpenseView 院所/餐廳搜尋規格，
-            // 避免每次按鍵都即時發出 MKLocalSearchCompleter 網路請求
+            // 避免每次按鍵都即時發出 MKLocalSearchCompleter 網路請求；過往紀錄本地比對
+            // 也一併等防抖後才更新，避免本地建議先跳、網路建議 0.3 秒後才到造成清單重排兩次。
             clinicDebounceTask?.cancel()
             clinicDebounceTask = Task {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 guard !Task.isCancelled else { return }
                 clinicCompleter.queryFragment = newValue
+                clinicDebouncedQuery = newValue
                 clinicExpandedSuggestions = false
             }
         }
@@ -1458,7 +1465,7 @@ struct ChildRecordEditorSheet: View {
 
     /// 合併所有小孩過往就醫 / 接種院所 + Apple Maps POI（醫療類）
     private var allClinicSuggestions: [ClinicSuggestion] {
-        let q = detail.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = clinicDebouncedQuery.trimmingCharacters(in: .whitespaces).lowercased()
         var seen: Set<String> = []
         var output: [ClinicSuggestion] = []
 

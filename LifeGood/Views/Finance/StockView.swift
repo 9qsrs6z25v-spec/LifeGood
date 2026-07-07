@@ -81,8 +81,14 @@ struct StockView: View {
                     }
                 } else {
                     ScrollView {
+                        // body 單次計算 active/sold，往下傳入各子區塊，避免 scrollOffset
+                        // 每次 onPreferenceChange 觸發整個 body 重繪時，summaryHeader／
+                        // activeStocksSectionHeader／allocationMiniBar／soldStackSection／
+                        // soldStackPreview 各自獨立重新 filter/sort store.stocks。
+                        let active = activeStocks
+                        let sold = soldStocks
                         LazyVStack(spacing: 0) {
-                            summaryHeader
+                            summaryHeader(active: active)
                                 .background(
                                     GeometryReader { geo in
                                         Color.clear.preference(
@@ -93,11 +99,11 @@ struct StockView: View {
                                 )
 
                             LazyVStack(spacing: 12) {
-                                if !activeStocks.isEmpty {
-                                    activeStocksSectionHeader
+                                if !active.isEmpty {
+                                    activeStocksSectionHeader(count: active.count)
                                         .padding(.horizontal, 4)
                                 }
-                                ForEach(Array(activeStocks.enumerated()), id: \.element.id) { idx, item in
+                                ForEach(Array(active.enumerated()), id: \.element.id) { idx, item in
                                     stockCard(item)
                                         .opacity(cardsAppeared ? 1 : 0)
                                         .offset(y: cardsAppeared ? 0 : 18)
@@ -117,8 +123,8 @@ struct StockView: View {
                                         }
                                 }
 
-                                if !soldStocks.isEmpty {
-                                    soldStackSection
+                                if !sold.isEmpty {
+                                    soldStackSection(sold: sold)
                                 }
                             }
                             .padding(.horizontal, 16)
@@ -263,7 +269,7 @@ struct StockView: View {
 
     // MARK: - 已賣出堆疊
 
-    private var soldStackSection: some View {
+    private func soldStackSection(sold: [Stock]) -> some View {
         VStack(spacing: 0) {
             Button {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
@@ -283,7 +289,7 @@ struct StockView: View {
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.orange)
                     }
-                    Text("已賣出（\(soldStocks.count) 檔）")
+                    Text("已賣出（\(sold.count) 檔）")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
                     Spacer()
@@ -306,7 +312,7 @@ struct StockView: View {
 
             if soldExpanded {
                 LazyVStack(spacing: 12) {
-                    ForEach(soldStocks) { item in
+                    ForEach(sold) { item in
                         stockCard(item)
                             .onTapGesture { viewingItem = item }
                             .contextMenu {
@@ -322,14 +328,14 @@ struct StockView: View {
                 }
                 .padding(.top, 10)
             } else {
-                soldStackPreview
+                soldStackPreview(sold: sold)
             }
         }
     }
 
-    private var soldStackPreview: some View {
+    private func soldStackPreview(sold: [Stock]) -> some View {
         ZStack(alignment: .bottom) {
-            let count = min(soldStocks.count, 3)
+            let count = min(sold.count, 3)
             ForEach(0..<count, id: \.self) { i in
                 let reverseIndex = count - 1 - i
                 RoundedRectangle(cornerRadius: 12)
@@ -344,8 +350,8 @@ struct StockView: View {
                     .opacity(1.0 - Double(reverseIndex) * 0.2)
             }
 
-            if let top = soldStocks.first {
-                let totalSoldPL = soldStocks.reduce(0) { $0 + $1.profitLoss }
+            if let top = sold.first {
+                let totalSoldPL = sold.reduce(0) { $0 + $1.profitLoss }
                 let soldPLPositive = totalSoldPL >= 0
                 HStack(spacing: 6) {
                     Text(top.name)
@@ -373,7 +379,7 @@ struct StockView: View {
                 .frame(height: 36)
             }
         }
-        .padding(.top, CGFloat(min(soldStocks.count, 3) - 1) * 8)
+        .padding(.top, CGFloat(min(sold.count, 3) - 1) * 8)
     }
 
     // MARK: - 刪除
@@ -397,7 +403,7 @@ struct StockView: View {
 
     // MARK: - 摘要（橙色漸層英雄卡片）
 
-    private var summaryHeader: some View {
+    private func summaryHeader(active: [Stock]) -> some View {
         let pl = store.totalStockProfitLoss
         let isPositive = pl >= 0
         let returnRate = store.totalStockCost > 0 ? (pl / store.totalStockCost * 100) : 0
@@ -463,7 +469,7 @@ struct StockView: View {
                         Text("活躍持股")
                             .font(.caption2)
                             .foregroundStyle(.white.opacity(0.62))
-                        Text("\(activeStocks.count) 檔")
+                        Text("\(active.count) 檔")
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .contentTransition(.numericText())
@@ -483,12 +489,12 @@ struct StockView: View {
                 }
 
                 // 持股分配迷你條（≥2 檔時才顯示）
-                if activeStocks.count >= 2 {
+                if active.count >= 2 {
                     Rectangle()
                         .fill(.white.opacity(0.18))
                         .frame(height: 0.5)
                         .padding(.vertical, 10)
-                    allocationMiniBar
+                    allocationMiniBar(active: active)
                 }
             }
         }
@@ -743,7 +749,7 @@ struct StockView: View {
 
     // MARK: - 持有中 Section Header（Capsule 側條 + 計數膠囊）
 
-    private var activeStocksSectionHeader: some View {
+    private func activeStocksSectionHeader(count: Int) -> some View {
         let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
         return HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 3)
@@ -759,7 +765,7 @@ struct StockView: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.primary.opacity(0.75))
             Spacer(minLength: 6)
-            Text("\(activeStocks.count) 檔")
+            Text("\(count) 檔")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(accent.opacity(0.85))
                 .padding(.horizontal, 8)
@@ -772,9 +778,9 @@ struct StockView: View {
 
     // MARK: - 持股分配迷你條（hero card 底部，GeometryReader 色條）
 
-    private var allocationMiniBar: some View {
-        let sorted = activeStocks.sorted { $0.marketValue > $1.marketValue }
-        let totalVal = max(activeStocks.reduce(0) { $0 + $1.marketValue }, 1)
+    private func allocationMiniBar(active: [Stock]) -> some View {
+        let sorted = active.sorted { $0.marketValue > $1.marketValue }
+        let totalVal = max(active.reduce(0) { $0 + $1.marketValue }, 1)
         let top5 = Array(sorted.prefix(5))
         let othersTotal = sorted.dropFirst(5).reduce(0) { $0 + $1.marketValue }
         let barColors: [Color] = [

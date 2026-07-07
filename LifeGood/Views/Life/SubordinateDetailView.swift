@@ -746,9 +746,9 @@ struct SubordinateDetailView: View {
     /// 全部部屬的任務/會議/報告中，內容或備註 @ 標註到「本人」的項目
     private var mentionedItems: [SubordinateItemRef] {
         let me = subordinate.id
-        let people = lifeStore.mentionPeople()
+        let sortedPeople = MentionText.sortedByNameLengthDescending(lifeStore.mentionPeople())
         func hit(_ texts: String...) -> Bool {
-            texts.contains { MentionText.mentionedIDs(in: $0, people: people).contains(me) }
+            texts.contains { MentionText.mentionedIDs(in: $0, sortedPeople: sortedPeople).contains(me) }
         }
         var out: [SubordinateItemRef] = []
         for s in lifeStore.subordinates {
@@ -2001,21 +2001,23 @@ extension LifeStore {
     /// 一次掃描所有部屬的任務/會議/報告，統計每個人被 @ 標註到的「項目數」。
     /// 同一項目同一人只計一次。用於主動性加分與看板「被標註」計數。
     func mentionedCounts() -> [UUID: Int] {
-        let people = mentionPeople()
+        // 人員清單只排序一次，往下傳給每筆任務/會議/報告的 mentionedIDs，
+        // 避免同一份清單在巢狀迴圈中被重複 filter + sort。
+        let sortedPeople = MentionText.sortedByNameLengthDescending(mentionPeople())
         var counts: [UUID: Int] = [:]
         for s in subordinates {
             for t in s.tasks {
-                let ids = MentionText.mentionedIDs(in: t.content, people: people)
-                    .union(MentionText.mentionedIDs(in: t.note, people: people))
+                let ids = MentionText.mentionedIDs(in: t.content, sortedPeople: sortedPeople)
+                    .union(MentionText.mentionedIDs(in: t.note, sortedPeople: sortedPeople))
                 for id in ids { counts[id, default: 0] += 1 }
             }
             for m in s.meetings {
-                var ids = MentionText.mentionedIDs(in: m.note, people: people)
-                for item in m.items { ids.formUnion(MentionText.mentionedIDs(in: item.content, people: people)) }
+                var ids = MentionText.mentionedIDs(in: m.note, sortedPeople: sortedPeople)
+                for item in m.items { ids.formUnion(MentionText.mentionedIDs(in: item.content, sortedPeople: sortedPeople)) }
                 for id in ids { counts[id, default: 0] += 1 }
             }
             for r in s.weeklyReports {
-                for id in MentionText.mentionedIDs(in: r.note, people: people) { counts[id, default: 0] += 1 }
+                for id in MentionText.mentionedIDs(in: r.note, sortedPeople: sortedPeople) { counts[id, default: 0] += 1 }
             }
         }
         return counts
@@ -2032,12 +2034,22 @@ enum MentionText {
 
     /// 取出文字中所有被 @ 標註且能對應到人員的 id（用於「被標註的項目」）
     static func mentionedIDs(in raw: String, people: [MentionPerson]) -> Set<UUID> {
-        let sorted = people.filter { !$0.name.isEmpty }.sorted { $0.name.count > $1.name.count }
+        mentionedIDs(in: raw, sortedPeople: sortedByNameLengthDescending(people))
+    }
+
+    /// 以最長名字優先比對，避免「王」先於「王小明」誤配
+    static func sortedByNameLengthDescending(_ people: [MentionPerson]) -> [MentionPerson] {
+        people.filter { !$0.name.isEmpty }.sorted { $0.name.count > $1.name.count }
+    }
+
+    /// 供呼叫端在迴圈中重複解析多筆文字時使用：人員清單先排序一次再重複傳入，
+    /// 避免每呼叫一次就重新 filter + sort 整份人員清單。
+    static func mentionedIDs(in raw: String, sortedPeople: [MentionPerson]) -> Set<UUID> {
         var ids = Set<UUID>()
         var s = Substring(raw)
         while let atIdx = s.firstIndex(of: "@") {
             let afterAt = s[s.index(after: atIdx)...]
-            if let p = sorted.first(where: { afterAt.hasPrefix($0.name) }) {
+            if let p = sortedPeople.first(where: { afterAt.hasPrefix($0.name) }) {
                 ids.insert(p.id)
                 s = afterAt[afterAt.index(afterAt.startIndex, offsetBy: p.name.count)...]
             } else {
