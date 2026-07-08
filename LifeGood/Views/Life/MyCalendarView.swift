@@ -65,7 +65,6 @@ struct MyCalendarView: View {
     @State private var heroCardAppeared = false
     @State private var todayCardAppeared = false
     @State private var weekCardAppeared = false
-    @State private var milestonesCardAppeared = false
 
     private let calendar = Calendar.current
 
@@ -128,16 +127,6 @@ struct MyCalendarView: View {
                             }
                         }
                         .onDisappear { weekCardAppeared = false }
-                    upcomingMilestonesSection(milestones: upcomingMS)
-                        .opacity(milestonesCardAppeared ? 1 : 0)
-                        .offset(y: milestonesCardAppeared ? 0 : 18)
-                        .onAppear {
-                            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.24)) {
-                                milestonesCardAppeared = true
-                            }
-                        }
-                        .onDisappear { milestonesCardAppeared = false }
-
                     // 部屬事項（請假 / 會議 / 任務 / 未完成會議 / 未完成任務）
                     if !lifeStore.subordinates.isEmpty {
                         subordinateAgendaSection(date: startOfSelectedDay)
@@ -979,6 +968,20 @@ struct MyCalendarView: View {
         }.sorted { ($0.task.dueDate ?? $0.task.date) < ($1.task.dueDate ?? $1.task.date) }
     }
 
+    /// 當日事項（請假 / 報告 / 會議 / 任務）與下方「未完成待辦」之間的分隔線，讓兩組有明確空間區隔
+    private var agendaGroupDivider: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Color(.separator).opacity(0.5)).frame(height: 0.75)
+            Text("未完成待辦")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize()
+            Rectangle().fill(Color(.separator).opacity(0.5)).frame(height: 0.75)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+    }
+
     private func subordinateAgendaSection(date: Date) -> some View {
         let leaves = subLeaves(on: date)
         let reports = subReports(on: date)
@@ -1025,6 +1028,9 @@ struct MyCalendarView: View {
                     }
                 }
             }
+
+            agendaGroupDivider
+
             subAgendaCard("未完成會議條目", "person.3.sequence.fill", .indigo,
                           count: allIncompleteMeetings.count, empty: "沒有未完成的會議條目") {
                 ForEach(Array(allIncompleteMeetings.enumerated()), id: \.element.item.id) { _, it in

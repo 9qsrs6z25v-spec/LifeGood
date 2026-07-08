@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.54", build: 610, date: "2026/07/08", notes: [
+            "我的行事曆：移除「未來 30 天里程碑」章節（整個列表卡片不再顯示）。頂部英雄卡的『未來 30 天』統計數字仍保留。",
+            "我的行事曆：在當日事項（部屬請假／報告／會議／任務）與下方「未完成會議條目／未完成任務」之間，加入一條帶「未完成待辦」標題的分隔線，讓上下兩組有明確的空間區隔。"
+        ]),
         ChangelogEntry(version: "23.53", build: 609, date: "2026/07/08", notes: [
             "【靜態除錯 v23.53】複查 10 個 Finance 視圖檔案，修復一類重複出現的孤兒照片問題與一處效能瓶頸：① AddVehicleView（deleteFixedExpenses／deleteVariableExpenses）、AddRealEstateView（deleteMortgageItems／deletePaidItems／deleteVariableItems，以及賣出損益同步邏輯）、AddStockView（賣出損益同步邏輯）、SavingsInsuranceView（滑動刪除保單）皆以 expenseStore.expenses.removeAll 直接刪除連結支出，繞過 ExpenseStore.delete(_:) 的照片清除邏輯，導致刪除時連結支出的附加照片成為孤兒檔案；改為先收集連結支出 ID 清除照片檔案（或改呼叫 expenseStore.delete(_:)）再移除，對齊 StockDetailView.deleteStock／VehicleView.deleteVehicle 既有修復規格。② RealEstateDetailView.deleteEstate 原本對 6 類巢狀項目（貸款/已支出/變動支出/保險/樓層物件/水電瓦斯）逐類各自呼叫 removeAll（觸發多次 @Published 更新），且未清除連結支出的附加照片；deleteLinkedExpense／UtilityPaymentEditor.deleteRecord 也是直接 removeAll；三處皆改為收集連結支出 ID 後一次批量刪除並清除照片（或改用 expenseStore.delete(_:)），降為單次更新且不再孤兒化照片。③ StockDetailView：sortedTransactions／sortedDividends 原本在各自 section 內被 isEmpty／count／ForEach 重複呼叫 3～4 次重新排序；改為 section 頂端以區域變數算一次。其餘檔案（AddSavingsInsuranceView／HolographicBuildingView／RenovationPhotoEditor／VehicleDetailView）複查後確認先前既有修復仍完整，未發現新增問題。"
         ]),
