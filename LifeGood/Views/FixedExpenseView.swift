@@ -1005,19 +1005,32 @@ private struct FixedExpenseCard: View {
     private var savingsSection: some View {
         if let ins = linkedSavings {
             let rate = current.insuranceRate ?? ins.annualRate
+            let elapsed = ins.elapsedPeriods
+            let total = ins.totalPeriods
+            let paid = ins.premiumAmount * Double(elapsed)
+            let projected = ins.premiumAmount * Double(total)
+            let progress = total > 0 ? min(1, Double(elapsed) / Double(total)) : 0
             VStack(alignment: .leading, spacing: 8) {
                 Text("儲蓄險").font(.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 14).padding(.top, 10)
+
+                // 甘特圖：起始日 → 到期日，填色代表已繳進度，圓點為目前位置
+                ganttBar(progress: progress, start: ins.startDate, end: ins.maturityDate)
+
                 VStack(spacing: 0) {
                     field("複利年利率", rate > 0 ? String(format: "%.2f%%", rate) : "—")
                     Divider().padding(.leading, 14)
-                    field("幣別", ins.currencyCode)
-                    Divider().padding(.leading, 14)
                     field("繳費週期", ins.paymentPeriod.rawValue)
+                    Divider().padding(.leading, 14)
+                    field("已繳 / 總期數", "\(elapsed) / \(total) 期")
+                    Divider().padding(.leading, 14)
+                    field("已繳總支出", "\(ins.currencyCode) " + fmtShort(paid))
+                    Divider().padding(.leading, 14)
+                    field("預計總支出", "\(ins.currencyCode) " + fmtShort(projected))
                     Divider().padding(.leading, 14)
                     field("起始日", Self.dateFmt.string(from: ins.startDate))
                     Divider().padding(.leading, 14)
-                    field("到期日", Self.dateFmt.string(from: ins.maturityDate))
+                    field("預計結束（到期）", Self.dateFmt.string(from: ins.maturityDate))
                     if ins.expectedReturn > 0 {
                         Divider().padding(.leading, 14)
                         field("期滿預估領回", "\(ins.currencyCode) " + fmtShort(ins.expectedReturn))
@@ -1028,6 +1041,38 @@ private struct FixedExpenseCard: View {
             .background(Color(.secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
+    }
+
+    /// 甘特圖風格的繳費進度條：整條代表起始日→到期日，填色為已繳進度，白圓點標示目前位置
+    private func ganttBar(progress: Double, start: Date, end: Date) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { geo in
+                let w = geo.size.width
+                let fill = max(6, w * progress)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color(.tertiarySystemFill)).frame(height: 10)
+                    Capsule()
+                        .fill(LinearGradient(colors: [.green, .green.opacity(0.55)],
+                                             startPoint: .leading, endPoint: .trailing))
+                        .frame(width: fill, height: 10)
+                    Circle().fill(.white).frame(width: 15, height: 15)
+                        .overlay(Circle().stroke(Color.green, lineWidth: 3))
+                        .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                        .offset(x: min(w - 15, max(0, w * progress - 7.5)))
+                }
+                .frame(height: 15)
+            }
+            .frame(height: 16)
+            HStack {
+                Text(Self.dateFmt.string(from: start)).font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int((progress * 100).rounded()))%")
+                    .font(.caption2.weight(.bold)).foregroundStyle(.green)
+                Spacer()
+                Text(Self.dateFmt.string(from: end)).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 6)
     }
 
     /// 帳單照片：可拍照 / 從相簿新增，直接寫回此筆固定支出並持久化（含 iCloud 同步）
