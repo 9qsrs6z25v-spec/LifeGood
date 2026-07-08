@@ -1004,11 +1004,12 @@ private struct FixedExpenseCard: View {
     @ViewBuilder
     private var savingsSection: some View {
         if let ins = linkedSavings {
+            let rate = current.insuranceRate ?? ins.annualRate
             VStack(alignment: .leading, spacing: 8) {
                 Text("儲蓄險").font(.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 14).padding(.top, 10)
                 VStack(spacing: 0) {
-                    field("複利年利率", ins.annualRate > 0 ? String(format: "%.2f%%", ins.annualRate) : "—")
+                    field("複利年利率", rate > 0 ? String(format: "%.2f%%", rate) : "—")
                     Divider().padding(.leading, 14)
                     field("幣別", ins.currencyCode)
                     Divider().padding(.leading, 14)

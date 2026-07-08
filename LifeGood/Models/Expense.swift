@@ -267,6 +267,8 @@ struct Expense: Identifiable, Codable {
     var loanTotalAmount: Double?
     var loanYears: Double?
     var loanRate: Double?
+    /// 儲蓄險複利年利率（%）。同步存一份於支出本身，避免連結的理財儲蓄險遺失時利率帶不出來。
+    var insuranceRate: Double?
     var linkedBankMilestoneId: UUID?
     var linkedBankCurrency: String?
     var linkedCreditCardMilestoneId: UUID?
@@ -306,6 +308,7 @@ struct Expense: Identifiable, Codable {
         loanTotalAmount: Double? = nil,
         loanYears: Double? = nil,
         loanRate: Double? = nil,
+        insuranceRate: Double? = nil,
         linkedBankMilestoneId: UUID? = nil,
         linkedBankCurrency: String? = nil,
         linkedCreditCardMilestoneId: UUID? = nil,
@@ -340,6 +343,7 @@ struct Expense: Identifiable, Codable {
         self.loanTotalAmount = loanTotalAmount
         self.loanYears = loanYears
         self.loanRate = loanRate
+        self.insuranceRate = insuranceRate
         self.linkedBankMilestoneId = linkedBankMilestoneId
         self.linkedBankCurrency = linkedBankCurrency
         self.linkedCreditCardMilestoneId = linkedCreditCardMilestoneId
@@ -378,6 +382,7 @@ struct Expense: Identifiable, Codable {
         loanTotalAmount = try? c.decode(Double.self, forKey: .loanTotalAmount)
         loanYears = try? c.decode(Double.self, forKey: .loanYears)
         loanRate = try? c.decode(Double.self, forKey: .loanRate)
+        insuranceRate = try? c.decodeIfPresent(Double.self, forKey: .insuranceRate)
         linkedBankMilestoneId = try? c.decode(UUID.self, forKey: .linkedBankMilestoneId)
         linkedBankCurrency = try? c.decode(String.self, forKey: .linkedBankCurrency)
         linkedCreditCardMilestoneId = try? c.decodeIfPresent(UUID.self, forKey: .linkedCreditCardMilestoneId)
@@ -392,7 +397,7 @@ struct Expense: Identifiable, Codable {
         case linkedInsuranceId, linkedStockId, linkedRealEstateId, linkedVehicleId
         case vehicleExpenseCategory, realEstateExpenseCategory, taxSavingSubCategory
         case socialSubCategory, socialRecipient, taxDeductibleOverride, note, currencyCode, diningMember
-        case loanTotalAmount, loanYears, loanRate
+        case loanTotalAmount, loanYears, loanRate, insuranceRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
         case placeAddress, placeLatitude, placeLongitude, photoFileNames
     }

@@ -2276,6 +2276,7 @@ struct AddExpenseView: View {
             loanTotalAmount: showLoanCalcFields ? Double(loanTotalAmountText) : nil,
             loanYears: showLoanCalcFields ? Double(loanYearsText) : nil,
             loanRate: showLoanCalcFields ? computedLoanRate() : nil,
+            insuranceRate: isSavingsInsurance ? insRate : nil,
             linkedBankMilestoneId: selectedBankMilestoneId,
             linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
             linkedCreditCardMilestoneId: selectedCreditCardMilestoneId,
@@ -2709,6 +2710,10 @@ struct AddExpenseView: View {
             insRateText = linked.annualRate > 0 ? String(format: "%.2f", linked.annualRate) : ""
             insStartDate = linked.startDate
             insMaturityDate = linked.maturityDate
+        }
+        // 利率以支出自身欄位為主：即使連結的儲蓄險找不到（或利率為 0），也能把利率帶回編輯欄位
+        if let r = expense.insuranceRate, r > 0 {
+            insRateText = String(format: "%.2f", r)
         }
 
         // 載入連結的房地產
