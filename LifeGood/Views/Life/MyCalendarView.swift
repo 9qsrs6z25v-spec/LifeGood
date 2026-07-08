@@ -35,7 +35,7 @@ struct MyCalendarView: View {
 
     @State private var selectedDate = Date()
     @State private var showAdd = false
-    @State private var editingEvent: PersonalEvent?
+    @State private var previewCalendarItem: CalendarEventCard.Item?
     @State private var searchText = ""
     @State private var debouncedSearchText = ""
     @State private var showSubCompleted = false
@@ -150,23 +150,24 @@ struct MyCalendarView: View {
             .sheet(isPresented: $showAdd) {
                 PersonalEventEditor(initialDate: selectedDate, editing: nil)
             }
-            .sheet(item: $editingEvent) { ev in
-                PersonalEventEditor(initialDate: ev.date, editing: ev)
+            .sheet(item: $previewCalendarItem) { item in
+                CalendarEventCard(item: item)
             }
             .sheet(item: $openTarget) { target in
                 switch target {
+                // 部屬報告/任務/會議/請假：先顯示預覽卡片，右上角「編輯」才進入編輯
                 case .report(let subId, let report):
-                    WeeklyReportEditorSheet(subordinateId: subId, editing: report)
+                    SubordinateItemCard(ref: .report(subId: subId, report: report))
                 case .task(let subId, let task):
-                    TaskEditorSheet(subordinateId: subId, editing: task)
+                    SubordinateItemCard(ref: .task(subId: subId, task: task))
                 case .meeting(let subId, let meeting):
-                    MeetingEditorSheet(subordinateId: subId, editing: meeting)
+                    SubordinateItemCard(ref: .meeting(subId: subId, meeting: meeting))
                 case .leave(let subId, let rec):
-                    RecordEditorSheet(subordinateId: subId, type: rec.type, editing: rec)
+                    SubordinateItemCard(ref: .leave(subId: subId, rec: rec))
                 case .milestone(let ms):
-                    AddMilestoneView(editing: ms)
+                    CalendarEventCard(item: .milestone(ms))
                 case .event(let ev):
-                    PersonalEventEditor(initialDate: ev.date, editing: ev)
+                    CalendarEventCard(item: .personalEvent(ev))
                 }
             }
             .task {
@@ -426,6 +427,30 @@ struct MyCalendarView: View {
         return "\(Self.calendarDateFormatter.string(from: selectedDate)) 事件"
     }
 
+    /// 將當日事件解析為預覽卡片項目（個人事件/里程碑可編輯；系統行事曆可開啟；生日/紀念日唯讀）
+    private func cardItem(for ev: CalendarEvent) -> CalendarEventCard.Item {
+        if let pid = ev.personalEventId,
+           let pe = lifeStore.personalEvents.first(where: { $0.id == pid }) {
+            return .personalEvent(pe)
+        }
+        let fallbackDate = ev.time ?? calendar.startOfDay(for: selectedDate)
+        switch ev.type {
+        case .milestone:
+            if ev.id.hasPrefix("ms-"),
+               let uuid = UUID(uuidString: String(ev.id.dropFirst(3))),
+               let ms = lifeStore.milestones.first(where: { $0.id == uuid }) {
+                return .milestone(ms)
+            }
+            return .appleEvent(title: ev.title, time: ev.time, detail: ev.detail, date: fallbackDate)
+        case .birthday:
+            return .family(title: ev.title, detail: ev.detail, isBirthday: true)
+        case .anniversary:
+            return .family(title: ev.title, detail: ev.detail, isBirthday: false)
+        case .appleCalendar, .meeting, .task:
+            return .appleEvent(title: ev.title, time: ev.time, detail: ev.detail, date: fallbackDate)
+        }
+    }
+
     private func todayEventsSection(events: [CalendarEvent]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader(selectedDayHeaderTitle,
@@ -441,13 +466,8 @@ struct MyCalendarView: View {
                 )
             } else {
                 ForEach(Array(events.enumerated()), id: \.element.id) { idx, ev in
-                    if let pid = ev.personalEventId,
-                       let pe = lifeStore.personalEvents.first(where: { $0.id == pid }) {
-                        Button { editingEvent = pe } label: { eventRow(ev) }
-                            .buttonStyle(.plain)
-                    } else {
-                        eventRow(ev)
-                    }
+                    Button { previewCalendarItem = cardItem(for: ev) } label: { eventRow(ev) }
+                        .buttonStyle(.plain)
                     if idx < events.count - 1 {
                         Divider().padding(.leading, 60)
                     }
@@ -993,7 +1013,8 @@ struct MyCalendarView: View {
             subAgendaCard("部屬請假", "calendar.badge.minus", .teal, count: leaves.count, empty: "當日無人請假") {
                 ForEach(Array(leaves.enumerated()), id: \.offset) { _, it in
                     subAgendaRow(name: it.sub.name, lead: it.rec.leaveType?.rawValue ?? "請假",
-                                 sub: it.rec.content, accent: .teal, icon: "calendar.badge.minus")
+                                 sub: it.rec.content, accent: .teal, icon: "calendar.badge.minus",
+                                 onOpen: { openTarget = .leave(subId: it.sub.id, rec: it.rec) })
                 }
             }
             subAgendaCard("部屬報告（本週/待辦）", "doc.text.fill", .purple, count: reports.count, empty: "本週無報告、無待辦報告") {
@@ -1007,7 +1028,8 @@ struct MyCalendarView: View {
                                       text: it.report.topic.isEmpty ? "未命名報告" : it.report.topic,
                                       detail: detail,
                                       done: it.report.isCompleted, accent: meta.color,
-                                      completedAt: it.report.completedAt, due: it.report.date) {
+                                      completedAt: it.report.completedAt, due: it.report.date,
+                                      onOpen: { openTarget = .report(subId: it.sub.id, report: it.report) }) {
                         lifeStore.toggleWeeklyReportCompletion(subordinateId: it.sub.id, reportId: it.report.id)
                     }
                 }
@@ -1015,7 +1037,8 @@ struct MyCalendarView: View {
             subAgendaCard("部屬會議", "person.3.fill", .indigo, count: meetings.count, empty: "當日無會議") {
                 ForEach(Array(meetings.enumerated()), id: \.offset) { _, it in
                     subAgendaRow(name: it.sub.name, lead: it.meeting.topic.isEmpty ? "未命名會議" : it.meeting.topic,
-                                 sub: subAgendaTime(it.meeting.date), accent: .indigo, icon: "person.3.fill")
+                                 sub: subAgendaTime(it.meeting.date), accent: .indigo, icon: "person.3.fill",
+                                 onOpen: { openTarget = .meeting(subId: it.sub.id, meeting: it.meeting) })
                 }
             }
             subAgendaCard("部屬任務", "checklist", .cyan, count: tasks.count, empty: "當日無任務") {
@@ -1023,7 +1046,8 @@ struct MyCalendarView: View {
                     subAgendaCheckRow(name: it.sub.name,
                                       text: it.task.topic.isEmpty ? "未命名任務" : it.task.topic,
                                       detail: it.task.dueDate.map { "截止 " + subAgendaTime($0) },
-                                      done: it.task.isCompleted, accent: .cyan) {
+                                      done: it.task.isCompleted, accent: .cyan,
+                                      onOpen: { openTarget = .task(subId: it.sub.id, task: it.task) }) {
                         lifeStore.toggleTaskCompletion(subordinateId: it.sub.id, taskId: it.task.id)
                     }
                 }
@@ -1038,7 +1062,8 @@ struct MyCalendarView: View {
                                       text: it.item.content.isEmpty ? "未填內容" : it.item.content,
                                       detail: (it.meeting.topic.isEmpty ? "會議" : it.meeting.topic)
                                             + (it.item.dueDate.map { "・截止 " + subAgendaTime($0) } ?? ""),
-                                      done: it.item.isCompleted, accent: .indigo) {
+                                      done: it.item.isCompleted, accent: .indigo,
+                                      onOpen: { openTarget = .meeting(subId: it.sub.id, meeting: it.meeting) }) {
                         lifeStore.toggleMeetingItemCompletion(subordinateId: it.sub.id, meetingId: it.meeting.id, itemId: it.item.id)
                     }
                 }
@@ -1049,7 +1074,8 @@ struct MyCalendarView: View {
                     subAgendaCheckRow(name: it.sub.name,
                                       text: it.task.topic.isEmpty ? "未命名任務" : it.task.topic,
                                       detail: it.task.dueDate.map { "截止 " + subAgendaTime($0) },
-                                      done: it.task.isCompleted, accent: .orange) {
+                                      done: it.task.isCompleted, accent: .orange,
+                                      onOpen: { openTarget = .task(subId: it.sub.id, task: it.task) }) {
                         lifeStore.toggleTaskCompletion(subordinateId: it.sub.id, taskId: it.task.id)
                     }
                 }
@@ -1241,21 +1267,28 @@ struct MyCalendarView: View {
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
-    private func subAgendaRow(name: String, lead: String, sub: String, accent: Color, icon: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon).font(.system(size: 12)).foregroundStyle(accent).frame(width: 22)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(lead).font(.subheadline.weight(.medium)).lineLimit(1)
-                if !sub.isEmpty { Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+    private func subAgendaRow(name: String, lead: String, sub: String, accent: Color, icon: String,
+                              onOpen: (() -> Void)? = nil) -> some View {
+        Button { onOpen?() } label: {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 12)).foregroundStyle(accent).frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(lead).font(.subheadline.weight(.medium)).lineLimit(1)
+                    if !sub.isEmpty { Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+                }
+                Spacer(minLength: 4)
+                Text(name).font(.caption2).foregroundStyle(.secondary)
             }
-            Spacer(minLength: 4)
-            Text(name).font(.caption2).foregroundStyle(.secondary)
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 14).padding(.vertical, 9)
+        .buttonStyle(.plain)
+        .disabled(onOpen == nil)
     }
 
     private func subAgendaCheckRow(name: String, text: String, detail: String?, done: Bool,
                                    accent: Color, completedAt: Date? = nil, due: Date? = nil,
+                                   onOpen: (() -> Void)? = nil,
                                    toggle: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
             Button(action: toggle) {
@@ -1263,15 +1296,22 @@ struct MyCalendarView: View {
                     .font(.system(size: 16)).foregroundStyle(done ? Color.green : accent)
             }
             .buttonStyle(.plain)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(text).font(.subheadline.weight(.medium))
-                    .strikethrough(done, color: .secondary)
-                    .foregroundStyle(done ? .secondary : .primary).lineLimit(2)
-                if let detail { Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
-                if done { CompletionStamp(completedAt: completedAt, due: due) }
+            Button { onOpen?() } label: {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(text).font(.subheadline.weight(.medium))
+                            .strikethrough(done, color: .secondary)
+                            .foregroundStyle(done ? .secondary : .primary).lineLimit(2)
+                        if let detail { Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+                        if done { CompletionStamp(completedAt: completedAt, due: due) }
+                    }
+                    Spacer(minLength: 4)
+                    Text(name).font(.caption2).foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 4)
-            Text(name).font(.caption2).foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .disabled(onOpen == nil)
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
         .opacity(done ? 0.7 : 1)
@@ -1914,6 +1954,200 @@ fileprivate struct CalendarLocationSuggestion: Identifiable {
     }
     var iconColor: Color {
         source == .past ? .green : .blue
+    }
+}
+
+// MARK: - 行事曆事件預覽卡片（點事件先看卡片，右上角「編輯」才進入編輯）
+// 個人事件 / 里程碑可編輯；系統行事曆事件提供「在行事曆開啟」；生日 / 紀念日為唯讀資訊。
+
+struct CalendarEventCard: View {
+    enum Item: Identifiable {
+        case personalEvent(PersonalEvent)
+        case milestone(LifeMilestone)
+        case appleEvent(title: String, time: Date?, detail: String, date: Date)
+        case family(title: String, detail: String, isBirthday: Bool)
+
+        var id: String {
+            switch self {
+            case .personalEvent(let e): return "pe_\(e.id.uuidString)"
+            case .milestone(let m):     return "ms_\(m.id.uuidString)"
+            case .appleEvent(let t, let time, _, let d):
+                return "ek_\(t)_\(time?.timeIntervalSince1970 ?? 0)_\(d.timeIntervalSince1970)"
+            case .family(let t, _, let b): return "fam_\(b ? "b" : "a")_\(t)"
+            }
+        }
+    }
+
+    @Environment(\.dismiss) private var dismiss
+    let item: Item
+    @State private var showEdit = false
+
+    private static let dtFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
+    }()
+    private static let dFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E)"; return f
+    }()
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    titleBlock
+                    if !fields.isEmpty { infoCard }
+                    if !noteText.isEmpty { noteBlock }
+                    if case .appleEvent(_, _, _, let date) = item { openInCalendarButton(date) }
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle(navTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { trailingButton }
+            }
+            .sheet(isPresented: $showEdit) { editor }
+        }
+    }
+
+    @ViewBuilder private var trailingButton: some View {
+        switch item {
+        case .personalEvent, .milestone:
+            Button("編輯") { showEdit = true }.bold()
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder private var editor: some View {
+        switch item {
+        case .personalEvent(let e): PersonalEventEditor(initialDate: e.date, editing: e)
+        case .milestone(let m):     AddMilestoneView(editing: m)
+        default: EmptyView()
+        }
+    }
+
+    // MARK: - 標頭 / 樣式
+
+    private var navTitle: String {
+        switch item {
+        case .personalEvent: return "個人事件"
+        case .milestone:     return "里程碑"
+        case .appleEvent:    return "系統行事曆"
+        case .family(_, _, let b): return b ? "生日" : "紀念日"
+        }
+    }
+
+    private var accent: Color {
+        switch item {
+        case .personalEvent(let e): return e.kind == .meeting ? .indigo : .cyan
+        case .milestone:            return Color(red: 0.99, green: 0.65, blue: 0.30)
+        case .appleEvent:           return Color(red: 0.45, green: 0.65, blue: 0.95)
+        case .family(_, _, let b):  return b ? Color(red: 0.99, green: 0.74, blue: 0.80) : Color(red: 0.95, green: 0.55, blue: 0.65)
+        }
+    }
+
+    private var icon: String {
+        switch item {
+        case .personalEvent(let e): return e.kind == .meeting ? "person.3.fill" : "checklist"
+        case .milestone(let m):     return m.category.icon
+        case .appleEvent:           return "calendar"
+        case .family(_, _, let b):  return b ? "gift.fill" : "heart.fill"
+        }
+    }
+
+    private var titleText: String {
+        switch item {
+        case .personalEvent(let e): return e.title.isEmpty ? e.kind.rawValue : e.title
+        case .milestone(let m):     return m.title.isEmpty ? "里程碑" : m.title
+        case .appleEvent(let t, _, _, _): return t
+        case .family(let t, _, _):  return t
+        }
+    }
+
+    private var noteText: String {
+        switch item {
+        case .personalEvent(let e): return e.note
+        case .milestone(let m):     return m.note
+        default: return ""
+        }
+    }
+
+    /// 卡片欄位（標籤、值）
+    private var fields: [(String, String)] {
+        switch item {
+        case .personalEvent(let e):
+            var out: [(String, String)] = [("類型", e.kind.rawValue)]
+            out.append(("時間", e.durationMinutes > 0 ? Self.dtFmt.string(from: e.date) : Self.dFmt.string(from: e.date) + " 全日"))
+            if e.durationMinutes > 0 { out.append(("長度", "\(e.durationMinutes) 分鐘")) }
+            if e.recurrence != .none { out.append(("重複", e.recurrence.rawValue)) }
+            if !e.location.isEmpty { out.append(("地點", e.location)) }
+            return out
+        case .milestone(let m):
+            return [("分類", m.category.rawValue), ("日期", Self.dFmt.string(from: m.date))]
+        case .appleEvent(_, let time, let detail, let date):
+            var out: [(String, String)] = [("時間", time.map { Self.dtFmt.string(from: $0) } ?? (Self.dFmt.string(from: date) + " 全日"))]
+            if !detail.isEmpty { out.append(("詳情", detail)) }
+            return out
+        case .family(_, let detail, _):
+            return detail.isEmpty ? [] : [("資訊", detail)]
+        }
+    }
+
+    private var titleBlock: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 48, height: 48)
+                Image(systemName: icon).font(.system(size: 20, weight: .semibold)).foregroundStyle(accent)
+            }
+            Text(titleText).font(.title3.weight(.bold)).lineLimit(2)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var infoCard: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(fields.enumerated()), id: \.offset) { idx, f in
+                HStack {
+                    Text(f.0).font(.subheadline).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(f.1).font(.subheadline.weight(.medium)).multilineTextAlignment(.trailing)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                if idx < fields.count - 1 { Divider().padding(.leading, 14) }
+            }
+        }
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var noteBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("備註").font(.caption).foregroundStyle(.secondary)
+            Text(noteText).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func openInCalendarButton(_ date: Date) -> some View {
+        Button {
+            AppleCalendarBridge.shared.openInAppleCalendar(at: date)
+        } label: {
+            Label("在「行事曆」App 開啟", systemImage: "arrow.up.forward.app")
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(accent.opacity(0.12))
+                .foregroundStyle(accent)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
     }
 }
 
