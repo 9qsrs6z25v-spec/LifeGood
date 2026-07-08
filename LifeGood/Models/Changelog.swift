@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.51", build: 607, date: "2026/07/08", notes: [
+            "【靜態除錯 v23.51】針對性複查健康檔案／醫療地圖／旅遊地圖三項最新功能（HealthModels／HealthProfileEditView／MedicalMapView／TravelMapView，以及 LifeStore／UnifiedExport 中健康檔案的整合點）：① TravelMapView 空狀態的 emptyIconPulse 進場脈衝旗標缺少 onDisappear 歸零，足跡刪光後再新增地點、空狀態重新出現時脈衝動畫不會再播放；比照 FoodMapView 同名旗標既有規格補上重置。② MedicalMapView.body 內 placeAggregates（內含 Dictionary(grouping:) 聚合）在 isEmpty 判斷、地圖 ForEach、清單排序等處被呼叫 5 次，healthMilestones／insuranceMilestones（filter+sort）也各被呼叫 4 次，今年就診/醫療支出的 medicalExpenses 過濾亦重複執行；改為在 body 頂端各算一次後以參數往下傳給 clinicMapSection／milestoneSection／insuranceSection／summaryCard，對齊 TravelMapView／FoodMapView 既有的「單次計算、消除 body 內重複呼叫」規格。HealthModels、HealthProfileEditView、LifeStore、UnifiedExport 複查後邏輯皆完整（逐欄位容錯解碼、isLoading 批次保護、合併模式僅在本機無資料時填入），未發現新增問題。"
+        ]),
+        ChangelogEntry(version: "23.50", build: 606, date: "2026/07/08", notes: [
+            "【靜態除錯 v23.50】針對性複查 14 個 Models 檔案（AIService／AppleCalendarBridge／EInvoice／EInvoiceClient／EInvoiceSyncManager／FeatureGate／FinanceModels／Income／InvoiceCategorizer／KeychainHelper／NotificationManager／RemoteAdmin／RestaurantSearch／SubscriptionManager），修復兩處尚未套用逐筆容錯解碼慣例的檔案讀取：① EInvoiceSyncManager.loadHistory() 原本整批 try? JSONDecoder().decode([EInvoiceImportRecord].self, ...)，單一筆匯入紀錄損壞會讓整份電子發票匯入歷史消失；② InvoiceCategorizer.load() 原本整批解碼 [CategoryRule]，單一筆規則損壞會讓整份自動分類規則消失。兩者皆改為對齊 LifeStore/ExpenseStore/FinanceStore 既有規格：先試整批解碼，失敗再逐筆解、只跳過損壞元素。其餘 12 個檔案（含 CloudKit/網路請求節流、[weak self]、fatalError 守衛、O(n²) 迴圈）複查後皆已在先前多輪除錯中修復完成，未發現新增問題。"
+        ]),
         ChangelogEntry(version: "23.49", build: 605, date: "2026/07/07", notes: [
             "固定支出項目點擊行為調整：點項目改為先顯示預覽卡片（項目名稱、金額、週期、月均換算、起始日期、節稅、扣款目標、備註），右上角「編輯」才進入編輯畫面（原本為直接進編輯），與部屬項目的預覽卡一致。預覽卡即時讀取最新資料，編輯儲存後立即反映。"
         ]),

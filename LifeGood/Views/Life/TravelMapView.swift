@@ -256,6 +256,7 @@ struct TravelMapView: View {
                 emptyIconPulse = true
             }
         }
+        .onDisappear { emptyIconPulse = false }
     }
 
     // MARK: - 清單 sheet（統計卡 + 依縣市分組）

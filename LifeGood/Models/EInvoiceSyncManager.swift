@@ -226,9 +226,30 @@ final class EInvoiceSyncManager: ObservableObject {
     }
 
     private func loadHistory() {
-        guard let data = try? Data(contentsOf: historyURL),
-              let decoded = try? JSONDecoder().decode([EInvoiceImportRecord].self, from: data) else { return }
-        importHistory = decoded
+        guard let data = try? Data(contentsOf: historyURL) else { return }
+        // 逐筆容錯解碼：單一筆損壞的匯入紀錄不應讓整份發票匯入歷史消失
+        // （對齊 LifeStore/ExpenseStore/FinanceStore 既有的逐筆容錯規格）。
+        if let decoded = Self.lossyDecodeArray([EInvoiceImportRecord].self, from: data) {
+            importHistory = decoded
+        }
+    }
+
+    /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
+    private static func lossyDecodeArray<Element: Decodable>(_ type: [Element].Type, from data: Data) -> [Element]? {
+        let decoder = JSONDecoder()
+        if let items = try? decoder.decode([Element].self, from: data) { return items }
+        if let raw = try? decoder.decode([FailableDecodable<Element>].self, from: data) {
+            return raw.compactMap { $0.value }
+        }
+        return nil
+    }
+
+    /// 包裝單一元素，解碼失敗時不丟錯、回傳 nil
+    private struct FailableDecodable<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws {
+            value = try? T(from: decoder)
+        }
     }
 
     private func persistHistory() {

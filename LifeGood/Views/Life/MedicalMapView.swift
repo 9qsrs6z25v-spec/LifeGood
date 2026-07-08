@@ -38,17 +38,23 @@ struct MedicalMapView: View {
     private var health: HealthProfile { lifeStore.healthProfile }
 
     var body: some View {
-        NavigationStack {
+        // 各自算一次後往下傳參數，避免 placeAggregates（Dictionary(grouping:)）與
+        // healthMilestones / insuranceMilestones（filter+sort）在 body 內被多處重複呼叫。
+        let medExpenses = medicalExpenses
+        let places = placeAggregates(from: medExpenses)
+        let healthMs = healthMilestones
+        let insuranceMs = insuranceMilestones
+        return NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
-                    summaryCard
-                    if !placeAggregates.isEmpty { clinicMapSection }
+                    summaryCard(medExpenses)
+                    if !places.isEmpty { clinicMapSection(places) }
                     measurementSection
                     if !health.allergies.isEmpty { allergySection }
                     if !health.activeMedications.isEmpty { medicationSection }
                     checkupSection
-                    if !healthMilestones.isEmpty { milestoneSection }
-                    if !insuranceMilestones.isEmpty { insuranceSection }
+                    if !healthMs.isEmpty { milestoneSection(healthMs) }
+                    if !insuranceMs.isEmpty { insuranceSection(insuranceMs) }
                 }
                 .padding(.vertical, 16)
             }
@@ -73,8 +79,11 @@ struct MedicalMapView: View {
 
     // MARK: - 健康狀況總結英雄卡
 
-    private var summaryCard: some View {
-        VStack(spacing: 14) {
+    private func summaryCard(_ medExpenses: [Expense]) -> some View {
+        let thisYear = medExpenses.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .year) }
+        let thisYearVisits = thisYear.count
+        let thisYearSpend = thisYear.reduce(0) { $0 + $1.amount }
+        return VStack(spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("健康狀況總結").font(.caption).foregroundStyle(.white.opacity(0.85))
@@ -161,11 +170,11 @@ struct MedicalMapView: View {
 
     // MARK: - 就醫地圖
 
-    private var clinicMapSection: some View {
+    private func clinicMapSection(_ places: [MedicalPlaceAggregate]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("就醫地點", icon: "cross.case.fill", trailing: "\(placeAggregates.count) 處")
+            sectionHeader("就醫地點", icon: "cross.case.fill", trailing: "\(places.count) 處")
             Map(position: $cameraPosition) {
-                ForEach(placeAggregates) { place in
+                ForEach(places) { place in
                     Annotation(place.name, coordinate: place.coordinate) {
                         Button { selectedPlace = place } label: {
                             ZStack {
@@ -183,11 +192,11 @@ struct MedicalMapView: View {
             .padding(.horizontal)
 
             VStack(spacing: 0) {
-                ForEach(Array(placeAggregates.sorted { $0.visitCount > $1.visitCount }.enumerated()),
+                ForEach(Array(places.sorted { $0.visitCount > $1.visitCount }.enumerated()),
                         id: \.element.id) { idx, place in
                     Button { selectedPlace = place } label: { clinicRow(place) }
                         .buttonStyle(.plain)
-                    if idx < placeAggregates.count - 1 { Divider().padding(.leading, 52) }
+                    if idx < places.count - 1 { Divider().padding(.leading, 52) }
                 }
             }
         }
@@ -344,11 +353,11 @@ struct MedicalMapView: View {
 
     // MARK: - 健康里程碑
 
-    private var milestoneSection: some View {
+    private func milestoneSection(_ items: [LifeMilestone]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("健康里程碑", icon: "cross.fill", trailing: "\(healthMilestones.count) 筆")
+            sectionHeader("健康里程碑", icon: "cross.fill", trailing: "\(items.count) 筆")
             VStack(spacing: 0) {
-                ForEach(Array(healthMilestones.enumerated()), id: \.element.id) { idx, ms in
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, ms in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(ms.title.isEmpty ? "健康事件" : ms.title).font(.subheadline.weight(.medium))
                         Text(Self.dateFmt.string(from: ms.date)).font(.caption).foregroundStyle(.secondary)
@@ -358,7 +367,7 @@ struct MedicalMapView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14).padding(.vertical, 9)
-                    if idx < healthMilestones.count - 1 { Divider().padding(.leading, 14) }
+                    if idx < items.count - 1 { Divider().padding(.leading, 14) }
                 }
             }
         }
@@ -369,11 +378,11 @@ struct MedicalMapView: View {
 
     // MARK: - 醫療保障
 
-    private var insuranceSection: some View {
+    private func insuranceSection(_ items: [LifeMilestone]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("醫療保障", icon: "checkmark.shield.fill", trailing: "\(insuranceMilestones.count) 張")
+            sectionHeader("醫療保障", icon: "checkmark.shield.fill", trailing: "\(items.count) 張")
             VStack(spacing: 0) {
-                ForEach(Array(insuranceMilestones.enumerated()), id: \.element.id) { idx, ms in
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, ms in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(insuranceTitle(ms)).font(.subheadline.weight(.medium))
@@ -389,7 +398,7 @@ struct MedicalMapView: View {
                         }
                     }
                     .padding(.horizontal, 14).padding(.vertical, 9)
-                    if idx < insuranceMilestones.count - 1 { Divider().padding(.leading, 14) }
+                    if idx < items.count - 1 { Divider().padding(.leading, 14) }
                 }
             }
         }
@@ -427,8 +436,8 @@ struct MedicalMapView: View {
         expenseStore.expenses.filter { $0.expenseType == .variable && $0.variableCategory == .medical }
     }
 
-    private var placeAggregates: [MedicalPlaceAggregate] {
-        let located = medicalExpenses.filter { $0.placeLatitude != nil && $0.placeLongitude != nil }
+    private func placeAggregates(from medExpenses: [Expense]) -> [MedicalPlaceAggregate] {
+        let located = medExpenses.filter { $0.placeLatitude != nil && $0.placeLongitude != nil }
         let groups = Dictionary(grouping: located) { "\($0.title)|\($0.placeAddress ?? "")" }
         return groups.compactMap { key, exps in
             guard let first = exps.first, let lat = first.placeLatitude, let lon = first.placeLongitude else { return nil }
@@ -436,14 +445,6 @@ struct MedicalMapView: View {
                 id: key, name: first.title, address: first.placeAddress ?? "",
                 coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon), visits: exps)
         }
-    }
-
-    private var thisYearVisits: Int {
-        medicalExpenses.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .year) }.count
-    }
-    private var thisYearSpend: Double {
-        medicalExpenses.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .year) }
-            .reduce(0) { $0 + $1.amount }
     }
 
     private var healthMilestones: [LifeMilestone] {
