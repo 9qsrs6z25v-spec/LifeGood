@@ -511,24 +511,36 @@ struct AddVehicleView: View {
 
     private func deleteFixedExpenses(at offsets: IndexSet) {
         guard var vehicle = currentVehicle else { return }
+        // 先收集連結支出 ID，刪除前清除照片檔案，避免孤兒照片（對齊 VehicleView/VehicleDetailView.deleteVehicle 既有修復規格）
+        var linkedIds = Set<UUID>()
         for index in offsets {
             let item = fixedExpenses[index]
-            if let expId = item.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == expId }
-            }
+            if let expId = item.linkedExpenseId { linkedIds.insert(expId) }
             vehicle.fixedExpenses.removeAll { $0.id == item.id }
+        }
+        if !linkedIds.isEmpty {
+            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
+                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+            }
+            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
         }
         financeStore.update(vehicle)
     }
 
     private func deleteVariableExpenses(at offsets: IndexSet) {
         guard var vehicle = currentVehicle else { return }
+        // 先收集連結支出 ID，刪除前清除照片檔案，避免孤兒照片（對齊 VehicleView/VehicleDetailView.deleteVehicle 既有修復規格）
+        var linkedIds = Set<UUID>()
         for index in offsets {
             let item = variableExpenses[index]
-            if let expId = item.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == expId }
-            }
+            if let expId = item.linkedExpenseId { linkedIds.insert(expId) }
             vehicle.variableExpenses.removeAll { $0.id == item.id }
+        }
+        if !linkedIds.isEmpty {
+            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
+                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+            }
+            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
         }
         financeStore.update(vehicle)
     }

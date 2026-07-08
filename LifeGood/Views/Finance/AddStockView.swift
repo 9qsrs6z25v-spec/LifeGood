@@ -961,13 +961,20 @@ struct AddStockView: View {
             let pl = shares * (sp - price)
             if pl >= 0 {
                 incId = syncSoldIncome(stockId: stockId, name: trimmedName, profit: pl, date: soldDate, note: trimmedNote, existingId: incId)
-                if let eid = expId { expenseStore.expenses.removeAll { $0.id == eid }; expId = nil }
+                // 改用 expenseStore.delete(_:) 清除連結支出，確保附加照片一併移除，避免孤兒照片
+                if let eid = expId, let exp = expenseStore.expenses.first(where: { $0.id == eid }) {
+                    expenseStore.delete(exp)
+                }
+                expId = nil
             } else {
                 expId = syncSoldExpense(stockId: stockId, name: trimmedName, loss: abs(pl), date: soldDate, note: trimmedNote, existingId: expId)
                 if let iid = incId { expenseStore.incomes.removeAll { $0.id == iid }; incId = nil }
             }
         } else {
-            if let eid = expId { expenseStore.expenses.removeAll { $0.id == eid }; expId = nil }
+            if let eid = expId, let exp = expenseStore.expenses.first(where: { $0.id == eid }) {
+                expenseStore.delete(exp)
+            }
+            expId = nil
             if let iid = incId { expenseStore.incomes.removeAll { $0.id == iid }; incId = nil }
         }
 

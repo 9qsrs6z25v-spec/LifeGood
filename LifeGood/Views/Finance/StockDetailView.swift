@@ -366,6 +366,8 @@ struct StockDetailView: View {
 
     @ViewBuilder
     private var transactionsSection: some View {
+        // 只算一次，避免下方 isEmpty／count／ForEach 三處各自重新呼叫 .sorted
+        let sortedTransactions = sortedTransactions
         VStack(alignment: .leading, spacing: 0) {
             // 【美化】Capsule 色條 + subheadline.bold + 計數膠囊，對齊其他頁面區塊標題設計語言
             HStack(spacing: 10) {
@@ -557,7 +559,10 @@ struct StockDetailView: View {
         stock.dividends.sorted { $0.date > $1.date }
     }
 
+    @ViewBuilder
     private var dividendsSection: some View {
+        // 只算一次，避免下方 isEmpty／ForEach 兩處各自重新呼叫 .sorted
+        let sortedDividends = sortedDividends
         VStack(alignment: .leading, spacing: 0) {
             // 【美化】Capsule 色條 + subheadline.bold + 計數膠囊，對齊 transactionsSection 設計語言
             HStack(spacing: 10) {

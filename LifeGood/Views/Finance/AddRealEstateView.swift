@@ -1309,13 +1309,20 @@ struct AddRealEstateView: View {
             let pl = currentVal - price
             if pl >= 0 {
                 saleIncId = syncSaleIncome(reId: reId, name: trimmedName, profit: pl, date: soldDate, existingId: saleIncId)
-                if let eid = saleExpId { expenseStore.expenses.removeAll { $0.id == eid }; saleExpId = nil }
+                // 改用 expenseStore.delete(_:) 清除連結支出，確保附加照片一併移除，避免孤兒照片
+                if let eid = saleExpId, let exp = expenseStore.expenses.first(where: { $0.id == eid }) {
+                    expenseStore.delete(exp)
+                }
+                saleExpId = nil
             } else {
                 saleExpId = syncSaleExpense(reId: reId, name: trimmedName, loss: abs(pl), date: soldDate, existingId: saleExpId)
                 if let iid = saleIncId { expenseStore.incomes.removeAll { $0.id == iid }; saleIncId = nil }
             }
         } else {
-            if let eid = saleExpId { expenseStore.expenses.removeAll { $0.id == eid }; saleExpId = nil }
+            if let eid = saleExpId, let exp = expenseStore.expenses.first(where: { $0.id == eid }) {
+                expenseStore.delete(exp)
+            }
+            saleExpId = nil
             if let iid = saleIncId { expenseStore.incomes.removeAll { $0.id == iid }; saleIncId = nil }
         }
 
@@ -1410,12 +1417,19 @@ struct AddRealEstateView: View {
     private func deleteMortgageItems(at offsets: IndexSet) {
         guard var re = currentEstate else { return }
         let items = re.mortgageItems
+        // 這些項目可透過「已支出項目」點擊進入 AddExpenseView 附加照片，
+        // 刪除前先清除照片檔案避免孤兒檔（對齊 VehicleView/VehicleDetailView.deleteVehicle 既有修復規格）
+        var linkedIds = Set<UUID>()
         for index in offsets {
             let item = items[index]
-            if let expId = item.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == expId }
-            }
+            if let expId = item.linkedExpenseId { linkedIds.insert(expId) }
             re.mortgageItems.removeAll { $0.id == item.id }
+        }
+        if !linkedIds.isEmpty {
+            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
+                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+            }
+            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
         }
         financeStore.update(re)
     }
@@ -1423,12 +1437,17 @@ struct AddRealEstateView: View {
     private func deletePaidItems(at offsets: IndexSet) {
         guard var re = currentEstate else { return }
         let items = re.paidItems
+        var linkedIds = Set<UUID>()
         for index in offsets {
             let item = items[index]
-            if let expId = item.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == expId }
-            }
+            if let expId = item.linkedExpenseId { linkedIds.insert(expId) }
             re.paidItems.removeAll { $0.id == item.id }
+        }
+        if !linkedIds.isEmpty {
+            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
+                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+            }
+            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
         }
         financeStore.update(re)
     }
@@ -1436,12 +1455,17 @@ struct AddRealEstateView: View {
     private func deleteVariableItems(at offsets: IndexSet) {
         guard var re = currentEstate else { return }
         let items = re.variableExpenses
+        var linkedIds = Set<UUID>()
         for index in offsets {
             let item = items[index]
-            if let expId = item.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == expId }
-            }
+            if let expId = item.linkedExpenseId { linkedIds.insert(expId) }
             re.variableExpenses.removeAll { $0.id == item.id }
+        }
+        if !linkedIds.isEmpty {
+            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
+                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+            }
+            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
         }
         financeStore.update(re)
     }

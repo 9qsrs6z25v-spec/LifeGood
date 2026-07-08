@@ -129,8 +129,12 @@ struct SavingsInsuranceView: View {
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
                                         if subscription.isPremium {
-                                            if let linkedId = item.linkedExpenseId {
-                                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                                            // 改用 expenseStore.delete(_:) 而非直接 removeAll，
+                                            // 確保連結支出的附加照片一併清除，避免孤兒照片
+                                            // （對齊 StockDetailView.deleteStock 既有修復規格）
+                                            if let linkedId = item.linkedExpenseId,
+                                               let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
+                                                expenseStore.delete(exp)
                                             }
                                             store.deleteInsurance(item)
                                         } else {

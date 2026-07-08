@@ -2245,46 +2245,42 @@ struct RealEstateDetailView: View {
     }
 
     private func deleteEstate() {
+        // 收集所有連結支出 ID，先清除照片檔案再一次 removeAll，
+        // 對齊 VehicleDetailView.deleteVehicle 既有修復規格：
+        // ① 避免逐筆 removeAll 各自觸發 @Published didSet → save() + pushAll()
+        // ② 避免這些可透過 AddExpenseView 附加照片的項目（貸款/已支出/變動支出）刪除時孤兒化
+        var linkedIds = Set<UUID>()
         for m in estate.mortgageItems {
-            if let linkedId = m.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = m.linkedExpenseId { linkedIds.insert(linkedId) }
         }
         for p in estate.paidItems {
-            if let linkedId = p.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = p.linkedExpenseId { linkedIds.insert(linkedId) }
         }
         for ve in estate.variableExpenses {
-            if let linkedId = ve.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = ve.linkedExpenseId { linkedIds.insert(linkedId) }
         }
         for ins in estate.insuranceItems {
-            if let linkedId = ins.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = ins.linkedExpenseId { linkedIds.insert(linkedId) }
         }
         for asset in estate.propertyAssets {
-            if let linkedId = asset.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = asset.linkedExpenseId { linkedIds.insert(linkedId) }
         }
         for up in estate.utilityPayments {
-            if let linkedId = up.linkedExpenseId {
-                expenseStore.expenses.removeAll { $0.id == linkedId }
-            }
+            if let linkedId = up.linkedExpenseId { linkedIds.insert(linkedId) }
             if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
         }
         // 清除裝潢照片檔案（多張）
         for rp in estate.renovationPhotos {
             for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
         }
-        if let linkedId = estate.linkedExpenseId {
-            expenseStore.expenses.removeAll { $0.id == linkedId }
-        }
-        if let saleExpId = estate.saleLinkedExpenseId {
-            expenseStore.expenses.removeAll { $0.id == saleExpId }
+        if let linkedId = estate.linkedExpenseId { linkedIds.insert(linkedId) }
+        if let saleExpId = estate.saleLinkedExpenseId { linkedIds.insert(saleExpId) }
+
+        if !linkedIds.isEmpty {
+            for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
+                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+            }
+            expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
         }
         if let saleIncId = estate.saleLinkedIncomeId {
             expenseStore.incomes.removeAll { $0.id == saleIncId }
@@ -2326,7 +2322,9 @@ struct RealEstateDetailView: View {
             ms.bankDeposits?.removeAll { $0.linkedExpenseId == expense.id }
             lifeStore.update(ms)
         }
-        expenseStore.expenses.removeAll { $0.id == expense.id }
+        // 改用 expenseStore.delete(_:) 而非直接 removeAll，確保照片檔案一併清除，
+        // 避免孤兒照片（對齊 StockDetailView.deleteStock 既有修復規格）
+        expenseStore.delete(expense)
     }
 
     /// 複製一個 Expense（新 id、日期改為今天）並重新觸發房地產 / 銀行同步
@@ -2967,14 +2965,15 @@ struct UtilityPaymentEditor: View {
               let e = editing else { return }
         if let name = e.photoFileName { UtilityPayment.deletePhoto(name) }
         // 同步移除對應的變動支出與銀行扣款紀錄
-        if let linkedId = e.linkedExpenseId {
-            if let exp = expenseStore.expenses.first(where: { $0.id == linkedId }),
-               let bankId = exp.linkedBankMilestoneId,
+        if let linkedId = e.linkedExpenseId,
+           let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
+            if let bankId = exp.linkedBankMilestoneId,
                var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
                 ms.bankDeposits?.removeAll { $0.linkedExpenseId == linkedId }
                 lifeStore.update(ms)
             }
-            expenseStore.expenses.removeAll { $0.id == linkedId }
+            // 改用 expenseStore.delete(_:) 而非直接 removeAll，確保附加照片一併清除，避免孤兒照片
+            expenseStore.delete(exp)
         }
         estate.utilityPayments.removeAll { $0.id == e.id }
         let financeStore = store
