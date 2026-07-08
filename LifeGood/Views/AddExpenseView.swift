@@ -2170,7 +2170,9 @@ struct AddExpenseView: View {
         let amount = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
 
         let expenseId = editingExpense?.id ?? generatedNewExpenseId
+        // 正向連結遺失時，改用反向連結（儲蓄險記得連到本支出）找回既有保單，避免重存時建立重複保單
         var linkedInsId = editingExpense?.linkedInsuranceId
+            ?? financeStore.insurances.first(where: { $0.linkedExpenseId == expenseId })?.id
         var linkedStkId = editingExpense?.linkedStockId
         var linkedREId = editingExpense?.linkedRealEstateId
         var linkedVehId = editingExpense?.linkedVehicleId
@@ -2702,9 +2704,9 @@ struct AddExpenseView: View {
         selectedCreditCardMilestoneId = expense.linkedCreditCardMilestoneId
         note = expense.note
 
-        // 載入連結的儲蓄險
-        if let linkedId = expense.linkedInsuranceId,
-           let linked = financeStore.insurances.first(where: { $0.id == linkedId }) {
+        // 載入連結的儲蓄險：先用正向連結，找不到再用反向連結（相容早期連結遺失的資料）
+        if let linked = financeStore.insurances.first(where: { $0.id == expense.linkedInsuranceId })
+                        ?? financeStore.insurances.first(where: { $0.linkedExpenseId == expense.id }) {
             insCompany = linked.company
             insCurrencyCode = linked.currencyCode
             insRateText = linked.annualRate > 0 ? String(format: "%.2f", linked.annualRate) : ""

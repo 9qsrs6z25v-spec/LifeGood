@@ -888,12 +888,16 @@ private struct FixedExpenseCard: View {
     /// 讀取 store 最新版本，編輯儲存後即時反映（找不到才退回快照）
     private var current: Expense { store.expenses.first { $0.id == expense.id } ?? expense }
 
-    /// 若此筆為儲蓄險固定支出，取其連結的理財儲蓄險（利率等資料存於此）
+    /// 若此筆為儲蓄險固定支出，取其連結的理財儲蓄險（利率等資料存於此）。
+    /// 先用正向連結（linkedInsuranceId），找不到再用反向連結（儲蓄險記得連到本支出），
+    /// 以相容早期連結遺失／子分類未存到的舊資料——只要有連結儲蓄險就視為儲蓄險。
     private var linkedSavings: SavingsInsurance? {
-        guard current.fixedCategory == .insurance,
-              current.insuranceSubCategory == .savings,
-              let id = current.linkedInsuranceId else { return nil }
-        return financeStore.insurances.first { $0.id == id }
+        guard current.fixedCategory == .insurance else { return nil }
+        if let id = current.linkedInsuranceId,
+           let ins = financeStore.insurances.first(where: { $0.id == id }) {
+            return ins
+        }
+        return financeStore.insurances.first { $0.linkedExpenseId == current.id }
     }
 
     private static let dateFmt: DateFormatter = {
