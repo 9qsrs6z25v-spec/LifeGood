@@ -26,13 +26,17 @@ struct MacaronDatePicker: View {
     }()
 
     private var relativeDays: [(label: String, offset: Int, color: Color)] {
-        [
+        let all: [(label: String, offset: Int, color: Color)] = [
             ("前天", -2, Color(red: 0.66, green: 0.86, blue: 0.74)),  // mint
             ("昨天", -1, Color(red: 0.78, green: 0.71, blue: 0.89)),  // lavender
             ("今天",  0, Color(red: 0.99, green: 0.80, blue: 0.65)),  // peach
             ("明天",  1, Color(red: 0.99, green: 0.92, blue: 0.65)),  // butter
             ("後天",  2, Color(red: 0.99, green: 0.74, blue: 0.80)),  // rose
         ]
+        // allowFuture 原本宣告但未實際套用：未來日快捷鍵與下方 DatePicker 一律允許選未來日期，
+        // 與參數文件「是否允許選未來日期」的意圖不符。改為實際依旗標過濾/限制。
+        guard !allowFuture else { return all }
+        return all.filter { $0.offset <= 0 }
     }
 
     var body: some View {
@@ -64,9 +68,15 @@ struct MacaronDatePicker: View {
 
                 Spacer()
 
-                DatePicker("選擇日期", selection: $selectedDate, displayedComponents: .date)
-                    .datePickerStyle(.compact)
-                    .labelsHidden()
+                Group {
+                    if allowFuture {
+                        DatePicker("選擇日期", selection: $selectedDate, displayedComponents: .date)
+                    } else {
+                        DatePicker("選擇日期", selection: $selectedDate, in: ...Date(), displayedComponents: .date)
+                    }
+                }
+                .datePickerStyle(.compact)
+                .labelsHidden()
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)

@@ -348,7 +348,10 @@ struct SubordinateRosterView: View {
     // MARK: 棋盤格
 
     private var gridArea: some View {
-        GeometryReader { geo in
+        // 只算一次：rosterRows 內部對 lifeStore.subordinates 做 filter+sort+Dictionary(grouping:)，
+        // 原本被凍結姓名欄與日格區塊各自的 ForEach 各重新呼叫一次，改為算一次往下傳參數。
+        let rows = rosterRows
+        return GeometryReader { geo in
             let bodyWidth = CGFloat(days.count) * cellW
             let viewportW = max(0, geo.size.width - nameColWidth)   // 日格可視寬度（扣掉凍結姓名欄）
             VStack(spacing: 0) {
@@ -359,7 +362,7 @@ struct SubordinateRosterView: View {
                 ScrollView(.vertical, showsIndicators: true) {
                     HStack(alignment: .top, spacing: 0) {
                         VStack(spacing: 0) {
-                            ForEach(rosterRows) { row in
+                            ForEach(rows) { row in
                                 switch row {
                                 case .header(let area): nameHeaderCell(area)
                                 case .person(let p):    nameCell(p)
@@ -368,7 +371,7 @@ struct SubordinateRosterView: View {
                         }
                         .frame(width: nameColWidth)
 
-                        rosterHScroll(bodyWidth: bodyWidth)
+                        rosterHScroll(bodyWidth: bodyWidth, rows: rows)
                             .frame(width: viewportW)
                     }
                 }
@@ -411,9 +414,9 @@ struct SubordinateRosterView: View {
 
     /// 日格水平捲動區：開啟時自動捲到今天；iOS 18 直接讀 contentOffset 同步表頭。
     @ViewBuilder
-    private func rosterHScroll(bodyWidth: CGFloat) -> some View {
+    private func rosterHScroll(bodyWidth: CGFloat, rows: [RosterRow]) -> some View {
         ScrollViewReader { proxy in
-            hScrollContent(bodyWidth: bodyWidth)
+            hScrollContent(bodyWidth: bodyWidth, rows: rows)
                 .onAppear {
                     guard !didAutoScroll, let today = todayInMonth else { return }
                     didAutoScroll = true
@@ -426,7 +429,7 @@ struct SubordinateRosterView: View {
     }
 
     @ViewBuilder
-    private func hScrollContent(bodyWidth: CGFloat) -> some View {
+    private func hScrollContent(bodyWidth: CGFloat, rows: [RosterRow]) -> some View {
         let content = ScrollView(.horizontal, showsIndicators: true) {
             VStack(spacing: 0) {
                 // 隱形錨點列（height 0）：供 ScrollViewReader 自動捲到今天
@@ -435,7 +438,7 @@ struct SubordinateRosterView: View {
                         Color.clear.frame(width: cellW, height: 0).id(dayColID(d))
                     }
                 }
-                ForEach(rosterRows) { row in
+                ForEach(rows) { row in
                     switch row {
                     case .header:        gridHeaderRow()
                     case .person(let p): HStack(spacing: 0) { ForEach(days, id: \.self) { d in cell(p, d) } }
