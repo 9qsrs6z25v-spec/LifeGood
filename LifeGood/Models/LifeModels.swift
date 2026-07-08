@@ -737,7 +737,15 @@ struct LifeMilestone: Identifiable, Codable {
         let billCloseOffset = expenseDay > billDay ? 1 : 0
         let paymentOffset = payDay <= billDay ? 1 : 0
         components.month = (components.month ?? 1) + billCloseOffset + paymentOffset
-        components.day = payDay
+        // Calendar.date(from:) 對超出目標月天數的 day（如小月填 31 日）不會回傳 nil，
+        // 而是靜默溢位到下個月，導致扣款日與月份彙總跑到錯誤的月份。
+        // 比照 MyCalendarView.annualOccurrence 的做法，先把 day 截至目標月實際天數。
+        if let refDate = calendar.date(from: DateComponents(year: components.year, month: components.month, day: 1)) {
+            let maxDay = calendar.range(of: .day, in: .month, for: refDate)?.count ?? payDay
+            components.day = min(payDay, maxDay)
+        } else {
+            components.day = payDay
+        }
         return calendar.date(from: components) ?? expenseDate
     }
 }

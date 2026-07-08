@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.61", build: 617, date: "2026/07/08", notes: [
+            "【靜態除錯 v23.61】針對從未被靜態掃描覆蓋過的 LifeModels／AppMode／AddIncomeView 三個檔案複查強制解包／Optional／型別／index 越界、retain cycle／競態條件、UI 閃爍、效能瓶頸與日期邊界，修復一處日期溢位問題：LifeMilestone.creditCardWithdrawalDate（信用卡實際扣款日推算，用於行事曆/存款/帳單月份彙總多處）直接把使用者輸入的繳款日（1～31，未限制上限）指定為 DateComponents.day 再轉換，若繳款日落在天數較少的月份（如小月填 31 日、或 2 月），Calendar.date(from:) 不會回傳 nil，而是靜默溢位到下個月 1 日以後，導致扣款日期與月份彙總跑到錯誤的月份；與先前已修復的 MyCalendarView.annualOccurrence（生日 2/29 溢位）屬同一類日期邊界問題，但此檔案先前未被掃到。改為比照該做法，換算前先查目標月實際天數並將 day 截頂。AppMode（純列舉）、AddIncomeView（金額解析皆有 guard、無強制解包、篩選 milestones 陣列規模小不構成效能問題）複查後未發現問題。",
+        ]),
         ChangelogEntry(version: "23.60", build: 616, date: "2026/07/08", notes: [
             "修正部分儲蓄險固定支出卡片不顯示儲蓄險樣式（甘特圖/利率/總支出）：原本只用『正向連結（linkedInsuranceId）＋子分類為儲蓄險』判斷，早期連結遺失或子分類未存到的項目就查不到連結保單而不顯示；改為找不到正向連結時，改用『反向連結』（理財儲蓄險記得自己連到哪筆支出）找回，只要有連結保單就視為儲蓄險。",
             "同步強化編輯畫面：載入儲蓄險欄位（利率/繳費/起訖日）與儲存時，皆改為正向找不到就用反向連結找回既有保單，避免利率帶不出來、以及重新儲存時建立重複保單。"
