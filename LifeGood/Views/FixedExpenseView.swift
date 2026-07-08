@@ -914,6 +914,7 @@ private struct FixedExpenseCard: View {
                     titleBlock
                     infoCard
                     if !current.note.isEmpty { noteBlock }
+                    photoSection
                 }
                 .padding()
             }
@@ -987,6 +988,32 @@ private struct FixedExpenseCard: View {
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// 帳單照片：可拍照 / 從相簿新增，直接寫回此筆固定支出並持久化（含 iCloud 同步）
+    private var photoSection: some View {
+        MultiPhotoGallery(
+            fileNames: photoBinding,
+            urlFor: { Expense.photoURL(for: $0) },
+            onSaveImage: { Expense.savePhoto($0, expenseId: expense.id) },
+            onDeleteFile: { Expense.deletePhoto($0) },
+            title: "帳單照片"
+        )
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// 綁定到此筆支出的照片檔名陣列：新增 / 刪除即透過 store.update 寫回並存檔
+    private var photoBinding: Binding<[String]> {
+        Binding(
+            get: { current.photoFileNames },
+            set: { newNames in
+                var e = current
+                e.photoFileNames = newNames
+                store.update(e)
+            }
+        )
     }
 
     private func field(_ label: String, _ value: String) -> some View {
