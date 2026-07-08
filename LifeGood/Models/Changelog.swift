@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.57", build: 613, date: "2026/07/08", notes: [
+            "修正儲蓄險利率『看起來消失』：固定支出的儲蓄險，其複利年利率是存在連結的理財儲蓄險中；先前新增的預覽卡片沒有顯示這些欄位，導致點開項目看不到利率、誤以為沒存到。預覽卡片新增「儲蓄險」明細區塊，顯示複利年利率、幣別、繳費週期、起始 / 到期日與期滿預估領回（資料仍可由右上角『編輯』修改）。"
+        ]),
         ChangelogEntry(version: "23.56", build: 612, date: "2026/07/08", notes: [
             "固定支出預覽卡片新增「帳單照片」：可直接拍照或從相簿新增帳單 / 收據照片留存，點縮圖可全螢幕檢視、可刪除。照片即時寫回該筆固定支出並持久化（含 iCloud 同步），沿用全 App 共用的多照片元件。"
         ]),

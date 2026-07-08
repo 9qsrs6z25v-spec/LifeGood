@@ -880,12 +880,21 @@ struct FixedExpenseRow: View {
 private struct FixedExpenseCard: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var financeStore: FinanceStore
     @Environment(\.dismiss) private var dismiss
     let expense: Expense
     @State private var showEdit = false
 
     /// 讀取 store 最新版本，編輯儲存後即時反映（找不到才退回快照）
     private var current: Expense { store.expenses.first { $0.id == expense.id } ?? expense }
+
+    /// 若此筆為儲蓄險固定支出，取其連結的理財儲蓄險（利率等資料存於此）
+    private var linkedSavings: SavingsInsurance? {
+        guard current.fixedCategory == .insurance,
+              current.insuranceSubCategory == .savings,
+              let id = current.linkedInsuranceId else { return nil }
+        return financeStore.insurances.first { $0.id == id }
+    }
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
@@ -913,6 +922,7 @@ private struct FixedExpenseCard: View {
                 VStack(alignment: .leading, spacing: 16) {
                     titleBlock
                     infoCard
+                    if linkedSavings != nil { savingsSection }
                     if !current.note.isEmpty { noteBlock }
                     photoSection
                 }
@@ -988,6 +998,35 @@ private struct FixedExpenseCard: View {
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// 儲蓄險明細：顯示連結理財儲蓄險的複利年利率、繳費週期、起訖日與期滿預估
+    @ViewBuilder
+    private var savingsSection: some View {
+        if let ins = linkedSavings {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("儲蓄險").font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 14).padding(.top, 10)
+                VStack(spacing: 0) {
+                    field("複利年利率", ins.annualRate > 0 ? String(format: "%.2f%%", ins.annualRate) : "—")
+                    Divider().padding(.leading, 14)
+                    field("幣別", ins.currencyCode)
+                    Divider().padding(.leading, 14)
+                    field("繳費週期", ins.paymentPeriod.rawValue)
+                    Divider().padding(.leading, 14)
+                    field("起始日", Self.dateFmt.string(from: ins.startDate))
+                    Divider().padding(.leading, 14)
+                    field("到期日", Self.dateFmt.string(from: ins.maturityDate))
+                    if ins.expectedReturn > 0 {
+                        Divider().padding(.leading, 14)
+                        field("期滿預估領回", "\(ins.currencyCode) " + fmtShort(ins.expectedReturn))
+                    }
+                }
+            }
+            .padding(.bottom, 6)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
     }
 
     /// 帳單照片：可拍照 / 從相簿新增，直接寫回此筆固定支出並持久化（含 iCloud 同步）
