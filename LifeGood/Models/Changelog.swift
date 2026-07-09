@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.63", build: 619, date: "2026/07/09", notes: [
+            "醫療地圖（MedicalMapView）美化：過敏、用藥、健檢、健康里程碑、醫療保障列行加入 36pt 漸層圓形圖示（對齊健康檔案編輯畫面規格），量測趨勢數值改為粉色徽章呈現；金額顯示改用全 App 共用的萬/億智慧量級格式，取代原本只到「萬」量級的重複程式碼；空狀態提示加入圖示；BMI／醫療支出大字數值補上自適應縮放避免截斷；未變動地圖標註、資料聚合或任何既有商業邏輯。"
+        ]),
         ChangelogEntry(version: "23.62", build: 618, date: "2026/07/09", notes: [
             "健康檔案編輯畫面（HealthProfileEditView）美化：七個區塊統一改用漸層色條 + 彩色圖示 section header（基本資料/病史/過敏/用藥/量測/健檢/備註各自配色），過敏、用藥、健檢列行加入 36pt 漸層圓形圖示，量測數值改用彩色徽章呈現，五個列表補上空狀態提示列，BMI 數值字級放大並加入自適應縮放避免大字級裝置被截斷；未變動任何草稿寫回、刪除等既有邏輯。"
         ]),

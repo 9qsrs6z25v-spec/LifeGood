@@ -9,6 +9,29 @@ import UIKit
 //   • 醫療 / 意外保險（財富里程碑中 insuranceType 為醫療/意外者）
 // 主題色為醫療青綠（teal）。
 
+// MARK: - 美化紀錄（MedicalMapView）2026-07
+// [2026-07] 首次美化方向：
+//   1. 金額顯示改用共用 Double.ntdWanString（FinanceModels.swift），支援「萬 / 億」
+//      量級自動切換（原本每個 struct 各自維護一份只到「萬」量級的 fmtShort/decimalFmt，
+//      已移除重複程式碼），對齊全 App 金額顯示規格，避免醫療支出達億量級時顯示過長。
+//   2. 新增 rowIcon(_:color:) 輔助函式：36pt 漸層圓形圖示（LinearGradient 0.22→0.09 +
+//      shadow opacity 0.18 + 細邊框），套用到過敏／用藥／健檢／健康里程碑／醫療保障
+//      列行，對齊 HealthProfileEditView.rowIcon 規格，取代原本純文字列，提升可掃視性；
+//      各列主題色沿用 HealthProfileEditView 對照：過敏(orange)／用藥(blue)／
+//      健檢(purple)／里程碑・保障(teal 主色)。
+//   3. 量測趨勢列：日期加入 caption2 calendar 圖示（粉色），數值改為粉色 metric chip
+//      （底色 10% + 細邊框），取代純文字串接，對齊 HealthProfileEditView 量測列規格。
+//   4. 加了圖示的列行同步將 Divider 左內縮從 14pt 調整為 62pt（14 邊距 + 36 圖示 +
+//      12 間距），使分隔線與文字對齊，非圖示列（服用中藥物無圖示時對齊需求不同）維持原值。
+//   5. emptyHint 加入圖示參數，對齊 SubordinateRosterView / HealthProfileEditView 空
+//      狀態列規格（圖示 + 說明文字），取代純文字提示。
+//   6. BMI／今年醫療支出等大字數值補上 minimumScaleFactor，避免大字級裝置或億量級金額
+//      被截斷，但不縮到無法辨識。
+//   7. MedicalPlaceDetailSheet 小節標題（照片/收據、就診紀錄）改用 Label 加圖示並統一
+//      teal 主題色；關閉按鈕維持 topBarLeading（左側），符合全 App 一致慣例。
+//   8. 未變動任何地圖標註、資料聚合（placeAggregates／healthMilestones／
+//      insuranceMilestones）、篩選或排序等既有商業邏輯。
+
 // MARK: - 就醫地點聚合
 
 struct MedicalPlaceAggregate: Identifiable {
@@ -92,6 +115,7 @@ struct MedicalMapView: View {
                             Text(String(format: "BMI %.1f", bmi))
                                 .font(.system(size: 28, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
+                                .lineLimit(1).minimumScaleFactor(0.7)
                             if let cat = health.bmiCategory {
                                 Text(cat).font(.caption.weight(.semibold))
                                     .foregroundStyle(.white)
@@ -103,6 +127,7 @@ struct MedicalMapView: View {
                         Text("尚未建立健康檔案")
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
+                            .lineLimit(1).minimumScaleFactor(0.8)
                     }
                 }
                 Spacer()
@@ -133,8 +158,9 @@ struct MedicalMapView: View {
                 Label("今年醫療支出", systemImage: "dollarsign.circle.fill")
                     .font(.caption).foregroundStyle(.white.opacity(0.85))
                 Spacer()
-                Text("NT$ \(fmtShort(thisYearSpend))")
+                Text(thisYearSpend.ntdWanString)
                     .font(.subheadline.weight(.bold)).foregroundStyle(.white)
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
         }
         .padding(20)
@@ -196,7 +222,7 @@ struct MedicalMapView: View {
                         id: \.element.id) { idx, place in
                     Button { selectedPlace = place } label: { clinicRow(place) }
                         .buttonStyle(.plain)
-                    if idx < places.count - 1 { Divider().padding(.leading, 52) }
+                    if idx < places.count - 1 { Divider().padding(.leading, 62) }
                 }
             }
         }
@@ -208,18 +234,16 @@ struct MedicalMapView: View {
 
     private func clinicRow(_ place: MedicalPlaceAggregate) -> some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(accent.opacity(0.14)).frame(width: 36, height: 36)
-                Image(systemName: "cross.case").font(.system(size: 15)).foregroundStyle(accent)
-            }
+            rowIcon("cross.case", color: accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(place.name.isEmpty ? "就醫地點" : place.name)
                     .font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
                 Text("就診 \(place.visitCount) 次").font(.caption2).foregroundStyle(.secondary)
             }
             Spacer()
-            Text("NT$ \(fmtShort(place.totalSpent))")
+            Text(place.totalSpent.ntdWanString)
                 .font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.8)
         }
         .padding(.horizontal, 14).padding(.vertical, 10).contentShape(Rectangle())
     }
@@ -231,14 +255,19 @@ struct MedicalMapView: View {
         return VStack(alignment: .leading, spacing: 8) {
             sectionHeader("量測趨勢", icon: "waveform.path.ecg", trailing: "\(recent.count) 筆")
             if recent.isEmpty {
-                emptyHint("尚無量測；點右上『健康檔案』新增體重 / 血壓")
+                emptyHint("尚無量測；點右上『健康檔案』新增體重 / 血壓", icon: "waveform.path.ecg")
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(recent.prefix(6).enumerated()), id: \.element.id) { idx, m in
-                        HStack {
+                        HStack(spacing: 8) {
+                            Image(systemName: "calendar").font(.caption2).foregroundStyle(.pink)
                             Text(Self.dateFmt.string(from: m.date)).font(.subheadline)
                             Spacer()
-                            Text(measurementSummary(m)).font(.caption).foregroundStyle(.secondary)
+                            Text(measurementSummary(m))
+                                .font(.caption2.weight(.semibold)).foregroundStyle(.pink)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Color.pink.opacity(0.10)).clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.pink.opacity(0.20), lineWidth: 0.6))
                         }
                         .padding(.horizontal, 14).padding(.vertical, 9)
                         if idx < min(recent.count, 6) - 1 { Divider().padding(.leading, 14) }
@@ -258,7 +287,8 @@ struct MedicalMapView: View {
             sectionHeader("過敏", icon: "allergens", trailing: "\(health.allergies.count) 項")
             VStack(spacing: 0) {
                 ForEach(Array(health.allergies.enumerated()), id: \.element.id) { idx, a in
-                    HStack {
+                    HStack(spacing: 12) {
+                        rowIcon("allergens", color: .orange)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(a.name.isEmpty ? "未命名" : a.name).font(.subheadline.weight(.medium))
                             if !a.reaction.isEmpty {
@@ -270,10 +300,11 @@ struct MedicalMapView: View {
                             Text(s.rawValue).font(.caption2).foregroundStyle(.orange)
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(Color.orange.opacity(0.12)).clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
                         }
                     }
                     .padding(.horizontal, 14).padding(.vertical, 9)
-                    if idx < health.allergies.count - 1 { Divider().padding(.leading, 14) }
+                    if idx < health.allergies.count - 1 { Divider().padding(.leading, 62) }
                 }
             }
         }
@@ -290,7 +321,8 @@ struct MedicalMapView: View {
             sectionHeader("服用中藥物", icon: "pills.fill", trailing: "\(meds.count) 種")
             VStack(spacing: 0) {
                 ForEach(Array(meds.enumerated()), id: \.element.id) { idx, m in
-                    HStack {
+                    HStack(spacing: 12) {
+                        rowIcon("pills.fill", color: .blue)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(m.name.isEmpty ? "未命名藥物" : m.name).font(.subheadline.weight(.medium))
                             if !m.dosage.isEmpty {
@@ -300,7 +332,7 @@ struct MedicalMapView: View {
                         Spacer()
                     }
                     .padding(.horizontal, 14).padding(.vertical, 9)
-                    if idx < meds.count - 1 { Divider().padding(.leading, 14) }
+                    if idx < meds.count - 1 { Divider().padding(.leading, 62) }
                 }
             }
         }
@@ -325,23 +357,26 @@ struct MedicalMapView: View {
                 .padding(.horizontal, 14).padding(.vertical, 8)
             }
             if checkups.isEmpty {
-                emptyHint("尚無健檢紀錄；點右上『健康檔案』新增")
+                emptyHint("尚無健檢紀錄；點右上『健康檔案』新增", icon: "stethoscope")
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(checkups.prefix(6).enumerated()), id: \.element.id) { idx, c in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(c.title.isEmpty ? "健檢" : c.title).font(.subheadline.weight(.medium))
-                            HStack(spacing: 6) {
-                                Text(Self.dateFmt.string(from: c.date))
-                                if !c.place.isEmpty { Text("· \(c.place)") }
-                            }.font(.caption).foregroundStyle(.secondary)
-                            if !c.result.isEmpty {
-                                Text(c.result).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        HStack(alignment: .top, spacing: 12) {
+                            rowIcon("stethoscope", color: .purple)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(c.title.isEmpty ? "健檢" : c.title).font(.subheadline.weight(.medium))
+                                HStack(spacing: 6) {
+                                    Text(Self.dateFmt.string(from: c.date))
+                                    if !c.place.isEmpty { Text("· \(c.place)") }
+                                }.font(.caption).foregroundStyle(.secondary)
+                                if !c.result.isEmpty {
+                                    Text(c.result).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.vertical, 9)
-                        if idx < min(checkups.count, 6) - 1 { Divider().padding(.leading, 14) }
+                        if idx < min(checkups.count, 6) - 1 { Divider().padding(.leading, 62) }
                     }
                 }
             }
@@ -358,16 +393,19 @@ struct MedicalMapView: View {
             sectionHeader("健康里程碑", icon: "cross.fill", trailing: "\(items.count) 筆")
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, ms in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(ms.title.isEmpty ? "健康事件" : ms.title).font(.subheadline.weight(.medium))
-                        Text(Self.dateFmt.string(from: ms.date)).font(.caption).foregroundStyle(.secondary)
-                        if !ms.note.isEmpty {
-                            Text(ms.note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    HStack(alignment: .top, spacing: 12) {
+                        rowIcon("cross.fill", color: accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ms.title.isEmpty ? "健康事件" : ms.title).font(.subheadline.weight(.medium))
+                            Text(Self.dateFmt.string(from: ms.date)).font(.caption).foregroundStyle(.secondary)
+                            if !ms.note.isEmpty {
+                                Text(ms.note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14).padding(.vertical, 9)
-                    if idx < items.count - 1 { Divider().padding(.leading, 14) }
+                    if idx < items.count - 1 { Divider().padding(.leading, 62) }
                 }
             }
         }
@@ -383,7 +421,8 @@ struct MedicalMapView: View {
             sectionHeader("醫療保障", icon: "checkmark.shield.fill", trailing: "\(items.count) 張")
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, ms in
-                    HStack {
+                    HStack(spacing: 12) {
+                        rowIcon("checkmark.shield.fill", color: accent)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(insuranceTitle(ms)).font(.subheadline.weight(.medium))
                             if let company = ms.insuranceCompany, !company.isEmpty {
@@ -395,10 +434,11 @@ struct MedicalMapView: View {
                             Text(t.rawValue).font(.caption2).foregroundStyle(accent)
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(accent.opacity(0.12)).clipShape(Capsule())
+                                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                         }
                     }
                     .padding(.horizontal, 14).padding(.vertical, 9)
-                    if idx < items.count - 1 { Divider().padding(.leading, 14) }
+                    if idx < items.count - 1 { Divider().padding(.leading, 62) }
                 }
             }
         }
@@ -424,10 +464,26 @@ struct MedicalMapView: View {
         .padding(.horizontal)
     }
 
-    private func emptyHint(_ text: String) -> some View {
-        Text(text).font(.caption).foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14).padding(.vertical, 10)
+    private func emptyHint(_ text: String, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).font(.caption).foregroundStyle(.tertiary)
+            Text(text).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    /// 依主題色繪製 36pt 漸層圓形圖示，對齊 HealthProfileEditView.rowIcon 列行圖示規格
+    private func rowIcon(_ systemName: String, color: Color) -> some View {
+        ZStack {
+            Circle()
+                .fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0.09)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 36, height: 36)
+                .shadow(color: color.opacity(0.18), radius: 5, x: 0, y: 2)
+            Circle().stroke(color.opacity(0.18), lineWidth: 1).frame(width: 36, height: 36)
+            Image(systemName: systemName).font(.system(size: 14, weight: .semibold)).foregroundStyle(color)
+        }
     }
 
     // MARK: - 資料
@@ -482,17 +538,6 @@ struct MedicalMapView: View {
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }
 
-    private static let decimalFmt: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
-    }()
-    private func fmtShort(_ v: Double) -> String {
-        if abs(v) >= 10_000 {
-            let s = Self.decimalFmt.string(from: NSNumber(value: v / 10_000)) ?? "0"
-            return "\(s)萬"
-        }
-        return Self.decimalFmt.string(from: NSNumber(value: v)) ?? "0"
-    }
-
     static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
     }()
@@ -529,7 +574,7 @@ struct MedicalPlaceDetailSheet: View {
 
                     HStack(spacing: 0) {
                         kpi("就診", "\(place.visitCount) 次")
-                        kpi("累計", "NT$ \(fmtShort(place.totalSpent))")
+                        kpi("累計", place.totalSpent.ntdWanString)
                         if let last = place.lastVisit { kpi("最近", Self.dateFmt.string(from: last)) }
                     }
                     .padding(.vertical, 12)
@@ -562,7 +607,8 @@ struct MedicalPlaceDetailSheet: View {
 
     private var photoRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("照片 / 收據").font(.subheadline.weight(.bold)).padding(.horizontal)
+            Label("照片 / 收據", systemImage: "photo.on.rectangle.angled")
+                .font(.subheadline.weight(.bold)).foregroundStyle(accent).padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(place.photoNames, id: \.self) { name in
@@ -590,14 +636,17 @@ struct MedicalPlaceDetailSheet: View {
     private var visitsList: some View {
         let sorted = place.visits.sorted { $0.date > $1.date }
         return VStack(alignment: .leading, spacing: 8) {
-            Text("就診紀錄").font(.subheadline.weight(.bold)).padding(.horizontal)
+            Label("就診紀錄", systemImage: "list.bullet.clipboard")
+                .font(.subheadline.weight(.bold)).foregroundStyle(accent).padding(.horizontal)
             VStack(spacing: 0) {
                 ForEach(Array(sorted.enumerated()), id: \.element.id) { idx, exp in
-                    HStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "calendar").font(.caption2).foregroundStyle(accent)
                         Text(Self.dateFmt.string(from: exp.date)).font(.subheadline)
                         Spacer()
-                        Text("NT$ \(fmtShort(exp.amount))")
+                        Text(exp.amount.ntdWanString)
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .lineLimit(1).minimumScaleFactor(0.8)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 9)
                     if idx < sorted.count - 1 { Divider().padding(.leading, 14) }
@@ -607,16 +656,5 @@ struct MedicalPlaceDetailSheet: View {
         .padding(.vertical, 8)
         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
-    }
-
-    private static let decimalFmt: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
-    }()
-    private func fmtShort(_ v: Double) -> String {
-        if abs(v) >= 10_000 {
-            let s = Self.decimalFmt.string(from: NSNumber(value: v / 10_000)) ?? "0"
-            return "\(s)萬"
-        }
-        return Self.decimalFmt.string(from: NSNumber(value: v)) ?? "0"
     }
 }
