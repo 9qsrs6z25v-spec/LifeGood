@@ -19,6 +19,14 @@ import SwiftUI
 //      日期改 Capsule 徽章（.tertiarySystemFill 底色 + separator stroke 0.6pt），
 //      build 號維持 .caption 輔助文字；更新條目 bullet 圓從 5pt 升為 7pt 並加藍色漸層填色，
 //      對齊 StockDetailView sectionHeader / FamilyMembersResumeView 日期 Capsule 規格。
+// [2026-07 v2] 補齊「載入狀態」缺口：
+//   6. RemoteAdminManager 早已提供 @Published isBusy（寫入 CloudKit AppConfig 期間會切
+//      true/false），但畫面先前完全沒有讀取，切換「全功能免費」/「對外顯示人數」門檻時，
+//      使用者在網路寫入期間看不到任何進行中提示，也可能連續多次觸發造成重疊寫入。
+//      新增條件式 Section（與既有 lastError 錯誤區塊同款式）：isBusy 時於「使用者人數」
+//      與「訂閱」之間顯示 ProgressView + 「正在與 iCloud 同步設定…」提示列，寫入完成後自動
+//      消失；同時把「全功能免費」/「對外顯示人數」Toggle 與「套用門檻」按鈕在 isBusy 期間
+//      disabled，避免重複觸發。純 UI 呈現既有狀態旗標，未新增或變動任何遠端讀寫邏輯。
 // ─────────────────────────────────────────────
 
 /// 隱藏管理控制台（關於頁連點版本卡 20 下開啟，需輸入 PIN）。
@@ -187,9 +195,23 @@ struct AdminConsoleView: View {
                 }
             }
 
+            // [v2] 載入狀態：isBusy 時顯示同步提示（寫入 CloudKit AppConfig 期間）
+            if admin.isBusy {
+                Section {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在與 iCloud 同步設定…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .transition(.opacity)
+                }
+            }
+
             // 訂閱總開關
             Section {
                 Toggle("全功能免費（所有使用者）", isOn: $allFreeMirror)
+                    .disabled(admin.isBusy)
                     .onChange(of: allFreeMirror) { _, newValue in
                         // 只有使用者實際撥動時才寫遠端（避免 onAppear 同步鏡像時誤觸）
                         if newValue != admin.allFree { admin.adminSetAllFree(newValue) }
@@ -224,6 +246,7 @@ struct AdminConsoleView: View {
             // 對外人數顯示
             Section {
                 Toggle("對外顯示人數", isOn: $showPublicMirror)
+                    .disabled(admin.isBusy)
                     .onChange(of: showPublicMirror) { _, newValue in
                         if newValue != admin.showCountPublicly { applyPublicDisplay() }
                     }
@@ -237,6 +260,7 @@ struct AdminConsoleView: View {
                         .onSubmit { applyPublicDisplay() }
                 }
                 Button("套用門檻") { applyPublicDisplay() }
+                    .disabled(admin.isBusy)
             } header: {
                 Text("對外顯示")
             } footer: {
@@ -276,6 +300,8 @@ struct AdminConsoleView: View {
         // 控制台整體淡入 + 上移進場動畫（解鎖後觸發）
         .opacity(consoleAppeared ? 1 : 0)
         .offset(y: consoleAppeared ? 0 : 12)
+        // [v2] 同步提示 Section 出現/消失加淡入淡出，避免 isBusy 切換時列表跳動
+        .animation(.easeInOut(duration: 0.25), value: admin.isBusy)
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.78).delay(0.08)) {
                 consoleAppeared = true
