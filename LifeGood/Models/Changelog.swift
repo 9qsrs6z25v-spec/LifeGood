@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.64", build: 620, date: "2026/07/09", notes: [
+            "旅遊地圖（TravelMapView）美化：統計英雄卡與地點詳細頁 headerCard 補齊三顆散景裝飾圓＋頂部玻璃光澤覆層與 spring 進場動畫，對齊已完成美化的美食地圖（FoodMapView）娛樂紫姊妹頁規格；地點列行圖示圓補上陰影並新增「最近造訪」膠囊徽章；造訪紀錄列行圖示圓補齊邊框、日期改為膠囊徽章樣式，並加入交錯進場動畫；金額顯示改用全 App 共用的萬/億智慧量級格式，取代原本只到「萬」量級、且在主畫面與詳細頁各自重複維護一份的 fmtShort／NumberFormatter；同行者小卡圖示補上漸層與陰影，姓名文字加入自適應縮放避免截斷。未變動地圖標註、縣市解析、資料聚合或任何既有商業邏輯。"
+        ]),
         ChangelogEntry(version: "23.63", build: 619, date: "2026/07/09", notes: [
             "醫療地圖（MedicalMapView）美化：過敏、用藥、健檢、健康里程碑、醫療保障列行加入 36pt 漸層圓形圖示（對齊健康檔案編輯畫面規格），量測趨勢數值改為粉色徽章呈現；金額顯示改用全 App 共用的萬/億智慧量級格式，取代原本只到「萬」量級的重複程式碼；空狀態提示加入圖示；BMI／醫療支出大字數值補上自適應縮放避免截斷；未變動地圖標註、資料聚合或任何既有商業邏輯。"
         ]),

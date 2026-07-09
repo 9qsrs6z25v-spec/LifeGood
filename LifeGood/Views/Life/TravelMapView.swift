@@ -7,6 +7,29 @@ import UIKit
 // 以「項目名稱|地址」聚合成去過的地點，撒點於地圖，並依台灣縣市分組呈現足跡。
 // 沿用美食地圖（FoodMapView）驗證過的 MapKit / 照片顯示模式，主題色改為娛樂紫。
 
+// MARK: - 美化紀錄（TravelMapView）2026-07
+// [2026-07 v1] 首次美化方向（對齊已完成美化的 FoodMapView 娛樂紫姊妹頁規格，
+// 拉齊兩頁視覺均值）：
+//   1. 金額顯示改用共用 Double.ntdWanString（FinanceModels.swift），支援「萬 / 億」
+//      量級自動切換（原本 TravelMapView 與 TravelSpotDetailSheet 各自維護一份只到
+//      「萬」量級的 fmtShort/decimalFormatter，已移除重複程式碼），避免旅遊花費達億
+//      量級時顯示過長。
+//   2. statsCard／headerCard 英雄卡：補齊三顆散景裝飾圓 + 頂部玻璃光澤覆層
+//      （LinearGradient [.white.opacity(0.18)→.clear] top→center），對齊
+//      FoodMapView.statsCard／headerCard v3 三圓散景規格；加入 spring 進場動畫
+//      （statsCardAppeared／cardAppeared），總花費大字補上 contentTransition(.numericText())。
+//   3. spotRow：44pt 圖示圓補上陰影；新增「最近造訪」calendar 圖示膠囊徽章
+//      （tertiarySystemFill），對齊 FoodMapView.restaurantRow 規格；金額改用主題紫
+//      強調色 + contentTransition。
+//   4. visitsSection 列行：34pt 圖示圓補齊 stroke 邊框；日期改為膠囊徽章樣式；
+//      加入交錯淡入 + 向上進場動畫（visitsAppeared），對齊 StockDetailView
+//      transactionsSection / FoodMapView.visitsSection stagger 規格。
+//   5. companionCard 圖示圓補上漸層 + 陰影 + 邊框，姓名文字加入自適應縮放，避免長
+//      姓名截斷。
+//   6. 關閉按鈕維持 topBarLeading（左側），符合全 App 一致慣例。
+//   7. 未變動任何地圖標註、資料聚合（aggregates／spotsByCity／cityOptions）、篩選
+//      或排序等既有商業邏輯。
+
 // MARK: - 台灣縣市解析（自地址字串推斷縣市）
 
 enum TravelCityParser {
@@ -73,6 +96,7 @@ struct TravelMapView: View {
     @State private var showAlbumSheet = false
     @State private var photoOnly = false
     @State private var emptyIconPulse = false
+    @State private var statsCardAppeared = false
 
     var body: some View {
         let spots = aggregates
@@ -332,18 +356,28 @@ struct TravelMapView: View {
                     .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.08)],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 44, height: 44)
+                    .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
                 Circle().stroke(accent.opacity(0.22), lineWidth: 0.75).frame(width: 44, height: 44)
                 Image(systemName: "figure.walk").font(.system(size: 17, weight: .semibold)).foregroundStyle(accent)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(spot.name.isEmpty ? "未命名地點" : spot.name)
                     .font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Text("造訪 \(spot.visitCount) 次")
                         .font(.caption2.weight(.semibold)).foregroundStyle(accent)
                         .padding(.horizontal, 7).padding(.vertical, 2)
                         .background(accent.opacity(0.10)).clipShape(Capsule())
                         .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                    if let last = spot.lastVisit {
+                        HStack(spacing: 3) {
+                            Image(systemName: "calendar").font(.system(size: 8, weight: .medium))
+                            Text(fmtRelative(last)).font(.system(size: 9, weight: .medium))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill)).clipShape(Capsule())
+                    }
                     if !spot.photoNames.isEmpty {
                         Label("\(spot.photoNames.count)", systemImage: "photo")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -352,11 +386,10 @@ struct TravelMapView: View {
             }
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 2) {
-                Text("NT$ \(fmtShort(spot.totalSpent))")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                if let last = spot.lastVisit {
-                    Text(fmtRelative(last)).font(.caption2).foregroundStyle(.secondary)
-                }
+                Text(spot.totalSpent.ntdWanString)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.42, green: 0.16, blue: 0.82))
+                    .contentTransition(.numericText())
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
@@ -375,9 +408,10 @@ struct TravelMapView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("旅遊足跡紀錄").font(.caption).foregroundStyle(.white.opacity(0.80))
-                    Text("NT$ \(fmtShort(total))")
+                    Text(total.ntdWanString)
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundStyle(.white).minimumScaleFactor(0.6).lineLimit(1)
+                        .contentTransition(.numericText())
                 }
                 Spacer()
                 Text("\(spots.count) 個地點")
@@ -405,10 +439,13 @@ struct TravelMapView: View {
                 LinearGradient(colors: [Color(red: 0.62, green: 0.36, blue: 1.0),
                                         Color(red: 0.42, green: 0.16, blue: 0.82)],
                                startPoint: .topLeading, endPoint: .bottomTrailing)
+                // 三顆散景裝飾圓（對齊 FoodMapView.statsCard v3 規格）
                 Circle().fill(.white.opacity(0.12)).frame(width: 120, height: 120)
                     .offset(x: 80, y: -40).blur(radius: 12)
-                Circle().fill(.white.opacity(0.06)).frame(width: 66, height: 66)
-                    .offset(x: -55, y: 40).blur(radius: 8)
+                Circle().fill(.white.opacity(0.07)).frame(width: 70, height: 70)
+                    .offset(x: -55, y: 42).blur(radius: 8)
+                Circle().fill(.white.opacity(0.05)).frame(width: 55, height: 55)
+                    .offset(x: 50, y: 30).blur(radius: 6)
                 LinearGradient(colors: [.white.opacity(0.18), .clear], startPoint: .top, endPoint: .center)
                     .allowsHitTesting(false)
             }
@@ -416,6 +453,14 @@ struct TravelMapView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: Color(red: 0.42, green: 0.16, blue: 0.82).opacity(0.38), radius: 14, x: 0, y: 7)
         .padding(.horizontal)
+        .opacity(statsCardAppeared ? 1 : 0)
+        .offset(y: statsCardAppeared ? 0 : 20)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                statsCardAppeared = true
+            }
+        }
+        .onDisappear { statsCardAppeared = false }
     }
 
     private func kpiCell(label: String, value: String) -> some View {
@@ -542,20 +587,9 @@ struct TravelMapView: View {
 
     // MARK: - 格式化
 
-    private static let decimalFormatter: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
-    }()
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
     }()
-
-    private func fmtShort(_ v: Double) -> String {
-        if abs(v) >= 10_000 {
-            let s = Self.decimalFormatter.string(from: NSNumber(value: v / 10_000)) ?? "0"
-            return "\(s)萬"
-        }
-        return Self.decimalFormatter.string(from: NSNumber(value: v)) ?? "0"
-    }
 
     private func fmtRelative(_ date: Date) -> String {
         let cal = Calendar.current
@@ -580,6 +614,8 @@ struct TravelSpotDetailSheet: View {
 
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var viewingPhotoURL: IdentifiableURL?
+    @State private var cardAppeared = false
+    @State private var visitsAppeared = false
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
@@ -623,7 +659,7 @@ struct TravelSpotDetailSheet: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(spot.name.isEmpty ? "未命名地點" : spot.name)
-                    .font(.title3.bold()).foregroundStyle(.white).lineLimit(2)
+                    .font(.title3.bold()).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.7)
                 if !spot.address.isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "mappin").font(.caption2)
@@ -636,20 +672,38 @@ struct TravelSpotDetailSheet: View {
 
             HStack(spacing: 0) {
                 detailKpi(icon: "figure.walk", label: "造訪", value: "\(spot.visitCount) 次")
-                detailKpi(icon: "dollarsign.circle", label: "累計", value: "NT$ \(fmtShort(spot.totalSpent))")
-                detailKpi(icon: "chart.bar", label: "平均", value: "NT$ \(fmtShort(spot.averageSpent))")
+                detailKpi(icon: "dollarsign.circle", label: "累計", value: spot.totalSpent.ntdWanString)
+                detailKpi(icon: "chart.bar", label: "平均", value: spot.averageSpent.ntdWanString)
             }
             .padding(.top, 14)
         }
         .padding(.horizontal, 20).padding(.vertical, 18)
         .background(
-            LinearGradient(colors: [Color(red: 0.62, green: 0.36, blue: 1.0),
-                                    Color(red: 0.42, green: 0.16, blue: 0.82)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            ZStack {
+                LinearGradient(colors: [Color(red: 0.62, green: 0.36, blue: 1.0),
+                                        Color(red: 0.42, green: 0.16, blue: 0.82)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                // 三顆散景裝飾圓 + 頂部玻璃光澤（對齊 FoodMapView.headerCard v3 規格）
+                Circle().fill(.white.opacity(0.12)).frame(width: 110, height: 110)
+                    .offset(x: 70, y: -35).blur(radius: 12)
+                Circle().fill(.white.opacity(0.07)).frame(width: 65, height: 65)
+                    .offset(x: -50, y: 35).blur(radius: 8)
+                Circle().fill(.white.opacity(0.04)).frame(width: 50, height: 50)
+                    .offset(x: 40, y: 28).blur(radius: 6)
+                LinearGradient(colors: [.white.opacity(0.18), .clear], startPoint: .top, endPoint: .center)
+                    .allowsHitTesting(false)
+            }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: Color(red: 0.42, green: 0.16, blue: 0.82).opacity(0.35), radius: 14, x: 0, y: 7)
         .padding(.horizontal)
+        .opacity(cardAppeared ? 1 : 0)
+        .offset(y: cardAppeared ? 0 : 20)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                cardAppeared = true
+            }
+        }
     }
 
     private func detailKpi(icon: String, label: String, value: String) -> some View {
@@ -665,12 +719,18 @@ struct TravelSpotDetailSheet: View {
     private func companionCard(_ name: String) -> some View {
         HStack(spacing: 12) {
             ZStack {
-                Circle().fill(.white.opacity(0.22)).frame(width: 36, height: 36)
+                Circle()
+                    .fill(LinearGradient(colors: [.white.opacity(0.30), .white.opacity(0.14)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 36, height: 36)
+                    .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
+                Circle().stroke(.white.opacity(0.25), lineWidth: 0.75).frame(width: 36, height: 36)
                 Image(systemName: "person.2.fill").font(.system(size: 15)).foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text("最常同行").font(.caption2).foregroundStyle(.white.opacity(0.8))
                 Text(name).font(.subheadline.weight(.bold)).foregroundStyle(.white)
+                    .lineLimit(1).minimumScaleFactor(0.7)
             }
             Spacer()
         }
@@ -714,22 +774,41 @@ struct TravelSpotDetailSheet: View {
                     HStack(spacing: 10) {
                         ZStack {
                             Circle()
-                                .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.08)],
+                                .fill(LinearGradient(colors: [accent.opacity(0.18), accent.opacity(0.07)],
                                                      startPoint: .topLeading, endPoint: .bottomTrailing))
                                 .frame(width: 34, height: 34)
-                            Image(systemName: "calendar").font(.system(size: 13)).foregroundStyle(accent)
+                                .overlay(Circle().stroke(accent.opacity(0.18), lineWidth: 0.75))
+                            Image(systemName: "calendar").font(.system(size: 13, weight: .medium)).foregroundStyle(accent.opacity(0.85))
                         }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(Self.dateFmt.string(from: exp.date)).font(.subheadline.weight(.medium))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(Self.dateFmt.string(from: exp.date))
+                                .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(accent.opacity(0.10)).clipShape(Capsule())
+                                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                             if let m = exp.diningMember, !m.isEmpty {
-                                Text(m).font(.caption2).foregroundStyle(.pink)
+                                HStack(spacing: 3) {
+                                    Image(systemName: "person.2.fill").font(.system(size: 9))
+                                    Text(m).font(.system(size: 10, weight: .medium))
+                                }
+                                .foregroundStyle(.pink)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.pink.opacity(0.10)).clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.pink.opacity(0.22), lineWidth: 0.6))
                             }
                         }
-                        Spacer()
-                        Text("NT$ \(fmtShort(exp.amount))")
+                        Spacer(minLength: 4)
+                        Text(exp.amount.ntdWanString)
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .contentTransition(.numericText())
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)
+                    .opacity(visitsAppeared ? 1 : 0)
+                    .offset(y: visitsAppeared ? 0 : 10)
+                    .animation(
+                        .spring(response: 0.44, dampingFraction: 0.82).delay(0.05 * Double(min(idx, 10))),
+                        value: visitsAppeared
+                    )
                     if idx < sorted.count - 1 { Divider().padding(.leading, 58) }
                 }
             }
@@ -738,6 +817,11 @@ struct TravelSpotDetailSheet: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
+        .onAppear {
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.08)) {
+                visitsAppeared = true
+            }
+        }
     }
 
     private func sectionHeader(_ title: String, icon: String, trailing: String) -> some View {
@@ -754,17 +838,6 @@ struct TravelSpotDetailSheet: View {
                 .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.75))
         }
         .padding(.horizontal)
-    }
-
-    private static let shortDecimal: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
-    }()
-    private func fmtShort(_ v: Double) -> String {
-        if abs(v) >= 10_000 {
-            let s = Self.shortDecimal.string(from: NSNumber(value: v / 10_000)) ?? "0"
-            return "\(s)萬"
-        }
-        return Self.shortDecimal.string(from: NSNumber(value: v)) ?? "0"
     }
 }
 
