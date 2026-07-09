@@ -147,6 +147,15 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
 //      Capsule 底色從純色 Color.green.opacity(0.15) 升級為
 //      LinearGradient（topLeading 0.22 → bottomTrailing 0.10）+ overlay stroke（0.75pt），
 //      對齊 FinanceOverviewView.totalAssetsCard / SavingsInsuranceView 漸層卡片設計語言。
+// [2026-07] 本次美化方向：AI 語音記帳結果提示卡（aiToastView）
+//   4. 圖示從裸 SF Symbol 升級為 32pt 漸層圓徽章（LinearGradient 填色 + stroke 邊框），
+//      對齊 AdminConsoleView / SettingsView 圖示圓規格。
+//   5. 卡片補上 accent 色（成功綠／失敗橘）overlay RoundedRectangle stroke（0.75pt）
+//      與第二層柔化陰影，取代單一黑色陰影，成功/失敗主題更醒目。
+//   6. aiCommitExpense 成功 toast 金額顯示改用全 App 共用 ntdWanString 萬/億智慧量級，
+//      取代原本高額時會顯示成長串裸整數（如 NT$ 1200000）的寫法；
+//      純顯示調整，未變動實際存入的 Expense.amount 或其他記帳邏輯。
+//   （下次美化本檔案時，可從 topSubFeatureBar／floatingActionButton 繼續找可統一之處）
 
 // MARK: - 主畫面
 
@@ -693,7 +702,9 @@ struct MainTabView: View {
         )
         expenseStore.add(exp)
         // 成功 toast
-        var detailParts: [String] = ["\(finalCategory.rawValue)・NT$ \(Int(amount))"]
+        // [美化] 金額改用全 App 共用的萬/億智慧量級（ntdWanString），對齊其餘頁面金額顯示規格，
+        // 取代原本高額時會顯示成長串裸整數（如 NT$ 1200000）的寫法；純顯示調整，未變動實際存入的 exp.amount。
+        var detailParts: [String] = ["\(finalCategory.rawValue)・\(amount.ntdWanString)"]
         if let m = resolvedDiningMember, !m.isEmpty { detailParts.append(m) }
         if let acc = matchedAccountDisplay { detailParts.append(acc) }
         if let re = matchedRealEstateDisplay {
@@ -764,12 +775,27 @@ struct MainTabView: View {
         }
     }
 
+    // [美化] 圖示改為漸層圓徽章（對齊全 App icon 圓規格：LinearGradient 填色 + stroke 邊框），
+    // 取代原本裸 SF Symbol；卡片補 accent 色 overlay 邊框（0.75pt）與雙層陰影，
+    // 成功/失敗兩色主題更醒目，對齊 AdminConsoleView 錯誤橫幅、OverviewView 卡片邊框設計語言。
     private func aiToastView(_ toast: AIToastInfo) -> some View {
-        VStack {
+        let accent: Color = toast.isError ? .orange : .green
+        return VStack {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(toast.isError ? Color.orange : Color.green)
-                    .font(.title3)
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [accent.opacity(0.24), accent.opacity(0.10)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 32, height: 32)
+                    Circle()
+                        .stroke(accent.opacity(0.30), lineWidth: 1)
+                        .frame(width: 32, height: 32)
+                    Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(accent)
+                        .font(.system(size: 15, weight: .semibold))
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(toast.title).font(.subheadline.weight(.semibold))
                     Text(toast.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
@@ -778,7 +804,12 @@ struct MainTabView: View {
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(accent.opacity(0.22), lineWidth: 0.75)
+            )
+            .shadow(color: accent.opacity(0.18), radius: 10, y: 4)
+            .shadow(color: .black.opacity(0.10), radius: 4, y: 2)
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .transition(.move(edge: .top).combined(with: .opacity))

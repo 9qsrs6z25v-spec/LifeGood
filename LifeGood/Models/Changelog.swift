@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.66", build: 622, date: "2026/07/09", notes: [
+            "美化主畫面外殼（MainTabView）AI 語音記帳結果提示卡：圖示從裸 SF Symbol 升級為 32pt 漸層圓徽章（LinearGradient 填色＋stroke 邊框），卡片補上成功綠／失敗橘 accent 色 overlay 邊框與第二層柔化陰影，成功/失敗主題更醒目，對齊全 App 圖示圓與卡片邊框設計語言；記帳成功 toast 的金額顯示改用全 App 共用的萬/億智慧量級格式，取代原本高額時會顯示成長串裸整數（如 NT$ 1200000）的寫法。純視覺調整，未變動語音辨識、AI 解析、記帳寫入或任何既有商業邏輯。"
+        ]),
         ChangelogEntry(version: "23.65", build: 621, date: "2026/07/09", notes: [
             "美化管理控制台（AdminConsoleView）：RemoteAdminManager 原本就有 isBusy 狀態旗標（寫入 CloudKit 期間會切 true/false），但畫面先前完全沒有讀取，切換「全功能免費」或「對外顯示人數」門檻時，使用者在網路寫入期間看不到任何進行中提示；新增同步中提示列（ProgressView＋文字，寫入完成後自動淡出消失）與相關 Toggle／按鈕在寫入期間 disabled，避免重複觸發造成重疊寫入。純粹呈現既有狀態旗標，未新增或變動任何遠端讀寫邏輯。"
         ]),
