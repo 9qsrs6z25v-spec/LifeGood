@@ -28,6 +28,11 @@ import SwiftUI
 //      分隔線改用屋頂主題色，提升視覺凝聚感；標籤文字改用 roofColor 色，強化辨識性。
 //  13. personChip 圖示圓補 stroke：加入 Circle().stroke(roofColor.opacity(0.22), lineWidth:0.75)，
 //      對齊 OverviewView.recentRow v3 / ChildrenResumeView v2 圖示圓邊框規格。
+// [2026-07 v3] 深色模式配色修正：
+//  14. 街道場景外層背景：v2 已把 HouseView 屋身改為深色模式相容，但外層 ScrollView 背景
+//      仍是寫死的淺草綠 LinearGradient，深色模式下這塊「街道底圖」會維持刺眼的亮綠色，
+//      與其餘全深色的畫面格格不入。改為依 colorScheme 切換：淺色模式維持原本淺草綠，
+//      深色模式改用深墨綠（模擬夜間街景），兩者都以 systemGroupedBackground 起筆過渡。
 
 // MARK: - 家庭總覽（街道式）
 
@@ -38,6 +43,8 @@ struct FamilyOverviewMap: View {
     let members: [FamilyMember]
     // [v2] 進場動畫旗標：上/下排房子各自 stagger
     @State private var houseRowsAppeared = false
+    // [v3] 深色模式下街道底圖改用深墨綠，避免刺眼亮綠背景
+    @Environment(\.colorScheme) private var colorScheme
 
     private var spouse: FamilyMember? { members.first { $0.role == .spouse } }
     private var children: [FamilyMember] {
@@ -218,11 +225,19 @@ struct FamilyOverviewMap: View {
             }
             .onDisappear { houseRowsAppeared = false }
         }
-        .background(
-            LinearGradient(
-                colors: [Color(.systemGroupedBackground), Color(red: 0.93, green: 0.96, blue: 0.92)],
-                startPoint: .top, endPoint: .bottom
-            )
+        .background(streetSceneBackground)
+    }
+
+    /// [v3] 街道底圖：淺色模式維持原本淺草綠，深色模式改用深墨綠模擬夜間街景
+    private var streetSceneBackground: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(.systemGroupedBackground),
+                colorScheme == .dark
+                    ? Color(red: 0.07, green: 0.11, blue: 0.08)
+                    : Color(red: 0.93, green: 0.96, blue: 0.92)
+            ],
+            startPoint: .top, endPoint: .bottom
         )
     }
 
