@@ -44,7 +44,7 @@ struct CameraPicker: UIViewControllerRepresentable {
 }
 
 // MARK: - 美化紀錄（RenovationPhotoEditor / RenovationStackViewer）
-// [2026-06] 本次美化方向：
+// [2026-06] 第一次美化方向：
 //   1. renoSectionHeader 輔助：統一三個 Section（基本資訊 / 照片 / 備註）標題列，
 //      升級為 4pt Capsule 漸層色條 + 彩色圖示 + .subheadline.bold，
 //      對齊全 App AddVehicleView / AddStockView section header 設計語言。
@@ -54,6 +54,19 @@ struct CameraPicker: UIViewControllerRepresentable {
 //      對齊全 App 計數膠囊規格（IncomeView.daySectionHeader 等），暗背景下更醒目。
 //   4. RenovationStackViewer 日期：加入 calendar 圖示前綴，
 //      與全 App 日期 icon+text 設計語言統一（CareerView / SubordinateView 等）。
+//
+// [2026-07 v2] 修正一致性問題 + 空狀態補齊：
+//   1. 照片 Section header：發現第一次美化把它做成獨立的漸層色條 + icon + 標題 +
+//      計數膠囊，但 MultiPhotoGallery 元件本身「內建」一列一模一樣資訊的標題列
+//      （bold 標題 + 綠色計數膠囊 + 新增選單按鈕，見 MultiPhotoGallery.swift body 開頭）。
+//      結果同一頁「照片」文字與筆數重複顯示兩次（Form 灰底小標題 + 元件內建 header）。
+//      比對全 App 其他呼叫端（AddExpenseView.photoGallerySection／FixedExpenseView.photoSection）
+//      都只用純文字 `Text("照片")` 當 Section header，把裝飾留給元件內建 header 負責——
+//      改回同樣做法，消除重複視覺雜訊。**下次若要幫 MultiPhotoGallery 呼叫端加裝飾 header，
+//      記得元件本身已經有一份，不要重複疊加。**
+//   2. RenovationStackViewer 空狀態「沒有照片」：從純文字升級為圖示 + 文字直式排版
+//      （semi-transparent 圓形圖示徽章 + 說明文字），對齊全 App 空狀態慣例
+//      （MultiPhotoGallery.emptyState 同款結構，僅配色改為白色系以搭配黑底全螢幕）。
 
 // MARK: - 裝潢照片編輯器（支援多張照片）
 
@@ -104,28 +117,9 @@ struct RenovationPhotoEditor: View {
                     )
                     .padding(.vertical, 4)
                 } header: {
-                    HStack(spacing: 8) {
-                        Capsule()
-                            .fill(LinearGradient(
-                                colors: [Color(red: 0.10, green: 0.62, blue: 0.60),
-                                         Color(red: 0.06, green: 0.45, blue: 0.45)],
-                                startPoint: .top, endPoint: .bottom
-                            ))
-                            .frame(width: 4, height: 16)
-                        Image(systemName: "photo.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color(red: 0.10, green: 0.62, blue: 0.60))
-                        Text("照片")
-                            .font(.subheadline.weight(.bold))
-                        if !photoFileNames.isEmpty {
-                            Text("\(photoFileNames.count) 張")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(Color(red: 0.10, green: 0.62, blue: 0.60))
-                                .padding(.horizontal, 7).padding(.vertical, 2)
-                                .background(Color(red: 0.10, green: 0.62, blue: 0.60).opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-                    }
+                    // 純文字標題：裝飾（標題／計數）已由 MultiPhotoGallery 內建 header 負責，
+                    // 這裡疊加同樣資訊會造成重複顯示，對齊 AddExpenseView / FixedExpenseView 做法。
+                    Text("照片")
                 } footer: {
                     Text("可拍照或從相簿一次選多張，會以堆疊方式顯示在裝潢照片廊中。")
                 }
@@ -260,8 +254,22 @@ struct RenovationStackViewer: View {
                 Color.black.ignoresSafeArea()
 
                 if record.photoFileNames.isEmpty {
-                    Text("沒有照片")
-                        .foregroundStyle(.white.opacity(0.7))
+                    VStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.10))
+                                .frame(width: 52, height: 52)
+                            Circle()
+                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                                .frame(width: 52, height: 52)
+                            Image(systemName: "photo")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                        Text("沒有照片")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
                 } else {
                     TabView(selection: $currentIndex) {
                         ForEach(Array(record.photoFileNames.enumerated()), id: \.offset) { idx, name in

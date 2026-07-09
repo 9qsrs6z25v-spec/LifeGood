@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.67", build: 623, date: "2026/07/09", notes: [
+            "美化裝潢照片編輯畫面（RenovationPhotoEditor）：修正先前一次美化留下的視覺重複——「照片」Section 標題原本疊了一組自製的漸層色條＋圖示＋粗體標題＋計數膠囊，但下方 MultiPhotoGallery 元件本身已內建同樣一列（粗體標題＋計數膠囊＋新增按鈕），造成標題與張數重複顯示兩次。改回與 AddExpenseView／FixedExpenseView 相同做法，Section header 僅用純文字「照片」，裝飾交由元件內建 header 負責，消除重複雜訊。另外裝潢照片全螢幕瀏覽（RenovationStackViewer）在沒有照片時的「沒有照片」純文字空狀態，升級為圓形圖示徽章＋文字的直式排版，對齊全 App 空狀態設計語言。純視覺調整，未變動照片儲存、刪除或任何既有商業邏輯。"
+        ]),
         ChangelogEntry(version: "23.66", build: 622, date: "2026/07/09", notes: [
             "美化主畫面外殼（MainTabView）AI 語音記帳結果提示卡：圖示從裸 SF Symbol 升級為 32pt 漸層圓徽章（LinearGradient 填色＋stroke 邊框），卡片補上成功綠／失敗橘 accent 色 overlay 邊框與第二層柔化陰影，成功/失敗主題更醒目，對齊全 App 圖示圓與卡片邊框設計語言；記帳成功 toast 的金額顯示改用全 App 共用的萬/億智慧量級格式，取代原本高額時會顯示成長串裸整數（如 NT$ 1200000）的寫法。純視覺調整，未變動語音辨識、AI 解析、記帳寫入或任何既有商業邏輯。"
         ]),
