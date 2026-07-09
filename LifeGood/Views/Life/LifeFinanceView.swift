@@ -245,6 +245,9 @@ struct LifeFinanceView: View {
                             headerAppeared = true
                         }
                     }
+                    .onDisappear {
+                        headerAppeared = false
+                    }
                 filterChips
                 milestoneList
             }
@@ -514,6 +517,9 @@ struct LifeFinanceView: View {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
                 rowsAppeared = true
             }
+        }
+        .onDisappear {
+            rowsAppeared = false
         }
     }
 
@@ -2120,13 +2126,15 @@ struct DepositEditorSheet: View {
         }
     }
 
-    private func bankBalance(for ms: LifeMilestone) -> Double {
+    /// expensesById 由呼叫端批次建表傳入一次，避免每一列都對 expenseStore.expenses
+    /// 做 first(where:) 全量掃描（對齊 AddStockView.accountBalance() 的批次建表修復規格）。
+    private func bankBalance(for ms: LifeMilestone, expensesById: [UUID: Expense]) -> Double {
         let now = Date()
         var total: Double = 0
         for dep in ms.bankDeposits ?? [] {
             guard dep.date <= now else { continue }
             if let expId = dep.linkedExpenseId,
-               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
+               let exp = expensesById[expId],
                exp.linkedCreditCardMilestoneId != nil { continue }
             // 換算成台幣再加總，外幣提款 / 存款才不會被當成台幣金額直接計算
             let twd = depositAmountInTWD(dep.amount, currency: dep.currencyCode)
@@ -2144,9 +2152,9 @@ struct DepositEditorSheet: View {
         return amount
     }
 
-    private var currentBalance: Double {
+    private func currentBalance(expensesById: [UUID: Expense]) -> Double {
         guard let ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { return 0 }
-        return bankBalance(for: ms)
+        return bankBalance(for: ms, expensesById: expensesById)
     }
 
     private static let numFormatter: NumberFormatter = {
@@ -2165,6 +2173,7 @@ struct DepositEditorSheet: View {
     }
 
     var body: some View {
+        let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         NavigationStack {
             Form {
                 Section {
@@ -2182,7 +2191,7 @@ struct DepositEditorSheet: View {
                             Text("請選擇").tag(nil as UUID?)
                             ForEach(bankMilestones) { ms in
                                 let name = ms.bankName ?? ms.title
-                                Text("\(name)（\(fmtBal(bankBalance(for: ms)))）")
+                                Text("\(name)（\(fmtBal(bankBalance(for: ms, expensesById: expensesById)))）")
                                     .tag(ms.id as UUID?)
                             }
                         }
@@ -2197,7 +2206,7 @@ struct DepositEditorSheet: View {
                         HStack {
                             Text("目前總額").foregroundStyle(.secondary)
                             Spacer()
-                            Text(fmtBal(currentBalance)).foregroundStyle(.blue)
+                            Text(fmtBal(currentBalance(expensesById: expensesById))).foregroundStyle(.blue)
                         }
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                         HStack {
@@ -2205,7 +2214,7 @@ struct DepositEditorSheet: View {
                             TextField("調整後金額", text: $amountText).keyboardType(.decimalPad)
                         }
                         if let target = Double(amountText) {
-                            let diff = target - currentBalance
+                            let diff = target - currentBalance(expensesById: expensesById)
                             HStack {
                                 Text("差額").foregroundStyle(.secondary)
                                 Spacer()
@@ -2309,7 +2318,8 @@ struct DepositEditorSheet: View {
     private func saveAdjust() {
         guard let targetAmount = Double(amountText),
               var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
-        let diff = targetAmount - currentBalance
+        let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let diff = targetAmount - currentBalance(expensesById: expensesById)
         guard diff != 0 else { dismiss(); return }
         var list = ms.bankDeposits ?? []
         let trimmedNote = adjustNote.trimmingCharacters(in: .whitespaces)

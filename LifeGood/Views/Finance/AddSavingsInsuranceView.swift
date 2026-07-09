@@ -72,7 +72,7 @@ struct AddSavingsInsuranceView: View {
         guard Date() >= startDate else { return 0 }
         let months = Calendar.current.dateComponents([.month], from: startDate, to: min(Date(), maturityDate)).month ?? 0
         let monthsPerPeriod = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
-        return min(months / monthsPerPeriod + 1, totalPeriods)
+        return max(0, min(months / monthsPerPeriod + 1, totalPeriods))
     }
 
     private var calculatedExpectedReturn: Double {

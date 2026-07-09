@@ -78,6 +78,9 @@ struct FixedExpenseView: View {
                                 headerAppeared = true
                             }
                         }
+                        .onDisappear {
+                            headerAppeared = false
+                        }
                 }
 
                 if store.fixedExpenses.isEmpty {
@@ -474,6 +477,9 @@ struct FixedExpenseView: View {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
                 categoryListAppeared = true
             }
+        }
+        .onDisappear {
+            categoryListAppeared = false
         }
     }
 

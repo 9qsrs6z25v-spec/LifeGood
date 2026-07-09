@@ -560,6 +560,9 @@ struct BusinessCardView: View {
                 heroCardAppeared = true
             }
         }
+        .onDisappear {
+            heroCardAppeared = false
+        }
     }
 
     // MARK: - 公司分組標題列（橘色強調條 + 計數膠囊）
@@ -818,6 +821,9 @@ struct BusinessCardView: View {
                         withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
                             cardsAppeared = true
                         }
+                    }
+                    .onDisappear {
+                        cardsAppeared = false
                     }
                 }
             }

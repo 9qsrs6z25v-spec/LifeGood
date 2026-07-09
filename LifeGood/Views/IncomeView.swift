@@ -101,6 +101,9 @@ struct IncomeView: View {
                                 headerAppeared = true
                             }
                         }
+                        .onDisappear {
+                            headerAppeared = false
+                        }
                 }
                 Section {
                     categoryFilter
@@ -709,6 +712,9 @@ struct IncomeView: View {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
                 listRowsAppeared = true
             }
+        }
+        .onDisappear {
+            listRowsAppeared = false
         }
 
         // 展開更早紀錄按鈕（對齊 VariableExpenseView.expenseListSectionsFor 展開規格）

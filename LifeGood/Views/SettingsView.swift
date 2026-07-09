@@ -207,6 +207,9 @@ struct SettingsView: View {
                                 heroCardAppeared = true
                             }
                         }
+                        .onDisappear {
+                            heroCardAppeared = false
+                        }
                 }
                 disclosureBlock("訂閱方案", icon: "crown.fill", color: .yellow, isExpanded: $subscriptionExpanded) {
                     subscriptionSection

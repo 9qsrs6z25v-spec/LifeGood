@@ -207,7 +207,7 @@ struct SavingsInsurance: Identifiable, Codable {
         guard now >= startDate else { return 0 }
         let elapsedMonths = calendar.dateComponents([.month], from: startDate, to: min(now, maturityDate)).month ?? 0
         let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
-        return min(elapsedMonths / monthsPerPeriod + 1, totalPeriods)
+        return max(0, min(elapsedMonths / monthsPerPeriod + 1, totalPeriods))
     }
 
     /// 計算到期預估領回

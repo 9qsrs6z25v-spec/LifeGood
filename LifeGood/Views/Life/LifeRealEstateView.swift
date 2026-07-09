@@ -265,6 +265,9 @@ struct LifeRealEstateView: View {
                 headerAppeared = true
             }
         }
+        .onDisappear {
+            headerAppeared = false
+        }
     }
 
     // [v2] heroKpiCell：圖示圓升級為 32pt LinearGradient + stroke border，對齊 OverviewView.summaryCard v3
@@ -374,6 +377,9 @@ struct LifeRealEstateView: View {
             withAnimation(.spring(response: 0.58, dampingFraction: 0.78).delay(0.20)) {
                 miniBarAppeared = true
             }
+        }
+        .onDisappear {
+            miniBarAppeared = false
         }
     }
 

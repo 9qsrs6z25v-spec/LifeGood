@@ -626,6 +626,9 @@ struct VariableExpenseView: View {
                 listRowsAppeared = true
             }
         }
+        .onDisappear {
+            listRowsAppeared = false
+        }
 
         if hiddenCount > 0 {
             Section {

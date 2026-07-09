@@ -112,6 +112,9 @@ struct OverviewView: View {
                                 _ = appearedCards.insert("header")
                             }
                         }
+                        .onDisappear {
+                            appearedCards.remove("header")
+                        }
 
                     HStack(alignment: .top, spacing: 12) {
                         summaryCard(
@@ -154,8 +157,9 @@ struct OverviewView: View {
                             }
                         }
                         .onDisappear {
-                            // 重置旗標，讓下次 onAppear 時脈衝動畫能重新觸發
+                            // 重置旗標，讓下次 onAppear 時脈衝動畫與進場動畫都能重新觸發
                             ringPulse = false
+                            todayCardAppeared = false
                         }
 
                     categoryBreakdownSection
@@ -165,6 +169,9 @@ struct OverviewView: View {
                             withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.15)) {
                                 recentListAppeared = true
                             }
+                        }
+                        .onDisappear {
+                            recentListAppeared = false
                         }
                 }
                 .padding(.vertical)
@@ -729,6 +736,9 @@ struct OverviewView: View {
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
                         categoryListAppeared = true
                     }
+                }
+                .onDisappear {
+                    categoryListAppeared = false
                 }
             }
         }
