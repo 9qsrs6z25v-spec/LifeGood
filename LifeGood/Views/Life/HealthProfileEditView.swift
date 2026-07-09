@@ -4,6 +4,25 @@ import SwiftUI
 // 編輯 LifeStore.healthProfile：基本資料（血型/身高）、過敏、用藥、量測（體重/血壓/心率）、健檢。
 // 以草稿（draft）編輯，按「儲存」才寫回 store，避免每次鍵入都觸發 iCloud 上傳。
 
+// MARK: - 美化紀錄（HealthProfileEditView）2026-07
+// [2026-07] 首次美化方向：
+//   1. 新增 healthSectionHeader(title:icon:color:count:) 輔助函式：4pt 漸層 Capsule 色條 +
+//      彩色圖示 + .subheadline.semibold + 計數膠囊（附細邊框），對齊全 App Form 型編輯頁
+//      設計語言（AddVehicleView.vehicleSectionHeader / AddSavingsInsuranceView 規格）。
+//      七個 Section 各配獨立主題色：基本資料(teal)／病史(indigo)／過敏(orange)／
+//      用藥(blue)／量測(pink)／健檢(purple)／備註(secondary)，提升可掃視性。
+//   2. 過敏／用藥／健檢列行：加入 36pt 主題色漸層圓形圖示（LinearGradient 0.22→0.09 +
+//      shadow opacity 0.18），對齊 AddVehicleView.fixedExpenseSection 列行圖示規格。
+//   3. 量測列行：日期改用 calendar 圖示 + Capsule 徽章；體重/血壓/心率改為獨立彩色
+//      metric chip（各自底色 12% + 細邊框），取代原本純文字串接，對齊
+//      OverviewView.categoryRow 徽章化數值呈現規格。
+//   4. 病史／過敏／用藥／量測／健檢五個列表新增輕量空狀態列（secondary caption + 圖示），
+//      對齊 SubordinateRosterView / LifeRealEstateView 空狀態列規格。
+//   5. BMI 數值：字級升級為 .title3.bold + minimumScaleFactor(0.7) 避免大字級裝置被截斷；
+//      分類膠囊加入對應色系圖示，維持在可辨識最小字級以上。
+//   6. 保留原有 toolbar 佈局（取消固定左側／儲存固定右側，符合全 App 一致慣例），
+//      未變動任何草稿寫回、刪除、upsert 等既有商業邏輯。
+
 struct HealthProfileEditView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
@@ -62,7 +81,7 @@ struct HealthProfileEditView: View {
     // MARK: - 基本資料
 
     private var basicSection: some View {
-        Section("基本資料") {
+        Section {
             HStack {
                 Text("血型")
                 Spacer()
@@ -82,22 +101,34 @@ struct HealthProfileEditView: View {
                 HStack {
                     Text("BMI")
                     Spacer()
-                    Text(String(format: "%.1f", bmi)).fontWeight(.semibold)
+                    Text(String(format: "%.1f", bmi))
+                        .font(.title3.bold())
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+                        .foregroundStyle(accent)
                     if let cat = draft.bmiCategory {
-                        Text(cat).font(.caption)
+                        Label(cat, systemImage: "heart.text.square.fill")
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(accent)
-                            .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(accent.opacity(0.12)).clipShape(Capsule())
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(accent.opacity(0.12))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                     }
                 }
             }
+        } header: {
+            healthSectionHeader("基本資料", icon: "person.text.rectangle.fill", color: accent)
         }
     }
 
     // MARK: - 慢性病 / 病史
 
     private var conditionsSection: some View {
-        Section("慢性病 / 病史") {
+        Section {
+            if draft.conditions.isEmpty {
+                emptyRow(icon: "list.bullet.clipboard", text: "尚無慢性病 / 病史紀錄")
+            }
             ForEach(Array(draft.conditions.enumerated()), id: \.offset) { idx, c in
                 Text(c)
             }
@@ -109,9 +140,11 @@ struct HealthProfileEditView: View {
                     guard !t.isEmpty else { return }
                     draft.conditions.append(t)
                     newCondition = ""
-                } label: { Image(systemName: "plus.circle.fill").foregroundStyle(accent) }
+                } label: { Image(systemName: "plus.circle.fill").foregroundStyle(Color.indigo) }
                 .disabled(newCondition.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+        } header: {
+            healthSectionHeader("慢性病 / 病史", icon: "list.bullet.clipboard.fill", color: .indigo, count: draft.conditions.count)
         }
     }
 
@@ -119,38 +152,52 @@ struct HealthProfileEditView: View {
 
     private var allergySection: some View {
         Section {
+            if draft.allergies.isEmpty {
+                emptyRow(icon: "allergens", text: "尚無過敏紀錄")
+            }
             ForEach(draft.allergies) { a in
                 Button { editingAllergy = a } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(a.name.isEmpty ? "未命名過敏原" : a.name).foregroundStyle(.primary)
-                            if let s = a.severity {
-                                Text(s.rawValue).font(.caption2)
-                                    .foregroundStyle(.orange)
-                                    .padding(.horizontal, 6).padding(.vertical, 1)
-                                    .background(Color.orange.opacity(0.12)).clipShape(Capsule())
+                    HStack(spacing: 12) {
+                        rowIcon("allergens", color: .orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(a.name.isEmpty ? "未命名過敏原" : a.name).foregroundStyle(.primary)
+                                if let s = a.severity {
+                                    Text(s.rawValue).font(.caption2)
+                                        .foregroundStyle(.orange)
+                                        .padding(.horizontal, 6).padding(.vertical, 1)
+                                        .background(Color.orange.opacity(0.12)).clipShape(Capsule())
+                                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+                                }
+                            }
+                            if !a.reaction.isEmpty {
+                                Text(a.reaction).font(.caption).foregroundStyle(.secondary)
                             }
                         }
-                        if !a.reaction.isEmpty {
-                            Text(a.reaction).font(.caption).foregroundStyle(.secondary)
-                        }
                     }
+                    .contentShape(Rectangle())
                 }
             }
             .onDelete { draft.allergies.remove(atOffsets: $0) }
             Button { editingAllergy = HealthAllergy() } label: {
                 Label("新增過敏原", systemImage: "plus.circle.fill")
             }
-        } header: { Text("過敏") }
+        } header: {
+            healthSectionHeader("過敏", icon: "allergens", color: .orange, count: draft.allergies.count)
+        }
     }
 
     // MARK: - 用藥
 
     private var medicationSection: some View {
         Section {
+            if draft.medications.isEmpty {
+                emptyRow(icon: "pills.fill", text: "尚無用藥紀錄")
+            }
             ForEach(draft.medications) { m in
                 Button { editingMedication = m } label: {
-                    HStack {
+                    HStack(spacing: 12) {
+                        rowIcon("pills.fill", color: .blue)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(m.name.isEmpty ? "未命名藥物" : m.name).foregroundStyle(.primary)
                             if !m.dosage.isEmpty {
@@ -164,73 +211,174 @@ struct HealthProfileEditView: View {
                             .padding(.horizontal, 7).padding(.vertical, 2)
                             .background((m.isActive ? Color.green : Color.gray).opacity(0.12))
                             .clipShape(Capsule())
+                            .overlay(Capsule().stroke((m.isActive ? Color.green : Color.gray).opacity(0.22), lineWidth: 0.6))
                     }
+                    .contentShape(Rectangle())
                 }
             }
             .onDelete { draft.medications.remove(atOffsets: $0) }
             Button { editingMedication = HealthMedication() } label: {
                 Label("新增藥物", systemImage: "plus.circle.fill")
             }
-        } header: { Text("用藥") }
+        } header: {
+            healthSectionHeader("用藥", icon: "pills.fill", color: .blue, count: draft.medications.count)
+        }
     }
 
     // MARK: - 量測（體重 / 血壓 / 心率）
 
     private var measurementSection: some View {
         Section {
+            if draft.measurements.isEmpty {
+                emptyRow(icon: "waveform.path.ecg", text: "尚無量測紀錄")
+            }
             ForEach(draft.measurements.sorted { $0.date > $1.date }) { m in
+                let chips = measurementChips(m)
                 Button { editingMeasurement = m } label: {
                     HStack {
-                        Text(Self.dateFmt.string(from: m.date)).foregroundStyle(.primary)
+                        Label {
+                            Text(Self.dateFmt.string(from: m.date)).foregroundStyle(.primary)
+                        } icon: {
+                            Image(systemName: "calendar")
+                                .font(.caption2)
+                                .foregroundStyle(.pink)
+                        }
                         Spacer()
-                        Text(measurementSummary(m)).font(.caption).foregroundStyle(.secondary)
+                        if chips.isEmpty {
+                            Text("—").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            HStack(spacing: 4) {
+                                ForEach(chips, id: \.self) { chip in
+                                    Text(chip)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.pink)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color.pink.opacity(0.10))
+                                        .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(Color.pink.opacity(0.20), lineWidth: 0.6))
+                                }
+                            }
+                        }
                     }
+                    .contentShape(Rectangle())
                 }
             }
             .onDelete { deleteMeasurements($0) }
             Button { editingMeasurement = HealthMeasurement() } label: {
                 Label("新增量測", systemImage: "plus.circle.fill")
             }
-        } header: { Text("量測（體重 / 血壓 / 心率）") }
+        } header: {
+            healthSectionHeader("量測（體重 / 血壓 / 心率）", icon: "waveform.path.ecg", color: .pink, count: draft.measurements.count)
+        }
     }
 
     // MARK: - 健檢
 
     private var checkupSection: some View {
         Section {
+            if draft.checkups.isEmpty {
+                emptyRow(icon: "stethoscope", text: "尚無健檢紀錄")
+            }
             ForEach(draft.checkups.sorted { $0.date > $1.date }) { c in
                 Button { editingCheckup = c } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(c.title.isEmpty ? "健檢" : c.title).foregroundStyle(.primary)
-                        HStack(spacing: 6) {
-                            Text(Self.dateFmt.string(from: c.date))
-                            if !c.place.isEmpty { Text("· \(c.place)") }
+                    HStack(spacing: 12) {
+                        rowIcon("stethoscope", color: .purple)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(c.title.isEmpty ? "健檢" : c.title).foregroundStyle(.primary)
+                            HStack(spacing: 6) {
+                                Text(Self.dateFmt.string(from: c.date))
+                                if !c.place.isEmpty { Text("· \(c.place)") }
+                            }
+                            .font(.caption).foregroundStyle(.secondary)
                         }
-                        .font(.caption).foregroundStyle(.secondary)
                     }
+                    .contentShape(Rectangle())
                 }
             }
             .onDelete { deleteCheckups($0) }
             Button { editingCheckup = HealthCheckup() } label: {
                 Label("新增健檢", systemImage: "plus.circle.fill")
             }
-        } header: { Text("健檢紀錄") }
+        } header: {
+            healthSectionHeader("健檢紀錄", icon: "stethoscope", color: .purple, count: draft.checkups.count)
+        }
     }
 
     private var noteSection: some View {
-        Section("備註") {
+        Section {
             TextField("其他健康備註", text: $draft.note, axis: .vertical).lineLimit(2...5)
+        } header: {
+            healthSectionHeader("備註", icon: "text.bubble.fill", color: .secondary)
         }
     }
 
     // MARK: - Helpers
 
-    private func measurementSummary(_ m: HealthMeasurement) -> String {
+    /// 依主題色繪製 36pt 漸層圓形圖示，對齊 AddVehicleView 列行圖示規格
+    @ViewBuilder
+    private func rowIcon(_ systemName: String, color: Color) -> some View {
+        ZStack {
+            Circle()
+                .fill(LinearGradient(
+                    colors: [color.opacity(0.22), color.opacity(0.09)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+                .frame(width: 36, height: 36)
+                .shadow(color: color.opacity(0.18), radius: 5, x: 0, y: 2)
+            Circle()
+                .stroke(color.opacity(0.18), lineWidth: 1)
+                .frame(width: 36, height: 36)
+            Image(systemName: systemName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(color)
+        }
+    }
+
+    /// 輕量空狀態列：圖示 + 說明文字，對齊 SubordinateRosterView / LifeRealEstateView 空狀態列規格
+    private func emptyRow(icon: String, text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// Section header：4pt 漸層 Capsule 色條 + 圖示 + 標題 + 計數膠囊，對齊
+    /// AddVehicleView.vehicleSectionHeader 全 App Form 編輯頁設計語言
+    @ViewBuilder
+    private func healthSectionHeader(_ title: String, icon: String, color: Color, count: Int? = nil) -> some View {
+        HStack(spacing: 7) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+            if let n = count, n > 0 {
+                Text("\(n)")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(color.opacity(0.12))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+            }
+        }
+    }
+
+    private func measurementChips(_ m: HealthMeasurement) -> [String] {
         var parts: [String] = []
         if let w = m.weightKg { parts.append(String(format: "%.1fkg", w)) }
         if let s = m.systolic, let d = m.diastolic { parts.append("\(s)/\(d)") }
         if let h = m.heartRate { parts.append("\(h)bpm") }
-        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+        return parts
     }
 
     /// 依 id 取代或新增
