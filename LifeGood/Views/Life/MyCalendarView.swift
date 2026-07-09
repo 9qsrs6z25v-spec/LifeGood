@@ -34,7 +34,8 @@ struct MyCalendarView: View {
     @StateObject private var appleCal = AppleCalendarBridge.shared
 
     @State private var selectedDate = Date()
-    @State private var showAdd = false
+    @State private var addPersonalKind: PersonalEventKind?   // 新增我的會議 / 事務
+    @State private var subAddKind: SubAddKind?               // 新增部屬任務 / 會議 / 報告
     @State private var previewCalendarItem: CalendarEventCard.Item?
     @State private var searchText = ""
     @State private var debouncedSearchText = ""
@@ -140,15 +141,13 @@ struct MyCalendarView: View {
                         prompt: "搜尋報告/會議/任務/里程碑/事件（標題或內容）")
             .navigationTitle("我的行事曆")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title3).foregroundStyle(.green)
-                    }
-                }
+                ToolbarItem(placement: .topBarTrailing) { addMenu }
             }
-            .sheet(isPresented: $showAdd) {
-                PersonalEventEditor(initialDate: selectedDate, editing: nil)
+            .sheet(item: $addPersonalKind) { kind in
+                PersonalEventEditor(initialDate: selectedDate, editing: nil, initialKind: kind)
+            }
+            .sheet(item: $subAddKind) { kind in
+                AddSubItemSheet(kind: kind)
             }
             .sheet(item: $previewCalendarItem) { item in
                 CalendarEventCard(item: item)
@@ -182,6 +181,23 @@ struct MyCalendarView: View {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 debouncedSearchText = searchText
             }
+        }
+    }
+
+    /// 右上角「＋」選單：新增我的會議／事務，或部屬任務／會議／報告
+    private var addMenu: some View {
+        Menu {
+            Section("我的行事曆") {
+                Button { addPersonalKind = .meeting } label: { Label("新增會議", systemImage: "person.3.fill") }
+                Button { addPersonalKind = .task } label: { Label("新增事務", systemImage: "checklist") }
+            }
+            Section("部屬") {
+                Button { subAddKind = .task } label: { Label("新增部屬任務", systemImage: "checklist") }
+                Button { subAddKind = .meeting } label: { Label("新增部屬會議", systemImage: "person.3.fill") }
+                Button { subAddKind = .report } label: { Label("新增部屬報告", systemImage: "doc.text.fill") }
+            }
+        } label: {
+            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
         }
     }
 
@@ -1424,6 +1440,8 @@ struct PersonalEventEditor: View {
 
     let initialDate: Date
     let editing: PersonalEvent?
+    /// 新增時的預設類型（會議 / 事務）；編輯既有事件時忽略
+    var initialKind: PersonalEventKind = .meeting
 
     private static let mdhmFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "M/d HH:mm"; return f
@@ -1590,7 +1608,8 @@ struct PersonalEventEditor: View {
                     syncToAppleCalendar = e.syncToAppleCalendar
                     selectedAppleCalendarId = e.appleCalendarId
                 } else {
-                    // 新事件：日期用使用者選的那天，時間用排程時段（整點/半點，過 18:00 則 09:30）
+                    // 新事件：套用預設類型（會議 / 事務），日期用使用者選的那天
+                    kind = initialKind
                     let cal = Calendar.current
                     let sched = FiveMinuteDateTimePicker.defaultSchedulingTime()
                     let timeComp = cal.dateComponents([.hour, .minute], from: sched)

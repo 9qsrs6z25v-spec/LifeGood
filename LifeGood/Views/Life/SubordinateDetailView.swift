@@ -1543,6 +1543,85 @@ struct RecordEditorSheet: View {
     }
 }
 
+// MARK: - 新增部屬項目（先選部屬，再開對應編輯器）
+
+/// 可從行事曆 / 部屬總覽的「＋」新增的部屬項目類型
+enum SubAddKind: String, Identifiable, CaseIterable {
+    case task, meeting, report
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .task: return "部屬任務"
+        case .meeting: return "部屬會議"
+        case .report: return "部屬報告"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .task: return "checklist"
+        case .meeting: return "person.3.fill"
+        case .report: return "doc.text.fill"
+        }
+    }
+}
+
+/// 兩步驟 Sheet：先選部屬（單一 sheet 內切換內容，避免多 sheet 競態），選完直接進對應編輯器
+struct AddSubItemSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    let kind: SubAddKind
+    @State private var pickedSubId: UUID?
+
+    var body: some View {
+        if let subId = pickedSubId {
+            switch kind {
+            case .task:    TaskEditorSheet(subordinateId: subId, editing: nil)
+            case .meeting: MeetingEditorSheet(subordinateId: subId, editing: nil)
+            case .report:  WeeklyReportEditorSheet(subordinateId: subId, editing: nil)
+            }
+        } else {
+            NavigationStack {
+                Group {
+                    if lifeStore.subordinates.isEmpty {
+                        ContentUnavailableView("尚無部屬", systemImage: "person.2.slash",
+                                               description: Text("請先在『部屬』頁新增部屬，才能建立\(kind.title)"))
+                    } else {
+                        List {
+                            ForEach(lifeStore.subordinates.sorted { $0.name < $1.name }) { sub in
+                                Button {
+                                    pickedSubId = sub.id
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: kind.icon)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(.green).frame(width: 26)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(sub.name.isEmpty ? "未命名" : sub.name)
+                                                .foregroundStyle(.primary)
+                                            let subtitle = [sub.department, sub.jobTitle]
+                                                .filter { !$0.isEmpty }.joined(separator: " · ")
+                                            if !subtitle.isEmpty {
+                                                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        Spacer()
+                                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("選擇部屬")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - 會議編輯 Sheet
 
 struct MeetingEditorSheet: View {

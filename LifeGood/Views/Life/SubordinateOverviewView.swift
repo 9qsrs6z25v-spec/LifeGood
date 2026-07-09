@@ -53,6 +53,8 @@ struct SubordinateOverviewView: View {
     @State private var sectionAppeared = false
     @State private var showCompleted = false
     @State private var editTarget: OverviewEditTarget?
+    @State private var addPersonalKind: PersonalEventKind?   // 新增我的會議 / 事務
+    @State private var subAddKind: SubAddKind?               // 新增部屬任務 / 會議 / 報告
 
     /// 點擊總覽項目要開啟的編輯目標
     private enum OverviewEditTarget: Identifiable {
@@ -239,6 +241,32 @@ struct SubordinateOverviewView: View {
                 // 點項目先顯示預覽卡片（右上角「編輯」才進入編輯）
                 SubordinateItemCard(ref: target.itemRef)
             }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { addMenu }
+            }
+            .sheet(item: $addPersonalKind) { kind in
+                PersonalEventEditor(initialDate: selectedDate, editing: nil, initialKind: kind)
+            }
+            .sheet(item: $subAddKind) { kind in
+                AddSubItemSheet(kind: kind)
+            }
+        }
+    }
+
+    /// 右上角「＋」選單：新增我的會議／事務，或部屬任務／會議／報告
+    private var addMenu: some View {
+        Menu {
+            Section("我的行事曆") {
+                Button { addPersonalKind = .meeting } label: { Label("新增會議", systemImage: "person.3.fill") }
+                Button { addPersonalKind = .task } label: { Label("新增事務", systemImage: "checklist") }
+            }
+            Section("部屬") {
+                Button { subAddKind = .task } label: { Label("新增部屬任務", systemImage: "checklist") }
+                Button { subAddKind = .meeting } label: { Label("新增部屬會議", systemImage: "person.3.fill") }
+                Button { subAddKind = .report } label: { Label("新增部屬報告", systemImage: "doc.text.fill") }
+            }
+        } label: {
+            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
         }
     }
 
