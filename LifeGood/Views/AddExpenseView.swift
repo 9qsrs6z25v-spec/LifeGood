@@ -1062,8 +1062,12 @@ struct AddExpenseView: View {
         return result
     }
 
-    private func formatBankBalance(_ value: Double) -> String {
+    private static let bankBalanceFormatter: NumberFormatter = {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        return f
+    }()
+    private func formatBankBalance(_ value: Double) -> String {
+        let f = Self.bankBalanceFormatter
         if abs(value) >= 10000 {
             let wan = value / 10000
             let str = f.string(from: NSNumber(value: wan)) ?? "0"

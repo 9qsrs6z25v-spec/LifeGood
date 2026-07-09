@@ -582,15 +582,23 @@ struct AddSavingsInsuranceView: View {
         return expenseId
     }
 
+    private static let currencyFormatterCache = NSCache<NSString, NumberFormatter>()
     private func formatCurrency(_ value: Double) -> String {
         // 台幣套用「萬」規則；外幣維持原幣別與小數位
         if !isUSD && (currencySymbol == "NT$" || currencySymbol == "TWD") {
             return value.ntdWanString
         }
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencySymbol = currencySymbol
-        f.maximumFractionDigits = isUSD ? 2 : 0
+        let key = "\(currencySymbol)_\(isUSD)" as NSString
+        let f: NumberFormatter
+        if let cached = Self.currencyFormatterCache.object(forKey: key) {
+            f = cached
+        } else {
+            f = NumberFormatter()
+            f.numberStyle = .currency
+            f.currencySymbol = currencySymbol
+            f.maximumFractionDigits = isUSD ? 2 : 0
+            Self.currencyFormatterCache.setObject(f, forKey: key)
+        }
         return f.string(from: NSNumber(value: value)) ?? "\(currencySymbol)0"
     }
 
