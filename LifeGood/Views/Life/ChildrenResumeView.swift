@@ -84,6 +84,10 @@ struct ChildrenResumeView: View {
                                     heroAppeared = true
                                 }
                             }
+                            .onDisappear {
+                                // 重置旗標：切到其他分頁再切回時能重新播放英雄卡進場動畫
+                                heroAppeared = false
+                            }
 
                         // [v2] 清單區塊標題
                         childrenSectionHeader
@@ -109,6 +113,10 @@ struct ChildrenResumeView: View {
                             withAnimation(.spring(response: 0.50, dampingFraction: 0.82).delay(0.05)) {
                                 cardsAppeared = true
                             }
+                        }
+                        .onDisappear {
+                            // 重置旗標：切到其他分頁再切回時能重新播放卡片列表進場動畫
+                            cardsAppeared = false
                         }
                     }
                 }

@@ -101,7 +101,15 @@ final class NotificationManager {
             if let endDate = event.recurrenceEndDate {
                 // 有截止日 → 逐次列出每次的觸發時間，個別排
                 if endDate < Date() { return }
-                let fires = enumerateFires(start: baseFire, end: endDate, recurrence: event.recurrence, cal: cal)
+                // baseFire 永遠是「事件原始那一次」的時間，不會隨時間推進；enumerateFires
+                // 內建 61 筆安全上限，若 baseFire 已是很久以前（例如每天重複的事件建立超過
+                // 61 天），61 筆全部列在過去，下面 filter 後變空陣列，導致這個仍在截止日內、
+                // 理應繼續提醒的事件從此再也排不到任何通知。先跳過已過去的次數，
+                // 從第一個 >= 現在的次數開始列舉，61 筆上限才會涵蓋到未來的次數。
+                let enumerationStart = advanceToNextOccurrence(
+                    from: baseFire, onOrAfter: Date(), recurrence: event.recurrence, cal: cal
+                )
+                let fires = enumerateFires(start: enumerationStart, end: endDate, recurrence: event.recurrence, cal: cal)
                     .filter { $0 > Date() }
                 let capped = Array(fires.prefix(60))
                 for (i, f) in capped.enumerated() {
@@ -224,6 +232,35 @@ final class NotificationManager {
             break
         }
         return comps
+    }
+
+    /// 把 start 依 recurrence 步進跳過所有早於 now 的次數，回傳第一個 >= now 的次數
+    /// （start 已經 >= now 時原樣回傳）。用於 enumerateFires 前先把列舉起點移到未來，
+    /// 避免 61 筆安全上限被已過去的次數用完。
+    private func advanceToNextOccurrence(
+        from start: Date,
+        onOrAfter now: Date,
+        recurrence: EventRecurrence,
+        cal: Calendar
+    ) -> Date {
+        guard start < now else { return start }
+        let step: Calendar.Component
+        switch recurrence {
+        case .daily:   step = .day
+        case .weekly:  step = .weekOfYear
+        case .monthly: step = .month
+        case .yearly:  step = .year
+        case .none:    return start
+        }
+        var current = start
+        var safety = 0
+        // 上限給到遠大於實務上會遇到的天數差距（daily 步進下相當於 10 年以上）
+        while current < now, safety < 4000 {
+            guard let next = cal.date(byAdding: step, value: 1, to: current) else { break }
+            current = next
+            safety += 1
+        }
+        return current
     }
 
     /// 從 start 開始，依 recurrence 一步一步往後算實際觸發時間，直到超過 end

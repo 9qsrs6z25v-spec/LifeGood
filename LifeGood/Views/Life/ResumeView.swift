@@ -1266,6 +1266,11 @@ struct AddMilestoneView: View {
                             Label(cat.displayName, systemImage: cat.icon).tag(cat)
                         }
                     }
+                    // 編輯既有項目時鎖定分類：save() 是依「進入編輯時的分類」各自寫回
+                    // editing / editingFamily 其中一個既有記錄，若編輯中途切換分類，
+                    // 會變成用新 UUID 呼叫 store.add() 建立另一筆全新記錄，原記錄則完全
+                    // 未被更新或刪除，形成孤兒記錄 + 使用者的編輯內容不翼而飛。
+                    .disabled(editing != nil || editingFamily != nil)
 
                     if isFamily {
                         familyFields

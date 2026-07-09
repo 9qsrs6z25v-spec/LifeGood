@@ -107,6 +107,10 @@ struct ResumeGiftSection: View {
                     rowsAppeared = true
                 }
             }
+            .onDisappear {
+                // 重置旗標：切到其他分頁再切回時能重新播放禮金列表進場動畫
+                rowsAppeared = false
+            }
 
             // 各子分類 DisclosureGroup
             ForEach(byCategory, id: \.sub) { group in

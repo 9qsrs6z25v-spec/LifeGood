@@ -171,6 +171,9 @@ struct ChartView: View {
             }
             .onDisappear {
                 loadTask?.cancel()
+                // 重置英雄卡進場旗標：切到其他子功能再切回 Chart 分頁時能重新播放進場動畫
+                // （其餘圖表旗標已在 loadChartData() 內因資料重載而歸零，僅此旗標未被涵蓋）
+                heroCardAppeared = false
             }
         }
     }

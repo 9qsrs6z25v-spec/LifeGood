@@ -13,6 +13,12 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.71", build: 627, date: "2026/07/09", notes: [
+            "【正確性修復】NotificationManager：有截止日的重複事件（每天/每週/每月/每年），若事件建立已超過約 61 次重複週期（例如每天重複的事件建立超過 61 天），排程時逐次列舉觸發時間所用的安全上限（61 筆）會被早已過去的次數用完，過濾掉過去時間後變成空陣列，導致這個仍在截止日內、理應繼續提醒的事件從此再也排不到任何通知，且 App 每次啟動的 rescheduleAll() 都是從同一個過去的原始時間重算，不會自行恢復。改為排程前先把列舉起點往前跳到第一個「現在之後」的次數，再從那裡開始列舉，確保 61 筆上限涵蓋到的都是尚未發生的未來次數。",
+            "【正確性修復】我的履歷（ResumeView.AddMilestoneView）：編輯既有里程碑或既有家庭成員時，畫面上方「分類」選單仍可自由切換；save() 是依「進入編輯時的分類」各自寫回 editing／editingFamily 兩者之一的既有記錄，若編輯中途切換分類（例如把一筆既有里程碑的分類改成「家庭」），會變成用新 UUID 呼叫 store.add() 建立一筆全新記錄，而原本正在編輯的記錄完全沒有被更新或刪除，形成「多一筆新記錄 + 原記錄的編輯內容不翼而飛」的資料不一致；切到「房地產」分類時儲存則是純粹的 no-op，使用者的編輯內容會被靜默捨棄。修正為編輯既有項目時鎖定分類選單（disabled），分類僅能在新增當下決定。",
+            "【效能修復】AddStockView 帳戶選擇器（accountPicker）：accountBalance(for:) 每次呼叫都對 expenseStore.expenses 做全量 filter/first(where:) 掃描，而 accountPicker 是 Form body 的一部分，新增股票時任何欄位每次按鍵都會觸發整個 body 重新求值，導致帳戶餘額對 expenses 反覆全量掃描（O(帳戶數 × expenses) 每次按鍵）。改為批次建表（allAccountBalances()：expensesById／expensesByCardMilestone 各建一次，逐帳戶查表 O(1)），對齊 AddExpenseView.allBankBalances() 既有修復規格。",
+            "【畫面閃爍修復】6 個尚未套用「進場動畫旗標需在 onDisappear 歸零」既有規格的畫面：FamilyView（membersAppeared）、ChildrenResumeView（heroAppeared／cardsAppeared）、FamilyMembersResumeView（heroCardAppeared／rowsAppeared）、SpouseResumeView（cardAppeared／milestonesAppeared／expensesAppeared）、ResumeGiftSection（rowsAppeared）、ChartView（heroCardAppeared）。這些畫面都是透過 MainTabView 分頁 switch 常駐內容進入（非 sheet），@State 旗標在切到其他分頁時不會重置，只設 true 未搭配 onDisappear 歸零 false，導致使用者切走再切回時，英雄卡／清單列的淡入＋位移進場動畫不會再播放。比照全 App 其餘畫面（v22.24／v22.36／v22.39／v22.87／v23.44 等）已修復的同型規格，逐一補上 onDisappear 重置。"
+        ]),
         ChangelogEntry(version: "23.70", build: 626, date: "2026/07/09", notes: [
             "我的行事曆與部屬總覽頁右上角「＋」改為選單：可選擇新增『我的會議 / 事務』（個人行事曆事件），或『部屬任務 / 會議 / 報告』。新增部屬項目時會先跳選擇部屬清單，選完直接進入對應的編輯畫面。",
             "個人事件編輯器新增預設類型參數（會議 / 事務），從選單新增時直接帶入對應類型。"

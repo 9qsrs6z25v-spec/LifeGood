@@ -104,6 +104,10 @@ struct FamilyMembersResumeView: View {
                                 heroCardAppeared = true
                             }
                         }
+                        .onDisappear {
+                            // 重置旗標：切到其他分頁再切回時能重新播放英雄卡進場動畫
+                            heroCardAppeared = false
+                        }
                 }
 
                 if allMembers.isEmpty {
@@ -156,6 +160,10 @@ struct FamilyMembersResumeView: View {
                         withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
                             rowsAppeared = true
                         }
+                    }
+                    .onDisappear {
+                        // 重置旗標：切到其他分頁再切回時能重新播放列表進場動畫
+                        rowsAppeared = false
                     }
                 }
             }

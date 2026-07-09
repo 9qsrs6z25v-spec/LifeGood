@@ -122,6 +122,10 @@ struct SpouseResumeView: View {
                                     cardAppeared = true
                                 }
                             }
+                            .onDisappear {
+                                // 重置旗標：切到其他分頁再切回時能重新播放英雄卡進場動畫
+                                cardAppeared = false
+                            }
                     }
                     marriageSection(s)
                     milestoneSection
@@ -458,6 +462,10 @@ struct SpouseResumeView: View {
                                 }
                             }
                         }
+                        .onDisappear {
+                            // 重置旗標：切到其他分頁再切回時能重新播放里程碑列表進場動畫
+                            if idx == 0 { milestonesAppeared = false }
+                        }
                 }
             }
         }
@@ -582,6 +590,10 @@ struct SpouseResumeView: View {
                                     expensesAppeared = true
                                 }
                             }
+                        }
+                        .onDisappear {
+                            // 重置旗標：切到其他分頁再切回時能重新播放消費列表進場動畫
+                            if idx == 0 { expensesAppeared = false }
                         }
                 }
 

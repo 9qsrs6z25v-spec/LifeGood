@@ -443,31 +443,41 @@ struct AddStockView: View {
         return unique.isEmpty ? ["NT$"] : unique
     }
 
-    /// 計算帳戶餘額
-    private func accountBalance(for ms: LifeMilestone) -> Double {
+    /// 計算全部銀行 / 證券帳戶的目前餘額，一次算好整批供 accountPicker 查表。
+    /// 原本 accountBalance(for:) 每次呼叫都對 expenseStore.expenses 做 first(where:)/filter
+    /// 全量掃描，而 accountPicker 是 Form body 的一部分，任何欄位每次按鍵都會觸發整個 body
+    /// 重新求值——帳戶選單因此在打字時對 expenses 反覆全量掃描（O(帳戶數 × expenses) 每次按鍵）。
+    /// 改為批次建表：expensesById／expensesByCardMilestone 各建一次，逐帳戶查表 O(1)，
+    /// 對齊 AddExpenseView.allBankBalances() 既有修復規格。
+    private func allAccountBalances() -> [UUID: Double] {
         let now = Date()
-        var total: Double = 0
-        for dep in ms.bankDeposits ?? [] {
-            guard dep.date <= now else { continue }
-            if let expId = dep.linkedExpenseId,
-               let exp = expenseStore.expenses.first(where: { $0.id == expId }),
-               exp.linkedCreditCardMilestoneId != nil {
-                continue
-            }
-            total += dep.isWithdrawal ? -dep.amount : dep.amount
-        }
-        if ms.financeSubCategory == .bank {
-            let cards = lifeStore.milestones.filter {
-                $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
-            }
-            for card in cards {
-                let exps = expenseStore.expenses.filter {
-                    $0.linkedCreditCardMilestoneId == card.id && $0.date <= now
+        let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let expensesByCardMilestone = Dictionary(grouping: expenseStore.expenses.filter {
+            $0.linkedCreditCardMilestoneId != nil && $0.date <= now
+        }, by: { $0.linkedCreditCardMilestoneId! })
+        var result: [UUID: Double] = [:]
+        for ms in bankMilestones + securitiesMilestones {
+            var total: Double = 0
+            for dep in ms.bankDeposits ?? [] {
+                guard dep.date <= now else { continue }
+                if let expId = dep.linkedExpenseId,
+                   let exp = expensesById[expId],
+                   exp.linkedCreditCardMilestoneId != nil {
+                    continue
                 }
-                for exp in exps { total -= exp.amount }
+                total += dep.isWithdrawal ? -dep.amount : dep.amount
             }
+            if ms.financeSubCategory == .bank {
+                let cards = lifeStore.milestones.filter {
+                    $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
+                }
+                for card in cards {
+                    for exp in expensesByCardMilestone[card.id] ?? [] { total -= exp.amount }
+                }
+            }
+            result[ms.id] = total
         }
-        return total
+        return result
     }
 
     private static let balanceFormatter: NumberFormatter = {
@@ -498,7 +508,8 @@ struct AddStockView: View {
     }
 
     private var accountPicker: some View {
-        HStack {
+        let balances = allAccountBalances()
+        return HStack {
             Text("扣款帳戶").foregroundStyle(.secondary)
             Spacer()
             Menu {
@@ -512,7 +523,7 @@ struct AddStockView: View {
                         ForEach(bankMilestones) { ms in
                             let currencies = bankCurrencies(for: ms)
                             let name = ms.bankName ?? ms.title
-                            let label = "\(name)（\(fmtBalance(accountBalance(for: ms)))）"
+                            let label = "\(name)（\(fmtBalance(balances[ms.id] ?? 0))）"
                             if currencies.count > 1 {
                                 Menu(label) {
                                     ForEach(currencies, id: \.self) { code in
@@ -536,7 +547,7 @@ struct AddStockView: View {
                 if !securitiesMilestones.isEmpty {
                     Section("證券") {
                         ForEach(securitiesMilestones) { ms in
-                            let label = "\(ms.title)（\(fmtBalance(accountBalance(for: ms)))）"
+                            let label = "\(ms.title)（\(fmtBalance(balances[ms.id] ?? 0))）"
                             Button(label) {
                                 selectedSecuritiesMilestoneId = ms.id
                                 selectedBankMilestoneId = nil

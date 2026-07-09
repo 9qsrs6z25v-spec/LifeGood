@@ -106,6 +106,10 @@ struct FamilyView: View {
                                 membersAppeared = true
                             }
                         }
+                        .onDisappear {
+                            // 重置旗標：切到其他分頁再切回時能重新播放成員列表進場動畫
+                            membersAppeared = false
+                        }
                     }
                 }
             }
