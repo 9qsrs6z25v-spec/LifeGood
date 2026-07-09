@@ -20,6 +20,15 @@ import SwiftUI
 //   • gradeTitleRow 兩欄：補 RoundedRectangle().stroke 細描邊
 //   • deptEmptyState / gradeTitleEmptyState：主圓升級為 LinearGradient fill + stroke 描邊
 //   • DepartmentEditor checkRow code badge：補 Capsule stroke overlay
+//
+// [2026-07 v3] 本次美化方向（DepartmentEditor 部門編輯器補齊）：
+//   • 五個 Form Section（基本資訊／部門功能／上游／下游／同層級）header 從純文字
+//     升級為與外層 GradeTitleView.sectionHeader 同款的 Capsule side bar + icon 標頭，
+//     上游／下游／同層級三段並加入已選數量 Capsule badge，對齊全 App section 標頭規格
+//   • checkRow：選中時標籤字色 .primary／未選 .secondary 加強可讀對比，
+//     toggle 加 easeInOut(0.15) 過場動畫，避免選取狀態切換太生硬
+//   • 三處重複的「尚無其他部門可選」提示合併為 noCandidatesHint，補上圖示錨點
+//   本次僅調整 DepartmentEditor 視覺呈現，未變動任何雙向同步 / 儲存邏輯
 
 struct GradeTitleView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -497,25 +506,26 @@ struct DepartmentEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     TextField("部門代號（例 ENG-01）", text: $code)
                         .autocapitalization(.allCharacters)
                     TextField("部門名稱", text: $name)
+                } header: {
+                    sectionHeader("基本資訊", icon: "info.circle.fill", color: .indigo)
                 }
 
                 Section {
                     TextField("這個部門做什麼？例如：研發新產品、維護線上服務", text: $function, axis: .vertical)
                         .lineLimit(2...5)
                 } header: {
-                    Text("部門功能")
+                    sectionHeader("部門功能", icon: "text.alignleft", color: .indigo)
                 } footer: {
                     Text("會顯示在公司組織頁的部門卡片上，幫助記住每個部門的職責。")
                 }
 
                 Section {
                     if candidates.isEmpty {
-                        Text("尚無其他部門可選，請先新增部門。")
-                            .font(.caption).foregroundStyle(.tertiary)
+                        noCandidatesHint
                     } else {
                         ForEach(candidates) { d in
                             checkRow(
@@ -534,15 +544,14 @@ struct DepartmentEditor: View {
                         }
                     }
                 } header: {
-                    Text("上游部門（向誰回報 / 由誰決策）")
+                    sectionHeader("上游部門（向誰回報 / 由誰決策）", icon: "arrow.up.circle.fill", color: .blue, count: upstreamIds.isEmpty ? nil : upstreamIds.count)
                 } footer: {
                     Text("勾選後會自動設定對方為「下游部門」，組織圖會以此繪製。")
                 }
 
                 Section {
                     if candidates.isEmpty {
-                        Text("尚無其他部門可選，請先新增部門。")
-                            .font(.caption).foregroundStyle(.tertiary)
+                        noCandidatesHint
                     } else {
                         ForEach(candidates) { d in
                             checkRow(
@@ -562,15 +571,14 @@ struct DepartmentEditor: View {
                         }
                     }
                 } header: {
-                    Text("下游部門（誰受我支援 / 由我管轄）")
+                    sectionHeader("下游部門（誰受我支援 / 由我管轄）", icon: "arrow.down.circle.fill", color: .orange, count: downstreamIds.isEmpty ? nil : downstreamIds.count)
                 } footer: {
                     Text("一個部門不能同時是上游又是下游。儲存時會把對方對應的關係雙向同步。")
                 }
 
                 Section {
                     if candidates.isEmpty {
-                        Text("尚無其他部門可選，請先新增部門。")
-                            .font(.caption).foregroundStyle(.tertiary)
+                        noCandidatesHint
                     } else {
                         ForEach(candidates) { d in
                             checkRow(
@@ -590,7 +598,7 @@ struct DepartmentEditor: View {
                         }
                     }
                 } header: {
-                    Text("同層級部門（peer / 平行單位）")
+                    sectionHeader("同層級部門（peer / 平行單位）", icon: "arrow.left.arrow.right.circle.fill", color: .purple, count: peerIds.isEmpty ? nil : peerIds.count)
                 } footer: {
                     Text("互不上下級的平行部門，組織圖會以紫色虛線連接表示「橫向夥伴」。")
                 }
@@ -626,6 +634,49 @@ struct DepartmentEditor: View {
         }
     }
 
+    // MARK: - Section Header（[v3] 對齊 GradeTitleView.sectionHeader：Capsule side bar + icon + 選中數量 badge）
+
+    private func sectionHeader(_ title: String, icon: String, color: Color, count: Int? = nil) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.6)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+            Spacer()
+            if let count {
+                ZStack {
+                    Capsule().fill(color.opacity(0.10))
+                    Text("已選 \(count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(color)
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    Capsule().stroke(color.opacity(0.22), lineWidth: 0.75)
+                }
+                .fixedSize()
+            }
+        }
+        .padding(.vertical, 2)
+        .textCase(nil)
+    }
+
+    // [v3] 三處「尚無其他部門可選」重複提示合併，補圖示錨點，強化空狀態可辨識度
+    private var noCandidatesHint: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "person.2.slash")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Text("尚無其他部門可選，請先新增部門。")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
     // MARK: - Check Row (badge 升級為 Capsule)
 
     private func checkRow(isOn: Bool, label: String, code: String, color: Color, action: @escaping () -> Void) -> some View {
@@ -643,12 +694,16 @@ struct DepartmentEditor: View {
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.75))
                 }
+                // [v3] 選中時 .primary／未選 .secondary，加強勾選狀態的文字對比
                 Text(label)
+                    .foregroundStyle(isOn ? .primary : .secondary)
                 Spacer()
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // [v3] 勾選切換加短促過場動畫，避免圖示/字色瞬間跳變
+        .animation(.easeInOut(duration: 0.15), value: isOn)
     }
 
     // MARK: - Load / Save

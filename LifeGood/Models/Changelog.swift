@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.68", build: 624, date: "2026/07/09", notes: [
+            "美化部門職等畫面（GradeTitleView）的部門編輯器（DepartmentEditor）：先前主畫面（英雄卡／部門列／職等列）已完成美化，但點進「新增部門／編輯部門」的表單卻仍是純文字 Section 標題，風格與主畫面脫節。本次補齊：基本資訊／部門功能／上游／下游／同層級五個區塊 header 升級為與主畫面一致的漸層色條＋圖示標頭，上游／下游／同層級並加入已選數量徽章，方便一眼確認勾選狀態；勾選列（checkRow）選中/未選文字對比加強，並補上切換過場動畫；三處重複的「尚無其他部門可選」提示合併並補上圖示。純視覺調整，未變動部門雙向連結同步、刪除或任何既有儲存邏輯。"
+        ]),
         ChangelogEntry(version: "23.67", build: 623, date: "2026/07/09", notes: [
             "美化裝潢照片編輯畫面（RenovationPhotoEditor）：修正先前一次美化留下的視覺重複——「照片」Section 標題原本疊了一組自製的漸層色條＋圖示＋粗體標題＋計數膠囊，但下方 MultiPhotoGallery 元件本身已內建同樣一列（粗體標題＋計數膠囊＋新增按鈕），造成標題與張數重複顯示兩次。改回與 AddExpenseView／FixedExpenseView 相同做法，Section header 僅用純文字「照片」，裝飾交由元件內建 header 負責，消除重複雜訊。另外裝潢照片全螢幕瀏覽（RenovationStackViewer）在沒有照片時的「沒有照片」純文字空狀態，升級為圓形圖示徽章＋文字的直式排版，對齊全 App 空狀態設計語言。純視覺調整，未變動照片儲存、刪除或任何既有商業邏輯。"
         ]),
