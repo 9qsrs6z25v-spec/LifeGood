@@ -13,6 +13,14 @@ import SwiftUI
 //      引導使用者了解底部 compact picker 用途，對齊 IncomeView KPI 橫列輔助文字規格
 //   6. 整體 padding 微調：pills 行垂直從 8 → 9，DatePicker 行垂直從 compact → 10，
 //      呼吸感與其他表單卡片一致
+// [2026-07 v2] 深色模式對比 + 文字自適應：
+//   7. pillButton 未選中底色：固定 opacity(0.22) 疊在 systemBackground 上，深色模式下
+//      systemBackground 接近純黑，馬卡龍粉彩色會被吃成一片死黑、難以分辨彼此顏色。
+//      改為依 colorScheme 切換：淺色維持 0.22，深色提高到 0.34，
+//      對齊 FamilyOverviewMap v3 依 colorScheme 切換底色的做法。
+//   8. pillButton 標籤／日期文字補 lineLimit(1) + minimumScaleFactor(0.8)：
+//      5 顆膠囊在小螢幕（SE）+ 大字體輔助設定下容易被壓縮換行變形，
+//      加上後可自動縮小但不低於可辨識下限，對齊全 App 文字自適應規格。
 
 /// 馬卡龍色調的精簡日期選擇器：第一行 5 顆相對日期按鈕，第二行 compact DatePicker。
 struct MacaronDatePicker: View {
@@ -20,6 +28,7 @@ struct MacaronDatePicker: View {
     /// 是否允許選未來日期（行事曆需要、部屬總覽也允許）
     var allowFuture: Bool = true
 
+    @Environment(\.colorScheme) private var colorScheme
     private let calendar = Calendar.current
     private static let mdFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "M/d"; return f
@@ -103,12 +112,17 @@ struct MacaronDatePicker: View {
         } label: {
             VStack(spacing: 2) {
                 Text(label).font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Text(dateLabel).font(.system(size: 10)).opacity(0.7)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
-            // 選中時飽和度更高（0.90），未選中更淡（0.22），強化對比
-            .background(color.opacity(isSelected ? 0.90 : 0.22))
+            // 選中時飽和度更高（0.90）；未選中依 colorScheme 調整（淺色 0.22／深色 0.34），
+            // 避免深色模式下底色被 systemBackground 吃成一片死黑
+            .background(color.opacity(isSelected ? 0.90 : (colorScheme == .dark ? 0.34 : 0.22)))
             .foregroundStyle(isSelected ? Color.white : Color.primary)
             .overlay(
                 RoundedRectangle(cornerRadius: 10)

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.77", build: 633, date: "2026/07/10", notes: [
+            "美化日期快選元件（MacaronDatePicker，行事曆／部屬總覽等多處共用）：未選中的馬卡龍粉彩膠囊固定用 opacity(0.22) 疊在系統背景上，深色模式下背景接近純黑，5 種粉彩色會被吃成同一片死黑、幾乎分辨不出顏色差異。改為依 colorScheme 切換不透明度（淺色維持 0.22、深色提高到 0.34），並為膠囊內的日期文字補上 lineLimit(1) + minimumScaleFactor(0.8)，避免小螢幕或放大字體時文字被壓縮換行變形。純視覺調整，未變動日期選取、allowFuture 未來日限制等既有邏輯。",
+        ]),
         ChangelogEntry(version: "23.76", build: 632, date: "2026/07/10", notes: [
             "美化健康檔案編輯畫面（HealthProfileEditView）四個子編輯視窗（過敏原／藥物／量測／健檢）：先前這四個 sheet 都是欄位直接平鋪的裸 Form，完全沒有分組標題，與外層清單「4pt 漸層色條 + 圖示 + 標題」的小節樣式落差最大。新增共用 healthEditorSectionHeader(_:icon:color:) 並依外層對應小節主題色分組（過敏 orange／用藥 blue／量測 pink／健檢 purple），量測視窗另拆分「日期」「體重 / 心率」「血壓」三個獨立小節取代原本純字串標題，備註欄統一歸入 secondary 色「備註」小節。純版面調整，未變動任何草稿欄位、儲存/取消邏輯。",
         ]),
