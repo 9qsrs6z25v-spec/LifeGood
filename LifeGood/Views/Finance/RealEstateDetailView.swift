@@ -65,6 +65,14 @@ import ImageIO
 //      對齊 mortgageItems / paidItems 金額規格。
 //  19. latestPaymentRow → 金額字型升級 .system(size:14,weight:.bold,design:.rounded) +
 //      contentTransition(.numericText())，對齊 calcRow 規格。
+//
+// [2026-07 v5] 空狀態一致性修復：
+//  20. elevatorContent 空狀態：原本是唯一手刻裸 HStack + Text("尚無保養記錄")，
+//      同檔案 mortgageItems／paidItems／variableExpenses 三處空狀態都已改用共用
+//      emptySectionRow(_:)（tray 圖示 + .caption/.tertiary + 14/9pt padding），
+//      只有電梯保養這格漏改、垂直 padding 也不同（6pt vs 9pt），
+//      切分頁時視覺不連貫。改呼叫 emptySectionRow("尚無保養記錄") 對齊其餘三處。
+//      純視覺調整，未變動保養記錄新增/刪除或任何既有資料邏輯。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -1018,11 +1026,7 @@ struct RealEstateDetailView: View {
     @ViewBuilder
     private var elevatorContent: some View {
         if estate.elevatorMaintenances.isEmpty {
-            HStack {
-                Text("尚無保養記錄").font(.caption).foregroundStyle(.tertiary)
-                Spacer()
-            }
-            .padding(.horizontal).padding(.vertical, 6)
+            emptySectionRow("尚無保養記錄")
         } else {
             ForEach(estate.elevatorMaintenances) { m in
                 Button { editingElevatorMaintenance = m } label: {

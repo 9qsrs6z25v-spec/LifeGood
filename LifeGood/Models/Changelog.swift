@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.78", build: 634, date: "2026/07/10", notes: [
+            "美化不動產詳情畫面（RealEstateDetailView）電梯保養空狀態：先前電梯保養分頁沒有任何保養記錄時，是全檔案唯一手刻裸 HStack + Text(\"尚無保養記錄\") 的空狀態，同畫面「貸款項目」「已支出項目」「變動支出」三處空狀態都早已改用共用 emptySectionRow(_:)（tray 圖示 + .caption/.tertiary 文字），只有電梯保養這格漏改，垂直留白也和其他三處不一致（6pt vs 9pt），切分頁時視覺會有落差。改呼叫既有 emptySectionRow(\"尚無保養記錄\")，與其餘三處空狀態對齊。純視覺調整，未變動電梯保養記錄新增/編輯/刪除等既有邏輯。",
+        ]),
         ChangelogEntry(version: "23.77", build: 633, date: "2026/07/10", notes: [
             "美化日期快選元件（MacaronDatePicker，行事曆／部屬總覽等多處共用）：未選中的馬卡龍粉彩膠囊固定用 opacity(0.22) 疊在系統背景上，深色模式下背景接近純黑，5 種粉彩色會被吃成同一片死黑、幾乎分辨不出顏色差異。改為依 colorScheme 切換不透明度（淺色維持 0.22、深色提高到 0.34），並為膠囊內的日期文字補上 lineLimit(1) + minimumScaleFactor(0.8)，避免小螢幕或放大字體時文字被壓縮換行變形。純視覺調整，未變動日期選取、allowFuture 未來日限制等既有邏輯。",
         ]),
