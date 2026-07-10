@@ -36,6 +36,11 @@ import SwiftUI
 //      對齊全 App 金額顯示規格（VariableExpenseView / IncomeView 等）。
 //  12. 卡片內 Divider() 升級：改用 Rectangle().fill(Color(.separator).opacity(0.20))
 //      .frame(height:0.5)，對齊全 App 分隔線規格（VariableExpenseView / IncomeView 等）。
+// [2026-07 v3] 本次美化方向：
+//  13. CategoryRulesEditorView 關閉按鈕位置：純關閉用途 sheet（無取消/儲存兩顆按鈕）的唯一
+//      「完成」鈕原放在 topBarTrailing，與全 App 同類 sheet 既有規格（TalentMatrixView／
+//      SubordinateRosterView，以及本檔案同層的 EInvoiceHistoryView「關閉」鈕）皆置於
+//      topBarLeading 不一致；改為 topBarLeading，對齊「關閉按鈕統一放在視窗左側」規格。
 
 // MARK: - 主畫面
 
@@ -748,7 +753,7 @@ struct CategoryRulesEditorView: View {
             .navigationTitle("自動分類規則")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("完成") { dismiss() }
                 }
             }

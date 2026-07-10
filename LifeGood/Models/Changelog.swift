@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.81", build: 637, date: "2026/07/10", notes: [
+            "美化電子發票自動匯入設定畫面（EInvoiceSetupView.CategoryRulesEditorView）關閉按鈕位置：自動分類規則編輯器是純關閉用途的 sheet（無另外的取消/儲存兩顆按鈕），原本唯一的「完成」關閉鈕放在 topBarTrailing（右上），與全 App 同類「純關閉 sheet」既有規格（TalentMatrixView／SubordinateRosterView 兩處，以及本檔案同層的 EInvoiceHistoryView「關閉」鈕）皆放在 topBarLeading（左上）不一致。改為 topBarLeading，對齊全 App「關閉按鈕統一放在視窗左側」規格。純視覺調整，未變動規則新增/刪除/重設等既有邏輯。",
+        ]),
         ChangelogEntry(version: "23.80", build: 636, date: "2026/07/10", notes: [
             "美化財富總覽存款編輯表單（LifeFinanceView.DepositEditorSheet）轉帳/沖正帳戶餘額格式：先前 fmtBal 自製 NumberFormatter 手刻「NT$ X萬」（無條件捨去小數，且未處理億級單位，例如 1.2 億的帳戶會顯示成「NT$12000萬」），與全 App 共用的 Double.ntdWanString（「NT$1.2萬」保留一位小數、億以上自動換算為「億」）風格不一致，是本檔案唯一未接上共用金額量級格式的地方（與 v23.79 AddExpenseView.formatBankBalance 同型問題）。改呼叫既有 ntdWanString，「轉入帳戶」選單與「沖正」目前總額顯示對齊全 App 金額規則。純視覺調整，未變動帳戶餘額計算、轉帳或沖正等既有邏輯。",
         ]),
