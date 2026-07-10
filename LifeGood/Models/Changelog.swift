@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.82", build: 638, date: "2026/07/10", notes: [
+            "【正確性修復】公司組織部門編輯（GradeTitleView.DepartmentEditor）勾選「上游部門」時，只清除同一目標的 downstreamIds，未同步清除 peerIds；而「下游」「同層級」兩個勾選欄位都會正確清除另外兩種關係。若使用者先勾同一部門為「同層級」，之後改勾「上游」，peerIds 會殘留該部門 id，儲存後同一目標會同時出現「上游」與「同層級」兩個互斥徽章，組織圖也會畫出矛盾的上下屬 + 平行連接線。補上 peerIds.remove(d.id)，與另外兩個勾選欄位規格一致。",
+            "【正確性修復】部門刪除清除殘留關聯：GradeTitleView.deleteDepartment（列表滑動刪除）於清空其他部門的 upstreamIds／downstreamIds 後，從未清空 peerIds，刪除部門後其他部門的 peerIds 仍留著已刪除部門的 id（dangling reference），組織圖／人數統計可能因此參照到不存在的部門。同檔案 DepartmentEditor.deleteSelf（編輯畫面內刪除）雖有清 peerIds，但少了「有異動才寫回」判斷，等同刪除任一部門就對其餘所有部門無條件呼叫 lifeStore.update（全量 JSON 重編碼 + 觸發 CloudKit 推送節流），即使該部門與被刪對象毫無關聯。兩處統一補齊 peerIds 清除 + 「僅在確實有異動時才 update」判斷。",
+        ]),
         ChangelogEntry(version: "23.81", build: 637, date: "2026/07/10", notes: [
             "美化電子發票自動匯入設定畫面（EInvoiceSetupView.CategoryRulesEditorView）關閉按鈕位置：自動分類規則編輯器是純關閉用途的 sheet（無另外的取消/儲存兩顆按鈕），原本唯一的「完成」關閉鈕放在 topBarTrailing（右上），與全 App 同類「純關閉 sheet」既有規格（TalentMatrixView／SubordinateRosterView 兩處，以及本檔案同層的 EInvoiceHistoryView「關閉」鈕）皆放在 topBarLeading（左上）不一致。改為 topBarLeading，對齊全 App「關閉按鈕統一放在視窗左側」規格。純視覺調整，未變動規則新增/刪除/重設等既有邏輯。",
         ]),

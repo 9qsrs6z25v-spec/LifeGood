@@ -459,9 +459,11 @@ struct GradeTitleView: View {
         for var other in lifeStore.departments where other.id != dept.id {
             let removedUp = other.upstreamIds.contains(dept.id)
             let removedDown = other.downstreamIds.contains(dept.id)
+            let removedPeer = other.peerIds.contains(dept.id)
             other.upstreamIds.removeAll { $0 == dept.id }
             other.downstreamIds.removeAll { $0 == dept.id }
-            if removedUp || removedDown { lifeStore.update(other) }
+            other.peerIds.removeAll { $0 == dept.id }
+            if removedUp || removedDown || removedPeer { lifeStore.update(other) }
         }
         for var p in lifeStore.orgPeople where p.departmentId == dept.id {
             p.departmentId = nil
@@ -539,6 +541,7 @@ struct DepartmentEditor: View {
                                 } else {
                                     upstreamIds.insert(d.id)
                                     downstreamIds.remove(d.id)
+                                    peerIds.remove(d.id)
                                 }
                             }
                         }
@@ -781,10 +784,13 @@ struct DepartmentEditor: View {
 
     private func deleteSelf(_ dept: Department) {
         for var other in lifeStore.departments where other.id != dept.id {
+            let removedUp = other.upstreamIds.contains(dept.id)
+            let removedDown = other.downstreamIds.contains(dept.id)
+            let removedPeer = other.peerIds.contains(dept.id)
             other.upstreamIds.removeAll { $0 == dept.id }
             other.downstreamIds.removeAll { $0 == dept.id }
             other.peerIds.removeAll { $0 == dept.id }
-            lifeStore.update(other)
+            if removedUp || removedDown || removedPeer { lifeStore.update(other) }
         }
         for var p in lifeStore.orgPeople where p.departmentId == dept.id {
             p.departmentId = nil
