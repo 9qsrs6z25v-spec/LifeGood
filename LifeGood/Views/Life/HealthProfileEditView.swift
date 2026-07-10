@@ -22,6 +22,13 @@ import SwiftUI
 //      分類膠囊加入對應色系圖示，維持在可辨識最小字級以上。
 //   6. 保留原有 toolbar 佈局（取消固定左側／儲存固定右側，符合全 App 一致慣例），
 //      未變動任何草稿寫回、刪除、upsert 等既有商業邏輯。
+// [2026-07 v2] 修正病史列與同頁其他小節不一致：
+//   7. conditionsSection 先前直接輸出裸 Text(c)，是全頁唯一沒有 rowIcon 圖示圓的清單列，
+//      與過敏／用藥／健檢三個小節（皆有 36pt 主題色漸層圖示圓）形成明顯落差；
+//      新增 conditionRow(_:) 補上 indigo 主題圖示圓，對齊 healthSectionHeader 同色系。
+//   下次美化方向：AllergyEditor／MedicationEditor／MeasurementEditor／CheckupEditor 四個
+//   子編輯 sheet 目前仍是裸 Form（無 section header 色條/圖示），與外層清單的視覺規格落差
+//   最大，適合作為下一輪美化重點。
 
 struct HealthProfileEditView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -130,7 +137,7 @@ struct HealthProfileEditView: View {
                 emptyRow(icon: "list.bullet.clipboard", text: "尚無慢性病 / 病史紀錄")
             }
             ForEach(Array(draft.conditions.enumerated()), id: \.offset) { idx, c in
-                Text(c)
+                conditionRow(c)
             }
             .onDelete { draft.conditions.remove(atOffsets: $0) }
             HStack {
@@ -313,6 +320,14 @@ struct HealthProfileEditView: View {
     }
 
     // MARK: - Helpers
+
+    /// 病史列：補上與過敏／用藥／健檢一致的圖示圓，修正先前純文字列與其他小節不一致的問題
+    private func conditionRow(_ text: String) -> some View {
+        HStack(spacing: 12) {
+            rowIcon("list.bullet.clipboard.fill", color: .indigo)
+            Text(text).foregroundStyle(.primary)
+        }
+    }
 
     /// 依主題色繪製 36pt 漸層圓形圖示，對齊 AddVehicleView 列行圖示規格
     @ViewBuilder

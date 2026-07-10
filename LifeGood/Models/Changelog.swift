@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.75", build: 631, date: "2026/07/10", notes: [
+            "美化健康檔案編輯畫面（HealthProfileEditView）「慢性病 / 病史」小節：先前該清單直接輸出裸 Text(c)，是全頁唯一沒有圖示圓的清單列，與同頁「過敏」「用藥」「健檢」三個小節（皆有 36pt 主題色漸層圖示圓）視覺落差明顯，像是漏改的半成品。新增 conditionRow(_:) 補上與其他小節一致的 indigo 主題圖示圓，滑動刪除等既有互動與資料邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "23.74", build: 630, date: "2026/07/10", notes: [
             "美化設定頁（SettingsView）「自訂幣別匯率」區塊：先前此區只有裸 TextField 橫排，沒有任何空狀態說明、也是全頁面唯一停留在初版樣式、從未跟上其他小節視覺規格的區塊。新增尚未設定任何匯率時的緊湊空狀態提示（對齊 HealthProfileEditView.emptyRow 規格），並為每筆匯率列補上 22pt 漸層小圖示圓、比值欄位改用等寬數字對齊，避免多筆匯率上下數字左右跳動。純視覺調整，未變動幣別新增/刪除/換算邏輯。",
         ]),
