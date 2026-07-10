@@ -1062,20 +1062,14 @@ struct AddExpenseView: View {
         return result
     }
 
-    private static let bankBalanceFormatter: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f
-    }()
+    // 【美化方向】扣款帳戶選單餘額格式：先前這裡自製 NumberFormatter + 手刻「NT$ X萬」
+    // （NT$ 後多一個空白、萬以下無小數），與 App 其餘 28 處畫面（FinanceOverviewView／
+    // RealEstateView／StockView／SavingsInsuranceView 等）共用的 Double.ntdWanString
+    // （"NT$1.2萬" 無空白、億以上自動進位、非整數保留一位小數）風格不一致，
+    // 也會把 45,000 這類金額捨去小數顯示成「NT$ 5萬」。改呼叫共用 ntdWanString，
+    // 與全 App 金額量級顯示規則對齊。純視覺調整，未變動帳戶餘額計算邏輯。
     private func formatBankBalance(_ value: Double) -> String {
-        let f = Self.bankBalanceFormatter
-        if abs(value) >= 10000 {
-            let wan = value / 10000
-            let str = f.string(from: NSNumber(value: wan)) ?? "0"
-            return "NT$ \(str)萬"
-        } else {
-            let str = f.string(from: NSNumber(value: value)) ?? "0"
-            return "NT$ \(str)"
-        }
+        value.ntdWanString
     }
 
     private var bankPickerLabel: String {

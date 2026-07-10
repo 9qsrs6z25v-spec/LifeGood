@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.79", build: 635, date: "2026/07/10", notes: [
+            "美化記帳新增畫面（AddExpenseView）「扣款目標」選單帳戶餘額格式：先前 formatBankBalance 自製 NumberFormatter 手刻「NT$ 5萬」（NT$ 後多一個空白、且無條件捨去小數，例如 45,000 會被顯示成「NT$ 5萬」遺失小數），與全 App 其餘近 30 處畫面（FinanceOverviewView／RealEstateView／StockView／SavingsInsuranceView 等）共用的 Double.ntdWanString（「NT$1.2萬」無空白、保留一位小數、億以上自動換算）風格不一致，是全檔案唯一未接上共用金額量級格式的地方。改呼叫既有 ntdWanString，與全 App 金額顯示規則對齊。純視覺調整，未變動帳戶餘額加總或扣款目標選擇等既有邏輯。",
+        ]),
         ChangelogEntry(version: "23.78", build: 634, date: "2026/07/10", notes: [
             "美化不動產詳情畫面（RealEstateDetailView）電梯保養空狀態：先前電梯保養分頁沒有任何保養記錄時，是全檔案唯一手刻裸 HStack + Text(\"尚無保養記錄\") 的空狀態，同畫面「貸款項目」「已支出項目」「變動支出」三處空狀態都早已改用共用 emptySectionRow(_:)（tray 圖示 + .caption/.tertiary 文字），只有電梯保養這格漏改，垂直留白也和其他三處不一致（6pt vs 9pt），切分頁時視覺會有落差。改呼叫既有 emptySectionRow(\"尚無保養記錄\")，與其餘三處空狀態對齊。純視覺調整，未變動電梯保養記錄新增/編輯/刪除等既有邏輯。",
         ]),
