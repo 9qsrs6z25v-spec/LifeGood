@@ -37,6 +37,13 @@ import SwiftUI
 //  12. KPI 背景條 → 補上 .white.opacity(0.18) strokeBorder，增加容器定義感。
 //  13. milestoneRow 非銀行類日期 → 從純文字升級為 Capsule 徽章（tertiarySystemFill 底），
 //      對齊 MyCalendarView / creditCardChartSection 日期 Badge 規格。
+// [2026-07 v4] DepositEditorSheet 轉帳/沖正帳戶餘額格式一致性修復：
+//  14. fmtBal(_:) 先前自製 NumberFormatter 手刻「NT$ X萬」（無條件捨去小數、且未處理
+//      億級單位，例如 1.2 億的帳戶會顯示成「NT$12000萬」），與全 App 其餘畫面共用的
+//      Double.ntdWanString（「NT$1.2萬」保留一位小數、億以上自動換算為「億」）風格不一致，
+//      是本檔案唯一未接上共用金額量級格式的地方（對齊 v23.79 AddExpenseView.formatBankBalance
+//      同型修復）。改呼叫既有 ntdWanString，「轉入帳戶」選單與「沖正」目前總額顯示對齊全 App
+//      金額規則。純視覺調整，未變動帳戶餘額計算、轉帳或沖正等既有邏輯。
 
 // MARK: - 固定支出週期展開（共用）
 
@@ -2165,11 +2172,12 @@ struct DepositEditorSheet: View {
         Self.numFormatter.string(from: NSNumber(value: v)) ?? "0"
     }
 
+    // 【美化方向】轉帳/沖正帳戶餘額格式：先前自製 NumberFormatter 手刻「NT$ X萬」
+    // （無條件捨去小數、未處理億級單位），與全 App 共用的 Double.ntdWanString
+    // （「NT$1.2萬」保留一位小數、億以上自動換算）風格不一致。改呼叫共用 ntdWanString，
+    // 與全 App 金額量級顯示規則對齊。純視覺調整，未變動帳戶餘額計算邏輯。
     private func fmtBal(_ v: Double) -> String {
-        if abs(v) >= 10000 {
-            return "NT$ \(Self.numFormatter.string(from: NSNumber(value: v / 10000)) ?? "0")萬"
-        }
-        return "NT$ \(Self.numFormatter.string(from: NSNumber(value: v)) ?? "0")"
+        v.ntdWanString
     }
 
     var body: some View {
