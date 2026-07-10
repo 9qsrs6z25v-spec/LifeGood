@@ -456,24 +456,29 @@ struct GradeTitleView: View {
     // MARK: - Delete
 
     private func deleteDepartment(_ dept: Department) {
-        for var other in lifeStore.departments where other.id != dept.id {
-            let removedUp = other.upstreamIds.contains(dept.id)
-            let removedDown = other.downstreamIds.contains(dept.id)
-            let removedPeer = other.peerIds.contains(dept.id)
-            other.upstreamIds.removeAll { $0 == dept.id }
-            other.downstreamIds.removeAll { $0 == dept.id }
-            other.peerIds.removeAll { $0 == dept.id }
-            if removedUp || removedDown || removedPeer { lifeStore.update(other) }
+        // 用 withBatch 包住整個迴圈：刪一個部門若牽動 N 個關聯部門/人員/部屬，
+        // 原本會各自觸發 N 次 LifeStore.save()（全量 12 個集合重編碼 + 畫面重繪），
+        // 改成迴圈跑完只存檔一次。
+        lifeStore.withBatch {
+            for var other in lifeStore.departments where other.id != dept.id {
+                let removedUp = other.upstreamIds.contains(dept.id)
+                let removedDown = other.downstreamIds.contains(dept.id)
+                let removedPeer = other.peerIds.contains(dept.id)
+                other.upstreamIds.removeAll { $0 == dept.id }
+                other.downstreamIds.removeAll { $0 == dept.id }
+                other.peerIds.removeAll { $0 == dept.id }
+                if removedUp || removedDown || removedPeer { lifeStore.update(other) }
+            }
+            for var p in lifeStore.orgPeople where p.departmentId == dept.id {
+                p.departmentId = nil
+                lifeStore.update(p)
+            }
+            for var sub in lifeStore.subordinates where sub.departmentId == dept.id {
+                sub.departmentId = nil
+                lifeStore.update(sub)
+            }
+            lifeStore.deleteDepartment(dept)
         }
-        for var p in lifeStore.orgPeople where p.departmentId == dept.id {
-            p.departmentId = nil
-            lifeStore.update(p)
-        }
-        for var sub in lifeStore.subordinates where sub.departmentId == dept.id {
-            sub.departmentId = nil
-            lifeStore.update(sub)
-        }
-        lifeStore.deleteDepartment(dept)
     }
 }
 
@@ -740,67 +745,73 @@ struct DepartmentEditor: View {
     }
 
     private func syncReverseLinks(forDept dept: Department) {
-        for d in lifeStore.departments where d.id != dept.id {
-            var changed = d
-            // upstream / downstream 對映同步
-            let shouldHaveDown = dept.upstreamIds.contains(d.id)
-            if shouldHaveDown && !changed.downstreamIds.contains(dept.id) {
-                changed.downstreamIds.append(dept.id)
-            } else if !shouldHaveDown && changed.downstreamIds.contains(dept.id) {
-                if !dept.downstreamIds.contains(d.id) {
+        // withBatch 包住迴圈：N 個關聯部門原本會各自觸發 N 次 save()，改成只存檔一次。
+        lifeStore.withBatch {
+            for d in lifeStore.departments where d.id != dept.id {
+                var changed = d
+                // upstream / downstream 對映同步
+                let shouldHaveDown = dept.upstreamIds.contains(d.id)
+                if shouldHaveDown && !changed.downstreamIds.contains(dept.id) {
+                    changed.downstreamIds.append(dept.id)
+                } else if !shouldHaveDown && changed.downstreamIds.contains(dept.id) {
+                    if !dept.downstreamIds.contains(d.id) {
+                        changed.downstreamIds.removeAll { $0 == dept.id }
+                    }
+                }
+                let shouldHaveUp = dept.downstreamIds.contains(d.id)
+                if shouldHaveUp && !changed.upstreamIds.contains(dept.id) {
+                    changed.upstreamIds.append(dept.id)
+                } else if !shouldHaveUp && changed.upstreamIds.contains(dept.id) {
+                    if !dept.upstreamIds.contains(d.id) {
+                        changed.upstreamIds.removeAll { $0 == dept.id }
+                    }
+                }
+                // peer 對映同步
+                let shouldHavePeer = dept.peerIds.contains(d.id)
+                if shouldHavePeer && !changed.peerIds.contains(dept.id) {
+                    changed.peerIds.append(dept.id)
+                } else if !shouldHavePeer && changed.peerIds.contains(dept.id) {
+                    changed.peerIds.removeAll { $0 == dept.id }
+                }
+                // 互斥
+                if changed.upstreamIds.contains(dept.id) && changed.downstreamIds.contains(dept.id) {
                     changed.downstreamIds.removeAll { $0 == dept.id }
                 }
-            }
-            let shouldHaveUp = dept.downstreamIds.contains(d.id)
-            if shouldHaveUp && !changed.upstreamIds.contains(dept.id) {
-                changed.upstreamIds.append(dept.id)
-            } else if !shouldHaveUp && changed.upstreamIds.contains(dept.id) {
-                if !dept.upstreamIds.contains(d.id) {
+                if changed.peerIds.contains(dept.id) {
                     changed.upstreamIds.removeAll { $0 == dept.id }
+                    changed.downstreamIds.removeAll { $0 == dept.id }
                 }
-            }
-            // peer 對映同步
-            let shouldHavePeer = dept.peerIds.contains(d.id)
-            if shouldHavePeer && !changed.peerIds.contains(dept.id) {
-                changed.peerIds.append(dept.id)
-            } else if !shouldHavePeer && changed.peerIds.contains(dept.id) {
-                changed.peerIds.removeAll { $0 == dept.id }
-            }
-            // 互斥
-            if changed.upstreamIds.contains(dept.id) && changed.downstreamIds.contains(dept.id) {
-                changed.downstreamIds.removeAll { $0 == dept.id }
-            }
-            if changed.peerIds.contains(dept.id) {
-                changed.upstreamIds.removeAll { $0 == dept.id }
-                changed.downstreamIds.removeAll { $0 == dept.id }
-            }
-            if changed.upstreamIds != d.upstreamIds
-                || changed.downstreamIds != d.downstreamIds
-                || changed.peerIds != d.peerIds {
-                lifeStore.update(changed)
+                if changed.upstreamIds != d.upstreamIds
+                    || changed.downstreamIds != d.downstreamIds
+                    || changed.peerIds != d.peerIds {
+                    lifeStore.update(changed)
+                }
             }
         }
     }
 
     private func deleteSelf(_ dept: Department) {
-        for var other in lifeStore.departments where other.id != dept.id {
-            let removedUp = other.upstreamIds.contains(dept.id)
-            let removedDown = other.downstreamIds.contains(dept.id)
-            let removedPeer = other.peerIds.contains(dept.id)
-            other.upstreamIds.removeAll { $0 == dept.id }
-            other.downstreamIds.removeAll { $0 == dept.id }
-            other.peerIds.removeAll { $0 == dept.id }
-            if removedUp || removedDown || removedPeer { lifeStore.update(other) }
+        // withBatch 包住整個迴圈：與 deleteDepartment(_:) 同型修復，避免 N 筆關聯各自觸發 save()。
+        lifeStore.withBatch {
+            for var other in lifeStore.departments where other.id != dept.id {
+                let removedUp = other.upstreamIds.contains(dept.id)
+                let removedDown = other.downstreamIds.contains(dept.id)
+                let removedPeer = other.peerIds.contains(dept.id)
+                other.upstreamIds.removeAll { $0 == dept.id }
+                other.downstreamIds.removeAll { $0 == dept.id }
+                other.peerIds.removeAll { $0 == dept.id }
+                if removedUp || removedDown || removedPeer { lifeStore.update(other) }
+            }
+            for var p in lifeStore.orgPeople where p.departmentId == dept.id {
+                p.departmentId = nil
+                lifeStore.update(p)
+            }
+            for var sub in lifeStore.subordinates where sub.departmentId == dept.id {
+                sub.departmentId = nil
+                lifeStore.update(sub)
+            }
+            lifeStore.deleteDepartment(dept)
         }
-        for var p in lifeStore.orgPeople where p.departmentId == dept.id {
-            p.departmentId = nil
-            lifeStore.update(p)
-        }
-        for var sub in lifeStore.subordinates where sub.departmentId == dept.id {
-            sub.departmentId = nil
-            lifeStore.update(sub)
-        }
-        lifeStore.deleteDepartment(dept)
     }
 }
 

@@ -492,6 +492,20 @@ class LifeStore: ObservableObject {
         .sorted { $0.interaction.date > $1.interaction.date }
     }
 
+    // MARK: - 批次修改
+
+    /// 供外部（View 層）在一次操作中對多筆、甚至跨集合（departments/orgPeople/subordinates…）
+    /// 呼叫多次 update() 時使用：暫停期間每筆 didSet 都不觸發 save()，body 結束後只統一存檔一次。
+    /// 用法與本檔案內部既有的 `isLoading = true; defer { isLoading = false }; ...; save()` 手法一致，
+    /// 只是包成公開函式給 View 端的迴圈（例如刪除部門時連動清除其他部門/人員的關聯）使用，
+    /// 避免迴圈跑 N 次就各自觸發 N 次「全量 12 個集合重編碼 + CloudKit 推送節流 + 畫面重繪」。
+    func withBatch(_ body: () -> Void) {
+        isLoading = true
+        defer { isLoading = false }
+        body()
+        save()
+    }
+
     // MARK: - 持久化
 
     private func save() {

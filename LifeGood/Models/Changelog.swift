@@ -13,6 +13,11 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.83", build: 639, date: "2026/07/10", notes: [
+            "【靜態除錯 v23.83】本次針對強制解包／Optional／index／retain cycle／競態條件、畫面閃爍、效能瓶頸三大類做全面掃描（Models + Views 共 83 個檔案）。前者掃描結果：未發現新的高信心 bug——`try!`／`as!`／未防護的陣列越界／缺 `[weak self]` 等既有規格皆已符合，本次未做變動。",
+            "【效能修復】BackupManager.createSnapshot 自動快照（App 啟動與進背景時觸發）先前在主執行緒同步做 UnifiedExporter.exportJSON（含 `.prettyPrinted`／`.sortedKeys` 全量 JSON 編碼），資料量大時會卡住主執行緒，尤其進背景是系統給的極短執行窗口。改為只在主執行緒用 UnifiedExport.build 組出純 struct 快照（很快），實際 JSONEncoder 編碼搬到既有的背景佇列做，與 FullBackup.export 已採用的模式一致；還原端解碼策略不變（`.iso8601`），格式相容。",
+            "【畫面閃爍修復】GradeTitleView 的 deleteDepartment（列表刪除）、DepartmentEditor.deleteSelf（編輯畫面內刪除）、syncReverseLinks（儲存部門時雙向同步其他部門的上下游/同層級關聯）三處迴圈，先前對迴圈內每一筆關聯部門/組織人員/部屬各自呼叫 lifeStore.update()，每呼叫一次就各自觸發 LifeStore 的 didSet → save()（12 個集合全量 JSON 重編碼 + CloudKit 推送節流 + 畫面重繪），刪除或編輯一個有 N 筆關聯的部門會產生 N 次不必要的重複存檔與重繪。新增 LifeStore.withBatch(_:) 比照檔案內既有的 isLoading 批次手法，三處迴圈改用 withBatch 包住，跑完只存檔一次。",
+        ]),
         ChangelogEntry(version: "23.82", build: 638, date: "2026/07/10", notes: [
             "【正確性修復】公司組織部門編輯（GradeTitleView.DepartmentEditor）勾選「上游部門」時，只清除同一目標的 downstreamIds，未同步清除 peerIds；而「下游」「同層級」兩個勾選欄位都會正確清除另外兩種關係。若使用者先勾同一部門為「同層級」，之後改勾「上游」，peerIds 會殘留該部門 id，儲存後同一目標會同時出現「上游」與「同層級」兩個互斥徽章，組織圖也會畫出矛盾的上下屬 + 平行連接線。補上 peerIds.remove(d.id)，與另外兩個勾選欄位規格一致。",
             "【正確性修復】部門刪除清除殘留關聯：GradeTitleView.deleteDepartment（列表滑動刪除）於清空其他部門的 upstreamIds／downstreamIds 後，從未清空 peerIds，刪除部門後其他部門的 peerIds 仍留著已刪除部門的 id（dangling reference），組織圖／人數統計可能因此參照到不存在的部門。同檔案 DepartmentEditor.deleteSelf（編輯畫面內刪除）雖有清 peerIds，但少了「有異動才寫回」判斷，等同刪除任一部門就對其餘所有部門無條件呼叫 lifeStore.update（全量 JSON 重編碼 + 觸發 CloudKit 推送節流），即使該部門與被刪對象毫無關聯。兩處統一補齊 peerIds 清除 + 「僅在確實有異動時才 update」判斷。",
