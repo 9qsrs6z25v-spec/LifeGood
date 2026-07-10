@@ -36,6 +36,14 @@ import UniformTypeIdentifiers
 //      Circle().stroke(color.opacity(0.18), 0.75pt)，對齊 OverviewView.summaryCard v3 /
 //      FinanceOverviewView.assetCard v3 / CareerView v3 圖示圓規格，補齊「關於」欄唯一
 //      未升級的圖示圓視覺落差。
+// [2026-07 v5] currencyRateSection 補齊空狀態 + 列樣式一致性（此段是全檔案唯一
+//      仍停留在「純 TextField 裸排」、從未跟上其他小節視覺規格的區塊）：
+//  14. 新增空狀態：尚未設定任何匯率時顯示 emptyCurrencyRow（圖示 + 文字），
+//      對齊 HealthProfileEditView.emptyRow 的 Form Section 內緊湊空狀態規格，
+//      避免只剩一顆「新增匯率」按鈕孤立顯示、使用者不清楚此區用途。
+//  15. 幣別列補上 22pt 漸層小圖示圓（globe），比值欄位改用 monospacedDigit，
+//      對齊全 App 數字欄位等寬對齊慣例，避免多筆匯率上下數字左右跳動。
+//      （下次美化本檔案時，可考慮 aiAssistantSection / providerKeySection 圖示圓升級）
 
 // MARK: - Share Sheet (UIKit bridge)
 
@@ -612,8 +620,29 @@ struct SettingsView: View {
 
     private var currencyRateSection: some View {
         Section {
+            if store.currencyRates.isEmpty {
+                emptyCurrencyRow
+            }
+
             ForEach($store.currencyRates) { $rate in
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.blue.opacity(0.20), Color.blue.opacity(0.08)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 22, height: 22)
+                        Circle()
+                            .stroke(Color.blue.opacity(0.20), lineWidth: 0.75)
+                            .frame(width: 22, height: 22)
+                        Image(systemName: "globe")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
                     TextField("幣別", text: $rate.code)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text("=")
@@ -621,6 +650,7 @@ struct SettingsView: View {
                     TextField("比值", value: $rate.rate, format: .number)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
+                        .font(.system(.body, design: .default).monospacedDigit())
                         .frame(maxWidth: 80)
                     Text("元")
                         .foregroundStyle(.secondary)
@@ -645,6 +675,19 @@ struct SettingsView: View {
         } footer: {
             Text("輸入幣別代號與對 NT$ 的比值（例：美金 = 32 元）。新增後，記帳的金額輸入欄位左側即可選擇該幣別，輸入金額時將自動換算為 NT$。")
         }
+    }
+
+    /// 匯率清單空狀態（Form Section 內緊湊樣式），對齊 HealthProfileEditView.emptyRow 規格
+    private var emptyCurrencyRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "dollarsign.arrow.circlepath")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Text("尚未設定自訂匯率")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
     }
 
     // MARK: - iCloud 同步

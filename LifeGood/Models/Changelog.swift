@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.74", build: 630, date: "2026/07/10", notes: [
+            "美化設定頁（SettingsView）「自訂幣別匯率」區塊：先前此區只有裸 TextField 橫排，沒有任何空狀態說明、也是全頁面唯一停留在初版樣式、從未跟上其他小節視覺規格的區塊。新增尚未設定任何匯率時的緊湊空狀態提示（對齊 HealthProfileEditView.emptyRow 規格），並為每筆匯率列補上 22pt 漸層小圖示圓、比值欄位改用等寬數字對齊，避免多筆匯率上下數字左右跳動。純視覺調整，未變動幣別新增/刪除/換算邏輯。",
+        ]),
         ChangelogEntry(version: "23.73", build: 629, date: "2026/07/09", notes: [
             "【效能修復】儲蓄險相關 3 處外幣金額格式化：SavingsInsuranceView.fmt（清單逐筆金額）、AddSavingsInsuranceView.formatCurrency（新增/編輯表單 KPI 預覽，Form 內任何欄位每次按鍵都會重新求值 body）、AddExpenseView.formatBankBalance（扣款帳戶選單逐帳戶餘額）三處皆是外幣金額時就地 `let f = NumberFormatter()` 建立新物件，與已於 FixedExpenseView.formatCurrencyWithCode／FoodMapView 修復的「NumberFormatter 建立成本高，應快取重用」規格不一致。改為比照既有 NSCache&lt;NSString, NumberFormatter&gt;（或單一設定情境下的 static let）快取寫法，避免表單輸入或選單開啟時重複配置格式器。",
             "【靜態複查】RealEstateDetailView／StockDetailView／VehicleDetailView 的 estate／stock／vehicle 計算屬性雖每次存取都對 store 陣列做 first(where:) 線性掃描、且在單一 body 中被引用約 30～150 次，但這三個陣列是使用者自身房產/股票/車輛清單（規模遠小於 AddStockView/LifeFinanceView 先前修復案例中被全量掃描的 expenses 陣列），且這三個畫面本身並非表單、不會隨按鍵重新求值 body，故列為已知但影響可忽略，不比照批次查表方式做大規模改寫，避免為改而改。FullBackup.stamp()／OrganizationView.formattedExportDate() 的 DateFormatter 就地建立僅在使用者手動匯出時各執行一次，同樣影響可忽略予以保留。",
