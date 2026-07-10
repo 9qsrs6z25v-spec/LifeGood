@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.76", build: 632, date: "2026/07/10", notes: [
+            "美化健康檔案編輯畫面（HealthProfileEditView）四個子編輯視窗（過敏原／藥物／量測／健檢）：先前這四個 sheet 都是欄位直接平鋪的裸 Form，完全沒有分組標題，與外層清單「4pt 漸層色條 + 圖示 + 標題」的小節樣式落差最大。新增共用 healthEditorSectionHeader(_:icon:color:) 並依外層對應小節主題色分組（過敏 orange／用藥 blue／量測 pink／健檢 purple），量測視窗另拆分「日期」「體重 / 心率」「血壓」三個獨立小節取代原本純字串標題，備註欄統一歸入 secondary 色「備註」小節。純版面調整，未變動任何草稿欄位、儲存/取消邏輯。",
+        ]),
         ChangelogEntry(version: "23.75", build: 631, date: "2026/07/10", notes: [
             "美化健康檔案編輯畫面（HealthProfileEditView）「慢性病 / 病史」小節：先前該清單直接輸出裸 Text(c)，是全頁唯一沒有圖示圓的清單列，與同頁「過敏」「用藥」「健檢」三個小節（皆有 36pt 主題色漸層圖示圓）視覺落差明顯，像是漏改的半成品。新增 conditionRow(_:) 補上與其他小節一致的 indigo 主題圖示圓，滑動刪除等既有互動與資料邏輯完全未變動。",
         ]),

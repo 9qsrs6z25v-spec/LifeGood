@@ -26,9 +26,18 @@ import SwiftUI
 //   7. conditionsSection 先前直接輸出裸 Text(c)，是全頁唯一沒有 rowIcon 圖示圓的清單列，
 //      與過敏／用藥／健檢三個小節（皆有 36pt 主題色漸層圖示圓）形成明顯落差；
 //      新增 conditionRow(_:) 補上 indigo 主題圖示圓，對齊 healthSectionHeader 同色系。
-//   下次美化方向：AllergyEditor／MedicationEditor／MeasurementEditor／CheckupEditor 四個
-//   子編輯 sheet 目前仍是裸 Form（無 section header 色條/圖示），與外層清單的視覺規格落差
-//   最大，適合作為下一輪美化重點。
+// [2026-07 v3] 補齊四個子編輯 sheet 的視覺規格：
+//   8. AllergyEditor／MedicationEditor／MeasurementEditor／CheckupEditor 先前皆為裸 Form
+//      （欄位直接平鋪、無任何 Section 分組與標題），與外層清單「4pt 漸層色條 + 圖示 + 標題」
+//      的 healthSectionHeader 規格落差最大。新增共用 healthEditorSectionHeader(_:icon:color:)
+//      （與 healthSectionHeader 同款式，僅省略計數膠囊），四個 sheet 各自比照外層對應小節的
+//      主題色分組：過敏(orange)／用藥(blue)／量測(pink)／健檢(purple)，備註欄一律歸入獨立的
+//      secondary 色「備註」小節，與外層 noteSection 呼應。
+//   9. MeasurementEditor 原本用純字串 Section("血壓") 當標題，改為與其餘小節一致的色條樣式；
+//      並將「日期」「體重 / 心率」「血壓」拆為三個獨立小節，取代原本欄位全部平鋪一排的排法。
+//   10. 純版面調整，未變動任何草稿欄位、儲存/取消 callback 或 upsert 商業邏輯。
+//   下次美化方向：本檔案七大 Section 與四個子編輯 sheet 已完成規格對齊；可留意
+//   AllergySeverity Picker 目前仍是系統預設樣式，未來如需可考慮改為分段色塊選擇器。
 
 struct HealthProfileEditView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -418,12 +427,30 @@ struct HealthProfileEditView: View {
     }()
 }
 
+/// 子編輯 sheet 共用 Section header：4pt 漸層 Capsule 色條 + 圖示 + 標題，
+/// 與 HealthProfileEditView.healthSectionHeader 同款式（省略計數膠囊）
+@ViewBuilder
+private func healthEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
+
 // MARK: - 過敏編輯
 
 private struct AllergyEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: HealthAllergy
     let onSave: (HealthAllergy) -> Void
+    private let accent = Color.orange
 
     init(allergy: HealthAllergy, onSave: @escaping (HealthAllergy) -> Void) {
         _draft = State(initialValue: allergy); self.onSave = onSave
@@ -432,12 +459,20 @@ private struct AllergyEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("過敏原（藥物 / 食物 / 環境）", text: $draft.name)
-                TextField("過敏反應", text: $draft.reaction)
-                Picker("嚴重度", selection: Binding(
-                    get: { draft.severity ?? .mild },
-                    set: { draft.severity = $0 })) {
-                    ForEach(AllergySeverity.allCases) { s in Text(s.rawValue).tag(s) }
+                Section {
+                    TextField("過敏原（藥物 / 食物 / 環境）", text: $draft.name)
+                    TextField("過敏反應", text: $draft.reaction)
+                } header: {
+                    healthEditorSectionHeader("過敏原資訊", icon: "allergens", color: accent)
+                }
+                Section {
+                    Picker("嚴重度", selection: Binding(
+                        get: { draft.severity ?? .mild },
+                        set: { draft.severity = $0 })) {
+                        ForEach(AllergySeverity.allCases) { s in Text(s.rawValue).tag(s) }
+                    }
+                } header: {
+                    healthEditorSectionHeader("嚴重度", icon: "exclamationmark.triangle.fill", color: accent)
                 }
             }
             .navigationTitle("過敏原")
@@ -458,6 +493,7 @@ private struct MedicationEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: HealthMedication
     let onSave: (HealthMedication) -> Void
+    private let accent = Color.blue
 
     init(medication: HealthMedication, onSave: @escaping (HealthMedication) -> Void) {
         _draft = State(initialValue: medication); self.onSave = onSave
@@ -466,10 +502,18 @@ private struct MedicationEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("藥名", text: $draft.name)
-                TextField("劑量 / 頻率（例：500mg 每日兩次）", text: $draft.dosage)
-                Toggle("服用中", isOn: $draft.isActive)
-                TextField("備註", text: $draft.note, axis: .vertical).lineLimit(1...4)
+                Section {
+                    TextField("藥名", text: $draft.name)
+                    TextField("劑量 / 頻率（例：500mg 每日兩次）", text: $draft.dosage)
+                    Toggle("服用中", isOn: $draft.isActive)
+                } header: {
+                    healthEditorSectionHeader("藥物資訊", icon: "pills.fill", color: accent)
+                }
+                Section {
+                    TextField("備註", text: $draft.note, axis: .vertical).lineLimit(1...4)
+                } header: {
+                    healthEditorSectionHeader("備註", icon: "text.bubble.fill", color: .secondary)
+                }
             }
             .navigationTitle("藥物")
             .navigationBarTitleDisplayMode(.inline)
@@ -495,6 +539,7 @@ private struct MeasurementEditor: View {
     @State private var note: String
     private let id: UUID
     let onSave: (HealthMeasurement) -> Void
+    private let accent = Color.pink
 
     init(measurement: HealthMeasurement, onSave: @escaping (HealthMeasurement) -> Void) {
         id = measurement.id
@@ -510,14 +555,28 @@ private struct MeasurementEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                DatePicker("日期", selection: $date, displayedComponents: .date)
-                numberRow("體重", value: $weight, unit: "kg")
-                Section("血壓") {
+                Section {
+                    DatePicker("日期", selection: $date, displayedComponents: .date)
+                } header: {
+                    healthEditorSectionHeader("日期", icon: "calendar", color: accent)
+                }
+                Section {
+                    numberRow("體重", value: $weight, unit: "kg")
+                    intRow("心率", value: $heartRate, unit: "bpm")
+                } header: {
+                    healthEditorSectionHeader("體重 / 心率", icon: "waveform.path.ecg", color: accent)
+                }
+                Section {
                     intRow("收縮壓", value: $systolic, unit: "mmHg")
                     intRow("舒張壓", value: $diastolic, unit: "mmHg")
+                } header: {
+                    healthEditorSectionHeader("血壓", icon: "heart.text.square.fill", color: accent)
                 }
-                intRow("心率", value: $heartRate, unit: "bpm")
-                TextField("備註", text: $note, axis: .vertical).lineLimit(1...4)
+                Section {
+                    TextField("備註", text: $note, axis: .vertical).lineLimit(1...4)
+                } header: {
+                    healthEditorSectionHeader("備註", icon: "text.bubble.fill", color: .secondary)
+                }
             }
             .navigationTitle("量測")
             .navigationBarTitleDisplayMode(.inline)
@@ -565,6 +624,7 @@ private struct CheckupEditor: View {
     @State private var hasNextDue: Bool
     @State private var nextDue: Date
     let onSave: (HealthCheckup) -> Void
+    private let accent = Color.purple
 
     init(checkup: HealthCheckup, onSave: @escaping (HealthCheckup) -> Void) {
         _draft = State(initialValue: checkup)
@@ -576,15 +636,31 @@ private struct CheckupEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("項目（例：年度健檢、抽血）", text: $draft.title)
-                DatePicker("日期", selection: $draft.date, displayedComponents: .date)
-                TextField("院所", text: $draft.place)
-                TextField("結果摘要", text: $draft.result, axis: .vertical).lineLimit(1...4)
-                Toggle("設定下次回診 / 追蹤日", isOn: $hasNextDue)
-                if hasNextDue {
-                    DatePicker("下次日期", selection: $nextDue, displayedComponents: .date)
+                Section {
+                    TextField("項目（例：年度健檢、抽血）", text: $draft.title)
+                    DatePicker("日期", selection: $draft.date, displayedComponents: .date)
+                    TextField("院所", text: $draft.place)
+                } header: {
+                    healthEditorSectionHeader("健檢資訊", icon: "stethoscope", color: accent)
                 }
-                TextField("備註", text: $draft.note, axis: .vertical).lineLimit(1...4)
+                Section {
+                    TextField("結果摘要", text: $draft.result, axis: .vertical).lineLimit(1...4)
+                } header: {
+                    healthEditorSectionHeader("結果", icon: "doc.text.fill", color: accent)
+                }
+                Section {
+                    Toggle("設定下次回診 / 追蹤日", isOn: $hasNextDue)
+                    if hasNextDue {
+                        DatePicker("下次日期", selection: $nextDue, displayedComponents: .date)
+                    }
+                } header: {
+                    healthEditorSectionHeader("追蹤提醒", icon: "bell.badge.fill", color: accent)
+                }
+                Section {
+                    TextField("備註", text: $draft.note, axis: .vertical).lineLimit(1...4)
+                } header: {
+                    healthEditorSectionHeader("備註", icon: "text.bubble.fill", color: .secondary)
+                }
             }
             .navigationTitle("健檢")
             .navigationBarTitleDisplayMode(.inline)
