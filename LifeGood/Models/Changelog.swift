@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.87", build: 643, date: "2026/07/11", notes: [
+            "美化美食地圖清單畫面（FoodMapView）金額顯示量級：私有 fmtShort(_:) 只到「萬」量級（無條件捨去小數，未處理億級單位），與同檔案 RestaurantDetailSheet.fmtWan 已於 v3 補上的億級規格、以及全 App 共用的 Double.ntdWanString（萬/億自動切換、保留一位小數）皆不一致，是本檔案唯一未接上共用金額量級格式的地方。統計卡總花費／平均每次、餐廳列總花費／均消四處呼叫改用既有 ntdWanString，移除已無呼叫端的 fmtShort 與其專用 decimalFormatter 死碼。純顯示層調整，未變動花費加總或排序等既有邏輯。",
+        ]),
         ChangelogEntry(version: "23.86", build: 642, date: "2026/07/11", notes: [
             "美化不動產詳情畫面（RealEstateDetailView）樓層物件樹／房屋資料集錦空狀態：floorItemsTree 與 renovationPhotosContent 兩處空狀態仍是手刻裸 HStack + Text，垂直 padding 各自為 10pt／6pt，是 v23.78（elevatorContent）修復後全檔案僅剩的兩處未接上共用 emptySectionRow(_:)（tray 圖示 + .caption/.tertiary + 統一 14/9pt padding）的空狀態，與 mortgageItems／paidItems／variableExpenses／elevatorContent 四處不一致。改呼叫既有 emptySectionRow(_:)，至此全檔案六處空狀態視覺統一。純視覺調整，未變動樓層物件或房屋資料集錦的任何既有資料邏輯。",
         ]),

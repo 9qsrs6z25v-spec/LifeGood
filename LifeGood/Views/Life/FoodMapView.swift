@@ -52,7 +52,13 @@ import MapKit
 // [2026-07 v4] 一致性小步美化：
 //  16. 餐廳清單 sheet「關閉」按鈕：topBarTrailing → topBarLeading，
 //      對齊全 App「關閉／取消」一律置左的慣例（此為此檔案唯一例外，已統一）
-//      （下次美化本檔案時，可從這裡接著找其他可統一之處）
+// [2026-07 v5] 金額量級一致性：
+//  17. FoodMapView.statsCard／restaurantRow 私有 fmtShort(_:) 只到「萬」量級（無條件捨去
+//      小數、未處理億級單位），與同檔案 RestaurantDetailSheet.fmtWan（v3 已補上億級）及全 App
+//      共用 Double.ntdWanString（萬/億自動切換、保留一位小數）不一致，四處呼叫改用 ntdWanString，
+//      移除 fmtShort 與專用 decimalFormatter 死碼。
+//      （下次美化本檔案時：RestaurantDetailSheet.detailKpiCell「平均每次」目前呼叫 fmtNum，
+//      未做萬/億量級轉換，與同列「總花費」fmtWan 不一致，可考慮一併改用 ntdWanString）
 
 // MARK: - 餐廳聚合資料
 
@@ -490,7 +496,7 @@ struct FoodMapView: View {
                     Text("美食探索紀錄")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
-                    Text("NT$ \(fmtShort(total))")
+                    Text(total.ntdWanString)
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .minimumScaleFactor(0.6)
@@ -511,7 +517,7 @@ struct FoodMapView: View {
             HStack(spacing: 0) {
                 foodKpiCell(label: "造訪總次", value: "\(visits) 次")
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                foodKpiCell(label: "平均每次", value: "NT$ \(fmtShort(avg))")
+                foodKpiCell(label: "平均每次", value: avg.ntdWanString)
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
                 foodKpiCell(label: "最常光顧", value: mostVisited?.name ?? "—")
             }
@@ -647,11 +653,11 @@ struct FoodMapView: View {
 
             // 右側：總花費 + 平均
             VStack(alignment: .trailing, spacing: 3) {
-                Text("NT$ \(fmtShort(agg.totalSpent))")
+                Text(agg.totalSpent.ntdWanString)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(Color(red: 0.85, green: 0.32, blue: 0.05))
                     .contentTransition(.numericText())
-                Text("均 NT$ \(fmtShort(agg.averageSpent))")
+                Text("均 \(agg.averageSpent.ntdWanString)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -727,23 +733,10 @@ struct FoodMapView: View {
 
     // MARK: - 格式化
 
-    private static let decimalFormatter: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f
-    }()
-
     private static let relativeDateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"
         return f
     }()
-
-    private func fmtShort(_ v: Double) -> String {
-        if abs(v) >= 10_000 {
-            let s = Self.decimalFormatter.string(from: NSNumber(value: v / 10_000)) ?? "0"
-            return "\(s)萬"
-        }
-        return Self.decimalFormatter.string(from: NSNumber(value: v)) ?? "0"
-    }
 
     private func fmtRelative(_ date: Date) -> String {
         let cal = Calendar.current
