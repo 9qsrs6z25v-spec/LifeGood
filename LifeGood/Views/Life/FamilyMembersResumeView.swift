@@ -870,13 +870,8 @@ struct FamilyMemberDetailView: View {
     private func photoCard(_ p: FamilyAlbumPhoto) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack {
-                if let url = p.photoURL, let img = UIImage(contentsOfFile: url.path) {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 130, height: 100)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                if let url = p.photoURL {
+                    AsyncThumbnailView(url: url, size: CGSize(width: 130, height: 100))
                         .onTapGesture { viewingPhotoURL = url }
                 } else {
                     RoundedRectangle(cornerRadius: 10)

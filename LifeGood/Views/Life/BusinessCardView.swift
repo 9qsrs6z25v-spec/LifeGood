@@ -1097,42 +1097,51 @@ struct BusinessCardView: View {
     // 52pt 圓角頭像：有照片則顯示照片 + 細邊框；無照片則顯示首字母漸層圓角方塊
     @ViewBuilder
     private func avatarView(_ card: BusinessCard) -> some View {
-        if let url = card.photoURL,
-           let img = UIImage(contentsOfFile: url.path) {
-            Image(uiImage: img)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 52, height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(.separator).opacity(0.25), lineWidth: 0.75)
-                )
-                .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
-        } else {
-            let initial = String((card.name.isEmpty ? card.company : card.name).prefix(1))
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 1.00, green: 0.62, blue: 0.32),
-                                Color(red: 0.90, green: 0.30, blue: 0.60)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+        if let url = card.photoURL {
+            AsyncLocalImage(url: url) { img, _ in
+                if let img {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 52, height: 52)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(.separator).opacity(0.25), lineWidth: 0.75)
                         )
-                    )
-                    .frame(width: 52, height: 52)
-                    .shadow(color: Color(red: 0.90, green: 0.30, blue: 0.60).opacity(0.28), radius: 6, x: 0, y: 3)
-                Text(initial)
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                // v2：補白色邊框讓無照片頭像更立體
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(.white.opacity(0.30), lineWidth: 0.75)
-                    .frame(width: 52, height: 52)
+                        .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
+                } else {
+                    avatarPlaceholder(card)
+                }
             }
+        } else {
+            avatarPlaceholder(card)
+        }
+    }
+
+    private func avatarPlaceholder(_ card: BusinessCard) -> some View {
+        let initial = String((card.name.isEmpty ? card.company : card.name).prefix(1))
+        return ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 1.00, green: 0.62, blue: 0.32),
+                            Color(red: 0.90, green: 0.30, blue: 0.60)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 52, height: 52)
+                .shadow(color: Color(red: 0.90, green: 0.30, blue: 0.60).opacity(0.28), radius: 6, x: 0, y: 3)
+            Text(initial)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+            // v2：補白色邊框讓無照片頭像更立體
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.white.opacity(0.30), lineWidth: 0.75)
+                .frame(width: 52, height: 52)
         }
     }
 

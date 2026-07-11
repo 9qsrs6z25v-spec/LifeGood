@@ -968,22 +968,7 @@ struct RestaurantDetailSheet: View {
                         Button {
                             viewingPhotoURL = IdentifiableURL(url: url)
                         } label: {
-                            if let img = UIImage(contentsOfFile: url.path) {
-                                Image(uiImage: img)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 110, height: 90)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                            } else {
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Color(.tertiarySystemFill))
-                                    .frame(width: 110, height: 90)
-                                    .overlay(
-                                        Image(systemName: "icloud.and.arrow.down")
-                                            .foregroundStyle(.tertiary)
-                                    )
-                            }
+                            AsyncThumbnailView(url: url, size: CGSize(width: 110, height: 90))
                         }
                         .buttonStyle(.plain)
                     }

@@ -274,11 +274,13 @@ struct RenovationStackViewer: View {
                     TabView(selection: $currentIndex) {
                         ForEach(Array(record.photoFileNames.enumerated()), id: \.offset) { idx, name in
                             let url = RenovationPhoto.photoURL(for: name)
-                            ZStack {
-                                if let img = UIImage(contentsOfFile: url.path) {
-                                    ZoomableImageView(image: img)
-                                } else {
-                                    ProgressView().tint(.white)
+                            AsyncLocalImage(url: url) { img, _ in
+                                ZStack {
+                                    if let img {
+                                        ZoomableImageView(image: img)
+                                    } else {
+                                        ProgressView().tint(.white)
+                                    }
                                 }
                             }
                             .tag(idx)

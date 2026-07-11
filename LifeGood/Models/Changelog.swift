@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.92", build: 648, date: "2026/07/11", notes: [
+            "【靜態除錯 v23.92】本次針對強制解包／Optional／型別／index／retain cycle／競態條件、畫面閃爍、效能瓶頸三大類做全面掃描（Models + Views 共 83 個檔案）。前者掃描結果：未發現新的高信心 bug——`try!`／`as!`／未防護的陣列越界／缺 `[weak self]` 等既有規格皆已符合；CloudSyncManager 既有 30 秒節流／2 秒防抖／isSyncing 並行守衛亦確認正常，未做變動。",
+            "【效能／畫面閃爍修復】v23.89 修復 MedicalMapView 縮圖同步讀檔阻塞主執行緒問題時，已於檔案內註記其餘 7 個檔案仍殘留同型 UIImage(contentsOfFile:) 同步讀檔；本次優先修復「每次 ScrollView／TabView 重繪或分頁切換都會重新觸發」的清單／輪播類 8 處：TravelMapView.photoThumb（旅遊相簿格狀／橫向縮圖共用）、FoodMapView 就醫地點照片橫向捲動列、FamilyMembersResumeView 相簿橫向捲動縮圖，三處改用共用 AsyncThumbnailView；OrganizationView 部門成員列表頭像、BusinessCardView 名片列表頭像，兩處抽出 avatarPlaceholder／personAvatarPlaceholder 後改用新增的共用 AsyncLocalImage 背景讀取；RealEstateDetailView 支出照片 TabView 瀏覽器、RealEstateDetailView 裝潢照片編輯 TabView（保留原有「找不到照片」與「載入中」兩種狀態的正確區分，避免載入中誤閃一次找不到照片畫面）、RenovationPhotoEditor 逐張瀏覽 TabView，三處改用 AsyncLocalImage。另外 4 處（OrganizationView／FamilyMembersResumeView／BusinessCardView 各自的新增頭像表單預覽、OrganizationView 人員詳情頁大頭卡）僅在表單開啟或進入詳情頁時渲染一次，非隨捲動重複觸發，本次不動，避免為改而改擴大變動範圍。純顯示層調整，各畫面既有的頭像/縮圖 fallback 樣式、照片刪除、資料綁定等既有邏輯未變動。",
+        ]),
         ChangelogEntry(version: "23.91", build: 647, date: "2026/07/11", notes: [
             "美化履歷頁新增/編輯里程碑表單（ResumeView.AddMilestoneView）「NT$」金額欄位一致性：薪水／調薪前薪水／調薪後薪水／年費／保費五處金額輸入列原本各自手刻 HStack { Text(\"NT$\") + TextField }（部分甚至擠成單行），是 v23.84 美化購入價格金額量級時留下的下一輪待辦事項。新增共用 currencyField(_:text:) row helper，五處呼叫點統一改用，往後新增金額欄位可直接比照呼叫維持一致樣式。純顯示層重構，未變動任何欄位的資料綁定、驗證或試算邏輯。",
         ]),

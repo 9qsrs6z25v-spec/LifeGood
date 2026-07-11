@@ -891,16 +891,5 @@ struct TravelAlbumSheet: View {
 // MARK: - 共用縮圖
 
 private func photoThumb(url: URL, width: CGFloat, height: CGFloat) -> some View {
-    Group {
-        if let img = UIImage(contentsOfFile: url.path) {
-            Image(uiImage: img).resizable().scaledToFill()
-                .frame(width: width, height: height).clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-        } else {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(.tertiarySystemFill))
-                .frame(width: width, height: height)
-                .overlay(Image(systemName: "icloud.and.arrow.down").foregroundStyle(.tertiary))
-        }
-    }
+    AsyncThumbnailView(url: url, size: CGSize(width: width, height: height))
 }

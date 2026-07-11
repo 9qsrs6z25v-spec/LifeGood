@@ -278,6 +278,32 @@ struct AsyncThumbnailView: View {
     }
 }
 
+// MARK: - 非同步讀檔（供各畫面自訂佔位樣式時共用）
+// [2026-07] 供 TabView 逐張瀏覽等需要自訂「載入中／找不到照片」樣式的畫面共用，
+// 統一 UIImage(contentsOfFile:) 背景執行緒讀檔手法，避免在 view body 同步讀檔阻塞主執行緒。
+// didLoad 為 true 且 image 為 nil 時代表確定讀不到檔案（非仍在載入中），呼叫端可據此
+// 分辨「載入中」與「找不到照片」兩種狀態，避免載入中誤閃一次「找不到照片」畫面。
+
+struct AsyncLocalImage<Content: View>: View {
+    let url: URL
+    @ViewBuilder let content: (_ image: UIImage?, _ didLoad: Bool) -> Content
+    @State private var image: UIImage?
+    @State private var didLoad = false
+
+    var body: some View {
+        content(image, didLoad)
+            .task(id: url) {
+                guard !didLoad else { return }
+                let path = url.path
+                let loaded = await Task.detached(priority: .userInitiated) {
+                    UIImage(contentsOfFile: path)
+                }.value
+                image = loaded
+                didLoad = true
+            }
+    }
+}
+
 // MARK: - 全螢幕燈箱檢視
 
 struct PhotoLightbox: View {

@@ -703,23 +703,33 @@ struct DepartmentDetailView: View {
     private func personAvatar(_ p: OrgPerson) -> some View {
         let ringColor = relationRingColor(for: p)
         Group {
-            if let url = p.photoURL, let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img)
-                    .resizable().scaledToFill()
-                    .frame(width: 40, height: 40)
-                    .clipShape(Circle())
-            } else {
-                ZStack {
-                    Circle().fill(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 40, height: 40)
-                    Text(String(p.name.prefix(1)))
-                        .font(.headline).foregroundStyle(.white)
+            if let url = p.photoURL {
+                AsyncLocalImage(url: url) { img, _ in
+                    if let img {
+                        Image(uiImage: img)
+                            .resizable().scaledToFill()
+                            .frame(width: 40, height: 40)
+                            .clipShape(Circle())
+                    } else {
+                        personAvatarPlaceholder(p)
+                    }
                 }
+            } else {
+                personAvatarPlaceholder(p)
             }
         }
         .overlay(
             Circle().stroke(ringColor, lineWidth: ringColor == .clear ? 0 : 2.5)
         )
+    }
+
+    private func personAvatarPlaceholder(_ p: OrgPerson) -> some View {
+        ZStack {
+            Circle().fill(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 40, height: 40)
+            Text(String(p.name.prefix(1)))
+                .font(.headline).foregroundStyle(.white)
+        }
     }
 
     private func relationRingColor(for p: OrgPerson) -> Color {

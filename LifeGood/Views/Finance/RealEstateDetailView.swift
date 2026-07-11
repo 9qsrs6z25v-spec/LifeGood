@@ -3131,11 +3131,13 @@ struct ExpensePhotoStackViewer: View {
                     TabView(selection: $currentIndex) {
                         ForEach(Array(expense.photoFileNames.enumerated()), id: \.offset) { idx, name in
                             let url = Expense.photoURL(for: name)
-                            ZStack {
-                                if let img = UIImage(contentsOfFile: url.path) {
-                                    ZoomableImageView(image: img)
-                                } else {
-                                    ProgressView().tint(.white)
+                            AsyncLocalImage(url: url) { img, _ in
+                                ZStack {
+                                    if let img {
+                                        ZoomableImageView(image: img)
+                                    } else {
+                                        ProgressView().tint(.white)
+                                    }
                                 }
                             }
                             .tag(idx)
@@ -3371,50 +3373,56 @@ struct CutePhotoViewer: View {
 
     private func photoCard(url: URL) -> some View {
         GeometryReader { geo in
-            Group {
-                if let img = UIImage(contentsOfFile: url.path) {
-                    ZStack {
-                        // 模糊填底：填滿卡片、補滿留白；裁切在白框內不外溢
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .blur(radius: 18, opaque: true)
-                            .overlay(Color.black.opacity(0.06))
+            AsyncLocalImage(url: url) { img, didLoad in
+                Group {
+                    if let img {
+                        ZStack {
+                            // 模糊填底：填滿卡片、補滿留白；裁切在白框內不外溢
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .blur(radius: 18, opaque: true)
+                                .overlay(Color.black.opacity(0.06))
 
-                        // 原圖：完整顯示（橫圖也不會超出，可雙指縮放）
-                        ZoomableImageView(image: img)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                    }
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(Color.white, lineWidth: 4)
-                    )
-                    .shadow(color: Color.black.opacity(0.15), radius: 14, y: 6)
-                } else {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            VStack(spacing: 10) {
-                                Image(systemName: "photo.fill.on.rectangle.fill")
-                                    .font(.system(size: 40))
-                                    .foregroundStyle(draft.kind.accent.opacity(0.6))
-                                Text("找不到照片")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                            }
-                        )
+                            // 原圖：完整顯示（橫圖也不會超出，可雙指縮放）
+                            ZoomableImageView(image: img)
+                                .frame(width: geo.size.width, height: geo.size.height)
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 22, style: .continuous)
                                 .stroke(Color.white, lineWidth: 4)
                         )
-                        .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
-                        .frame(width: geo.size.width, height: geo.size.height)
+                        .shadow(color: Color.black.opacity(0.15), radius: 14, y: 6)
+                    } else {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                VStack(spacing: 10) {
+                                    if didLoad {
+                                        Image(systemName: "photo.fill.on.rectangle.fill")
+                                            .font(.system(size: 40))
+                                            .foregroundStyle(draft.kind.accent.opacity(0.6))
+                                        Text("找不到照片")
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        ProgressView()
+                                    }
+                                }
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                    .stroke(Color.white, lineWidth: 4)
+                            )
+                            .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    }
                 }
+                .frame(width: geo.size.width, height: geo.size.height)
             }
-            .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 
