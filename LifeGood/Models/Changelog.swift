@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.90", build: 646, date: "2026/07/11", notes: [
+            "美化車輛詳情畫面（VehicleDetailView）補齊與同型閃卡（StockDetailView／RealEstateDetailView）的兩處視覺落差：① 閃卡估值大字（52pt）原本唯獨本檔案缺少 minimumScaleFactor + lineLimit(1) + contentTransition(.numericText())，車輛估值位數較多時有截斷風險、切換車輛時數字為硬切換，補上對齊 StockDetailView 市值大字規格。② infoSection：定期／變動支出兩張卡片原本各自以 isEmpty 整卡隱藏，若車輛兩者皆無記錄，此區塊會完全留白、無任何提示，與 StockDetailView（交易/股利空狀態卡）、RealEstateDetailView（emptySectionRow）等同型詳情頁不一致；新增 emptyExpensesCard，兩份清單皆空時顯示「尚無支出記錄」提示卡。純顯示層調整，未變動車輛估值、支出加總或刪除等既有邏輯。",
+        ]),
         ChangelogEntry(version: "23.89", build: 645, date: "2026/07/11", notes: [
             "美化醫療地圖畫面（MedicalMapView）就醫地點詳情 Sheet 照片列（photoRow）縮圖載入：原本在 view body 內以 UIImage(contentsOfFile:) 同步讀檔，每次 ScrollView 重繪都可能阻塞主執行緒，且無載入中狀態，與 v22.28 已修復的 MultiPhotoGallery 縮圖同型問題，是本檔案唯一殘留的同步讀檔縮圖。改共用 MultiPhotoGallery.AsyncThumbnailView（原為 private，開放為 internal 供跨檔案共用）：背景執行緒讀檔＋載入中佔位（漸層底＋icloud 圖示＋文字）＋統一 12pt 圓角縮圖樣式。純顯示層調整，就診紀錄／花費加總等既有邏輯未變動。",
         ]),

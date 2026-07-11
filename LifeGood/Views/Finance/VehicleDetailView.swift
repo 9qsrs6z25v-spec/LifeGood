@@ -158,6 +158,15 @@ struct SoldStamp: View {
 //      對齊 LifeOverviewView.statsStrip / FamilyView.statsStrip 設計規格。
 //  10. 金額色彩：支出列右側金額從 .primary 升為各自 accent 顏色（藍 / 橘），
 //      提升視覺層次，讓定期與變動的分類色貫穿整列。
+// [2026-07 v3] 補齊與 StockDetailView／RealEstateDetailView 兩個同型閃卡的視覺落差：
+//  11. flashCard 估值大字（52pt）：原本唯獨本檔案缺少 minimumScaleFactor + lineLimit(1) +
+//      contentTransition(.numericText())，車輛估值達六位數以上時大字有截斷風險，且切換車輛
+//      時數字為硬切換而非平滑過渡；補上對齊 StockDetailView.market value（0.55）規格。
+//  12. infoSection 空狀態：原本定期／變動支出兩張卡片各自以 isEmpty 整卡隱藏，若車輛兩者皆無
+//      記錄，此區塊會完全留白、無任何提示，與 StockDetailView（交易/股利空狀態卡）、
+//      RealEstateDetailView（emptySectionRow）等同型詳情頁不一致。新增 emptyExpensesCard，
+//      兩份清單皆空時顯示「尚無支出記錄」提示卡，對齊全 App 空狀態設計規格。
+//      （下次美化本元件時，可從這裡接著找其他可統一之處）
 
 // MARK: - 汽車檢視卡片
 
@@ -281,9 +290,14 @@ struct VehicleDetailView: View {
 
             // 估值（大字）
             VStack(spacing: 4) {
+                // v3：補上 minimumScaleFactor + lineLimit + contentTransition，
+                // 對齊 StockDetailView 市值大字規格，防止高額估值截斷並讓切換車輛時平滑過渡
                 Text("\(fmtWan(vehicle.currentValue))")
                     .font(.system(size: 52, weight: .bold, design: .rounded))
                     .foregroundStyle(rarity.textColor)
+                    .minimumScaleFactor(0.55)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
                 Text("萬元")
                     .font(.subheadline)
                     .foregroundStyle(rarity == .legendary ? .white.opacity(0.6) : .secondary)
@@ -353,6 +367,11 @@ struct VehicleDetailView: View {
 
     private var infoSection: some View {
         VStack(spacing: 16) {
+            // v3：兩份清單皆空時顯示提示卡，避免區塊完全留白
+            if vehicle.fixedExpenses.isEmpty && vehicle.variableExpenses.isEmpty {
+                emptyExpensesCard
+            }
+
             // 定期支出卡片
             if !vehicle.fixedExpenses.isEmpty {
                 VStack(spacing: 0) {
@@ -582,6 +601,44 @@ struct VehicleDetailView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - v3：空狀態（定期／變動支出皆無記錄時顯示）
+
+    /// 對齊 StockDetailView 交易/股利空狀態卡規格：漸層圖示圓 + 標題 + 說明文字
+    private var emptyExpensesCard: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.blue.opacity(0.15), Color.blue.opacity(0.06)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 40, height: 40)
+                Circle()
+                    .stroke(Color.blue.opacity(0.18), lineWidth: 0.75)
+                    .frame(width: 40, height: 40)
+                Image(systemName: "fuelpump.circle")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Color.blue.opacity(0.65))
+            }
+            Text("尚無支出記錄")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("點右上角「編輯」新增定期或變動支出")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 
     // MARK: - 輔助
