@@ -268,7 +268,11 @@ struct AsyncThumbnailView: View {
             }
         }
         .task(id: url) {
-            guard image == nil else { return }
+            // 重置為載入中狀態：.task(id: url) 只在 url 改變時重新觸發，但先前用
+            // `image == nil` 當作「是否已讀過」的判斷在 url 改變、image 已非 nil
+            // （上一張圖已快取）時會誤判為已載入而直接 return，導致换照片後畫面
+            // 停留在舊圖；改成每次 url 改變都清空重讀。
+            image = nil
             let path = url.path
             let loaded = await Task.detached(priority: .userInitiated) {
                 UIImage(contentsOfFile: path)
@@ -293,7 +297,13 @@ struct AsyncLocalImage<Content: View>: View {
     var body: some View {
         content(image, didLoad)
             .task(id: url) {
-                guard !didLoad else { return }
+                // 重置為載入中狀態：.task(id: url) 只在 url 改變時重新觸發，但先前用
+                // `!didLoad` 這個「是否已讀過」的一次性旗標判斷，在同一個 view 實例
+                // 換了 url（例如同一張名片／頭像換照片但檔名不同）時仍為 true，會誤判
+                // 已載入而直接 return，導致换照片後畫面停留在舊圖；改成每次 url 改變
+                // 都清空重讀。
+                image = nil
+                didLoad = false
                 let path = url.path
                 let loaded = await Task.detached(priority: .userInitiated) {
                     UIImage(contentsOfFile: path)
@@ -377,7 +387,11 @@ struct PhotoLightbox: View {
             }
         }
         .task(id: url) {
-            guard image == nil else { return }
+            // 重置為載入中狀態：.task(id: url) 只在 url 改變時重新觸發，但先前用
+            // `image == nil` 當作「是否已讀過」的判斷在 url 改變、image 已非 nil
+            // （上一張圖已快取）時會誤判為已載入而直接 return，導致换照片後畫面
+            // 停留在舊圖；改成每次 url 改變都清空重讀。
+            image = nil
             let path = url.path
             let loaded = await Task.detached(priority: .userInitiated) {
                 UIImage(contentsOfFile: path)

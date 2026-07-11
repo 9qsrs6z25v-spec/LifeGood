@@ -1045,7 +1045,10 @@ struct OrgPersonEditor: View {
         var newPhoto = photoFileName
         if let data = pendingImageData {
             if let oldName = photoFileName { OrgPerson.deletePhoto(oldName) }
-            newPhoto = OrgPerson.savePhoto(data, id: id)
+            // 檔名用全新 UUID（而非沿用可能不變的 person id），確保換照片後 photoURL
+            // 一定改變，AsyncLocalImage 才會依 .task(id: url) 重新讀取新照片，
+            // 不會因舊照片檔名被同路徑覆寫而讓列表頭像停留在快取的舊圖。
+            newPhoto = OrgPerson.savePhoto(data, id: UUID())
         }
         // 過濾掉指向不存在人員的 relation
         let validRelations = relations.filter { rel in

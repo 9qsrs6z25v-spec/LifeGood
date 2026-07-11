@@ -1711,7 +1711,10 @@ struct BusinessCardDetailView: View {
     private func saveAvatarData(_ data: Data) {
         guard var c = lifeStore.businessCards.first(where: { $0.id == cardId }) else { return }
         if let oldName = c.photoFileName { BusinessCard.deletePhoto(oldName) }
-        c.photoFileName = BusinessCard.savePhoto(data, id: c.id)
+        // 檔名用全新 UUID（而非沿用不變的 card id），確保換頭像後 photoURL 一定改變，
+        // 讓清單列（AsyncLocalImage 依 url 快取讀取結果）能重新讀取新照片，
+        // 不會因新照片覆寫同一路徑而讓已載入過的舊圖快取停留在畫面上。
+        c.photoFileName = BusinessCard.savePhoto(data, id: UUID())
         lifeStore.update(c)
     }
 
@@ -2196,7 +2199,10 @@ struct BusinessCardEditor: View {
             if let oldName = photoFileName {
                 BusinessCard.deletePhoto(oldName)
             }
-            photoFileName = BusinessCard.savePhoto(data, id: id)
+            // 檔名用全新 UUID（而非沿用編輯中卡片不變的 id），理由同
+            // BusinessCardDetailView.saveAvatarData：避免同路徑覆寫造成
+            // AsyncLocalImage 快取的舊圖不更新。
+            photoFileName = BusinessCard.savePhoto(data, id: UUID())
         }
         let cleanedPhones = phones
             .map { $0.trimmingCharacters(in: .whitespaces) }

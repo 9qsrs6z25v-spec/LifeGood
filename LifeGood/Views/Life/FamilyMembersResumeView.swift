@@ -1166,7 +1166,10 @@ struct FamilyAlbumPhotoEditor: View {
         let id = editing?.id ?? UUID()
         if let data = pendingImageData {
             if let oldName = photoFileName { FamilyAlbumPhoto.deletePhoto(oldName) }
-            photoFileName = FamilyAlbumPhoto.savePhoto(data, id: id)
+            // 檔名用全新 UUID（而非沿用編輯中相片項目不變的 id），確保換照片後
+            // photoURL 一定改變；相簿縮圖已改用 AsyncThumbnailView 依 url 快取讀取，
+            // 同路徑覆寫會讓已載入過的舊縮圖停留在畫面上不更新。
+            photoFileName = FamilyAlbumPhoto.savePhoto(data, id: UUID())
         }
         let newPhoto = FamilyAlbumPhoto(
             id: id,
