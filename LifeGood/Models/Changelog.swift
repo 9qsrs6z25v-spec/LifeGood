@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.91", build: 647, date: "2026/07/11", notes: [
+            "美化履歷頁新增/編輯里程碑表單（ResumeView.AddMilestoneView）「NT$」金額欄位一致性：薪水／調薪前薪水／調薪後薪水／年費／保費五處金額輸入列原本各自手刻 HStack { Text(\"NT$\") + TextField }（部分甚至擠成單行），是 v23.84 美化購入價格金額量級時留下的下一輪待辦事項。新增共用 currencyField(_:text:) row helper，五處呼叫點統一改用，往後新增金額欄位可直接比照呼叫維持一致樣式。純顯示層重構，未變動任何欄位的資料綁定、驗證或試算邏輯。",
+        ]),
         ChangelogEntry(version: "23.90", build: 646, date: "2026/07/11", notes: [
             "美化車輛詳情畫面（VehicleDetailView）補齊與同型閃卡（StockDetailView／RealEstateDetailView）的兩處視覺落差：① 閃卡估值大字（52pt）原本唯獨本檔案缺少 minimumScaleFactor + lineLimit(1) + contentTransition(.numericText())，車輛估值位數較多時有截斷風險、切換車輛時數字為硬切換，補上對齊 StockDetailView 市值大字規格。② infoSection：定期／變動支出兩張卡片原本各自以 isEmpty 整卡隱藏，若車輛兩者皆無記錄，此區塊會完全留白、無任何提示，與 StockDetailView（交易/股利空狀態卡）、RealEstateDetailView（emptySectionRow）等同型詳情頁不一致；新增 emptyExpensesCard，兩份清單皆空時顯示「尚無支出記錄」提示卡。純顯示層調整，未變動車輛估值、支出加總或刪除等既有邏輯。",
         ]),

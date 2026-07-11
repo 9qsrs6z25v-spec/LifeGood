@@ -1157,8 +1157,11 @@ struct ResumeView: View {
 //      共用金額量級格式的地方（與 v23.79 AddExpenseView.formatBankBalance 同型問題）。
 //      改呼叫 ntdWanString，並補 lineLimit(1) + minimumScaleFactor(0.75) 防止大字截斷；
 //      移除已無其他呼叫端的 formatWan 死碼。純顯示層調整，未變動購入價格資料或篩選邏輯。
-//   （下次美化本元件時，可留意 Form 內各 HStack "NT$" 前綴寫法目前每處各自手刻，
-//     尚未抽成共用 row helper，可作為下一輪一致性優化方向。）
+// [2026-07 v2] Form 內薪水／調薪前後薪水／年費／保費五處 HStack "NT$" 前綴寫法原本各自
+//   手刻（部分甚至擠成單行），是上一輪美化留下的一致性缺口。新增共用 currencyField(_:text:)
+//   row helper（Text("NT$") + TextField + .numberPad 鍵盤），salaryField／careerExtraSection／
+//   financeDetailSection 五處呼叫點統一改用，往後新增金額欄位時比照呼叫即可維持一致樣式。
+//   純顯示層重構，未變動任何欄位的資料綁定、驗證或試算邏輯。
 
 struct AddMilestoneView: View {
     @EnvironmentObject var store: LifeStore
@@ -1490,12 +1493,17 @@ struct AddMilestoneView: View {
         }
     }
 
-    private var salaryField: some View {
+    /// 「NT$」前綴金額輸入列，供薪水／調薪前後薪水／年費／保費共用，統一前綴文字樣式與鍵盤類型。
+    private func currencyField(_ placeholder: String, text: Binding<String>) -> some View {
         HStack {
             Text("NT$").foregroundStyle(.secondary)
-            TextField("薪水（選填）", text: $salaryText)
+            TextField(placeholder, text: text)
                 .keyboardType(.numberPad)
         }
+    }
+
+    private var salaryField: some View {
+        currencyField("薪水（選填）", text: $salaryText)
     }
 
     /// 職稱 / 職等編號連動「部門職等」設定。
@@ -1565,16 +1573,8 @@ struct AddMilestoneView: View {
     private var careerExtraSection: some View {
         if careerSub == .salaryAdjust {
             Section("調薪資訊") {
-                HStack {
-                    Text("NT$").foregroundStyle(.secondary)
-                    TextField("調薪前薪水", text: $salaryBeforeText)
-                        .keyboardType(.numberPad)
-                }
-                HStack {
-                    Text("NT$").foregroundStyle(.secondary)
-                    TextField("調薪後薪水", text: $salaryAfterText)
-                        .keyboardType(.numberPad)
-                }
+                currencyField("調薪前薪水", text: $salaryBeforeText)
+                currencyField("調薪後薪水", text: $salaryAfterText)
                 HStack {
                     Text("幅度")
                     Spacer()
@@ -1639,7 +1639,7 @@ struct AddMilestoneView: View {
                 TextField("卡別名稱（如：御璽卡）", text: $cardName)
                 TextField("卡號末四碼（選填）", text: $cardLastFour).keyboardType(.numberPad)
                 HStack { TextField("額度", text: $creditLimitText).keyboardType(.numberPad); Text("萬元").foregroundStyle(.secondary) }
-                HStack { Text("NT$").foregroundStyle(.secondary); TextField("年費", text: $annualFeeText).keyboardType(.numberPad) }
+                currencyField("年費", text: $annualFeeText)
                 HStack { TextField("帳單日", text: $billingDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
                 HStack { TextField("繳款日", text: $paymentDayText).keyboardType(.numberPad); Text("日").foregroundStyle(.secondary) }
                 DatePicker("核卡日期", selection: $date, displayedComponents: .date)
@@ -1677,7 +1677,7 @@ struct AddMilestoneView: View {
                 Picker("險種", selection: $insType) {
                     ForEach(InsuranceType.allCases) { t in Text(t.rawValue).tag(t) }
                 }
-                HStack { Text("NT$").foregroundStyle(.secondary); TextField("保費", text: $premiumText).keyboardType(.numberPad) }
+                currencyField("保費", text: $premiumText)
                 DatePicker("生效日", selection: $date, displayedComponents: .date)
                 Toggle("填入到期日", isOn: $hasExpiryDate)
                 if hasExpiryDate {
