@@ -73,6 +73,14 @@ import ImageIO
 //      只有電梯保養這格漏改、垂直 padding 也不同（6pt vs 9pt），
 //      切分頁時視覺不連貫。改呼叫 emptySectionRow("尚無保養記錄") 對齊其餘三處。
 //      純視覺調整，未變動保養記錄新增/刪除或任何既有資料邏輯。
+//
+// [2026-07 v6] 空狀態一致性修復（v5 補漏）：
+//  21. floorItemsTree（樓層物件樹）與 renovationPhotosContent（房屋資料集錦）
+//      兩處空狀態仍是手刻裸 HStack + Text，垂直 padding 各自為 10pt / 6pt，
+//      是 v5 掃描後全檔案僅剩的兩處未接上共用 emptySectionRow(_:) 的空狀態，
+//      與 mortgageItems／paidItems／variableExpenses／elevatorContent 四處不一致。
+//      改呼叫既有 emptySectionRow(_:)，至此全檔案六處空狀態視覺統一。
+//      純視覺調整，未變動樓層物件或房屋資料集錦的任何既有資料邏輯。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -1260,12 +1268,7 @@ struct RealEstateDetailView: View {
             .padding(.horizontal, 12).padding(.top, 10)
 
             if floor.items.isEmpty {
-                HStack {
-                    Text("尚無物件，點右上「新增物件」開始建立")
-                        .font(.caption).foregroundStyle(.tertiary)
-                    Spacer()
-                }
-                .padding(.horizontal, 12).padding(.bottom, 10)
+                emptySectionRow("尚無物件，點右上「新增物件」開始建立")
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     // 先把樹狀物件攤平成一維列表，再用單一 ForEach 渲染。
@@ -1516,12 +1519,7 @@ struct RealEstateDetailView: View {
             .sorted { $0.date > $1.date }
 
         if allItems.isEmpty {
-            HStack {
-                Text("尚無房屋資料（裝潢照片 / 關聯支出 / 文件 / 水電瓦斯收據 / 電梯保養）")
-                    .font(.caption).foregroundStyle(.tertiary)
-                Spacer()
-            }
-            .padding(.horizontal).padding(.vertical, 6)
+            emptySectionRow("尚無房屋資料（裝潢照片 / 關聯支出 / 文件 / 水電瓦斯收據 / 電梯保養）")
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {

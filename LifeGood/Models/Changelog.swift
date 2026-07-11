@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.86", build: 642, date: "2026/07/11", notes: [
+            "美化不動產詳情畫面（RealEstateDetailView）樓層物件樹／房屋資料集錦空狀態：floorItemsTree 與 renovationPhotosContent 兩處空狀態仍是手刻裸 HStack + Text，垂直 padding 各自為 10pt／6pt，是 v23.78（elevatorContent）修復後全檔案僅剩的兩處未接上共用 emptySectionRow(_:)（tray 圖示 + .caption/.tertiary + 統一 14/9pt padding）的空狀態，與 mortgageItems／paidItems／variableExpenses／elevatorContent 四處不一致。改呼叫既有 emptySectionRow(_:)，至此全檔案六處空狀態視覺統一。純視覺調整，未變動樓層物件或房屋資料集錦的任何既有資料邏輯。",
+        ]),
         ChangelogEntry(version: "23.85", build: 641, date: "2026/07/11", notes: [
             "美化財富總覽主畫面（LifeFinanceView）銀行帳戶總餘額顯示：私有 formatTwdShort(_:) 用零小數位的 NumberFormatter 直接對「金額 / 億」「金額 / 萬」四捨五入（例如 1.25 億會被捨入顯示成「NT$ 1 億」，實際少報 25%；4.56 萬顯示成「NT$ 5 萬」），是本頁級距最大的金額顯示誤差，且與全 App 共用的 Double.ntdWanString（億/萬保留一位小數）風格不一致。改呼叫既有 ntdWanString，英雄卡 30pt 大字與導覽列小計兩處同步套用，移除已無呼叫端的 formatTwdShort 死碼。純顯示層調整，未變動銀行餘額換算或加總邏輯。",
         ]),
