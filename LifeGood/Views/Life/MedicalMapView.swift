@@ -31,6 +31,17 @@ import UIKit
 //      teal 主題色；關閉按鈕維持 topBarLeading（左側），符合全 App 一致慣例。
 //   8. 未變動任何地圖標註、資料聚合（placeAggregates／healthMilestones／
 //      insuranceMilestones）、篩選或排序等既有商業邏輯。
+//
+// [2026-07 v2] MedicalPlaceDetailSheet.photoRow 縮圖載入：
+//   9. 原本在 view body 內以 UIImage(contentsOfFile:) 同步讀檔（每次 ScrollView 重繪都可能
+//      阻塞主執行緒，且無載入中狀態，與 v22.28 已修復的 MultiPhotoGallery 同型問題），
+//      改共用 MultiPhotoGallery.AsyncThumbnailView（已從 private 開放為 internal）：
+//      背景執行緒讀檔 + 載入中佔位（漸層底 + icloud 圖示 +「載入中」文字）+ cornerRadius 12
+//      統一縮圖圓角，對齊 MultiPhotoGallery 縮圖規格。純顯示層調整，就診紀錄／花費加總等既有
+//      邏輯未變動。（下次美化本檔案時，可比照同一模式接續處理其餘手刻縮圖畫面，如
+//      FamilyMembersResumeView／TravelMapView／OrganizationView／FoodMapView／
+//      BusinessCardView／RenovationPhotoEditor／RealEstateDetailView 內仍殘留的
+//      UIImage(contentsOfFile:) 同步讀檔。）
 
 // MARK: - 就醫地點聚合
 
@@ -614,15 +625,7 @@ struct MedicalPlaceDetailSheet: View {
                     ForEach(place.photoNames, id: \.self) { name in
                         let url = Expense.photoURL(for: name)
                         Button { viewingPhotoURL = IdentifiableURL(url: url) } label: {
-                            if let img = UIImage(contentsOfFile: url.path) {
-                                Image(uiImage: img).resizable().scaledToFill()
-                                    .frame(width: 110, height: 90).clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                            } else {
-                                RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill))
-                                    .frame(width: 110, height: 90)
-                                    .overlay(Image(systemName: "icloud.and.arrow.down").foregroundStyle(.tertiary))
-                            }
+                            AsyncThumbnailView(url: url, size: CGSize(width: 110, height: 90))
                         }.buttonStyle(.plain)
                     }
                 }.padding(.horizontal)

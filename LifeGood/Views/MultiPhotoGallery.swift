@@ -223,8 +223,11 @@ private struct PressableScaleStyle: ButtonStyle {
 }
 
 // MARK: - 非同步縮圖載入（避免在 view body 同步讀檔阻塞主執行緒）
+// [2026-07 v3] 拿掉 private，讓其他畫面的照片縮圖列（例如 MedicalMapView.photoRow）
+// 可共用同一套非同步載入 + 載入中佔位樣式，取代各自手刻的 UIImage(contentsOfFile:)
+// 同步讀檔（詳見 MedicalMapView.swift 內對應美化紀錄）。
 
-private struct AsyncThumbnailView: View {
+struct AsyncThumbnailView: View {
     let url: URL
     let size: CGSize
     @State private var image: UIImage?

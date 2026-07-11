@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.89", build: 645, date: "2026/07/11", notes: [
+            "美化醫療地圖畫面（MedicalMapView）就醫地點詳情 Sheet 照片列（photoRow）縮圖載入：原本在 view body 內以 UIImage(contentsOfFile:) 同步讀檔，每次 ScrollView 重繪都可能阻塞主執行緒，且無載入中狀態，與 v22.28 已修復的 MultiPhotoGallery 縮圖同型問題，是本檔案唯一殘留的同步讀檔縮圖。改共用 MultiPhotoGallery.AsyncThumbnailView（原為 private，開放為 internal 供跨檔案共用）：背景執行緒讀檔＋載入中佔位（漸層底＋icloud 圖示＋文字）＋統一 12pt 圓角縮圖樣式。純顯示層調整，就診紀錄／花費加總等既有邏輯未變動。",
+        ]),
         ChangelogEntry(version: "23.88", build: 644, date: "2026/07/11", notes: [
             "美化記帳收入新增/編輯畫面（AddIncomeView）月/年等效收入與年薪估計金額量級：私有 smartCurrency 手刻「%.1f 萬」「%.1f 億」（單位前多一個空白、無 NT$ 字首、恆固定一位小數不會整數化、且未處理捨入至萬位上限應進位為億的邊界），與全 App 共用的 Double.ntdWanString（「NT$1.2萬」無空白、整數不帶小數、億以上自動換算＋捨入邊界防呆）皆不一致，是本檔案唯一未接上共用金額量級格式的地方。改呼叫既有 ntdWanString，移除已無其他呼叫端的 formatCurrency／currencyFormatter 死碼。純顯示層調整，未變動月/年等效收入或年薪估計等既有試算邏輯。",
         ]),
