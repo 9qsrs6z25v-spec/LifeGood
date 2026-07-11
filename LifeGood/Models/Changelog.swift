@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.84", build: 640, date: "2026/07/11", notes: [
+            "美化履歷頁新增/編輯里程碑表單（ResumeView.AddMilestoneView）房地產「購入價格」顯示：私有 formatWan(_:) 只到「萬」量級（無條件捨去小數，未處理億級單位，例如 1.2 億的房產會顯示成「12000 萬」），與全 App 共用的 Double.ntdWanString（萬/億自動切換、保留一位小數）不一致，是本表單唯一未接上共用金額量級格式的地方（與 v23.79 AddExpenseView.formatBankBalance 同型問題）。改呼叫既有 ntdWanString，並補上 lineLimit(1) + minimumScaleFactor(0.75) 防止大字截斷；移除已無其他呼叫端的 formatWan 死碼。純顯示層調整，未變動購入價格資料或篩選邏輯。",
+        ]),
         ChangelogEntry(version: "23.83", build: 639, date: "2026/07/10", notes: [
             "【靜態除錯 v23.83】本次針對強制解包／Optional／index／retain cycle／競態條件、畫面閃爍、效能瓶頸三大類做全面掃描（Models + Views 共 83 個檔案）。前者掃描結果：未發現新的高信心 bug——`try!`／`as!`／未防護的陣列越界／缺 `[weak self]` 等既有規格皆已符合，本次未做變動。",
             "【效能修復】BackupManager.createSnapshot 自動快照（App 啟動與進背景時觸發）先前在主執行緒同步做 UnifiedExporter.exportJSON（含 `.prettyPrinted`／`.sortedKeys` 全量 JSON 編碼），資料量大時會卡住主執行緒，尤其進背景是系統給的極短執行窗口。改為只在主執行緒用 UnifiedExport.build 組出純 struct 快照（很快），實際 JSONEncoder 編碼搬到既有的背景佇列做，與 FullBackup.export 已採用的模式一致；還原端解碼策略不變（`.iso8601`），格式相容。",

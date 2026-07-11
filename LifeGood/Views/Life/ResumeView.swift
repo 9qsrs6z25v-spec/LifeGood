@@ -1149,6 +1149,17 @@ struct ResumeView: View {
 
 // MARK: - 新增/編輯里程碑
 
+// MARK: - 美化紀錄（AddMilestoneView）
+// [2026-07] 本次美化方向：
+//   1. realEstateFields「購入價格」列：私有 formatWan(_:) 只到「萬」量級（無條件捨去小數，
+//      未處理億級，例如 1.2 億的房產會顯示成「12000 萬」），與全 App 共用的
+//      Double.ntdWanString（萬/億自動切換、保留一位小數）不一致，是本表單唯一未接上
+//      共用金額量級格式的地方（與 v23.79 AddExpenseView.formatBankBalance 同型問題）。
+//      改呼叫 ntdWanString，並補 lineLimit(1) + minimumScaleFactor(0.75) 防止大字截斷；
+//      移除已無其他呼叫端的 formatWan 死碼。純顯示層調整，未變動購入價格資料或篩選邏輯。
+//   （下次美化本元件時，可留意 Form 內各 HStack "NT$" 前綴寫法目前每處各自手刻，
+//     尚未抽成共用 row helper，可作為下一輪一致性優化方向。）
+
 struct AddMilestoneView: View {
     @EnvironmentObject var store: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -1411,7 +1422,10 @@ struct AddMilestoneView: View {
                 if let id = selectedRealEstateId,
                    let re = financeStore.realEstates.first(where: { $0.id == id }) {
                     HStack { Text("購入價格"); Spacer()
-                        Text(formatWan(re.purchasePrice)).foregroundStyle(.secondary)
+                        Text(re.purchasePrice > 0 ? re.purchasePrice.ntdWanString : "—")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
                     HStack { Text("購入日期"); Spacer()
                         Text(formatDateOnly(re.purchaseDate)).foregroundStyle(.secondary)
@@ -1929,10 +1943,6 @@ struct AddMilestoneView: View {
     }
 
     // MARK: - 工具
-
-    private func formatWan(_ v: Double) -> String {
-        v > 0 ? String(format: "%.0f 萬", v / 10000) : "—"
-    }
 
     private static let dateOnlyFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
