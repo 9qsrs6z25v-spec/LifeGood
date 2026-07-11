@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.88", build: 644, date: "2026/07/11", notes: [
+            "美化記帳收入新增/編輯畫面（AddIncomeView）月/年等效收入與年薪估計金額量級：私有 smartCurrency 手刻「%.1f 萬」「%.1f 億」（單位前多一個空白、無 NT$ 字首、恆固定一位小數不會整數化、且未處理捨入至萬位上限應進位為億的邊界），與全 App 共用的 Double.ntdWanString（「NT$1.2萬」無空白、整數不帶小數、億以上自動換算＋捨入邊界防呆）皆不一致，是本檔案唯一未接上共用金額量級格式的地方。改呼叫既有 ntdWanString，移除已無其他呼叫端的 formatCurrency／currencyFormatter 死碼。純顯示層調整，未變動月/年等效收入或年薪估計等既有試算邏輯。",
+        ]),
         ChangelogEntry(version: "23.87", build: 643, date: "2026/07/11", notes: [
             "美化美食地圖清單畫面（FoodMapView）金額顯示量級：私有 fmtShort(_:) 只到「萬」量級（無條件捨去小數，未處理億級單位），與同檔案 RestaurantDetailSheet.fmtWan 已於 v3 補上的億級規格、以及全 App 共用的 Double.ntdWanString（萬/億自動切換、保留一位小數）皆不一致，是本檔案唯一未接上共用金額量級格式的地方。統計卡總花費／平均每次、餐廳列總花費／均消四處呼叫改用既有 ntdWanString，移除已無呼叫端的 fmtShort 與其專用 decimalFormatter 死碼。純顯示層調整，未變動花費加總或排序等既有邏輯。",
         ]),

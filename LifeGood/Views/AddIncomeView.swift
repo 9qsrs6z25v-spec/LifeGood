@@ -30,6 +30,14 @@ import SwiftUI
 //      - HStack 右側新增小散景裝飾圓（70pt, blur 12, offset x:10）
 //      - 金額大字加 .minimumScaleFactor(0.65) + .lineLimit(1) 防長數字溢出
 //      - 分類膠囊加 .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth:0.6))
+//
+// [2026-07 v4] 金額量級格式對齊全 App 規格：
+//  10. smartCurrency 原為手刻「%.1f 萬」/「%.1f 億」（單位前多一個空白、無 NT$ 字首、
+//      恆固定一位小數不會整數化、且未處理捨入至 10000 萬應進位為億的邊界），
+//      與全 App 共用的 Double.ntdWanString（「NT$1.2萬」無空白、整數不帶小數、
+//      億以上自動換算＋捨入邊界防呆）不一致，是本檔案唯一未接上共用金額量級格式的地方。
+//      改呼叫既有 ntdWanString，移除已無其他呼叫端的 formatCurrency／currencyFormatter 死碼。
+//      純顯示層調整，未變動月/年等效收入或年薪估計等既有試算邏輯。
 
 struct AddIncomeView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -674,24 +682,8 @@ struct AddIncomeView: View {
         }
     }
 
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f
-    }()
-
-    private func formatCurrency(_ value: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "NT$0"
-    }
-
-    // 萬/億 量級顯示：≥1億 → "X.X 億"，≥1萬 → "X.X 萬"，其餘 → "NT$X"
+    // 萬/億 量級顯示：改呼叫全 App 共用的 Double.ntdWanString（見 v4 美化紀錄）
     private func smartCurrency(_ value: Double) -> String {
-        let abs = Swift.abs(value)
-        if abs >= 100_000_000 {
-            return String(format: "%.1f 億", value / 100_000_000)
-        } else if abs >= 10_000 {
-            return String(format: "%.1f 萬", value / 10_000)
-        }
-        return formatCurrency(value)
+        value.ntdWanString
     }
 }
