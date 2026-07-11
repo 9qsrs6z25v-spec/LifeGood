@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.85", build: 641, date: "2026/07/11", notes: [
+            "美化財富總覽主畫面（LifeFinanceView）銀行帳戶總餘額顯示：私有 formatTwdShort(_:) 用零小數位的 NumberFormatter 直接對「金額 / 億」「金額 / 萬」四捨五入（例如 1.25 億會被捨入顯示成「NT$ 1 億」，實際少報 25%；4.56 萬顯示成「NT$ 5 萬」），是本頁級距最大的金額顯示誤差，且與全 App 共用的 Double.ntdWanString（億/萬保留一位小數）風格不一致。改呼叫既有 ntdWanString，英雄卡 30pt 大字與導覽列小計兩處同步套用，移除已無呼叫端的 formatTwdShort 死碼。純顯示層調整，未變動銀行餘額換算或加總邏輯。",
+        ]),
         ChangelogEntry(version: "23.84", build: 640, date: "2026/07/11", notes: [
             "美化履歷頁新增/編輯里程碑表單（ResumeView.AddMilestoneView）房地產「購入價格」顯示：私有 formatWan(_:) 只到「萬」量級（無條件捨去小數，未處理億級單位，例如 1.2 億的房產會顯示成「12000 萬」），與全 App 共用的 Double.ntdWanString（萬/億自動切換、保留一位小數）不一致，是本表單唯一未接上共用金額量級格式的地方（與 v23.79 AddExpenseView.formatBankBalance 同型問題）。改呼叫既有 ntdWanString，並補上 lineLimit(1) + minimumScaleFactor(0.75) 防止大字截斷；移除已無其他呼叫端的 formatWan 死碼。純顯示層調整，未變動購入價格資料或篩選邏輯。",
         ]),

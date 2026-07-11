@@ -44,6 +44,14 @@ import SwiftUI
 //      是本檔案唯一未接上共用金額量級格式的地方（對齊 v23.79 AddExpenseView.formatBankBalance
 //      同型修復）。改呼叫既有 ntdWanString，「轉入帳戶」選單與「沖正」目前總額顯示對齊全 App
 //      金額規則。純視覺調整，未變動帳戶餘額計算、轉帳或沖正等既有邏輯。
+// [2026-07 v5] 主畫面「銀行帳戶總餘額」英雄卡大字 + 導覽列小計精度修復：
+//  15. formatTwdShort(_:) 先前用 maximumFractionDigits=0 的 decimalFormatter 直接對
+//      「金額 / 億」「金額 / 萬」四捨五入到整數（無小數位），例如 1.25 億會被捨入顯示成
+//      「NT$ 1 億」，實際少報 25%；4.56 萬會顯示成「NT$ 5 萬」，同樣嚴重失真——是本頁級距
+//      最大的金額顯示 bug（比 v4 修的 fmtBal 精度問題更嚴重，因為這裡連小數位都沒有保留）。
+//      改呼叫全 App 共用的 Double.ntdWanString（億/萬保留一位小數），summaryHeader 30pt 大字
+//      與導覽列小計兩處同步套用；移除已無呼叫端的 formatTwdShort 死碼。純顯示層調整，未變動
+//      銀行餘額換算或加總邏輯。
 
 // MARK: - 固定支出週期展開（共用）
 
@@ -263,7 +271,7 @@ struct LifeFinanceView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 8) {
-                        Text(formatTwdShort(bankBalanceTWD))
+                        Text(bankBalanceTWD.ntdWanString)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(bankBalanceTWD >= 0 ? Color.blue : Color.red)
                             .lineLimit(1)
@@ -310,7 +318,7 @@ struct LifeFinanceView: View {
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.78))
                     }
-                    Text(formatTwdShort(balance))
+                    Text(balance.ntdWanString)
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
                         .lineLimit(1)
@@ -735,20 +743,6 @@ struct LifeFinanceView: View {
 
     private func formatNumber(_ v: Double) -> String {
         Self.decimalFormatter.string(from: NSNumber(value: v)) ?? "0"
-    }
-
-    private func formatTwdShort(_ v: Double) -> String {
-        let f = Self.decimalFormatter
-        if abs(v) >= 100_000_000 {
-            let s = f.string(from: NSNumber(value: v / 100_000_000)) ?? "0"
-            return "NT$ \(s) 億"
-        }
-        if abs(v) >= 10_000 {
-            let s = f.string(from: NSNumber(value: v / 10_000)) ?? "0"
-            return "NT$ \(s) 萬"
-        }
-        let s = f.string(from: NSNumber(value: v)) ?? "0"
-        return "NT$ \(s)"
     }
 
     @ViewBuilder
