@@ -199,19 +199,29 @@ final class CloudSyncManager: ObservableObject {
     /// 開啟同步時：建立 zone/subscription，非破壞性預讀雲端。
     /// - 雲端沒資料 → 直接把本機推上去（種子）。
     /// - 雲端已有資料 → 設定 pendingInitialSync，由 UI 詢問使用者要覆蓋還是合併。
+    ///
+    /// 全程以 isSyncing 守衛：避免使用者連續點擊「立即同步」與「重新選擇同步方式」時，
+    /// 此流程與 performSync() 並行打同一批 key 造成 serverRecordChanged 衝突。
     private func beginInitialSync() {
+        guard !isSyncing else { return }
+        isSyncing = true
         CloudKitManager.shared.bootstrap { [weak self] ok in
-            guard let self = self, ok else { return }
+            guard let self = self, ok else { self?.isSyncing = false; return }
             CloudKitManager.shared.fetchAllKVToMemory { [weak self] cloudBlobs in
                 guard let self = self else { return }
                 let count = Self.itemCount(cloudBlobs)
                 if count == 0 {
                     // 雲端沒資料：把本機推上去當種子，不需詢問
-                    CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
-                    CloudKitManager.shared.uploadAllLocalPhotos()
-                    self.markSynced()
-                    DispatchQueue.main.async { [weak self] in self?.lastChangeReason = .initialSync }
+                    CloudKitManager.shared.pushAllKV(keys: Self.syncKeys) { [weak self] pushOK in
+                        CloudKitManager.shared.uploadAllLocalPhotos {
+                            self?.isSyncing = false
+                            if pushOK { self?.markSynced() }
+                            DispatchQueue.main.async { [weak self] in self?.lastChangeReason = .initialSync }
+                        }
+                    }
                 } else {
+                    // 保持 isSyncing = true 直到使用者做出覆蓋／合併選擇（resolveInitialSync）
+                    // 或取消（cancelInitialSync），避免決策期間被自動同步搶跑。
                     DispatchQueue.main.async { [weak self] in
                         self?.pendingInitialSync = InitialSyncInfo(cloudItemCount: count, cloudBlobs: cloudBlobs)
                     }
@@ -248,24 +258,34 @@ final class CloudSyncManager: ObservableObject {
         }
 
         // 把（覆蓋／合併後的）本機資料推回雲端，並上傳本機照片
-        CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
-        CloudKitManager.shared.uploadAllLocalPhotos()
-        markSynced()
-        DispatchQueue.main.async { [weak self] in self?.lastChangeReason = .initialSync }
+        isSyncing = true
+        CloudKitManager.shared.pushAllKV(keys: Self.syncKeys) { [weak self] pushOK in
+            CloudKitManager.shared.uploadAllLocalPhotos {
+                self?.isSyncing = false
+                if pushOK { self?.markSynced() }
+                DispatchQueue.main.async { [weak self] in self?.lastChangeReason = .initialSync }
+            }
+        }
     }
 
     /// 使用者在首次同步選項中取消 → 關回同步開關
     func cancelInitialSync() {
         pendingInitialSync = nil
+        isSyncing = false
         isEnabled = false
     }
 
-    /// 計算一批 KV blob 內的資料筆數（陣列型 blob 的元素數加總）
+    /// 計算一批 KV blob 內的資料筆數：陣列型 blob 加總元素數；
+    /// 非陣列（物件型，如 life_profile／life_health_profile 為單一 Codable struct）
+    /// 只要能解出非空物件就算 1 筆，避免被誤判為「雲端沒資料」而略過覆蓋／合併詢問、
+    /// 靜默把本機資料當種子推上去覆蓋雲端既有資料。
     static func itemCount(_ blobs: [String: Data]) -> Int {
         var n = 0
         for (_, data) in blobs {
             if let arr = (try? JSONSerialization.jsonObject(with: data)) as? [Any] {
                 n += arr.count
+            } else if let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], !obj.isEmpty {
+                n += 1
             }
         }
         return n
@@ -341,10 +361,14 @@ final class CloudSyncManager: ObservableObject {
                             self?.isSyncing = false
                             return
                         }
-                        CloudKitManager.shared.pushAllKV(keys: Self.syncKeys)
-                        CloudKitManager.shared.uploadAllLocalPhotos()
-                        self?.isSyncing = false
-                        self?.markSynced()
+                        // 等 push／上傳實際完成才重置 isSyncing、且只在全部成功時才 markSynced()，
+                        // 避免失敗的一輪被誤標為已同步（清空錯誤訊息、讓 30 秒節流延後下次重試）。
+                        CloudKitManager.shared.pushAllKV(keys: Self.syncKeys) { [weak self] pushOK in
+                            CloudKitManager.shared.uploadAllLocalPhotos {
+                                self?.isSyncing = false
+                                if pushOK { self?.markSynced() }
+                            }
+                        }
                     }
                 }
             }

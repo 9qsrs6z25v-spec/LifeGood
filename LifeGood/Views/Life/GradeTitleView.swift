@@ -89,7 +89,7 @@ struct GradeTitleView: View {
                 // ── 職等設定 ──
                 Section {
                     ForEach(Array(lifeStore.gradeTitles.enumerated()), id: \.element.id) { index, gt in
-                        gradeTitleRow(item: gt)
+                        gradeTitleRow(item: gt, index: index)
                             .opacity(rowsAppeared ? 1 : 0)
                             .offset(y: rowsAppeared ? 0 : 12)
                             .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04 * Double(index)), value: rowsAppeared)
@@ -339,7 +339,10 @@ struct GradeTitleView: View {
     // MARK: - Grade Title Row
 
     @ViewBuilder
-    private func gradeTitleRow(item gt: GradeTitle) -> some View {
+    private func gradeTitleRow(item gt: GradeTitle, index: Int) -> some View {
+        // get/set 直接用 ForEach(enumerated()) 已算好的 index 存取，取代逐字元觸發
+        // first(where:)/firstIndex(where:) 的全陣列線性掃描；否則每次按鍵在 N 筆
+        // 職等資料下都要重複掃描整個陣列，形成 O(n²)。index 越界時退回 gt 本身的值。
         HStack(spacing: 10) {
             // 職等編號欄 [v2] 補 RoundedRectangle stroke 細描邊
             ZStack {
@@ -350,8 +353,8 @@ struct GradeTitleView: View {
                     .stroke(Color.purple.opacity(0.20), lineWidth: 0.75)
                     .frame(width: 56, height: 36)
                 TextField("職等", text: Binding(
-                    get: { lifeStore.gradeTitles.first(where: { $0.id == gt.id })?.grade ?? gt.grade },
-                    set: { if let i = lifeStore.gradeTitles.firstIndex(where: { $0.id == gt.id }) { lifeStore.gradeTitles[i].grade = $0 } }
+                    get: { lifeStore.gradeTitles.indices.contains(index) ? lifeStore.gradeTitles[index].grade : gt.grade },
+                    set: { if lifeStore.gradeTitles.indices.contains(index) { lifeStore.gradeTitles[index].grade = $0 } }
                 ))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.purple)
@@ -368,8 +371,8 @@ struct GradeTitleView: View {
                     .stroke(Color(.separator).opacity(0.40), lineWidth: 0.75)
                     .frame(height: 36)
                 TextField("職稱", text: Binding(
-                    get: { lifeStore.gradeTitles.first(where: { $0.id == gt.id })?.title ?? gt.title },
-                    set: { if let i = lifeStore.gradeTitles.firstIndex(where: { $0.id == gt.id }) { lifeStore.gradeTitles[i].title = $0 } }
+                    get: { lifeStore.gradeTitles.indices.contains(index) ? lifeStore.gradeTitles[index].title : gt.title },
+                    set: { if lifeStore.gradeTitles.indices.contains(index) { lifeStore.gradeTitles[index].title = $0 } }
                 ))
                 .font(.subheadline)
                 .padding(.horizontal, 10)

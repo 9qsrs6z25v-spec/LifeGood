@@ -489,16 +489,15 @@ struct LifeFinanceView: View {
 
     // MARK: - 列表
 
-    private func linkedCards(for bankId: UUID) -> [LifeMilestone] {
-        lifeStore.milestones.filter {
-            $0.category == .achievement && $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == bankId
-        }
-    }
-
     private var milestoneList: some View {
         // 一次批次算好所有銀行帳戶餘額，避免每一列各自呼叫 bankBalances(for:)
         // 對 expenses/incomes 做 O(deposits × expenses) 全量掃描（對齊 AddExpenseView.allBankBalances() 的批次建表作法）
         let balancesByBank = allBankBalances()
+        // 一次依 linkedBankMilestoneId 分組信用卡，避免每一列銀行帳戶各自對
+        // lifeStore.milestones 做一次 O(n) filter（N 家銀行 × M 筆信用卡 = O(n×m)）
+        let cardsByBank = Dictionary(grouping: lifeStore.milestones.filter {
+            $0.category == .achievement && $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId != nil
+        }, by: { $0.linkedBankMilestoneId! })
         return List {
             ForEach(Array(filteredMilestones.enumerated()), id: \.element.id) { idx, item in
                 VStack(spacing: 0) {
@@ -507,7 +506,7 @@ struct LifeFinanceView: View {
                         .onTapGesture { viewingItem = item }
 
                     if item.financeSubCategory == .bank {
-                        let cards = linkedCards(for: item.id)
+                        let cards = cardsByBank[item.id] ?? []
                         if !cards.isEmpty {
                             ForEach(cards) { card in
                                 creditCardSubRow(card)
@@ -1227,11 +1226,16 @@ struct FinanceCardView: View {
     /// 銀行存款列表：真實 BankDeposit + 信用卡逐月彙總 + 固定支出週期展開 + 週期性收入展開
     private var deposits: [BankDeposit] {
         let now = Date()
+        // 先建一次 expensesById／incomesById 查表，取代逐筆 first(where:) 對
+        // expenseStore.expenses／incomes 的全量線性掃描（O(bankDeposits × (expenses+incomes))），
+        // 對齊 allBankBalances() 的批次建表作法。
+        let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let real = (item.bankDeposits ?? []).filter { dep in
             guard dep.date <= now else { return false }
             guard let linkedId = dep.linkedExpenseId else { return true }
             // 連結到 Expense
-            if let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
+            if let exp = expensesById[linkedId] {
                 // 信用卡支出：用每月彙總取代
                 if exp.linkedCreditCardMilestoneId != nil { return false }
                 // 固定支出（週期）：用展開虛擬條目取代
@@ -1239,7 +1243,7 @@ struct FinanceCardView: View {
                 return true
             }
             // 連結到 Income（週期性 → 用展開取代）
-            if let inc = expenseStore.incomes.first(where: { $0.id == linkedId }) {
+            if let inc = incomesById[linkedId] {
                 if inc.period != .once { return false }
             }
             return true

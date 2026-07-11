@@ -179,6 +179,9 @@ struct AddExpenseView: View {
     /// 是否展開所有候選地點（預設僅顯示 20 個）
     @State private var expandedSuggestions: Bool = false
     @State private var completerDebounceTask: Task<Void, Never>?
+    /// 「之前去過」候選：與 Apple Maps 查詢共用同一個 300ms 防抖節流，
+    /// 避免每次按鍵都對 store.expenses 做全量線性掃描
+    @State private var cachedPastSuggestions: [PlaceSuggestion] = []
 
     // MARK: - 條件判斷
 
@@ -737,6 +740,7 @@ struct AddExpenseView: View {
             LocationProvider.shared.requestIfNeeded()
             restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
             if !title.isEmpty { restaurantCompleter.queryFragment = title }
+            cachedPastSuggestions = computePastSuggestions()
         }
         .onChange(of: title) { _, newValue in
             if suppressNextCompleterUpdate {
@@ -747,13 +751,19 @@ struct AddExpenseView: View {
             if placeLatitude != nil || placeLongitude != nil || placeAddress != nil {
                 clearPlace()
             }
-            // 防抖：300ms 後才真正送出查詢，避免每次按鍵都觸發 MKLocalSearchCompleter
+            // 防抖：300ms 後才真正送出查詢，避免每次按鍵都觸發 MKLocalSearchCompleter，
+            // 同時把「之前去過」對 store.expenses 的線性掃描一併收進同一個防抖視窗，
+            // 避免每次按鍵都在 body 求值時同步全量掃描整個記帳歷史。
             completerDebounceTask?.cancel()
             completerDebounceTask = Task {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 guard !Task.isCancelled else { return }
                 restaurantCompleter.queryFragment = newValue
+                cachedPastSuggestions = computePastSuggestions()
             }
+        }
+        .onChange(of: selectedVariableCategory) { _, _ in
+            cachedPastSuggestions = computePastSuggestions()
         }
         .onChange(of: locationProvider.lastLocation) { _, _ in
             restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
@@ -884,13 +894,13 @@ struct AddExpenseView: View {
         .contentShape(Rectangle())
     }
 
-    /// 合併「之前去過」（依名稱含查詢字串）與 Apple Maps POI 結果，去重後產生候選清單
-    private var allPlaceSuggestions: [PlaceSuggestion] {
+    /// 「之前去過」候選：同類別、含座標、名稱含查詢字串（空字串時也顯示所有歷史）。
+    /// 對 store.expenses 做全量線性掃描，只在 cachedPastSuggestions 的 300ms 防抖視窗
+    /// 或分類切換時呼叫，避免每次按鍵都同步全量掃描整個記帳歷史。
+    private func computePastSuggestions() -> [PlaceSuggestion] {
         let q = title.trimmingCharacters(in: .whitespaces).lowercased()
         var seenKeys: Set<String> = []
         var output: [PlaceSuggestion] = []
-
-        // 1) 之前去過：同類別、含座標、名稱含查詢字串（空字串時也顯示所有歷史）
         for exp in store.expenses
             where exp.expenseType == .variable
                 && exp.variableCategory == selectedVariableCategory
@@ -911,6 +921,20 @@ struct AddExpenseView: View {
                 longitude: exp.placeLongitude,
                 address: exp.placeAddress
             ))
+        }
+        return output
+    }
+
+    /// 合併「之前去過」（快取結果）與 Apple Maps POI 結果，去重後產生候選清單
+    private var allPlaceSuggestions: [PlaceSuggestion] {
+        var seenKeys: Set<String> = []
+        var output: [PlaceSuggestion] = []
+
+        // 1) 之前去過：讀取已由 300ms 防抖節流計算好的快取，不在此同步掃描
+        for item in cachedPastSuggestions {
+            if seenKeys.contains(item.id) { continue }
+            seenKeys.insert(item.id)
+            output.append(item)
         }
 
         // 2) Apple Maps：搜尋字串非空才會有結果

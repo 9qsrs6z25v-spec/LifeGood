@@ -1074,11 +1074,17 @@ struct FamilyAlbumPhotoEditor: View {
                             .resizable().scaledToFit()
                             .frame(maxWidth: .infinity, maxHeight: 240)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
-                    } else if let url = currentPhotoURL, let img = UIImage(contentsOfFile: url.path) {
-                        Image(uiImage: img)
-                            .resizable().scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: 240)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    } else if let url = currentPhotoURL {
+                        // 用既有的 AsyncLocalImage 背景讀檔快取，避免 title／note 每次按鍵
+                        // 觸發整個 Form body 重新求值時，同步在主執行緒重讀＋重解碼 JPEG。
+                        AsyncLocalImage(url: url) { img, _ in
+                            if let img {
+                                Image(uiImage: img)
+                                    .resizable().scaledToFit()
+                                    .frame(maxWidth: .infinity, maxHeight: 240)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
                     }
 
                     Menu {

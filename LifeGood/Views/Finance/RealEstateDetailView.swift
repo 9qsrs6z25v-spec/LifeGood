@@ -2649,8 +2649,12 @@ struct ElevatorMaintenanceEditor: View {
             .onChange(of: photoItem) { _, item in
                 Task {
                     if let item, let data = try? await item.loadTransferable(type: Data.self) {
-                        let id = editing?.id ?? UUID()
-                        photoFileName = ElevatorMaintenance.savePhoto(data, id: id)
+                        if let oldName = photoFileName {
+                            ElevatorMaintenance.deletePhoto(oldName)
+                        }
+                        // 檔名用全新 UUID（而非沿用編輯中記錄不變的 id），避免同路徑覆寫
+                        // 造成縮圖快取的舊圖不更新，對齊 BusinessCardView.save() 同型修復。
+                        photoFileName = ElevatorMaintenance.savePhoto(data, id: UUID())
                     }
                 }
             }
@@ -2896,8 +2900,12 @@ struct UtilityPaymentEditor: View {
             .onChange(of: photoItem) { _, item in
                 Task {
                     if let item, let data = try? await item.loadTransferable(type: Data.self) {
-                        let id = editing?.id ?? UUID()
-                        photoFileName = UtilityPayment.savePhoto(data, id: id)
+                        if let oldName = photoFileName {
+                            UtilityPayment.deletePhoto(oldName)
+                        }
+                        // 檔名用全新 UUID（而非沿用編輯中記錄不變的 id），避免同路徑覆寫
+                        // 造成縮圖快取的舊圖不更新，對齊 BusinessCardView.save() 同型修復。
+                        photoFileName = UtilityPayment.savePhoto(data, id: UUID())
                     }
                 }
             }
@@ -3656,7 +3664,10 @@ struct ThumbnailImageView: View {
             }
         }
         .task(id: url?.path) {
-            guard let url else { image = nil; return }
+            // 先清空再讀，讓「url 改變」單純由 .task(id:) 本身的重觸發機制控管，
+            // 避免更換照片後畫面短暫停留在舊縮圖，對齊 AsyncLocalImage 同型修復。
+            image = nil
+            guard let url else { return }
             image = await ThumbnailCache.shared.thumbnail(for: url, maxPixel: maxPixel)
         }
     }

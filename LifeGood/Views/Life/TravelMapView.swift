@@ -334,7 +334,11 @@ struct TravelMapView: View {
             ForEach(Array(items.enumerated()), id: \.element.id) { idx, spot in
                 Button {
                     showListSheet = false
-                    selectedSpot = spot
+                    // 等 sheet 關閉再開另一張詳細 sheet，避免同一 run loop 內兩個 sheet
+                    // 的關閉／開啟互相搶跑，對齊 FoodMapView 同型修復。
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        selectedSpot = spot
+                    }
                 } label: {
                     spotRow(spot)
                 }

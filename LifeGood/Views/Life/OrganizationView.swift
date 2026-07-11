@@ -975,11 +975,15 @@ struct OrgPersonEditor: View {
                         .clipShape(Circle())
                 } else if let name = photoFileName {
                     let url = OrgPerson.photosDirectory.appendingPathComponent(name)
-                    if let img = UIImage(contentsOfFile: url.path) {
-                        Image(uiImage: img)
-                            .resizable().scaledToFill()
-                            .frame(width: 60, height: 60)
-                            .clipShape(Circle())
+                    // 用既有的 AsyncLocalImage 背景讀檔快取，避免姓名／職稱等欄位每次按鍵
+                    // 觸發整個 Form body 重新求值時，同步在主執行緒重讀＋重解碼 JPEG。
+                    AsyncLocalImage(url: url) { img, _ in
+                        if let img {
+                            Image(uiImage: img)
+                                .resizable().scaledToFill()
+                                .frame(width: 60, height: 60)
+                                .clipShape(Circle())
+                        }
                     }
                 } else {
                     Circle().fill(Color.indigo.opacity(0.15))

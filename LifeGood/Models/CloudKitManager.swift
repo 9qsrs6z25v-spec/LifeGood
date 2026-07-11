@@ -456,26 +456,42 @@ final class CloudKitManager {
             guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
                 completion?(); return
             }
+            // 等每張照片實際上傳完成才回呼，而非僅等排隊迴圈跑完；
+            // 否則呼叫端會誤以為「上傳全部完成」而提早重置同步中旗標。
+            let group = DispatchGroup()
             for dir in Self.photoDirectories {
                 let url = docs.appendingPathComponent(dir, isDirectory: true)
                 guard let files = try? FileManager.default.contentsOfDirectory(atPath: url.path) else { continue }
                 for f in files where !f.hasPrefix(".") {
-                    self.uploadPhoto(directory: dir, fileName: f)
+                    group.enter()
+                    self.uploadPhoto(directory: dir, fileName: f) { _ in group.leave() }
                 }
             }
-            completion?()
+            group.notify(queue: .main) { completion?() }
         }
     }
 
     // MARK: - 一次性：把所有 UserDefaults blob 推到 iCloud
 
-    func pushAllKV(keys: [String]) {
-        guard isAvailable else { return }
+    /// - Parameter completion: 全部 key 皆推送成功才回傳 true；任一失敗即 false。
+    ///   呼叫端可用此結果判斷是否要標記「已同步」，避免把失敗的一輪誤標成功。
+    func pushAllKV(keys: [String], completion: ((Bool) -> Void)? = nil) {
+        guard isAvailable else { completion?(false); return }
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var allOK = true
         for key in keys {
             if let data = defaults.data(forKey: key) {
-                pushKV(key: key, data: data)
+                group.enter()
+                pushKV(key: key, data: data) { ok in
+                    if !ok {
+                        lock.lock(); allOK = false; lock.unlock()
+                    }
+                    group.leave()
+                }
             }
         }
+        group.notify(queue: .main) { completion?(allOK) }
     }
 
     /// 非破壞性地把雲端所有 KVBlob 讀進記憶體：不寫入本機 UserDefaults、也不更新 change token。
