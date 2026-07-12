@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.99", build: 655, date: "2026/07/12", notes: [
+            "【美化】節稅總覽畫面（TaxOverviewView）金額量級一致性：私有 fmtShort(_:) 手刻「%.1f億／%.1f萬」完全缺少 NT$ 字首，與同頁英雄卡「年度稅費支出」大字（fmt，帶 NT$ 前綴）並排時字首不一致，也未處理 ≥9999.95萬 應進位為億的邊界（會顯示成不合理的「10000.0萬」）。年收入 KPI 膠囊／月份長條金額／節稅彙總膠囊／扣除額已累積徽章共 5 處呼叫點改用共用 Double.ntdWanString，其中節稅彙總膠囊、扣除額已累積徽章原本缺少防截斷規格，一併補上 lineLimit(1) + minimumScaleFactor（對齊同頁年收入膠囊既有規格）。純顯示層調整，稅費加總、節稅累積、扣除額試算等既有邏輯未變動。"
+        ]),
         ChangelogEntry(version: "23.98", build: 654, date: "2026/07/12", notes: [
             "【美化】財富總覽信用卡明細卡（LifeFinanceView.FinanceCardView）金額量級一致性：「額度」原本手刻只換算到萬（無條件捨去小數、未處理億級單位）、「年費」原本純整數無量級轉換，與 v23.97 才剛加入、緊接在下方的「本期已用」「可用額度」（已用共用 ntdWanString）風格不一致；「最近一期」加總與信用卡個別支出列同樣是純整數顯示。四處統一改用共用 Double.ntdWanString，消費金額改為「-」+ ntdWanString 拼接（對齊 StockDetailView 損益金額正負號慣例）。純顯示層調整，額度／年費／消費金額等既有試算邏輯未變動。"
         ]),

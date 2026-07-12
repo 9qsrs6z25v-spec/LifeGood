@@ -41,6 +41,14 @@ import SwiftUI
 //      對齊 ResumeGiftSection 彙總列 / SpouseResumeView 金額設計語言
 //  17. fmtShort 小數位補齊：「%.0f萬」→「%.1f萬」，對齊 OverviewView.smartCurrency /
 //      FinanceOverviewView.fmtShort 的 1 位小數顯示規格，避免精度損失
+// [2026-07 v4] 本次美化方向：
+//  18. fmtShort 改用共用 Double.ntdWanString：原本手刻的「%.1f億／%.1f萬」缺少 NT$ 字首，
+//      與同頁 fmt(taxTotal)（NT$ 前綴）、annualSummaryCard 年收入膠囊左右並排時字首不一致；
+//      也未處理 ≥9999.95萬 應進位為億的邊界（會顯示成不合理的「10000.0萬」）。改呼叫全 App
+//      共用的 ntdWanString，年收入 KPI 膠囊／月份長條金額／節稅彙總膠囊／扣除額已累積徽章
+//      四類共 5 處呼叫點字首統一補齊「NT$」；月份長條金額欄位加 lineLimit(1) +
+//      minimumScaleFactor(0.7)，扣除額已累積徽章加 lineLimit(1)，防止補上字首後在既有窄欄位/
+//      膠囊內截斷。純顯示層調整，稅費加總、節稅累積、扣除額試算等既有邏輯未變動。
 
 struct TaxOverviewView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -766,6 +774,8 @@ struct TaxOverviewView: View {
                     Text(fmtShort(savingTotal))
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background(LinearGradient(
                             colors: [Color.green.opacity(0.82), Color.green.opacity(0.58)],
@@ -942,6 +952,8 @@ struct TaxOverviewView: View {
                                 Text("已累積 \(fmtShort(acc))")
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundStyle(.green)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
                                     .padding(.horizontal, 7).padding(.vertical, 2)
                                     .background(Color.green.opacity(0.12))
                                     .clipShape(Capsule())
@@ -1032,11 +1044,9 @@ struct TaxOverviewView: View {
         Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
-    // [v3] 萬級改為 %.1f（對齊 OverviewView.smartCurrency / RealEstateView.fmt 1 位小數規格）
+    // [v4] 改呼叫共用 ntdWanString：補齊 NT$ 字首 + 萬轉億邊界防呆（見檔頭 v4 美化紀錄）
     private func fmtShort(_ v: Double) -> String {
-        if v >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
-        if v >= 10_000 { return String(format: "%.1f萬", v / 10_000) }
-        return fmt(v)
+        v.ntdWanString
     }
 
     private static let fmtDateFormatter: DateFormatter = {
