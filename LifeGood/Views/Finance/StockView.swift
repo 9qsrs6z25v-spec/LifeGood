@@ -36,6 +36,15 @@ import SwiftUI
 //      防止超大金額換行溢出，對齊 RealEstateView / VariableExpenseView 英雄卡金額規格
 //  15. summaryHeader KPI 統計列 → activeStocks 計數與整體報酬率均補 contentTransition(.numericText())，
 //      對齊 OverviewView / IncomeView 英雄卡數字動畫規格
+// [2026-07 v5] 金額量級一致性：
+//  16. summaryHeader 總成本／損益 KPI 膠囊、soldStackPreview 已實現損益膠囊：私有 fmtShort(_:)
+//      無 NT$ 字首、億以下無條件捨去小數（%.0f萬）、未處理捨入至萬位上限應進位為億的邊界，
+//      與同系列 StockDetailView（fmt = ntdWanString，「+NT$1.2萬」）及全 App 共用
+//      Double.ntdWanString 風格不一致，是本檔案唯一未接上共用金額量級格式的地方。三處呼叫
+//      改用既有 fmt（= ntdWanString），並為 soldStackPreview 損益膠囊補上 lineLimit(1) +
+//      minimumScaleFactor(0.7)（對齊 summaryHeader 損益 KPI 膠囊既有規格，防止字首變長後
+//      在窄膠囊內截斷）；移除已無呼叫端的私有 fmtShort 死碼。純顯示層調整，未變動市值／
+//      損益／報酬率等既有試算邏輯。
 
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
@@ -371,8 +380,10 @@ struct StockView: View {
                     HStack(spacing: 3) {
                         Image(systemName: soldPLPositive ? "arrow.up.right" : "arrow.down.right")
                             .font(.system(size: 8, weight: .bold))
-                        Text(fmtShort(totalSoldPL))
+                        Text(fmt(totalSoldPL))
                             .font(.system(size: 10, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(soldPLPositive ? .green : .red)
                     .padding(.horizontal, 7).padding(.vertical, 3)
@@ -427,7 +438,7 @@ struct StockView: View {
                         .lineLimit(1)
                         .contentTransition(.numericText())
                     if store.totalStockCost > 0 {
-                        Text("總成本 " + fmtShort(store.totalStockCost))
+                        Text("總成本 " + fmt(store.totalStockCost))
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.white.opacity(0.72))
                             .padding(.top, 1)
@@ -447,7 +458,7 @@ struct StockView: View {
                         HStack(spacing: 3) {
                             Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
                                 .font(.system(size: 10, weight: .bold))
-                            Text((isPositive ? "+" : "") + fmtShort(pl))
+                            Text((isPositive ? "+" : "") + fmt(pl))
                                 .font(.system(size: 12, weight: .bold, design: .rounded))
                                 .lineLimit(1).minimumScaleFactor(0.7)
                         }
@@ -853,13 +864,6 @@ struct StockView: View {
 
     private func fmt(_ v: Double) -> String {
         v.ntdWanString
-    }
-
-    private func fmtShort(_ v: Double) -> String {
-        let absV = abs(v)
-        if absV >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
-        if absV >= 10_000 { return String(format: "%.0f萬", v / 10_000) }
-        return fmt(v)
     }
 }
 

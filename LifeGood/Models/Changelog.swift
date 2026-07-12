@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.96", build: 652, date: "2026/07/12", notes: [
+            "【美化】股票畫面（StockView）金額量級一致性：summaryHeader 總成本／損益 KPI 膠囊、soldStackPreview 已實現損益膠囊，原本各自呼叫私有 fmtShort(_:)，無 NT$ 字首、萬級無條件捨去小數、也未處理捨入至萬位上限應進位為億的邊界，與同系列 StockDetailView（fmt = ntdWanString，「+NT$1.2萬」）及全 App 共用 Double.ntdWanString 風格不一致，是本檔案唯一未接上共用金額量級格式的地方。三處呼叫改用既有 fmt（= ntdWanString），並為 soldStackPreview 損益膠囊補上 lineLimit(1) + minimumScaleFactor(0.7)（對齊 summaryHeader 損益 KPI 膠囊既有規格，防止字首變長後在窄膠囊內截斷）；移除已無呼叫端的私有 fmtShort 死碼。純顯示層調整，未變動市值／損益／報酬率等既有試算邏輯。",
+        ]),
         ChangelogEntry(version: "23.95", build: 651, date: "2026/07/12", notes: [
             "【美化】美食地圖清單畫面（FoodMapView）餐廳詳情 Sheet KPI 列：「總花費」「平均每次」原本各自呼叫私有 fmtWan(_:) 與「NT$ \\(fmtNum(_:))」，「平均每次」未做萬/億量級轉換，金額較大時與同列「總花費」顯示規格不一致；兩處改用共用 Double.ntdWanString（對齊同檔案餐廳清單列已使用的規格），並移除只剩單一呼叫點、與共用元件重複的私有 fmtWan(_:) 死碼。純顯示層調整，造訪聚合、花費加總等既有邏輯未變動。",
         ]),
