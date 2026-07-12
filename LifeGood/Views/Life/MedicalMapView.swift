@@ -38,10 +38,10 @@ import UIKit
 //      改共用 MultiPhotoGallery.AsyncThumbnailView（已從 private 開放為 internal）：
 //      背景執行緒讀檔 + 載入中佔位（漸層底 + icloud 圖示 +「載入中」文字）+ cornerRadius 12
 //      統一縮圖圓角，對齊 MultiPhotoGallery 縮圖規格。純顯示層調整，就診紀錄／花費加總等既有
-//      邏輯未變動。（下次美化本檔案時，可比照同一模式接續處理其餘手刻縮圖畫面，如
-//      FamilyMembersResumeView／TravelMapView／OrganizationView／FoodMapView／
-//      BusinessCardView／RenovationPhotoEditor／RealEstateDetailView 內仍殘留的
-//      UIImage(contentsOfFile:) 同步讀檔。）
+//      邏輯未變動。（後續多輪靜態除錯已陸續把 FamilyMembersResumeView／TravelMapView／
+//      OrganizationView／FoodMapView／BusinessCardView／RenovationPhotoEditor／
+//      RealEstateDetailView 內同型 UIImage(contentsOfFile:) 同步讀檔改用 AsyncLocalImage／
+//      AsyncThumbnailView，全 App 已無殘留。）
 
 // MARK: - 就醫地點聚合
 

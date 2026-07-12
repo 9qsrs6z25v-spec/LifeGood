@@ -150,7 +150,8 @@ struct SpouseResumeView: View {
         let accent     = Self.heroAccent
         let accentDark = Self.heroAccentDark
         let marriageComp: (year: Int, month: Int)? = s.marriageDate.map { md in
-            let c = Calendar.current.dateComponents([.year, .month], from: md, to: Date())
+            let endDate = (s.isDivorced ? s.divorceDate : nil) ?? Date()
+            let c = Calendar.current.dateComponents([.year, .month], from: md, to: endDate)
             return (c.year ?? 0, c.month ?? 0)
         }
 
@@ -364,7 +365,8 @@ struct SpouseResumeView: View {
 
             // 結婚年數
             if let md = s.marriageDate {
-                let c = Calendar.current.dateComponents([.year, .month], from: md, to: Date())
+                let endDate = (s.isDivorced ? s.divorceDate : nil) ?? Date()
+                let c = Calendar.current.dateComponents([.year, .month], from: md, to: endDate)
                 marriageRow(
                     icon: "clock.fill",
                     accent: accent,

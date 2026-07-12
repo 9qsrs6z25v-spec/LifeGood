@@ -177,16 +177,12 @@ final class CloudSyncManager: ObservableObject {
     private func flushPushAll() {
         // isSyncing 期間跳過：避免與進行中的 performSync 並行打同一批 key 導致 serverRecordChanged 衝突
         guard isEnabled, isAccountAvailable, !isSyncing else { return }
-        let keys = Self.syncKeys
-        let group = DispatchGroup()
-        for key in keys {
-            if let data = UserDefaults.standard.data(forKey: key) {
-                group.enter()
-                CloudKitManager.shared.pushKV(key: key, data: data) { _ in group.leave() }
-            }
-        }
-        group.notify(queue: .main) { [weak self] in
-            self?.markSynced()
+        isSyncing = true
+        CloudKitManager.shared.pushAllKV(keys: Self.syncKeys) { [weak self] allOK in
+            // 只在全部 key 都推送成功才 markSynced()，避免失敗的一輪被誤標為已同步
+            // （清空 lastErrorMessage、更新 lastSyncDate，讓 UI 誤以為已同步且延後下次重試）。
+            self?.isSyncing = false
+            if allOK { self?.markSynced() }
         }
     }
 

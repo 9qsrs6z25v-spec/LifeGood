@@ -1610,22 +1610,20 @@ struct BusinessCardDetailView: View {
     @ViewBuilder
     private var avatarContent: some View {
         ZStack {
-            if let url = card.photoURL,
-               let img = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 76, height: 76)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            if let url = card.photoURL {
+                AsyncLocalImage(url: url) { img, _ in
+                    if let img {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 76, height: 76)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    } else {
+                        avatarPlaceholder
+                    }
+                }
             } else {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.2))
-                    .frame(width: 76, height: 76)
-                    .overlay(
-                        Image(systemName: "person.crop.rectangle.fill")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.white.opacity(0.85))
-                    )
+                avatarPlaceholder
             }
             // 右下角小相機圖示提示可點選
             VStack {
@@ -1644,6 +1642,17 @@ struct BusinessCardDetailView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.white.opacity(0.5), lineWidth: 1)
         )
+    }
+
+    private var avatarPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 14)
+            .fill(Color.white.opacity(0.2))
+            .frame(width: 76, height: 76)
+            .overlay(
+                Image(systemName: "person.crop.rectangle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.white.opacity(0.85))
+            )
     }
 
     // MARK: - QR Code

@@ -1887,11 +1887,15 @@ struct PhotoViewerSheet: View {
     @State private var lastScale: CGFloat = 1
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
+    // 只在進場時從磁碟讀取一次並解碼，避免 pinch/pan 手勢每次改 scale/offset 都觸發 body
+    // 重新評估、連帶在主執行緒重複讀檔＋解碼造成縮放時明顯卡頓。
+    @State private var loadedImage: UIImage?
+    @State private var loadFailed = false
 
     var body: some View {
         NavigationStack {
             Group {
-                if let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
+                if let img = loadedImage {
                     GeometryReader { geo in
                         Image(uiImage: img)
                             .resizable().scaledToFit()
@@ -1932,15 +1936,26 @@ struct PhotoViewerSheet: View {
                                 }
                             }
                     }
-                } else {
+                } else if loadFailed {
                     VStack(spacing: 12) {
                         Image(systemName: "photo.slash").font(.largeTitle).foregroundStyle(.secondary)
                         Text("無法載入照片").foregroundStyle(.secondary)
                     }
+                } else {
+                    ProgressView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black)
+            .task {
+                let url = url
+                let img = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+                    guard let data = try? Data(contentsOf: url) else { return nil }
+                    return UIImage(data: data)
+                }.value
+                loadedImage = img
+                loadFailed = (img == nil)
+            }
             .navigationTitle("照片瀏覽")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
