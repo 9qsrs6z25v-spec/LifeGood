@@ -1112,11 +1112,66 @@ struct FinanceCardView: View {
         infoRow("開戶日期", fmtDate(item.date))
     }
 
+    /// 信用卡本期已用 / 可用額度 / 使用率（依帳單日計算本期，過帳單日自動重置）
+    @ViewBuilder
+    private func creditUsageBlock(limit: Double) -> some View {
+        let spent = currentCycleSpent(item)
+        let available = max(0, limit - spent)
+        let ratio = limit > 0 ? min(1, spent / limit) : 0
+        let barColor: Color = ratio > 0.8 ? .red : (ratio > 0.5 ? .orange : .green)
+        infoRow("本期已用", spent.ntdWanString)
+        infoRow("可用額度", available.ntdWanString)
+        VStack(alignment: .leading, spacing: 5) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color(.tertiarySystemFill)).frame(height: 8)
+                    Capsule().fill(barColor).frame(width: max(4, geo.size.width * ratio), height: 8)
+                }
+            }
+            .frame(height: 8)
+            Text("使用率 \(Int((ratio * 100).rounded()))%　·　依帳單日計算本期，過帳單日重置")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
+
+    /// 本期（自最近一個帳單日之後）刷這張卡的消費總額；週期性固定支出會依 recurrence 展開
+    private func currentCycleSpent(_ card: LifeMilestone) -> Double {
+        let cal = Calendar.current
+        let now = Date()
+        let cycleStart = Self.creditCardCycleStart(billingDay: card.billingDay, now: now, calendar: cal)
+        return expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
+            .filter { $0.date > cycleStart && $0.date <= now }
+            .reduce(0) { $0 + $1.amount }
+    }
+
+    /// 本期起點＝今天(含)以前最近的一個帳單日；無帳單日則以當月 1 號為界
+    static func creditCardCycleStart(billingDay: Int?, now: Date, calendar cal: Calendar) -> Date {
+        let startOfToday = cal.startOfDay(for: now)
+        guard let bd = billingDay, bd >= 1 else {
+            return cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? startOfToday
+        }
+        func billingDate(inMonthOf ref: Date) -> Date {
+            var comps = cal.dateComponents([.year, .month], from: ref)
+            let maxDay = cal.range(of: .day, in: .month, for: ref)?.count ?? 28
+            comps.day = min(bd, maxDay)   // 帳單日超過該月天數時取月底
+            return cal.date(from: comps) ?? cal.startOfDay(for: ref)
+        }
+        let thisMonth = billingDate(inMonthOf: now)
+        if thisMonth <= startOfToday { return thisMonth }
+        // 本月帳單日還沒到 → 上一期結帳在上個月的帳單日
+        let prev = cal.date(byAdding: .month, value: -1, to: now) ?? now
+        return billingDate(inMonthOf: prev)
+    }
+
     @ViewBuilder
     private var creditCardDetail: some View {
         if let c = item.cardName, !c.isEmpty { infoRow("卡別", c) }
         if let l = item.cardLastFour, !l.isEmpty { infoRow("卡號末四碼", l) }
-        if let cl = item.creditLimit, cl > 0 { infoRow("額度", "\(fmtNum(cl / 10000)) 萬元") }
+        if let cl = item.creditLimit, cl > 0 {
+            infoRow("額度", "\(fmtNum(cl / 10000)) 萬元")
+            creditUsageBlock(limit: cl)
+        }
         if let af = item.annualFee, af > 0 { infoRow("年費", "NT$\(fmtNum(af))") }
         if let bd = item.billingDay { infoRow("帳單日", "每月 \(bd) 日") }
         if let pd = item.paymentDay { infoRow("繳款日", "每月 \(pd) 日") }

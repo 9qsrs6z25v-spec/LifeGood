@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "23.97", build: 653, date: "2026/07/12", notes: [
+            "財富信用卡卡片新增額度使用狀況：在既有「額度」下方顯示『本期已用』、『可用額度』與使用率進度條（使用率>50% 橘、>80% 紅）。本期已用＝自最近一個帳單日之後、刷這張卡的消費總額（週期性固定支出會依週期展開），過帳單日自動重置為新一期；未設帳單日則以當月 1 號為界。可用額度＝額度−本期已用。"
+        ]),
         ChangelogEntry(version: "23.96", build: 652, date: "2026/07/12", notes: [
             "【美化】股票畫面（StockView）金額量級一致性：summaryHeader 總成本／損益 KPI 膠囊、soldStackPreview 已實現損益膠囊，原本各自呼叫私有 fmtShort(_:)，無 NT$ 字首、萬級無條件捨去小數、也未處理捨入至萬位上限應進位為億的邊界，與同系列 StockDetailView（fmt = ntdWanString，「+NT$1.2萬」）及全 App 共用 Double.ntdWanString 風格不一致，是本檔案唯一未接上共用金額量級格式的地方。三處呼叫改用既有 fmt（= ntdWanString），並為 soldStackPreview 損益膠囊補上 lineLimit(1) + minimumScaleFactor(0.7)（對齊 summaryHeader 損益 KPI 膠囊既有規格，防止字首變長後在窄膠囊內截斷）；移除已無呼叫端的私有 fmtShort 死碼。純顯示層調整，未變動市值／損益／報酬率等既有試算邏輯。",
         ]),
