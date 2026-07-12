@@ -52,6 +52,15 @@ import SwiftUI
 //      改呼叫全 App 共用的 Double.ntdWanString（億/萬保留一位小數），summaryHeader 30pt 大字
 //      與導覽列小計兩處同步套用；移除已無呼叫端的 formatTwdShort 死碼。純顯示層調整，未變動
 //      銀行餘額換算或加總邏輯。
+// [2026-07 v6] FinanceCardView 信用卡明細卡金額量級一致性修復：
+//  16. creditCardDetail 的「額度」原本手刻 cl/10000 只顯示到萬（無條件捨去小數、未處理億級
+//      單位），「年費」原本用「NT$\(fmtNum(af))」純整數無量級轉換，與同一張卡緊接在下方、
+//      v23.97 才剛加入的「本期已用」「可用額度」（已用共用 ntdWanString「NT$X萬」規格）風格
+//      不一致，是同一張信用卡明細卡上最顯眼的落差；「額度」「年費」兩處改呼叫共用 ntdWanString。
+//  17. 「最近一期」加總與信用卡個別支出列金額原本用「-NT$ \(fmtNum(...))」純整數顯示，同樣未
+//      處理萬/億量級；改為「-」+ ntdWanString（對齊 StockDetailView 損益金額 "(pl >= 0 ? "+" :
+//      "") + fmt(pl)" 的正負號拼接慣例）。以上四處純顯示層調整，額度／年費／消費金額等既有
+//      試算與資料綁定邏輯未變動。
 
 // MARK: - 固定支出週期展開（共用）
 
@@ -1169,10 +1178,10 @@ struct FinanceCardView: View {
         if let c = item.cardName, !c.isEmpty { infoRow("卡別", c) }
         if let l = item.cardLastFour, !l.isEmpty { infoRow("卡號末四碼", l) }
         if let cl = item.creditLimit, cl > 0 {
-            infoRow("額度", "\(fmtNum(cl / 10000)) 萬元")
+            infoRow("額度", cl.ntdWanString)
             creditUsageBlock(limit: cl)
         }
-        if let af = item.annualFee, af > 0 { infoRow("年費", "NT$\(fmtNum(af))") }
+        if let af = item.annualFee, af > 0 { infoRow("年費", af.ntdWanString) }
         if let bd = item.billingDay { infoRow("帳單日", "每月 \(bd) 日") }
         if let pd = item.paymentDay { infoRow("繳款日", "每月 \(pd) 日") }
         infoRow("核卡日期", fmtDate(item.date))
@@ -1564,7 +1573,7 @@ struct FinanceCardView: View {
                     HStack {
                         Text("最近一期").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Text("-NT$ \(fmtNum(last.amount))").font(.caption.bold())
+                        Text("-\(last.amount.ntdWanString)").font(.caption.bold())
                             .foregroundStyle(.red)
                     }
                     .padding(.horizontal).padding(.bottom, 6)
@@ -1616,7 +1625,7 @@ struct FinanceCardView: View {
                             Spacer(minLength: 4)
 
                             VStack(alignment: .trailing, spacing: 3) {
-                                Text("-NT$ \(fmtNum(exp.amount))")
+                                Text("-\(exp.amount.ntdWanString)")
                                     .font(.system(size: 14, weight: .bold, design: .rounded))
                                     .foregroundStyle(Color.red)
                                     .contentTransition(.numericText())
