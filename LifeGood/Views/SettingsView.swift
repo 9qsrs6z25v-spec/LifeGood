@@ -516,6 +516,9 @@ struct SettingsView: View {
                 )
             }
             .foregroundStyle(.primary)
+            // 對齊 SubscriptionManager.restorePurchases() 新增的 restoreInProgress 守衛：
+            // 連點時第一次請求還在跑就先鎖住按鈕，避免並發觸發多個 AppStore.sync()。
+            .disabled(subscription.restoreInProgress)
 
             if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
                 Link(destination: url) {

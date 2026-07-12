@@ -463,7 +463,16 @@ struct Stock: Identifiable, Codable {
     ///   → 配股稀釋均價（總成本不變，股數變多）
     /// 若 shares 歸零且曾有賣出，isSold = true、soldDate = 最後賣出日、soldPrice = 加權平均賣出價
     mutating func recomputeFromTransactions() {
-        guard !transactions.isEmpty || !dividends.isEmpty else { return }
+        guard !transactions.isEmpty || !dividends.isEmpty else {
+            // 交易與配息都被刪光時，先前直接 return 會保留刪除前的舊 shares/purchasePrice/isSold，
+            // 使閃卡（讀 shares/marketValue/profitLoss）與已清空的交易列表互相矛盾；改為歸零。
+            shares = 0
+            purchasePrice = 0
+            isSold = false
+            soldDate = nil
+            soldPrice = 0
+            return
+        }
         var buyShares: Double = 0
         var buyAmount: Double = 0
         var sellShares: Double = 0

@@ -2347,8 +2347,13 @@ struct DepositEditorSheet: View {
 
     private func save() {
         guard var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
+        // 「沖正」紀錄的 txType 在 onAppear 只會回填成 .deposit/.withdrawal（此表單沒有「編輯沖正」的重算 UI），
+        // 若直接用預設值重建 BankDeposit 會把 isAdjust／note 清掉，等於使用者只是打開又存檔就把「沖正」
+        // 紀錄靜默改成普通存提款、遺失對帳備註。這裡保留原始 isAdjust／note，避免資料被改型別。
         let dep = BankDeposit(id: editing?.id ?? UUID(), date: date, amount: Double(amountText) ?? 0,
-                              currencyCode: currency, isWithdrawal: txType == .withdrawal)
+                              currencyCode: currency, isWithdrawal: txType == .withdrawal,
+                              isAdjust: editing?.isAdjust ?? false,
+                              note: (editing?.isAdjust == true) ? editing?.note : nil)
         var list = ms.bankDeposits ?? []
         if let idx = list.firstIndex(where: { $0.id == dep.id }) { list[idx] = dep }
         else { list.append(dep) }

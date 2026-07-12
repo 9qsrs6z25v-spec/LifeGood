@@ -1115,9 +1115,7 @@ struct StockTransactionEditor: View {
             dismiss(); return
         }
         s.transactions.removeAll { $0.id == e.id }
-        if !s.transactions.isEmpty {
-            s.recomputeFromTransactions()
-        }
+        s.recomputeFromTransactions()
         store.update(s)
         syncBankDepositsForTransactions(s)
         dismiss()

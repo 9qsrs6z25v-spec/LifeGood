@@ -56,6 +56,15 @@ struct VariableExpenseView: View {
         return f
     }()
 
+    /// 分組 key 專用（含年份，"yyyy-MM-dd"），對齊 IncomeView 同型修復：groupDateFormatter 沒有
+    /// 年份，跨年資料若同月同日同星期幾會被 Dictionary 分組誤合併成同一個 Section。
+    private static let groupKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "zh_TW")
+        return f
+    }()
+
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
@@ -593,7 +602,8 @@ struct VariableExpenseView: View {
         let hiddenCount = hiddenGroups.reduce(0) { $0 + $1.value.count }
 
         ForEach(Array(visibleGroups.enumerated()), id: \.element.key) { groupIdx, group in
-            let (dateString, expenses) = group
+            let expenses = group.value
+            let dateString = expenses.first.map { Self.groupDateFormatter.string(from: $0.date) } ?? group.key
             Section(header: daySectionHeader(dateString: dateString, expenses: expenses)) {
                 ForEach(Array(expenses.enumerated()), id: \.element.id) { rowIdx, expense in
                     ExpenseRow(expense: expense)
@@ -746,7 +756,7 @@ struct VariableExpenseView: View {
 
     private func groupedByDate(_ expenses: [Expense]) -> [(key: String, value: [Expense])] {
         let grouped = Dictionary(grouping: expenses) { expense in
-            Self.groupDateFormatter.string(from: expense.date)
+            Self.groupKeyFormatter.string(from: expense.date)
         }
 
         return grouped.sorted { pair1, pair2 in

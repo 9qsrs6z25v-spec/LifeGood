@@ -68,6 +68,17 @@ struct IncomeView: View {
         return f
     }()
 
+    /// 分組 key 專用（含年份，"yyyy-MM-dd"）：groupDateFormatter 只到「月.日.星期幾」，沒有年份，
+    /// 只要兩筆不同年份的收入剛好落在同月同日且同星期幾（多年記帳幾乎必然出現），Dictionary 分組會把
+    /// 不同年份的資料誤合併成同一個 Section、金額加總混在一起。key 另外用含年份的格式避免碰撞，
+    /// 顯示文字仍用 groupDateFormatter（不動既有視覺樣式）。
+    private static let groupKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "zh_TW")
+        return f
+    }()
+
     var filteredIncomes: [Income] { cachedFilteredIncomes }
 
     private func buildFilteredIncomes() -> [Income] {
@@ -219,9 +230,11 @@ struct IncomeView: View {
         let recurringMonthly = store.incomes
             .filter { $0.period != .once }
             .reduce(0.0) { $0 + $1.monthlyAmount }
-        let spendingRatio = displayedIncome > 0
-            ? min(store.currentMonthTotal / displayedIncome, 1.0)
-            : 0.0
+        // rawSpendingRatio 不夾住，供文字／顏色判斷；barSpendingRatio 才夾在 1.0，只用於進度條寬度
+        // （對齊 VariableExpenseView rawRatio/barRatio 既有規格）。先前兩者共用同一個已夾住的
+        // spendingRatio，超支超過 100% 時「支出 X%」文字會失真固定顯示 100%，看不出實際超支幅度。
+        let rawSpendingRatio = displayedIncome > 0 ? store.currentMonthTotal / displayedIncome : 0.0
+        let spendingRatio = min(rawSpendingRatio, 1.0)
         let stats = monthlyStats
         // mini 分類彩條資料（≥2 種分類才顯示）
         let catAmounts = incomeCategoryAmounts
@@ -378,7 +391,7 @@ struct IncomeView: View {
                                       : "exclamationmark.triangle.fill")
                                     .font(.system(size: 8))
                             }
-                            Text("支出 \(Int(spendingRatio * 100))%")
+                            Text("支出 \(Int(rawSpendingRatio * 100))%")
                         }
                         .font(.caption2)
                         .foregroundStyle(spendingRatio > 0.9
@@ -679,7 +692,8 @@ struct IncomeView: View {
         let hiddenCount = hiddenGroups.reduce(0) { $0 + $1.value.count }
 
         ForEach(Array(visibleGroups.enumerated()), id: \.element.key) { groupIdx, pair in
-            let (dateString, incomes) = pair
+            let incomes = pair.value
+            let dateString = incomes.first.map { Self.groupDateFormatter.string(from: $0.date) } ?? pair.key
             Section(header: daySectionHeader(dateString: dateString, incomes: incomes)) {
                 ForEach(Array(incomes.enumerated()), id: \.element.id) { rowIdx, income in
                     incomeRow(income)
@@ -929,7 +943,7 @@ struct IncomeView: View {
 
     private func groupedByDate() -> [(key: String, value: [Income])] {
         let grouped = Dictionary(grouping: filteredIncomes) { income in
-            Self.groupDateFormatter.string(from: income.date)
+            Self.groupKeyFormatter.string(from: income.date)
         }
 
         return grouped.sorted { pair1, pair2 in

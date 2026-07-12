@@ -694,13 +694,19 @@ struct MainTabView: View {
             note: parsed.note ?? "",
             diningMember: resolvedDiningMember,
             linkedBankMilestoneId: linkedBankId,
-            linkedBankCurrency: linkedBankId == nil ? nil : "NT$",
+            linkedBankCurrency: linkedBankId.map { aiBankCurrency(for: $0) },
             linkedCreditCardMilestoneId: linkedCardId,
             placeAddress: placeAddress,
             placeLatitude: placeLat,
             placeLongitude: placeLon
         )
         expenseStore.add(exp)
+        // AI 語音記帳原本只寫入 Expense 就結束，沒有比照 AddExpenseView.save() 呼叫
+        // syncBankWithdrawal／syncRealEstateVariableExpense，導致銀行帳戶餘額、房地產支出
+        // 章節帳實不符（AI 標了扣款帳戶／房地產，但對應清單與總額完全看不到這筆錢）；
+        // 這裡補上對等的同步邏輯，供 AI 記帳流程使用。
+        aiSyncBankWithdrawal(for: exp)
+        aiSyncRealEstateExpense(for: exp)
         // 成功 toast
         // [美化] 金額改用全 App 共用的萬/億智慧量級（ntdWanString），對齊其餘頁面金額顯示規格，
         // 取代原本高額時會顯示成長串裸整數（如 NT$ 1200000）的寫法；純顯示調整，未變動實際存入的 exp.amount。
@@ -713,6 +719,63 @@ struct MainTabView: View {
         }
         if placeLat != nil { detailParts.append("已標 美食地圖") }
         aiShowToast("已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false)
+    }
+
+    /// AI 記帳扣款帳戶預設幣別：沿用該銀行帳戶既有存款紀錄的幣別（比照 AddExpenseView.bankCurrencies(for:)），
+    /// 而非寫死 "NT$"，避免外幣帳戶被記到錯誤幣別的桶子。
+    private func aiBankCurrency(for bankId: UUID) -> String {
+        guard let ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return "NT$" }
+        let code = (ms.bankDeposits ?? []).first(where: { !$0.isWithdrawal })?.currencyCode
+        return code ?? "NT$"
+    }
+
+    /// AI 記帳同步：寫入銀行扣款紀錄，比照 AddExpenseView.syncBankWithdrawal(for:previous:)（新記錄、無需移除舊連結）。
+    @MainActor
+    private func aiSyncBankWithdrawal(for expense: Expense) {
+        guard expense.linkedCreditCardMilestoneId == nil,
+              let bankId = expense.linkedBankMilestoneId,
+              var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
+        var list = ms.bankDeposits ?? []
+        list.append(BankDeposit(
+            id: UUID(), date: expense.date, amount: expense.amount,
+            currencyCode: expense.linkedBankCurrency ?? "NT$",
+            isWithdrawal: true, linkedExpenseId: expense.id
+        ))
+        ms.bankDeposits = list
+        lifeStore.update(ms)
+    }
+
+    /// AI 記帳同步：寫入房地產已支出／水電瓦斯／變動支出章節，比照 AddExpenseView.syncRealEstateVariableExpense(realEstateId:expenseId:amount:)。
+    @MainActor
+    private func aiSyncRealEstateExpense(for expense: Expense) {
+        guard let reId = expense.linkedRealEstateId,
+              var re = financeStore.realEstates.first(where: { $0.id == reId }) else { return }
+        let category = expense.realEstateExpenseCategory ?? .other
+        switch category {
+        case .housePayment:
+            re.paidItems.append(RealEstatePaidItem(
+                id: UUID(), title: expense.title, amount: expense.amount,
+                date: expense.date, linkedExpenseId: expense.id
+            ))
+        case .utility:
+            let lower = expense.title.lowercased()
+            let inferredType: UtilityType = {
+                if lower.contains("水") || lower.contains("water") { return .water }
+                if lower.contains("電") || lower.contains("electric") { return .electricity }
+                if lower.contains("瓦斯") || lower.contains("gas") { return .gas }
+                return .electricity
+            }()
+            re.utilityPayments.append(UtilityPayment(
+                type: inferredType, date: expense.date, amount: expense.amount,
+                note: expense.note, linkedExpenseId: expense.id
+            ))
+        default:
+            re.variableExpenses.append(RealEstateVariableExpense(
+                id: UUID(), category: category, name: expense.note,
+                amount: expense.amount, date: expense.date, linkedExpenseId: expense.id
+            ))
+        }
+        financeStore.update(re)
     }
 
     /// 取得本人姓名（中文優先，否則英文；都空 → 回空字串）

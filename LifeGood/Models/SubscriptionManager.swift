@@ -30,6 +30,7 @@ final class SubscriptionManager: ObservableObject {
 
     @Published private(set) var products: [Product] = []
     @Published private(set) var purchaseInProgress: Bool = false
+    @Published private(set) var restoreInProgress: Bool = false
     @Published private(set) var lastError: String?
     @Published private(set) var entitlementExpiresAt: Date?
     @Published private(set) var entitledProductID: String?
@@ -140,6 +141,13 @@ final class SubscriptionManager: ObservableObject {
 
     @MainActor
     func restorePurchases() async {
+        // purchase(_:) 已有 purchaseInProgress 守衛防止連點重入，這裡原本缺同樣的防護：
+        // 使用者連續點擊「還原購買」會並發觸發多個 AppStore.sync()，並發的 refreshStatus()／
+        // lastError 寫入順序不定，可能出現「其中一次失敗訊息覆蓋掉另一次成功」的錯誤提示。
+        guard !restoreInProgress else { return }
+        restoreInProgress = true
+        defer { restoreInProgress = false }
+
         do {
             try await AppStore.sync()
             await refreshStatus()

@@ -2421,6 +2421,14 @@ struct RealEstateDetailView: View {
         if let expId = m.linkedExpenseId,
            let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
             duplicateLinkedExpense(exp)
+        } else if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            // 舊版資料（monthlyMortgage 遷移）／iCloud 還原出的項目 linkedExpenseId 恆為 nil，
+            // 先前完全沒有 else 分支，滑動複製會靜默無反應；比照 deleteMortgageItem 補上本地複製。
+            re.mortgageItems.append(RealEstateMortgageItem(
+                id: UUID(), title: m.title, amount: m.amount,
+                totalPeriods: m.totalPeriods, startDate: Date()
+            ))
+            store.update(re)
         }
     }
 
@@ -2438,6 +2446,12 @@ struct RealEstateDetailView: View {
         if let expId = p.linkedExpenseId,
            let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
             duplicateLinkedExpense(exp)
+        } else if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            // 同 duplicateMortgageItem：linkedExpenseId 為 nil 的舊資料補上本地複製，避免靜默無反應。
+            re.paidItems.append(RealEstatePaidItem(
+                id: UUID(), title: p.title, amount: p.amount, date: Date()
+            ))
+            store.update(re)
         }
     }
 
@@ -2455,6 +2469,12 @@ struct RealEstateDetailView: View {
         if let expId = v.linkedExpenseId,
            let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
             duplicateLinkedExpense(exp)
+        } else if var re = store.realEstates.first(where: { $0.id == estateId }) {
+            // 同 duplicateMortgageItem：linkedExpenseId 為 nil 的舊資料補上本地複製，避免靜默無反應。
+            re.variableExpenses.append(RealEstateVariableExpense(
+                id: UUID(), category: v.category, name: v.name, amount: v.amount, date: Date()
+            ))
+            store.update(re)
         }
     }
 }

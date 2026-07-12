@@ -830,7 +830,14 @@ struct AddRealEstateView: View {
                             guard let newItem else { return }
                             Task {
                                 if let data = try? await newItem.loadTransferable(type: Data.self) {
-                                    let fileName = ElevatorMaintenance.savePhoto(data, id: item.id)
+                                    // 檔名用全新 UUID（而非沿用編輯中記錄不變的 item.id），避免同路徑覆寫
+                                    // 造成 ThumbnailCache（全域 NSCache，依 url.path 為 key）換照片後
+                                    // 跨畫面持續顯示舊縮圖，對齊 RealEstateDetailView.ElevatorMaintenanceEditor
+                                    // 同型修復。
+                                    if let oldName = elevatorItems.first(where: { $0.id == item.id })?.photoFileName {
+                                        ElevatorMaintenance.deletePhoto(oldName)
+                                    }
+                                    let fileName = ElevatorMaintenance.savePhoto(data, id: UUID())
                                     if let idx = elevatorItems.firstIndex(where: { $0.id == item.id }) {
                                         elevatorItems[idx].photoFileName = fileName
                                     }
@@ -1066,8 +1073,11 @@ struct AddRealEstateView: View {
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         Button(role: .destructive) {
-                            if let linkedId = item.linkedExpenseId {
-                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                            // 改用 expenseStore.delete(_:)（對齊本檔案售出損益同步等處既有規格），
+                            // 確保連結支出附加的照片一併從磁碟移除，避免直接 removeAll 留下孤兒照片檔。
+                            if let linkedId = item.linkedExpenseId,
+                               let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
+                                expenseStore.delete(exp)
                             }
                             insuranceItems.removeAll { $0.id == item.id }
                         } label: {
@@ -1112,8 +1122,11 @@ struct AddRealEstateView: View {
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         Button(role: .destructive) {
-                            if let linkedId = item.linkedExpenseId {
-                                expenseStore.expenses.removeAll { $0.id == linkedId }
+                            // 改用 expenseStore.delete(_:)（對齊本檔案售出損益同步等處既有規格），
+                            // 確保連結支出附加的照片一併從磁碟移除，避免直接 removeAll 留下孤兒照片檔。
+                            if let linkedId = item.linkedExpenseId,
+                               let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
+                                expenseStore.delete(exp)
                             }
                             assetItems.removeAll { $0.id == item.id }
                         } label: {
@@ -1276,6 +1289,13 @@ struct AddRealEstateView: View {
                     amount: item.amount, linkedExpenseId: expId
                 ))
             } else {
+                // 金額被清空前若已連動過一筆變動支出，這裡只是把 linkedExpenseId 設為 nil，
+                // 不會刪掉舊的 Expense；該筆孤兒紀錄會繼續留在變動支出總額裡且從此無從察覺，
+                // 需比照上面「有價格」分支一併清掉。
+                if let oldExpId = item.linkedExpenseId,
+                   let oldExp = expenseStore.expenses.first(where: { $0.id == oldExpId }) {
+                    expenseStore.delete(oldExp)
+                }
                 syncedInsurance.append(RealEstateInsuranceItem(
                     id: item.id, policyNumber: item.policyNumber,
                     amount: 0, linkedExpenseId: nil
@@ -1294,6 +1314,11 @@ struct AddRealEstateView: View {
                     amount: item.amount, linkedExpenseId: expId
                 ))
             } else {
+                // 同上：金額清空前若已連動過變動支出，須一併刪除，避免孤兒 Expense 繼續計入總額。
+                if let oldExpId = item.linkedExpenseId,
+                   let oldExp = expenseStore.expenses.first(where: { $0.id == oldExpId }) {
+                    expenseStore.delete(oldExp)
+                }
                 syncedAssets.append(RealEstatePropertyAsset(
                     id: item.id, category: item.category, name: item.name,
                     brand: item.brand, floorLocation: item.floorLocation,

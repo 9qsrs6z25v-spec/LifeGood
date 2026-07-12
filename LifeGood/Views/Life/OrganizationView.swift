@@ -1396,9 +1396,22 @@ struct OrgPersonDetailView: View {
                 HStack(spacing: 14) {
                     // 頭像圓
                     Group {
-                        if let url = person.photoURL, let img = UIImage(contentsOfFile: url.path) {
-                            Image(uiImage: img).resizable().scaledToFill()
-                                .frame(width: 64, height: 64).clipShape(Circle())
+                        if let url = person.photoURL {
+                            // 改用 AsyncLocalImage 背景讀取，避免每次 body 求值（如開編輯/刪除
+                            // sheet、alert 轉場）都在主執行緒同步讀檔＋解碼一張完整大圖，對齊本檔案
+                            // personAvatar／photoSection 已套用的修復規格。
+                            AsyncLocalImage(url: url) { img, _ in
+                                if let img {
+                                    Image(uiImage: img).resizable().scaledToFill()
+                                        .frame(width: 64, height: 64).clipShape(Circle())
+                                } else {
+                                    ZStack {
+                                        Circle().fill(.white.opacity(0.22)).frame(width: 64, height: 64)
+                                        Text(String(person.name.prefix(1)))
+                                            .font(.title.bold()).foregroundStyle(.white)
+                                    }
+                                }
+                            }
                         } else {
                             ZStack {
                                 Circle().fill(.white.opacity(0.22)).frame(width: 64, height: 64)

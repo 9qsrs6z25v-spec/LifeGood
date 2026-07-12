@@ -1241,10 +1241,14 @@ struct ChildRecordEditorSheet: View {
             .onChange(of: photoItem) { _, _ in
                 Task {
                     guard let photoItem, let data = try? await photoItem.loadTransferable(type: Data.self) else { return }
-                    // 原圖永遠保留一份；素描檔名由 savePhoto 回傳的 photoFileName 推導（與 ChildRecord.sketchURL
-                    // 的推導邏輯一致，見 LifeModels.swift），不可各自另外亂數 UUID，否則檔名對不上、素描找不到
-                    let recordId = editing?.id ?? UUID()
-                    photoFileName = ChildRecord.savePhoto(data, id: recordId)
+                    // 編輯既有記錄時 editing.id 不變，若沿用它當檔名，換照片會同路徑覆寫、photoFileName
+                    // 字串不變，清單縮圖用的 AsyncLocalImage 依 url 判斷是否重讀，url 沒變就不會重讀，
+                    // 換照片後清單頭像停留在舊圖（同類 bug 已在 BusinessCard/OrgPerson/FamilyAlbumPhoto
+                    // 修復，改用全新 UUID 檔名）。素描檔名一律跟著同一個新 photoId 走，兩者仍保持配對。
+                    let oldPhotoName = photoFileName
+                    let photoId = UUID()
+                    photoFileName = ChildRecord.savePhoto(data, id: photoId)
+                    if let oldPhotoName { ChildRecord.deletePhoto(oldPhotoName) }
                     let origImage = UIImage(data: data)
                     // 素描版：CIContext 建立與 GPU 渲染移到背景執行緒，避免阻塞主執行緒
                     if let orig = origImage {
@@ -1252,7 +1256,7 @@ struct ChildRecordEditorSheet: View {
                             ChildRecord.applySketchEffect(orig)
                         }.value
                         if let sketched, let sketchData = sketched.jpegData(compressionQuality: 0.85) {
-                            _ = ChildRecord.saveSketch(sketchData, id: recordId)
+                            _ = ChildRecord.saveSketch(sketchData, id: photoId)
                         }
                     }
                     previewImage = sketchMode ? loadSketchOrOrig() : origImage
