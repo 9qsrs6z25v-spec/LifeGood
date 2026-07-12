@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.00", build: 656, date: "2026/07/12", notes: [
+            "【美化】家人履歷詳細頁（FamilyMembersResumeView.FamilyMemberDetailView）禮金金額量級一致性：memberGiftsSection 私有 smartGiftAmount(_:) 手刻「%.1f億／%.1f萬」，與全 App 共用 Double.ntdWanString 邏輯重複，且未處理捨入至萬位上限應進位為億的邊界（會顯示成不合理的「10000.0萬」）。禮金總計 Capsule 徽章、分類金額 Capsule 徽章兩處呼叫點改用共用 Double.ntdWanString，並補上 lineLimit(1) + minimumScaleFactor（對齊 StockView／TaxOverviewView 等同類 Capsule 金額徽章防截斷規格）。順手移除已無呼叫端的私有 smartGiftAmount／formatGiftTotal／currencyFormatter 死碼。純顯示層調整，禮金加總等既有邏輯未變動。"
+        ]),
         ChangelogEntry(version: "23.99", build: 655, date: "2026/07/12", notes: [
             "【美化】節稅總覽畫面（TaxOverviewView）金額量級一致性：私有 fmtShort(_:) 手刻「%.1f億／%.1f萬」完全缺少 NT$ 字首，與同頁英雄卡「年度稅費支出」大字（fmt，帶 NT$ 前綴）並排時字首不一致，也未處理 ≥9999.95萬 應進位為億的邊界（會顯示成不合理的「10000.0萬」）。年收入 KPI 膠囊／月份長條金額／節稅彙總膠囊／扣除額已累積徽章共 5 處呼叫點改用共用 Double.ntdWanString，其中節稅彙總膠囊、扣除額已累積徽章原本缺少防截斷規格，一併補上 lineLimit(1) + minimumScaleFactor（對齊同頁年收入膠囊既有規格）。純顯示層調整，稅費加總、節稅累積、扣除額試算等既有邏輯未變動。"
         ]),

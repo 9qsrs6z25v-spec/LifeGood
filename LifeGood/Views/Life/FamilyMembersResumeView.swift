@@ -53,6 +53,13 @@ import PhotosUI
 //  11. photoCard 照片日期：從純 tertiary 小字升級為「calendar icon + 日期」Capsule 徽章
 //      （tertiarySystemFill 底色 + separator 細邊框），
 //      對齊 eventsSection 日期 Capsule / ChildDetailView v2 / CareerView v2 日期規格。
+// [2026-07 v4] 金額量級一致性：memberGiftsSection 私有 smartGiftAmount(_:) 手刻「%.1f億／%.1f萬」
+//      邏輯與全 App 共用 Double.ntdWanString 完全重複，且缺少捨入至萬位上限應進位為億的邊界處理
+//      （會顯示成不合理的「10000.0萬」），與 ResumeView.giftHeroCard / SpouseResumeView 等同類禮金
+//      金額顯示風格不一致。禮金總計 Capsule 徽章、分類金額 Capsule 徽章兩處呼叫點改用共用
+//      Double.ntdWanString，並補上 lineLimit(1) + minimumScaleFactor(0.7)（對齊 StockView /
+//      TaxOverviewView 等同類 Capsule 金額徽章防截斷規格）。移除已無呼叫端的私有
+//      smartGiftAmount／formatGiftTotal／currencyFormatter 死碼。純顯示層調整，禮金加總等既有邏輯未變動。
 // ─────────────────────────────────────────────
 
 // MARK: - 家人履歷 列表
@@ -486,12 +493,6 @@ struct FamilyMemberDetailView: View {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
     }()
 
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f
-    }()
-
     private var member: FamilyMember {
         lifeStore.familyMembers.first(where: { $0.id == memberId })
             ?? FamilyMember(role: .otherRelative)
@@ -547,9 +548,11 @@ struct FamilyMemberDetailView: View {
                     .font(.subheadline.weight(.bold))
                 Spacer()
                 // 禮金總計 Capsule 徽章
-                Text(smartGiftAmount(gifts.reduce(0) { $0 + $1.amount }))
+                Text(gifts.reduce(0) { $0 + $1.amount }.ntdWanString)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.pink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(.pink.opacity(0.10))
                     .clipShape(Capsule())
@@ -579,9 +582,11 @@ struct FamilyMemberDetailView: View {
                         Text("\(items.count) 筆")
                             .font(.caption2).foregroundStyle(.secondary)
                         // 分類金額 Capsule 徽章
-                        Text(smartGiftAmount(items.reduce(0) { $0 + $1.amount }))
+                        Text(items.reduce(0) { $0 + $1.amount }.ntdWanString)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.pink)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                             .padding(.horizontal, 7).padding(.vertical, 3)
                             .background(.pink.opacity(0.10))
                             .clipShape(Capsule())
@@ -595,16 +600,6 @@ struct FamilyMemberDetailView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
-    }
-
-    private func formatGiftTotal(_ v: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
-    }
-
-    private func smartGiftAmount(_ v: Double) -> String {
-        if v >= 100_000_000 { return String(format: "NT$%.1f億", v / 100_000_000) }
-        if v >= 10_000      { return String(format: "NT$%.1f萬", v / 10_000) }
-        return Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     var body: some View {
