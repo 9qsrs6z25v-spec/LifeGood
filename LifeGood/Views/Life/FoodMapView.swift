@@ -57,8 +57,12 @@ import MapKit
 //      小數、未處理億級單位），與同檔案 RestaurantDetailSheet.fmtWan（v3 已補上億級）及全 App
 //      共用 Double.ntdWanString（萬/億自動切換、保留一位小數）不一致，四處呼叫改用 ntdWanString，
 //      移除 fmtShort 與專用 decimalFormatter 死碼。
-//      （下次美化本檔案時：RestaurantDetailSheet.detailKpiCell「平均每次」目前呼叫 fmtNum，
-//      未做萬/億量級轉換，與同列「總花費」fmtWan 不一致，可考慮一併改用 ntdWanString）
+// [2026-07 v6] 金額量級一致性收尾：
+//  18. RestaurantDetailSheet.detailKpiCell「總花費」「平均每次」原本各自呼叫私有
+//      fmtWan(_:)／「NT$ \(fmtNum(_:))」，「平均每次」未做萬/億量級轉換，金額較大時
+//      與同列「總花費」顯示規格不一致；兩處改用共用 Double.ntdWanString（對齊同檔案
+//      restaurantRow 已使用的規格），並移除只剩單一呼叫點、與共用元件重複的私有
+//      fmtWan(_:) 死碼。純顯示層調整，就診/造訪聚合等既有邏輯未變動。
 
 // MARK: - 餐廳聚合資料
 
@@ -858,10 +862,10 @@ struct RestaurantDetailSheet: View {
                               value: "\(aggregate.visitCount) 次")
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
                 detailKpiCell(icon: "yensign.circle.fill", label: "總花費",
-                              value: fmtWan(aggregate.totalSpent))
+                              value: aggregate.totalSpent.ntdWanString)
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
                 detailKpiCell(icon: "chart.bar.fill", label: "平均每次",
-                              value: "NT$ \(fmtNum(aggregate.averageSpent))")
+                              value: aggregate.averageSpent.ntdWanString)
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -1186,19 +1190,6 @@ struct RestaurantDetailSheet: View {
 
     private func fmtNum(_ v: Double) -> String {
         Self.decimalFormatter.string(from: NSNumber(value: v)) ?? "0"
-    }
-
-    // [v3] 萬/億 量級顯示，對齊全 App 金額規格
-    private func fmtWan(_ v: Double) -> String {
-        if abs(v) >= 1_0000_0000 {
-            let s = Self.decimalFormatter.string(from: NSNumber(value: v / 1_0000_0000)) ?? "0"
-            return "NT$ \(s)億"
-        }
-        if abs(v) >= 10_000 {
-            let s = Self.decimalFormatter.string(from: NSNumber(value: v / 10_000)) ?? "0"
-            return "NT$ \(s)萬"
-        }
-        return "NT$ \(fmtNum(v))"
     }
 
     private func fmtDate(_ date: Date) -> String {
