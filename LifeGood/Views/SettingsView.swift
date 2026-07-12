@@ -43,7 +43,12 @@ import UniformTypeIdentifiers
 //      避免只剩一顆「新增匯率」按鈕孤立顯示、使用者不清楚此區用途。
 //  15. 幣別列補上 22pt 漸層小圖示圓（globe），比值欄位改用 monospacedDigit，
 //      對齊全 App 數字欄位等寬對齊慣例，避免多筆匯率上下數字左右跳動。
-//      （下次美化本檔案時，可考慮 aiAssistantSection / providerKeySection 圖示圓升級）
+// [2026-07 v6] providerKeySection 圖示圓升級（承接 v5 breadcrumb）：
+//  16. 供應商列圖示：裸 Image(systemName:) → 22pt 漸層圖示圓，對齊 currencyRateSection
+//      幣別列規格；已設定 Key 狀態：孤立 checkmark.seal.fill → 綠色「已設定」Capsule 徽章，
+//      對齊 subscriptionSection「已訂閱」／iCloudSyncSection「已登入」既有徽章規格。
+//      純視覺加強，未動 API Key 讀寫、Keychain 儲存或啟用中服務判斷邏輯。
+//      （下次美化本檔案時，可考慮 aiAssistantSection 說明區塊補圖示或 Picker 選項列樣式統一）
 
 // MARK: - Share Sheet (UIKit bridge)
 
@@ -906,12 +911,35 @@ struct SettingsView: View {
     @ViewBuilder
     private func providerKeySection(_ p: AIProvider) -> some View {
         Section {
-            HStack {
-                Image(systemName: p.icon).foregroundStyle(.purple)
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.purple.opacity(0.20), Color.purple.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 22, height: 22)
+                    Circle()
+                        .stroke(Color.purple.opacity(0.20), lineWidth: 0.75)
+                        .frame(width: 22, height: 22)
+                    Image(systemName: p.icon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.purple)
+                }
                 Text(p.displayName).font(.subheadline.weight(.semibold))
                 Spacer()
                 if !aiSettings.key(for: p).isEmpty {
-                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                    Text("已設定")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
                 }
             }
             SecureField("API Key", text: Binding(
