@@ -1388,8 +1388,8 @@ struct SubordinateDetailView: View {
 //      輕微黃／一般橘／嚴重紅，與 recordRow 嚴重度 Capsule 用色一致）。
 //   4. 純視覺層調整，未動請假時數計算（computedLeaveHours／restDeductionHours）、
 //      儲存／刪除邏輯或任何欄位驗證規則。
-// （下次美化本檔案時，可接著處理 MeetingEditorSheet／TaskEditorSheet／
-//   WeeklyReportEditorSheet 三個尚未套用統一 Section header 規格的編輯 Sheet）
+// （後續已於 [2026-07 v2]（見下方 MeetingEditorSheet 前的紀錄）補齊 MeetingEditorSheet／
+//   TaskEditorSheet／WeeklyReportEditorSheet 三個編輯 Sheet 的統一 Section header 規格）
 
 struct RecordEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -1713,6 +1713,18 @@ struct AddSubItemSheet: View {
 
 // MARK: - 會議編輯 Sheet
 
+// MARK: - 美化紀錄（MeetingEditorSheet／TaskEditorSheet／WeeklyReportEditorSheet）
+// [2026-07 v2] 承接 RecordEditorSheet 上一版美化紀錄（[2026-07 v1]）末尾提及的待辦項目：
+// 本次為這三個編輯 Sheet 補齊與 RecordEditorSheet 相同的統一 Section 標題規格
+// （4pt 漸層色條 + 圖示 + .subheadline.bold，取代純文字 Section(標題) 字串），
+// 主題色沿用各自項目在主畫面列表列（meetingSection／taskSection／weeklyReportSection）
+// 已使用的識別色：會議＝indigo、任務＝cyan、報告＝purple；備註區一律用中性灰
+// （對齊 RecordEditorSheet 備註區 tint: Color(.systemGray2) 的既有規格）。
+// 另外會議項目清單原本無空狀態提示，新增時畫面會顯得空白，補上一列輕量文字提示。
+// 純視覺層調整，未變動任何儲存／刪除／指派/週期換算等既有商業邏輯。
+// （下次美化本檔案時，可考慮：任務／報告的「標記為已完成」Toggle Section 補上統一
+//   Section header；或處理本檔案其餘尚未套用漸層圖示圓規格的次要清單列）
+
 struct MeetingEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
@@ -1730,10 +1742,24 @@ struct MeetingEditorSheet: View {
 
     private var allSubordinates: [Subordinate] { lifeStore.subordinates }
 
+    /// 統一 Section 標題：4pt 漸層色條 + 圖示 + 粗體文字，對齊 RecordEditorSheet.editorSectionHeader 規格。
+    private func editorSectionHeader(_ title: String, icon: String, tint: Color = .indigo) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [tint, tint.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.subheadline.weight(.bold))
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("會議資訊") {
+                Section {
                     TextField("會議主題", text: $topic)
                     HStack {
                         Text("日期時間")
@@ -1751,9 +1777,19 @@ struct MeetingEditorSheet: View {
                             ForEach(MeetingRecurrence.allCases) { Text($0.rawValue).tag($0 as MeetingRecurrence?) }
                         }
                     }
+                } header: {
+                    editorSectionHeader("會議資訊", icon: "calendar.badge.clock")
                 }
 
                 Section {
+                    if items.isEmpty {
+                        HStack {
+                            Spacer()
+                            Text("尚未新增項目").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 6)
+                    }
                     ForEach($items) { $item in
                         VStack(spacing: 8) {
                             if items.first?.id != item.id { Divider() }
@@ -1777,10 +1813,14 @@ struct MeetingEditorSheet: View {
                     Button { items.append(MeetingItem()) } label: {
                         Label("新增項目", systemImage: "plus.circle").foregroundStyle(.indigo)
                     }
-                } header: { Text("會議項目") }
+                } header: {
+                    editorSectionHeader("會議項目", icon: "checklist")
+                }
 
-                Section("備註") {
+                Section {
                     MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
+                } header: {
+                    editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
                 }
                 if editing != nil {
                     Section {
@@ -1851,10 +1891,24 @@ struct TaskEditorSheet: View {
     @State private var isCompleted = false
     @State private var assignedSubId = UUID()   // 指派給哪位部屬（可換人處理）
 
+    /// 統一 Section 標題：4pt 漸層色條 + 圖示 + 粗體文字，對齊 RecordEditorSheet.editorSectionHeader 規格。
+    private func editorSectionHeader(_ title: String, icon: String, tint: Color = .cyan) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [tint, tint.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.subheadline.weight(.bold))
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("任務資訊") {
+                Section {
                     TextField("任務主題", text: $topic)
                     MentionTextField(text: $content, placeholder: "任務內容（可打 @ 標註人員）", people: lifeStore.mentionPeople())
                     HStack {
@@ -1870,6 +1924,8 @@ struct TaskEditorSheet: View {
                             FiveMinuteDateTimePicker(selection: $dueDate).fixedSize()
                         }
                     }
+                } header: {
+                    editorSectionHeader("任務資訊", icon: "checklist")
                 }
                 Section {
                     Picker(selection: $assignedSubId) {
@@ -1880,7 +1936,7 @@ struct TaskEditorSheet: View {
                         Label("指派給", systemImage: "person.crop.circle.badge.checkmark")
                     }
                 } header: {
-                    Text("指派人員")
+                    editorSectionHeader("指派人員", icon: "person.crop.circle.badge.checkmark")
                 } footer: {
                     if assignedSubId != subordinateId {
                         Text("儲存後此任務會移交給所選人員。")
@@ -1893,8 +1949,10 @@ struct TaskEditorSheet: View {
                     }
                     .tint(.green)
                 }
-                Section("備註") {
+                Section {
                     MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
+                } header: {
+                    editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
                 }
                 if editing != nil {
                     Section {
@@ -1973,16 +2031,32 @@ struct WeeklyReportEditorSheet: View {
     @State private var note = ""
     @State private var isCompleted = false
 
+    /// 統一 Section 標題：4pt 漸層色條 + 圖示 + 粗體文字，對齊 RecordEditorSheet.editorSectionHeader 規格。
+    private func editorSectionHeader(_ title: String, icon: String, tint: Color = .purple) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [tint, tint.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.subheadline.weight(.bold))
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("報告") {
+                Section {
                     TextField("報告題目", text: $topic)
                     HStack {
                         Text("日期")
                         Spacer()
                         FiveMinuteDateTimePicker(selection: $date).fixedSize()
                     }
+                } header: {
+                    editorSectionHeader("報告", icon: "doc.text.fill")
                 }
                 Section {
                     Toggle(isOn: $isCompleted) {
@@ -1991,8 +2065,10 @@ struct WeeklyReportEditorSheet: View {
                     }
                     .tint(.green)
                 }
-                Section("備註") {
+                Section {
                     MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
+                } header: {
+                    editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
                 }
                 if editing != nil {
                     Section {
