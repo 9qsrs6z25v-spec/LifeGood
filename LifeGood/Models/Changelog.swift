@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.05", build: 661, date: "2026/07/13", notes: [
+            "【美化】財富總覽不動產全息大樓卡（HolographicBuildingView）操作流暢性 + 空狀態補齊：FloorTagView 樓層標籤原本套用 .buttonStyle(.plain)，點擊完全沒有觸控回饋，是本元件唯一沒有互動反饋的可點擊項目；補上 HUDPressableStyle（縮放至 0.96 + 0.12s ease-out），對齊 MultiPhotoGallery 縮圖按下手感。樓層清單改為進場交錯動畫（opacity 0→1 + offset x: -10→0，每列間隔 0.05 秒）。物件尚未新增任何樓層時，原本清單直接留白；補上 HUD 風格空狀態圖示 + 「尚無樓層資料」提示文字。純視覺／互動回饋層調整，SceneKit 3D 建築渲染、樓層排序與選取邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.04", build: 660, date: "2026/07/12", notes: [
             "【美化】設定頁（SettingsView）語音 AI 助手供應商列圖示圓升級：providerKeySection 標題列原本是裸 Image(systemName:) 圖示直接貼在列首、已設定 Key 時只顯示一顆孤立的 checkmark.seal.fill，與同檔案 currencyRateSection 幣別列已有的「22pt 漸層小圖示圓（fill 0.20→0.08 + stroke 0.20, 0.75pt）」規格、以及 subscriptionSection／iCloudSyncSection 已有的「狀態 Capsule 徽章」規格不一致。改為供應商圖示套用同款 22pt 漸層圖示圓，已設定 Key 時改顯示綠色「已設定」Capsule 徽章（對齊「已訂閱」／「已登入」既有配色與樣式），消除本檔案語音 AI 助手區塊圖示圓/狀態徽章雙重視覺落差。純顯示層調整，Anthropic／OpenAI／Gemini 三供應商 API Key 讀寫、Keychain 儲存、啟用中服務判斷等既有邏輯完全未變動。"
         ]),
