@@ -378,7 +378,9 @@ struct SubordinateRosterView: View {
             }
             .coordinateSpace(name: "rosterArea")
             .onPreferenceChange(RosterHOffsetKey.self) { value in
-                // iOS 17 後援：由偏好值推算水平位移（捲右為負）
+                // iOS 17 後援：由偏好值推算水平位移（捲右為負）；iOS 18+ 已由 onScrollGeometryChange
+                // 直接同步 hOffset，此處若繼續生效會與其在同一捲動影格互相覆寫，故僅 iOS 17 以下才採用。
+                guard #unavailable(iOS 18.0) else { return }
                 hOffset = value - nameColWidth
             }
             .overlay(alignment: .topLeading) {
