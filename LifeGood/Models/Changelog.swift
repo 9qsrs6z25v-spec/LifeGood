@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.11", build: 664, date: "2026/07/13", notes: [
+            "【美化】記帳新增/編輯畫面（AddExpenseView）同行人員／收受人多選彈窗關閉鈕位置與已選提示：socialRecipientSelectorList（收受人多選 Sheet）的「完成」關閉鈕原本是 .topBarTrailing，是本檔案 NavigationStack Sheet 中唯一沒有比照全 App 一律置左規則（EInvoiceSetupView／TalentMatrixView／SubordinateRosterView 等單一「完成」鈕皆為 topBarLeading）的例外；改為 topBarLeading。diningMemberSelectorList（同行人員多選彈窗）原本是「標題置左、完成鈕置右」的自訂版面，與修正後的收受人彈窗（置左按鈕 + 置中標題）不一致，改為同款 ZStack 置中標題 + 置左按鈕版面，讓這兩個相鄰、性質相同的多選彈窗視覺語言一致。另外兩處標題旁補上「已選 N」提示膠囊（同行人員綠色、收受人粉色，對齊各自既有選取色與開啟入口圖示色），僅在有選取時顯示，不用展開清單也能得知已選人數。純顯示層／版面調整，人員多選、收受人分組、勾選切換等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.10", build: 663, date: "2026/07/13", notes: [
             "【美化】兒女詳細頁（ChildDetailView）Tab 切換器描邊 + 「還有 N 筆」溢出提示統一：自訂 Capsule Tab 切換器背景原本只有底色、無描邊，是本頁滾動內容中唯一沒有邊框的容器；補上與 headerCard／各 section 卡片一致的細邊框。日常記錄／消費兩處「還有 N 筆」原本是左側行內純文字且標點不一致（「筆...」三點 vs 「筆…」全形省略號），改為共用 overflowCountBadge(_:) 水平置中 Capsule 膠囊徽章，對齊 ResumeView／ResumeGiftSection／OrganizationView／SpouseResumeView 全 App「還有 N 筆…」統一規格。純顯示層調整，育兒記錄／消費連動篩選與 prefix(20) 截斷邏輯完全未變動。"
         ]),

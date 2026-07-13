@@ -32,6 +32,18 @@ import MapKit
 //  10. amountPreviewCard glass shine：背景 ZStack 末層加入 LinearGradient
 //      [.white.opacity(0.16), .clear] top→center 玻璃高光覆層，
 //      對齊全 App 英雄卡 glass shine 統一規格（AddIncomeView / OverviewView.monthlyBalanceCard）。
+// [2026-07 v4] 本次美化方向（同行人員／收受人多選彈窗，聚焦這一個元件）：
+//  11. socialRecipientSelectorList「完成」關閉鈕：從 .topBarTrailing 修正為 .topBarLeading，
+//      對齊全 App NavigationStack Sheet 關閉鈕一律置左的既有規則（EInvoiceSetupView／
+//      TalentMatrixView／SubordinateRosterView 等單一「完成」鈕皆為 topBarLeading，
+//      此處是本檔案唯一的例外）。
+//  12. diningMemberSelectorList 自訂標題列：改用 ZStack 讓「完成」鈕與 NavigationStack
+//      toolbar 同款「置左按鈕 + 置中標題」版面對齊，不再是唯一的「標題置左、按鈕置右」
+//      版面，與 v4-11 修正後的 socialRecipientSelectorList 視覺語言一致。
+//  13. 兩個多選彈窗標題旁補上「已選 N」提示膠囊（僅在有選取時顯示）：
+//      同行人員用綠色（對齊列內已選 checkmark 綠），收受人用粉色（對齊開啟入口
+//      gift.fill 粉色圖示），操作中不必展開清單也能得知已選人數，純顯示層新增。
+//  以上純視覺／版面調整，未變動人員多選、收受人分組、勾選切換等既有商業邏輯。
 
 struct AddExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -1182,13 +1194,27 @@ struct AddExpenseView: View {
     /// 飲食人員多選清單（popover 內容，可連續勾選不會關閉）
     private var diningMemberSelectorList: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("選擇人員")
-                    .font(.headline)
-                Spacer()
-                Button("完成") { showDiningMemberPopover = false }
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.green)
+            // v4：ZStack 置中標題 + 置左「完成」鈕，對齊 NavigationStack toolbar 版面，
+            // 與同一元件的 socialRecipientSelectorList 視覺語言一致。
+            ZStack {
+                HStack(spacing: 6) {
+                    Text("選擇人員")
+                        .font(.headline)
+                    if !selectedDiningMembers.isEmpty {
+                        Text("已選 \(selectedDiningMembers.count)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(Color.green.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+                HStack {
+                    Button("完成") { showDiningMemberPopover = false }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.green)
+                    Spacer()
+                }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
             .background(Color(.secondarySystemBackground))
@@ -1347,9 +1373,24 @@ struct AddExpenseView: View {
             .navigationTitle("收受人")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                // v4：從 topBarTrailing 修正為 topBarLeading，對齊全 App 關閉鈕一律置左規則
+                ToolbarItem(placement: .topBarLeading) {
                     Button("完成") { showSocialRecipientPopover = false }
                         .bold().foregroundStyle(.green)
+                }
+                // v4：已選人數提示膠囊，取代 navigationTitle 靜態標題（僅在有選取時顯示）
+                if !selectedSocialRecipients.isEmpty {
+                    ToolbarItem(placement: .principal) {
+                        HStack(spacing: 6) {
+                            Text("收受人").font(.headline)
+                            Text("已選 \(selectedSocialRecipients.count)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.pink)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.pink.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
                 }
             }
         }
