@@ -262,6 +262,9 @@ struct RealEstateView: View {
         if let id = item.saleLinkedExpenseId { expenseIds.insert(id) }
 
         if !expenseIds.isEmpty {
+            for exp in expenseStore.expenses where expenseIds.contains(exp.id) {
+                for name in exp.photoFileNames { Expense.deletePhoto(name) }
+            }
             expenseStore.expenses.removeAll { expenseIds.contains($0.id) }
         }
         if let saleIncId = item.saleLinkedIncomeId {
