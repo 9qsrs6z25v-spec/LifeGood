@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.06", build: 662, date: "2026/07/13", notes: [
+            "【美化】設定頁（SettingsView）AI 語音記帳說明區塊補齊圖示錨點：aiAssistantSection 頂部「啟用後會出現麥克風按鈕」／「語音辨識在裝置上完成」兩行說明文字原本純文字裸排、無任何圖示，是本檔案「AI 語音記帳」整組區塊（說明 + 供應商選單 + 各供應商 API Key 列）中唯一沒有圖示錨點的部分，與緊接在後的 providerKeySection 供應商列（22pt 漸層圖示圓）視覺不連貫。補上同規格 22pt 紫色漸層圖示圓（waveform），讓整組區塊圖示語言一致。純顯示層調整，語音辨識、AI 欄位抽取、API Key 讀寫與 Keychain 儲存等既有邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.05", build: 661, date: "2026/07/13", notes: [
             "【美化】財富總覽不動產全息大樓卡（HolographicBuildingView）操作流暢性 + 空狀態補齊：FloorTagView 樓層標籤原本套用 .buttonStyle(.plain)，點擊完全沒有觸控回饋，是本元件唯一沒有互動反饋的可點擊項目；補上 HUDPressableStyle（縮放至 0.96 + 0.12s ease-out），對齊 MultiPhotoGallery 縮圖按下手感。樓層清單改為進場交錯動畫（opacity 0→1 + offset x: -10→0，每列間隔 0.05 秒）。物件尚未新增任何樓層時，原本清單直接留白；補上 HUD 風格空狀態圖示 + 「尚無樓層資料」提示文字。純視覺／互動回饋層調整，SceneKit 3D 建築渲染、樓層排序與選取邏輯完全未變動。"
         ]),

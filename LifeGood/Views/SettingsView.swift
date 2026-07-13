@@ -48,7 +48,14 @@ import UniformTypeIdentifiers
 //      幣別列規格；已設定 Key 狀態：孤立 checkmark.seal.fill → 綠色「已設定」Capsule 徽章，
 //      對齊 subscriptionSection「已訂閱」／iCloudSyncSection「已登入」既有徽章規格。
 //      純視覺加強，未動 API Key 讀寫、Keychain 儲存或啟用中服務判斷邏輯。
-//      （下次美化本檔案時，可考慮 aiAssistantSection 說明區塊補圖示或 Picker 選項列樣式統一）
+// [2026-07 v7] aiAssistantSection 說明區塊補齊圖示錨點（承接 v6 breadcrumb）：
+//  17. 頂部麥克風/隱私說明兩行文字原本純 Text 裸排、無任何圖示，是本檔案唯一沒有圖示
+//      錨點的內容區塊；補上 22pt 漸層圖示圓（waveform，紫色），對齊緊接在後的
+//      providerKeySection 供應商列圖示規格，讓「AI 語音記帳」整組區塊（說明 + 供應商 +
+//      各供應商 Key 列）圖示語言一致。純視覺調整，未動語音辨識／AI 欄位抽取邏輯。
+//      （下次美化本檔案時，可考慮統一 Picker「使用中的 AI 服務」選項列樣式，
+//        或複查 dataStatsSection 支出記錄區間列的 32pt 純 fill 圖示圓升級為 34–36pt
+//        LinearGradient + stroke，對齊全檔案其餘圖示圓規格）
 
 // MARK: - Share Sheet (UIKit bridge)
 
@@ -882,12 +889,35 @@ struct SettingsView: View {
     @ViewBuilder
     private var aiAssistantSection: some View {
         Section {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("啟用後，變動支出頁面下方會出現麥克風按鈕，長按說話即可由 AI 自動建立記帳。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("語音辨識在裝置上完成；文字內容會送到你選的 AI 服務做欄位抽取。API Key 只存在這支手機的 Keychain，不會經過 LifeGood 伺服器。")
-                    .font(.caption2).foregroundStyle(.tertiary)
+            // [v7] 說明區塊補 22pt 漸層圖示圓（waveform），對齊本區塊下方 providerKeySection
+            // 供應商列既有的紫色圖示圓規格，消除本區塊原本是全 aiAssistantSection 唯一
+            // 沒有任何圖示錨點、純文字裸排的視覺落差。
+            HStack(alignment: .top, spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.purple.opacity(0.20), Color.purple.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 22, height: 22)
+                    Circle()
+                        .stroke(Color.purple.opacity(0.20), lineWidth: 0.75)
+                        .frame(width: 22, height: 22)
+                    Image(systemName: "waveform")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.purple)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("啟用後，變動支出頁面下方會出現麥克風按鈕，長按說話即可由 AI 自動建立記帳。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("語音辨識在裝置上完成；文字內容會送到你選的 AI 服務做欄位抽取。API Key 只存在這支手機的 Keychain，不會經過 LifeGood 伺服器。")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
             }
+            .padding(.vertical, 2)
         }
         Section {
             Picker("使用中的 AI 服務", selection: Binding(
