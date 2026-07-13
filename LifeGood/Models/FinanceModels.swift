@@ -742,11 +742,10 @@ struct ElevatorMaintenance: Identifiable, Codable {
         return dir
     }
 
-    static func savePhoto(_ data: Data, id: UUID) -> String {
+    static func savePhoto(_ data: Data, id: UUID) -> String? {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        // 只有寫入成功才觸發 CloudKit 上傳，避免上傳不存在的檔案
-        guard (try? data.write(to: url)) != nil else { return name }
+        guard (try? data.write(to: url)) != nil else { return nil }
         PhotoCloudSync.upload(directory: "ElevatorPhotos", fileName: name)
         return name
     }
@@ -807,11 +806,10 @@ struct UtilityPayment: Identifiable, Codable {
         return dir
     }
 
-    static func savePhoto(_ data: Data, id: UUID) -> String {
+    static func savePhoto(_ data: Data, id: UUID) -> String? {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        // 只有寫入成功才觸發 CloudKit 上傳，避免上傳不存在的檔案
-        guard (try? data.write(to: url)) != nil else { return name }
+        guard (try? data.write(to: url)) != nil else { return nil }
         PhotoCloudSync.upload(directory: "UtilityPhotos", fileName: name)
         return name
     }
@@ -972,11 +970,10 @@ struct RenovationPhoto: Identifiable, Codable {
         return dir
     }
 
-    static func savePhoto(_ data: Data, id: UUID = UUID()) -> String {
+    static func savePhoto(_ data: Data, id: UUID = UUID()) -> String? {
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
-        // 只有寫入成功才觸發 CloudKit 上傳，避免上傳不存在的檔案
-        guard (try? data.write(to: url)) != nil else { return name }
+        guard (try? data.write(to: url)) != nil else { return nil }
         PhotoCloudSync.upload(directory: "RenovationPhotos", fileName: name)
         return name
     }

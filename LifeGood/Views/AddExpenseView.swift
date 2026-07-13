@@ -186,6 +186,8 @@ struct AddExpenseView: View {
     @State private var placeAddress: String?
     @State private var placeLatitude: Double?
     @State private var placeLongitude: Double?
+    /// 每次選擇候選地點就遞增；resolve 完成回填時比對是否仍是最新一次選擇，避免快速連點造成舊請求覆寫新選擇的座標
+    @State private var placeSelectionToken: Int = 0
     @FocusState private var titleFieldFocused: Bool
     @State private var suppressNextCompleterUpdate = false
     /// 是否展開所有候選地點（預設僅顯示 20 個）
@@ -977,6 +979,8 @@ struct AddExpenseView: View {
         suppressNextCompleterUpdate = true
         title = item.title
         expandedSuggestions = false
+        // 遞增 token，讓任何仍在飛行中的舊 .apple resolve 回呼失效，避免它稍後才完成、覆寫這次選擇的地址／座標
+        placeSelectionToken += 1
         switch item.source {
         case .past:
             placeAddress = item.address
@@ -988,6 +992,7 @@ struct AddExpenseView: View {
             placeAddress = item.address
             placeLatitude = nil
             placeLongitude = nil
+            let myToken = placeSelectionToken
             if let c = item.completion {
                 restaurantCompleter.resolve(c) { mapItem in
                     guard let mapItem else { return }
@@ -996,6 +1001,8 @@ struct AddExpenseView: View {
                     let lon = mapItem.placemark.coordinate.longitude
                     let fallback = item.address
                     Task { @MainActor in
+                        // 期間若使用者又選了別的候選，token 已前進，此筆過期結果直接丟棄，避免覆寫成不相符的座標
+                        guard myToken == placeSelectionToken else { return }
                         placeAddress = resolved.isEmpty ? fallback : resolved
                         placeLatitude = lat
                         placeLongitude = lon
@@ -1011,6 +1018,8 @@ struct AddExpenseView: View {
         placeAddress = nil
         placeLatitude = nil
         placeLongitude = nil
+        // 同步作廢任何仍在飛行中的 resolve 回呼，避免清除後被舊結果覆寫回來
+        placeSelectionToken += 1
     }
 
     private var placeIcon: String {

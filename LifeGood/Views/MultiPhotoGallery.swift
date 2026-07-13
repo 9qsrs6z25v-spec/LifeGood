@@ -35,8 +35,8 @@ struct MultiPhotoGallery: View {
     @Binding var fileNames: [String]
     /// 取得單一檔名的本地 URL（呼叫端決定資料夾）
     let urlFor: (String) -> URL
-    /// 寫入 jpeg 後回傳檔名（資料夾與命名規則由呼叫端決定）
-    let onSaveImage: (Data) -> String
+    /// 寫入 jpeg 後回傳檔名（資料夾與命名規則由呼叫端決定）；寫入失敗回傳 nil
+    let onSaveImage: (Data) -> String?
     /// 刪除單一檔名
     let onDeleteFile: (String) -> Void
 
@@ -106,8 +106,7 @@ struct MultiPhotoGallery: View {
         }
         .sheet(isPresented: $showCamera) {
             CameraPicker { image in
-                if let data = image.jpegData(compressionQuality: 0.85) {
-                    let name = onSaveImage(data)
+                if let data = image.jpegData(compressionQuality: 0.85), let name = onSaveImage(data) {
                     fileNames.append(name)
                 }
             }
@@ -122,8 +121,7 @@ struct MultiPhotoGallery: View {
             Task {
                 var added: [String] = []
                 for item in items {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        let name = onSaveImage(data)
+                    if let data = try? await item.loadTransferable(type: Data.self), let name = onSaveImage(data) {
                         added.append(name)
                     }
                 }
