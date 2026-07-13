@@ -1434,6 +1434,21 @@ struct MyCalendarView: View {
 
 // MARK: - 個人行事曆事件編輯器
 
+// MARK: - 美化紀錄（PersonalEventEditor）2026-07
+// 本檔案先前僅美化過 MyCalendarView 主畫面（英雄卡／sectionHeader／eventRow 等），
+// 新增/編輯個人事件的 Form 表單一直維持系統預設純文字 Section("...") 標題，
+// 與 RecordEditorSheet／MeetingEditorSheet／TaskEditorSheet／WeeklyReportEditorSheet
+// 已套用的統一 Section header 規格不一致。本次補齊：
+// ① 新增 editorSectionHeader(_:icon:tint:)，比照上述編輯 Sheet 規格
+//    （4pt 漸層色條 + 圖示 + .subheadline.bold），取代「基本資訊／時間／重複／提醒／
+//    Apple 行事曆／備註」六個 Section 的純文字標題。
+// ② tint 預設依目前選取的事件類型動態切換（會議＝indigo／事務＝cyan），
+//    對齊本檔案 eventRow／CalendarEventCard 既有的會議＝indigo、事務＝cyan 配色；
+//    「基本資訊」標題圖示也隨 kind.icon 同步切換，備註區沿用全 App 一致的中性灰。
+// ③ 純視覺層調整，未變動任何新增／編輯／刪除／Apple 行事曆同步／通知排程等既有商業邏輯。
+// （下次美化本檔案時，可考慮：CalendarEventCard 預覽卡片補齊玻璃光澤與散景圓，
+//   對齊 StockDetailView／SubordinateDetailView 等其他閃卡規格）
+
 struct PersonalEventEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
@@ -1490,19 +1505,38 @@ struct PersonalEventEditor: View {
         ("一天 (8h)", 480)
     ]
 
+    /// 統一 Section 標題：4pt 漸層色條 + 圖示 + 粗體文字，對齊 RecordEditorSheet／MeetingEditorSheet／
+    /// TaskEditorSheet.editorSectionHeader 規格。tint 預設依目前選取的事件類型
+    /// （會議＝indigo／事務＝cyan，沿用 CalendarEventCard.color 相同配色）。
+    private func editorSectionHeader(_ title: String, icon: String, tint: Color? = nil) -> some View {
+        let color = tint ?? (kind == .meeting ? .indigo : .cyan)
+        return HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.bold))
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     Picker("類型", selection: $kind) {
                         ForEach(PersonalEventKind.allCases) { k in
                             Label(k.rawValue, systemImage: k.icon).tag(k)
                         }
                     }
                     TextField("標題", text: $title)
+                } header: {
+                    editorSectionHeader("基本資訊", icon: kind.icon)
                 }
 
-                Section("時間") {
+                Section {
                     if durationMinutes == 0 {
                         // 全天事件：只選日期
                         DatePicker("開始", selection: $date, displayedComponents: .date)
@@ -1528,9 +1562,11 @@ struct PersonalEventEditor: View {
                                 .foregroundStyle(.green)
                         }
                     }
+                } header: {
+                    editorSectionHeader("時間", icon: "clock")
                 }
 
-                Section("重複") {
+                Section {
                     Picker("頻率", selection: $recurrence) {
                         ForEach(EventRecurrence.allCases) { r in
                             Text(r.rawValue).tag(r)
@@ -1542,9 +1578,11 @@ struct PersonalEventEditor: View {
                             DatePicker("結束於", selection: $recurrenceEndDate, in: date..., displayedComponents: .date)
                         }
                     }
+                } header: {
+                    editorSectionHeader("重複", icon: "repeat")
                 }
 
-                Section("提醒") {
+                Section {
                     Picker("提前提醒", selection: $reminder) {
                         ForEach(EventReminder.allCases) { r in
                             Text(r.displayName).tag(r)
@@ -1554,12 +1592,16 @@ struct PersonalEventEditor: View {
                         Text(reminderHint)
                             .font(.caption2).foregroundStyle(.secondary)
                     }
+                } header: {
+                    editorSectionHeader("提醒", icon: "bell.badge")
                 }
 
                 appleCalendarSection
 
-                Section("備註") {
+                Section {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                } header: {
+                    editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
                 }
 
                 if editing != nil {
@@ -1673,7 +1715,7 @@ struct PersonalEventEditor: View {
                 }
             }
         } header: {
-            Text("Apple 行事曆")
+            editorSectionHeader("Apple 行事曆", icon: "calendar.badge.plus")
         } footer: {
             if appleCal.isDenied {
                 Text("Apple 行事曆權限被拒，無法寫入。請至「設定 → LifeGood」開啟。")
