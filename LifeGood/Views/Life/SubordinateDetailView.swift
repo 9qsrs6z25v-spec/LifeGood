@@ -1371,6 +1371,26 @@ struct SubordinateDetailView: View {
 
 // MARK: - 記錄編輯 Sheet
 
+// MARK: - 美化紀錄（RecordEditorSheet）
+// [2026-07 v1] 首次美化方向：本檔案主畫面（SubordinateDetailView）已有 3 版美化紀錄，
+// 但四個編輯 Sheet（RecordEditorSheet／MeetingEditorSheet／TaskEditorSheet／
+// WeeklyReportEditorSheet）皆未涵蓋，與主畫面漸層 icon 圓 / Capsule 徽章規格脫節。
+// 本次先補齊最小的 RecordEditorSheet：
+//   1. 新增 editorSectionHeader(_:icon:tint:) 統一 Section 標題（4pt 漸層色條 + 圖示 +
+//      .subheadline.bold），對齊 AddVehicleView／AddStockView／RenovationPhotoEditor.
+//      renoSectionHeader 規格，取代原本純文字 Section("...") 標題；色條沿用 accent
+//      （對齊該記錄類型於列表 recordRow 使用的 colorFor 主題色，維持列表→編輯頁色彩延續）。
+//   2. 「扣除休息」／「請假時數」原為純文字 HStack，改為彩色 Capsule 徽章（底色 12% +
+//      細邊框）+ contentTransition(.numericText())，對齊 App 全域數值徽章規格；
+//      並包在 leaveInfoAppeared spring 進場動畫內，對齊 AddVehicleView.calcSectionAppeared
+//      「計算衍生值區塊」進場規格。
+//   3. 嚴重度 Picker 下方補一列彩色圓點 + 文字即時預覽（沿用 severityColor 對照：
+//      輕微黃／一般橘／嚴重紅，與 recordRow 嚴重度 Capsule 用色一致）。
+//   4. 純視覺層調整，未動請假時數計算（computedLeaveHours／restDeductionHours）、
+//      儲存／刪除邏輯或任何欄位驗證規則。
+// （下次美化本檔案時，可接著處理 MeetingEditorSheet／TaskEditorSheet／
+//   WeeklyReportEditorSheet 三個尚未套用統一 Section header 規格的編輯 Sheet）
+
 struct RecordEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
@@ -1386,6 +1406,21 @@ struct RecordEditorSheet: View {
     @State private var note = ""
     @State private var severity: MissOpSeverity = .normal
     @State private var leaveType: LeaveType = .personal
+    @State private var leaveInfoAppeared = false
+
+    /// 對齊主畫面 colorFor(_:) 主題色，讓編輯頁 Section 色條與列表列行同色系。
+    private var accent: Color {
+        switch type {
+        case .pro: return .green; case .con: return .red
+        case .achievement: return .orange; case .improvement: return .blue
+        case .fault: return .pink; case .missOperation: return .purple
+        case .leave: return .teal
+        }
+    }
+
+    private func severityColor(_ s: MissOpSeverity) -> Color {
+        switch s { case .minor: return .yellow; case .normal: return .orange; case .severe: return .red }
+    }
 
     private var canSave: Bool {
         !content.trimmingCharacters(in: .whitespaces).isEmpty
@@ -1422,16 +1457,20 @@ struct RecordEditorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("內容") {
+                Section {
                     TextField(placeholder, text: $content, axis: .vertical).lineLimit(2...5)
+                } header: {
+                    editorSectionHeader("內容", icon: "text.alignleft")
                 }
                 if type == .leave {
-                    Section("請假資訊") {
+                    Section {
                         Picker("假別", selection: $leaveType) {
                             ForEach(LeaveType.allCases) { Text($0.rawValue).tag($0) }
                         }
+                    } header: {
+                        editorSectionHeader("請假資訊", icon: "calendar.badge.clock")
                     }
-                    Section("日期") {
+                    Section {
                         HStack {
                             Text("開始時間")
                             Spacer()
@@ -1447,31 +1486,60 @@ struct RecordEditorSheet: View {
                                 Text("扣除休息").foregroundStyle(.secondary)
                                 Spacer()
                                 Text(String(format: "−%.1f 小時", restDeductionHours))
+                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                                     .foregroundStyle(.orange)
+                                    .padding(.horizontal, 8).padding(.vertical, 3)
+                                    .background(Color.orange.opacity(0.12))
+                                    .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(Color.orange.opacity(0.25), lineWidth: 0.6))
+                                    .contentTransition(.numericText())
                             }
                         }
                         HStack {
                             Text("請假時數").foregroundStyle(.secondary)
                             Spacer()
                             Text(String(format: "%.1f 小時", computedLeaveHours))
-                                .foregroundStyle(.teal).bold()
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                .foregroundStyle(.teal)
+                                .padding(.horizontal, 9).padding(.vertical, 4)
+                                .background(Color.teal.opacity(0.12))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.teal.opacity(0.25), lineWidth: 0.6))
+                                .contentTransition(.numericText())
                         }
+                    } header: {
+                        editorSectionHeader("日期", icon: "calendar")
                     }
+                    .opacity(leaveInfoAppeared ? 1 : 0)
+                    .offset(y: leaveInfoAppeared ? 0 : 10)
+                    .animation(.easeInOut(duration: 0.2), value: computedLeaveHours)
                 } else {
-                    Section("日期") {
+                    Section {
                         DatePicker("發生日期", selection: $date, displayedComponents: .date)
+                    } header: {
+                        editorSectionHeader("日期", icon: "calendar")
                     }
                 }
                 if type == .missOperation {
-                    Section("嚴重度") {
+                    Section {
                         Picker("嚴重度", selection: $severity) {
                             ForEach(MissOpSeverity.allCases) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.segmented)
+                        HStack(spacing: 6) {
+                            Circle().fill(severityColor(severity)).frame(width: 8, height: 8)
+                            Text("目前嚴重度：\(severity.rawValue)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                    } header: {
+                        editorSectionHeader("嚴重度", icon: "exclamationmark.triangle.fill")
                     }
                 }
-                Section("備註") {
+                Section {
                     MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
+                } header: {
+                    editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
                 }
                 if editing != nil {
                     Section {
@@ -1487,7 +1555,28 @@ struct RecordEditorSheet: View {
                     Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave)
                 }
             }
-            .onAppear { loadEditing() }
+            .onAppear {
+                loadEditing()
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05)) {
+                    leaveInfoAppeared = true
+                }
+            }
+        }
+    }
+
+    /// 統一 Section 標題：4pt 漸層色條 + 圖示 + 粗體文字，對齊 AddVehicleView／AddStockView／
+    /// RenovationPhotoEditor.renoSectionHeader 規格。tint 預設沿用 accent（依記錄類型主題色）。
+    private func editorSectionHeader(_ title: String, icon: String, tint: Color? = nil) -> some View {
+        let color = tint ?? accent
+        return HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.bold))
         }
     }
 
