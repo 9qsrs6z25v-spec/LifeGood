@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.10", build: 663, date: "2026/07/13", notes: [
+            "【美化】兒女詳細頁（ChildDetailView）Tab 切換器描邊 + 「還有 N 筆」溢出提示統一：自訂 Capsule Tab 切換器背景原本只有底色、無描邊，是本頁滾動內容中唯一沒有邊框的容器；補上與 headerCard／各 section 卡片一致的細邊框。日常記錄／消費兩處「還有 N 筆」原本是左側行內純文字且標點不一致（「筆...」三點 vs 「筆…」全形省略號），改為共用 overflowCountBadge(_:) 水平置中 Capsule 膠囊徽章，對齊 ResumeView／ResumeGiftSection／OrganizationView／SpouseResumeView 全 App「還有 N 筆…」統一規格。純顯示層調整，育兒記錄／消費連動篩選與 prefix(20) 截斷邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.06", build: 662, date: "2026/07/13", notes: [
             "【美化】設定頁（SettingsView）AI 語音記帳說明區塊補齊圖示錨點：aiAssistantSection 頂部「啟用後會出現麥克風按鈕」／「語音辨識在裝置上完成」兩行說明文字原本純文字裸排、無任何圖示，是本檔案「AI 語音記帳」整組區塊（說明 + 供應商選單 + 各供應商 API Key 列）中唯一沒有圖示錨點的部分，與緊接在後的 providerKeySection 供應商列（22pt 漸層圖示圓）視覺不連貫。補上同規格 22pt 紫色漸層圖示圓（waveform），讓整組區塊圖示語言一致。純顯示層調整，語音辨識、AI 欄位抽取、API Key 讀寫與 Keychain 儲存等既有邏輯完全未變動。"
         ]),

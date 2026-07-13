@@ -37,6 +37,15 @@ import MapKit
 //     外圈補 stroke(.white.opacity(0.16), 0.75pt)、內圈補 stroke(.white.opacity(0.26), 1pt)，
 //     對齊 dailyRow/recordRow 36pt 圖示圓已有的 Circle stroke(accent.opacity(0.22), 1pt) 規格節奏。
 //   • 純視覺加強，未動任何年齡/生日計算或圖示邏輯。
+// [2026-07 v7] 自訂 Tab 切換器補描邊 + 「還有 N 筆」溢出提示對齊全 App 規格：
+//   • 自訂 Capsule Tab 切換器背景原本只有 fill(Color(.tertiarySystemFill))、無 stroke，
+//     是本頁滾動內容中唯一沒有邊框的容器（headerCard/各 section 卡片皆已有 stroke）；
+//     補 Capsule stroke(Color(.separator).opacity(0.15), 0.5pt) 呼應同頁其他容器描邊節奏。
+//   • dailySection／consumptionSection 的「還有 N 筆…」原本是左側行內純文字，且標點不一致
+//     （「筆...」三個句點 vs 「筆…」全形省略號）；統一改為「…」單字元，並改用水平置中
+//     Capsule 膠囊徽章樣式，對齊 ResumeView.spendingSection／ResumeGiftSection／
+//     OrganizationView／SpouseResumeView 全 App「還有 N 筆…」統一規格。
+//   • 純視覺與標點統一，未動 prefix(20) 截斷邏輯或筆數計算。
 //   （下次美化本元件時，可從這裡接著找其他可統一之處）
 
 struct ChildDetailView: View {
@@ -144,6 +153,7 @@ struct ChildDetailView: View {
                     .padding(4)
                     .background(Color(.tertiarySystemFill))
                     .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color(.separator).opacity(0.15), lineWidth: 0.5))
                     .padding(.horizontal)
 
                     if detailTab == .daily {
@@ -520,9 +530,7 @@ struct ChildDetailView: View {
                     }
                 }
                 if items.count > 20 {
-                    Text("還有 \(items.count - 20) 筆...")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                        .padding(.horizontal, 14).padding(.bottom, 10)
+                    overflowCountBadge(items.count - 20)
                 }
             }
         }
@@ -705,9 +713,7 @@ struct ChildDetailView: View {
                     }
                 }
                 if exps.count > 20 {
-                    Text("還有 \(exps.count - 20) 筆…")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                        .padding(.horizontal, 14).padding(.bottom, 10)
+                    overflowCountBadge(exps.count - 20)
                 }
             }
             if !child.chineseName.isEmpty {
@@ -1012,6 +1018,24 @@ struct ChildDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.bottom, 14)
+    }
+
+    // MARK: - 「還有 N 筆…」溢出提示（水平置中 Capsule 膠囊徽章）
+    // [2026-07 v7] 對齊 ResumeView.spendingSection／ResumeGiftSection／OrganizationView／
+    // SpouseResumeView 全 App「還有 N 筆…」統一規格；dailySection／consumptionSection 共用。
+    private func overflowCountBadge(_ count: Int) -> some View {
+        HStack {
+            Spacer()
+            Text("還有 \(count) 筆…")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10).padding(.vertical, 3.5)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(Capsule())
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
     }
 
 }
