@@ -34,7 +34,14 @@ class ExpenseStore: ObservableObject {
         NotificationCenter.default.removeObserver(self)
     }
 
-    @objc private func reloadFromCloud() {
+    @objc private func reloadFromCloud(_ note: Notification) {
+        // userInfo["keys"] 是這次雲端拉取實際變更的 key；若有帶入且與本 Store 無關（例如
+        // 只有 FinanceStore/LifeStore 的資料變更），就跳過整批重載，避免圖表等畫面無謂重繪。
+        // 未帶 keys（例如首次同步覆蓋／合併）維持原本全量重載行為。
+        if let keys = note.userInfo?["keys"] as? [String],
+           Set(keys).isDisjoint(with: [saveKey, incomeKey, currencyRatesKey]) {
+            return
+        }
         load()
         modifyID = UUID()
     }

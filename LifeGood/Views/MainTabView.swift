@@ -814,7 +814,8 @@ struct MainTabView: View {
         request.resultTypes = .pointOfInterest
         let search = MKLocalSearch(request: request)
         return await withCheckedContinuation { cont in
-            search.start { resp, _ in
+            search.start { [search] resp, _ in
+                _ = search  // 防止 ARC 在回調完成前提前釋放 search，導致 continuation 永不 resume
                 cont.resume(returning: resp?.mapItems.first)
             }
         }

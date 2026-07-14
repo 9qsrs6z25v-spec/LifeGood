@@ -381,7 +381,10 @@ struct SubordinateRosterView: View {
                 // iOS 17 後援：由偏好值推算水平位移（捲右為負）；iOS 18+ 已由 onScrollGeometryChange
                 // 直接同步 hOffset，此處若繼續生效會與其在同一捲動影格互相覆寫，故僅 iOS 17 以下才採用。
                 guard #unavailable(iOS 18.0) else { return }
-                hOffset = value - nameColWidth
+                // 節流：位移量沒有實質變化（<1pt）就不寫入，避免整個 body 連帶 rows 的
+                // O(人數 × 天數) 棋盤格（含 shiftFor/leaveFor 逐筆掃描）在每個捲動影格都重算一次。
+                let newOffset = value - nameColWidth
+                if abs(newOffset - hOffset) > 1 { hOffset = newOffset }
             }
             .overlay(alignment: .topLeading) {
                 // 凍結表頭：以實際水平捲動量即時平移（hOffset 由捲動內容回報）
@@ -460,7 +463,9 @@ struct SubordinateRosterView: View {
                 geo.contentOffset.x
             } action: { _, x in
                 // 捲右 contentOffset 為正，表頭需往左 → 取負
-                hOffset = -x
+                // 節流：同上，位移量沒有實質變化就不寫入，避免棋盤格在每個捲動影格都重算一次
+                let newOffset = -x
+                if abs(newOffset - hOffset) > 1 { hOffset = newOffset }
             }
         } else {
             content

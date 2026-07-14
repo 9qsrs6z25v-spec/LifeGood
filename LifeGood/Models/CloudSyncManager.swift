@@ -376,10 +376,16 @@ final class CloudSyncManager: ObservableObject {
     @objc private func handleKVChanges(_ note: Notification) {
         // 必須在主執行緒發送通知，避免各 Store 的 reloadFromCloud 在背景執行緒
         // 修改 @Published 屬性造成競態條件
+        // 附帶轉發 CloudKitManager 算出的實際變更 key（userInfo["keys"]），讓各 Store 只在
+        // 自己負責的 key 有異動時才 load()，避免任一 Store 的雲端變更都讓所有 Store 全量重載、
+        // 觸發不相關畫面（圖表／組織圖／行事曆等）不必要的重繪與進場動畫重播。
+        let keys = note.userInfo?["keys"] as? [String]
         DispatchQueue.main.async { [weak self] in
             self?.lastChangeReason = .serverChange
             self?.markSynced()
-            NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
+            var userInfo: [AnyHashable: Any]? = nil
+            if let keys { userInfo = ["keys": keys] }
+            NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil, userInfo: userInfo)
         }
     }
 

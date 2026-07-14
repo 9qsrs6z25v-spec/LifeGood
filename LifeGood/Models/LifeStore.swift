@@ -18,6 +18,14 @@ class LifeStore: ObservableObject {
     private var isLoading = false
     private let saveQueue = DispatchQueue(label: "com.lifegood.lifestore.save", qos: .utility)
 
+    /// 本 Store 負責的所有 UserDefaults key，供 reloadFromCloud 比對 userInfo["keys"] 用
+    private static let ownedKeys: Set<String> = [
+        "life_profile", "life_family", "life_milestones", "life_relationships",
+        "life_pets", "life_schedules", "life_subordinates", "life_departments",
+        "life_grade_titles", "life_business_cards", "life_personal_events",
+        "life_org_people", "life_health_profile"
+    ]
+
     init() {
         load()
         // 用 defer 重置，避免日後在中間加入 guard/return 導致 isLoading 卡死為 true（save() 永久停擺）
@@ -37,7 +45,14 @@ class LifeStore: ObservableObject {
         NotificationCenter.default.removeObserver(self)
     }
 
-    @objc private func reloadFromCloud() {
+    @objc private func reloadFromCloud(_ note: Notification) {
+        // userInfo["keys"] 有帶入且與本 Store 無關時（例如只有 ExpenseStore/FinanceStore 的
+        // 資料變更）跳過重載，避免家庭/組織圖/行事曆等不相關畫面無謂重繪、進場動畫重播；
+        // 未帶 keys（首次同步覆蓋／合併）維持全量重載。
+        if let keys = note.userInfo?["keys"] as? [String],
+           Set(keys).isDisjoint(with: Self.ownedKeys) {
+            return
+        }
         load()
         // backfill 期間暫停 save()，避免剛從雲端拉取就立刻回寫；用 defer 重置，
         // 避免日後在中間加入 guard/return 導致 isLoading 卡死為 true（save() 永久停擺）

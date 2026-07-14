@@ -27,10 +27,16 @@ class FinanceStore: ObservableObject {
         NotificationCenter.default.removeObserver(self)
     }
 
-    @objc private func reloadFromCloud() {
+    @objc private func reloadFromCloud(_ note: Notification) {
         // cloudSyncDidPullChanges 由 CloudSyncManager.handleKVChanges 在 main thread 上 post，
         // 與 LifeStore / ExpenseStore 保持一致：直接呼叫 load()，消除多一個 run-loop 的空窗期，
         // 避免該期間使用者操作觸發 save() 後被雲端資料覆蓋。
+        // userInfo["keys"] 有帶入且與本 Store 無關時（例如只有 ExpenseStore/LifeStore 的資料
+        // 變更）跳過重載，避免不相關畫面無謂重繪；未帶 keys（首次同步覆蓋／合併）維持全量重載。
+        if let keys = note.userInfo?["keys"] as? [String],
+           Set(keys).isDisjoint(with: [insKey, stockKey, vehicleKey, reKey]) {
+            return
+        }
         load()
     }
 
