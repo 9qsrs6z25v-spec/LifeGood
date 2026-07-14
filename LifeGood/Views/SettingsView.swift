@@ -58,8 +58,14 @@ import UniformTypeIdentifiers
 //      改用自訂 label（22pt 漸層圖示圓 + 文字），圖示隨目前啟用中的供應商動態切換
 //      （p.icon），停用時顯示中性 poweroff，對齊緊接在後 providerKeySection 供應商列
 //      的圖示圓規格。純視覺調整，selection binding／AIProvider 判斷邏輯完全未變動。
-//      （下次美化本檔案時，可考慮複查 dataStatsSection 支出記錄區間列的 32pt 純 fill
-//        圖示圓升級為 34–36pt LinearGradient + stroke，對齊全檔案其餘圖示圓規格）
+// [2026-07 v9] dataStatsSection「支出記錄區間」列圖示圓升級（承接 v8 breadcrumb）：
+//  19. 該列圖示原本是 32pt 純 fill(0.12)、全檔案圖示圓唯一未套用 LinearGradient +
+//      stroke 的殘留位置；改為 36pt LinearGradient(0.22→0.09) + Circle().stroke(0.20, 1pt)
+//      + shadow，對齊同結構（icon + 標題/副標 + Spacer）的 settingsActionRow 規格。
+//      純視覺調整，日期區間計算與顯示文字完全未變動。
+//      （SettingsView 全檔案圖示圓規格至此已收斂一致；下次美化本檔案時可轉往複查各
+//        Section footer 說明文字的字級／行距是否有落差，或改往其他仍有未收斂圖示圓
+//        殘留的畫面）
 
 // MARK: - Share Sheet (UIKit bridge)
 
@@ -1168,17 +1174,29 @@ struct SettingsView: View {
             }
 
             // 支出記錄時間區間（若有資料）
+            // [2026-07 v9] 圖示圓 32pt 純 fill(0.12) → 36pt LinearGradient + stroke + shadow，
+            // 對齊 settingsActionRow（icon + 標題/副標 + Spacer 同結構列）圖示圓規格。
             let expDates = store.expenses.map(\.date)
             if let earliest = expDates.min(), let latest = expDates.max() {
                 HStack(spacing: 12) {
                     ZStack {
                         Circle()
-                            .fill(Color.green.opacity(0.12))
-                            .frame(width: 32, height: 32)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.green.opacity(0.22), Color.green.opacity(0.09)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 36, height: 36)
+                        Circle()
+                            .stroke(Color.green.opacity(0.20), lineWidth: 1)
+                            .frame(width: 36, height: 36)
                         Image(systemName: "calendar.badge.clock")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.green)
                     }
+                    .shadow(color: Color.green.opacity(0.15), radius: 4, x: 0, y: 2)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("支出記錄區間")
                             .font(.caption)

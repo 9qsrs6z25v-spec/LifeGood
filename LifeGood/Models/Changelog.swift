@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.17", build: 670, date: "2026/07/14", notes: [
+            "【美化】設定頁（SettingsView）「資料統計」區塊「支出記錄區間」列圖示圓升級：承接 v24.16 留下的待辦事項，該列圖示原本是 32pt 純色填色圓、是全檔案圖示圓唯一還沒套用 LinearGradient + stroke 的殘留位置，與同區塊三模式統計徽章、緊接在後的資料管理／訂閱／iCloud 同步等所有列式圖示視覺落差明顯。改為 36pt LinearGradient 漸層圓 + 描邊 + 陰影，對齊 settingsActionRow（圖示 + 標題/副標 + Spacer 同結構列）既有規格。純視覺調整，支出日期區間計算與顯示文字完全未變動；SettingsView 全檔案圖示圓規格至此已收斂一致。"
+        ]),
         ChangelogEntry(version: "24.16", build: 669, date: "2026/07/14", notes: [
             "【美化】設定頁（SettingsView）「使用中的 AI 服務」Picker 補齊圖示錨點：原本是純文字裸排選單，是 aiAssistantSection 區塊中唯一沒有圖示錨點的列，與緊接在後、v6 已升級的 providerKeySection 供應商列（22pt 漸層圖示圓）視覺落差明顯。改為自訂 label（22pt 紫色漸層圖示圓 + 文字），圖示隨目前啟用中的供應商動態切換，停用時顯示中性 poweroff 圖示。純視覺調整，Picker selection binding／AIProvider 啟用判斷邏輯完全未變動。"
         ]),
