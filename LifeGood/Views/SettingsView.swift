@@ -53,9 +53,13 @@ import UniformTypeIdentifiers
 //      錨點的內容區塊；補上 22pt 漸層圖示圓（waveform，紫色），對齊緊接在後的
 //      providerKeySection 供應商列圖示規格，讓「AI 語音記帳」整組區塊（說明 + 供應商 +
 //      各供應商 Key 列）圖示語言一致。純視覺調整，未動語音辨識／AI 欄位抽取邏輯。
-//      （下次美化本檔案時，可考慮統一 Picker「使用中的 AI 服務」選項列樣式，
-//        或複查 dataStatsSection 支出記錄區間列的 32pt 純 fill 圖示圓升級為 34–36pt
-//        LinearGradient + stroke，對齊全檔案其餘圖示圓規格）
+// [2026-07 v8] 「使用中的 AI 服務」Picker 補齊圖示錨點（承接 v7 breadcrumb）：
+//  18. Picker 原本是純文字裸排選單，是 aiAssistantSection 中唯一沒有圖示錨點的列；
+//      改用自訂 label（22pt 漸層圖示圓 + 文字），圖示隨目前啟用中的供應商動態切換
+//      （p.icon），停用時顯示中性 poweroff，對齊緊接在後 providerKeySection 供應商列
+//      的圖示圓規格。純視覺調整，selection binding／AIProvider 判斷邏輯完全未變動。
+//      （下次美化本檔案時，可考慮複查 dataStatsSection 支出記錄區間列的 32pt 純 fill
+//        圖示圓升級為 34–36pt LinearGradient + stroke，對齊全檔案其餘圖示圓規格）
 
 // MARK: - Share Sheet (UIKit bridge)
 
@@ -920,13 +924,37 @@ struct SettingsView: View {
             .padding(.vertical, 2)
         }
         Section {
-            Picker("使用中的 AI 服務", selection: Binding(
+            // [v8] Picker 補 22pt 漸層圖示圓（隨目前啟用中的供應商變色圖示，
+            // 停用時顯示中性 poweroff），對齊緊接在後的 providerKeySection 供應商列
+            // 規格，消除本列原本是全 aiAssistantSection 唯一沒有圖示錨點的裸排選單。
+            Picker(selection: Binding(
                 get: { aiSettings.activeProvider?.rawValue ?? "" },
                 set: { aiSettings.activeProvider = AIProvider(rawValue: $0) }
             )) {
                 Text("停用").tag("")
                 ForEach(AIProvider.allCases) { p in
                     Label(p.displayName, systemImage: p.icon).tag(p.rawValue)
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.purple.opacity(0.20), Color.purple.opacity(0.08)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 22, height: 22)
+                        Circle()
+                            .stroke(Color.purple.opacity(0.20), lineWidth: 0.75)
+                            .frame(width: 22, height: 22)
+                        Image(systemName: aiSettings.activeProvider?.icon ?? "poweroff")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.purple)
+                    }
+                    Text("使用中的 AI 服務")
                 }
             }
         } header: {

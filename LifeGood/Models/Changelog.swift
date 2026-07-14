@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.16", build: 669, date: "2026/07/14", notes: [
+            "【美化】設定頁（SettingsView）「使用中的 AI 服務」Picker 補齊圖示錨點：原本是純文字裸排選單，是 aiAssistantSection 區塊中唯一沒有圖示錨點的列，與緊接在後、v6 已升級的 providerKeySection 供應商列（22pt 漸層圖示圓）視覺落差明顯。改為自訂 label（22pt 紫色漸層圖示圓 + 文字），圖示隨目前啟用中的供應商動態切換，停用時顯示中性 poweroff 圖示。純視覺調整，Picker selection binding／AIProvider 啟用判斷邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.15", build: 668, date: "2026/07/14", notes: [
             "【美化】個人行事曆事件預覽卡（MyCalendarView.CalendarEventCard）標頭承接上一版留下的待辦事項：titleBlock 原本是裸 48pt icon 圓 + 標題文字直接貼在系統分組背景上，是本檔案（已完成主畫面英雄卡／sectionHeader／PersonalEventEditor Section 標題美化）中唯一還沒接上「閃卡」規格的區塊，與 StockDetailView／SubordinateDetailView 等其他詳情頁的漸層英雄卡（雙散景圓 + 頂部玻璃光澤）視覺落差明顯。改為依事件類型變色的漸層英雄卡：會議＝indigo、事務＝cyan、里程碑＝橘、系統行事曆＝藍、生日＝粉金、紀念日＝玫瑰紅，卡內新增類型 Capsule 徽章（沿用既有 navTitle 文案）+ spring 進場動畫。另新增 heroGradientColors 一組手調深色調漸層，與純顯示用的淺色 accent（icon/欄位/按鈕沿用不變）分開計算，避免 family 粉色系等淺色 accent 直接當滿版背景時白色文字對比不足。純顯示層調整，事件／里程碑／Apple 行事曆／家人紀念日詳情欄位、編輯、開啟系統行事曆等既有商業邏輯完全未變動。"
         ]),
