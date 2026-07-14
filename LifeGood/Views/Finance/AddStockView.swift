@@ -62,6 +62,7 @@ struct AddStockView: View {
     @State private var currentPriceText = ""
     @State private var note = ""
     @State private var showError = false
+    @State private var errorText = "請輸入股票名稱、張數和買入價格"
 
     @State private var isSold = false
     @State private var soldPriceText = ""
@@ -181,7 +182,7 @@ struct AddStockView: View {
 
                 if showError {
                     Section {
-                        errorBanner("請輸入股票名稱、張數和買入價格")
+                        errorBanner(errorText)
                             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -597,14 +598,19 @@ struct AddStockView: View {
         defer { isFetching = false }
 
         if let result = await fetchTWSE(symbol: trimmed, exchange: "tse") {
+            // 使用者可能在等待網路回應期間已把代號改成別的股票，回應回來時要先確認代號沒變才套用，
+            // 避免舊代號的報價套到新代號的欄位上。
+            guard symbol.trimmingCharacters(in: .whitespaces) == trimmed else { return }
             applyQuote(result)
             return
         }
         if let result = await fetchTWSE(symbol: trimmed, exchange: "otc") {
+            guard symbol.trimmingCharacters(in: .whitespaces) == trimmed else { return }
             applyQuote(result)
             return
         }
 
+        guard symbol.trimmingCharacters(in: .whitespaces) == trimmed else { return }
         quote = nil
         fetchError = "查無股票代號 \(trimmed) 的報價"
     }
@@ -958,8 +964,16 @@ struct AddStockView: View {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
               let lots = Double(lotsText), lots > 0,
               let price = Double(purchasePriceText), price > 0 else {
+            errorText = "請輸入股票名稱、張數和買入價格"
             showError = true; return
         }
+        // 已標記「已賣出」卻沒填賣出價格時，(Double(soldPriceText) ?? 0) 會靜默把賣出價當 0，
+        // 存出「賣出價 0、100% 虧損」的錯誤記錄且不提示使用者，這裡改成擋下並要求補填。
+        if isSold, (Double(soldPriceText) ?? 0) <= 0 {
+            errorText = "已標記為賣出，請輸入賣出價格"
+            showError = true; return
+        }
+        showError = false
         let shares = lots * 1000
         let stockId = editing?.id ?? UUID()
         let trimmedName = name.trimmingCharacters(in: .whitespaces)

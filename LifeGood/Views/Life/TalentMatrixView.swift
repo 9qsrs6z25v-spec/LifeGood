@@ -276,6 +276,12 @@ struct TalentMatrixView: View {
                 }
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
+            // 部門篩選變更後 members／ctx 會改用新篩選重新計算，若明細卡仍開著且
+            // 選取的成員不在新篩選範圍內，卡片會顯示用 ?? 0 頂替的空分數、卻仍疊在畫面上，
+            // 呈現自相矛盾的資料，因此篩選一變就先收起明細卡。
+            .onChange(of: deptFilterRaw) { _, _ in
+                selected = nil
+            }
         }
     }
 

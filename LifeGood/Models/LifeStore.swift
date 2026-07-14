@@ -77,7 +77,18 @@ class LifeStore: ObservableObject {
     func update(_ item: FamilyMember) {
         if let i = familyMembers.firstIndex(where: { $0.id == item.id }) { familyMembers[i] = item }
     }
-    func deleteFamilyMember(_ item: FamilyMember) { familyMembers.removeAll { $0.id == item.id } }
+    func deleteFamilyMember(_ item: FamilyMember) {
+        isLoading = true
+        defer { isLoading = false }
+        familyMembers.removeAll { $0.id == item.id }
+        // 解除配偶配對：ResumeView 儲存配偶關係時會雙向寫入 spouseId（見 ResumeView.swift
+        // 附近 "spouseId = memberId" 的配對邏輯），刪除任一方若不清掉另一方的 spouseId，
+        // 會永久指向一筆已不存在的成員 id，比照 deleteSubordinate 解除 linkedSubordinateId 的既有寫法補上。
+        if let i = familyMembers.firstIndex(where: { $0.spouseId == item.id }) {
+            familyMembers[i].spouseId = nil
+        }
+        save()
+    }
 
     // MARK: - 里程碑 CRUD
 
@@ -602,6 +613,15 @@ class LifeStore: ObservableObject {
     }
 
     // MARK: - 清除
+
+    /// 對齊 clearAll() 涵蓋範圍的「本 Store 是否完全沒有資料」判斷，供 SettingsView 危險操作區
+    /// 的「清除所有資料」按鈕啟用/停用依據；沿用同一份欄位清單，避免兩處各自列舉而漏算新分類。
+    var isEmpty: Bool {
+        familyMembers.isEmpty && milestones.isEmpty && relationships.isEmpty &&
+        pets.isEmpty && schedules.isEmpty && subordinates.isEmpty &&
+        departments.isEmpty && gradeTitles.isEmpty && businessCards.isEmpty &&
+        personalEvents.isEmpty && orgPeople.isEmpty && healthProfile.isEmpty
+    }
 
     func clearAll() {
         isLoading = true

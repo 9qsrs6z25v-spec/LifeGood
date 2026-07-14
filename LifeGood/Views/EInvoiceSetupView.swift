@@ -390,8 +390,11 @@ struct EInvoiceSetupView: View {
     }
 
     private func attemptLink() {
+        // 驗證前先 trim：EInvoiceSyncManager.linkCarrier 內部也會 trim 頭尾空白／換行後才存入，
+        // 若這裡驗證用未 trim 的原始輸入，從其他 App 複製貼上帶尾端換行的條碼會被誤判格式錯誤。
+        let trimmedCardNo = inputCardNo.trimmingCharacters(in: .whitespacesAndNewlines)
         let pattern = #"^/[A-Z0-9.\-+]{7}$"#
-        let cardOK = inputCardNo.range(of: pattern, options: .regularExpression) != nil
+        let cardOK = trimmedCardNo.range(of: pattern, options: .regularExpression) != nil
         guard cardOK else {
             linkAlertMessage = "手機條碼格式錯誤，需為「/」開頭加 7 碼大寫英數，例如：/ABC1234"
             showLinkAlert = true

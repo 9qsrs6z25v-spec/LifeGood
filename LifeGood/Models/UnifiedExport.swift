@@ -473,7 +473,9 @@ enum UnifiedImporter {
                 let newRates = mergeItems(existing: expense.currencyRates, incoming: rates)
                 expense.currencyRates.append(contentsOf: newRates)
             }
-            if let profile = payload.life.profile { life.profile = profile }
+            // 個人檔案為單一物件：合併模式僅在本機尚無資料時填入，避免匯入別人的備份就把
+            // 自己的姓名/生日等個人資料覆蓋掉；比照下方健康檔案既有的合併寫法。
+            if let profile = payload.life.profile, life.profile.isEmpty { life.profile = profile }
             // 健康檔案為單一物件：合併模式僅在本機尚無資料時填入，避免覆蓋既有健康檔案
             if let hp = payload.life.healthProfile, life.healthProfile.isEmpty { life.healthProfile = hp }
             if let members = payload.life.familyMembers {

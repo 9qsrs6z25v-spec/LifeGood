@@ -1435,7 +1435,7 @@ struct FinanceCardView: View {
                 Text("尚無存款記錄").font(.caption).foregroundStyle(.tertiary)
                     .padding(.horizontal, 16).padding(.bottom, 14)
             } else {
-                depositChart
+                depositChart(allDeposits)
                     .padding(.horizontal).padding(.bottom, 8)
 
                 let sortedDesc = allDeposits.sorted { $0.date > $1.date }
@@ -1477,8 +1477,9 @@ struct FinanceCardView: View {
         let amount: Double
     }
 
-    private var creditCardMonthlyTotals: [CreditCardMonthlyTotal] {
-        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+    /// 接收呼叫端（creditCardChartSection）已算好的 entries，避免每次都重新呼叫
+    /// expandedCreditCardEntries 展開週期性支出（O(每筆固定支出 × 期數)）。
+    private func creditCardMonthlyTotals(_ entries: [CreditCardEntry]) -> [CreditCardMonthlyTotal] {
         let groups = Dictionary(grouping: entries) { entry -> String in
             let withdrawalDate = LifeMilestone.creditCardWithdrawalDate(
                 for: entry.date,
@@ -1508,8 +1509,8 @@ struct FinanceCardView: View {
         let amount: Double
     }
 
-    private var creditCardDailyTotals: [CreditCardDailyTotal] {
-        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+    /// 接收呼叫端（creditCardChartSection）已算好的 entries，理由同 creditCardMonthlyTotals(_:)。
+    private func creditCardDailyTotals(_ entries: [CreditCardEntry]) -> [CreditCardDailyTotal] {
         let calendar = Calendar.current
         let groups = Dictionary(grouping: entries) { entry -> String in
             let comps = calendar.dateComponents([.year, .month, .day], from: entry.date)
@@ -1532,8 +1533,10 @@ struct FinanceCardView: View {
     }
 
     private var creditCardChartSection: some View {
-        // 預先求值一次，避免同一 body 內兩次呼叫各自重算所有展開條目
-        let dailyTotals = creditCardDailyTotals
+        // 預先求值一次 entries／dailyTotals，往下傳給 creditCardChart／creditCardMonthlyTotals，
+        // 避免三處各自重新呼叫 expandedCreditCardEntries 展開週期性支出。
+        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+        let dailyTotals = creditCardDailyTotals(entries)
         return VStack(alignment: .leading, spacing: 0) {
             // 標題列：Capsule 側條（橙色）+ 筆數膠囊，對齊 depositSection 標題規格
             HStack(spacing: 10) {
@@ -1565,11 +1568,11 @@ struct FinanceCardView: View {
                 Text("尚無扣款記錄").font(.caption).foregroundStyle(.tertiary)
                     .padding(.horizontal).padding(.bottom, 12)
             } else {
-                creditCardChart
+                creditCardChart(dailyTotals)
                     .padding(.horizontal).padding(.bottom, 8)
 
                 // 最近一期加總
-                if let last = creditCardMonthlyTotals.last {
+                if let last = creditCardMonthlyTotals(entries).last {
                     HStack {
                         Text("最近一期").font(.caption).foregroundStyle(.secondary)
                         Spacer()
@@ -1664,8 +1667,7 @@ struct FinanceCardView: View {
     }
 
     /// 把整串資料切成每頁 30 筆（由舊到新，最後一頁可能不足 30 筆）
-    private var creditCardChartPages: [[CreditCardDailyTotal]] {
-        let data = creditCardDailyTotals
+    private func creditCardChartPages(_ data: [CreditCardDailyTotal]) -> [[CreditCardDailyTotal]] {
         guard !data.isEmpty else { return [] }
         let pageSize = 30
         var pages: [[CreditCardDailyTotal]] = []
@@ -1681,8 +1683,8 @@ struct FinanceCardView: View {
     @State private var chartCurrentPage: Int = 0
 
     @ViewBuilder
-    private var creditCardChart: some View {
-        let pages = creditCardChartPages
+    private func creditCardChart(_ dailyTotals: [CreditCardDailyTotal]) -> some View {
+        let pages = creditCardChartPages(dailyTotals)
         if pages.isEmpty {
             EmptyView()
         } else {
@@ -2048,8 +2050,9 @@ struct FinanceCardView: View {
 
     @State private var depositChartPage: Int = 0
 
-    private var depositChart: some View {
-        let data = deposits
+    /// 接收呼叫端（depositSection）已算好的 deposits，避免各自獨立重算一次 deposits
+    /// （expensesById／incomesById 建表 + 固定支出／週期性收入展開，屬於較重的計算）。
+    private func depositChart(_ data: [BankDeposit]) -> some View {
         // 混幣帳戶（例如台幣存款 + 美金提款）一律換算 TWD 後再累計，
         // 避免外幣提款被當成台幣金額直接相減；單一幣別則保留原幣別不換算。
         let currencies = Set(data.map(\.currencyCode))

@@ -20,6 +20,11 @@ struct UserProfile: Codable {
         self.jobTitle = jobTitle
         self.spouse = spouse
     }
+
+    /// 是否完全空白（供匯入合併模式判斷是否可安全覆蓋，避免清空使用者既有的個人資料）
+    var isEmpty: Bool {
+        chineseName.isEmpty && englishName.isEmpty && company.isEmpty && jobTitle.isEmpty && spouse.isEmpty
+    }
 }
 
 // MARK: - 家庭成員

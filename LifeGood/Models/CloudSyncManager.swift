@@ -238,7 +238,15 @@ final class CloudSyncManager: ObservableObject {
             break
         case .overwriteLocal:
             // 用雲端覆蓋本機：把預讀到的雲端資料寫回本機，再通知各 Store 重載
-            for (key, data) in cloudBlobs { defaults.set(data, forKey: key) }
+            // 雲端從未寫入過的 key（例如另一台裝置從未使用過的資料類別）也要一併清空本機，
+            // 否則「覆蓋本機」只會覆蓋雲端已有的類別，其餘本機舊資料會殘留並在下方 pushAllKV 時被誤傳回雲端。
+            for key in Self.syncKeys {
+                if let data = cloudBlobs[key] {
+                    defaults.set(data, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
             NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
         case .mergeLocalWins, .mergeCloudWins:
             let localWins = (choice == .mergeLocalWins)

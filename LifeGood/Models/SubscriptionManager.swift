@@ -117,6 +117,7 @@ final class SubscriptionManager: ObservableObject {
 
     @MainActor
     func purchase(_ product: Product) async {
+        guard !purchaseInProgress else { return }
         purchaseInProgress = true
         defer { purchaseInProgress = false }
 

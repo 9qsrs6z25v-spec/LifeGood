@@ -1333,11 +1333,13 @@ struct SettingsView: View {
     }
 
     private var isAllDataEmpty: Bool {
+        // lifeStore.isEmpty 涵蓋 clearAll() 會清空的完整欄位清單（含 familyMembers／subordinates／
+        // departments／businessCards／healthProfile 等），避免像先前只列舉 milestones/relationships/
+        // pets/schedules 四類，漏掉其餘分類導致使用者明明有資料、按鈕卻被誤判為禁用。
         store.expenses.isEmpty && store.incomes.isEmpty &&
         financeStore.insurances.isEmpty && financeStore.stocks.isEmpty &&
         financeStore.vehicles.isEmpty && financeStore.realEstates.isEmpty &&
-        lifeStore.milestones.isEmpty && lifeStore.relationships.isEmpty &&
-        lifeStore.pets.isEmpty && lifeStore.schedules.isEmpty
+        lifeStore.isEmpty
     }
 
     // MARK: - 行動列輔助（v3：36pt 漸層圖示圓 + 雙行文字）

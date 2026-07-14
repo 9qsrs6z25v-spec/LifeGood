@@ -215,13 +215,14 @@ struct RenovationPhotoEditor: View {
         DispatchQueue.main.async { financeStore.update(estate) }
     }
 
-    /// 取消時若是新增模式，只清除本次 session 新增的檔案；preloadedFileNames 是呼叫方傳入的，不刪
+    /// 取消時只清除本次 session 新增、尚未存檔的檔案；「原本就有」的基準線視新增／編輯模式而定：
+    /// 新增模式是呼叫端傳入的 preloadedFileNames，編輯模式則是 editing 進來時的 e.photoFileNames——
+    /// 過去編輯模式完全不清檔案（只判斷 editing == nil），使用者編輯既有紀錄時新加照片後按取消，
+    /// 該照片檔會留在磁碟／iCloud 卻不再被任何紀錄引用，變成永久孤兒檔案。
     private func cancel() {
-        if editing == nil {
-            let preloaded = Set(preloadedFileNames)
-            for name in photoFileNames where !preloaded.contains(name) {
-                RenovationPhoto.deletePhoto(name)
-            }
+        let original = Set(editing?.photoFileNames ?? preloadedFileNames)
+        for name in photoFileNames where !original.contains(name) {
+            RenovationPhoto.deletePhoto(name)
         }
         dismiss()
     }
@@ -229,7 +230,11 @@ struct RenovationPhotoEditor: View {
     private func deleteRecord() {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let e = editing else { return }
-        for name in e.photoFileNames {
+        // 刪除目前畫面上仍列出的 photoFileNames（即時狀態），而非 e.photoFileNames 這份進入編輯畫面時
+        // 的舊快照：編輯過程中新增的照片只存在於 photoFileNames，用舊快照刪除會漏刪這些孤兒檔案
+        // （使用者移除照片時 MultiPhotoGallery 的 onDeleteFile 已即時刪檔並同步移出 photoFileNames，
+        // 不會重複刪除已移除的項目）。
+        for name in photoFileNames {
             RenovationPhoto.deletePhoto(name)
         }
         estate.renovationPhotos.removeAll { $0.id == e.id }

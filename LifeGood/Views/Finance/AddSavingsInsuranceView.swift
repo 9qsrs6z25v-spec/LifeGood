@@ -570,7 +570,8 @@ struct AddSavingsInsuranceView: View {
             recurrence: paymentPeriod,
             insuranceSubCategory: .savings,
             linkedInsuranceId: insuranceId,
-            note: note
+            note: note,
+            currencyCode: currencyCode
         )
 
         if existingExpenseId != nil {
