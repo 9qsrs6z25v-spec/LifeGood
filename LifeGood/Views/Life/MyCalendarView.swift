@@ -1446,8 +1446,20 @@ struct MyCalendarView: View {
 //    對齊本檔案 eventRow／CalendarEventCard 既有的會議＝indigo、事務＝cyan 配色；
 //    「基本資訊」標題圖示也隨 kind.icon 同步切換，備註區沿用全 App 一致的中性灰。
 // ③ 純視覺層調整，未變動任何新增／編輯／刪除／Apple 行事曆同步／通知排程等既有商業邏輯。
-// （下次美化本檔案時，可考慮：CalendarEventCard 預覽卡片補齊玻璃光澤與散景圓，
-//   對齊 StockDetailView／SubordinateDetailView 等其他閃卡規格）
+//
+// [2026-07 v2] 本次美化方向（承接上方待辦：CalendarEventCard 預覽卡片）：
+// ④ titleBlock：從裸 icon 圓 + 標題文字，升級為依事件類型變色的漸層英雄卡
+//    （會議＝indigo／事務＝cyan／里程碑＝橘／系統行事曆＝藍／生日＝粉金／紀念日＝玫瑰紅），
+//    補齊雙散景圓 + 頂部玻璃光澤，對齊 StockDetailView／SubordinateDetailView 等其他
+//    「閃卡」詳情頁英雄卡規格；卡內另加類型 Capsule 徽章（沿用 navTitle 文案）。
+// ⑤ 新增 heroGradientColors：與純顯示用的淺色 accent（icon/欄位/按鈕沿用不變）分開，
+//    改用手調深色調兩色，避免 family 粉色系等淺色 accent 直接當滿版背景時白字對比不足。
+// ⑥ 新增 cardAppeared 進場動畫（spring 淡入 + Y 位移 14pt），對齊全 App detail sheet
+//    開啟時的英雄卡進場規格。
+// ⑦ 純顯示層調整，未變動事件／里程碑／Apple 行事曆／家人紀念日詳情欄位、編輯、
+//    開啟系統行事曆等既有商業邏輯。
+// （下次美化本檔案時，可考慮：infoCard／noteBlock 欄位列補齊 Capsule 側條 section header，
+//   對齊本檔案 PersonalEventEditor.editorSectionHeader 規格）
 
 struct PersonalEventEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -2042,6 +2054,8 @@ struct CalendarEventCard: View {
     @Environment(\.dismiss) private var dismiss
     let item: Item
     @State private var showEdit = false
+    // [v2] titleBlock 英雄卡進場動畫旗標
+    @State private var cardAppeared = false
 
     private static let dtFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
@@ -2156,17 +2170,85 @@ struct CalendarEventCard: View {
         }
     }
 
+    /// [v2] 依事件類型變色的深色調漸層（top→bottom），供 titleBlock 英雄卡背景使用；
+    /// 與純顯示用的淺色 accent（icon/欄位/按鈕）分開，避免淺色系（如 family 粉色系）
+    /// 直接當滿版背景時白色文字對比不足。
+    private var heroGradientColors: (top: Color, bottom: Color) {
+        switch item {
+        case .personalEvent(let e):
+            return e.kind == .meeting
+                ? (Color(red: 0.36, green: 0.32, blue: 0.86), Color(red: 0.20, green: 0.42, blue: 0.90))
+                : (Color(red: 0.10, green: 0.62, blue: 0.70), Color(red: 0.04, green: 0.46, blue: 0.56))
+        case .milestone:
+            return (Color(red: 1.00, green: 0.62, blue: 0.28), Color(red: 0.88, green: 0.38, blue: 0.05))
+        case .appleEvent:
+            return (Color(red: 0.32, green: 0.56, blue: 0.95), Color(red: 0.14, green: 0.38, blue: 0.85))
+        case .family(_, _, let isBirthday):
+            return isBirthday
+                ? (Color(red: 0.98, green: 0.55, blue: 0.62), Color(red: 0.88, green: 0.30, blue: 0.42))
+                : (Color(red: 0.92, green: 0.45, blue: 0.55), Color(red: 0.75, green: 0.22, blue: 0.35))
+        }
+    }
+
+    /// [v2] 從裸 icon + 標題文字，升級為依類型變色的漸層英雄卡（雙散景圓 + 頂部玻璃光澤），
+    /// 對齊 StockDetailView／SubordinateDetailView 等其他「閃卡」詳情頁英雄卡規格。
     private var titleBlock: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             ZStack {
                 Circle()
-                    .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.09)],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 48, height: 48)
-                Image(systemName: icon).font(.system(size: 20, weight: .semibold)).foregroundStyle(accent)
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 52, height: 52)
+                Circle()
+                    .stroke(.white.opacity(0.40), lineWidth: 1.25)
+                    .frame(width: 52, height: 52)
+                Image(systemName: icon)
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(.white)
             }
-            Text(titleText).font(.title3.weight(.bold)).lineLimit(2)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(navTitle)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(.white.opacity(0.18))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.6))
+                Text(titleText)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+            }
             Spacer(minLength: 0)
+        }
+        .padding(18)
+        .background(
+            ZStack {
+                LinearGradient(colors: [heroGradientColors.top, heroGradientColors.bottom],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Circle()
+                    .fill(.white.opacity(0.10))
+                    .frame(width: 110, height: 110)
+                    .blur(radius: 16)
+                    .offset(x: 75, y: -40)
+                    .allowsHitTesting(false)
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 70, height: 70)
+                    .blur(radius: 11)
+                    .offset(x: -55, y: 40)
+                    .allowsHitTesting(false)
+                LinearGradient(colors: [.white.opacity(0.18), .clear],
+                               startPoint: .top, endPoint: .center)
+                    .allowsHitTesting(false)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: heroGradientColors.bottom.opacity(0.35), radius: 14, x: 0, y: 7)
+        .opacity(cardAppeared ? 1 : 0)
+        .offset(y: cardAppeared ? 0 : 14)
+        .onAppear {
+            withAnimation(.spring(response: 0.50, dampingFraction: 0.78)) { cardAppeared = true }
         }
     }
 

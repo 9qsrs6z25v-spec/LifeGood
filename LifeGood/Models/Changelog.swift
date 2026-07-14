@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.15", build: 668, date: "2026/07/14", notes: [
+            "【美化】個人行事曆事件預覽卡（MyCalendarView.CalendarEventCard）標頭承接上一版留下的待辦事項：titleBlock 原本是裸 48pt icon 圓 + 標題文字直接貼在系統分組背景上，是本檔案（已完成主畫面英雄卡／sectionHeader／PersonalEventEditor Section 標題美化）中唯一還沒接上「閃卡」規格的區塊，與 StockDetailView／SubordinateDetailView 等其他詳情頁的漸層英雄卡（雙散景圓 + 頂部玻璃光澤）視覺落差明顯。改為依事件類型變色的漸層英雄卡：會議＝indigo、事務＝cyan、里程碑＝橘、系統行事曆＝藍、生日＝粉金、紀念日＝玫瑰紅，卡內新增類型 Capsule 徽章（沿用既有 navTitle 文案）+ spring 進場動畫。另新增 heroGradientColors 一組手調深色調漸層，與純顯示用的淺色 accent（icon/欄位/按鈕沿用不變）分開計算，避免 family 粉色系等淺色 accent 直接當滿版背景時白色文字對比不足。純顯示層調整，事件／里程碑／Apple 行事曆／家人紀念日詳情欄位、編輯、開啟系統行事曆等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.14", build: 667, date: "2026/07/13", notes: [
             "【靜態除錯 v24.14：修復 1 處真實 Bug】三路並行複查全部 83 個 Swift 檔案（Models 24 個／Finance Views 23 個／Life Views 及主要進入點 35 個），聚焦 force unwrap／as!／try!／陣列越界、retain cycle、非同步覆寫競態、CloudKit 30 秒節流是否遭繞過、O(n²) 迴圈與可快取的重複運算。RealEstateView.deleteEstate（不動產列表滑動刪除）收集貸款／已支出／變動支出／保險／資產／買賣關聯支出 ID 後直接 `expenseStore.expenses.removeAll`，卻漏了刪除這些 Expense 上透過 AddExpenseView 附加的收據照片檔案——同一份資料模型在 RealEstateDetailView.deleteEstate（詳細頁刪除路徑）、VehicleView／VehicleDetailView、SavingsInsuranceView、StockView 等五處對等刪除路徑都已在刪除紀錄前先跑 `for name in exp.photoFileNames { Expense.deletePhoto(name) }`，唯獨列表頁滑動刪除這條路徑遺漏，導致從列表直接刪除不動產時，關聯支出的收據照片變成無法再被存取、也無從清除的孤兒檔案，長期占用裝置儲存空間。已補上與其餘五處一致的照片清除迴圈。Models 群組（24 檔）與 Life Views 群組（35 檔）複查後確認無新問題：force unwrap／as!／try! 全數為零、陣列刪除皆採「先建快照／id 比對」安全模式、Coordinator／Timer／NotificationCenter 閉包 [weak self] 捕捉與 deinit 清理正確、CloudKit isSyncing 並行守衛與 30 秒節流／2 秒防抖未被繞過、v24.12／v24.13 既有修復（9 處 savePhoto／saveSketch 回傳 nil、SubordinateRosterView 凍結表頭 iOS 18 版本守衛）均維持正確且無回歸。"
         ]),
