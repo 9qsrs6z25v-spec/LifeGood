@@ -1,5 +1,15 @@
 import SwiftUI
 
+// MARK: - 🎨 美化說明（v16.78）
+// 本次美化聚焦「新增/編輯收入」表單，對齊 IncomeView 列表頁的視覺語言：
+// 1. Section 標題改用 iOS Settings 風格的漸層色圖示徽章（sectionHeader），與 SettingsView 一致
+// 2. 金額欄位升級為「Hero 數字」樣式：NT$ 徽章 + 大號等寬圓體數字，強化輸入焦點
+// 3. 分類 Picker 圖示改為分類色，色碼與 IncomeView.incomeCategoryColor 對齊（薪水綠/獎金橙/禮金粉/確幸紫/投資藍）
+// 4. 試算金額（月/年等效收入、年薪估計）達一萬以上時，加註「萬/億」量級摘要，避免長串數字閱讀困難
+// 5. 固定薪水說明、錯誤訊息改為色底膠囊卡片，取代純文字，強化狀態辨識度
+// 6. 長字串（銀行標籤、自動標題）加上 minimumScaleFactor，避免大字被裁切但不小到無法辨識
+// 7. 關閉按鈕維持左上角「取消」、儲存按鈕右上角綠色粗體，符合全 App 一致的視窗操作慣例
+// 未變動：所有欄位驗證、儲存邏輯、銀行存款同步（syncBankDeposit）等商業邏輯原封不動
 struct AddIncomeView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var lifeStore: LifeStore
@@ -52,6 +62,42 @@ struct AddIncomeView: View {
         return "未選擇"
     }
 
+    /// 分類色碼，需與 IncomeView.incomeCategoryColor 保持一致
+    private func categoryColor(_ category: IncomeCategory) -> Color {
+        switch category {
+        case .salary:     return Color(red: 0.16, green: 0.74, blue: 0.50)
+        case .bonus:      return Color(red: 1.00, green: 0.72, blue: 0.18)
+        case .gift:       return Color(red: 1.00, green: 0.35, blue: 0.55)
+        case .luck:       return Color(red: 0.68, green: 0.40, blue: 1.00)
+        case .investment: return Color(red: 0.27, green: 0.67, blue: 0.99)
+        }
+    }
+
+    /// Section 標題：漸層色圖示徽章 + 文字，對齊 SettingsView 的區塊標題樣式
+    @ViewBuilder
+    private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [color, color.opacity(0.78)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 22, height: 22)
+                    .shadow(color: color.opacity(0.35), radius: 3, x: 0, y: 1.5)
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            Text(title)
+        }
+        .textCase(nil)
+    }
+
     @ViewBuilder
     private var bankPicker: some View {
         HStack {
@@ -85,6 +131,8 @@ struct AddIncomeView: View {
                 HStack(spacing: 4) {
                     Text(bankPickerLabel)
                         .foregroundStyle(selectedBankMilestoneId == nil ? .secondary : .primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
                 }
             }
@@ -94,53 +142,65 @@ struct AddIncomeView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     if isSalary {
                         TextField("自訂文字（如公司名）", text: $salaryLabel)
                         HStack {
                             Text("標題").foregroundStyle(.secondary)
                             Spacer()
-                            Text(autoSalaryTitle).foregroundStyle(.primary)
+                            Text(autoSalaryTitle)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                     } else {
                         TextField("名稱", text: $title)
                     }
 
-                    HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("金額", text: $amountText).keyboardType(.decimalPad)
+                    HStack(spacing: 8) {
+                        Text("NT$")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.green.opacity(0.12))
+                            .clipShape(Capsule())
+                        TextField("金額", text: $amountText)
+                            .keyboardType(.decimalPad)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .minimumScaleFactor(0.6)
                     }
+                    .padding(.vertical, 2)
+
                     if !bankMilestones.isEmpty {
                         bankPicker
                     }
                     DatePicker("日期", selection: $date, displayedComponents: .date)
+                } header: {
+                    sectionHeader("基本資訊", icon: "doc.text.fill", color: .blue)
                 }
 
-                Section("分類") {
+                Section {
                     Picker("類別", selection: $category) {
                         ForEach(IncomeCategory.allCases) { cat in
-                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                            Label {
+                                Text(cat.rawValue)
+                            } icon: {
+                                Image(systemName: cat.icon)
+                                    .foregroundStyle(categoryColor(cat))
+                            }
+                            .tag(cat)
                         }
                     }
 
                     if isSalary {
                         Toggle("固定薪水", isOn: $isFixedSalary)
 
-                        if isFixedSalary {
-                            HStack {
-                                Image(systemName: "arrow.clockwise")
-                                    .foregroundStyle(.blue)
-                                Text("每月自動計入收入")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        } else {
-                            HStack {
-                                Image(systemName: "1.circle")
-                                    .foregroundStyle(.orange)
-                                Text("僅計入當月，不重複計算")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
+                        infoBanner(
+                            icon: isFixedSalary ? "arrow.clockwise" : "1.circle.fill",
+                            text: isFixedSalary ? "每月自動計入收入" : "僅計入當月，不重複計算",
+                            color: isFixedSalary ? .blue : .orange
+                        )
                     } else {
                         Picker("週期", selection: $period) {
                             ForEach(IncomePeriod.allCases) { p in
@@ -148,42 +208,41 @@ struct AddIncomeView: View {
                             }
                         }
                     }
+                } header: {
+                    sectionHeader("分類", icon: "tag.fill", color: categoryColor(category))
                 }
 
                 if !isSalary && period != .once {
-                    Section("試算") {
+                    Section {
                         if let amount = Double(amountText), amount > 0 {
                             let monthly = period == .monthly ? amount : amount / 12
-                            HStack {
-                                Text("月等效收入"); Spacer()
-                                Text(formatCurrency(monthly)).foregroundStyle(.green)
-                            }
-                            HStack {
-                                Text("年等效收入"); Spacer()
-                                Text(formatCurrency(monthly * 12)).foregroundStyle(.green)
-                            }
+                            estimateRow(title: "月等效收入", amount: monthly)
+                            estimateRow(title: "年等效收入", amount: monthly * 12)
                         }
+                    } header: {
+                        sectionHeader("試算", icon: "function", color: .green)
                     }
                 }
 
                 if isSalary, isFixedSalary {
-                    Section("試算") {
+                    Section {
                         if let amount = Double(amountText), amount > 0 {
-                            HStack {
-                                Text("年薪估計"); Spacer()
-                                Text(formatCurrency(amount * 12)).foregroundStyle(.green)
-                            }
+                            estimateRow(title: "年薪估計", amount: amount * 12)
                         }
+                    } header: {
+                        sectionHeader("試算", icon: "function", color: .green)
                     }
                 }
 
-                Section("備註") {
+                Section {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                } header: {
+                    sectionHeader("備註", icon: "note.text", color: .gray)
                 }
 
                 if showError {
                     Section {
-                        Text("請輸入有效金額").foregroundStyle(.red).font(.caption)
+                        infoBanner(icon: "exclamationmark.triangle.fill", text: "請輸入有效金額", color: .red)
                     }
                 }
             }
@@ -303,5 +362,49 @@ struct AddIncomeView: View {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: value)) ?? "NT$0"
+    }
+
+    /// 萬/億量級縮寫，達一萬以上才顯示（與 FinanceOverviewView.fmtShort 邏輯一致）
+    private func fmtShort(_ value: Double) -> String? {
+        if value >= 100_000_000 { return String(format: "%.1f億", value / 100_000_000) }
+        if value >= 10_000 { return String(format: "%.1f萬", value / 10_000) }
+        return nil
+    }
+
+    /// 試算列：金額 + 達一萬以上時附加萬/億量級摘要，避免長串數字閱讀困難
+    @ViewBuilder
+    private func estimateRow(title: String, amount: Double) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(formatCurrency(amount))
+                    .foregroundStyle(.green)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                if let short = fmtShort(amount) {
+                    Text("≈ \(short)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// 色底提示卡片，取代純文字說明／錯誤訊息，強化狀態辨識度
+    @ViewBuilder
+    private func infoBanner(icon: String, text: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(color)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(color)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(color.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
