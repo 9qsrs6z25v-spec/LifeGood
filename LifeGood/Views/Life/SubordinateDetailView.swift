@@ -971,7 +971,8 @@ struct SubordinateDetailView: View {
             Spacer(minLength: 0)
 
             if let due = item.dueDate {
-                Text(formatDate(due))
+                let c = Calendar.current.dateComponents([.hour, .minute], from: due)
+                Text((c.hour == 0 && c.minute == 0) ? formatDate(due) : formatDateTime(due))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
@@ -1804,10 +1805,27 @@ struct MeetingEditorSheet: View {
                                 Text("未指定").tag(nil as UUID?)
                                 ForEach(allSubordinates) { s in Text(s.name).tag(s.id as UUID?) }
                             }
-                            DatePicker("截止日", selection: Binding(
-                                get: { item.dueDate ?? Date() },
-                                set: { $item.wrappedValue.dueDate = $0 }
-                            ), displayedComponents: .date)
+                            Toggle("設定截止時間", isOn: Binding(
+                                get: { item.dueDate != nil },
+                                set: { $item.wrappedValue.dueDate = $0 ? (item.dueDate ?? FiveMinuteDateTimePicker.defaultSchedulingTime()) : nil }
+                            ))
+                            if item.dueDate != nil {
+                                DatePicker("截止", selection: Binding(
+                                    get: { item.dueDate ?? Date() },
+                                    set: { $item.wrappedValue.dueDate = $0 }
+                                ), displayedComponents: [.date, .hourAndMinute])
+                            }
+                            Toggle(isOn: Binding(
+                                get: { item.isCompleted },
+                                set: { newVal in
+                                    $item.wrappedValue.isCompleted = newVal
+                                    $item.wrappedValue.completedAt = newVal ? (item.completedAt ?? Date()) : nil
+                                }
+                            )) {
+                                Label(item.isCompleted ? "已完成" : "未完成",
+                                      systemImage: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(item.isCompleted ? .green : .secondary)
+                            }
                         }
                     }
                     Button { items.append(MeetingItem()) } label: {
@@ -2439,6 +2457,14 @@ struct SubordinateItemCard: View {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
     }()
     private func fmt(_ d: Date) -> String { Self.dateFmt.string(from: d) }
+    private static let dateOnlyFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E)"; return f
+    }()
+    /// 有設定時間（非午夜 00:00）才顯示時分，否則僅顯示日期。
+    private func fmtDue(_ d: Date) -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+        return (c.hour == 0 && c.minute == 0) ? Self.dateOnlyFmt.string(from: d) : Self.dateFmt.string(from: d)
+    }
 
     var body: some View {
         NavigationStack {
@@ -2507,10 +2533,27 @@ struct SubordinateItemCard: View {
                     Text("議程項目").font(.caption).foregroundStyle(.secondary)
                     ForEach(m.items) { item in
                         HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 13)).foregroundStyle(item.isCompleted ? .green : .indigo)
-                            Text(MentionText.attributed(item.content.isEmpty ? "未填內容" : item.content, people: people))
-                                .font(.subheadline).tint(.blue)
+                            Button {
+                                lifeStore.toggleMeetingItemCompletion(subordinateId: subId, meetingId: m.id, itemId: item.id)
+                            } label: {
+                                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 15)).foregroundStyle(item.isCompleted ? .green : .indigo)
+                            }
+                            .buttonStyle(.plain)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(MentionText.attributed(item.content.isEmpty ? "未填內容" : item.content, people: people))
+                                    .font(.subheadline).tint(.blue)
+                                    .strikethrough(item.isCompleted, color: .secondary)
+                                    .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                                if let due = item.dueDate {
+                                    Label(fmtDue(due), systemImage: "clock")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                            if item.isCompleted, let at = item.completedAt {
+                                Text(fmtDue(at)).font(.caption2).foregroundStyle(.green)
+                            }
                         }
                     }
                 }

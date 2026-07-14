@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.18", build: 671, date: "2026/07/14", notes: [
+            "【功能】部屬會議議程項目（MeetingItem）新增「截止時間」與「完成開關」：① 過去會議項目的截止日只能選日期（DatePicker 為 .date），現在編輯會議畫面（MeetingEditorSheet）每個議程項目改為「設定截止時間」Toggle + 日期時間選擇器（displayedComponents 由 .date 改為 [.date, .hourAndMinute]），可精確到時分；未開啟 Toggle 則不設截止（dueDate = nil），開啟時預設帶入排程時段（FiveMinuteDateTimePicker.defaultSchedulingTime）。② 議程項目的完成與否，過去只能在部屬詳細頁的議程列表勾選，現在編輯會議畫面每個項目也各有一個「已完成／未完成」Toggle，切換時同步寫入 completedAt（開啟＝當下時間、關閉＝清空）。③ 會議預覽卡（SubordinateItemCard 的 .meeting 分支）原本議程項目的勾選圖示是唯讀靜態圖示，現改為可點擊按鈕，直接呼叫 lifeStore.toggleMeetingItemCompletion 切換完成狀態，並在項目下方以時鐘圖示顯示截止時間（僅設有時間時顯示時分、午夜 00:00 則僅顯示日期）、已完成項目右側顯示完成時間並套刪節線。詳細頁議程列（meetingItemRow）的截止時間顯示同步改為有時分才顯示時分、否則僅日期，三處顯示邏輯一致。"
+        ]),
         ChangelogEntry(version: "24.17", build: 670, date: "2026/07/14", notes: [
             "【美化】設定頁（SettingsView）「資料統計」區塊「支出記錄區間」列圖示圓升級：承接 v24.16 留下的待辦事項，該列圖示原本是 32pt 純色填色圓、是全檔案圖示圓唯一還沒套用 LinearGradient + stroke 的殘留位置，與同區塊三模式統計徽章、緊接在後的資料管理／訂閱／iCloud 同步等所有列式圖示視覺落差明顯。改為 36pt LinearGradient 漸層圓 + 描邊 + 陰影，對齊 settingsActionRow（圖示 + 標題/副標 + Spacer 同結構列）既有規格。純視覺調整，支出日期區間計算與顯示文字完全未變動；SettingsView 全檔案圖示圓規格至此已收斂一致。"
         ]),
