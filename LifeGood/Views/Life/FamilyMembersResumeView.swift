@@ -1050,10 +1050,18 @@ struct FamilyAlbumPhotoEditor: View {
     @State private var note: String = ""
     @State private var photoFileName: String?
     @State private var pendingImageData: Data?
+    // 快取解碼結果，避免 body 直接對 pendingImageData 呼叫 UIImage(data:)：
+    // 標題／備註每次按鍵都會觸發 Form body 重新求值，若解碼寫在 body 裡就等於
+    // 每次按鍵都在主執行緒重新解碼一次完整 JPEG（同型修復見 OrgPersonEditor.pendingImage）。
+    @State private var pendingImage: UIImage?
     @State private var photoItem: PhotosPickerItem?
     @State private var showCamera: Bool = false
     @State private var showDeleteConfirm: Bool = false
     @State private var isPresentingPhotoPicker: Bool = false
+    // 選取照片是非同步的，若使用者在等待期間又重新選了一次（或移除照片），
+    // 較慢完成的前一次選取不該覆蓋較新的狀態；用世代編號判斷是否仍是最新一次選取
+    // （同型修復見 OrgPersonEditor.photoLoadGeneration）。
+    @State private var photoLoadGeneration = 0
 
     var body: some View {
         NavigationStack {
@@ -1064,7 +1072,7 @@ struct FamilyAlbumPhotoEditor: View {
                 }
 
                 Section("照片") {
-                    if let data = pendingImageData, let img = UIImage(data: data) {
+                    if let img = pendingImage {
                         Image(uiImage: img)
                             .resizable().scaledToFit()
                             .frame(maxWidth: .infinity, maxHeight: 240)
@@ -1100,7 +1108,11 @@ struct FamilyAlbumPhotoEditor: View {
 
                     if pendingImageData != nil || photoFileName != nil {
                         Button(role: .destructive) {
+                            // 讓任何仍在進行中的照片載入 Task 過期，避免它稍後才完成、
+                            // 把已被使用者移除的照片又重新蓋回來。
+                            photoLoadGeneration += 1
                             pendingImageData = nil
+                            pendingImage = nil
                             if let name = photoFileName { FamilyAlbumPhoto.deletePhoto(name) }
                             photoFileName = nil
                         } label: {
@@ -1137,15 +1149,26 @@ struct FamilyAlbumPhotoEditor: View {
             }
             .sheet(isPresented: $showCamera) {
                 CameraPicker { image in
+                    // 讓任何仍在進行中的相簿選取 Task 過期，避免它稍後才完成、
+                    // 把剛拍好的照片又蓋回相簿選的舊結果。
+                    photoLoadGeneration += 1
                     pendingImageData = image.jpegData(compressionQuality: 0.85)
+                    pendingImage = image
                 }
                 .ignoresSafeArea()
             }
             .photosPicker(isPresented: $isPresentingPhotoPicker, selection: $photoItem, matching: .images)
             .onChange(of: photoItem) { _, item in
+                photoLoadGeneration += 1
+                let generation = photoLoadGeneration
                 Task {
                     guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
-                    await MainActor.run { pendingImageData = data }
+                    let decoded = UIImage(data: data)
+                    await MainActor.run {
+                        guard generation == photoLoadGeneration else { return }
+                        pendingImageData = data
+                        pendingImage = decoded
+                    }
                 }
             }
             .onAppear {

@@ -1194,6 +1194,10 @@ struct ChildRecordEditorSheet: View {
     @State private var previewImage: UIImage?
     /// 進入編輯畫面時的原始照片檔名，用來判斷儲存/取消時該刪哪個檔案（見 save()/取消按鈕註解）。
     @State private var originalPhotoFileName: String?
+    // 選取照片是非同步的（iCloud 圖片可能要等幾秒），若使用者在等待期間又重新選了一次，
+    // 較慢完成的前一次選取不該覆蓋較新的結果；用世代編號判斷完成時是否仍是最新一次選取
+    // （同型修復見 OrgPersonEditor.photoLoadGeneration）。
+    @State private var photoLoadGeneration = 0
 
     private var canSave: Bool {
         switch type {
@@ -1243,6 +1247,9 @@ struct ChildRecordEditorSheet: View {
 
                     if photoFileName != nil {
                         Button(role: .destructive) {
+                            // 讓任何仍在進行中的照片載入 Task 過期，避免它稍後才完成、
+                            // 把剛移除的照片又重新蓋回來。
+                            photoLoadGeneration += 1
                             // 不在這裡立刻刪檔：使用者移除圖片後若按「取消」，原圖應該保持不變
                             // （取消不該有副作用）。實際刪除延到 save() 依最終結果判斷。
                             // 但若移除的是本次 session 剛選的新照片（尚未儲存），要立刻清掉，
@@ -1281,23 +1288,22 @@ struct ChildRecordEditorSheet: View {
                 }
             }
             .onAppear { loadEditing() }
-            .onChange(of: photoItem) { _, _ in
+            .onChange(of: photoItem) { _, newItem in
+                // 連續選兩張照片（例如第一張是要等 iCloud 下載的慢速圖，選完又反悔重選）
+                // 會有兩個 Task 並行跑 loadTransferable，先前沒有世代編號守衛時，較慢完成的
+                // 那個會用「self.photoItem」重新讀到的已是新選取，導致兩個 Task 存的其實是
+                // 同一張新照片，且哪個後寫入 photoFileName 全憑完成順序決定，較早選的舊照片
+                // 反而可能覆蓋較新的選擇。改用世代編號，只有仍是最新一次選取的 Task 才套用結果。
+                photoLoadGeneration += 1
+                let generation = photoLoadGeneration
                 Task {
-                    guard let photoItem, let data = try? await photoItem.loadTransferable(type: Data.self) else { return }
-                    // 換照片時不立刻刪舊檔：使用者選了新照片後若按「取消」，若這裡就刪掉
-                    // originalPhotoFileName，該檔案會被永久刪除卻沒有任何紀錄真的改用新照片
-                    // （取消不該有副作用）。改成只在 save() 依最終結果與原始檔名的差異決定要刪誰。
-                    // 若這是本次 session 已經選過一次的新照片（尚未儲存），要先清掉，否則連續換兩次
-                    // 照片會留下第一次選的孤兒檔案。
-                    if let previous = photoFileName, previous != originalPhotoFileName {
-                        ChildRecord.deletePhoto(previous)
-                    }
+                    guard let newItem, let data = try? await newItem.loadTransferable(type: Data.self) else { return }
                     // 編輯既有記錄時 editing.id 不變，若沿用它當檔名，換照片會同路徑覆寫、photoFileName
                     // 字串不變，清單縮圖用的 AsyncLocalImage 依 url 判斷是否重讀，url 沒變就不會重讀，
                     // 換照片後清單頭像停留在舊圖（同類 bug 已在 BusinessCard/OrgPerson/FamilyAlbumPhoto
                     // 修復，改用全新 UUID 檔名）。素描檔名一律跟著同一個新 photoId 走，兩者仍保持配對。
                     let photoId = UUID()
-                    photoFileName = ChildRecord.savePhoto(data, id: photoId)
+                    let savedName = ChildRecord.savePhoto(data, id: photoId)
                     let origImage = UIImage(data: data)
                     // 素描版：CIContext 建立與 GPU 渲染移到背景執行緒，避免阻塞主執行緒
                     if let orig = origImage {
@@ -1308,7 +1314,24 @@ struct ChildRecordEditorSheet: View {
                             _ = ChildRecord.saveSketch(sketchData, id: photoId)
                         }
                     }
-                    previewImage = sketchMode ? loadSketchOrOrig() : origImage
+                    await MainActor.run {
+                        guard generation == photoLoadGeneration else {
+                            // 已被更新的選取取代：這次白存的照片/素描檔沒有任何欄位會再引用到，
+                            // 立刻清掉避免孤兒檔案；不動任何已顯示的狀態。
+                            if let savedName { ChildRecord.deletePhoto(savedName) }
+                            return
+                        }
+                        // 換照片時不立刻刪舊檔：使用者選了新照片後若按「取消」，若這裡就刪掉
+                        // originalPhotoFileName，該檔案會被永久刪除卻沒有任何紀錄真的改用新照片
+                        // （取消不該有副作用）。改成只在 save() 依最終結果與原始檔名的差異決定要刪誰。
+                        // 若這是本次 session 已經選過一次的新照片（尚未儲存），要先清掉，否則連續換兩次
+                        // 照片會留下第一次選的孤兒檔案。
+                        if let previous = photoFileName, previous != originalPhotoFileName {
+                            ChildRecord.deletePhoto(previous)
+                        }
+                        photoFileName = savedName
+                        previewImage = sketchMode ? loadSketchOrOrig() : origImage
+                    }
                 }
             }
             // 避免 300ms 防抖期間關閉表單後，Task 仍在背景驅動診所搜尋（對齊 AddExpenseView 的修復）

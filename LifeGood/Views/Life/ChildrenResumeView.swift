@@ -68,6 +68,10 @@ struct ChildrenResumeView: View {
     }
 
     var body: some View {
+        // children 是 filter+sort（O(n log n)），一次算好供 heroStatsCard／childrenSectionHeader／
+        // ForEach／emptyState 檢查共用，避免同一次 body 求值各自重跑（heroStatsCard 內部原本
+        // 就會再獨立呼叫三次）。
+        let children = self.children
         NavigationStack {
             ScrollView {
                 if children.isEmpty {
@@ -76,7 +80,7 @@ struct ChildrenResumeView: View {
                 } else {
                     VStack(spacing: 0) {
                         // [v2] 英雄統計卡：粉藍漸層 + KPI + 進場動畫
-                        heroStatsCard
+                        heroStatsCard(children)
                             .opacity(heroAppeared ? 1 : 0)
                             .offset(y: heroAppeared ? 0 : 22)
                             .onAppear {
@@ -90,7 +94,7 @@ struct ChildrenResumeView: View {
                             }
 
                         // [v2] 清單區塊標題
-                        childrenSectionHeader
+                        childrenSectionHeader(children)
                             .padding(.top, 20)
                             .padding(.bottom, 8)
 
@@ -132,7 +136,7 @@ struct ChildrenResumeView: View {
 
     // MARK: - [v2] 英雄統計卡
 
-    private var heroStatsCard: some View {
+    private func heroStatsCard(_ children: [FamilyMember]) -> some View {
         let sons = children.filter { $0.role == .son }.count
         let daughters = children.filter { $0.role == .daughter }.count
         let totalRecords = children.reduce(0) { $0 + $1.childRecords.count }
@@ -291,7 +295,7 @@ struct ChildrenResumeView: View {
 
     // MARK: - [v2] 清單 Section Header
 
-    private var childrenSectionHeader: some View {
+    private func childrenSectionHeader(_ children: [FamilyMember]) -> some View {
         HStack(spacing: 10) {
             // 4pt Capsule 漸層側條（對齊 OverviewView categoryBreakdownSection 標題規格）
             Capsule()

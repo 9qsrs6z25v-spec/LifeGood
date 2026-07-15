@@ -151,6 +151,15 @@ class LifeStore: ObservableObject {
         if let i = orgPeople.firstIndex(where: { $0.linkedSubordinateId == item.id }) {
             orgPeople[i].linkedSubordinateId = nil
         }
+        // 解除其他部屬會議議程項目指派給此人的負責人連結，避免懸空 id
+        for si in subordinates.indices {
+            for mi in subordinates[si].meetings.indices {
+                for ii in subordinates[si].meetings[mi].items.indices
+                where subordinates[si].meetings[mi].items[ii].assigneeId == item.id {
+                    subordinates[si].meetings[mi].items[ii].assigneeId = nil
+                }
+            }
+        }
         save()
     }
 
@@ -384,6 +393,9 @@ class LifeStore: ObservableObject {
            let i = businessCards.firstIndex(where: { $0.id == cid }),
            businessCards[i].linkedOrgPersonId == item.id {
             businessCards[i].linkedOrgPersonId = nil
+        }
+        for i in orgPeople.indices {
+            orgPeople[i].relations.removeAll { $0.personId == item.id }
         }
         orgPeople.removeAll { $0.id == item.id }
         save()

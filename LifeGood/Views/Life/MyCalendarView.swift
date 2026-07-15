@@ -1492,6 +1492,10 @@ struct PersonalEventEditor: View {
     @State private var recurrenceEndDate: Date = Date().addingTimeInterval(60 * 60 * 24 * 90)
     @State private var reminder: EventReminder = .none
     @State private var showDeleteConfirm = false
+    // 防止連續點擊「新增/儲存」在 performSave() 的多個 await 中間隙並發觸發，
+    // 各自用不同 UUID 建立事件而互相偵測不到對方，造成重複事件／重複行事曆項目／重複通知
+    // （同型修復見 SubscriptionManager.purchaseInProgress）。
+    @State private var isSaving = false
     @State private var permissionDeniedAlert = false
     // Apple 行事曆連動
     @State private var location: String = ""
@@ -1638,7 +1642,7 @@ struct PersonalEventEditor: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing == nil ? "新增" : "儲存") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
@@ -1943,12 +1947,14 @@ struct PersonalEventEditor: View {
 
     private func save() {
         let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
-        guard !trimmedTitle.isEmpty else { return }
+        guard !trimmedTitle.isEmpty, !isSaving else { return }
+        isSaving = true
         Task { await performSave(trimmedTitle: trimmedTitle) }
     }
 
     @MainActor
     private func performSave(trimmedTitle: String) async {
+        defer { isSaving = false }
         // 先按目前 form 內容組事件
         var event = PersonalEvent(
             id: editing?.id ?? UUID(),

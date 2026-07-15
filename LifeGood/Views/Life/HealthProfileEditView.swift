@@ -477,6 +477,13 @@ private struct AllergyEditor: View {
             }
             .navigationTitle("過敏原")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                // Picker 的 get 用 ?? .mild 顯示預設值，但使用者若沒手動點過 Picker，
+                // set 永遠不會被呼叫，draft.severity 會存成 nil，讓「畫面顯示輕度」
+                // 與「實際存檔為未設定」互相矛盾（列表卡片因此不顯示嚴重度徽章）。
+                // 開啟編輯畫面當下就把顯示的預設值寫回 draft，讓兩者一致。
+                if draft.severity == nil { draft.severity = .mild }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {

@@ -1331,6 +1331,10 @@ struct BusinessCardDetailView: View {
     @State private var showPhotosPicker = false
     @State private var showAvatarLightbox = false
     @State private var pickerItem: PhotosPickerItem?
+    // 選取頭像是非同步的（iCloud 圖片可能要等幾秒），若使用者在等待期間又重新選了一次
+    // （或改用拍照），較慢完成的前一次選取不該覆蓋較新的結果；用世代編號判斷完成時是否
+    // 仍是最新一次選取（同型修復見 OrgPersonEditor.photoLoadGeneration）。
+    @State private var avatarLoadGeneration = 0
     @State private var showQRFullscreen = false
     @State private var viewingLinkedOrgPersonId: UUID?
     // 美化：英雄卡片進場動畫旗標（對齊 VehicleDetailView.flashCard / RealEstateDetailView 規格）
@@ -1555,6 +1559,9 @@ struct BusinessCardDetailView: View {
         }
         .sheet(isPresented: $showCamera) {
             CameraPicker { image in
+                // 讓任何仍在進行中的相簿選取 Task 過期，避免它稍後才完成、
+                // 把剛拍好的頭像又蓋回相簿選的舊結果。
+                avatarLoadGeneration += 1
                 if let data = image.jpegData(compressionQuality: 0.85) {
                     saveAvatarData(data)
                 }
@@ -1563,9 +1570,14 @@ struct BusinessCardDetailView: View {
         }
         .photosPicker(isPresented: $showPhotosPicker, selection: $pickerItem, matching: .images)
         .onChange(of: pickerItem) { _, item in
+            avatarLoadGeneration += 1
+            let generation = avatarLoadGeneration
             Task {
                 guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
                 await MainActor.run {
+                    // 若載入期間使用者又重選了一次（或改用拍照），這次結果已過期，不套用，
+                    // 避免較慢完成的舊選取覆蓋掉使用者實際想要的較新選取。
+                    guard generation == avatarLoadGeneration else { return }
                     saveAvatarData(data)
                     pickerItem = nil
                 }

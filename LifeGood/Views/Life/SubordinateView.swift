@@ -142,8 +142,8 @@ struct SubordinateView: View {
         }
     }
 
-    private var displayRows: [ListRow] {
-        let list = filteredSubordinates
+    private func displayRows(_ filtered: [Subordinate]) -> [ListRow] {
+        let list = filtered
         if sortOption == .manual { return list.map { .person($0) } }
         let grouped = Dictionary(grouping: list) { $0.plantArea }
         let areas = grouped.keys.filter { !$0.isEmpty }.sorted()
@@ -164,6 +164,10 @@ struct SubordinateView: View {
 
     @ViewBuilder
     private func subordinateSections(mentionCounts: [UUID: Int]) -> some View {
+        // filteredSubordinates／displayRows 各自是 filter/O(n log n) 排序，一次算好供本
+        // section 的空狀態檢查、計數徽章、ForEach 共用，避免同一次 body 求值各自重跑三次。
+        let filtered = filteredSubordinates
+        let rows = displayRows(filtered)
         // 部門篩選列（有定義部門才顯示）
         if !lifeStore.departments.isEmpty {
             Section {
@@ -176,7 +180,7 @@ struct SubordinateView: View {
 
         // 部屬列表 sectionHeader（4pt Capsule 側條 + 計數徽章）
         Section {
-            activeSubordinatesSectionHeader
+            activeSubordinatesSectionHeader(count: filtered.count)
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 2, trailing: 16))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -189,7 +193,7 @@ struct SubordinateView: View {
                 }
         }
 
-        if filteredSubordinates.isEmpty {
+        if filtered.isEmpty {
             Section {
                 Text("此部門尚無部屬")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -199,12 +203,11 @@ struct SubordinateView: View {
                     .listRowSeparator(.hidden)
             }
         } else {
-            ForEach(Array(displayRows.enumerated()), id: \.element.id) { idx, row in
+            ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
                 listRow(row, idx: idx, mentionCounts: mentionCounts)
             }
             .onDelete { offsets in
                 guard subscription.isPremium else { showPremiumAlert = true; return }
-                let rows = displayRows
                 let items = offsets.compactMap { off -> Subordinate? in
                     guard off < rows.count, case .person(let s) = rows[off] else { return nil }
                     return s
@@ -545,8 +548,7 @@ struct SubordinateView: View {
         .foregroundStyle(.blue)
     }
 
-    private var activeSubordinatesSectionHeader: some View {
-        let count = filteredSubordinates.count
+    private func activeSubordinatesSectionHeader(count: Int) -> some View {
         let accent = Color(red: 0.22, green: 0.53, blue: 0.98)
         let title = selectedDeptId.flatMap { id in lifeStore.departments.first { $0.id == id } }
             .map { deptLabel($0) } ?? "部屬成員"

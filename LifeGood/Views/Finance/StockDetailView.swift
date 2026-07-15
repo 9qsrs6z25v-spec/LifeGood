@@ -1317,7 +1317,9 @@ struct StockDividendEditor: View {
                 }
             }
             .onChange(of: date) { _, _ in
-                if kind == .cash, !isEditing {
+                // 只在使用者還沒手動填過基準股數時才自動帶入，避免調整日期時
+                // 把使用者已手動輸入的股數（與 currentHeldShares 不同的自訂值）靜默覆蓋掉。
+                if kind == .cash, !isEditing, (Double(sharesAtEventText) ?? 0) == 0 {
                     sharesAtEventText = "\(Int(currentHeldShares))"
                 }
             }

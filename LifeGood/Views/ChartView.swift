@@ -362,8 +362,8 @@ struct ChartView: View {
         VStack(spacing: 8) {
             TabView(selection: $chartMode) {
                 trendChart.tag(ChartMode.trend)
-                variablePieChart.tag(ChartMode.variablePie)
-                fixedPieChart.tag(ChartMode.fixedPie)
+                variablePieChart().tag(ChartMode.variablePie)
+                fixedPieChart().tag(ChartMode.fixedPie)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             // .page 樣式的 TabView 不會自動依內容高度伸縮，必須給定高度。
@@ -421,8 +421,8 @@ struct ChartView: View {
     private var chartHeightMeasuringLayer: some View {
         VStack(spacing: 0) {
             trendChart.reportChartPageHeight(.trend)
-            variablePieChart.reportChartPageHeight(.variablePie)
-            fixedPieChart.reportChartPageHeight(.fixedPie)
+            variablePieChart(rowsAppeared: .constant(true)).reportChartPageHeight(.variablePie)
+            fixedPieChart(rowsAppeared: .constant(true)).reportChartPageHeight(.fixedPie)
         }
         .fixedSize(horizontal: false, vertical: true)
         .hidden()
@@ -605,8 +605,13 @@ struct ChartView: View {
 
     // MARK: - 變動支出圓餅圖
 
-    private var variablePieChart: some View {
+    // rowsAppeared 可由呼叫端覆寫：chartHeightMeasuringLayer 用來量高度的隱藏副本
+    // 若沿用真正可見那頁的 $variablePieRowsAppeared，會在使用者第一次滑到這頁之前
+    // 就把旗標設成 true，讓圖例的進場動畫失去「從無到有」的起點、變成直接以全不透明顯示、
+    // 完全不播放。隱藏副本改傳入獨立的 .constant(true)，不干擾可見頁的真正旗標。
+    private func variablePieChart(rowsAppeared: Binding<Bool>? = nil) -> some View {
         let entries = variableBreakdownCache
+        let rowsAppearedBinding = rowsAppeared ?? $variablePieRowsAppeared
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Capsule()
@@ -678,8 +683,8 @@ struct ChartView: View {
                 .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
-                // [v3] 傳入 $variablePieRowsAppeared 控制圖例行交錯進場
-                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(variable: $0.category), $0.amount) }, total: total, rowsAppeared: $variablePieRowsAppeared)
+                // [v3] 傳入 rowsAppearedBinding 控制圖例行交錯進場
+                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(variable: $0.category), $0.amount) }, total: total, rowsAppeared: rowsAppearedBinding)
             }
         }
         .padding(.vertical)
@@ -692,8 +697,10 @@ struct ChartView: View {
 
     // MARK: - 固定支出圓餅圖
 
-    private var fixedPieChart: some View {
+    // rowsAppeared 可由呼叫端覆寫，理由同 variablePieChart(rowsAppeared:) 上方註解。
+    private func fixedPieChart(rowsAppeared: Binding<Bool>? = nil) -> some View {
         let entries = fixedBreakdownCache
+        let rowsAppearedBinding = rowsAppeared ?? $fixedPieRowsAppeared
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Capsule()
@@ -765,8 +772,8 @@ struct ChartView: View {
                 .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
-                // [v3] 傳入 $fixedPieRowsAppeared 控制圖例行交錯進場
-                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(fixed: $0.category), $0.amount) }, total: total, rowsAppeared: $fixedPieRowsAppeared)
+                // [v3] 傳入 rowsAppearedBinding 控制圖例行交錯進場
+                pieChartBody(entries: entries.map { ($0.category.rawValue, $0.category.icon, colorFor(fixed: $0.category), $0.amount) }, total: total, rowsAppeared: rowsAppearedBinding)
             }
         }
         .padding(.vertical)

@@ -2360,6 +2360,13 @@ struct RealEstateDetailView: View {
             note: source.note,
             currencyCode: source.currencyCode,
             diningMember: source.diningMember,
+            // 複製房地產連動的貸款支出時，若漏了這四個欄位，計算機資料會靜默消失，
+            // 使用者複製一筆有填貸款試算的房貸項目後，開啟複製品會發現貸款總額／年期／
+            // 利率／保費率全部變空白（同型修復見 AddExpenseView.loadInitial 的讀取端）。
+            loanTotalAmount: source.loanTotalAmount,
+            loanYears: source.loanYears,
+            loanRate: source.loanRate,
+            insuranceRate: source.insuranceRate,
             linkedBankMilestoneId: source.linkedBankMilestoneId,
             linkedBankCurrency: source.linkedBankCurrency,
             linkedCreditCardMilestoneId: source.linkedCreditCardMilestoneId,

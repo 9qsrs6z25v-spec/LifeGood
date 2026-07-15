@@ -122,6 +122,11 @@ struct AddRealEstateView: View {
     // 兩個 Task 互相刪對方剛存好的檔案（同型修復見 RealEstateDetailView.
     // ElevatorMaintenanceEditor.photoLoadTask）。依 item.id 分別記錄、取消前一個。
     @State private var elevatorPhotoLoadTasks: [UUID: Task<Void, Never>] = [:]
+    // 上面的 Task 完成時只能靠這個世代編號判斷自己是否仍是「目前這一次選取」，
+    // 不能靠清空 elevatorPhotoLoadTasks[itemId] 本身來判斷（Task 非 Equatable，
+    // 且若無條件清空，會把後續、仍在執行中的新選取 Task 的登記一併清掉，
+    // 導致下一次選取時 cancel() 變成 no-op、新舊 Task 並行互刪對方檔案）。
+    @State private var elevatorPhotoLoadGeneration: [UUID: Int] = [:]
 
     struct ElevatorItemState: Identifiable {
         let id: UUID
@@ -835,6 +840,8 @@ struct AddRealEstateView: View {
                             guard let newItem else { return }
                             let itemId = item.id
                             elevatorPhotoLoadTasks[itemId]?.cancel()
+                            let generation = (elevatorPhotoLoadGeneration[itemId] ?? 0) + 1
+                            elevatorPhotoLoadGeneration[itemId] = generation
                             elevatorPhotoLoadTasks[itemId] = Task {
                                 if let data = try? await newItem.loadTransferable(type: Data.self) {
                                     guard !Task.isCancelled else { return }
@@ -850,7 +857,12 @@ struct AddRealEstateView: View {
                                         elevatorItems[idx].photoFileName = fileName
                                     }
                                 }
-                                elevatorPhotoLoadTasks[itemId] = nil
+                                // 只有仍是目前這一代（沒被更新的選取取代）才清空登記，避免清掉
+                                // 後續、仍在執行中的新選取 Task 的登記，導致下一次選取時
+                                // cancel() 變成 no-op、新舊 Task 並行互刪對方剛存好的檔案。
+                                if elevatorPhotoLoadGeneration[itemId] == generation {
+                                    elevatorPhotoLoadTasks[itemId] = nil
+                                }
                             }
                         }
                     ), matching: .images) {
@@ -860,6 +872,10 @@ struct AddRealEstateView: View {
                     .buttonStyle(.plain)
 
                     Button(role: .destructive) {
+                        // 刪除這筆記錄前先取消尚未完成的照片載入 Task，避免它稍後才完成、
+                        // 把照片存進磁碟卻已找不到對應的 item，變成永久孤兒檔案。
+                        elevatorPhotoLoadTasks[item.id]?.cancel()
+                        elevatorPhotoLoadTasks[item.id] = nil
                         if let fn = item.photoFileName {
                             ElevatorMaintenance.deletePhoto(fn)
                         }

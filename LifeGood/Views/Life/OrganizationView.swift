@@ -609,7 +609,11 @@ struct DepartmentDetailView: View {
 
     // [v2] section header 從裸 Text 升級為 Capsule 側條 + 計數膠囊；加入交錯進場動畫
     private var peopleSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // people 是 filter+sort，一次算好供整個 section（計數、空狀態檢查、ForEach、
+        // 分隔線判斷）共用，避免分隔線判斷在 ForEach 每一列都重新呼叫一次 people
+        // （對一家公司的全部人員重新 filter+sort，等同 O(該部門人數 × 全公司人數 log n)）。
+        let people = self.people
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Capsule()
                     .fill(LinearGradient(colors: [.green, .green.opacity(0.50)], startPoint: .top, endPoint: .bottom))
@@ -645,6 +649,7 @@ struct DepartmentDetailView: View {
                 }
                 .padding(.horizontal).padding(.bottom, 14)
             } else {
+                let lastId = people.last?.id
                 ForEach(Array(people.enumerated()), id: \.element.id) { idx, person in
                     Button { viewingPersonId = person.id } label: {
                         personRow(person)
@@ -653,7 +658,7 @@ struct DepartmentDetailView: View {
                     .opacity(peopleAppeared ? 1 : 0)
                     .offset(y: peopleAppeared ? 0 : 12)
                     .animation(.spring(response: 0.42, dampingFraction: 0.78).delay(0.05 + Double(idx) * 0.06), value: peopleAppeared)
-                    if person.id != people.last?.id {
+                    if person.id != lastId {
                         Rectangle().fill(Color(.separator).opacity(0.20))
                             .frame(height: 0.5).padding(.leading, 60)
                     }
@@ -778,6 +783,10 @@ struct OrgPersonEditor: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var isPresentingPhotoPicker = false
     @State private var showDeleteConfirm = false
+    // 選取照片後 loadTransferable 是非同步的（iCloud 圖片可能要等幾秒）。若使用者在等待
+    // 期間又重新開選單選了另一張、或按了「移除照片」，較慢完成的前一次選取不該覆蓋較新的
+    // 狀態；用世代編號讓每次 Task 完成時檢查自己是否仍是最新一次選取。
+    @State private var photoLoadGeneration = 0
 
     private var isEditing: Bool { editingId != nil }
     private var existing: OrgPerson? {
@@ -947,6 +956,9 @@ struct OrgPersonEditor: View {
             }
             .sheet(isPresented: $showCamera) {
                 CameraPicker { image in
+                    // 讓任何仍在進行中的相簿選取 Task 過期，避免它稍後才完成、
+                    // 把剛拍好的照片又蓋回相簿選的舊結果。
+                    photoLoadGeneration += 1
                     pendingImageData = image.jpegData(compressionQuality: 0.85)
                     pendingImage = image
                 }
@@ -954,10 +966,17 @@ struct OrgPersonEditor: View {
             }
             .photosPicker(isPresented: $isPresentingPhotoPicker, selection: $photoItem, matching: .images)
             .onChange(of: photoItem) { _, item in
+                photoLoadGeneration += 1
+                let generation = photoLoadGeneration
                 Task {
                     guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
                     let decoded = UIImage(data: data)
-                    await MainActor.run { pendingImageData = data; pendingImage = decoded }
+                    await MainActor.run {
+                        // 若載入期間使用者又選了下一張照片（或移除了照片），
+                        // generation 已經前進，這次結果已過期，不套用。
+                        guard generation == photoLoadGeneration else { return }
+                        pendingImageData = data; pendingImage = decoded
+                    }
                 }
             }
             .alert("確定要刪除這個人員嗎？", isPresented: $showDeleteConfirm) {
@@ -1004,6 +1023,9 @@ struct OrgPersonEditor: View {
                 Button { isPresentingPhotoPicker = true } label: { Label("從相簿選", systemImage: "photo.on.rectangle") }
                 if pendingImageData != nil || photoFileName != nil {
                     Button(role: .destructive) {
+                        // 讓任何仍在進行中的照片載入 Task 過期，避免它稍後才完成、
+                        // 把已被使用者移除的照片又重新蓋回來。
+                        photoLoadGeneration += 1
                         if let oldName = photoFileName { OrgPerson.deletePhoto(oldName) }
                         photoFileName = nil
                         pendingImageData = nil

@@ -226,6 +226,66 @@ fileprivate func stableDepositUUID(seed: String) -> UUID {
     ))
 }
 
+/// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 固定支出／週期性收入展開）。
+/// 獨立成檔案層級的共用函式（而非 LifeFinanceView 的 private 方法），讓 DepositEditorSheet
+/// 的轉帳／沖正也能算出與列表頁一致的完整餘額，不必各自維護一份簡化、容易脫節的版本。
+fileprivate func bankBalances(
+    for ms: LifeMilestone, now: Date,
+    expensesById: [UUID: Expense], incomesById: [UUID: Income],
+    lifeStore: LifeStore, expenseStore: ExpenseStore
+) -> [String: Double] {
+    var totals: [String: Double] = [:]
+    for dep in ms.bankDeposits ?? [] where dep.date <= now {
+        // 跳過已連結到信用卡支出的存款（用信用卡彙總取代）
+        if let expId = dep.linkedExpenseId,
+           let exp = expensesById[expId],
+           exp.linkedCreditCardMilestoneId != nil { continue }
+        // 跳過已連結到固定支出（含週期）的存款 — 改用展開的虛擬條目取代，避免漏算或重算
+        if let expId = dep.linkedExpenseId,
+           let exp = expensesById[expId],
+           exp.expenseType == .fixed, exp.recurrence != nil { continue }
+        // 跳過已連結到週期性收入的存款 — 改用展開的虛擬條目取代
+        if let incId = dep.linkedExpenseId,
+           let inc = incomesById[incId],
+           inc.period != .once { continue }
+        totals[dep.currencyCode, default: 0] += dep.isWithdrawal ? -dep.amount : dep.amount
+    }
+    // 固定支出（直接扣銀行）依週期展開為每期扣款
+    for dep in expandedFixedExpenseWithdrawals(for: ms.id, expenses: expenseStore.expenses) {
+        totals[dep.currencyCode, default: 0] -= dep.amount
+    }
+    // 週期性收入依 period 展開為每期入帳
+    for dep in expandedIncomeDeposits(for: ms.id, incomes: expenseStore.incomes) {
+        totals[dep.currencyCode, default: 0] += dep.amount
+    }
+    // 信用卡彙總扣款一律以 NT$ 計（週期性固定支出依 recurrence 展開到今天）
+    let cards = lifeStore.milestones.filter {
+        $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
+    }
+    for card in cards {
+        let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
+        for entry in entries { totals["NT$", default: 0] -= entry.amount }
+    }
+    // 過濾掉淨額為 0 的幣別（避免單一幣別帳戶被誤判為混幣）
+    let nonZero = totals.filter { $0.value != 0 }
+    return nonZero.isEmpty ? totals : nonZero
+}
+
+/// 將某帳戶的所有幣別餘額換算成 TWD 加總
+fileprivate func balanceInTWD(_ balances: [String: Double], expenseStore: ExpenseStore) -> Double {
+    var total: Double = 0
+    for (code, amount) in balances {
+        if code == "NT$" {
+            total += amount
+        } else if let rate = expenseStore.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+            total += amount * rate.rate
+        } else {
+            total += amount  // 找不到匯率時不換算，至少不丟失資料
+        }
+    }
+    return total
+}
+
 struct LifeFinanceView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -668,66 +728,9 @@ struct LifeFinanceView: View {
         }
         var result: [UUID: [String: Double]] = [:]
         for ms in banks {
-            result[ms.id] = bankBalances(for: ms, now: now, expensesById: expensesById, incomesById: incomesById)
+            result[ms.id] = bankBalances(for: ms, now: now, expensesById: expensesById, incomesById: incomesById, lifeStore: lifeStore, expenseStore: expenseStore)
         }
         return result
-    }
-
-    /// 依幣別計算銀行帳戶的目前餘額（含信用卡彙總扣款 NT$ + 股票交易 + 固定支出週期展開）
-    private func bankBalances(
-        for ms: LifeMilestone, now: Date,
-        expensesById: [UUID: Expense], incomesById: [UUID: Income]
-    ) -> [String: Double] {
-        var totals: [String: Double] = [:]
-        for dep in ms.bankDeposits ?? [] where dep.date <= now {
-            // 跳過已連結到信用卡支出的存款（用信用卡彙總取代）
-            if let expId = dep.linkedExpenseId,
-               let exp = expensesById[expId],
-               exp.linkedCreditCardMilestoneId != nil { continue }
-            // 跳過已連結到固定支出（含週期）的存款 — 改用展開的虛擬條目取代，避免漏算或重算
-            if let expId = dep.linkedExpenseId,
-               let exp = expensesById[expId],
-               exp.expenseType == .fixed, exp.recurrence != nil { continue }
-            // 跳過已連結到週期性收入的存款 — 改用展開的虛擬條目取代
-            if let incId = dep.linkedExpenseId,
-               let inc = incomesById[incId],
-               inc.period != .once { continue }
-            totals[dep.currencyCode, default: 0] += dep.isWithdrawal ? -dep.amount : dep.amount
-        }
-        // 固定支出（直接扣銀行）依週期展開為每期扣款
-        for dep in expandedFixedExpenseWithdrawals(for: ms.id, expenses: expenseStore.expenses) {
-            totals[dep.currencyCode, default: 0] -= dep.amount
-        }
-        // 週期性收入依 period 展開為每期入帳
-        for dep in expandedIncomeDeposits(for: ms.id, incomes: expenseStore.incomes) {
-            totals[dep.currencyCode, default: 0] += dep.amount
-        }
-        // 信用卡彙總扣款一律以 NT$ 計（週期性固定支出依 recurrence 展開到今天）
-        let cards = lifeStore.milestones.filter {
-            $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
-        }
-        for card in cards {
-            let entries = expandedCreditCardEntries(forCard: card.id, expenses: expenseStore.expenses)
-            for entry in entries { totals["NT$", default: 0] -= entry.amount }
-        }
-        // 過濾掉淨額為 0 的幣別（避免單一幣別帳戶被誤判為混幣）
-        let nonZero = totals.filter { $0.value != 0 }
-        return nonZero.isEmpty ? totals : nonZero
-    }
-
-    /// 將某帳戶的所有幣別餘額換算成 TWD 加總
-    private func balanceInTWD(_ balances: [String: Double]) -> Double {
-        var total: Double = 0
-        for (code, amount) in balances {
-            if code == "NT$" {
-                total += amount
-            } else if let rate = expenseStore.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
-                total += amount * rate.rate
-            } else {
-                total += amount  // 找不到匯率時不換算，至少不丟失資料
-            }
-        }
-        return total
     }
 
     /// 帳戶餘額顯示：單幣別→該幣別；多幣別→換算 TWD 等值
@@ -736,13 +739,13 @@ struct LifeFinanceView: View {
             let entry = balances.first ?? ("NT$", 0)
             return ("\(entry.0) \(formatNumber(entry.1))", entry.1)
         }
-        let twd = balanceInTWD(balances)
+        let twd = balanceInTWD(balances, expenseStore: expenseStore)
         return ("≈ NT$ \(formatNumber(twd))", twd)
     }
 
     /// 所有銀行帳戶的台幣等值總和
     private var allBankBalanceInTWD: Double {
-        allBankBalances().values.reduce(0) { $0 + balanceInTWD($1) }
+        allBankBalances().values.reduce(0) { $0 + balanceInTWD($1, expenseStore: expenseStore) }
     }
 
     private static let decimalFormatter: NumberFormatter = {
@@ -2201,35 +2204,22 @@ struct DepositEditorSheet: View {
         }
     }
 
-    /// expensesById 由呼叫端批次建表傳入一次，避免每一列都對 expenseStore.expenses
+    /// expensesById／incomesById 由呼叫端批次建表傳入一次，避免每一列都對 expenseStore.expenses
     /// 做 first(where:) 全量掃描（對齊 AddStockView.accountBalance() 的批次建表修復規格）。
-    private func bankBalance(for ms: LifeMilestone, expensesById: [UUID: Expense]) -> Double {
-        let now = Date()
-        var total: Double = 0
-        for dep in ms.bankDeposits ?? [] {
-            guard dep.date <= now else { continue }
-            if let expId = dep.linkedExpenseId,
-               let exp = expensesById[expId],
-               exp.linkedCreditCardMilestoneId != nil { continue }
-            // 換算成台幣再加總，外幣提款 / 存款才不會被當成台幣金額直接計算
-            let twd = depositAmountInTWD(dep.amount, currency: dep.currencyCode)
-            total += dep.isWithdrawal ? -twd : twd
-        }
-        return total
+    /// 改呼叫檔案層級共用的 bankBalances()（與列表頁 milestoneRow／allBankBalances() 同一份邏輯），
+    /// 取代原本只加總 bankDeposits 原始條目的簡化版本——簡化版漏算信用卡彙總扣款、
+    /// 且週期性固定支出／收入只算到第一筆種子條目，會讓「轉入帳戶」下拉與「沖正」的
+    /// 「目前總額」明顯低估負債、高估餘額，導致沖正調整值算錯。
+    private func bankBalance(for ms: LifeMilestone, expensesById: [UUID: Expense], incomesById: [UUID: Income]) -> Double {
+        balanceInTWD(
+            bankBalances(for: ms, now: Date(), expensesById: expensesById, incomesById: incomesById, lifeStore: lifeStore, expenseStore: expenseStore),
+            expenseStore: expenseStore
+        )
     }
 
-    /// 把單筆金額換算成台幣（NT$ 直接回傳；找不到匯率時不換算以免丟資料）
-    private func depositAmountInTWD(_ amount: Double, currency: String) -> Double {
-        if currency == "NT$" { return amount }
-        if let rate = expenseStore.currencyRates.first(where: { $0.code == currency }), rate.rate > 0 {
-            return amount * rate.rate
-        }
-        return amount
-    }
-
-    private func currentBalance(expensesById: [UUID: Expense]) -> Double {
+    private func currentBalance(expensesById: [UUID: Expense], incomesById: [UUID: Income]) -> Double {
         guard let ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { return 0 }
-        return bankBalance(for: ms, expensesById: expensesById)
+        return bankBalance(for: ms, expensesById: expensesById, incomesById: incomesById)
     }
 
     private static let numFormatter: NumberFormatter = {
@@ -2250,6 +2240,7 @@ struct DepositEditorSheet: View {
 
     var body: some View {
         let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         NavigationStack {
             Form {
                 Section {
@@ -2259,6 +2250,13 @@ struct DepositEditorSheet: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    // 編輯既有存款/提款時鎖定類型：saveTransfer()/saveAdjust() 不認得 editing，
+                    // 若在編輯途中改選「轉帳」/「沖正」會另外新增一筆（或兩筆）記錄，
+                    // 原本正在編輯的那筆卻完全沒被處理，變成帳戶餘額被靜默灌入幽靈記錄。
+                    .disabled(editing != nil)
+                    if editing != nil {
+                        Text("編輯時無法變更類型").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
 
                 if txType == .transfer {
@@ -2267,7 +2265,7 @@ struct DepositEditorSheet: View {
                             Text("請選擇").tag(nil as UUID?)
                             ForEach(bankMilestones) { ms in
                                 let name = ms.bankName ?? ms.title
-                                Text("\(name)（\(fmtBal(bankBalance(for: ms, expensesById: expensesById)))）")
+                                Text("\(name)（\(fmtBal(bankBalance(for: ms, expensesById: expensesById, incomesById: incomesById)))）")
                                     .tag(ms.id as UUID?)
                             }
                         }
@@ -2282,7 +2280,7 @@ struct DepositEditorSheet: View {
                         HStack {
                             Text("目前總額").foregroundStyle(.secondary)
                             Spacer()
-                            Text(fmtBal(currentBalance(expensesById: expensesById))).foregroundStyle(.blue)
+                            Text(fmtBal(currentBalance(expensesById: expensesById, incomesById: incomesById))).foregroundStyle(.blue)
                         }
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                         HStack {
@@ -2290,7 +2288,7 @@ struct DepositEditorSheet: View {
                             TextField("調整後金額", text: $amountText).keyboardType(.decimalPad)
                         }
                         if let target = Double(amountText) {
-                            let diff = target - currentBalance(expensesById: expensesById)
+                            let diff = target - currentBalance(expensesById: expensesById, incomesById: incomesById)
                             HStack {
                                 Text("差額").foregroundStyle(.secondary)
                                 Spacer()
@@ -2400,7 +2398,8 @@ struct DepositEditorSheet: View {
         guard let targetAmount = Double(amountText),
               var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
         let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let diff = targetAmount - currentBalance(expensesById: expensesById)
+        let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let diff = targetAmount - currentBalance(expensesById: expensesById, incomesById: incomesById)
         guard diff != 0 else { dismiss(); return }
         var list = ms.bankDeposits ?? []
         let trimmedNote = adjustNote.trimmingCharacters(in: .whitespaces)

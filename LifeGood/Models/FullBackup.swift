@@ -89,6 +89,10 @@ enum FullBackup {
             // 讀取失敗應 throw 而非靜默略過：若略過會造成後續附件的位元組偏移量錯誤，
             // 使還原時每筆附件的二進位讀取位置全部錯位，導致整份備份損壞。
             let data = try Data(contentsOf: f.url, options: .mappedIfSafe)
+            // manifest 已預先寫入的 size 若與實際讀到的 bytes 數不符（例如匯出期間
+            // 該檔案被 CloudKit 背景同步覆寫），還原時會用舊 size 切出錯誤的位元組範圍，
+            // 造成該附件及其後所有附件全部損壞；與其靜默寫入不一致資料，直接中止匯出。
+            guard data.count == f.size else { throw BackupError.writeFailed }
             try fh.write(contentsOf: data)
             if total > 0 {
                 let pct = Int(Double(i + 1) / Double(total) * 100)

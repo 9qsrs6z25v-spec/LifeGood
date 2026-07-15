@@ -81,6 +81,7 @@ struct AddExpenseView: View {
     @State private var selectedRecurrence: Recurrence = .monthly
     @State private var note = ""
     @State private var showValidationError = false
+    @State private var validationErrorMessage = "請輸入有效的名稱與金額（大於 0）。"
     /// 扣款帳戶選單的銀行餘額快取：allBankBalances() 內部雖已改為批次建表，
     /// 但 bankPicker 是 Form body 的一部分，每次按鍵都會重新求值、重建整批表——
     /// 改為只在 store.expenses／lifeStore.milestones 實際變動時（.task(id:)）才重算一次快取。
@@ -346,7 +347,7 @@ struct AddExpenseView: View {
                                 Text("無法儲存")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.red)
-                                Text("請輸入有效的名稱與金額（大於 0）。")
+                                Text(validationErrorMessage)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -374,6 +375,7 @@ struct AddExpenseView: View {
             // 卡片應立即消失；先前只在下次按儲存才會重新判斷，卡片會誤導使用者以為仍未修正。
             .onChange(of: title) { _, _ in showValidationError = false }
             .onChange(of: amountText) { _, _ in showValidationError = false }
+            .onChange(of: rePurchasePriceText) { _, _ in showValidationError = false }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("取消") { dismiss() }
@@ -2243,7 +2245,23 @@ struct AddExpenseView: View {
 
         guard !trimmedTitle.isEmpty,
               let rawAmount = Double(finalAmountText), rawAmount > 0 else {
+            validationErrorMessage = "請輸入有效的名稱與金額（大於 0）。"
             // 美化：withAnimation 讓錯誤卡片的 transition 動畫生效
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showValidationError = true
+            }
+            return
+        }
+
+        // 「新增物件」模式會建立全新的 RealEstate，購入價格若留空／為 0，
+        // 會被 (Double(rePurchasePriceText) ?? 0) 靜默存成 0，資產淨值、排序、
+        // 稀有度全部跟著算錯卻不會有任何錯誤提示；比照 AddRealEstateView／
+        // AddVehicleView／AddStockView 既有的「新增資產必填價格」守衛補上。
+        let willCreateNewRealEstate =
+            (isMortgage && !mortgageLinkExisting)
+            || (expenseType == .variable && selectedAssetLink == .realEstate && !realEstateLinkExisting)
+        if willCreateNewRealEstate, (Double(rePurchasePriceText) ?? 0) <= 0 {
+            validationErrorMessage = "新增不動產物件時，請輸入有效的購入價格（大於 0）。"
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 showValidationError = true
             }

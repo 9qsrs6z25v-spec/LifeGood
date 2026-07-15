@@ -46,6 +46,9 @@ struct FamilyView: View {
     @State private var statsAppeared = false
 
     var body: some View {
+        // 一次建表供 memberRow／spouseDisplayName 共用，取代原本每一列各自對
+        // store.familyMembers 做 first(where:) 全量掃描（O(members²)）。
+        let membersById = Dictionary(store.familyMembers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         NavigationStack {
             // 用同一個 List 把街道圖跟成員清單放在一起；
             // 列表上滑時，街道圖會自然跟著被推上去，給下方項目更多空間。
@@ -81,7 +84,7 @@ struct FamilyView: View {
                 } else {
                     Section(header: familySectionHeader) {
                         ForEach(Array(store.familyMembers.enumerated()), id: \.element.id) { idx, member in
-                            memberRow(member)
+                            memberRow(member, membersById: membersById)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     if subscription.isPremium { editingMember = member }
@@ -367,7 +370,7 @@ struct FamilyView: View {
 
     // MARK: - 成員列（44pt 圖示圓 + 角色色彩強調條 + 膠囊標籤）
 
-    private func memberRow(_ member: FamilyMember) -> some View {
+    private func memberRow(_ member: FamilyMember, membersById: [UUID: FamilyMember]) -> some View {
         let accent = roleAccentColor(member.role)
         let displayName = member.chineseName.isEmpty ? member.englishName : member.chineseName
 
@@ -430,7 +433,7 @@ struct FamilyView: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
-                        if let spouse = spouseDisplayName(for: member) {
+                        if let spouse = spouseDisplayName(for: member, membersById: membersById) {
                             HStack(spacing: 3) {
                                 Image(systemName: "heart.fill")
                                     .font(.system(size: 8))
@@ -462,7 +465,11 @@ struct FamilyView: View {
                         .padding(.horizontal, 6).padding(.vertical, 2.5)
                         .background(Color(.tertiarySystemFill))
                         .clipShape(Capsule())
-                    } else if member.role == .spouse, let md = member.marriageDate {
+                    }
+                    // 原本用 if/else if 讓婚期／離婚徽章只在「沒有生日」時才顯示，
+                    // 但配偶幾乎都會填生日，導致已離婚的配偶在家人列表完全看不出離婚狀態
+                    // （SpouseResumeView 卻正確顯示）；改為與生日徽章各自獨立顯示。
+                    if member.role == .spouse, let md = member.marriageDate {
                         let spouseAccent = Color(red: 1.00, green: 0.35, blue: 0.55)
                         HStack(spacing: 3) {
                             Image(systemName: "heart.fill")
@@ -501,9 +508,8 @@ struct FamilyView: View {
         Self._dateFmt.string(from: date)
     }
 
-    private func spouseDisplayName(for member: FamilyMember) -> String? {
-        guard let id = member.spouseId,
-              let spouse = store.familyMembers.first(where: { $0.id == id }) else { return nil }
+    private func spouseDisplayName(for member: FamilyMember, membersById: [UUID: FamilyMember]) -> String? {
+        guard let id = member.spouseId, let spouse = membersById[id] else { return nil }
         let name = spouse.chineseName.isEmpty ? spouse.englishName : spouse.chineseName
         return name.isEmpty ? nil : name
     }

@@ -62,7 +62,13 @@ struct TaxOverviewView: View {
     @State private var taxRowsAppeared = false
     @State private var checklistRowsAppeared = false
     @State private var tipsRowsAppeared = false
-    @State private var emptyIconPulse = false
+    // 拆成兩個獨立旗標：taxRecordsSection（稅務紀錄是否為空）與 taxSavingSection
+    // （節稅記錄是否為空）是兩個互不相關的條件，常常一個空一個不空。共用同一個
+    // @State 時，若其中一個空狀態先掛載並把旗標設成 true，之後另一個空狀態掛載時
+    // 旗標已是 true、.animation(value:) 偵測不到「從 false 變 true」的變化，
+    // 脈衝光環會直接停在動畫結束狀態（不透明度 0）、永遠不會播放。
+    @State private var emptyRecordsPulse = false
+    @State private var emptySavingPulse = false
 
     // MARK: - 商業邏輯（不動）
 
@@ -128,10 +134,10 @@ struct TaxOverviewView: View {
         }
     }
 
-    private var taxByMonth: [(month: Int, amount: Double)] {
+    private func taxByMonth(_ exps: [Expense]) -> [(month: Int, amount: Double)] {
         let cal = Calendar.current
         // 用 Dictionary(grouping:) 一次分組取代「12 次全量 filter」，避免 O(12n) 重複掃描
-        let byMonth = Dictionary(grouping: taxExpenses) { cal.component(.month, from: $0.date) }
+        let byMonth = Dictionary(grouping: exps) { cal.component(.month, from: $0.date) }
         var result: [(Int, Double)] = []
         for m in 1...12 {
             let amount = (byMonth[m] ?? []).reduce(0) { $0 + $1.amount }
@@ -164,11 +170,14 @@ struct TaxOverviewView: View {
         let breakdown = taxSavingBySub
         let savingTotal = taxSavingExpenses.reduce(0.0) { $0 + $1.amount }
             + breakdown.values.reduce(0.0) { $0 + $1.fixed }
+        // taxExpenses 是 filter+sort（O(n log n)），一次算好供 annualSummaryCard／
+        // taxRecordsSection／monthlyBreakdown 共用，避免同一次 body 求值各自重跑三次。
+        let exps = taxExpenses
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     yearPicker
-                    annualSummaryCard(savingTotal)
+                    annualSummaryCard(savingTotal, exps: exps)
                         .opacity(heroCardAppeared ? 1 : 0)
                         .offset(y: heroCardAppeared ? 0 : 20)
                         .onAppear {
@@ -176,8 +185,8 @@ struct TaxOverviewView: View {
                                 heroCardAppeared = true
                             }
                         }
-                    taxRecordsSection
-                    monthlyBreakdown
+                    taxRecordsSection(exps)
+                    monthlyBreakdown(exps)
                     taxSavingSection(savingTotal, breakdown: breakdown)
                     taxChecklistSection
                     deductionTipsSection(breakdown: breakdown)
@@ -189,9 +198,10 @@ struct TaxOverviewView: View {
             .onChange(of: selectedYear) { _, _ in
                 // yearPicker 只重置 heroCardAppeared/monthBarAppeared；
                 // 此處補齊其餘旗標，確保切換年份後：
-                //   1. emptyIconPulse 歸零，下一個空狀態出現時脈衝動畫正確重啟
+                //   1. emptyRecordsPulse/emptySavingPulse 歸零，下一個空狀態出現時脈衝動畫正確重啟
                 //   2. 列項旗標歸零後延遲 0.08 s 重播進場動畫，對齊英雄卡片節奏
-                emptyIconPulse = false
+                emptyRecordsPulse = false
+                emptySavingPulse = false
                 taxRowsAppeared = false
                 checklistRowsAppeared = false
                 tipsRowsAppeared = false
@@ -205,7 +215,8 @@ struct TaxOverviewView: View {
             }
             .onDisappear {
                 heroCardAppeared = false
-                emptyIconPulse = false
+                emptyRecordsPulse = false
+                emptySavingPulse = false
                 taxRowsAppeared = false
                 checklistRowsAppeared = false
                 tipsRowsAppeared = false
@@ -287,9 +298,7 @@ struct TaxOverviewView: View {
 
     // MARK: - 年度摘要英雄卡（升級：紅橘漸層 + 散景裝飾 + KPI 統計行）
 
-    private func annualSummaryCard(_ savingTotal: Double) -> some View {
-        // taxExpenses は filter+sort（O(n log n)）のため、一度だけ実行して再利用
-        let exps = taxExpenses
+    private func annualSummaryCard(_ savingTotal: Double, exps: [Expense]) -> some View {
         let taxTotal = exps.reduce(0) { $0 + $1.amount }
         let taxRatio = estimatedAnnualIncome > 0 ? taxTotal / estimatedAnnualIncome * 100 : 0
 
@@ -436,9 +445,8 @@ struct TaxOverviewView: View {
 
     // MARK: - 稅費紀錄（升級：漸層圖示圓 + 日期膠囊 + 空狀態佔位）
 
-    private var taxRecordsSection: some View {
-        let exps = taxExpenses  // 整個 section 共用一份結果，避免多次 filter+sort
-        return VStack(alignment: .leading, spacing: 0) {
+    private func taxRecordsSection(_ exps: [Expense]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             sectionHeader("稅費紀錄", icon: "list.bullet.rectangle", color: .red,
                           count: exps.isEmpty ? nil : exps.count)
 
@@ -447,15 +455,15 @@ struct TaxOverviewView: View {
                 VStack(spacing: 16) {
                     ZStack {
                         Circle()
-                            .stroke(Color.red.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                            .stroke(Color.red.opacity(emptyRecordsPulse ? 0 : 0.28), lineWidth: 1.5)
                             .frame(width: 100, height: 100)
-                            .scaleEffect(emptyIconPulse ? 1.38 : 1.0)
-                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                            .scaleEffect(emptyRecordsPulse ? 1.38 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyRecordsPulse)
                         Circle()
-                            .stroke(Color.red.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                            .stroke(Color.red.opacity(emptyRecordsPulse ? 0 : 0.14), lineWidth: 1)
                             .frame(width: 100, height: 100)
-                            .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
-                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                            .scaleEffect(emptyRecordsPulse ? 1.60 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyRecordsPulse)
                         Circle()
                             .fill(LinearGradient(
                                 colors: [Color.red.opacity(0.14), Color.red.opacity(0.06)],
@@ -467,7 +475,7 @@ struct TaxOverviewView: View {
                             .foregroundStyle(Color.red.opacity(0.65))
                     }
                     .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyIconPulse = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyRecordsPulse = true }
                     }
                     Text("本年度尚無稅費紀錄")
                         .font(.subheadline.weight(.medium))
@@ -546,9 +554,8 @@ struct TaxOverviewView: View {
     // MARK: - 月份分佈（升級：漸層 Capsule + 進場動畫 + 月份膠囊徽章）
 
     @ViewBuilder
-    private var monthlyBreakdown: some View {
-        // taxByMonth 內部呼叫 taxExpenses（O(n log n)），一次捕捉避免四次重複計算
-        let byMonth = taxByMonth
+    private func monthlyBreakdown(_ exps: [Expense]) -> some View {
+        let byMonth = taxByMonth(exps)
         if !byMonth.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 sectionHeader("月份分佈", icon: "calendar", color: .orange,
@@ -719,15 +726,15 @@ struct TaxOverviewView: View {
                 VStack(spacing: 16) {
                     ZStack {
                         Circle()
-                            .stroke(Color.green.opacity(emptyIconPulse ? 0 : 0.26), lineWidth: 1.5)
+                            .stroke(Color.green.opacity(emptySavingPulse ? 0 : 0.26), lineWidth: 1.5)
                             .frame(width: 100, height: 100)
-                            .scaleEffect(emptyIconPulse ? 1.38 : 1.0)
-                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                            .scaleEffect(emptySavingPulse ? 1.38 : 1.0)
+                            .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptySavingPulse)
                         Circle()
-                            .stroke(Color.green.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                            .stroke(Color.green.opacity(emptySavingPulse ? 0 : 0.13), lineWidth: 1)
                             .frame(width: 100, height: 100)
-                            .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
-                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                            .scaleEffect(emptySavingPulse ? 1.60 : 1.0)
+                            .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptySavingPulse)
                         Circle()
                             .fill(LinearGradient(
                                 colors: [Color.green.opacity(0.14), Color.green.opacity(0.05)],
@@ -739,7 +746,7 @@ struct TaxOverviewView: View {
                             .foregroundStyle(Color.green.opacity(0.65))
                     }
                     .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyIconPulse = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptySavingPulse = true }
                     }
                     VStack(spacing: 8) {
                         Text("本年度尚無節稅紀錄")

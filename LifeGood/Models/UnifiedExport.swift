@@ -438,6 +438,10 @@ enum UnifiedImporter {
 
         switch mode {
         case .replace:
+            let incomingIds = Set(payload.expense.expenses.map(\.id))
+            for old in expense.expenses where !incomingIds.contains(old.id) {
+                for name in old.photoFileNames { Expense.deletePhoto(name) }
+            }
             expense.expenses = payload.expense.expenses
             expense.incomes = payload.expense.incomes
             if let rates = payload.expense.currencyRates { expense.currencyRates = rates }

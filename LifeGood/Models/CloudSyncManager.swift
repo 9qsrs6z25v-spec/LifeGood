@@ -202,24 +202,28 @@ final class CloudSyncManager: ObservableObject {
         guard !isSyncing else { return }
         isSyncing = true
         CloudKitManager.shared.bootstrap { [weak self] ok in
-            guard let self = self, ok else { self?.isSyncing = false; return }
-            CloudKitManager.shared.fetchAllKVToMemory { [weak self] cloudBlobs in
-                guard let self = self else { return }
-                let count = Self.itemCount(cloudBlobs)
-                if count == 0 {
-                    // 雲端沒資料：把本機推上去當種子，不需詢問
-                    CloudKitManager.shared.pushAllKV(keys: Self.syncKeys) { [weak self] pushOK in
-                        CloudKitManager.shared.uploadAllLocalPhotos {
-                            self?.isSyncing = false
-                            if pushOK { self?.markSynced() }
-                            DispatchQueue.main.async { [weak self] in self?.lastChangeReason = .initialSync }
+            // bootstrap completion 可能由 CloudKit 背景佇列呼叫，
+            // 強制回主執行緒再修改 isSyncing，避免競態條件
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, ok else { self?.isSyncing = false; return }
+                CloudKitManager.shared.fetchAllKVToMemory { [weak self] cloudBlobs in
+                    guard let self = self else { return }
+                    let count = Self.itemCount(cloudBlobs)
+                    if count == 0 {
+                        // 雲端沒資料：把本機推上去當種子，不需詢問
+                        CloudKitManager.shared.pushAllKV(keys: Self.syncKeys) { [weak self] pushOK in
+                            CloudKitManager.shared.uploadAllLocalPhotos {
+                                self?.isSyncing = false
+                                if pushOK { self?.markSynced() }
+                                DispatchQueue.main.async { [weak self] in self?.lastChangeReason = .initialSync }
+                            }
                         }
-                    }
-                } else {
-                    // 保持 isSyncing = true 直到使用者做出覆蓋／合併選擇（resolveInitialSync）
-                    // 或取消（cancelInitialSync），避免決策期間被自動同步搶跑。
-                    DispatchQueue.main.async { [weak self] in
-                        self?.pendingInitialSync = InitialSyncInfo(cloudItemCount: count, cloudBlobs: cloudBlobs)
+                    } else {
+                        // 保持 isSyncing = true 直到使用者做出覆蓋／合併選擇（resolveInitialSync）
+                        // 或取消（cancelInitialSync），避免決策期間被自動同步搶跑。
+                        DispatchQueue.main.async { [weak self] in
+                            self?.pendingInitialSync = InitialSyncInfo(cloudItemCount: count, cloudBlobs: cloudBlobs)
+                        }
                     }
                 }
             }

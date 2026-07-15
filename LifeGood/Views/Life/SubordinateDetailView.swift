@@ -1475,6 +1475,12 @@ struct RecordEditorSheet: View {
                         editorSectionHeader("請假資訊", icon: "calendar.badge.clock")
                     }
                     Section {
+                        // restDeductionHours 會逐日走訪 date...endDate 並對 sub.shifts 做線性掃描，
+                        // FiveMinuteDateTimePicker 拖曳/捲動時每一格都觸發 Form body 重新求值；
+                        // 原本這裡與下方 computedLeaveHours（內部又重呼叫一次 restDeductionHours）
+                        // 加起來一次 render 會重算 4 次，拖曳期間等於每格都重掃 4 次。改為只算一次。
+                        let deduction = restDeductionHours
+                        let leaveHours = max(0, endDate.timeIntervalSince(date) / 3600 - deduction)
                         HStack {
                             Text("開始時間")
                             Spacer()
@@ -1485,11 +1491,11 @@ struct RecordEditorSheet: View {
                             Spacer()
                             FiveMinuteDateTimePicker(selection: $endDate, minimumDate: date).fixedSize()
                         }
-                        if restDeductionHours > 0 {
+                        if deduction > 0 {
                             HStack {
                                 Text("扣除休息").foregroundStyle(.secondary)
                                 Spacer()
-                                Text(String(format: "−%.1f 小時", restDeductionHours))
+                                Text(String(format: "−%.1f 小時", deduction))
                                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                                     .foregroundStyle(.orange)
                                     .padding(.horizontal, 8).padding(.vertical, 3)
@@ -1502,7 +1508,7 @@ struct RecordEditorSheet: View {
                         HStack {
                             Text("請假時數").foregroundStyle(.secondary)
                             Spacer()
-                            Text(String(format: "%.1f 小時", computedLeaveHours))
+                            Text(String(format: "%.1f 小時", leaveHours))
                                 .font(.system(size: 14, weight: .bold, design: .rounded))
                                 .foregroundStyle(.teal)
                                 .padding(.horizontal, 9).padding(.vertical, 4)
