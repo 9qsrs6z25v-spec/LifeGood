@@ -769,6 +769,11 @@ struct OrgPersonEditor: View {
     @State private var relations: [OrgPersonRelation] = []
     @State private var linkedBusinessCardId: UUID?
     @State private var pendingImageData: Data?
+    // pendingImageData 解碼後的快取：photoSection 過去直接在 body 內對 pendingImageData
+    // 呼叫 UIImage(data:)，姓名／職稱等任何欄位按鍵都會觸發 Form body 重新求值，
+    // 導致選了新照片後每次按鍵都在主執行緒重新解碼一次完整 JPEG。改為只在照片來源
+    // （相機／相簿）產生 pendingImageData 當下解碼一次並快取。
+    @State private var pendingImage: UIImage?
     @State private var showCamera = false
     @State private var photoItem: PhotosPickerItem?
     @State private var isPresentingPhotoPicker = false
@@ -943,6 +948,7 @@ struct OrgPersonEditor: View {
             .sheet(isPresented: $showCamera) {
                 CameraPicker { image in
                     pendingImageData = image.jpegData(compressionQuality: 0.85)
+                    pendingImage = image
                 }
                 .ignoresSafeArea()
             }
@@ -950,7 +956,8 @@ struct OrgPersonEditor: View {
             .onChange(of: photoItem) { _, item in
                 Task {
                     guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
-                    await MainActor.run { pendingImageData = data }
+                    let decoded = UIImage(data: data)
+                    await MainActor.run { pendingImageData = data; pendingImage = decoded }
                 }
             }
             .alert("確定要刪除這個人員嗎？", isPresented: $showDeleteConfirm) {
@@ -968,7 +975,7 @@ struct OrgPersonEditor: View {
     private var photoSection: some View {
         HStack {
             ZStack {
-                if let data = pendingImageData, let img = UIImage(data: data) {
+                if let img = pendingImage {
                     Image(uiImage: img)
                         .resizable().scaledToFill()
                         .frame(width: 60, height: 60)
@@ -1000,6 +1007,7 @@ struct OrgPersonEditor: View {
                         if let oldName = photoFileName { OrgPerson.deletePhoto(oldName) }
                         photoFileName = nil
                         pendingImageData = nil
+                        pendingImage = nil
                     } label: { Label("移除照片", systemImage: "trash") }
                 }
             } label: {

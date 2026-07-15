@@ -386,6 +386,11 @@ struct ResumeView: View {
                             heroCardAppeared = true
                         }
                     }
+                    .onDisappear {
+                        // 重置旗標：切到其他分頁再切回時能重新播放英雄卡進場動畫，
+                        // 對齊 CareerView / FixedExpenseView 既有寫法。
+                        heroCardAppeared = false
+                    }
 
                 categoryFilter
 
@@ -462,6 +467,10 @@ struct ResumeView: View {
                 rowsAppeared = true
             }
         }
+        .onDisappear {
+            // 重置旗標：切到其他分頁再切回時能重新播放列表進場動畫，對齊 FixedExpenseView 既有寫法。
+            rowsAppeared = false
+        }
     }
 
     private func filteredList(category: MilestoneCategory, sorted: [LifeMilestone]) -> some View {
@@ -507,6 +516,10 @@ struct ResumeView: View {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
                 rowsAppeared = true
             }
+        }
+        .onDisappear {
+            // 重置旗標：切到其他分頁再切回時能重新播放列表進場動畫，對齊 FixedExpenseView 既有寫法。
+            rowsAppeared = false
         }
     }
 
@@ -1810,6 +1823,25 @@ struct AddMilestoneView: View {
                 preserved.familyPhotos = original.familyPhotos
             }
             if editingFamily != nil { store.update(preserved) } else { store.add(preserved) }
+            // 解除舊配對關係，避免殘留失效引用（比照 LifeStore.deleteFamilyMember 解除
+            // spouseId 的既有寫法）：
+            // ① 本人原本配對的對象若換了（或整個清空），原對象的 spouseId 要一併清掉，
+            //    否則會永遠單向指向本人（本人已改指別人或不再有配偶）。
+            if let oldSpouseId = editingFamily?.spouseId, oldSpouseId != familySpouseId,
+               var oldSpouse = store.familyMembers.first(where: { $0.id == oldSpouseId }),
+               oldSpouse.spouseId == memberId {
+                oldSpouse.spouseId = nil
+                store.update(oldSpouse)
+            }
+            // ② 新選的另一半若原本配對別人，那個人的 spouseId 也要清掉，
+            //    否則會同時被兩個人的 spouseId 指到。
+            if let spouseId = familySpouseId,
+               var otherOldSpouse = store.familyMembers.first(where: {
+                   $0.spouseId == spouseId && $0.id != memberId
+               }) {
+                otherOldSpouse.spouseId = nil
+                store.update(otherOldSpouse)
+            }
             // 雙向綁定：把選中的另一半也指向自己（同步補位）
             if let spouseId = familySpouseId,
                var other = store.familyMembers.first(where: { $0.id == spouseId }),

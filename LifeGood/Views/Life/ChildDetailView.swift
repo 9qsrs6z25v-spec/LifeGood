@@ -1192,6 +1192,8 @@ struct ChildRecordEditorSheet: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var sketchMode = true
     @State private var previewImage: UIImage?
+    /// 進入編輯畫面時的原始照片檔名，用來判斷儲存/取消時該刪哪個檔案（見 save()/取消按鈕註解）。
+    @State private var originalPhotoFileName: String?
 
     private var canSave: Bool {
         switch type {
@@ -1241,7 +1243,13 @@ struct ChildRecordEditorSheet: View {
 
                     if photoFileName != nil {
                         Button(role: .destructive) {
-                            if let name = photoFileName { ChildRecord.deletePhoto(name) }
+                            // 不在這裡立刻刪檔：使用者移除圖片後若按「取消」，原圖應該保持不變
+                            // （取消不該有副作用）。實際刪除延到 save() 依最終結果判斷。
+                            // 但若移除的是本次 session 剛選的新照片（尚未儲存），要立刻清掉，
+                            // 否則變成孤兒檔案。
+                            if let name = photoFileName, name != originalPhotoFileName {
+                                ChildRecord.deletePhoto(name)
+                            }
                             photoFileName = nil; previewImage = nil
                         } label: {
                             Label("移除圖片", systemImage: "xmark.circle")
@@ -1256,7 +1264,18 @@ struct ChildRecordEditorSheet: View {
             .navigationTitle(editing != nil ? "編輯\(type.rawValue)" : "新增\(type.rawValue)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") {
+                        // 選了新照片但按取消：新照片檔案已寫入磁碟卻不會被任何紀錄引用，
+                        // 要在這裡清掉，避免變成永久孤兒檔案（同型修復見 RenovationPhotoEditor.cancel()）。
+                        // 原本的照片（originalPhotoFileName）維持不動，因為 onChange 已改為不再
+                        // 立刻刪除舊檔，取消時原檔仍完整保留。
+                        if let current = photoFileName, current != originalPhotoFileName {
+                            ChildRecord.deletePhoto(current)
+                        }
+                        dismiss()
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave)
                 }
@@ -1265,14 +1284,20 @@ struct ChildRecordEditorSheet: View {
             .onChange(of: photoItem) { _, _ in
                 Task {
                     guard let photoItem, let data = try? await photoItem.loadTransferable(type: Data.self) else { return }
+                    // 換照片時不立刻刪舊檔：使用者選了新照片後若按「取消」，若這裡就刪掉
+                    // originalPhotoFileName，該檔案會被永久刪除卻沒有任何紀錄真的改用新照片
+                    // （取消不該有副作用）。改成只在 save() 依最終結果與原始檔名的差異決定要刪誰。
+                    // 若這是本次 session 已經選過一次的新照片（尚未儲存），要先清掉，否則連續換兩次
+                    // 照片會留下第一次選的孤兒檔案。
+                    if let previous = photoFileName, previous != originalPhotoFileName {
+                        ChildRecord.deletePhoto(previous)
+                    }
                     // 編輯既有記錄時 editing.id 不變，若沿用它當檔名，換照片會同路徑覆寫、photoFileName
                     // 字串不變，清單縮圖用的 AsyncLocalImage 依 url 判斷是否重讀，url 沒變就不會重讀，
                     // 換照片後清單頭像停留在舊圖（同類 bug 已在 BusinessCard/OrgPerson/FamilyAlbumPhoto
                     // 修復，改用全新 UUID 檔名）。素描檔名一律跟著同一個新 photoId 走，兩者仍保持配對。
-                    let oldPhotoName = photoFileName
                     let photoId = UUID()
                     photoFileName = ChildRecord.savePhoto(data, id: photoId)
-                    if let oldPhotoName { ChildRecord.deletePhoto(oldPhotoName) }
                     let origImage = UIImage(data: data)
                     // 素描版：CIContext 建立與 GPU 渲染移到背景執行緒，避免阻塞主執行緒
                     if let orig = origImage {
@@ -1573,6 +1598,7 @@ struct ChildRecordEditorSheet: View {
         if let w = e.weightKg, w > 0 { weightText = String(format: "%g", w) }
         dose = e.dose ?? ""; severity = e.severity ?? .mild
         photoFileName = e.photoFileName
+        originalPhotoFileName = e.photoFileName
         if e.photoFileName != nil {
             previewImage = sketchMode ? loadSketchOrOrig() : {
                 guard let name = e.photoFileName,
@@ -1584,6 +1610,11 @@ struct ChildRecordEditorSheet: View {
 
     private func save() {
         guard var member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { dismiss(); return }
+        // 原始照片與最終結果不同（換照片或移除圖片）才刪除原檔；真正的刪除動作延到這裡才提交，
+        // 使用者中途按「取消」不會遺失原本已存在的照片（見 photoItem onChange／移除圖片按鈕註解）。
+        if let original = originalPhotoFileName, original != photoFileName {
+            ChildRecord.deletePhoto(original)
+        }
         let rec = ChildRecord(
             id: editing?.id ?? UUID(), type: type, date: date,
             title: title.trimmingCharacters(in: .whitespaces), detail: detail.trimmingCharacters(in: .whitespaces),

@@ -134,6 +134,22 @@ struct SpouseResumeView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            // onAppear/onDisappear 掛在 List 本身（而非 ForEach 內每一列）：List 會延遲載入
+            // （lazy-load）各列，掛在 ForEach 上等同掛在每一列各自的子視圖上，捲動使某列進出可視範圍
+            // 就各自觸發一次，milestonesAppeared／expensesAppeared 是所有列共用的旗標，
+            // 反覆觸發會讓可視列表在捲動時無謂淡出又重播進場動畫。比照 FamilyView 既有寫法，
+            // 改掛在 List 本身，確保只在畫面進出時各觸發一次。
+            .onAppear {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                    milestonesAppeared = true
+                    expensesAppeared = true
+                }
+            }
+            .onDisappear {
+                // 重置旗標：切到其他分頁再切回時能重新播放里程碑／消費列表進場動畫
+                milestonesAppeared = false
+                expensesAppeared = false
+            }
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("配偶履歷")
@@ -457,17 +473,6 @@ struct SpouseResumeView: View {
                                 .delay(0.05 * Double(idx)),
                             value: milestonesAppeared
                         )
-                        .onAppear {
-                            if idx == 0 {
-                                withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
-                                    milestonesAppeared = true
-                                }
-                            }
-                        }
-                        .onDisappear {
-                            // 重置旗標：切到其他分頁再切回時能重新播放里程碑列表進場動畫
-                            if idx == 0 { milestonesAppeared = false }
-                        }
                 }
             }
         }
@@ -586,17 +591,6 @@ struct SpouseResumeView: View {
                                 .delay(0.04 * Double(min(idx, 14))),
                             value: expensesAppeared
                         )
-                        .onAppear {
-                            if idx == 0 {
-                                withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
-                                    expensesAppeared = true
-                                }
-                            }
-                        }
-                        .onDisappear {
-                            // 重置旗標：切到其他分頁再切回時能重新播放消費列表進場動畫
-                            if idx == 0 { expensesAppeared = false }
-                        }
                 }
 
                 if expenses.count > 20 {

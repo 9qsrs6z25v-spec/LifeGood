@@ -95,6 +95,19 @@ struct FixedExpenseView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            // onAppear/onDisappear 掛在 List 本身（而非 fixedExpenseSections 內每個分類的
+            // ForEach）：List 延遲載入各 Section，掛在 ForEach 上等同掛在每組各自的子視圖上，
+            // 捲動使某組進出可視範圍就各自觸發一次，所有列共用的 categoryListAppeared 旗標會被
+            // 反覆重置，導致可視列表捲動時無謂淡出又重播進場動畫。改掛在 List 本身，
+            // 比照 FamilyView 既有寫法，確保只在畫面進出時各觸發一次。
+            .onAppear {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                    categoryListAppeared = true
+                }
+            }
+            .onDisappear {
+                categoryListAppeared = false
+            }
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("固定支出")
@@ -472,14 +485,6 @@ struct FixedExpenseView: View {
                     deleteWithSync(offsets: offsets, from: expenses)
                 }
             }
-        }
-        .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
-                categoryListAppeared = true
-            }
-        }
-        .onDisappear {
-            categoryListAppeared = false
         }
     }
 

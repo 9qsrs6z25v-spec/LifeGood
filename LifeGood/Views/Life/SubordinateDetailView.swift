@@ -141,7 +141,10 @@ struct CompletedCollapsibleCard: View {
                 .buttonStyle(.plain)
 
                 if expanded {
-                    ForEach(Array(sorted.enumerated()), id: \.element.id) { idx, e in
+                    // 先捕捉一次，避免下方 idx < sorted.count - 1 每列都重新呼叫 sorted
+                    // 造成整份 entries 重排一次（O(n log n) × n）。
+                    let sortedEntries = sorted
+                    ForEach(Array(sortedEntries.enumerated()), id: \.element.id) { idx, e in
                         Button(action: e.onTap) {
                             HStack(spacing: 11) {
                                 ZStack {
@@ -177,7 +180,7 @@ struct CompletedCollapsibleCard: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        if idx < sorted.count - 1 { Divider().padding(.leading, 57) }
+                        if idx < sortedEntries.count - 1 { Divider().padding(.leading, 57) }
                     }
                     .padding(.bottom, 6)
                 }

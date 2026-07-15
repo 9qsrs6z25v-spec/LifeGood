@@ -82,13 +82,18 @@ struct MyCalendarView: View {
         let resolvedWeekDates = weekDates
         let startOfSelectedDay = calendar.startOfDay(for: selectedDate)
         let startOfToday = calendar.startOfDay(for: Date())
-        let weekEventsMap = Dictionary(uniqueKeysWithValues: resolvedWeekDates.map { ($0, eventsOn($0)) })
-        let upcomingMS = upcomingMilestones
         let heroIsToday = startOfSelectedDay == startOfToday
         let heroWeekDates = heroIsToday ? resolvedWeekDates
             : (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: startOfToday) }
+        // 非今日時 heroWeekDates 與 resolvedWeekDates 最多重疊 6 天，先算聯集只呼叫一次
+        // eventsOn()（家人+里程碑+行事曆全量查詢，非輕量運算），weekEventsMap／heroEventsMap
+        // 再各自從聯集結果取子集，避免重疊日期被 eventsOn() 重複掃描兩次。
+        let allDates = Array(Set(resolvedWeekDates).union(heroWeekDates))
+        let allEventsMap = Dictionary(uniqueKeysWithValues: allDates.map { ($0, eventsOn($0)) })
+        let weekEventsMap = Dictionary(uniqueKeysWithValues: resolvedWeekDates.map { ($0, allEventsMap[$0] ?? []) })
         let heroEventsMap = heroIsToday ? weekEventsMap
-            : Dictionary(uniqueKeysWithValues: heroWeekDates.map { ($0, eventsOn($0)) })
+            : Dictionary(uniqueKeysWithValues: heroWeekDates.map { ($0, allEventsMap[$0] ?? []) })
+        let upcomingMS = upcomingMilestones
         let heroTodayCount = heroEventsMap[startOfToday]?.count ?? 0
         let heroWeekTotal = heroWeekDates.reduce(0) { $0 + (heroEventsMap[$1]?.count ?? 0) }
         NavigationStack {

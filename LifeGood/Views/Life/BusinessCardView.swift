@@ -110,7 +110,14 @@ enum BusinessCardOCR {
             request.recognitionLanguages = ["zh-Hant", "zh-Hans", "en-US"]
             let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
             DispatchQueue.global(qos: .userInitiated).async {
-                try? handler.perform([request])
+                do {
+                    try handler.perform([request])
+                } catch {
+                    // perform 拋錯時（例如相機拍到的圖檔損毀）request 的 completion handler
+                    // 不會被呼叫，繼續用 try? 吞掉錯誤會讓 continuation 永遠不 resume，
+                    // 呼叫端的 await 卡死、isProcessingScan/isRescanning 卡在 true 出不去。
+                    continuation.resume(returning: [])
+                }
             }
         }
     }
@@ -2187,6 +2194,9 @@ struct BusinessCardEditor: View {
                     note = p.note
                     date = editing?.date ?? Date()
                     department = editing?.department ?? ""
+                    // OCR 重新掃描抓不到「主要往來」，沿用 date／department 的既有寫法一併保留，
+                    // 否則重新拍照辨識存檔會把原本已填的主要往來靜默清空。
+                    primaryBusiness = editing?.primaryBusiness ?? ""
                 } else if let e = editing {
                     name = e.name; company = e.company; department = e.department
                     jobTitle = e.jobTitle

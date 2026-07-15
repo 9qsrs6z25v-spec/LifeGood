@@ -866,14 +866,18 @@ struct RealEstateDetailView: View {
             }
 
             // 3. 房屋資料集錦（預設展開；右側 + Menu）
+            // gallerySummary／renovationPhotosContent 過去各自獨立呼叫 linkedExpensePhotos
+            // （對 expenseStore.expenses 全量 filter），summary 又不受展開狀態影響、每次都會算，
+            // 同一次 render 因此重複掃描兩次；改由呼叫端算一次後往下傳參數。
+            let expPhotos = linkedExpensePhotos
             collapsibleSection(
                 title: "房屋資料集錦",
-                summary: gallerySummary,
+                summary: gallerySummary(expensePhotos: expPhotos),
                 summaryColor: .green,
                 isExpanded: $hiGalleryExpanded,
                 trailing: { galleryAddMenu }
             ) {
-                renovationPhotosContent
+                renovationPhotosContent(expensePhotos: expPhotos)
             }
 
             // 4. 電梯資料
@@ -1019,9 +1023,9 @@ struct RealEstateDetailView: View {
 
     // MARK: - 集錦摘要
 
-    private var gallerySummary: String? {
+    private func gallerySummary(expensePhotos: [Expense]) -> String? {
         let photoCount = estate.renovationPhotos.reduce(0) { $0 + max(1, $1.photoFileNames.count) }
-        let expensePhotoCount = linkedExpensePhotos.reduce(0) { $0 + $1.photoFileNames.count }
+        let expensePhotoCount = expensePhotos.reduce(0) { $0 + $1.photoFileNames.count }
         let docCount = estate.documents.count
         let utilityPhotoCount = estate.utilityPayments.filter { $0.photoFileName != nil }.count
         let elevatorPhotoCount = estate.elevatorMaintenances.filter { $0.photoFileName != nil }.count
@@ -1505,9 +1509,9 @@ struct RealEstateDetailView: View {
     }
 
     @ViewBuilder
-    private var renovationPhotosContent: some View {
+    private func renovationPhotosContent(expensePhotos: [Expense]) -> some View {
         let renovationItems = estate.renovationPhotos.map { HousePhotoItem.renovation($0) }
-        let expenseItems = linkedExpensePhotos.map { HousePhotoItem.expense($0) }
+        let expenseItems = expensePhotos.map { HousePhotoItem.expense($0) }
         let documentItems = estate.documents.map { HousePhotoItem.document($0) }
         let utilityItems = estate.utilityPayments
             .filter { $0.photoFileName != nil }
@@ -2617,6 +2621,10 @@ struct ElevatorMaintenanceEditor: View {
     @State private var photoFileName: String?
     @State private var photoItem: PhotosPickerItem?
     @State private var showDeleteConfirm = false
+    // 防止連續選兩張照片時新舊 Task 並行：後選的載入較快先完成會把 photoFileName
+    // 指向它自己，先選的隨後完成又讀到已更新的 photoFileName 當作「舊檔」誤刪，
+    // 兩個 Task 互相刪對方剛存好的檔案。改為每次選擇先取消前一個未完成的載入。
+    @State private var photoLoadTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -2667,8 +2675,10 @@ struct ElevatorMaintenanceEditor: View {
                 }
             }
             .onChange(of: photoItem) { _, item in
-                Task {
+                photoLoadTask?.cancel()
+                photoLoadTask = Task {
                     if let item, let data = try? await item.loadTransferable(type: Data.self) {
+                        guard !Task.isCancelled else { return }
                         if let oldName = photoFileName {
                             ElevatorMaintenance.deletePhoto(oldName)
                         }
@@ -2729,6 +2739,9 @@ struct UtilityPaymentEditor: View {
     @State private var note = ""
     @State private var photoFileName: String?
     @State private var photoItem: PhotosPickerItem?
+    // 防止連續選兩張照片時新舊 Task 並行互相刪對方剛存好的檔案（同型修復見
+    // ElevatorMaintenanceEditor.photoLoadTask）：每次選擇先取消前一個未完成的載入。
+    @State private var photoLoadTask: Task<Void, Never>?
     @State private var showDeleteConfirm = false
     @State private var showError = false
     @State private var selectedBankMilestoneId: UUID?
@@ -2918,8 +2931,10 @@ struct UtilityPaymentEditor: View {
                 }
             }
             .onChange(of: photoItem) { _, item in
-                Task {
+                photoLoadTask?.cancel()
+                photoLoadTask = Task {
                     if let item, let data = try? await item.loadTransferable(type: Data.self) {
+                        guard !Task.isCancelled else { return }
                         if let oldName = photoFileName {
                             UtilityPayment.deletePhoto(oldName)
                         }

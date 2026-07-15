@@ -81,6 +81,10 @@ struct AddExpenseView: View {
     @State private var selectedRecurrence: Recurrence = .monthly
     @State private var note = ""
     @State private var showValidationError = false
+    /// 扣款帳戶選單的銀行餘額快取：allBankBalances() 內部雖已改為批次建表，
+    /// 但 bankPicker 是 Form body 的一部分，每次按鍵都會重新求值、重建整批表——
+    /// 改為只在 store.expenses／lifeStore.milestones 實際變動時（.task(id:)）才重算一次快取。
+    @State private var cachedBankBalances: [UUID: Double] = [:]
     // 即時金額預覽卡進場動畫旗標
     @State private var amountCardAppeared = false
 
@@ -366,6 +370,10 @@ struct AddExpenseView: View {
                     sheetDetent = newValue ? .large : .height(440)
                 }
             }
+            // 儲存失敗顯示「無法儲存」錯誤卡片後，使用者若接著修正名稱／金額，
+            // 卡片應立即消失；先前只在下次按儲存才會重新判斷，卡片會誤導使用者以為仍未修正。
+            .onChange(of: title) { _, _ in showValidationError = false }
+            .onChange(of: amountText) { _, _ in showValidationError = false }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("取消") { dismiss() }
@@ -1136,8 +1144,7 @@ struct AddExpenseView: View {
     }
 
     private var bankPicker: some View {
-        let balances = allBankBalances()
-        return HStack {
+        HStack {
             Text("扣款目標").foregroundStyle(.secondary)
             Spacer()
             Menu {
@@ -1151,7 +1158,7 @@ struct AddExpenseView: View {
                         ForEach(bankMilestones) { ms in
                             let currencies = bankCurrencies(for: ms)
                             let name = ms.bankName ?? ms.title
-                            let balanceLabel = "\(name)（\(formatBankBalance(balances[ms.id] ?? 0))）"
+                            let balanceLabel = "\(name)（\(formatBankBalance(cachedBankBalances[ms.id] ?? 0))）"
                             if currencies.count > 1 {
                                 Menu(balanceLabel) {
                                     ForEach(currencies, id: \.self) { code in
@@ -1180,7 +1187,7 @@ struct AddExpenseView: View {
                                 guard let bankId = card.linkedBankMilestoneId,
                                       let bank = bankMilestones.first(where: { $0.id == bankId }) else { return nil }
                                 let bankName = bank.bankName ?? bank.title
-                                return "\(bankName)（\(formatBankBalance(balances[bank.id] ?? 0))）"
+                                return "\(bankName)（\(formatBankBalance(cachedBankBalances[bank.id] ?? 0))）"
                             }()
                             Button(bankInfo.map { "\(cardName) → \($0)" } ?? cardName) {
                                 selectedCreditCardMilestoneId = card.id
@@ -1197,6 +1204,11 @@ struct AddExpenseView: View {
                     Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
                 }
             }
+        }
+        // 只在 store.expenses／lifeStore.milestones 實際變動時重算快取，而非每次按鍵都觸發的
+        // body 重新求值都重建批次表（見 cachedBankBalances 宣告處說明）。
+        .task(id: "\(store.modifyID)-\(lifeStore.milestones.count)") {
+            cachedBankBalances = allBankBalances()
         }
     }
 

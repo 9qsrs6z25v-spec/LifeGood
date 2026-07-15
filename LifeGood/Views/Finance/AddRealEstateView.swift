@@ -117,6 +117,11 @@ struct AddRealEstateView: View {
     @State private var hasElevator = false
     @State private var elevatorItems: [ElevatorItemState] = []
     @State private var viewingPhotoURL: URL?
+    // 防止同一筆保養記錄連續選兩張照片時新舊 Task 並行：後選的較快完成先把
+    // photoFileName 指向它自己，先選的隨後完成又讀到已更新的值當「舊檔」誤刪，
+    // 兩個 Task 互相刪對方剛存好的檔案（同型修復見 RealEstateDetailView.
+    // ElevatorMaintenanceEditor.photoLoadTask）。依 item.id 分別記錄、取消前一個。
+    @State private var elevatorPhotoLoadTasks: [UUID: Task<Void, Never>] = [:]
 
     struct ElevatorItemState: Identifiable {
         let id: UUID
@@ -828,20 +833,24 @@ struct AddRealEstateView: View {
                         get: { nil },
                         set: { newItem in
                             guard let newItem else { return }
-                            Task {
+                            let itemId = item.id
+                            elevatorPhotoLoadTasks[itemId]?.cancel()
+                            elevatorPhotoLoadTasks[itemId] = Task {
                                 if let data = try? await newItem.loadTransferable(type: Data.self) {
+                                    guard !Task.isCancelled else { return }
                                     // 檔名用全新 UUID（而非沿用編輯中記錄不變的 item.id），避免同路徑覆寫
                                     // 造成 ThumbnailCache（全域 NSCache，依 url.path 為 key）換照片後
                                     // 跨畫面持續顯示舊縮圖，對齊 RealEstateDetailView.ElevatorMaintenanceEditor
                                     // 同型修復。
-                                    if let oldName = elevatorItems.first(where: { $0.id == item.id })?.photoFileName {
+                                    if let oldName = elevatorItems.first(where: { $0.id == itemId })?.photoFileName {
                                         ElevatorMaintenance.deletePhoto(oldName)
                                     }
                                     let fileName = ElevatorMaintenance.savePhoto(data, id: UUID())
-                                    if let idx = elevatorItems.firstIndex(where: { $0.id == item.id }) {
+                                    if let idx = elevatorItems.firstIndex(where: { $0.id == itemId }) {
                                         elevatorItems[idx].photoFileName = fileName
                                     }
                                 }
+                                elevatorPhotoLoadTasks[itemId] = nil
                             }
                         }
                     ), matching: .images) {

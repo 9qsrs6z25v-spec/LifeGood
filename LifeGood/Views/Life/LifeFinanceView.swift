@@ -1769,7 +1769,10 @@ struct FinanceCardView: View {
     }
 
     private var linkedCreditCardSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // 過去 isEmpty／count／ForEach 各自獨立呼叫 linkedCreditCards（對 lifeStore.milestones
+        // 全量 filter），同一次 render 被呼叫 4 次；改為先算一次本地變數全段共用。
+        let cards = linkedCreditCards
+        return VStack(alignment: .leading, spacing: 0) {
             // 標題列：Capsule 側條（橙色）+ 張數膠囊，對齊 depositSection 標題規格
             HStack(spacing: 10) {
                 Capsule()
@@ -1783,8 +1786,8 @@ struct FinanceCardView: View {
                 Text("信用卡")
                     .font(.subheadline.weight(.bold))
                 Spacer()
-                if !linkedCreditCards.isEmpty {
-                    Text("\(linkedCreditCards.count) 張")
+                if !cards.isEmpty {
+                    Text("\(cards.count) 張")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.orange)
                         .padding(.horizontal, 8).padding(.vertical, 3)
@@ -1795,11 +1798,11 @@ struct FinanceCardView: View {
             }
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
 
-            if linkedCreditCards.isEmpty {
+            if cards.isEmpty {
                 Text("尚無信用卡").font(.caption).foregroundStyle(.tertiary)
                     .padding(.horizontal, 16).padding(.bottom, 14)
             } else {
-                ForEach(linkedCreditCards) { card in
+                ForEach(cards) { card in
                     let disabled = card.isDisabled == true
                     let accent: Color = disabled ? .secondary : .orange
                     Button { viewingLinkedCard = card } label: {

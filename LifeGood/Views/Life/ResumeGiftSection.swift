@@ -101,16 +101,6 @@ struct ResumeGiftSection: View {
                     .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.75))
             }
             .padding(.vertical, 4)
-            .onAppear {
-                // [v2-C] 觸發 giftRow 交錯進場動畫
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
-                    rowsAppeared = true
-                }
-            }
-            .onDisappear {
-                // 重置旗標：切到其他分頁再切回時能重新播放禮金列表進場動畫
-                rowsAppeared = false
-            }
 
             // 各子分類 DisclosureGroup
             ForEach(byCategory, id: \.sub) { group in
@@ -202,6 +192,20 @@ struct ResumeGiftSection: View {
             .textCase(nil)
         } footer: {
             Text("變動支出分類選「社交」並把「\(recipientName)」加入收受人，會自動同步到此區塊。")
+        }
+        // onAppear/onDisappear 掛在 Section 本身（而非總計列 HStack）：本元件被嵌入外層 List，
+        // 若掛在總計列上，List 延遲載入使該列可能單獨捲出/捲入可視範圍，反覆觸發會讓
+        // 所有子分類 giftRow 共用的 rowsAppeared 旗標被重置，捲動時無謂淡出又重播進場動畫。
+        // 改掛在 Section 本身，確保只在畫面進出時各觸發一次。
+        .onAppear {
+            // [v2-C] 觸發 giftRow 交錯進場動畫
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                rowsAppeared = true
+            }
+        }
+        .onDisappear {
+            // 重置旗標：切到其他分頁再切回時能重新播放禮金列表進場動畫
+            rowsAppeared = false
         }
     }
 

@@ -135,6 +135,19 @@ struct IncomeView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            // onAppear/onDisappear 掛在 List 本身（而非 incomeListSections 內每個日期分組的
+            // ForEach）：List 延遲載入各 Section，掛在 ForEach 上等同掛在每組各自的子視圖上，
+            // 捲動使某組進出可視範圍就各自觸發一次，所有列共用的 listRowsAppeared 旗標會被
+            // 反覆重置，導致可視列表捲動時無謂淡出又重播進場動畫。改掛在 List 本身，
+            // 比照 FamilyView 既有寫法，確保只在畫面進出時各觸發一次。
+            .onAppear {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                    listRowsAppeared = true
+                }
+            }
+            .onDisappear {
+                listRowsAppeared = false
+            }
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("收入")
@@ -721,14 +734,6 @@ struct IncomeView: View {
                         )
                 }
             }
-        }
-        .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
-                listRowsAppeared = true
-            }
-        }
-        .onDisappear {
-            listRowsAppeared = false
         }
 
         // 展開更早紀錄按鈕（對齊 VariableExpenseView.expenseListSectionsFor 展開規格）

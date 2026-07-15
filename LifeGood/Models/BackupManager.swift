@@ -19,9 +19,17 @@ class BackupManager {
         set { UserDefaults.standard.set(newValue, forKey: "lifegood_last_backup") }
     }
 
+    // 防止並行快照：createSnapshotIfNeeded 由 .onAppear 與 .onChange(scenePhase) 兩處呼叫，
+    // 冷啟動後立刻切背景（例如點通知進 App 又馬上切走）時兩者可能在同一秒內先後觸發，
+    // 此時 lastSnapshotDate 尚未被前一次寫入更新，第二次呼叫會判斷「還沒到間隔」失敗而重跑一次，
+    // 兩個背景佇列工作各自編碼並寫入同一個以秒為單位命名的檔案，造成競態覆寫與重複運算。
+    // 比照 CloudSyncManager.isSyncing／EInvoiceSyncManager.isSyncing 既有寫法補上旗標。
+    private var isSnapshotting = false
+
     // MARK: - 建立快照
 
     func createSnapshotIfNeeded(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) {
+        guard !isSnapshotting else { return }
         let now = Date()
         if let last = lastSnapshotDate, now.timeIntervalSince(last) < minInterval { return }
         createSnapshot(expense: expense, finance: finance, life: life)
@@ -29,6 +37,8 @@ class BackupManager {
 
     @discardableResult
     func createSnapshot(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> URL? {
+        guard !isSnapshotting else { return nil }
+        isSnapshotting = true
         // 只有「讀取 @Published 屬性、組出 UnifiedExport 結構」需要在主執行緒完成（純 struct copy，很快）；
         // 實際 JSONEncoder 編碼本身不碰 @Published，改到背景佇列做，避免資料量大時（App 啟動／進背景這種
         // 執行窗口極短的時機）卡住主執行緒。與 FullBackup.export 已採用的模式一致。
@@ -52,6 +62,7 @@ class BackupManager {
                 // 編碼或寫入失敗：不更新時間戳，讓下次 createSnapshotIfNeeded 能再試一次
             }
             self?.cleanOldBackups()
+            DispatchQueue.main.async { self?.isSnapshotting = false }
         }
         return url
     }
