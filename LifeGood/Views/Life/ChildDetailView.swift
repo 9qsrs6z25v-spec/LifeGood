@@ -1373,6 +1373,9 @@ struct ChildRecordEditorSheet: View {
                         try? sketchData.write(to: sketchPath)
                         PhotoCloudSync.upload(directory: "ChildRecordPhotos", fileName: sketchName)
                     }
+                    // 運算期間使用者可能已把 Toggle 切回原圖：不檢查會讓這裡把已經正確顯示的
+                    // 原圖預覽，事後又覆蓋回素描版，畫面與目前 Toggle 狀態不一致。
+                    guard sketchMode, photoFileName == name else { return }
                     previewImage = loadSketchOrOrig()
                 }
             } else {

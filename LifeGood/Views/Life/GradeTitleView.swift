@@ -89,7 +89,7 @@ struct GradeTitleView: View {
                 // ── 職等設定 ──
                 Section {
                     ForEach(Array(lifeStore.gradeTitles.enumerated()), id: \.element.id) { index, gt in
-                        gradeTitleRow(item: gt, index: index)
+                        GradeTitleRow(item: gt)
                             .opacity(rowsAppeared ? 1 : 0)
                             .offset(y: rowsAppeared ? 0 : 12)
                             .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04 * Double(index)), value: rowsAppeared)
@@ -208,7 +208,9 @@ struct GradeTitleView: View {
                     Divider().frame(height: 36).background(.white.opacity(0.25))
                     kpiCell(title: "職等數", value: "\(lifeStore.gradeTitles.count)", unit: "級")
                     Divider().frame(height: 36).background(.white.opacity(0.25))
-                    let connCount = lifeStore.departments.reduce(0) { $0 + $1.upstreamIds.count + $1.downstreamIds.count }
+                    // syncReverseLinks 會把每條上下游關係雙向寫入兩個部門（A 的 upstream 對應 B 的
+                    // downstream），直接加總 upstreamIds+downstreamIds 會把每條關係算兩次，故除以 2。
+                    let connCount = lifeStore.departments.reduce(0) { $0 + $1.upstreamIds.count + $1.downstreamIds.count } / 2
                     kpiCell(title: "關聯鏈", value: "\(connCount)", unit: "條")
                 }
                 .padding(.top, 4)
@@ -336,60 +338,6 @@ struct GradeTitleView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Grade Title Row
-
-    @ViewBuilder
-    private func gradeTitleRow(item gt: GradeTitle, index: Int) -> some View {
-        // get/set 直接用 ForEach(enumerated()) 已算好的 index 存取，取代逐字元觸發
-        // first(where:)/firstIndex(where:) 的全陣列線性掃描；否則每次按鍵在 N 筆
-        // 職等資料下都要重複掃描整個陣列，形成 O(n²)。index 越界時退回 gt 本身的值。
-        HStack(spacing: 10) {
-            // 職等編號欄 [v2] 補 RoundedRectangle stroke 細描邊
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.purple.opacity(0.10))
-                    .frame(width: 56, height: 36)
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.purple.opacity(0.20), lineWidth: 0.75)
-                    .frame(width: 56, height: 36)
-                TextField("職等", text: Binding(
-                    get: { lifeStore.gradeTitles.indices.contains(index) ? lifeStore.gradeTitles[index].grade : gt.grade },
-                    set: { if lifeStore.gradeTitles.indices.contains(index) { lifeStore.gradeTitles[index].grade = $0 } }
-                ))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.purple)
-                .multilineTextAlignment(.center)
-                .frame(width: 52)
-            }
-
-            // 職稱欄 [v2] Color(.systemGray6) → Color(.secondarySystemFill) 深色模式修正 + stroke 描邊
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.secondarySystemFill))
-                    .frame(height: 36)
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(.separator).opacity(0.40), lineWidth: 0.75)
-                    .frame(height: 36)
-                TextField("職稱", text: Binding(
-                    get: { lifeStore.gradeTitles.indices.contains(index) ? lifeStore.gradeTitles[index].title : gt.title },
-                    set: { if lifeStore.gradeTitles.indices.contains(index) { lifeStore.gradeTitles[index].title = $0 } }
-                ))
-                .font(.subheadline)
-                .padding(.horizontal, 10)
-            }
-
-            Button(role: .destructive) {
-                lifeStore.deleteGradeTitle(gt)
-            } label: {
-                Image(systemName: "minus.circle.fill")
-                    .foregroundStyle(.red.opacity(0.80))
-                    .font(.title3)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.vertical, 2)
-    }
-
     // MARK: - Empty States
 
     private var deptEmptyState: some View {
@@ -482,6 +430,90 @@ struct GradeTitleView: View {
             }
             lifeStore.deleteDepartment(dept)
         }
+    }
+}
+
+// MARK: - 職等清單單列
+
+/// 職等/職稱輸入列：本地暫存文字，停止輸入 400ms 後才寫回 lifeStore.gradeTitles。
+/// 先前直接把 TextField 綁在 lifeStore.gradeTitles[index] 上，每敲一個字都會讓
+/// LifeStore.save()（全量 12 個集合重新編碼寫入 UserDefaults + 排程 CloudKit push）跑一次，
+/// 且 @Published 陣列變動會觸發 GradeTitleView 整頁重繪（英雄卡動畫、KPI 一起重算），
+/// 快速輸入時明顯閃爍/卡頓；改成本地 @State 草稿 + debounce 才提交。
+private struct GradeTitleRow: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    let itemId: UUID
+
+    @State private var gradeText: String
+    @State private var titleText: String
+    @State private var commitTask: Task<Void, Never>?
+
+    init(item: GradeTitle) {
+        itemId = item.id
+        _gradeText = State(initialValue: item.grade)
+        _titleText = State(initialValue: item.title)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.purple.opacity(0.10))
+                    .frame(width: 56, height: 36)
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.purple.opacity(0.20), lineWidth: 0.75)
+                    .frame(width: 56, height: 36)
+                TextField("職等", text: $gradeText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.purple)
+                    .multilineTextAlignment(.center)
+                    .frame(width: 52)
+                    .onChange(of: gradeText) { _, _ in scheduleCommit() }
+            }
+
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.secondarySystemFill))
+                    .frame(height: 36)
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(.separator).opacity(0.40), lineWidth: 0.75)
+                    .frame(height: 36)
+                TextField("職稱", text: $titleText)
+                    .font(.subheadline)
+                    .padding(.horizontal, 10)
+                    .onChange(of: titleText) { _, _ in scheduleCommit() }
+            }
+
+            Button(role: .destructive) {
+                commitTask?.cancel()
+                lifeStore.gradeTitles.removeAll { $0.id == itemId }
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(.red.opacity(0.80))
+                    .font(.title3)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 2)
+        .onDisappear {
+            commitTask?.cancel()
+            commit()
+        }
+    }
+
+    private func scheduleCommit() {
+        commitTask?.cancel()
+        commitTask = Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            commit()
+        }
+    }
+
+    private func commit() {
+        guard let idx = lifeStore.gradeTitles.firstIndex(where: { $0.id == itemId }) else { return }
+        if lifeStore.gradeTitles[idx].grade != gradeText { lifeStore.gradeTitles[idx].grade = gradeText }
+        if lifeStore.gradeTitles[idx].title != titleText { lifeStore.gradeTitles[idx].title = titleText }
     }
 }
 

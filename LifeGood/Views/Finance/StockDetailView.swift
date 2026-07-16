@@ -1432,8 +1432,11 @@ struct StockDividendEditor: View {
         }
         // 舊資料（只有 shares、無 transactions）需先補種原始買入交易，
         // 否則 recompute 會因 transactions 為空把股數歸零。
-        stock.seedTransactionsFromLegacyIfNeeded()
-        stock.recomputeFromTransactions()
+        // 若已售光（shares==0）而無法補種，seed 會回傳 false：此時不可再呼叫 recompute，
+        // 否則會把這筆舊資料僅存的 isSold/soldDate/soldPrice/purchasePrice 全部清空覆蓋（資料遺失）。
+        if stock.seedTransactionsFromLegacyIfNeeded() {
+            stock.recomputeFromTransactions()
+        }
         store.update(stock)
         dismiss()
     }
@@ -1446,9 +1449,11 @@ struct StockDividendEditor: View {
         }
         removeCashDividendBankDeposit(stock: stock, dividendId: editing.id)
         stock.dividends.removeAll { $0.id == editing.id }
-        // 同 save()：舊資料需先補種交易，避免 recompute 把股數歸零。
-        stock.seedTransactionsFromLegacyIfNeeded()
-        stock.recomputeFromTransactions()
+        // 同 save()：舊資料需先補種交易，避免 recompute 把股數歸零；seed 失敗（回傳 false）時
+        // 同樣不可再呼叫 recompute，避免清空舊資料僅存的 isSold/soldDate/soldPrice/purchasePrice。
+        if stock.seedTransactionsFromLegacyIfNeeded() {
+            stock.recomputeFromTransactions()
+        }
         store.update(stock)
         dismiss()
     }

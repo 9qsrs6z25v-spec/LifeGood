@@ -121,7 +121,7 @@ struct AddVehicleView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { cancelAndRollback() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil || hasAutoSaved ? "儲存" : "新增") { save() }
@@ -468,6 +468,27 @@ struct AddVehicleView: View {
             hasAutoSaved = true
         }
         return true
+    }
+
+    /// 「取消」按鈕：新增流程中若已因新增子項目（定期/變動支出）觸發過
+    /// ensureVehicleSavedInStore() 自動建檔，「取消」原本只單純 dismiss，完全不檢查
+    /// hasAutoSaved，導致這筆使用者明確想放棄的車輛連同已建立的支出永久留在 store 並同步上 CloudKit。
+    /// 這裡補上回滾：僅在「新增流程」（editing == nil）且已自動存檔時才移除，
+    /// 編輯既有車輛時「取消」維持原樣不動任何資料。
+    private func cancelAndRollback() {
+        if editing == nil, hasAutoSaved, let vehicle = currentVehicle {
+            var linkedIds = Set<UUID>()
+            for fe in vehicle.fixedExpenses { if let id = fe.linkedExpenseId { linkedIds.insert(id) } }
+            for ve in vehicle.variableExpenses { if let id = ve.linkedExpenseId { linkedIds.insert(id) } }
+            if !linkedIds.isEmpty {
+                for exp in expenseStore.expenses where linkedIds.contains(exp.id) {
+                    for name in exp.photoFileNames { Expense.deletePhoto(name) }
+                }
+                expenseStore.expenses.removeAll { linkedIds.contains($0.id) }
+            }
+            financeStore.deleteVehicle(vehicle)
+        }
+        dismiss()
     }
 
     // MARK: - 預設值（給 AddExpenseView）

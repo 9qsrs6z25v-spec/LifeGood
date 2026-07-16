@@ -304,7 +304,7 @@ struct AddRealEstateView: View {
             .navigationTitle((editing != nil || hasAutoSaved) ? "編輯房地產" : "新增房地產")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { cancelAndRollback() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
                         Button { showFeaturePicker.toggle() } label: {
@@ -1460,6 +1460,44 @@ struct AddRealEstateView: View {
             hasAutoSaved = true
         }
         return true
+    }
+
+    /// 「取消」按鈕：新增流程中若已因新增貸款/已支出/變動支出等子項目觸發過
+    /// ensureRealEstateSavedInStore() 自動建檔，「取消」原本只單純 dismiss、完全不檢查
+    /// hasAutoSaved，導致這筆使用者明確想放棄的房地產連同已建立的支出/照片永久留在 store
+    /// 並同步上 CloudKit。這裡補上回滾（清理邏輯對齊 RealEstateView.deleteEstate）：
+    /// 僅在「新增流程」（editing == nil）且已自動存檔時才移除，編輯既有房地產時
+    /// 「取消」維持原樣不動任何資料。
+    private func cancelAndRollback() {
+        if editing == nil, hasAutoSaved, let re = currentEstate {
+            var expenseIds = Set<UUID>()
+            for m in re.mortgageItems { if let id = m.linkedExpenseId { expenseIds.insert(id) } }
+            for p in re.paidItems { if let id = p.linkedExpenseId { expenseIds.insert(id) } }
+            for ve in re.variableExpenses { if let id = ve.linkedExpenseId { expenseIds.insert(id) } }
+            for ins in re.insuranceItems { if let id = ins.linkedExpenseId { expenseIds.insert(id) } }
+            for asset in re.propertyAssets { if let id = asset.linkedExpenseId { expenseIds.insert(id) } }
+            for up in re.utilityPayments {
+                if let id = up.linkedExpenseId { expenseIds.insert(id) }
+                if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+            }
+            for rp in re.renovationPhotos {
+                for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
+            }
+            if let id = re.linkedExpenseId { expenseIds.insert(id) }
+            if let id = re.saleLinkedExpenseId { expenseIds.insert(id) }
+
+            if !expenseIds.isEmpty {
+                for exp in expenseStore.expenses where expenseIds.contains(exp.id) {
+                    for name in exp.photoFileNames { Expense.deletePhoto(name) }
+                }
+                expenseStore.expenses.removeAll { expenseIds.contains($0.id) }
+            }
+            if let saleIncId = re.saleLinkedIncomeId {
+                expenseStore.incomes.removeAll { $0.id == saleIncId }
+            }
+            financeStore.deleteRealEstate(re)
+        }
+        dismiss()
     }
 
     // MARK: - 刪除項目

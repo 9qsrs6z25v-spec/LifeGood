@@ -515,9 +515,14 @@ struct Stock: Identifiable, Codable {
         }
     }
 
-    /// 若 transactions 為空，但已有 shares / purchasePrice → 種一筆原始買入（與賣出，若已售出）
-    mutating func seedTransactionsFromLegacyIfNeeded() {
-        guard transactions.isEmpty, shares > 0 || isSold else { return }
+    /// 若 transactions 為空，但已有 shares / purchasePrice → 種一筆原始買入（與賣出，若已售出）。
+    /// 回傳 false 表示「本該補種但股數已歸零、無法推算原始張數而放棄」（見下方 baseLots==0 分支）；
+    /// 此時 transactions 仍是空的，呼叫端不應該接著呼叫 recomputeFromTransactions()，
+    /// 否則會把這筆舊資料僅存的 isSold/soldDate/soldPrice/purchasePrice 當成「無交易」全部清空覆蓋，
+    /// 與本函式「保留舊欄位為元資料」的意圖矛盾，造成資料靜默遺失。
+    @discardableResult
+    mutating func seedTransactionsFromLegacyIfNeeded() -> Bool {
+        guard transactions.isEmpty, shares > 0 || isSold else { return true }
         var seeds: [StockTransaction] = []
         if shares > 0 || (isSold && soldPrice > 0) {
             // 原始買入（包含售出後的數量需要先還原）
@@ -546,6 +551,7 @@ struct Stock: Identifiable, Codable {
             ))
         }
         transactions = seeds
+        return !(isSold && shares <= 0.0001 && seeds.isEmpty)
     }
 }
 

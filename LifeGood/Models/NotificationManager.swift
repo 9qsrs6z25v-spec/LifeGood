@@ -253,10 +253,16 @@ final class NotificationManager {
         case .none:    return start
         }
         var current = start
+        var n = 0
         var safety = 0
         // 上限給到遠大於實務上會遇到的天數差距（daily 步進下相當於 10 年以上）
+        // 每次都從原始 start 重新加 n 期，而非鏈式從上一步結果累加：Calendar 對月/年天數不足
+        // 會把結果夾到當月最後一天（例如每月 31 號遇到 2 月會夾到 28 號），若鏈式累加，
+        // 這個被夾住的日期會變成下一步的起點，往後每個月都固定卡在 28 號，
+        // 永久遺失原本 31 號的錨點，與行事曆畫面顯示的日期脫勾。
         while current < now, safety < 4000 {
-            guard let next = cal.date(byAdding: step, value: 1, to: current) else { break }
+            n += 1
+            guard let next = cal.date(byAdding: step, value: n, to: start) else { break }
             current = next
             safety += 1
         }
@@ -280,11 +286,15 @@ final class NotificationManager {
         }
         var fires: [Date] = []
         var current = start
+        var n = 0
         var safety = 0
         // 呼叫端只取前 60 筆（iOS 系統通知上限），上限設 61 避免多餘計算（原 5000 會浪費高達 4940 次）
+        // 同 advanceToNextOccurrence：每次都從原始 start 重新加 n 期，避免月天數不足被夾到
+        // 較短日期後，鏈式累加導致往後每一期都卡在被夾住的那一天，永久漂移。
         while current <= end, safety < 61 {
             fires.append(current)
-            guard let next = cal.date(byAdding: step, value: 1, to: current) else { break }
+            n += 1
+            guard let next = cal.date(byAdding: step, value: n, to: start) else { break }
             current = next
             safety += 1
         }

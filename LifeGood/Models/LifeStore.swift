@@ -376,7 +376,6 @@ class LifeStore: ObservableObject {
     func update(_ item: GradeTitle) {
         if let i = gradeTitles.firstIndex(where: { $0.id == item.id }) { gradeTitles[i] = item }
     }
-    func deleteGradeTitle(_ item: GradeTitle) { gradeTitles.removeAll { $0.id == item.id } }
 
     // MARK: - 公司組織人員 CRUD
 

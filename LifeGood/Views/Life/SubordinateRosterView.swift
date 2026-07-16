@@ -101,6 +101,63 @@ private struct RosterHOffsetKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
+/// 用獨立 ObservableObject 承載水平捲動位移：先前用 SubordinateRosterView 自身的
+/// @State 存放時，即使 1pt 節流門檻已生效，真實拖曳時位移量幾乎每影格都超過門檻，
+/// 導致整個 body（含棋盤格 O(人數 × 天數) 的 shiftFor/leaveFor 逐筆掃描）連帶重算，
+/// 造成捲動卡頓／閃爍。改由 RosterFrozenHeader 這個子視圖單獨觀察此物件，
+/// 讓位移變化只讓表頭子視圖重繪，不會波及父視圖的棋盤格。
+private final class RosterHOffsetBox: ObservableObject {
+    @Published var value: CGFloat = 0
+}
+
+/// 凍結表頭覆蓋層：僅依賴水平捲動位移，抽成獨立子視圖以隔離重繪範圍（見 RosterHOffsetBox 註解）。
+private struct RosterFrozenHeader: View {
+    @ObservedObject var box: RosterHOffsetBox
+    let days: [Date]
+    let nameColWidth: CGFloat
+    let headerH: CGFloat
+    let cellW: CGFloat
+    let viewportW: CGFloat
+    let bodyWidth: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: nameColWidth, height: headerH)
+            HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
+                .frame(width: bodyWidth, alignment: .leading)
+                .offset(x: box.value)
+                .frame(width: viewportW, alignment: .leading)
+                .clipped()
+        }
+        .frame(height: headerH)
+        .background(Color(.systemBackground))
+        .allowsHitTesting(false)
+    }
+
+    private func isWeekend(_ d: Date) -> Bool {
+        let wd = Calendar.current.component(.weekday, from: d)
+        return wd == 1 || wd == 7
+    }
+
+    private func weekdayShort(_ d: Date) -> String {
+        let wd = Calendar.current.component(.weekday, from: d)  // 1 = 週日
+        return ["日", "一", "二", "三", "四", "五", "六"][max(0, min(6, wd - 1))]
+    }
+
+    private func dayHeader(_ day: Date) -> some View {
+        let weekend = isWeekend(day)
+        return VStack(spacing: 1) {
+            Text(weekdayShort(day)).font(.system(size: 9)).foregroundStyle(weekend ? .red : .secondary)
+            Text("\(Calendar.current.component(.day, from: day))")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(weekend ? .red : .primary)
+        }
+        .frame(width: cellW, height: headerH)
+        .background(weekend ? Color(.tertiarySystemFill).opacity(0.5) : Color.clear)
+        .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
+    }
+}
+
 // MARK: - 部屬班表（棋盤式燈號）
 
 struct SubordinateRosterView: View {
@@ -113,7 +170,7 @@ struct SubordinateRosterView: View {
     @State private var selectedDeptId: UUID? = nil
     @State private var detail: RosterCell?
     @State private var showSettings = false
-    @State private var hOffset: CGFloat = 0   // 日格水平捲動位移（同步凍結表頭）
+    @StateObject private var hOffsetBox = RosterHOffsetBox()   // 日格水平捲動位移（同步凍結表頭；獨立物件避免波及棋盤格重算）
     @State private var emptyIconPulse = false
     @State private var didAutoScroll = false  // 開啟時自動捲到今天（僅一次）
 
@@ -379,26 +436,17 @@ struct SubordinateRosterView: View {
             .coordinateSpace(name: "rosterArea")
             .onPreferenceChange(RosterHOffsetKey.self) { value in
                 // iOS 17 後援：由偏好值推算水平位移（捲右為負）；iOS 18+ 已由 onScrollGeometryChange
-                // 直接同步 hOffset，此處若繼續生效會與其在同一捲動影格互相覆寫，故僅 iOS 17 以下才採用。
+                // 直接同步 hOffsetBox，此處若繼續生效會與其在同一捲動影格互相覆寫，故僅 iOS 17 以下才採用。
                 guard #unavailable(iOS 18.0) else { return }
-                // 節流：位移量沒有實質變化（<1pt）就不寫入，避免整個 body 連帶 rows 的
-                // O(人數 × 天數) 棋盤格（含 shiftFor/leaveFor 逐筆掃描）在每個捲動影格都重算一次。
                 let newOffset = value - nameColWidth
-                if abs(newOffset - hOffset) > 1 { hOffset = newOffset }
+                if abs(newOffset - hOffsetBox.value) > 0.5 { hOffsetBox.value = newOffset }
             }
             .overlay(alignment: .topLeading) {
-                // 凍結表頭：以實際水平捲動量即時平移（hOffset 由捲動內容回報）
-                HStack(spacing: 0) {
-                    Color.clear.frame(width: nameColWidth, height: headerH)
-                    HStack(spacing: 0) { ForEach(days, id: \.self) { d in dayHeader(d) } }
-                        .frame(width: bodyWidth, alignment: .leading)
-                        .offset(x: hOffset)
-                        .frame(width: viewportW, alignment: .leading)
-                        .clipped()
-                }
-                .frame(height: headerH)
-                .background(Color(.systemBackground))
-                .allowsHitTesting(false)
+                // 凍結表頭：以實際水平捲動量即時平移。抽成獨立子視圖只觀察 hOffsetBox，
+                // 讓每影格的位移更新只讓這一小塊表頭重繪，不會連帶讓整個棋盤格
+                // （O(人數 × 天數) 的 shiftFor/leaveFor 逐筆掃描）跟著重算，避免捲動卡頓/閃爍。
+                RosterFrozenHeader(box: hOffsetBox, days: days, nameColWidth: nameColWidth,
+                                   headerH: headerH, cellW: cellW, viewportW: viewportW, bodyWidth: bodyWidth)
             }
             .background(Color(.systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -463,9 +511,10 @@ struct SubordinateRosterView: View {
                 geo.contentOffset.x
             } action: { _, x in
                 // 捲右 contentOffset 為正，表頭需往左 → 取負
-                // 節流：同上，位移量沒有實質變化就不寫入，避免棋盤格在每個捲動影格都重算一次
+                // 寫入獨立的 hOffsetBox（見上方 RosterHOffsetBox 註解），只讓凍結表頭子視圖重繪，
+                // 不會連帶讓整個棋盤格在每個捲動影格都重算一次
                 let newOffset = -x
-                if abs(newOffset - hOffset) > 1 { hOffset = newOffset }
+                if abs(newOffset - hOffsetBox.value) > 0.5 { hOffsetBox.value = newOffset }
             }
         } else {
             content
@@ -504,19 +553,6 @@ struct SubordinateRosterView: View {
             .fill(Color.blue.opacity(0.10))
             .frame(width: CGFloat(days.count) * cellW, height: groupHeaderH)
             .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
-    }
-
-    private func dayHeader(_ day: Date) -> some View {
-        let weekend = isWeekend(day)
-        return VStack(spacing: 1) {
-            Text(weekdayShort(day)).font(.system(size: 9)).foregroundStyle(weekend ? .red : .secondary)
-            Text("\(Calendar.current.component(.day, from: day))")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(weekend ? .red : .primary)
-        }
-        .frame(width: cellW, height: headerH)
-        .background(weekend ? Color(.tertiarySystemFill).opacity(0.5) : Color.clear)
-        .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
     }
 
     private func cell(_ sub: Subordinate, _ day: Date) -> some View {
