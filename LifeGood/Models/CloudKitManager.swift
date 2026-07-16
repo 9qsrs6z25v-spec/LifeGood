@@ -330,8 +330,14 @@ final class CloudKitManager {
                        let asset = record["payload"] as? CKAsset,
                        let url = asset.fileURL,
                        let data = try? Data(contentsOf: url) {
-                        self.defaults.set(data, forKey: key)
-                        lock.lock(); pulledKVKeys.insert(key); lock.unlock()
+                        // 推播的變更可能是本裝置剛推送的內容原樣回彈（CloudKit 的 server change token
+                        // 只在拉取時前進，推送後緊接的下一次拉取一定會看到自己剛寫入的 record）。
+                        // 若內容與本地已存的完全相同，視為 echo，跳過寫入與通知，避免各 Store 收到
+                        // 「已變更」的 key 而整批 reload 未變動的資料，造成畫面閃爍。
+                        if self.defaults.data(forKey: key) != data {
+                            self.defaults.set(data, forKey: key)
+                            lock.lock(); pulledKVKeys.insert(key); lock.unlock()
+                        }
                     }
                 } else if record.recordType == Self.photoRecordType {
                     if let dir = record["directory"] as? String,
