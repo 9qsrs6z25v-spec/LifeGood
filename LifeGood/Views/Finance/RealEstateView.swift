@@ -258,6 +258,13 @@ struct RealEstateView: View {
         for rp in item.renovationPhotos {
             for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
         }
+        // 清除電梯保養照片、附件文件檔案（先前遺漏，會永久留在磁碟上並被反覆重傳 CloudKit）
+        for em in item.elevatorMaintenances {
+            if let name = em.photoFileName { ElevatorMaintenance.deletePhoto(name) }
+        }
+        for doc in item.documents {
+            RealEstateDocument.deleteDocument(doc.fileName)
+        }
         if let id = item.linkedExpenseId { expenseIds.insert(id) }
         if let id = item.saleLinkedExpenseId { expenseIds.insert(id) }
 

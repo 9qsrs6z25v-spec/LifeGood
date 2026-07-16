@@ -1825,13 +1825,25 @@ struct PersonalEvent: Identifiable, Codable, Equatable {
             let comps = calendar.dateComponents([.day], from: start, to: target)
             return (comps.day ?? 0) % 7 == 0
         case .monthly:
-            let dayOfMonth = calendar.component(.day, from: start)
-            return calendar.component(.day, from: target) == dayOfMonth
+            // 不能只比對「日」是否相同：NotificationManager 用 Calendar.byAdding(.month)
+            // 逐期展開通知時，月天數不足會把結果夾到當月最後一天（例如每月 31 號事件在
+            // 2/4/6/9/11 月會夾到 28/30 號），若這裡仍嚴格比對「日 == 起始日」，短月份
+            // 永遠比對不到，事件會從行事曆畫面消失，卻仍會收到通知，兩邊顯示不一致。
+            // 改為用同一套 Calendar.byAdding 邏輯算出「這個月的實際發生日」再比對，
+            // 確保行事曆畫面與通知時間永遠一致。
+            let sy = calendar.component(.year, from: start), sm = calendar.component(.month, from: start)
+            let ty = calendar.component(.year, from: target), tm = calendar.component(.month, from: target)
+            let monthsDiff = (ty - sy) * 12 + (tm - sm)
+            guard monthsDiff >= 0,
+                  let expected = calendar.date(byAdding: .month, value: monthsDiff, to: start) else { return false }
+            return calendar.isDate(calendar.startOfDay(for: expected), inSameDayAs: target)
         case .yearly:
-            let m = calendar.component(.month, from: start)
-            let d = calendar.component(.day, from: start)
-            return calendar.component(.month, from: target) == m
-                && calendar.component(.day, from: target) == d
+            // 同月份邏輯：閏年 2/29 事件在平年會被 Calendar.byAdding(.year) 夾到 2/28，
+            // 改用同一套邏輯算出「這一年的實際發生日」再比對，避免與通知時間脫勾。
+            let yearsDiff = calendar.component(.year, from: target) - calendar.component(.year, from: start)
+            guard yearsDiff >= 0,
+                  let expected = calendar.date(byAdding: .year, value: yearsDiff, to: start) else { return false }
+            return calendar.isDate(calendar.startOfDay(for: expected), inSameDayAs: target)
         }
     }
 

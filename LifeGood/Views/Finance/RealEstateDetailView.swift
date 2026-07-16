@@ -2279,6 +2279,13 @@ struct RealEstateDetailView: View {
         for rp in estate.renovationPhotos {
             for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
         }
+        // 清除電梯保養照片、附件文件檔案（先前遺漏，會永久留在磁碟上並被反覆重傳 CloudKit）
+        for em in estate.elevatorMaintenances {
+            if let name = em.photoFileName { ElevatorMaintenance.deletePhoto(name) }
+        }
+        for doc in estate.documents {
+            RealEstateDocument.deleteDocument(doc.fileName)
+        }
         if let linkedId = estate.linkedExpenseId { linkedIds.insert(linkedId) }
         if let saleExpId = estate.saleLinkedExpenseId { linkedIds.insert(saleExpId) }
 

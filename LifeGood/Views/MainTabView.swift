@@ -558,13 +558,17 @@ struct MainTabView: View {
                 availableBankAccounts: bankDisplayNames.map(\.display),
                 availableRealEstates: realEstateDisplayNames.map(\.display)
             )
-            aiBusy = false
+            // aiBusy 要保護到 aiCommitExpense（含其內部的 Apple Maps 地點查詢與
+            // expenseStore/lifeStore/financeStore 寫入）完全結束為止，否則使用者能在
+            // 上一筆記帳仍在背景寫入時就按住麥克風開始下一筆，兩個 commit 交錯執行，
+            // toast 顯示順序錯亂，畫面卻顯示「未在忙碌」造成誤導。
             try await aiCommitExpense(
                 parsed: parsed,
                 cardDisplayNames: cardDisplayNames,
                 bankDisplayNames: bankDisplayNames,
                 realEstateDisplayNames: realEstateDisplayNames
             )
+            aiBusy = false
         } catch {
             aiBusy = false
             aiShowToast("AI 解析失敗", detail: error.localizedDescription, isError: true)

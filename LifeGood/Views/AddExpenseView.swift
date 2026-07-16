@@ -2268,6 +2268,19 @@ struct AddExpenseView: View {
             return
         }
 
+        // 同上：變動支出「關聯資產＝股票」且尚未連結既有股票時會經 syncStockInvestment()
+        // 建立全新 Stock，股數／價格留空會被 (Double(...) ?? 0) 靜默存成 0，變成一筆與本支出
+        // 金額完全脫鉤、股數 0 的空殼持股卻沒有任何提示；比照上面不動產守衛補上必填檢查。
+        let willCreateNewStock =
+            expenseType == .variable && selectedAssetLink == .stock && editingExpense?.linkedStockId == nil
+        if willCreateNewStock, !((Double(stockSharesText) ?? 0) > 0 && (Double(stockPriceText) ?? 0) > 0) {
+            validationErrorMessage = "新增股票投資時，請輸入有效的股數與價格（大於 0）。"
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showValidationError = true
+            }
+            return
+        }
+
         // 自訂幣別換算為 NT$（儲蓄險不適用，使用其自身幣別欄位）
         let amount = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
 

@@ -849,12 +849,19 @@ struct AddRealEstateView: View {
                                     // 造成 ThumbnailCache（全域 NSCache，依 url.path 為 key）換照片後
                                     // 跨畫面持續顯示舊縮圖，對齊 RealEstateDetailView.ElevatorMaintenanceEditor
                                     // 同型修復。
+                                    // 必須先寫入新照片、確認成功後才刪舊照片：若先刪舊檔、寫入新檔又因
+                                    // 空間不足等原因失敗（savePhoto 回傳 nil），會在使用者毫無提示下
+                                    // 永久遺失原本的照片。
+                                    let fileName = ElevatorMaintenance.savePhoto(data, id: UUID())
+                                    guard let fileName else { return }
                                     if let oldName = elevatorItems.first(where: { $0.id == itemId })?.photoFileName {
                                         ElevatorMaintenance.deletePhoto(oldName)
                                     }
-                                    let fileName = ElevatorMaintenance.savePhoto(data, id: UUID())
                                     if let idx = elevatorItems.firstIndex(where: { $0.id == itemId }) {
                                         elevatorItems[idx].photoFileName = fileName
+                                    } else {
+                                        // item 已在等待期間被刪除，剛存好的新檔案要一併清掉，避免孤兒檔案
+                                        ElevatorMaintenance.deletePhoto(fileName)
                                     }
                                 }
                                 // 只有仍是目前這一代（沒被更新的選取取代）才清空登記，避免清掉
@@ -1482,6 +1489,13 @@ struct AddRealEstateView: View {
             }
             for rp in re.renovationPhotos {
                 for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
+            }
+            // 清除電梯保養照片、附件文件檔案（先前遺漏，取消時會孤兒化）
+            for em in re.elevatorMaintenances {
+                if let name = em.photoFileName { ElevatorMaintenance.deletePhoto(name) }
+            }
+            for doc in re.documents {
+                RealEstateDocument.deleteDocument(doc.fileName)
             }
             if let id = re.linkedExpenseId { expenseIds.insert(id) }
             if let id = re.saleLinkedExpenseId { expenseIds.insert(id) }

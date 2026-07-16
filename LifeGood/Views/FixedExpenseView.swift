@@ -563,13 +563,23 @@ struct FixedExpenseView: View {
 
     @ViewBuilder
     private func insuranceHeaderAmount(_ expenses: [Expense]) -> some View {
-        let byCurrency = Dictionary(grouping: expenses) { $0.currencyCode }
+        // 只有儲蓄險的 amount 是原幣別存值，其餘保險（含外幣保費）在 AddExpenseView 儲存時
+        // 就已換算成 NT$（見 AddExpenseView.saveExpense() 的 amount 計算），currencyCode 卻仍
+        // 保留原幣別代碼。先前直接用 currencyCode 分組會把已換算的 NT$ 金額誤標成外幣顯示
+        // （例如 100 美元保費換算後存成 NT$3,100，卻顯示成「USD 3,100」），比照
+        // FixedExpenseRow.formattedAmount 的 isSavingsIns 判斷改用正確的分組幣別。
+        let byCurrency = Dictionary(grouping: expenses) { headerCurrencyCode($0) }
         let parts = byCurrency.sorted(by: { $0.key < $1.key }).map { (code, exps) -> String in
             let total = exps.reduce(0.0) { $0 + monthlyEquivalent($1) }
             return formatCurrencyWithCode(total, code: code)
         }
         Text(parts.joined(separator: " + "))
             .font(.caption.bold())
+    }
+
+    private func headerCurrencyCode(_ expense: Expense) -> String {
+        let isSavingsIns = expense.fixedCategory == .insurance && expense.insuranceSubCategory == .savings
+        return isSavingsIns ? expense.currencyCode : "NT$"
     }
 
     private func monthlyEquivalent(_ expense: Expense) -> Double {

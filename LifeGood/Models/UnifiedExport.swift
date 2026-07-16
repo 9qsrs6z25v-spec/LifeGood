@@ -442,6 +442,24 @@ enum UnifiedImporter {
             for old in expense.expenses where !incomingIds.contains(old.id) {
                 for name in old.photoFileNames { Expense.deletePhoto(name) }
             }
+            // RealEstate 內嵌的電梯保養/水電繳費/裝潢照片/文件檔案未隨 replace 匯入被清掉的話，
+            // 舊檔案會永久留在磁碟上並被 CloudKitManager.uploadAllLocalPhotos() 當成「未上傳的本機照片」
+            // 反覆重傳，對齊上面 Expense 的清理方式，只清掉被 replace 淘汰、不在新資料中的 RealEstate。
+            let incomingRealEstateIds = Set(payload.finance.realEstates.map(\.id))
+            for old in finance.realEstates where !incomingRealEstateIds.contains(old.id) {
+                for up in old.utilityPayments {
+                    if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+                }
+                for rp in old.renovationPhotos {
+                    for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
+                }
+                for em in old.elevatorMaintenances {
+                    if let name = em.photoFileName { ElevatorMaintenance.deletePhoto(name) }
+                }
+                for doc in old.documents {
+                    RealEstateDocument.deleteDocument(doc.fileName)
+                }
+            }
             expense.expenses = payload.expense.expenses
             expense.incomes = payload.expense.incomes
             if let rates = payload.expense.currencyRates { expense.currencyRates = rates }

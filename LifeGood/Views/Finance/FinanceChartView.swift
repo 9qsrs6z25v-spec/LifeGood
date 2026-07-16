@@ -148,7 +148,8 @@ struct FinanceChartView: View {
                         .padding(.top, 1)
                 }
                 Spacer()
-                let totalCount = store.stocks.count + store.realEstates.count + store.insurances.count
+                // 與下方 KPI 橫列的房地產筆數口徑一致（排除已出售），避免同一張卡片上總數與明細互相矛盾
+                let totalCount = store.stocks.count + store.realEstates.filter { !$0.isSold }.count + store.insurances.count
                 Text("\(totalCount) 項")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 11)

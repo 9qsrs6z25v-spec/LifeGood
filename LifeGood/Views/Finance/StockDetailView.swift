@@ -325,7 +325,7 @@ struct StockDetailView: View {
 
     private var infoSection: some View {
         let pl = stock.profitLoss
-        let rowCount = 4 + (stock.isSold && stock.soldDate != nil ? 1 : 0)
+        let rowCount = 5 + (stock.isSold && stock.soldDate != nil ? 1 : 0)
         return VStack(alignment: .leading, spacing: 0) {
             // [v2] 橙色 sectionHeader + 計數膠囊
             sectionHeader("交易資訊", count: rowCount)

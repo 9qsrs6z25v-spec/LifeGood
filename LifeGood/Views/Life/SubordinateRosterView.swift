@@ -170,7 +170,14 @@ struct SubordinateRosterView: View {
     @State private var selectedDeptId: UUID? = nil
     @State private var detail: RosterCell?
     @State private var showSettings = false
-    @StateObject private var hOffsetBox = RosterHOffsetBox()   // 日格水平捲動位移（同步凍結表頭；獨立物件避免波及棋盤格重算）
+    // 注意：這裡刻意用 @State 而非 @StateObject。用 classic ObservableObject 時，任何持有
+    // @StateObject/@ObservedObject 的視圖都會在該物件 objectWillChange 觸發時整個 body 重算，
+    // 不論有沒有實際讀取變動的屬性；先前用 @StateObject 持有會讓每次捲動寫入 hOffsetBox.value
+    // 時，SubordinateRosterView 自己也被連帶重新整個 body（含棋盤格 O(人數 × 天數) 掃描），
+    // 等於重新引入了下面這段註解原本要隔離掉的閃爍/卡頓。@State 一樣能跨重繪保留同一個
+    // class 實例（RosterFrozenHeader 仍可正常經由 @ObservedObject 觀察它），但不會讓持有它
+    // 的這個視圖自己訂閱 objectWillChange，才能真正做到只讓子視圖重繪。
+    @State private var hOffsetBox = RosterHOffsetBox()   // 日格水平捲動位移（同步凍結表頭；獨立物件避免波及棋盤格重算）
     @State private var emptyIconPulse = false
     @State private var didAutoScroll = false  // 開啟時自動捲到今天（僅一次）
 

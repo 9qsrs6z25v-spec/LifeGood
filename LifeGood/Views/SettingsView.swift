@@ -649,44 +649,8 @@ struct SettingsView: View {
                 emptyCurrencyRow
             }
 
-            ForEach($store.currencyRates) { $rate in
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.blue.opacity(0.20), Color.blue.opacity(0.08)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 22, height: 22)
-                        Circle()
-                            .stroke(Color.blue.opacity(0.20), lineWidth: 0.75)
-                            .frame(width: 22, height: 22)
-                        Image(systemName: "globe")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.blue)
-                    }
-                    TextField("幣別", text: $rate.code)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("=")
-                        .foregroundStyle(.secondary)
-                    TextField("比值", value: $rate.rate, format: .number)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .font(.system(.body, design: .default).monospacedDigit())
-                        .frame(maxWidth: 80)
-                    Text("元")
-                        .foregroundStyle(.secondary)
-                    Button(role: .destructive) {
-                        store.currencyRates.removeAll { $0.id == rate.id }
-                    } label: {
-                        Image(systemName: "minus.circle.fill")
-                            .foregroundStyle(.red)
-                    }
-                    .buttonStyle(.plain)
-                }
+            ForEach(store.currencyRates) { rate in
+                CurrencyRateRow(rateId: rate.id, initialCode: rate.code, initialRate: rate.rate)
             }
 
             Button {
@@ -1674,6 +1638,88 @@ struct SettingsView: View {
 
     private var appBuild: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+}
+
+/// 匯率列：TextField 先前直接綁在 $store.currencyRates[index] 上，每敲一個字元都會讓
+/// ExpenseStore.currencyRates 的 didSet 觸發整份陣列重新編碼寫入 UserDefaults + CloudKit
+/// pushAll 排程，且 @Published 變動會讓整個 SettingsView（含所有其他 disclosureBlock 區塊）
+/// 跟著重繪。對齊 GradeTitleView.GradeTitleRow 既有修復規格：改為本地暫存文字/數值，
+/// 停止輸入 400ms 後才提交回 store。
+private struct CurrencyRateRow: View {
+    @EnvironmentObject var store: ExpenseStore
+    let rateId: UUID
+
+    @State private var codeText: String
+    @State private var rateValue: Double
+    @State private var commitTask: Task<Void, Never>?
+
+    init(rateId: UUID, initialCode: String, initialRate: Double) {
+        self.rateId = rateId
+        _codeText = State(initialValue: initialCode)
+        _rateValue = State(initialValue: initialRate)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.20), Color.blue.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 22, height: 22)
+                Circle()
+                    .stroke(Color.blue.opacity(0.20), lineWidth: 0.75)
+                    .frame(width: 22, height: 22)
+                Image(systemName: "globe")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.blue)
+            }
+            TextField("幣別", text: $codeText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onChange(of: codeText) { _, _ in scheduleCommit() }
+            Text("=")
+                .foregroundStyle(.secondary)
+            TextField("比值", value: $rateValue, format: .number)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .font(.system(.body, design: .default).monospacedDigit())
+                .frame(maxWidth: 80)
+                .onChange(of: rateValue) { _, _ in scheduleCommit() }
+            Text("元")
+                .foregroundStyle(.secondary)
+            Button(role: .destructive) {
+                commitTask?.cancel()
+                store.currencyRates.removeAll { $0.id == rateId }
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+        }
+        .onDisappear {
+            commitTask?.cancel()
+            commit()
+        }
+    }
+
+    private func scheduleCommit() {
+        commitTask?.cancel()
+        commitTask = Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            commit()
+        }
+    }
+
+    private func commit() {
+        guard let idx = store.currencyRates.firstIndex(where: { $0.id == rateId }) else { return }
+        if store.currencyRates[idx].code != codeText { store.currencyRates[idx].code = codeText }
+        if store.currencyRates[idx].rate != rateValue { store.currencyRates[idx].rate = rateValue }
     }
 }
 
