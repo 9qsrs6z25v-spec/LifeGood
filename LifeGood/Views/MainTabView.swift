@@ -171,6 +171,11 @@ struct MainTabView: View {
     @State private var isSettingsActive: Bool = false
     // UI美化：matchedGeometryEffect 讓底部 Tab Bar 選中指示器在頁籤間滑動而非消失/出現
     @Namespace private var tabBarNamespace
+    // 佔位用（.hidden()）bottomTabBar 副本專用的獨立 namespace：避免與下方真正顯示的
+    // bottomTabBar 共用 tabBarNamespace，導致同一個 matchedGeometryEffect(id:) 在同一個
+    // namespace 裡同時有兩個 source view（Apple 文件：結果為 undefined），
+    // 可能造成分頁切換時膠囊指示器位置偶發跳動。
+    @Namespace private var hiddenTabBarNamespace
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -327,8 +332,10 @@ struct MainTabView: View {
                 }
                 contentView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 佔位用：與底部 tab bar 同高，保證內容區不會被 tab bar 蓋住
-                bottomTabBar
+                // 佔位用：與底部 tab bar 同高，保證內容區不會被 tab bar 蓋住。
+                // 用獨立的 hiddenTabBarNamespace，避免跟下方真正顯示的副本共用同一個
+                // matchedGeometryEffect namespace（見上方 hiddenTabBarNamespace 宣告註解）。
+                bottomTabBar(namespace: hiddenTabBarNamespace)
                     .hidden()
             }
             .tint(.green)
@@ -353,7 +360,7 @@ struct MainTabView: View {
                 if exportProgress.isExporting {
                     exportProgressBar
                 }
-                bottomTabBar
+                bottomTabBar(namespace: tabBarNamespace)
             }
 
             if let toast = aiToast {
@@ -1090,17 +1097,17 @@ struct MainTabView: View {
     // MARK: - 底部四按鈕
 
     // UI美化：傳入 tabBarNamespace 給各頁籤，讓 matchedGeometryEffect 可跨按鈕滑動
-    private var bottomTabBar: some View {
+    private func bottomTabBar(namespace: Namespace.ID) -> some View {
         HStack(spacing: 0) {
-            tabButton(mode: .expense, icon: "dollarsign.circle.fill", label: "收支", namespace: tabBarNamespace)
-            tabButton(mode: .finance, icon: "chart.pie.fill", label: "理財", namespace: tabBarNamespace)
-            tabButton(mode: .life, icon: "person.fill", label: "人生", namespace: tabBarNamespace)
+            tabButton(mode: .expense, icon: "dollarsign.circle.fill", label: "收支", namespace: namespace)
+            tabButton(mode: .finance, icon: "chart.pie.fill", label: "理財", namespace: namespace)
+            tabButton(mode: .life, icon: "person.fill", label: "人生", namespace: namespace)
             Button {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
                     isSettingsActive = true
                 }
             } label: {
-                tabItemLabel(icon: "gearshape.fill", label: "設定", isActive: isSettingsActive, namespace: tabBarNamespace)
+                tabItemLabel(icon: "gearshape.fill", label: "設定", isActive: isSettingsActive, namespace: namespace)
             }
             .buttonStyle(.plain)
         }

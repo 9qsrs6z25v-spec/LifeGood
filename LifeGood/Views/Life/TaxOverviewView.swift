@@ -150,12 +150,20 @@ struct TaxOverviewView: View {
     private var vehicleCount: Int { financeStore.vehicles.filter { !$0.isSold }.count }
 
     private var estimatedAnnualIncome: Double {
+        // 對齊 yearEquivalentAmount(_:year:) 的口徑：monthly／yearly 這種週期性收入也要以
+        // 起始日 <= selectedYear 為準才計入，否則瀏覽過去年度時，今天才新增的月薪仍會被
+        // 整年 x12 算進該年度的預估年收入，讓稅務占比／二代健保等 KPI 失真。
         expenseStore.incomes.reduce(0.0) { sum, inc in
+            let incomeYear = Calendar.current.component(.year, from: inc.date)
             switch inc.period {
-            case .monthly: return sum + inc.amount * 12
-            case .yearly:  return sum + inc.amount
+            case .monthly:
+                guard incomeYear <= selectedYear else { return sum }
+                return sum + inc.amount * 12
+            case .yearly:
+                guard incomeYear <= selectedYear else { return sum }
+                return sum + inc.amount
             case .once:
-                if Calendar.current.component(.year, from: inc.date) == selectedYear {
+                if incomeYear == selectedYear {
                     return sum + inc.amount
                 }
                 return sum

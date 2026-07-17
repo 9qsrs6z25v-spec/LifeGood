@@ -247,7 +247,7 @@ struct AddExpenseView: View {
         guard Date() >= insStartDate else { return 0 }
         let months = Calendar.current.dateComponents([.month], from: insStartDate, to: min(Date(), insMaturityDate)).month ?? 0
         let mpp = selectedRecurrence == .monthly ? 1 : (selectedRecurrence == .quarterly ? 3 : 12)
-        return min(months / mpp + 1, insTotalPeriods)
+        return max(0, min(months / mpp + 1, insTotalPeriods))
     }
 
     private var insExpectedReturn: Double {
@@ -1963,7 +1963,7 @@ struct AddExpenseView: View {
                 }
                 TextField("保險公司", text: $insCompany)
                 DatePicker("起始日", selection: $insStartDate, displayedComponents: .date)
-                DatePicker("到期日", selection: $insMaturityDate, displayedComponents: .date)
+                DatePicker("到期日", selection: $insMaturityDate, in: insStartDate..., displayedComponents: .date)
             } header: {
                 sectionHeader(title: "繳費設定", accentColor: .green)
             }

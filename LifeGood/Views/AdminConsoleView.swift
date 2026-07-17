@@ -214,7 +214,13 @@ struct AdminConsoleView: View {
                     .disabled(admin.isBusy)
                     .onChange(of: allFreeMirror) { _, newValue in
                         // 只有使用者實際撥動時才寫遠端（避免 onAppear 同步鏡像時誤觸）
-                        if newValue != admin.allFree { admin.adminSetAllFree(newValue) }
+                        if newValue != admin.allFree {
+                            admin.adminSetAllFree(newValue) { ok in
+                                // 寫入失敗時 admin.allFree 未變，把鏡像撥回真實狀態，
+                                // 避免 Toggle 一直顯示使用者以為已生效的錯誤狀態
+                                if !ok { allFreeMirror = admin.allFree }
+                            }
+                        }
                     }
                 HStack {
                     Text("本機目前狀態")
@@ -313,7 +319,13 @@ struct AdminConsoleView: View {
     private func applyPublicDisplay() {
         let threshold = Int(thresholdText.filter { $0.isNumber }) ?? admin.countThreshold
         thresholdText = "\(threshold)"
-        admin.adminSetPublicDisplay(enabled: showPublicMirror, threshold: threshold)
+        admin.adminSetPublicDisplay(enabled: showPublicMirror, threshold: threshold) { ok in
+            // 寫入失敗時 admin.showCountPublicly/countThreshold 未變，把鏡像撥回真實狀態
+            if !ok {
+                showPublicMirror = admin.showCountPublicly
+                thresholdText = "\(admin.countThreshold)"
+            }
+        }
     }
 }
 

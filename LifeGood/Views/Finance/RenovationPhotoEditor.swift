@@ -224,6 +224,19 @@ struct RenovationPhotoEditor: View {
         for name in photoFileNames where !original.contains(name) {
             RenovationPhoto.deletePhoto(name)
         }
+        // 使用者若在編輯既有紀錄時刪除了「原本已存在」的照片，MultiPhotoGallery 的刪除按鈕
+        // 會立即刪檔並同步 CloudKit（不等按下「儲存」），取消時若不回寫 store，紀錄仍會留著
+        // 已被刪除照片的檔名，變成永久指向不存在檔案的孤兒引用（縮圖破圖／無限載入中）。
+        let remaining = photoFileNames.filter { original.contains($0) }
+        if let e = editing, Set(remaining) != original,
+           var estate = store.realEstates.first(where: { $0.id == estateId }),
+           let idx = estate.renovationPhotos.firstIndex(where: { $0.id == e.id }) {
+            estate.renovationPhotos[idx].photoFileNames = remaining
+            let financeStore = store
+            dismiss()
+            DispatchQueue.main.async { financeStore.update(estate) }
+            return
+        }
         dismiss()
     }
 

@@ -95,7 +95,9 @@ struct MultiPhotoGallery: View {
                 emptyState
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    // LazyHStack：相片數量多時（20-30+ 張收據／裝潢照）避免一次把所有縮圖
+                    // 都實例化並觸發磁碟讀取＋JPEG 解碼，只在捲動到可視範圍附近才載入。
+                    LazyHStack(spacing: 8) {
                         ForEach(fileNames, id: \.self) { name in
                             thumbnail(for: name)
                         }

@@ -1440,9 +1440,13 @@ struct RealEstate: Identifiable, Codable {
         try c.encode(elevatorMaintenances, forKey: .elevatorMaintenances)
         try c.encode(pingCount, forKey: .pingCount)
         try c.encode(landOwner, forKey: .landOwner)
-        try c.encode(landSituation, forKey: .landSituation)
-        try c.encode(landNumber, forKey: .landNumber)
-        try c.encode(landArea, forKey: .landArea)
+        // 舊版單筆土地權狀欄位改由 landDeeds 陣列推導寫回（而非直接存 stored 值），
+        // 避免 AddRealEstateView 載入舊資料時把過期的 landSituation/landNumber/landArea
+        // 原樣存回：使用者刪掉唯一一筆土地權狀後，landDeeds 已清空，但這三個純量欄位
+        // 若仍保留舊值，下次 decode 的向下相容遷移邏輯會把剛刪除的權狀「復活」回來。
+        try c.encode(landDeeds.first?.situation ?? "", forKey: .landSituation)
+        try c.encode(landDeeds.first?.number ?? "", forKey: .landNumber)
+        try c.encode(landDeeds.first?.area ?? 0, forKey: .landArea)
         try c.encode(bldgSituation, forKey: .bldgSituation)
         try c.encode(bldgNumber, forKey: .bldgNumber)
         try c.encode(bldgAddress, forKey: .bldgAddress)

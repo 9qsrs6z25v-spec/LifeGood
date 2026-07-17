@@ -60,6 +60,7 @@ struct FinanceChartView: View {
     @State private var rowsAppeared = false
     @State private var allocationRowsAppeared = false
     @State private var emptyPulse = false
+    @State private var entranceAnimationTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -104,13 +105,19 @@ struct FinanceChartView: View {
                 withAnimation(.spring(response: 0.52, dampingFraction: 0.82).delay(0.12)) {
                     sectionsAppeared = true
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                // 用可取消的 Task 取代三個各自獨立的 DispatchQueue.main.asyncAfter，
+                // 讓 onDisappear 能一次取消所有進行中的計時，避免快速離開/返回時孤兒更新
+                // 在旗標已被重置為 false 後才觸發，造成進場動畫略過或卡在中間狀態。
+                entranceAnimationTask?.cancel()
+                entranceAnimationTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    guard !Task.isCancelled else { return }
                     withAnimation { allocationRowsAppeared = true }
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    guard !Task.isCancelled else { return }
                     withAnimation { rowsAppeared = true }
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyPulse = true
                 }
             }
@@ -120,6 +127,8 @@ struct FinanceChartView: View {
                 rowsAppeared = false
                 allocationRowsAppeared = false
                 emptyPulse = false
+                entranceAnimationTask?.cancel()
+                entranceAnimationTask = nil
             }
         }
     }
@@ -149,7 +158,7 @@ struct FinanceChartView: View {
                 }
                 Spacer()
                 // 與下方 KPI 橫列的房地產筆數口徑一致（排除已出售），避免同一張卡片上總數與明細互相矛盾
-                let totalCount = store.stocks.count + store.realEstates.filter { !$0.isSold }.count + store.insurances.count
+                let totalCount = store.stocks.filter { !$0.isSold }.count + store.realEstates.filter { !$0.isSold }.count + store.insurances.count
                 Text("\(totalCount) 項")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 11)
@@ -167,7 +176,7 @@ struct FinanceChartView: View {
 
             // KPI 橫列：股票 / 房地產 / 儲蓄險 筆數
             HStack(spacing: 0) {
-                heroKpiCell(label: "股票", value: "\(store.stocks.count) 檔",
+                heroKpiCell(label: "股票", value: "\(store.stocks.filter { !$0.isSold }.count) 檔",
                              icon: "chart.line.uptrend.xyaxis")
                 Rectangle()
                     .fill(.white.opacity(0.25))

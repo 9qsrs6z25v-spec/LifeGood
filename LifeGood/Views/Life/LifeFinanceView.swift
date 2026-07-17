@@ -1874,7 +1874,11 @@ struct FinanceCardView: View {
     }
 
     private func isVirtualCreditCardEntry(_ dep: BankDeposit) -> Bool {
-        !(item.bankDeposits ?? []).contains(where: { $0.id == dep.id })
+        // deposits 除了信用卡彙總虛擬條目外，也包含週期性固定支出／收入展開後的虛擬條目
+        // （expandedFixedExpenseWithdrawals／expandedIncomeDeposits），兩者同樣不存在於
+        // item.bankDeposits 中。信用卡彙總條目一律 linkedExpenseId == nil（見 1364 行），
+        // 固定支出／收入展開條目則帶有真實的 linkedExpenseId，需一併排除才不會被誤判為信用卡。
+        dep.linkedExpenseId == nil && !(item.bankDeposits ?? []).contains(where: { $0.id == dep.id })
     }
 
     /// 根據聚合條目 id 比對產生它的信用卡（含週期性固定支出展開後的虛擬條目）

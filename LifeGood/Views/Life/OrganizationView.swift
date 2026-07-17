@@ -50,7 +50,11 @@ struct OrganizationView: View {
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var viewingDeptId: UUID?
     @State private var showPremiumAlert = false
-    @State private var pdfURL: URL?
+    // 直接存 IdentifiableURL（而非 URL? 再用 Binding(get:set:) 現包一次）：IdentifiableURL.id
+    // 是 init 時產生的隨機 UUID，若每次 body 重繪都重新包一次，id 會跟著變，SwiftUI 可能因此
+    // 把 .sheet(item:) 判定成「新項目」而中途關閉/重開分享面板。改成本檔案唯一一個違反此
+    // struct 既有用法（其餘檔案都是直接把它存進 @State）的地方，id 建立後即固定。
+    @State private var pdfURL: IdentifiableURL?
     // 美化：空狀態脈衝光環動畫旗標
     @State private var orgEmptyPulse = false
 
@@ -87,7 +91,7 @@ struct OrganizationView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     if !lifeStore.departments.isEmpty {
                         Button {
-                            pdfURL = generatePDFURL()
+                            pdfURL = generatePDFURL().map { IdentifiableURL(url: $0) }
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                                 .foregroundStyle(.green)
@@ -95,10 +99,7 @@ struct OrganizationView: View {
                     }
                 }
             }
-            .sheet(item: Binding(
-                get: { pdfURL.map { IdentifiableURL(url: $0) } },
-                set: { pdfURL = $0?.url }
-            )) { wrapper in
+            .sheet(item: $pdfURL) { wrapper in
                 ShareSheet(items: [wrapper.url])
             }
             .sheet(item: Binding(

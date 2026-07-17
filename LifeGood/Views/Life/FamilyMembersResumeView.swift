@@ -449,6 +449,10 @@ struct FamilyMembersResumeView: View {
                     emptyIconPulse = true
                 }
             }
+            // 對齊本檔案 heroCardAppeared／rowsAppeared 既有寫法：離開時重置旗標，
+            // 否則再次回到空清單狀態時 emptyIconPulse 已是 true，withAnimation 判定無變化
+            // 不會重新排程 repeatForever 動畫，兩個脈衝環會停在淡出終態（opacity: 0）不再脈動。
+            .onDisappear { emptyIconPulse = false }
 
             VStack(spacing: 6) {
                 Text("尚未新增家人").font(.title3.bold())

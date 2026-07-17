@@ -61,6 +61,7 @@ struct FinanceOverviewView: View {
     @State private var miniBarAppeared = false
     // mini 彩條延遲 Task（可在 onDisappear 取消，防止孤兒更新造成動畫時序錯誤）
     @State private var miniBarTask: Task<Void, Never>?
+    @State private var allocationBarTask: Task<Void, Never>?
 
     /// insuranceValueNTD／insurancePaidNTD 過去各自獨立重建匯率字典並重新 reduce 一次
     /// store.insurances，而 body 內 totalAssetsCard／assetCards／ntdAllocations 三處
@@ -160,7 +161,7 @@ struct FinanceOverviewView: View {
     }
 
     private var totalAssetCount: Int {
-        store.insurances.count + store.stocks.count + store.vehicles.count +
+        store.insurances.count + store.stocks.filter { !$0.isSold }.count + store.vehicles.count +
         store.realEstates.filter { !$0.isSold }.count
     }
 
@@ -319,7 +320,7 @@ struct FinanceOverviewView: View {
                 assetCard(title: "股票", amount: store.totalStockValue,
                           profitLoss: stockProfitLoss,
                           icon: "chart.line.uptrend.xyaxis", color: .orange,
-                          count: store.stocks.count, key: "stock")
+                          count: store.stocks.filter { !$0.isSold }.count, key: "stock")
             }
             HStack(spacing: 12) {
                 assetCard(title: "汽車", amount: store.totalVehicleValue,
@@ -619,14 +620,25 @@ struct FinanceOverviewView: View {
             }
         }
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            // 比照上方 miniBarTask：用可取消的 Task 取代 DispatchQueue.main.asyncAfter，
+            // 讓 onDisappear 能取消進行中的計時，避免快速離開/返回時孤兒更新在
+            // allocationBarAppeared 已被重置為 false 後才觸發，造成彩條動畫略過或卡在半展開。
+            allocationBarTask?.cancel()
+            allocationBarTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled else { return }
                 allocationBarAppeared = true
             }
             withAnimation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.18)) {
                 allocationRowsAppeared = true
             }
         }
-        .onDisappear { allocationBarAppeared = false; allocationRowsAppeared = false }
+        .onDisappear {
+            allocationBarAppeared = false
+            allocationRowsAppeared = false
+            allocationBarTask?.cancel()
+            allocationBarTask = nil
+        }
     }
 
     // MARK: - 每月現金流

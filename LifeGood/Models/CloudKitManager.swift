@@ -348,12 +348,22 @@ final class CloudKitManager {
                         let dirURL = docs.appendingPathComponent(dir, isDirectory: true)
                         try? FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
                         let dest = dirURL.appendingPathComponent(name)
-                        try? FileManager.default.removeItem(at: dest)
-                        do {
-                            try FileManager.default.copyItem(at: url, to: dest)
-                            lock.lock(); pulledPhotos.insert("\(dir)/\(name)"); lock.unlock()
-                        } catch {
-                            self.report(error, context: "寫入照片 \(dir)/\(name)")
+                        // 與上方 KVBlob 分支同理：本裝置剛推送的照片，下一次節流拉取幾乎必然把
+                        // 自己剛寫入、內容其實沒變的同一張照片也算成「已變更」而回彈。寫入前先比對
+                        // 內容是否與本機既有檔案相同，相同則視為 echo 跳過，避免無謂的磁碟 I/O 與
+                        // SettingsView「從 iCloud 收到更新」提示無故閃爍。
+                        let downloadedData = try? Data(contentsOf: url)
+                        let existingData = try? Data(contentsOf: dest)
+                        if downloadedData != nil && downloadedData == existingData {
+                            // echo：內容相同，不動作
+                        } else {
+                            try? FileManager.default.removeItem(at: dest)
+                            do {
+                                try FileManager.default.copyItem(at: url, to: dest)
+                                lock.lock(); pulledPhotos.insert("\(dir)/\(name)"); lock.unlock()
+                            } catch {
+                                self.report(error, context: "寫入照片 \(dir)/\(name)")
+                            }
                         }
                     }
                 }

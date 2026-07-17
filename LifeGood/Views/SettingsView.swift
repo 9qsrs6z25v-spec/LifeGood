@@ -970,13 +970,7 @@ struct SettingsView: View {
                         .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
                 }
             }
-            SecureField("API Key", text: Binding(
-                get: { aiSettings.key(for: p) },
-                set: { aiSettings.setKey($0, for: p) }
-            ))
-            .textInputAutocapitalization(.never)
-            .disableAutocorrection(true)
-            .autocorrectionDisabled()
+            ProviderAPIKeyField(provider: p, initialKey: aiSettings.key(for: p))
             if let consoleURL = URL(string: p.consoleURL) {
                 Link(destination: consoleURL) {
                     HStack(spacing: 6) {
@@ -1473,42 +1467,65 @@ struct SettingsView: View {
 
     // MARK: - 匯出
 
+    // exportJSON／exportCSV／exportSubordinates：與 exportFullBackup 同一模式——只有讀取
+    // @Published 屬性組出純 struct 快照這步留在主執行緒（很快），實際 JSON 編碼／CSV 組字串
+    // 這種資料量大時會卡 UI 的重運算搬到背景執行緒，寫完檔再跳回主執行緒更新分享項目。
+
     private func exportJSON() {
-        let data = UnifiedExporter.exportJSON(expense: store, finance: financeStore, life: lifeStore)
+        let payload = UnifiedExport.build(expense: store, finance: financeStore, life: lifeStore)
         let filename = "LifeGood_\(dateStamp()).json"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-        do {
-            try data.write(to: url)
-            activeShareItem = .json(url)
-        } catch {
-            exportErrorMessage = error.localizedDescription
-            showExportError = true
+        Task.detached {
+            let data = UnifiedExporter.exportJSON(payload)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            do {
+                try data.write(to: url)
+                await MainActor.run { activeShareItem = .json(url) }
+            } catch {
+                await MainActor.run {
+                    exportErrorMessage = error.localizedDescription
+                    showExportError = true
+                }
+            }
         }
     }
 
     private func exportCSV() {
-        let csv = UnifiedExporter.exportCSV(expense: store, finance: financeStore, life: lifeStore)
+        let payload = UnifiedExport.build(expense: store, finance: financeStore, life: lifeStore)
         let filename = "LifeGood_\(dateStamp()).csv"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-        do {
-            try csv.write(to: url, atomically: true, encoding: .utf8)
-            activeShareItem = .csv(url)
-        } catch {
-            exportErrorMessage = error.localizedDescription
-            showExportError = true
+        Task.detached {
+            let csv = UnifiedExporter.exportCSV(payload)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            do {
+                try csv.write(to: url, atomically: true, encoding: .utf8)
+                await MainActor.run { activeShareItem = .csv(url) }
+            } catch {
+                await MainActor.run {
+                    exportErrorMessage = error.localizedDescription
+                    showExportError = true
+                }
+            }
         }
     }
 
     private func exportSubordinates() {
-        let data = SubordinateExporter.exportJSON(life: lifeStore)
+        let payload = SubordinateExport(
+            subordinates: lifeStore.subordinates,
+            departments: lifeStore.departments,
+            gradeTitles: lifeStore.gradeTitles
+        )
         let filename = "LifeGood_部屬_\(dateStamp()).json"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-        do {
-            try data.write(to: url)
-            activeShareItem = .json(url)
-        } catch {
-            exportErrorMessage = error.localizedDescription
-            showExportError = true
+        Task.detached {
+            let data = SubordinateExporter.exportJSON(payload)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            do {
+                try data.write(to: url)
+                await MainActor.run { activeShareItem = .json(url) }
+            } catch {
+                await MainActor.run {
+                    exportErrorMessage = error.localizedDescription
+                    showExportError = true
+                }
+            }
         }
     }
 
@@ -1638,6 +1655,47 @@ struct SettingsView: View {
 
     private var appBuild: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+}
+
+/// AI 供應商 API Key 欄位：SecureField 先前直接綁在 aiSettings.setKey(for:) 上，每敲一個字元
+/// 都會同步寫入 Keychain 並讓 keyChangeStamp 遞增，觸發整個 SettingsView 重繪。對齊
+/// CurrencyRateRow 既有修復規格：改為本地暫存文字，停止輸入 400ms 後才提交回 Keychain。
+private struct ProviderAPIKeyField: View {
+    let provider: AIProvider
+    @State private var keyText: String
+    @State private var commitTask: Task<Void, Never>?
+
+    init(provider: AIProvider, initialKey: String) {
+        self.provider = provider
+        _keyText = State(initialValue: initialKey)
+    }
+
+    var body: some View {
+        SecureField("API Key", text: $keyText)
+            .textInputAutocapitalization(.never)
+            .disableAutocorrection(true)
+            .autocorrectionDisabled()
+            .onChange(of: keyText) { _, _ in scheduleCommit() }
+            .onDisappear {
+                commitTask?.cancel()
+                commit()
+            }
+    }
+
+    private func scheduleCommit() {
+        commitTask?.cancel()
+        commitTask = Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            commit()
+        }
+    }
+
+    private func commit() {
+        if AISettingsStore.shared.key(for: provider) != keyText {
+            AISettingsStore.shared.setKey(keyText, for: provider)
+        }
     }
 }
 

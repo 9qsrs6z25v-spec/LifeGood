@@ -1448,7 +1448,14 @@ struct RecordEditorSheet: View {
             if let shift = sub.shifts.first(where: { cal.isDate($0.date, inSameDayAs: day) })?.type,
                let rest = schedule.restRange(for: shift),
                let rStart = cal.date(byAdding: .minute, value: rest.startMinutes, to: day),
-               let rEnd = cal.date(byAdding: .minute, value: rest.endMinutes, to: day), rEnd > rStart {
+               // 休息時段可能跨午夜（如晚班 23:00–00:30，startMinutes > endMinutes，見
+               // ShiftTimeRange／eveningShift 預設班別本身就跨日）。此時 endMinutes 換算成
+               // 同一天的 Date 會比 rStart 還早，導致 rEnd > rStart 這個判斷失敗，整天的
+               // 休息時段扣除被直接跳過（而非部分扣除），造成請假時數被高估。跨日時把
+               // endMinutes 多加 1440 分鐘（+1 天）換算，其餘 clamp 邏輯不變。
+               let rEnd = cal.date(byAdding: .minute,
+                                    value: rest.endMinutes + (rest.endMinutes < rest.startMinutes ? 1440 : 0),
+                                    to: day), rEnd > rStart {
                 let s = max(date, rStart), e = min(endDate, rEnd)
                 if e > s { total += e.timeIntervalSince(s) / 3600 }
             }

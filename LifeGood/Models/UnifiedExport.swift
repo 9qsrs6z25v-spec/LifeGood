@@ -66,7 +66,11 @@ struct UnifiedExport: Codable {
 
 enum UnifiedExporter {
     static func exportJSON(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> Data {
-        let payload = UnifiedExport.build(expense: expense, finance: finance, life: life)
+        exportJSON(UnifiedExport.build(expense: expense, finance: finance, life: life))
+    }
+
+    /// 純 payload 版本：只碰 struct 快照，不觸及 @Published，可安全在背景執行緒呼叫。
+    static func exportJSON(_ payload: UnifiedExport) -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
@@ -74,6 +78,14 @@ enum UnifiedExporter {
     }
 
     static func exportCSV(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> String {
+        exportCSV(UnifiedExport.build(expense: expense, finance: finance, life: life))
+    }
+
+    /// 純 payload 版本：只碰 struct 快照，不觸及 @Published，可安全在背景執行緒呼叫。
+    static func exportCSV(_ payload: UnifiedExport) -> String {
+        let expense = payload.expense
+        let finance = payload.finance
+        let life = payload.life
         let iso = ISO8601DateFormatter()
         var csv = ""
 
@@ -606,11 +618,15 @@ struct SubordinateExport: Codable {
 
 enum SubordinateExporter {
     static func exportJSON(life: LifeStore) -> Data {
-        let payload = SubordinateExport(
+        exportJSON(SubordinateExport(
             subordinates: life.subordinates,
             departments: life.departments,
             gradeTitles: life.gradeTitles
-        )
+        ))
+    }
+
+    /// 純 payload 版本：只碰 struct 快照，不觸及 @Published，可安全在背景執行緒呼叫。
+    static func exportJSON(_ payload: SubordinateExport) -> Data {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         enc.dateEncodingStrategy = .iso8601

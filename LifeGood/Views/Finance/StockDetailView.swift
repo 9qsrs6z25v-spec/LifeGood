@@ -890,6 +890,15 @@ struct StockDetailView: View {
            let inc = expenseStore.incomes.first(where: { $0.id == incId }) {
             expenseStore.deleteIncome(inc)
         }
+        // 每筆現金股利各自透過 linkedIncomeId 連結一筆 Income（見 syncCashDividendIncome），
+        // 不只 stock.linkedIncomeId 這個單一欄位，刪除股票時要一併清掉，避免留下永遠對應
+        // 不到任何股票、卻仍計入收入總額的孤兒「XX 配息」紀錄。
+        for div in stock.dividends {
+            if let incId = div.linkedIncomeId,
+               let inc = expenseStore.incomes.first(where: { $0.id == incId }) {
+                expenseStore.deleteIncome(inc)
+            }
+        }
         for accId in [stock.linkedBankMilestoneId, stock.linkedSecuritiesMilestoneId].compactMap({ $0 }) {
             if var ms = lifeStore.milestones.first(where: { $0.id == accId }) {
                 ms.bankDeposits?.removeAll { $0.linkedStockId == stock.id }
