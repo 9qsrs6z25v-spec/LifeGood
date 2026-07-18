@@ -843,6 +843,7 @@ struct TalentMatrixView: View {
                 }
             }
             .onAppear { emptyPulse = true }
+            .onDisappear { emptyPulse = false }
             Text(selectedDeptIds.isEmpty ? "尚無部屬資料" : "所選部門沒有部屬")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)

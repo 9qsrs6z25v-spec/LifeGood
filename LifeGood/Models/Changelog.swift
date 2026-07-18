@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.33", build: 686, date: "2026/07/18", notes: [
+            "【靜態除錯 v24.33：TalentMatrixView 空狀態脈衝動畫卡死】emptyHint（人才矩陣依部門篩選後無符合部屬時的空狀態）只在 .onAppear 把 emptyPulse 設成 true，沒有比照全 App 其餘空狀態（FamilyView／ResumeView／LifeOverviewView／SubordinateView／ChildrenResumeView／FoodMapView／CareerView 等）在 .onDisappear 一併重置為 false。透過畫面上方的部門篩選 Menu 先切到有部屬的部門（空狀態從畫面上移除但 emptyPulse 仍停留在 true）、再切回沒有部屬的部門，.onAppear 重新掛載時 emptyPulse 已是 true，指派 true→true 不構成 SwiftUI 判定的變化，.animation(value:) 不會重新觸發，兩層脈衝光環會直接卡在放大後的固定尺寸、不再播放脈動效果。補上 .onDisappear { emptyPulse = false }，強制下次掛載時觸發 false→true 的轉場以重播動畫。本輪複查 Views/Life 目錄全部 27 個檔案，其餘強制解包／as!／索引越界／retain cycle／防抖動畫／忙碌守衛均確認已妥善保護，未發現新問題。Views 根層與 Finance 目錄的複查仍在進行中。"
+        ]),
         ChangelogEntry(version: "24.32", build: 685, date: "2026/07/18", notes: [
             "【靜態除錯 v24.32：RemoteAdminManager.refresh() 補上節流，避免重複打公用 CloudKit DB】App 內所有其他 CloudKit 同步路徑（CloudSyncManager 30 秒節流、2 秒防抖；EInvoiceSyncManager 依設定間隔判斷）都有節流保護，唯獨 RemoteAdminManager.refresh()（由 LifeGoodApp 根視圖 .onAppear 呼叫的 bootstrap() 觸發，拉取 Public DB 的 AppConfig／GlobalStats）完全沒有節流；根視圖 .onAppear 在 scene 重建等情境下可能不只觸發一次，每次都會無節制送出 CKFetchRecordsOperation。新增 lastAutoRefresh 節流旗標，比照既有 30 秒節流慣例：bootstrap() 走的自動路徑 30 秒內跳過重複拉取，AdminConsoleView「重新整理人數／設定」按鈕的手動路徑則維持原樣立即生效（refresh(force:) 預設 true）。本輪同時複查 Models 目錄全部 27 個檔案，其餘強制解包／as!／try!／retain cycle／CloudKit 節流與防抖／isSyncing 並行守衛均確認已妥善保護，未發現新問題。"
         ]),
