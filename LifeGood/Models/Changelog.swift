@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.35", build: 688, date: "2026/07/18", notes: [
+            "【靜態除錯 v24.35：EInvoiceHistoryView 空狀態脈衝動畫卡死】匯入歷史頁（EInvoiceSetupView.EInvoiceHistoryView）在同一個 sheet 內以 if/else 於清單／空狀態間切換：使用者對單筆紀錄「撤銷」（swipe action）或按右上角「清除全部歷史」把 sync.importHistory 清空後，畫面從清單切回空狀態，但 emptyPulse 這個雙層脈衝光環旗標是宣告在 EInvoiceHistoryView 本身（sheet 頂層、跨越 if/else 兩個分支持續存在），並非空狀態子視圖獨有；只要這個 sheet 在清單／空狀態之間切換過一次以上，第二次進入空狀態時 emptyPulse 已停留在 true，.onAppear 重新指派 true→true 不構成 SwiftUI 判定的變化，脈衝動畫不會重播，兩層光環直接卡在放大後的固定尺寸——與 v24.33 TalentMatrixView 空狀態脈衝卡死屬同一種 bug（@State 宣告在持續存在的父層、conditional 子視圖各自 onAppear 卻沒有對應 onDisappear 重置）。比照該次修法補上 .onDisappear { emptyPulse = false }。本輪同時針對尚未被 v24.20～v24.34 逐檔覆蓋、較少提及的 AdminConsoleView／MultiPhotoGallery／VehicleDetailView／HolographicBuildingView（目前無任何呼叫端引用，屬未串接的閒置元件，故所有潛在問題影響範圍為零，本輪不列入修復）四個檔案做重點複查：強制解包／as!／try!／索引越界／retain cycle（Timer／SCNAction 閉包皆已用 [weak self]／[weak root]）／CloudKit 節流／isBusy 並行守衛均確認已妥善保護，未發現其餘新問題。"
+        ]),
         ChangelogEntry(version: "24.34", build: 687, date: "2026/07/18", notes: [
             "【靜態除錯 v24.34：多處儲存按鈕補上連點守衛，避免重複紀錄/資料錯亂】① RealEstateDetailView.ElevatorMaintenanceEditor（電梯保養記錄）的儲存與刪除，比照同檔案 UtilityPaymentEditor／RenovationPhotoEditor 已修過的同型 bug——save()／deleteRecord() 都是先 dismiss() 關閉 sheet，下一個 runloop 才非同步寫回 financeStore，快速連點兩下會讓兩次呼叫各自讀到同一份舊 estate 快照、各自 append／刪除，較晚寫回者蓋掉較早者，可能造成重複的保養記錄或遺失剛存的保養照片（孤兒檔案），卻唯獨這個編輯器沒有 isSaving 守衛；補上比照既有規格。② AddIncomeView／AddVehicleView.VehicleEditor／AddSavingsInsuranceView／AddStockView 四個新增/編輯表單的儲存皆是同步寫回 store 後立即 dismiss()，sheet 收合動畫尚未播完前按鈕仍可被觸發，快速連點會建立兩筆重複紀錄（AddStockView 又牽涉股票已實現損益連動的支出/收入建立與刪除，重複觸發風險更高）；四處統一補上 isSaving 忙碌旗標 + 按鈕 disabled 守衛，比照本檔案系列先前已為 AddRealEstateView／AddExpenseView 等畫面建立的規格。純新增守衛邏輯，不影響任何既有儲存資料欄位或商業邏輯。"
         ]),

@@ -1011,6 +1011,7 @@ struct EInvoiceHistoryView: View {
                     emptyPulse = true
                 }
             }
+            .onDisappear { emptyPulse = false }
 
             VStack(spacing: 6) {
                 Text("尚無匯入紀錄").font(.headline)
