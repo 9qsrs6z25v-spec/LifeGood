@@ -30,6 +30,9 @@ final class RemoteAdminManager: ObservableObject {
     private let statsID  = CKRecord.ID(recordName: "global_stats")
 
     private let defaults = UserDefaults.standard
+    /// 節流用：避免 bootstrap() 在 App 生命週期內被重複觸發（例如 scene 重建）時
+    /// 反覆對 Public DB 送出 CKFetchRecordsOperation。手動按「重新整理」則略過此節流。
+    private var lastAutoRefresh: Date?
     private enum K {
         static let allFree     = "ra_all_free"
         static let userCount   = "ra_user_count"
@@ -61,7 +64,7 @@ final class RemoteAdminManager: ObservableObject {
 
     /// App 啟動時呼叫：拉設定 + 人數，並（若需要）註冊本使用者
     func bootstrap() {
-        refresh()
+        refresh(force: false)
         registerUserIfNeeded()
     }
 
@@ -74,7 +77,13 @@ final class RemoteAdminManager: ObservableObject {
 
     // MARK: - 讀取設定 + 人數
 
-    func refresh() {
+    /// - Parameter force: 手動「重新整理」按鈕應傳 true，略過節流直接打 CloudKit；
+    ///   自動觸發（bootstrap）用預設 false，30 秒內已抓過就跳過。
+    func refresh(force: Bool = true) {
+        if !force, let last = lastAutoRefresh, Date().timeIntervalSince(last) < 30 {
+            return
+        }
+        lastAutoRefresh = Date()
         let op = CKFetchRecordsOperation(recordIDs: [configID, statsID])
         op.qualityOfService = .utility
         op.perRecordResultBlock = { [weak self] recID, result in
