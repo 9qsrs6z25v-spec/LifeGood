@@ -1468,8 +1468,15 @@ struct MyCalendarView: View {
 //    開啟時的英雄卡進場規格。
 // ⑦ 純顯示層調整，未變動事件／里程碑／Apple 行事曆／家人紀念日詳情欄位、編輯、
 //    開啟系統行事曆等既有商業邏輯。
-// （下次美化本檔案時，可考慮：infoCard／noteBlock 欄位列補齊 Capsule 側條 section header，
-//   對齊本檔案 PersonalEventEditor.editorSectionHeader 規格）
+// [2026-07 v3] 本次美化方向（承接上方待辦）：
+// ⑧ 新增 CalendarEventCard.cardSectionHeader(_:icon:tint:)，比照 PersonalEventEditor.
+//    editorSectionHeader 規格（4pt 漸層色條 + 圖示 + .subheadline.bold），補上「詳細資訊」
+//    （info.circle，沿用卡片 accent）與「備註」（note.text，中性灰，對齊 editorSectionHeader
+//    備註區配色）兩個標頭，取代 infoCard 原本完全無標頭的裸欄位列，以及 noteBlock 原本
+//    純 caption 字級「備註」二字標籤。
+// ⑨ 純視覺層調整，未變動 fields／noteText 欄位資料來源、編輯、刪除等既有商業邏輯。
+// （下次美化本檔案時，可考慮：主畫面 eventRow 列表的「重複」「提醒」等次要徽章是否需要
+//   統一尺寸節奏，或改往其他仍留有待辦的畫面）
 
 struct PersonalEventEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -2268,30 +2275,52 @@ struct CalendarEventCard: View {
         }
     }
 
-    private var infoCard: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(fields.enumerated()), id: \.offset) { idx, f in
-                HStack {
-                    Text(f.0).font(.subheadline).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(f.1).font(.subheadline.weight(.medium)).multilineTextAlignment(.trailing)
-                }
-                .padding(.horizontal, 14).padding(.vertical, 12)
-                if idx < fields.count - 1 { Divider().padding(.leading, 14) }
-            }
+    /// [v3] infoCard／noteBlock 共用標頭，比照 PersonalEventEditor.editorSectionHeader 規格
+    /// （4pt 漸層色條 + 圖示 + .subheadline.bold），補上 v2 只做完 titleBlock 英雄卡、
+    /// 下方兩張卡片卻仍是無標頭裸內容區塊的落差。tint 預設沿用卡片既有 accent（依事件
+    /// 類型變色），備註沿用 editorSectionHeader 同款中性灰，純視覺調整、欄位資料不變。
+    private func cardSectionHeader(_ title: String, icon: String, tint: Color? = nil) -> some View {
+        let color = tint ?? accent
+        return HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.bold))
+            Spacer(minLength: 0)
         }
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var infoCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            cardSectionHeader("詳細資訊", icon: "info.circle")
+            VStack(spacing: 0) {
+                ForEach(Array(fields.enumerated()), id: \.offset) { idx, f in
+                    HStack {
+                        Text(f.0).font(.subheadline).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(f.1).font(.subheadline.weight(.medium)).multilineTextAlignment(.trailing)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    if idx < fields.count - 1 { Divider().padding(.leading, 14) }
+                }
+            }
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
     }
 
     private var noteBlock: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("備註").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            cardSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
             Text(noteText).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
         }
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private func openInCalendarButton(_ date: Date) -> some View {
