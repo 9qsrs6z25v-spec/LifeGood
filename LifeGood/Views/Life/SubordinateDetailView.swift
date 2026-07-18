@@ -1739,8 +1739,13 @@ struct AddSubItemSheet: View {
 // （對齊 RecordEditorSheet 備註區 tint: Color(.systemGray2) 的既有規格）。
 // 另外會議項目清單原本無空狀態提示，新增時畫面會顯得空白，補上一列輕量文字提示。
 // 純視覺層調整，未變動任何儲存／刪除／指派/週期換算等既有商業邏輯。
-// （下次美化本檔案時，可考慮：任務／報告的「標記為已完成」Toggle Section 補上統一
-//   Section header；或處理本檔案其餘尚未套用漸層圖示圓規格的次要清單列）
+// [2026-07 v3] 承接上一版（v2）末尾待辦：TaskEditorSheet／WeeklyReportEditorSheet
+// 的「標記為已完成」Toggle Section 原本是全檔唯一沒有 header 的 Section，
+// 補上 editorSectionHeader("完成狀態", icon: "checkmark.seal.fill", tint: .green)，
+// 綠色呼應 Toggle 開啟時的勾選綠，與 isCompleted 狀態語意一致；純視覺層調整，
+// $isCompleted binding／save() 寫回 completedAt 等既有商業邏輯完全未變動。
+// （下次美化本檔案時，可考慮處理本檔案其餘尚未套用漸層圖示圓規格的次要清單列，
+//   或轉往其他仍留有待辦的畫面）
 
 struct MeetingEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -1982,6 +1987,8 @@ struct TaskEditorSheet: View {
                             .foregroundStyle(isCompleted ? .green : .primary)
                     }
                     .tint(.green)
+                } header: {
+                    editorSectionHeader("完成狀態", icon: "checkmark.seal.fill", tint: .green)
                 }
                 Section {
                     MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
@@ -2098,6 +2105,8 @@ struct WeeklyReportEditorSheet: View {
                             .foregroundStyle(isCompleted ? .green : .primary)
                     }
                     .tint(.green)
+                } header: {
+                    editorSectionHeader("完成狀態", icon: "checkmark.seal.fill", tint: .green)
                 }
                 Section {
                     MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())

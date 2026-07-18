@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.29", build: 682, date: "2026/07/18", notes: [
+            "【美化】部屬任務／週報編輯頁（SubordinateDetailView.TaskEditorSheet／WeeklyReportEditorSheet）補齊「完成狀態」Section 標頭：上一版（v24.x）美化會議/任務/週報三個編輯 Sheet 時已補齊大部分 Section 統一標頭規格，但唯獨「標記為已完成」Toggle 所在的 Section 是全檔案僅剩沒有 header 的例外，與同畫面其他 Section（會議資訊／任務資訊／指派人員／備註）視覺落差明顯。新增 editorSectionHeader(\"完成狀態\", icon: \"checkmark.seal.fill\", tint: .green) 補齊兩處，綠色呼應 Toggle 開啟時的勾選綠，與 isCompleted 狀態語意一致。純視覺層調整，$isCompleted binding 與 save() 寫回 completedAt 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.28", build: 681, date: "2026/07/18", notes: [
             "【美化】個人檔案編輯頁（ResumeView.EditProfileView）補齊 Section 標頭：這是全 App 掃過一輪最後一個完全沒有任何美化紀錄的畫面（同檔案 ProfileFlashCard 英雄卡、母頁 LifeOverviewView 皆已完成規格對齊，唯獨這個從英雄卡鉛筆圖示點入的編輯 sheet 仍是最原始的裸 Form，三個 Section 只有系統預設純文字標題）。新增共用 profileEditorSectionHeader(_:icon:color:)（4pt 漸層色條 + 圖示 + 粗體文字，比照 HealthProfileEditView.healthEditorSectionHeader／MyCalendarView.editorSectionHeader 既有規格），補上「姓名」（indigo，person.text.rectangle.fill）／「工作」（orange，briefcase.fill）／「家庭」（pink，heart.fill）三個標頭，各自獨立主題色提升可掃視性。關閉按鈕維持原本固定左側「取消」、儲存固定右側「儲存」，本就符合全 App 一致慣例。純視覺層調整，chineseName／englishName／company／jobTitle／spouse 欄位資料來源與 loadProfile()／save() 寫回 store 等既有商業邏輯完全未變動。"
         ]),
