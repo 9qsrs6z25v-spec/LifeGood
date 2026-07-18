@@ -456,6 +456,50 @@ struct ResumeView: View {
         }
     }
 
+    /// 刪除里程碑並清除其他 Store 對此 id 的懸空引用。LifeStore.deleteMilestone 本身無法觸及
+    /// FinanceStore／ExpenseStore（不同 store，無互相持有），比照 deleteFamilyMember／deleteSubordinate
+    /// 解除交叉引用的既有寫法，改在同時持有三個 store 的這一層補上清除。
+    private func deleteMilestoneCleaningLinks(_ item: LifeMilestone) {
+        store.deleteMilestone(item)
+
+        var stocks = financeStore.stocks
+        var stocksChanged = false
+        for i in stocks.indices {
+            if stocks[i].linkedBankMilestoneId == item.id {
+                stocks[i].linkedBankMilestoneId = nil
+                stocks[i].linkedBankCurrency = nil
+                stocksChanged = true
+            }
+            if stocks[i].linkedSecuritiesMilestoneId == item.id {
+                stocks[i].linkedSecuritiesMilestoneId = nil
+                stocksChanged = true
+            }
+        }
+        if stocksChanged { financeStore.stocks = stocks }
+
+        var expenses = expenseStore.expenses
+        var expensesChanged = false
+        for i in expenses.indices {
+            if expenses[i].linkedBankMilestoneId == item.id {
+                expenses[i].linkedBankMilestoneId = nil
+                expensesChanged = true
+            }
+            if expenses[i].linkedCreditCardMilestoneId == item.id {
+                expenses[i].linkedCreditCardMilestoneId = nil
+                expensesChanged = true
+            }
+        }
+        if expensesChanged { expenseStore.expenses = expenses }
+
+        var incomes = expenseStore.incomes
+        var incomesChanged = false
+        for i in incomes.indices where incomes[i].linkedBankMilestoneId == item.id {
+            incomes[i].linkedBankMilestoneId = nil
+            incomesChanged = true
+        }
+        if incomesChanged { expenseStore.incomes = incomes }
+    }
+
     // MARK: - 列表
 
     private func groupedList(_ sorted: [LifeMilestone]) -> some View {
@@ -483,7 +527,7 @@ struct ResumeView: View {
                         let snapshot = section.items
                         let items = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
                             .filter { realMilestoneIDs.contains($0.id) }
-                        items.forEach { store.deleteMilestone($0) }
+                        items.forEach { deleteMilestoneCleaningLinks($0) }
                     }
                 } header: {
                     sectionHeader(section.category, count: section.items.count)
@@ -534,7 +578,7 @@ struct ResumeView: View {
                         let snapshot = items
                         let toDelete = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
                             .filter { realMilestoneIDs.contains($0.id) }
-                        toDelete.forEach { store.deleteMilestone($0) }
+                        toDelete.forEach { deleteMilestoneCleaningLinks($0) }
                     }
                 } header: {
                     sectionHeader(category, count: items.count)

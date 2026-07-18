@@ -84,6 +84,10 @@ struct RenovationPhotoEditor: View {
     @State private var note: String = ""
     @State private var photoFileNames: [String] = []
     @State private var showDeleteConfirm: Bool = false
+    // 防止「儲存」連點：save() 把實際寫回 store 的動作延後到下個 runloop（見 save() 內註解），
+    // 快速連點兩下會讓兩次呼叫都讀到同一份 estate 快照、各自 append 自己的 RenovationPhoto，
+    // 後寫入者會蓋掉前者剛存好的紀錄，其照片檔案則變成永久孤兒。
+    @State private var isSaving: Bool = false
 
     init(estateId: UUID, editing: RenovationPhoto?, preloadedFileNames: [String] = []) {
         self.estateId = estateId
@@ -148,7 +152,7 @@ struct RenovationPhotoEditor: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("儲存") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(photoFileNames.isEmpty)
+                        .disabled(photoFileNames.isEmpty || isSaving)
                 }
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
@@ -192,7 +196,9 @@ struct RenovationPhotoEditor: View {
     // MARK: - 動作
 
     private func save() {
+        guard !isSaving else { return }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        isSaving = true
         let recordId = editing?.id ?? UUID()
 
         let record = RenovationPhoto(

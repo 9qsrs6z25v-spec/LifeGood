@@ -828,6 +828,49 @@ struct FinanceCardView: View {
         }
     }
 
+    /// 刪除里程碑並清除其他 Store 對此 id 的懸空引用（比照 ResumeView.deleteMilestoneCleaningLinks
+    /// 同型修復，LifeStore.deleteMilestone 本身無法觸及 FinanceStore／ExpenseStore）。
+    private func deleteMilestoneCleaningLinks(_ item: LifeMilestone) {
+        lifeStore.deleteMilestone(item)
+
+        var stocks = financeStore.stocks
+        var stocksChanged = false
+        for i in stocks.indices {
+            if stocks[i].linkedBankMilestoneId == item.id {
+                stocks[i].linkedBankMilestoneId = nil
+                stocks[i].linkedBankCurrency = nil
+                stocksChanged = true
+            }
+            if stocks[i].linkedSecuritiesMilestoneId == item.id {
+                stocks[i].linkedSecuritiesMilestoneId = nil
+                stocksChanged = true
+            }
+        }
+        if stocksChanged { financeStore.stocks = stocks }
+
+        var expenses = expenseStore.expenses
+        var expensesChanged = false
+        for i in expenses.indices {
+            if expenses[i].linkedBankMilestoneId == item.id {
+                expenses[i].linkedBankMilestoneId = nil
+                expensesChanged = true
+            }
+            if expenses[i].linkedCreditCardMilestoneId == item.id {
+                expenses[i].linkedCreditCardMilestoneId = nil
+                expensesChanged = true
+            }
+        }
+        if expensesChanged { expenseStore.expenses = expenses }
+
+        var incomes = expenseStore.incomes
+        var incomesChanged = false
+        for i in incomes.indices where incomes[i].linkedBankMilestoneId == item.id {
+            incomes[i].linkedBankMilestoneId = nil
+            incomesChanged = true
+        }
+        if incomesChanged { expenseStore.incomes = incomes }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -880,7 +923,7 @@ struct FinanceCardView: View {
                 AddStockView(editing: stk)
             }
             .alert("確定要刪除嗎？", isPresented: $showDeleteConfirm) {
-                Button("刪除", role: .destructive) { lifeStore.deleteMilestone(item); dismiss() }
+                Button("刪除", role: .destructive) { deleteMilestoneCleaningLinks(item); dismiss() }
                 Button("取消", role: .cancel) {}
             }
         }

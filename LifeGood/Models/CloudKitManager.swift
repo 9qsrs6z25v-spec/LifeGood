@@ -50,6 +50,14 @@ final class CloudKitManager {
 
     private let defaults = UserDefaults.standard
     private let fetchLock = NSLock()
+    /// 是否已有一輪 fetchChanges 正在進行中。`queue` 只序列化「送出操作」那一刻，
+    /// ensureZoneExists／CKFetchRecordZoneChangesOperation 的完成回呼落在 CloudKit 自己的
+    /// 佇列上，並不會被 `queue` 擋住；若 CloudSyncManager.performSync（30 秒節流）與
+    /// handleRemoteNotification（silent push，未經過 CloudSyncManager.isSyncing 守衛）
+    /// 前後腳呼叫，兩個 CKFetchRecordZoneChangesOperation 會針對同一個 zone 並行拉取，
+    /// 各自獨立存檔 change token 並各自觸發 Store reload。這裡補上旗標，讓後到的呼叫直接
+    /// 視為失敗跳過，只保留最先開始的那一輪。
+    private var isFetching = false
     private let zoneCreatedKey = "ck_zone_created"
     private let subscriptionCreatedKey = "ck_zone_sub_created"
     private let serverChangeTokenKey = "ck_server_change_token"
@@ -296,9 +304,15 @@ final class CloudKitManager {
     func fetchChanges(completion: ((Bool) -> Void)? = nil) {
         guard isAvailable else { completion?(false); return }
         queue.async {
+            guard !self.isFetching else { completion?(false); return }
+            self.isFetching = true
+            let wrapped: (Bool) -> Void = { ok in
+                self.queue.async { self.isFetching = false }
+                completion?(ok)
+            }
             self.ensureZoneExists { ok in
-                guard ok else { completion?(false); return }
-                self.runFetch(completion: completion)
+                guard ok else { wrapped(false); return }
+                self.runFetch(completion: wrapped)
             }
         }
     }

@@ -2761,6 +2761,10 @@ struct UtilityPaymentEditor: View {
     @State private var selectedBankMilestoneId: UUID?
     @State private var selectedBankCurrency: String = "NT$"
     @State private var selectedCreditCardMilestoneId: UUID?
+    // 防止「儲存」連點：save() 把實際寫回 store 的動作延後到下個 runloop（見 save() 內註解），
+    // 快速連點兩下會在第一次寫入完成前就再次進入 save()，各自建立一筆 Expense、並各自捕捉
+    // 自己的 estate 快照非同步寫回，後寫入者會蓋掉前者剛 append 的 UtilityPayment，留下孤兒 Expense。
+    @State private var isSaving = false
 
     private var bankMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
@@ -2925,7 +2929,7 @@ struct UtilityPaymentEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") { save() }.bold().foregroundStyle(.green)
+                    Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving)
                 }
             }
             .onAppear {
@@ -2966,10 +2970,12 @@ struct UtilityPaymentEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard let amount = Double(amountText), amount > 0 else {
             showError = true; return
         }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        isSaving = true
         let recordId = editing?.id ?? UUID()
 
         // 取得舊的支出（用於同步銀行扣款時還原舊紀錄）

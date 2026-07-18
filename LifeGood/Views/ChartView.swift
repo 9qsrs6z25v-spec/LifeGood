@@ -92,6 +92,14 @@ struct ChartView: View {
     @State private var variablePieEmptyPulse = false
     @State private var fixedPieEmptyPulse = false
     @State private var typeBreakdownEmptyPulse = false
+    // 上面四個脈衝旗標原本各自用未取消的 DispatchQueue.main.asyncAfter 排程 0.3 秒後觸發，
+    // loadChartData() 重載資料時只會把旗標歸零、不會取消已排程但尚未觸發的 closure：
+    // 快速連續切換期間（例如來回點兩個週期分頁）舊的 closure 仍會在之後補一次遲到的觸發，
+    // 造成脈衝動畫從中途突然開始。改用可取消的 Task（比照 FinanceChartView 既有寫法）。
+    @State private var trendPulseTask: Task<Void, Never>?
+    @State private var variablePiePulseTask: Task<Void, Never>?
+    @State private var fixedPiePulseTask: Task<Void, Never>?
+    @State private var typeBreakdownPulseTask: Task<Void, Never>?
     // 英雄卡片進場動畫旗標（v2 美化）
     @State private var heroCardAppeared = false
     // 圓餅圖例行交錯進場動畫旗標（v3 美化，各圓餅頁各用一個旗標避免頁面切換時互相重置）
@@ -171,6 +179,10 @@ struct ChartView: View {
             }
             .onDisappear {
                 loadTask?.cancel()
+                trendPulseTask?.cancel()
+                variablePiePulseTask?.cancel()
+                fixedPiePulseTask?.cancel()
+                typeBreakdownPulseTask?.cancel()
                 // 重置英雄卡進場旗標：切到其他子功能再切回 Chart 分頁時能重新播放進場動畫
                 // （其餘圖表旗標已在 loadChartData() 內因資料重載而歸零，僅此旗標未被涵蓋）
                 heroCardAppeared = false
@@ -187,6 +199,10 @@ struct ChartView: View {
         // 重置各圖表脈衝旗標：isLoading=true 會移除 empty state，旗標卡在 true 時
         // 資料重載後 empty state 重出現、onAppear guard 通過不了，動畫不再播放。
         // 在此歸零確保每次載入結束後 empty state 能重新觸發脈衝動畫。
+        trendPulseTask?.cancel()
+        variablePiePulseTask?.cancel()
+        fixedPiePulseTask?.cancel()
+        typeBreakdownPulseTask?.cancel()
         trendEmptyPulse = false
         variablePieEmptyPulse = false
         fixedPieEmptyPulse = false
@@ -490,7 +506,12 @@ struct ChartView: View {
                     }
                     .onAppear {
                         guard !trendEmptyPulse else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { trendEmptyPulse = true }
+                        trendPulseTask?.cancel()
+                        trendPulseTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            guard !Task.isCancelled else { return }
+                            trendEmptyPulse = true
+                        }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
@@ -669,7 +690,12 @@ struct ChartView: View {
                     }
                     .onAppear {
                         guard !variablePieEmptyPulse else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { variablePieEmptyPulse = true }
+                        variablePiePulseTask?.cancel()
+                        variablePiePulseTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            guard !Task.isCancelled else { return }
+                            variablePieEmptyPulse = true
+                        }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
@@ -758,7 +784,12 @@ struct ChartView: View {
                     }
                     .onAppear {
                         guard !fixedPieEmptyPulse else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { fixedPieEmptyPulse = true }
+                        fixedPiePulseTask?.cancel()
+                        fixedPiePulseTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            guard !Task.isCancelled else { return }
+                            fixedPieEmptyPulse = true
+                        }
                     }
                     VStack(spacing: 6) {
                         Text("尚無資料")
@@ -1057,7 +1088,12 @@ struct ChartView: View {
                     }
                     .onAppear {
                         guard !typeBreakdownEmptyPulse else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { typeBreakdownEmptyPulse = true }
+                        typeBreakdownPulseTask?.cancel()
+                        typeBreakdownPulseTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            guard !Task.isCancelled else { return }
+                            typeBreakdownEmptyPulse = true
+                        }
                     }
                     VStack(spacing: 6) {
                         Text("尚無支出資料")

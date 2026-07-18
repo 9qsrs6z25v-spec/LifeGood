@@ -1018,7 +1018,9 @@ struct AddStockView: View {
             linkedIncomeId: incId,
             linkedBankMilestoneId: selectedBankMilestoneId,
             linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
-            linkedSecuritiesMilestoneId: selectedSecuritiesMilestoneId
+            linkedSecuritiesMilestoneId: selectedSecuritiesMilestoneId,
+            transactions: editing?.transactions ?? [],
+            dividends: editing?.dividends ?? []
         )
         if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
         syncAccountTransactions(for: item, previous: editing)

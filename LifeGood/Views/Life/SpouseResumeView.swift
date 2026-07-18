@@ -59,8 +59,11 @@ struct SpouseResumeView: View {
     @State private var cardAppeared = false
     @State private var milestonesAppeared = false
     @State private var expensesAppeared = false
-    // [v3] 空狀態脈衝光環動畫旗標
-    @State private var emptyIconPulse = false
+    // [v3] 空狀態脈衝光環動畫旗標：里程碑／消費兩個空狀態各自獨立一份，避免共用同一旗標時
+    // 其中一個先掛載把旗標設成 true，另一個掛載時偵測不到「從 false 變 true」而不會播放
+    // （同型修復比照 TaxOverviewView v24.22 拆分 emptyRecordsPulse／emptySavingPulse）。
+    @State private var milestoneEmptyPulse = false
+    @State private var expenseEmptyPulse = false
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
@@ -462,7 +465,7 @@ struct SpouseResumeView: View {
                                   count: derived.isEmpty ? nil : derived.count)
         ) {
             if derived.isEmpty {
-                emptyPlaceholder(icon: "heart.text.square", text: "尚無相關里程碑")
+                emptyPlaceholder(icon: "heart.text.square", text: "尚無相關里程碑", pulse: $milestoneEmptyPulse)
             } else {
                 ForEach(Array(derived.enumerated()), id: \.element.id) { idx, m in
                     milestoneRow(m, accent: accent)
@@ -549,7 +552,7 @@ struct SpouseResumeView: View {
             footer: Text("變動支出中將「\(spouse?.chineseName ?? "配偶")」加入人員的紀錄會自動同步到此。")
         ) {
             if expenses.isEmpty {
-                emptyPlaceholder(icon: "bag", text: "尚無共同消費紀錄", color: accent)
+                emptyPlaceholder(icon: "bag", text: "尚無共同消費紀錄", color: accent, pulse: $expenseEmptyPulse)
             } else {
                 // 合計列
                 HStack(spacing: 12) {
@@ -672,19 +675,19 @@ struct SpouseResumeView: View {
     // MARK: - 空狀態佔位
     // [v3] 升級：雙層脈衝光環 + 漸層底圓，對齊 TaxOverviewView v2 / VariableExpenseView emptyStateView 規格
 
-    private func emptyPlaceholder(icon: String, text: String, color: Color = Self.heroAccent) -> some View {
+    private func emptyPlaceholder(icon: String, text: String, color: Color = Self.heroAccent, pulse: Binding<Bool>) -> some View {
         VStack(spacing: 14) {
             ZStack {
                 Circle()
-                    .stroke(color.opacity(emptyIconPulse ? 0 : 0.26), lineWidth: 1.5)
+                    .stroke(color.opacity(pulse.wrappedValue ? 0 : 0.26), lineWidth: 1.5)
                     .frame(width: 88, height: 88)
-                    .scaleEffect(emptyIconPulse ? 1.38 : 1.0)
-                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                    .scaleEffect(pulse.wrappedValue ? 1.38 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: pulse.wrappedValue)
                 Circle()
-                    .stroke(color.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                    .stroke(color.opacity(pulse.wrappedValue ? 0 : 0.13), lineWidth: 1)
                     .frame(width: 88, height: 88)
-                    .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
-                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                    .scaleEffect(pulse.wrappedValue ? 1.60 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: pulse.wrappedValue)
                 Circle()
                     .fill(LinearGradient(
                         colors: [color.opacity(0.14), color.opacity(0.05)],
@@ -696,8 +699,8 @@ struct SpouseResumeView: View {
                     .foregroundStyle(color.opacity(0.65))
             }
             .onAppear {
-                emptyIconPulse = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyIconPulse = true }
+                pulse.wrappedValue = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pulse.wrappedValue = true }
             }
             Text(text)
                 .font(.subheadline.weight(.medium))

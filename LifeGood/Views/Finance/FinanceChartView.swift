@@ -54,6 +54,7 @@ import Charts
 
 struct FinanceChartView: View {
     @EnvironmentObject var store: FinanceStore
+    @EnvironmentObject var expenseStore: ExpenseStore
 
     @State private var heroCardAppeared = false
     @State private var sectionsAppeared = false
@@ -135,8 +136,37 @@ struct FinanceChartView: View {
 
     // MARK: - 英雄卡片
 
+    /// 儲蓄險 currentValue／totalPaid 是以保單自己的 currencyCode 存值（非一律 NT$，
+    /// 可在 AddSavingsInsuranceView 選擇 USD/JPY 等幣別），但 FinanceStore.totalInsuranceValue／
+    /// assetAllocations 直接加總未做匯率換算，會讓外幣保單的原始數字被當成 NT$ 計入總資產與
+    /// 圓餅圖，與 FinanceOverviewView（已比照 insuranceSummaryNTD 換算）互相矛盾。這裡補上同型換算。
+    private var insuranceSummaryNTD: (value: Double, paid: Double) {
+        let rates = expenseStore.currencyRates.reduce(into: ["NT$": 1.0]) { $0[$1.code] = $1.rate }
+        return store.insurances.reduce(into: (value: 0.0, paid: 0.0)) { acc, ins in
+            let rate = rates[ins.currencyCode] ?? 1
+            acc.value += ins.currentValue * rate
+            acc.paid += ins.totalPaid * rate
+        }
+    }
+
     private var totalAssetsValue: Double {
-        store.totalAssets
+        insuranceSummaryNTD.value + store.totalStockValue + store.totalVehicleValue + store.totalRealEstateValue
+    }
+
+    /// 對齊 FinanceStore.assetAllocations 的分類/排序邏輯，唯獨儲蓄險改用換算後的 NTD 現值。
+    private var assetAllocationsNTD: [AssetAllocation] {
+        let ins = insuranceSummaryNTD.value
+        let stk = store.totalStockValue
+        let veh = store.totalVehicleValue
+        let re  = store.totalRealEstateValue
+        let total = ins + stk + veh + re
+        guard total > 0 else { return [] }
+        var result: [AssetAllocation] = []
+        if ins > 0 { result.append(AssetAllocation(type: .savingsInsurance, value: ins, percentage: ins / total * 100)) }
+        if stk > 0 { result.append(AssetAllocation(type: .stock,            value: stk, percentage: stk / total * 100)) }
+        if veh > 0 { result.append(AssetAllocation(type: .vehicle,          value: veh, percentage: veh / total * 100)) }
+        if re  > 0 { result.append(AssetAllocation(type: .realEstate,       value: re,  percentage: re  / total * 100)) }
+        return result.sorted { $0.value > $1.value }
     }
 
     private var financeChartHeroCard: some View {
@@ -270,7 +300,7 @@ struct FinanceChartView: View {
     // MARK: - 資產配置圖
 
     private var allocationChart: some View {
-        let allocations = store.assetAllocations
+        let allocations = assetAllocationsNTD
         let grandTotal = allocations.reduce(0) { $0 + $1.value }
         return VStack(alignment: .leading, spacing: 14) {
             sectionHeader("資產配置分布", icon: "chart.pie.fill",
@@ -703,7 +733,7 @@ struct FinanceChartView: View {
                                     .font(.subheadline.weight(.semibold))
                                     .lineLimit(1)
                                 HStack(spacing: 5) {
-                                    Text("已繳 \(fmtShort(item.totalPaid))")
+                                    Text("已繳 \(fmtShort(item.totalPaid))\(item.currencyCode == "NT$" ? "" : " \(item.currencyCode)")")
                                         .font(.system(size: 10, weight: .medium))
                                         .foregroundStyle(.secondary)
                                         .padding(.horizontal, 6).padding(.vertical, 2)
@@ -724,10 +754,17 @@ struct FinanceChartView: View {
 
                             Spacer()
 
-                            Text(fmtShort(item.currentValue))
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
-                                .foregroundStyle(.primary)
-                                .contentTransition(.numericText())
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(fmtShort(item.currentValue))
+                                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                    .contentTransition(.numericText())
+                                if item.currencyCode != "NT$" {
+                                    Text(item.currencyCode)
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                         .padding(.horizontal)
                         .padding(.vertical, 12)

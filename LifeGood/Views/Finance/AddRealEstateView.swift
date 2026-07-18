@@ -95,6 +95,7 @@ struct AddRealEstateView: View {
     @State private var monthlyRentalText = ""
     @State private var note = ""
     @State private var showError = false
+    @State private var isSaving = false
     // v2 進場動畫旗標
     @State private var cardAppeared = false
     // matchedGeometryEffect：Tab 切換器平滑滑動（對齊 RealEstateDetailView.tabPicker 規格）
@@ -316,6 +317,7 @@ struct AddRealEstateView: View {
                         }
                         Button((editing != nil || hasAutoSaved) ? "儲存" : "新增") { save() }
                             .bold().foregroundStyle(.green)
+                            .disabled(isSaving)
                     }
                 }
             }
@@ -1291,10 +1293,12 @@ struct AddRealEstateView: View {
     // MARK: - 儲存
 
     private func save() {
+        guard !isSaving else { return }
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
               let priceWan = Double(purchasePriceText), priceWan > 0 else {
             showError = true; return
         }
+        isSaving = true
 
         let price = priceWan * 10000
         let currentVal = (Double(currentValueText) ?? priceWan) * 10000

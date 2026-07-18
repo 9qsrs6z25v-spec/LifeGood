@@ -190,6 +190,10 @@ struct SettingsView: View {
     @State private var pendingImportData: Data?
     @State private var pendingBackupURL: URL?      // 完整備份檔（含照片）匯入用
     @State private var backupBusy = false
+    // 匯出 JSON／CSV／部屬資料共用忙碌旗標：三者皆用 Task.detached 背景寫檔＋檔名含秒級 dateStamp()，
+    // 沒有守衛時快速連點同一顆按鈕會並發跑兩個 Task 各自寫同一個檔名、各自把 activeShareItem 蓋過去，
+    // 造成分享面板閃爍/重開，比照旁邊「完整備份」backupBusy 既有規格補上。
+    @State private var exportBusy = false
     @State private var showBackupRange = false     // 完整備份的時間範圍選擇
     @State private var importResultMessage = ""
     @State private var showImportResult = false
@@ -1001,6 +1005,7 @@ struct SettingsView: View {
                 )
             }
             .foregroundStyle(.primary)
+            .disabled(exportBusy)
 
             // 完整備份（含照片 / 文件）
             Button {
@@ -1054,6 +1059,7 @@ struct SettingsView: View {
                 )
             }
             .foregroundStyle(.primary)
+            .disabled(exportBusy)
 
             // 匯出部屬資料（含班表 / 任務 / 會議 / 請假）
             Button {
@@ -1067,6 +1073,7 @@ struct SettingsView: View {
                 )
             }
             .foregroundStyle(.primary)
+            .disabled(exportBusy)
 
             // 匯入
             Button {
@@ -1472,6 +1479,8 @@ struct SettingsView: View {
     // 這種資料量大時會卡 UI 的重運算搬到背景執行緒，寫完檔再跳回主執行緒更新分享項目。
 
     private func exportJSON() {
+        guard !exportBusy else { return }
+        exportBusy = true
         let payload = UnifiedExport.build(expense: store, finance: financeStore, life: lifeStore)
         let filename = "LifeGood_\(dateStamp()).json"
         Task.detached {
@@ -1479,17 +1488,20 @@ struct SettingsView: View {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
             do {
                 try data.write(to: url)
-                await MainActor.run { activeShareItem = .json(url) }
+                await MainActor.run { activeShareItem = .json(url); exportBusy = false }
             } catch {
                 await MainActor.run {
                     exportErrorMessage = error.localizedDescription
                     showExportError = true
+                    exportBusy = false
                 }
             }
         }
     }
 
     private func exportCSV() {
+        guard !exportBusy else { return }
+        exportBusy = true
         let payload = UnifiedExport.build(expense: store, finance: financeStore, life: lifeStore)
         let filename = "LifeGood_\(dateStamp()).csv"
         Task.detached {
@@ -1497,17 +1509,20 @@ struct SettingsView: View {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
             do {
                 try csv.write(to: url, atomically: true, encoding: .utf8)
-                await MainActor.run { activeShareItem = .csv(url) }
+                await MainActor.run { activeShareItem = .csv(url); exportBusy = false }
             } catch {
                 await MainActor.run {
                     exportErrorMessage = error.localizedDescription
                     showExportError = true
+                    exportBusy = false
                 }
             }
         }
     }
 
     private func exportSubordinates() {
+        guard !exportBusy else { return }
+        exportBusy = true
         let payload = SubordinateExport(
             subordinates: lifeStore.subordinates,
             departments: lifeStore.departments,
@@ -1519,11 +1534,12 @@ struct SettingsView: View {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
             do {
                 try data.write(to: url)
-                await MainActor.run { activeShareItem = .json(url) }
+                await MainActor.run { activeShareItem = .json(url); exportBusy = false }
             } catch {
                 await MainActor.run {
                     exportErrorMessage = error.localizedDescription
                     showExportError = true
+                    exportBusy = false
                 }
             }
         }

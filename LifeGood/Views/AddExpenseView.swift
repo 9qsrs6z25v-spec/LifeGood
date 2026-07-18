@@ -378,7 +378,7 @@ struct AddExpenseView: View {
             .onChange(of: rePurchasePriceText) { _, _ in showValidationError = false }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { cancelAddExpense() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(isEditing ? "儲存" : "新增") { saveExpense() }
@@ -716,6 +716,18 @@ struct AddExpenseView: View {
 
     /// 為新增模式提供穩定的 expenseId（避免每次 body 重建時產生新 UUID）
     @State private var generatedNewExpenseId: UUID = UUID()
+
+    /// 取消時清除本次 session 新增、尚未存檔的照片：photoGallerySection 拍照/多選會立即寫檔並存進
+    /// photoFileNames，但只有 saveExpense() 才會把這個陣列寫回 Expense 紀錄；按「取消」過去直接
+    /// dismiss() 完全不清理，這些照片會永久留在磁碟並被 CloudKit 備份同步上去，變成孤兒檔案。
+    /// 比照 RenovationPhotoEditor.cancel() 同型寫法：只刪「原本沒有」的新增檔案，既有照片不動。
+    private func cancelAddExpense() {
+        let originalPhotos = Set(editingExpense?.photoFileNames ?? [])
+        for name in photoFileNames where !originalPhotos.contains(name) {
+            Expense.deletePhoto(name)
+        }
+        dismiss()
+    }
 
     // MARK: - 地點欄位（飲食 / 娛樂 / 購物 / 日用品 / 醫療）
 
