@@ -224,7 +224,33 @@ struct ProfileFlashCard: View {
     }
 }
 
-// MARK: - 編輯個人檔案
+// MARK: - 美化紀錄（EditProfileView）2026-07
+// [2026-07] 首次美化方向：
+//   1. 原本為完全無標頭的裸 Form（三個 Section 只用系統預設純文字標題），與全 App 其他
+//      Form 型編輯頁（HealthProfileEditView.healthEditorSectionHeader／MyCalendarView.
+//      editorSectionHeader）「4pt 漸層色條 + 圖示 + 粗體文字」規格落差明顯；新增共用
+//      profileEditorSectionHeader(_:icon:color:) 補齊三個 Section 標頭：
+//      姓名(indigo, person.text.rectangle.fill)／工作(orange, briefcase.fill)／
+//      家庭(pink, heart.fill)，各自獨立主題色提升可掃視性。
+//   2. 關閉按鈕維持固定左側「取消」、儲存固定右側「儲存」，對齊全 App 一致慣例（未變動）。
+//   3. 純視覺層調整，chineseName／englishName／company／jobTitle／spouse 欄位資料來源、
+//      loadProfile()／save() 寫回 store 等既有商業邏輯完全未變動。
+//   下次美化本檔案時：可考慮把 fmtAssets() 之外的其餘 ResumeView 元件（如
+//   ResumeGiftSection 以外仍待均值化的清單列）一併比對，或轉往其他仍留有待辦的畫面。
+
+private func profileEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
 
 struct EditProfileView: View {
     @EnvironmentObject var store: LifeStore
@@ -239,17 +265,23 @@ struct EditProfileView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("姓名") {
+                Section {
                     TextField("中文姓名", text: $chineseName)
                     TextField("英文姓名", text: $englishName)
                         .autocapitalization(.words)
+                } header: {
+                    profileEditorSectionHeader("姓名", icon: "person.text.rectangle.fill", color: .indigo)
                 }
-                Section("工作") {
+                Section {
                     TextField("公司名稱", text: $company)
                     TextField("職稱", text: $jobTitle)
+                } header: {
+                    profileEditorSectionHeader("工作", icon: "briefcase.fill", color: .orange)
                 }
-                Section("家庭") {
+                Section {
                     TextField("配偶", text: $spouse)
+                } header: {
+                    profileEditorSectionHeader("家庭", icon: "heart.fill", color: .pink)
                 }
             }
             .navigationTitle("編輯個人檔案")

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.28", build: 681, date: "2026/07/18", notes: [
+            "【美化】個人檔案編輯頁（ResumeView.EditProfileView）補齊 Section 標頭：這是全 App 掃過一輪最後一個完全沒有任何美化紀錄的畫面（同檔案 ProfileFlashCard 英雄卡、母頁 LifeOverviewView 皆已完成規格對齊，唯獨這個從英雄卡鉛筆圖示點入的編輯 sheet 仍是最原始的裸 Form，三個 Section 只有系統預設純文字標題）。新增共用 profileEditorSectionHeader(_:icon:color:)（4pt 漸層色條 + 圖示 + 粗體文字，比照 HealthProfileEditView.healthEditorSectionHeader／MyCalendarView.editorSectionHeader 既有規格），補上「姓名」（indigo，person.text.rectangle.fill）／「工作」（orange，briefcase.fill）／「家庭」（pink，heart.fill）三個標頭，各自獨立主題色提升可掃視性。關閉按鈕維持原本固定左側「取消」、儲存固定右側「儲存」，本就符合全 App 一致慣例。純視覺層調整，chineseName／englishName／company／jobTitle／spouse 欄位資料來源與 loadProfile()／save() 寫回 store 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.27", build: 680, date: "2026/07/18", notes: [
             "【美化】個人行事曆事件預覽卡（MyCalendarView.CalendarEventCard）補齊「詳細資訊」／「備註」卡片標頭：v24.x 先前已把新增/編輯表單（PersonalEventEditor）與預覽卡標頭（titleBlock 英雄卡）都升級成統一規格，但預覽卡下方 infoCard（類型/時間/長度/重複/地點等欄位列）一直是完全無標頭的裸內容區塊，noteBlock 也只有純 caption 字級的「備註」二字標籤，與同檔案編輯表單的 editorSectionHeader（4pt 漸層色條 + 圖示 + 粗體文字）視覺落差明顯。新增共用 cardSectionHeader(_:icon:tint:) 補上「詳細資訊」（info.circle，沿用卡片依事件類型變色的 accent）與「備註」（note.text，中性灰，對齊 editorSectionHeader 備註區配色）兩個標頭。純視覺層調整，fields／noteText 欄位資料來源與新增/編輯/刪除/Apple 行事曆同步等既有商業邏輯完全未變動。"
         ]),
