@@ -36,8 +36,16 @@ import SwiftUI
 //   9. MeasurementEditor 原本用純字串 Section("血壓") 當標題，改為與其餘小節一致的色條樣式；
 //      並將「日期」「體重 / 心率」「血壓」拆為三個獨立小節，取代原本欄位全部平鋪一排的排法。
 //   10. 純版面調整，未變動任何草稿欄位、儲存/取消 callback 或 upsert 商業邏輯。
-//   下次美化方向：本檔案七大 Section 與四個子編輯 sheet 已完成規格對齊；可留意
-//   AllergySeverity Picker 目前仍是系統預設樣式，未來如需可考慮改為分段色塊選擇器。
+// [2026-07 v4] 承接上一版留下的待辦：AllergyEditor 嚴重度選擇器美化：
+//   11. 新增共用 severityColor(_:)：輕度＝綠／中度＝橘／重度＝紅，交通號誌語意一眼可辨。
+//       AllergyEditor 的「嚴重度」原本是系統預設 Picker（純文字選單、三個等級視覺完全相同，
+//       需點開下拉才看得出目前選了哪一級），改為三段色塊按鈕列：選中的色塊填滿主題色 +
+//       白字 + 陰影，未選中的色塊淡底 + 主題色文字 + 細邊框，不必進下拉選單就能一眼比較嚴重度。
+//   12. 外層過敏清單列的嚴重度徽章原本無論輕/中/重度一律固定橘色，與新版選擇器的
+//       三色分級不一致；改用同一份 severityColor(_:)，兩處色彩語意統一。
+//   13. 純視覺層調整，draft.severity 讀寫與 onAppear 預設值回填等既有商業邏輯完全未變動。
+//   下次美化方向：本檔案七大 Section、四個子編輯 sheet 與過敏嚴重度分級已完成規格對齊；
+//   可留意用藥／健檢清單目前是否也有可比照分級著色的欄位，或轉往其他仍留有待辦的畫面。
 
 struct HealthProfileEditView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -180,10 +188,10 @@ struct HealthProfileEditView: View {
                                 Text(a.name.isEmpty ? "未命名過敏原" : a.name).foregroundStyle(.primary)
                                 if let s = a.severity {
                                     Text(s.rawValue).font(.caption2)
-                                        .foregroundStyle(.orange)
+                                        .foregroundStyle(severityColor(s))
                                         .padding(.horizontal, 6).padding(.vertical, 1)
-                                        .background(Color.orange.opacity(0.12)).clipShape(Capsule())
-                                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+                                        .background(severityColor(s).opacity(0.12)).clipShape(Capsule())
+                                        .overlay(Capsule().stroke(severityColor(s).opacity(0.22), lineWidth: 0.6))
                                 }
                             }
                             if !a.reaction.isEmpty {
@@ -427,6 +435,16 @@ struct HealthProfileEditView: View {
     }()
 }
 
+/// 過敏嚴重度對應色：輕度＝綠／中度＝橘／重度＝紅，交通號誌語意一眼可辨，
+/// AllergyEditor 分段選擇器與外層清單徽章共用同一份配色（見 v4 美化紀錄）。
+private func severityColor(_ s: AllergySeverity) -> Color {
+    switch s {
+    case .mild:     return .green
+    case .moderate: return .orange
+    case .severe:   return .red
+    }
+}
+
 /// 子編輯 sheet 共用 Section header：4pt 漸層 Capsule 色條 + 圖示 + 標題，
 /// 與 HealthProfileEditView.healthSectionHeader 同款式（省略計數膠囊）
 @ViewBuilder
@@ -466,11 +484,35 @@ private struct AllergyEditor: View {
                     healthEditorSectionHeader("過敏原資訊", icon: "allergens", color: accent)
                 }
                 Section {
-                    Picker("嚴重度", selection: Binding(
-                        get: { draft.severity ?? .mild },
-                        set: { draft.severity = $0 })) {
-                        ForEach(AllergySeverity.allCases) { s in Text(s.rawValue).tag(s) }
+                    HStack(spacing: 8) {
+                        ForEach(AllergySeverity.allCases) { s in
+                            let isSelected = (draft.severity ?? .mild) == s
+                            let tint = severityColor(s)
+                            Button {
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) {
+                                    draft.severity = s
+                                }
+                            } label: {
+                                Text(s.rawValue)
+                                    .font(.subheadline.weight(.semibold))
+                                    .minimumScaleFactor(0.8)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .foregroundStyle(isSelected ? .white : tint)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(isSelected ? tint : tint.opacity(0.12))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(tint.opacity(isSelected ? 0 : 0.28), lineWidth: 0.75)
+                                    )
+                                    .shadow(color: isSelected ? tint.opacity(0.35) : .clear, radius: 5, x: 0, y: 2)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
+                    .padding(.vertical, 2)
                 } header: {
                     healthEditorSectionHeader("嚴重度", icon: "exclamationmark.triangle.fill", color: accent)
                 }
@@ -478,10 +520,10 @@ private struct AllergyEditor: View {
             .navigationTitle("過敏原")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                // Picker 的 get 用 ?? .mild 顯示預設值，但使用者若沒手動點過 Picker，
-                // set 永遠不會被呼叫，draft.severity 會存成 nil，讓「畫面顯示輕度」
-                // 與「實際存檔為未設定」互相矛盾（列表卡片因此不顯示嚴重度徽章）。
-                // 開啟編輯畫面當下就把顯示的預設值寫回 draft，讓兩者一致。
+                // 分段選擇器的 isSelected 用 ?? .mild 顯示預設高亮，但使用者若沒手動點過任一色塊，
+                // draft.severity 會存成 nil，讓「畫面高亮輕度」與「實際存檔為未設定」互相矛盾
+                // （列表卡片因此不顯示嚴重度徽章）。開啟編輯畫面當下就把顯示的預設值寫回 draft，
+                // 讓兩者一致。
                 if draft.severity == nil { draft.severity = .mild }
             }
             .toolbar {

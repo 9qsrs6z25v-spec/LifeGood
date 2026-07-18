@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.30", build: 683, date: "2026/07/18", notes: [
+            "【美化】健康檔案編輯頁（HealthProfileEditView.AllergyEditor）過敏嚴重度選擇器：承接上一版（v24.x）留下的待辦事項，「嚴重度」原本是系統預設 Picker（純文字下拉選單，輕/中/重三個等級視覺完全相同，需點開才看得出目前選了哪一級），與同頁其餘已美化的漸層圖示圓、色塊化 metric chip 等視覺落差明顯。新增共用 severityColor(_:)（輕度＝綠／中度＝橘／重度＝紅，交通號誌語意），把 Picker 改為三段色塊按鈕列：選中的色塊填滿主題色 + 白字 + 陰影，未選中的色塊淡底 + 主題色文字 + 細邊框，並補上輕量彈簧動畫，不必進下拉選單就能一眼比較嚴重度。外層過敏清單的嚴重度徽章原本無論輕/中/重度一律固定橘色，一併改用同一份 severityColor(_:)，兩處色彩語意統一。純視覺層調整，draft.severity 讀寫、onAppear 預設值回填與儲存等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.29", build: 682, date: "2026/07/18", notes: [
             "【美化】部屬任務／週報編輯頁（SubordinateDetailView.TaskEditorSheet／WeeklyReportEditorSheet）補齊「完成狀態」Section 標頭：上一版（v24.x）美化會議/任務/週報三個編輯 Sheet 時已補齊大部分 Section 統一標頭規格，但唯獨「標記為已完成」Toggle 所在的 Section 是全檔案僅剩沒有 header 的例外，與同畫面其他 Section（會議資訊／任務資訊／指派人員／備註）視覺落差明顯。新增 editorSectionHeader(\"完成狀態\", icon: \"checkmark.seal.fill\", tint: .green) 補齊兩處，綠色呼應 Toggle 開啟時的勾選綠，與 isCompleted 狀態語意一致。純視覺層調整，$isCompleted binding 與 save() 寫回 completedAt 等既有商業邏輯完全未變動。"
         ]),
