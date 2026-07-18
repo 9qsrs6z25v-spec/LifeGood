@@ -47,6 +47,9 @@ struct AddSavingsInsuranceView: View {
     @State private var note = ""
     @State private var showError = false
     @State private var cardAppeared = false
+    // 儲存為同步寫回 store 後立即 dismiss()，sheet 收合動畫期間按鈕仍可觸發，
+    // 快速連點會建立兩筆重複儲蓄險紀錄；補上忙碌守衛比照 AddRealEstateView 既有修法。
+    @State private var isSaving = false
 
     // MARK: - 自動計算
 
@@ -277,7 +280,7 @@ struct AddSavingsInsuranceView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
+                        .bold().foregroundStyle(.green).disabled(isSaving)
                 }
             }
             .onAppear {
@@ -516,10 +519,12 @@ struct AddSavingsInsuranceView: View {
     // MARK: - 商業邏輯（不變動）
 
     private func save() {
+        guard !isSaving else { return }
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
               premium > 0 else {
             showError = true; return
         }
+        isSaving = true
 
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedCompany = company.trimmingCharacters(in: .whitespaces)

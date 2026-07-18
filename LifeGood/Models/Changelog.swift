@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.34", build: 687, date: "2026/07/18", notes: [
+            "【靜態除錯 v24.34：多處儲存按鈕補上連點守衛，避免重複紀錄/資料錯亂】① RealEstateDetailView.ElevatorMaintenanceEditor（電梯保養記錄）的儲存與刪除，比照同檔案 UtilityPaymentEditor／RenovationPhotoEditor 已修過的同型 bug——save()／deleteRecord() 都是先 dismiss() 關閉 sheet，下一個 runloop 才非同步寫回 financeStore，快速連點兩下會讓兩次呼叫各自讀到同一份舊 estate 快照、各自 append／刪除，較晚寫回者蓋掉較早者，可能造成重複的保養記錄或遺失剛存的保養照片（孤兒檔案），卻唯獨這個編輯器沒有 isSaving 守衛；補上比照既有規格。② AddIncomeView／AddVehicleView.VehicleEditor／AddSavingsInsuranceView／AddStockView 四個新增/編輯表單的儲存皆是同步寫回 store 後立即 dismiss()，sheet 收合動畫尚未播完前按鈕仍可被觸發，快速連點會建立兩筆重複紀錄（AddStockView 又牽涉股票已實現損益連動的支出/收入建立與刪除，重複觸發風險更高）；四處統一補上 isSaving 忙碌旗標 + 按鈕 disabled 守衛，比照本檔案系列先前已為 AddRealEstateView／AddExpenseView 等畫面建立的規格。純新增守衛邏輯，不影響任何既有儲存資料欄位或商業邏輯。"
+        ]),
         ChangelogEntry(version: "24.33", build: 686, date: "2026/07/18", notes: [
             "【靜態除錯 v24.33：TalentMatrixView 空狀態脈衝動畫卡死】emptyHint（人才矩陣依部門篩選後無符合部屬時的空狀態）只在 .onAppear 把 emptyPulse 設成 true，沒有比照全 App 其餘空狀態（FamilyView／ResumeView／LifeOverviewView／SubordinateView／ChildrenResumeView／FoodMapView／CareerView 等）在 .onDisappear 一併重置為 false。透過畫面上方的部門篩選 Menu 先切到有部屬的部門（空狀態從畫面上移除但 emptyPulse 仍停留在 true）、再切回沒有部屬的部門，.onAppear 重新掛載時 emptyPulse 已是 true，指派 true→true 不構成 SwiftUI 判定的變化，.animation(value:) 不會重新觸發，兩層脈衝光環會直接卡在放大後的固定尺寸、不再播放脈動效果。補上 .onDisappear { emptyPulse = false }，強制下次掛載時觸發 false→true 的轉場以重播動畫。本輪複查 Views/Life 目錄全部 27 個檔案，其餘強制解包／as!／索引越界／retain cycle／防抖動畫／忙碌守衛均確認已妥善保護，未發現新問題。Views 根層與 Finance 目錄的複查仍在進行中。"
         ]),

@@ -58,6 +58,9 @@ struct AddVehicleView: View {
     @State private var note = ""
     @State private var showError = false
     @State private var hasAutoSaved: Bool = false
+    // 儲存為同步寫回 store 後立即 dismiss()，sheet 收合動畫期間按鈕仍可觸發，
+    // 快速連點會建立兩筆重複車輛紀錄；補上忙碌守衛比照 AddRealEstateView 既有修法。
+    @State private var isSaving = false
     // v2 進場動畫旗標
     @State private var cardAppeared = false
     @State private var calcSectionAppeared = false
@@ -125,7 +128,7 @@ struct AddVehicleView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil || hasAutoSaved ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
+                        .bold().foregroundStyle(.green).disabled(isSaving)
                 }
             }
             .onAppear { loadEditing() }
@@ -569,11 +572,13 @@ struct AddVehicleView: View {
     // MARK: - 儲存
 
     private func save() {
+        guard !isSaving else { return }
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty,
               let priceWan = Double(purchasePriceText), priceWan > 0 else {
             showError = true; return
         }
+        isSaving = true
 
         let price = priceWan * 10000
         let currentVal = (Double(currentValueText) ?? priceWan) * 10000

@@ -58,6 +58,9 @@ struct AddIncomeView: View {
     @State private var selectedBankMilestoneId: UUID?
     @State private var selectedBankCurrency: String = "NT$"
     @State private var cardAppeared = false
+    // 儲存為同步寫回 store 後立即 dismiss()，sheet 收合動畫期間按鈕仍可觸發，
+    // 快速連點會建立兩筆重複收入紀錄；補上忙碌守衛比照 AddRealEstateView 既有修法。
+    @State private var isSaving = false
 
     private var isEditing: Bool { editing != nil }
     private var isSalary: Bool { category == .salary }
@@ -333,6 +336,7 @@ struct AddIncomeView: View {
                     Button(isEditing ? "儲存" : "新增") { save() }
                         .bold()
                         .foregroundStyle(.green)
+                        .disabled(isSaving)
                 }
             }
             .onAppear {
@@ -585,6 +589,7 @@ struct AddIncomeView: View {
     // MARK: - 儲存
 
     private func save() {
+        guard !isSaving else { return }
         guard let amount = parsedAmount else {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 showError = true
@@ -604,6 +609,7 @@ struct AddIncomeView: View {
             }
             finalTitle = title.trimmingCharacters(in: .whitespaces)
         }
+        isSaving = true
 
         let finalPeriod: IncomePeriod
         if isSalary {

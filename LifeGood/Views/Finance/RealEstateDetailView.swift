@@ -2639,6 +2639,10 @@ struct ElevatorMaintenanceEditor: View {
     // 指向它自己，先選的隨後完成又讀到已更新的 photoFileName 當作「舊檔」誤刪，
     // 兩個 Task 互相刪對方剛存好的檔案。改為每次選擇先取消前一個未完成的載入。
     @State private var photoLoadTask: Task<Void, Never>?
+    // 儲存/刪除已 dismiss + 延後一個 runloop 才寫回 store，快速連點會讓兩次呼叫
+    // 各自讀到同一份舊 estate 快照、後寫回者蓋掉先寫回者；比照 UtilityPaymentEditor
+    // 既有修法補上忙碌守衛。
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
@@ -2679,7 +2683,7 @@ struct ElevatorMaintenanceEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") { save() }.bold().foregroundStyle(.green)
+                    Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving)
                 }
             }
             .onAppear {
@@ -2710,7 +2714,9 @@ struct ElevatorMaintenanceEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        isSaving = true
         let recordId = editing?.id ?? UUID()
         let record = ElevatorMaintenance(id: recordId, date: date, photoFileName: photoFileName)
         if let idx = estate.elevatorMaintenances.firstIndex(where: { $0.id == recordId }) {
@@ -2726,8 +2732,10 @@ struct ElevatorMaintenanceEditor: View {
     }
 
     private func deleteRecord() {
+        guard !isSaving else { return }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let e = editing else { return }
+        isSaving = true
         if let name = e.photoFileName { ElevatorMaintenance.deletePhoto(name) }
         estate.elevatorMaintenances.removeAll { $0.id == e.id }
         let financeStore = store

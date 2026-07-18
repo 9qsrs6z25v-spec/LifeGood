@@ -63,6 +63,10 @@ struct AddStockView: View {
     @State private var note = ""
     @State private var showError = false
     @State private var errorText = "請輸入股票名稱、張數和買入價格"
+    // 儲存為同步寫回 store（含連結支出/收入的建立與刪除）後立即 dismiss()，
+    // sheet 收合動畫期間按鈕仍可觸發，快速連點會產生重複股票紀錄或重複的
+    // 已實現損益支出/收入；補上忙碌守衛比照 AddRealEstateView 既有修法。
+    @State private var isSaving = false
 
     @State private var isSold = false
     @State private var soldPriceText = ""
@@ -200,6 +204,7 @@ struct AddStockView: View {
                     Button(editing != nil ? "儲存" : "新增") { save() }
                         .bold()
                         .foregroundStyle(.orange)
+                        .disabled(isSaving)
                 }
             }
             .onAppear { loadEditing() }
@@ -961,6 +966,7 @@ struct AddStockView: View {
     // MARK: - 儲存
 
     private func save() {
+        guard !isSaving else { return }
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
               let lots = Double(lotsText), lots > 0,
               let price = Double(purchasePriceText), price > 0 else {
@@ -974,6 +980,7 @@ struct AddStockView: View {
             showError = true; return
         }
         showError = false
+        isSaving = true
         let shares = lots * 1000
         let stockId = editing?.id ?? UUID()
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
