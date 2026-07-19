@@ -1,6 +1,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+// MARK: - 美化方向紀錄（供下次美化查找對齊用，勿刪）
+// 1. disclosureBlock 摺疊/展開加上彈簧動畫（.spring response:0.4 dampingFraction:0.82），與其他頁一致的手感。
+// 2. aboutSection 改為置中「品牌卡」：漸層圖示徽章 + App 名稱 + 版本/Build 膠囊標籤，取代原本純文字列。
+// 3. dataStatsSection 每列加上彩色圓形圖示背景（記帳綠／理財藍／人生紫），數字改用等寬字體並加千分位。
+// 4. dangerZoneSection 加上淡紅底色列與漸層警示圖示徽章，強化「危險操作」的視覺辨識，避免誤觸。
+// 5. 未變動任何資料存取 / 匯出匯入 / 訂閱邏輯，僅視覺與動畫調整。
+// 對齊基準：SectionHeader 樣式、圖示徽章圓角方塊語彙沿用 FixedExpenseView／IncomeView 已建立的設計語言。
+
 // MARK: - Share Sheet (UIKit bridge)
 
 struct ShareSheet: UIViewControllerRepresentable {
@@ -292,7 +300,14 @@ struct SettingsView: View {
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         Section {
-            DisclosureGroup(isExpanded: isExpanded) {
+            DisclosureGroup(isExpanded: Binding(
+                get: { isExpanded.wrappedValue },
+                set: { newValue in
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+                        isExpanded.wrappedValue = newValue
+                    }
+                }
+            )) {
                 content()
             } label: {
                 HStack(spacing: 13) {
@@ -591,26 +606,14 @@ struct SettingsView: View {
 
     private var dataStatsSection: some View {
         Section("資料統計") {
-            HStack {
-                Label("記帳", systemImage: "yensign.circle")
-                Spacer()
-                Text("\(store.expenses.count + store.incomes.count) 筆")
-                    .foregroundStyle(.secondary)
-            }
+            statRow(title: "記帳", icon: "yensign.circle.fill", color: .green,
+                    count: store.expenses.count + store.incomes.count)
 
-            HStack {
-                Label("理財", systemImage: "chart.pie")
-                Spacer()
-                Text("\(financeStore.insurances.count + financeStore.stocks.count + financeStore.vehicles.count + financeStore.realEstates.count) 筆")
-                    .foregroundStyle(.secondary)
-            }
+            statRow(title: "理財", icon: "chart.pie.fill", color: .blue,
+                    count: financeStore.insurances.count + financeStore.stocks.count + financeStore.vehicles.count + financeStore.realEstates.count)
 
-            HStack {
-                Label("人生", systemImage: "star.circle")
-                Spacer()
-                Text("\(lifeStore.milestones.count + lifeStore.familyMembers.count + financeStore.realEstates.count) 筆")
-                    .foregroundStyle(.secondary)
-            }
+            statRow(title: "人生", icon: "star.circle.fill", color: .purple,
+                    count: lifeStore.milestones.count + lifeStore.familyMembers.count + financeStore.realEstates.count)
 
             if let earliest = store.expenses.map(\.date).min(),
                let latest = store.expenses.map(\.date).max() {
@@ -622,6 +625,25 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func statRow(title: String, icon: String, color: Color, count: Int) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.15))
+                    .frame(width: 30, height: 30)
+                Image(systemName: icon)
+                    .font(.system(size: 15))
+                    .foregroundStyle(color)
+            }
+            Text(title)
+            Spacer()
+            Text("\(count) 筆")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -691,9 +713,29 @@ struct SettingsView: View {
             Button(role: .destructive) {
                 showClearConfirm = true
             } label: {
-                Label("清除所有資料", systemImage: "trash")
+                HStack(spacing: 13) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [.red, .red.opacity(0.78)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 32, height: 32)
+                            .shadow(color: .red.opacity(0.35), radius: 4, x: 0, y: 2)
+                        Image(systemName: "trash")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    Text("清除所有資料")
+                        .font(.subheadline.weight(.medium))
+                }
+                .padding(.vertical, 2)
             }
             .disabled(isAllDataEmpty)
+            .listRowBackground(Color.red.opacity(0.06))
         } header: {
             Text("危險操作")
         } footer: {
@@ -712,20 +754,34 @@ struct SettingsView: View {
     // MARK: - 關於
 
     private var aboutSection: some View {
-        Section("關於") {
-            HStack {
-                Label("版本", systemImage: "info.circle")
-                Spacer()
-                Text(appVersion)
-                    .foregroundStyle(.secondary)
+        Section {
+            VStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [.indigo, .purple.opacity(0.85)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 56, height: 56)
+                        .shadow(color: .purple.opacity(0.35), radius: 8, x: 0, y: 4)
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .symbolRenderingMode(.hierarchical)
+                }
+                Text("LifeGood 美好人生")
+                    .font(.headline)
+                HStack(spacing: 6) {
+                    versionPill("版本 \(appVersion)")
+                    versionPill("Build \(appBuild)")
+                }
             }
-
-            HStack {
-                Label("Build", systemImage: "hammer")
-                Spacer()
-                Text(appBuild)
-                    .foregroundStyle(.secondary)
-            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .listRowBackground(Color.clear)
 
             HStack {
                 Label("最低系統需求", systemImage: "iphone")
@@ -733,7 +789,18 @@ struct SettingsView: View {
                 Text("iOS 17.0")
                     .foregroundStyle(.secondary)
             }
+        } header: {
+            Text("關於")
         }
+    }
+
+    private func versionPill(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.secondary.opacity(0.12)))
     }
 
     // MARK: - 匯出
