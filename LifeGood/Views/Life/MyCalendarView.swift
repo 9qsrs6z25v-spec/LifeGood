@@ -302,6 +302,10 @@ struct MyCalendarView: View {
         let time: Date?
         let detail: String
         var personalEventId: UUID? = nil
+        // [2026-07] 美化：取代先前塞進 detail 字串的「🔁」純文字表情符號，
+        // 改用獨立布林旗標交由 eventRow 畫成與 clock／sun.max 同規格的 SF Symbol 徽章。
+        var isRecurring: Bool = false
+        var hasReminder: Bool = false
 
         enum EventType {
             case birthday, anniversary, meeting, task, milestone, appleCalendar
@@ -422,10 +426,9 @@ struct MyCalendarView: View {
         // 個人行事曆事件（事務 / 會議，含重複展開）
         for pe in lifeStore.personalEvents where pe.occurs(on: day, calendar: calendar) {
             let occTime = pe.occurrenceDate(on: day, calendar: calendar)
-            let recurrenceLabel = pe.recurrence == .none ? "" : "🔁 "
             let baseDetail: String = pe.durationMinutes > 0
-                ? "\(recurrenceLabel)\(pe.durationMinutes) 分鐘"
-                : "\(recurrenceLabel)全日"
+                ? "\(pe.durationMinutes) 分鐘"
+                : "全日"
             let withNote = pe.note.isEmpty ? baseDetail : "\(baseDetail) · \(pe.note)"
             events.append(CalendarEvent(
                 id: "pe-\(pe.id.uuidString)-\(calendar.startOfDay(for: day).timeIntervalSince1970)",
@@ -433,7 +436,9 @@ struct MyCalendarView: View {
                 title: pe.title.isEmpty ? pe.kind.rawValue : pe.title,
                 time: pe.durationMinutes > 0 ? occTime : nil,
                 detail: withNote,
-                personalEventId: pe.id
+                personalEventId: pe.id,
+                isRecurring: pe.recurrence != .none,
+                hasReminder: pe.reminderMinutes >= 0
             ))
         }
 
@@ -569,6 +574,18 @@ struct MyCalendarView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                    }
+                    // 重複／提醒次要徽章：與同排「clock／sun.max」尺寸節奏對齊（9pt 圖示 + tertiary），
+                    // 取代先前塞進 detail 字串的「🔁」純文字表情符號寫法。
+                    if ev.isRecurring {
+                        Image(systemName: "repeat")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                    if ev.hasReminder {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -1475,8 +1492,20 @@ struct MyCalendarView: View {
 //    備註區配色）兩個標頭，取代 infoCard 原本完全無標頭的裸欄位列，以及 noteBlock 原本
 //    純 caption 字級「備註」二字標籤。
 // ⑨ 純視覺層調整，未變動 fields／noteText 欄位資料來源、編輯、刪除等既有商業邏輯。
-// （下次美化本檔案時，可考慮：主畫面 eventRow 列表的「重複」「提醒」等次要徽章是否需要
-//   統一尺寸節奏，或改往其他仍留有待辦的畫面）
+// [2026-07 v4] 本次美化方向（承接 v3 末尾待辦：eventRow「重複」「提醒」徽章）：
+// ⑩ 主畫面 eventRow 先前把重複狀態塞進 detail 字串裡（"🔁 " 純文字表情符號前綴），
+//    是全檔案唯一用 emoji 而非 SF Symbol 表達狀態的地方，與同排 clock／sun.max 兩個
+//    9pt SF Symbol + tertiary 灰階圖示的既有節奏不一致。CalendarEvent 新增
+//    isRecurring／hasReminder 兩個純顯示用布林欄位（預設 false，不影響既有呼叫端），
+//    eventRow 改用 "repeat" 與 "bell.fill" 兩枚 9pt SF Symbol 徽章，套用與 clock／
+//    sun.max 完全相同的尺寸／配色規格，達成「次要徽章統一尺寸節奏」。
+// ⑪ 個人事件先前只顯示重複狀態、從未顯示是否有設提醒；hasReminder 依 pe.reminderMinutes
+//    >= 0 判斷（-1 = 不提醒，沿用既有語意，未新增或變更任何提醒排程邏輯），純粹補齊
+//    主畫面可視性，不影響 NotificationManager 既有的排程/取消/重新排程行為。
+// ⑫ 純視覺層調整，未變動 eventsOn()／occurs()／reminderMinutes 讀寫、通知排程、
+//    Apple 行事曆同步等既有商業邏輯。
+// （下次美化本檔案時，可考慮：weekDayCard／monthGrid 等月曆格狀元件是否也有可比照
+//   eventRow 統一化的次要標記，或改往其他仍留有待辦的畫面）
 
 struct PersonalEventEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
