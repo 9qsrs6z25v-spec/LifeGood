@@ -403,27 +403,34 @@ struct AddExpenseView: View {
                 }
                 applyAutoTitleIfLinked()
             }
-            .onChange(of: selectedVehicleId) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedVehicleExpenseCategory) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedRealEstateLinkId) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: realEstateLinkExisting) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedRealEstateExpenseCategory) { _, _ in
-                applyAutoTitleIfLinked()
-            }
-            .onChange(of: selectedMortgageRealEstateId) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: mortgageLinkExisting) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: note) { _, _ in
-                if isMortgage { applyAutoTitleIfLinked() }
-            }
-            .onChange(of: selectedFixedAssetLink) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: fixedLinkVehicleId) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedFixedCategory) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedLoanSubCategory) { _, _ in applyAutoTitleIfLinked() }
+            // 上述多個連結欄位若各自掛一條 .onChange 會讓 body 型別檢查逾時；
+            // 改為合併成單一「連結欄位簽章」字串，任一欄位變動即觸發自動命名。
+            .onChange(of: autoTitleSignature) { _, _ in applyAutoTitleIfLinked() }
             .onDisappear { completerDebounceTask?.cancel() }
         }
     }
 
     // MARK: - 連結資產名稱自動生成
+
+    /// 將所有會影響自動命名的連結欄位濃縮成單一字串；任一欄位變動時字串就不同，
+    /// 供單一 .onChange 觀測（取代原本十多條 .onChange，避免 body 型別檢查逾時）。
+    /// 備註（note）僅在房貸情境下納入，維持原本「note 變動只在房貸時重算標題」的行為。
+    private var autoTitleSignature: String {
+        [
+            String(describing: selectedVehicleId),
+            String(describing: selectedVehicleExpenseCategory),
+            String(describing: selectedRealEstateLinkId),
+            String(describing: realEstateLinkExisting),
+            String(describing: selectedRealEstateExpenseCategory),
+            String(describing: selectedMortgageRealEstateId),
+            String(describing: mortgageLinkExisting),
+            isMortgage ? note : "",
+            String(describing: selectedFixedAssetLink),
+            String(describing: fixedLinkVehicleId),
+            String(describing: selectedFixedCategory),
+            String(describing: selectedLoanSubCategory)
+        ].joined(separator: "|")
+    }
 
     /// 若此筆支出連結到理財模式中的具體項目（車輛/房地產），回傳自動生成的名稱「項目 N：型號-類別」。
     private var linkedAssetTitle: String? {

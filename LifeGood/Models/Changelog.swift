@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.38", build: 691, date: "2026/07/19", notes: [
+            "【修復編譯錯誤】記帳新增/編輯畫面（AddExpenseView）Archive 打包時回報「The compiler is unable to type-check this expression in reasonable time」（AddExpenseView.swift:393）：主畫面 body 的 Form 後方原本串接了十多條各自獨立的 .onChange（selectedVehicleId／selectedVehicleExpenseCategory／selectedRealEstateLinkId／realEstateLinkExisting／selectedRealEstateExpenseCategory／selectedMortgageRealEstateId／mortgageLinkExisting／note／selectedFixedAssetLink／fixedLinkVehicleId／selectedFixedCategory／selectedLoanSubCategory），且每條都帶尾隨閉包呼叫 applyAutoTitleIfLinked()，讓 Swift 型別檢查器在 Release 最佳化下逾時而無法完成推論。改為新增一個 autoTitleSignature 計算屬性，把所有會影響「連結資產自動命名」的欄位濃縮成單一字串（備註 note 僅在房貸情境納入，維持原本行為），再以單一 .onChange(of: autoTitleSignature) 觀測，任一欄位變動即觸發自動命名。純結構重構，觀測欄位集合與觸發時機與原本完全一致，僅將十多條 .onChange 合併為一條以解除型別檢查逾時。"
+        ]),
         ChangelogEntry(version: "24.37", build: 690, date: "2026/07/19", notes: [
             "【美化部屬新增流程「選擇部屬」清單列（SubordinateDetailView.AddSubItemSheet）+ 同步版本號 v24.37】從行事曆／部屬總覽按「＋」新增部屬任務／會議／報告時，第一步「選擇部屬」清單列先前是裸 26pt 單色圖示（固定寫死 .green，與新增項目種類無關），是本檔案唯一沒有套用 36pt LinearGradient 漸層圖示圓（fill 0.22→0.09 + shadow + stroke 0.22pt）規格的清單列，與同檔案 recordRow／meetingSection 等既有列不一致，選錯部屬時也缺乏顏色提示自己正在新增哪一種項目。SubAddKind 新增 color 計算屬性（任務＝cyan／會議＝indigo／報告＝purple，沿用本檔案 CompletedEntry.Kind.color 已建立的識別色慣例），清單列圖示改套用該色的標準漸層圓，與選完後開啟的對應編輯器 Section 識別色一致。純視覺層調整，未變動 pickedSubId 選取、切換至 TaskEditorSheet／MeetingEditorSheet／WeeklyReportEditorSheet 等既有商業邏輯。"
         ]),
