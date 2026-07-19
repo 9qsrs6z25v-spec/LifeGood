@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.41", build: 694, date: "2026/07/19", notes: [
+            "【修復】財富卡片銀行帳戶：固定薪水設了「收入結束日」後，銀行存款仍持續入帳、餘額未同步。承接 v24.40，Income 已支援 endDate（換工作/離職/產假），且收入頁的每月收入計算已排除已結束薪水，但財富卡片（LifeFinanceView）另有一條獨立的虛擬入帳展開邏輯：expandedIncomeDeposits 把連結到銀行 milestone 的週期性收入（月薪/年薪）從建立日一路展開成每期一筆虛擬 BankDeposit，用於銀行帳戶餘額計算（bankBalances → 總資產）與存款明細/走勢圖顯示，但這條 while 迴圈當初只用 `current <= now`（展開到今天）作為停止條件，完全沒有看 endDate，導致離職後每個月仍持續灌入一筆薪資入帳、銀行餘額與總資產持續虛增。已在迴圈內加上 `if !inc.isActive(in: current) { break }` 守衛（current 逐月單調遞增，跨過結束月即跳出），與 Income.isActive(in:)／收入頁計算採同一套「結束月含、之後停止」規則，讓銀行帳戶餘額、存款明細、走勢圖三處一致在結束月後停止入帳。純計算修正，未變動既有存款展開、信用卡彙總、固定支出扣款等其他虛擬條目邏輯。"
+        ]),
         ChangelogEntry(version: "24.40", build: 693, date: "2026/07/19", notes: [
             "【功能】固定薪水可設定「收入結束日」與結束原因（換工作/離職/產假等）：收入頁面點開編輯（AddIncomeView）某筆「固定薪水」時，週期設定區塊新增「設定收入結束日」開關，開啟後可選結束日期與結束原因（離職／換工作／產假／育嬰留停／退休／資遣／其他），適用於中途換工作、留職停薪等情境。① 資料模型 Income 新增 endDate／endReason 兩個欄位（皆為選填，向下相容既有資料；透過 Codable 一併納入雲端同步與完整備份）。② 新增 Income.isActive(in:) 判斷：結束日所在月份（含）之前仍計入、之後不再計入（考量多數情況離職當月仍領到最後一份薪水，結束月採「含」）。③ 本月收入合計（ExpenseStore.currentMonthIncomeTotal）與過去月份收入估算（incomeTotal(for:)、供無當月收入時取中位數預估）兩處週期收入加總都改為排除已結束的固定薪水，換工作後上一份薪水不再灌水到本月收入。④ 收入頁英雄卡「固定月收」KPI、累計收入（totalIncomeAll，固定薪水改為僅展開至結束月為止而非一路累計到今天）同步排除／截斷已結束薪水。⑤ 收入清單列新增結束標示膠囊：已過結束月顯示灰色「原因＋年月」（例如「離職 2025/3」）、尚未到結束月顯示橘色（將結束），一眼可辨哪些固定薪水已停發。純新增欄位與條件化計算，未變動既有單次／獎金／投資等其他收入類型的計算邏輯。"
         ]),

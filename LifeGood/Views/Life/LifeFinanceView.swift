@@ -177,6 +177,9 @@ fileprivate func expandedIncomeDeposits(
         var current = inc.date
         var idx = 0
         while current <= now && idx < 1200 {
+            // 固定薪水設有結束日者，展開至結束月（含）為止；之後停止入帳，
+            // 與 Income.isActive(in:)／收入頁計算一致。current 單調遞增，失效後即可跳出。
+            if !inc.isActive(in: current, calendar: cal) { break }
             let stableId = stableDepositUUID(seed: "inc-\(inc.id.uuidString)-\(idx)")
             result.append(BankDeposit(
                 id: stableId,
