@@ -290,6 +290,14 @@ struct MainTabView: View {
     /// 但 aiStartRecording 是 async，從觸發到 speechRecognizer.isRecording=true 之間有空窗，
     /// 若沒這個旗標會多次平行 startRecording → 重設 transcript / 重裝 audio tap → 畫面閃爍
     @State private var aiStartingRecording = false
+    /// 快速點放守衛：requestAccess() 尚未回覆權限、startRecording() 還沒真正把
+    /// isRecording 設成 true 前，使用者就已放開手指——DragGesture.onEnded 此時讀到
+    /// isRecording == false 會直接略過、不會呼叫 stopRecording()，導致麥克風在放開手指後
+    /// 仍悄悄持續錄音（旗標卡在 aiStartingRecording，下次按住也會被 onChanged 的
+    /// !isRecording 守衛擋掉，只能靠背景/前景切換的 stopRecording 才能解除）。
+    /// 這個旗標在 onEnded 提前觸發時記錄「使用者已放開」，等 aiStartRecording 真正啟動
+    /// 錄音後立刻補一次 stopRecording／收尾，不需等待下一次手勢。
+    @State private var aiStopRequestedBeforeStart = false
     /// 麥克風進場動畫旗標：每次切到變動支出頁就從左下角彈一次
     @State private var micEntered = false
 
@@ -504,13 +512,19 @@ struct MainTabView: View {
                           !aiStartingRecording
                     else { return }
                     aiStartingRecording = true
+                    aiStopRequestedBeforeStart = false
                     Task {
                         await aiStartRecording()
                         await MainActor.run { aiStartingRecording = false }
                     }
                 }
                 .onEnded { _ in
-                    guard speechRecognizer.isRecording else { return }
+                    guard speechRecognizer.isRecording else {
+                        // 錄音尚未真正啟動（仍在等權限／等 startRecording）就放開手指，
+                        // 記下來讓 aiStartRecording 啟動成功後立刻收尾，不留下悄悄持續的錄音。
+                        if aiStartingRecording { aiStopRequestedBeforeStart = true }
+                        return
+                    }
                     Task { await aiFinishRecording() }
                 }
         )
@@ -525,6 +539,11 @@ struct MainTabView: View {
         }
         do {
             try speechRecognizer.startRecording()
+            // 手指在權限詢問／啟動期間就已放開 → 立刻收尾，不留下悄悄持續的錄音。
+            if aiStopRequestedBeforeStart {
+                aiStopRequestedBeforeStart = false
+                await aiFinishRecording()
+            }
         } catch {
             aiShowToast("錄音失敗", detail: error.localizedDescription, isError: true)
         }

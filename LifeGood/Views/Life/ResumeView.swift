@@ -1870,6 +1870,16 @@ struct AddMilestoneView: View {
 
     // MARK: - 儲存
 
+    /// 只有在 careerSub／financeSub 對應的表單分支才會顯示、可能被使用者填寫的欄位，
+    /// 若不比照 isManagerial／salary 等既有欄位一併依子分類條件化，切換子分類（不影響／不清空
+    /// 這些 @State）時，前一個子分類殘留的文字會被原封不動存進新子分類的紀錄裡
+    /// （例如先在「升遷」填了職稱，切到「調薪」送出，調薪紀錄會被存進不相關的舊職稱）。
+    private func trimmedOrNil(_ text: String, when condition: Bool) -> String? {
+        guard condition else { return nil }
+        let t = text.trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? nil : t
+    }
+
     private func save() {
         if isFamily {
             let isSpouse = familyRole == .spouse
@@ -1942,17 +1952,20 @@ struct AddMilestoneView: View {
                 guard let v = Double(salaryText), v > 0 else { return nil }
                 return v
             }()
+            // 對齊 careerFields 表單實際顯示這些欄位的子分類，避免切換子分類時把
+            // 前一個子分類殘留的文字誤存進新子分類的紀錄。
+            let hasTitleGrade = [.join, .promote, .transfer, .demote].contains(careerSub)
             let item = LifeMilestone(
                 id: editing?.id ?? UUID(),
                 title: autoTitle, date: date, category: .career,
                 note: careerSub == .resign ? "" : note.trimmingCharacters(in: .whitespaces),
                 careerSubCategory: careerSub,
-                companyName: companyName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : companyName.trimmingCharacters(in: .whitespaces),
-                department: department.trimmingCharacters(in: .whitespaces).isEmpty ? nil : department.trimmingCharacters(in: .whitespaces),
-                jobTitle: jobTitle.trimmingCharacters(in: .whitespaces).isEmpty ? nil : jobTitle.trimmingCharacters(in: .whitespaces),
-                jobGrade: jobGrade.trimmingCharacters(in: .whitespaces).isEmpty ? nil : jobGrade.trimmingCharacters(in: .whitespaces),
-                mood: mood.trimmingCharacters(in: .whitespaces).isEmpty ? nil : mood.trimmingCharacters(in: .whitespaces),
-                futurePlan: futurePlan.trimmingCharacters(in: .whitespaces).isEmpty ? nil : futurePlan.trimmingCharacters(in: .whitespaces),
+                companyName: trimmedOrNil(companyName, when: careerSub == .join),
+                department: trimmedOrNil(department, when: careerSub == .join || careerSub == .transfer),
+                jobTitle: trimmedOrNil(jobTitle, when: hasTitleGrade),
+                jobGrade: trimmedOrNil(jobGrade, when: hasTitleGrade),
+                mood: trimmedOrNil(mood, when: careerSub == .resign),
+                futurePlan: trimmedOrNil(futurePlan, when: careerSub == .resign),
                 isManagerial: managerial,
                 salary: salaryVal,
                 salaryBefore: careerSub == .salaryAdjust ? Double(salaryBeforeText) : nil,
@@ -1967,26 +1980,29 @@ struct AddMilestoneView: View {
                 title: autoTitle, date: date, category: .achievement,
                 note: t,
                 financeSubCategory: financeSub,
-                bankName: bankName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : bankName.trimmingCharacters(in: .whitespaces),
-                branchName: branchName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : branchName.trimmingCharacters(in: .whitespaces),
-                accountNumber: accountNumber.trimmingCharacters(in: .whitespaces).isEmpty ? nil : accountNumber.trimmingCharacters(in: .whitespaces),
+                // 對齊 financeDetailSection 表單實際顯示這些欄位的子分類，避免切換子分類時把
+                // 前一個子分類殘留的文字誤存進新子分類的紀錄（例如先在「信用卡」填了卡號末四碼，
+                // 切到「保險」送出，保單紀錄會被存進不相關的舊卡號）。
+                bankName: trimmedOrNil(bankName, when: financeSub != .insurance),
+                branchName: trimmedOrNil(branchName, when: financeSub == .bank),
+                accountNumber: trimmedOrNil(accountNumber, when: financeSub == .bank || financeSub == .securities),
                 bankAccountType: financeSub == .bank ? bankAccType : nil,
-                cardName: cardName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cardName.trimmingCharacters(in: .whitespaces),
-                cardLastFour: cardLastFour.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cardLastFour.trimmingCharacters(in: .whitespaces),
+                cardName: trimmedOrNil(cardName, when: financeSub == .creditCard),
+                cardLastFour: trimmedOrNil(cardLastFour, when: financeSub == .creditCard),
                 // 信用卡額度輸入值單位為「萬元」，存進 LifeMilestone 時換算回元
                 creditLimit: financeSub == .creditCard
                     ? (Double(creditLimitText).map { $0 * 10000 })
-                    : Double(creditLimitText),
-                annualFee: Double(annualFeeText),
-                billingDay: Int(billingDayText),
-                paymentDay: Int(paymentDayText),
-                expiryDate: hasExpiryDate ? expiryDate : nil,
+                    : nil,
+                annualFee: financeSub == .creditCard ? Double(annualFeeText) : nil,
+                billingDay: financeSub == .creditCard ? Int(billingDayText) : nil,
+                paymentDay: financeSub == .creditCard ? Int(paymentDayText) : nil,
+                expiryDate: (financeSub == .creditCard || financeSub == .insurance) && hasExpiryDate ? expiryDate : nil,
                 securitiesAccountType: financeSub == .securities ? secAccType : nil,
-                insuranceCompany: insuranceCompany.trimmingCharacters(in: .whitespaces).isEmpty ? nil : insuranceCompany.trimmingCharacters(in: .whitespaces),
-                policyNumber: policyNumber.trimmingCharacters(in: .whitespaces).isEmpty ? nil : policyNumber.trimmingCharacters(in: .whitespaces),
+                insuranceCompany: trimmedOrNil(insuranceCompany, when: financeSub == .insurance),
+                policyNumber: trimmedOrNil(policyNumber, when: financeSub == .insurance),
                 insuranceType: financeSub == .insurance ? insType : nil,
-                premiumAmount: Double(premiumText),
-                beneficiary: beneficiary.trimmingCharacters(in: .whitespaces).isEmpty ? nil : beneficiary.trimmingCharacters(in: .whitespaces),
+                premiumAmount: financeSub == .insurance ? Double(premiumText) : nil,
+                beneficiary: trimmedOrNil(beneficiary, when: financeSub == .insurance),
                 linkedBankMilestoneId: financeSub == .creditCard ? selectedLinkedBankId : nil
             )
             // 編輯既有財富卡時保留銀行存取紀錄（init 沒提供 bankDeposits 參數，需手動帶回）
