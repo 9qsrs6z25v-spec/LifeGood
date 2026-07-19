@@ -186,10 +186,13 @@ struct IncomeView: View {
             case .once:
                 return sum + income.amount
             case .monthly:
-                let months = calendar.dateComponents([.month], from: income.date, to: now).month ?? 0
+                // 固定薪水設有結束日者，展開至結束日為止（不再累計到今天）
+                let end = income.endDate.map { min($0, now) } ?? now
+                let months = calendar.dateComponents([.month], from: income.date, to: end).month ?? 0
                 return sum + income.amount * Double(max(1, months + 1))
             case .yearly:
-                let years = calendar.dateComponents([.year], from: income.date, to: now).year ?? 0
+                let end = income.endDate.map { min($0, now) } ?? now
+                let years = calendar.dateComponents([.year], from: income.date, to: end).year ?? 0
                 return sum + income.amount * Double(max(1, years + 1))
             }
         }
@@ -237,7 +240,7 @@ struct IncomeView: View {
         let displayedBalance = displayedIncome - store.currentMonthTotal
         let isPositive = displayedBalance >= 0
         let recurringMonthly = store.incomes
-            .filter { $0.period != .once }
+            .filter { $0.period != .once && $0.isActive(in: Date()) }
             .reduce(0.0) { $0 + $1.monthlyAmount }
         // rawSpendingRatio 不夾住，供文字／顏色判斷；barSpendingRatio 才夾在 1.0，只用於進度條寬度
         // （對齊 VariableExpenseView rawRatio/barRatio 既有規格）。先前兩者共用同一個已夾住的
@@ -890,6 +893,18 @@ struct IncomeView: View {
                             .foregroundStyle(accent.opacity(0.85))
                             .clipShape(Capsule())
                     }
+                    // 固定薪水結束標示：已過結束月 → 灰色「已結束」；尚未到 → 橘色「將結束」
+                    if income.isFixedSalary, let end = income.endDate {
+                        let ended = !income.isActive(in: Date())
+                        Label("\(income.endReason?.rawValue ?? "結束") \(endBadgeFmt(end))",
+                              systemImage: income.endReason?.icon ?? "calendar.badge.exclamationmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background((ended ? Color.gray : Color.orange).opacity(0.14))
+                            .foregroundStyle(ended ? Color.gray : Color.orange)
+                            .clipShape(Capsule())
+                    }
                     // 股票連結指示：有配息連結時顯示圖示，對齊 ExpenseRow.mappin 地點指示規格
                     if income.linkedStockId != nil {
                         Image(systemName: "chart.line.uptrend.xyaxis")
@@ -958,4 +973,10 @@ struct IncomeView: View {
     private func fmt(_ v: Double) -> String {
         v.ntdWanString
     }
+
+    private static let endBadgeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M"; return f
+    }()
+    /// 固定薪水結束標示日期（僅到年月）。
+    private func endBadgeFmt(_ d: Date) -> String { Self.endBadgeFormatter.string(from: d) }
 }

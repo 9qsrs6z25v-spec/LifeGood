@@ -117,9 +117,9 @@ class ExpenseStore: ObservableObject {
             .filter { $0.period == .once && calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
             .reduce(0) { $0 + $1.amount }
 
-        // 週期性收入：建立日期 <= 本月的，換算為月金額
+        // 週期性收入：建立日期 <= 本月、且尚未結束（固定薪水設有結束日者，結束月後不再計入）的，換算為月金額
         let recurringTotal = incomes
-            .filter { $0.period != .once && calendar.startOfDay(for: $0.date) <= calendar.startOfDay(for: now) }
+            .filter { $0.period != .once && calendar.startOfDay(for: $0.date) <= calendar.startOfDay(for: now) && $0.isActive(in: now, calendar: calendar) }
             .reduce(0) { $0 + $1.monthlyAmount }
 
         return onceTotal + recurringTotal
@@ -165,7 +165,7 @@ class ExpenseStore: ObservableObject {
             .reduce(0) { $0 + $1.amount }
 
         let recurringTotal = incomes
-            .filter { $0.period != .once && $0.date < monthEnd }
+            .filter { $0.period != .once && $0.date < monthEnd && $0.isActive(in: date, calendar: calendar) }
             .reduce(0) { $0 + $1.monthlyAmount }
 
         return onceTotal + recurringTotal

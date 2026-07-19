@@ -52,6 +52,10 @@ struct AddIncomeView: View {
     @State private var category: IncomeCategory = .salary
     @State private var period: IncomePeriod = .monthly
     @State private var isFixedSalary = true
+    // 固定薪水結束日（換工作/離職/產假等）：開啟後結束月之後不再計入每月收入
+    @State private var hasEndDate = false
+    @State private var endDate = Date()
+    @State private var endReason: SalaryEndReason = .jobChange
     @State private var salaryLabel = ""
     @State private var note = ""
     @State private var showError = false
@@ -246,6 +250,32 @@ struct AddIncomeView: View {
                             Text(isFixedSalary ? "每月自動計入收入" : "僅計入當月，不重複計算")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        if isFixedSalary {
+                            Divider()
+                            Toggle("設定收入結束日", isOn: $hasEndDate.animation(.spring(response: 0.3, dampingFraction: 0.85)))
+                            if hasEndDate {
+                                DatePicker("結束日期", selection: $endDate, displayedComponents: .date)
+                                Picker("結束原因", selection: $endReason) {
+                                    ForEach(SalaryEndReason.allCases) { r in
+                                        Label(r.rawValue, systemImage: r.icon).tag(r)
+                                    }
+                                }
+                                HStack(spacing: 8) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.orange.opacity(0.12))
+                                            .frame(width: 28, height: 28)
+                                        Image(systemName: "calendar.badge.exclamationmark")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(.orange)
+                                    }
+                                    Text("結束月份（含）之後不再計入每月收入")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     } else {
                         Picker("週期", selection: $period) {
@@ -629,7 +659,9 @@ struct AddIncomeView: View {
             note: note.trimmingCharacters(in: .whitespaces),
             linkedStockId: editing?.linkedStockId,
             linkedBankMilestoneId: selectedBankMilestoneId,
-            linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil
+            linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
+            endDate: (isSalary && isFixedSalary && hasEndDate) ? endDate : nil,
+            endReason: (isSalary && isFixedSalary && hasEndDate) ? endReason : nil
         )
         if isEditing { store.update(income) } else { store.add(income) }
         syncBankDeposit(for: income, previous: editing)
@@ -670,6 +702,8 @@ struct AddIncomeView: View {
         category = e.category
         period = e.period
         isFixedSalary = e.isFixedSalary
+        if let ed = e.endDate { hasEndDate = true; endDate = ed }
+        if let r = e.endReason { endReason = r }
         note = e.note
         selectedBankMilestoneId = e.linkedBankMilestoneId
         selectedBankCurrency = e.linkedBankCurrency ?? "NT$"
