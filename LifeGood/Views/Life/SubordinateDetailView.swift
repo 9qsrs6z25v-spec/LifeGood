@@ -1651,6 +1651,19 @@ struct RecordEditorSheet: View {
 
 // MARK: - 新增部屬項目（先選部屬，再開對應編輯器）
 
+// MARK: - 美化紀錄（AddSubItemSheet）
+// [2026-07 v1] 承接本檔案 MeetingEditorSheet／TaskEditorSheet／WeeklyReportEditorSheet
+// v3 末尾待辦「本檔案其餘尚未套用漸層圖示圓規格的次要清單列」：
+// 「選擇部屬」步驟的清單列先前是裸 26pt 單色圖示（固定寫死 .green，與 kind 無關），
+// 是本檔案唯一未套用 36pt LinearGradient 漸層圖示圓（fill 0.22→0.09 + shadow + stroke
+// 0.22 lineWidth 1.0）規格的清單列，與 recordRow／meetingSection 等既有列不一致。
+// SubAddKind 新增 color 計算屬性（任務＝cyan／會議＝indigo／報告＝purple，沿用本檔案
+// CompletedEntry.Kind.color 已建立的識別色慣例），清單列圖示改用該色套上標準漸層圓，
+// 選到哪種項目就呈現對應色，與選完後開啟的編輯器 Section 識別色一致。
+// 純視覺層調整，未變動 pickedSubId 選取、切換至對應 EditorSheet 等既有商業邏輯。
+// （下次美化本檔案時，可從 AddSubItemSheet 空狀態 ContentUnavailableView 或其他仍留有
+//   待辦的畫面繼續找可統一之處）
+
 /// 可從行事曆 / 部屬總覽的「＋」新增的部屬項目類型
 enum SubAddKind: String, Identifiable, CaseIterable {
     case task, meeting, report
@@ -1667,6 +1680,14 @@ enum SubAddKind: String, Identifiable, CaseIterable {
         case .task: return "checklist"
         case .meeting: return "person.3.fill"
         case .report: return "doc.text.fill"
+        }
+    }
+    /// 對齊全檔案「任務＝cyan／會議＝indigo／報告＝purple」識別色慣例（見 CompletedEntry.Kind.color）
+    var color: Color {
+        switch self {
+        case .task: return .cyan
+        case .meeting: return .indigo
+        case .report: return .purple
         }
     }
 }
@@ -1698,9 +1719,27 @@ struct AddSubItemSheet: View {
                                     pickedSubId = sub.id
                                 } label: {
                                     HStack(spacing: 12) {
-                                        Image(systemName: kind.icon)
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundStyle(.green).frame(width: 26)
+                                        // [v1] 36pt 漸層圖示圓 + 陰影 + 細邊框，對齊 recordRow／meetingSection
+                                        // 等本檔案既有清單列規格，取代先前裸 26pt 單色圖示；
+                                        // 色彩改用 kind.color（任務＝cyan／會議＝indigo／報告＝purple），
+                                        // 與下方對應編輯器 Section 識別色一致，不再固定寫死 .green。
+                                        ZStack {
+                                            Circle()
+                                                .fill(
+                                                    LinearGradient(
+                                                        colors: [kind.color.opacity(0.22), kind.color.opacity(0.09)],
+                                                        startPoint: .topLeading, endPoint: .bottomTrailing
+                                                    )
+                                                )
+                                                .frame(width: 36, height: 36)
+                                                .shadow(color: kind.color.opacity(0.20), radius: 5, x: 0, y: 2)
+                                            Circle()
+                                                .stroke(kind.color.opacity(0.22), lineWidth: 1.0)
+                                                .frame(width: 36, height: 36)
+                                            Image(systemName: kind.icon)
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundStyle(kind.color)
+                                        }
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(sub.name.isEmpty ? "未命名" : sub.name)
                                                 .foregroundStyle(.primary)
@@ -1744,8 +1783,8 @@ struct AddSubItemSheet: View {
 // 補上 editorSectionHeader("完成狀態", icon: "checkmark.seal.fill", tint: .green)，
 // 綠色呼應 Toggle 開啟時的勾選綠，與 isCompleted 狀態語意一致；純視覺層調整，
 // $isCompleted binding／save() 寫回 completedAt 等既有商業邏輯完全未變動。
-// （下次美化本檔案時，可考慮處理本檔案其餘尚未套用漸層圖示圓規格的次要清單列，
-//   或轉往其他仍留有待辦的畫面）
+// （「本檔案其餘尚未套用漸層圖示圓規格的次要清單列」已於 AddSubItemSheet [2026-07 v1]
+//   處理完成，下次美化本檔案時可轉往其他仍留有待辦的畫面）
 
 struct MeetingEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore

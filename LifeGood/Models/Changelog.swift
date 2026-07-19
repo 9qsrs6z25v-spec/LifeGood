@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.37", build: 690, date: "2026/07/19", notes: [
+            "【美化部屬新增流程「選擇部屬」清單列（SubordinateDetailView.AddSubItemSheet）+ 同步版本號 v24.37】從行事曆／部屬總覽按「＋」新增部屬任務／會議／報告時，第一步「選擇部屬」清單列先前是裸 26pt 單色圖示（固定寫死 .green，與新增項目種類無關），是本檔案唯一沒有套用 36pt LinearGradient 漸層圖示圓（fill 0.22→0.09 + shadow + stroke 0.22pt）規格的清單列，與同檔案 recordRow／meetingSection 等既有列不一致，選錯部屬時也缺乏顏色提示自己正在新增哪一種項目。SubAddKind 新增 color 計算屬性（任務＝cyan／會議＝indigo／報告＝purple，沿用本檔案 CompletedEntry.Kind.color 已建立的識別色慣例），清單列圖示改套用該色的標準漸層圓，與選完後開啟的對應編輯器 Section 識別色一致。純視覺層調整，未變動 pickedSubId 選取、切換至 TaskEditorSheet／MeetingEditorSheet／WeeklyReportEditorSheet 等既有商業邏輯。"
+        ]),
         ChangelogEntry(version: "24.36", build: 689, date: "2026/07/19", notes: [
             "【美化個人行事曆主畫面（MyCalendarView.eventRow）重複／提醒徽章 + 同步版本號 v24.36】主畫面每日事項列表（eventRow）先前把「這是重複事件」塞進 detail 字串裡，用純文字表情符號「🔁」當前綴，是全檔案唯一用 emoji 而非 SF Symbol 表達狀態的地方，與同一排時間欄位（clock／sun.max，皆為 9pt SF Symbol + tertiary 灰階）的既有視覺節奏不一致；且個人事件即使設了提醒也完全不會顯示，需要點進詳情頁才看得到。CalendarEvent（僅供本畫面顯示用的私有結構）新增 isRecurring／hasReminder 兩個布林欄位（預設 false，不影響其餘四處既有建構呼叫），eventRow 改用 \"repeat\" 與 \"bell.fill\" 兩枚與 clock／sun.max 完全同規格的 9pt SF Symbol 徽章呈現；hasReminder 依既有 pe.reminderMinutes >= 0 語意判斷（-1 = 不提醒），純粹補齊主畫面可視性。純視覺層調整，未變動 eventsOn()／occurs()／reminderMinutes 讀寫、NotificationManager 通知排程、Apple 行事曆同步等既有商業邏輯。"
         ]),
