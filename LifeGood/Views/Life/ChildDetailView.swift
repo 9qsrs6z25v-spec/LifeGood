@@ -797,14 +797,21 @@ struct ChildDetailView: View {
     @ViewBuilder
     private var lifeContent: some View {
         ForEach(Array(ChildRecordType.allCases.enumerated()), id: \.element) { idx, type in
-            recordSection(type)
-                .opacity(contentAppeared ? 1 : 0)
-                .offset(y: contentAppeared ? 0 : 14)
-                .animation(
-                    .spring(response: 0.45, dampingFraction: 0.82)
-                        .delay(0.05 * Double(idx)),
-                    value: contentAppeared
-                )
+            Group {
+                // 疫苗章節改為「接種時程規劃」：依生日列出所有應施打疫苗，填入施打日期即完成，逾期自動標示
+                if type == .vaccination {
+                    ChildVaccineScheduleView(childId: childId)
+                } else {
+                    recordSection(type)
+                }
+            }
+            .opacity(contentAppeared ? 1 : 0)
+            .offset(y: contentAppeared ? 0 : 14)
+            .animation(
+                .spring(response: 0.45, dampingFraction: 0.82)
+                    .delay(0.05 * Double(idx)),
+                value: contentAppeared
+            )
         }
     }
 

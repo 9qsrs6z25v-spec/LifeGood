@@ -61,6 +61,8 @@
 		A01B000001000200 /* TravelMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000200 /* TravelMapView.swift */; };
 		A01B000001000202 /* HealthProfileEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000202 /* HealthProfileEditView.swift */; };
 		A01B000001000203 /* MedicalMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000203 /* MedicalMapView.swift */; };
+		A01B000001000204 /* ChildVaccineSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000204 /* ChildVaccineSchedule.swift */; };
+		A01B000001000205 /* ChildVaccineScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000205 /* ChildVaccineScheduleView.swift */; };
 		A01B000001000103 /* MultiPhotoGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000103 /* MultiPhotoGallery.swift */; };
 		A01B000001000104 /* ResumeGiftSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000104 /* ResumeGiftSection.swift */; };
 		A01B000001000105 /* OrganizationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000105 /* OrganizationView.swift */; };
@@ -125,6 +127,7 @@
 		A01A00000100001F /* RealEstateDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealEstateDetailView.swift; sourceTree = "<group>"; };
 		A01A000001000020 /* LifeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeModels.swift; sourceTree = "<group>"; };
 		A01A000001000201 /* HealthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthModels.swift; sourceTree = "<group>"; };
+		A01A000001000204 /* ChildVaccineSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildVaccineSchedule.swift; sourceTree = "<group>"; };
 		A01A000001000021 /* LifeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeStore.swift; sourceTree = "<group>"; };
 		A01A000001000022 /* LifeOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeOverviewView.swift; sourceTree = "<group>"; };
 		A01A000001000023 /* ResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeView.swift; sourceTree = "<group>"; };
@@ -149,6 +152,7 @@
 		A01A000001000200 /* TravelMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelMapView.swift; sourceTree = "<group>"; };
 		A01A000001000202 /* HealthProfileEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthProfileEditView.swift; sourceTree = "<group>"; };
 		A01A000001000203 /* MedicalMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalMapView.swift; sourceTree = "<group>"; };
+		A01A000001000205 /* ChildVaccineScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildVaccineScheduleView.swift; sourceTree = "<group>"; };
 		A01A000001000103 /* MultiPhotoGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiPhotoGallery.swift; sourceTree = "<group>"; };
 		A01A000001000104 /* ResumeGiftSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeGiftSection.swift; sourceTree = "<group>"; };
 		A01A000001000105 /* OrganizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationView.swift; sourceTree = "<group>"; };
@@ -227,6 +231,7 @@
 				A01A000001000010 /* FinanceStore.swift */,
 				A01A000001000020 /* LifeModels.swift */,
 				A01A000001000201 /* HealthModels.swift */,
+				A01A000001000204 /* ChildVaccineSchedule.swift */,
 				A01A000001000021 /* LifeStore.swift */,
 				A01A000001000027 /* UnifiedExport.swift */,
 				A01A000001000030 /* BackupManager.swift */,
@@ -322,6 +327,7 @@
 				A01A000001000200 /* TravelMapView.swift */,
 				A01A000001000202 /* HealthProfileEditView.swift */,
 				A01A000001000203 /* MedicalMapView.swift */,
+				A01A000001000205 /* ChildVaccineScheduleView.swift */,
 				A01A000001000104 /* ResumeGiftSection.swift */,
 				A01A000001000105 /* OrganizationView.swift */,
 			);
@@ -469,6 +475,8 @@
 				A01B000001000200 /* TravelMapView.swift in Sources */,
 				A01B000001000202 /* HealthProfileEditView.swift in Sources */,
 				A01B000001000203 /* MedicalMapView.swift in Sources */,
+				A01B000001000204 /* ChildVaccineSchedule.swift in Sources */,
+				A01B000001000205 /* ChildVaccineScheduleView.swift in Sources */,
 				A01B000001000103 /* MultiPhotoGallery.swift in Sources */,
 				A01B000001000104 /* ResumeGiftSection.swift in Sources */,
 				A01B000001000105 /* OrganizationView.swift in Sources */,
@@ -511,7 +519,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 694;
+				CURRENT_PROJECT_VERSION = 695;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -535,7 +543,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 24.41;
+				MARKETING_VERSION = 24.42;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -551,7 +559,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 694;
+				CURRENT_PROJECT_VERSION = 695;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -575,7 +583,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 24.41;
+				MARKETING_VERSION = 24.42;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

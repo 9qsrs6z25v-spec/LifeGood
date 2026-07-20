@@ -104,6 +104,8 @@ struct FamilyMember: Identifiable, Codable {
     var familySide: FamilySide?
     /// 父母配對：媽媽指向爸爸（或反向），自由不選
     var spouseId: UUID?
+    /// 兒童疫苗接種狀態（對應 VaccineSchedule.taiwan 的各劑次；有施打日期＝已完成）
+    var vaccinations: [VaccineDose]
 
     init(id: UUID = UUID(), role: FamilyMemberRole = .spouse,
          chineseName: String = "", englishName: String = "",
@@ -112,7 +114,8 @@ struct FamilyMember: Identifiable, Codable {
          childRecords: [ChildRecord] = [], dailyRecords: [DailyRecord] = [],
          birthYear: Int? = nil, idNumber: String? = nil, relativeNote: String? = nil,
          familyEvents: [FamilyEvent] = [], familyPhotos: [FamilyAlbumPhoto] = [],
-         familySide: FamilySide? = nil, spouseId: UUID? = nil) {
+         familySide: FamilySide? = nil, spouseId: UUID? = nil,
+         vaccinations: [VaccineDose] = []) {
         self.id = id; self.role = role
         self.chineseName = chineseName; self.englishName = englishName
         self.birthday = birthday
@@ -128,6 +131,7 @@ struct FamilyMember: Identifiable, Codable {
         self.familyPhotos = familyPhotos
         self.familySide = familySide
         self.spouseId = spouseId
+        self.vaccinations = vaccinations
     }
 
     init(from decoder: Decoder) throws {
@@ -149,6 +153,7 @@ struct FamilyMember: Identifiable, Codable {
         familyPhotos = (try? c.decode([FamilyAlbumPhoto].self, forKey: .familyPhotos)) ?? []
         familySide = try? c.decodeIfPresent(FamilySide.self, forKey: .familySide)
         spouseId = try? c.decodeIfPresent(UUID.self, forKey: .spouseId)
+        vaccinations = (try? c.decodeIfPresent([VaccineDose].self, forKey: .vaccinations)) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -170,12 +175,13 @@ struct FamilyMember: Identifiable, Codable {
         try c.encode(familyPhotos, forKey: .familyPhotos)
         try c.encodeIfPresent(familySide, forKey: .familySide)
         try c.encodeIfPresent(spouseId, forKey: .spouseId)
+        try c.encode(vaccinations, forKey: .vaccinations)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, role, chineseName, englishName, birthday, marriageDate, isDivorced, divorceDate, childRecords, dailyRecords
         case birthYear, idNumber, relativeNote, familyEvents, familyPhotos
-        case familySide, spouseId
+        case familySide, spouseId, vaccinations
     }
 
     /// 顯示用稱謂：依 familySide 與 role 自動套用「我的」或「配偶的」前綴
