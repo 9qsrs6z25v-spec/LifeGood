@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.43", build: 696, date: "2026/07/21", notes: [
+            "【修復】合併匯入時，既有家庭成員的疫苗接種紀錄（及其他子項目）整筆被丟棄：匯出端本身沒有問題（FamilyMember.encode 已含 vaccinations，JSON 備份檔內確實帶有疫苗資料），問題出在 UnifiedImporter 的「合併」模式——familyMembers 過去用 mergeItems 以整筆成員為單位去重，只要匯入檔裡的成員 id 在本機已存在（例如兩台裝置都有同一位兒子），整筆傳入資料連同疫苗接種、兒女記錄、日常記錄、家庭活動、相簿等所有子項目一起被靜默捨棄，於是「匯出有帶、合併匯入後卻看不到」。比照部屬（subordinates）既有的深度合併寫法改寫：既有成員（同 id）改為逐類子項目補進本機缺少的資料（childRecords／dailyRecords／familyEvents／familyPhotos 依 id 去重新增；疫苗接種依劑次 scheduleId 對應——本機已有該劑紀錄則保留本機、僅在本機缺施打日期或備註時補上，本機沒有的劑次整筆帶入），基本欄位（生日／出生年）僅在本機空缺時補上、不覆蓋本機既有資料；不存在的成員維持整筆新增。完整備份（FullBackup.restore）重用同一套 UnifiedImporter，一併修復。另將部屬合併區塊內的局部 appendNewByID 提升為 UnifiedImporter 私有共用 helper，供家庭成員與部屬兩處深度合併共用。「取代」模式行為不變。"
+        ]),
         ChangelogEntry(version: "24.42", build: 695, date: "2026/07/20", notes: [
             "【功能】兒女履歷「疫苗」章節升級為「疫苗接種時程規劃」：過去疫苗章節只能一筆一筆自由手動新增，現在改為依台灣兒童常規疫苗時程自動列出所有應接種的疫苗劑次（B 型肝炎、五合一、13 價肺炎鏈球菌、卡介苗、水痘、MMR、A 型肝炎、日本腦炎、四合一、流感，及輪狀病毒等常見自費項目），並以孩子的出生日期自動推算每一劑的「建議接種日」。① 使用方式簡化為「只需填施打日期」：點開任一劑次，開啟「已完成施打」並選日期即視為完成、不填即為尚未施打，另可加註備註（接種院所、反應、提醒等）。② 逾期自動標示：尚未施打且已過建議接種日者，該列自動顯示紅色「需盡快施打」，卡片標頭並彙總「N 劑逾期，需盡快施打」；建議接種日在 30 天內者顯示橘色「即將接種」，直接對應使用者「需快點規劃施打」的提醒需求。③ 卡片標頭顯示完成進度（已完成 X／全部 Y），依月齡分期（出生、1／2／4／5／6／12／15／18／27 個月、滿 5 歲–入學前）分組排列。④ 未設生日時仍可標記施打、並提示「設定生日後可自動推算建議接種日」。⑤ 資料層：FamilyMember 新增 vaccinations（[VaccineDose]）欄位，各劑次狀態獨立儲存並隨 iCloud 同步／完整備份（向下相容既有資料）；新增 VaccineSchedule.taiwan 靜態時程表與 VaccineScheduleItem／VaccineDose 模型。⑥ 相容保留：先前以自由文字手動新增的疫苗紀錄（ChildRecord）仍完整顯示於卡片下方「其他疫苗紀錄」區，點擊可續行編輯或刪除，資料不遺失。"
         ]),

@@ -513,9 +513,43 @@ enum UnifiedImporter {
             // 健康檔案為單一物件：合併模式僅在本機尚無資料時填入，避免覆蓋既有健康檔案
             if let hp = payload.life.healthProfile, life.healthProfile.isEmpty { life.healthProfile = hp }
             if let members = payload.life.familyMembers {
-                let newFamily = mergeItems(existing: life.familyMembers, incoming: members)
-                life.familyMembers.append(contentsOf: newFamily)
-                result.familyMembers = newFamily.count
+                // 既有成員（同 id）過去整筆被 mergeItems 丟棄，導致對方備份裡的疫苗接種、
+                // 兒女記錄等子項目在合併模式下永遠進不來；比照下方部屬（subordinates）的
+                // 深度合併寫法：既有成員補進新的子項目、不存在的成員整筆新增。
+                var arr = life.familyMembers
+                var addedMembers = 0
+                for inc in members {
+                    if let idx = arr.firstIndex(where: { $0.id == inc.id }) {
+                        var m = arr[idx]
+                        appendNewByID(&m.childRecords, inc.childRecords)
+                        appendNewByID(&m.dailyRecords, inc.dailyRecords)
+                        appendNewByID(&m.familyEvents, inc.familyEvents)
+                        appendNewByID(&m.familyPhotos, inc.familyPhotos)
+                        // 疫苗接種：同一劑次（scheduleId）本機已有紀錄則保留本機，
+                        // 僅補上本機缺少的施打日期/備註；本機沒有的劑次整筆帶入。
+                        for v in inc.vaccinations {
+                            if let vi = m.vaccinations.firstIndex(where: { $0.scheduleId == v.scheduleId }) {
+                                if m.vaccinations[vi].administeredDate == nil, let d = v.administeredDate {
+                                    m.vaccinations[vi].administeredDate = d
+                                }
+                                if m.vaccinations[vi].note.isEmpty, !v.note.isEmpty {
+                                    m.vaccinations[vi].note = v.note
+                                }
+                            } else {
+                                m.vaccinations.append(v)
+                            }
+                        }
+                        // 基本欄位僅在本機空缺時補上，不覆蓋本機既有資料
+                        if m.birthday == nil { m.birthday = inc.birthday }
+                        if m.birthYear == nil { m.birthYear = inc.birthYear }
+                        arr[idx] = m
+                    } else {
+                        arr.append(inc)
+                        addedMembers += 1
+                    }
+                }
+                life.familyMembers = arr
+                result.familyMembers = addedMembers
             }
             let newExpenses = mergeItems(existing: expense.expenses, incoming: payload.expense.expenses)
             expense.expenses.append(contentsOf: newExpenses)
@@ -560,10 +594,6 @@ enum UnifiedImporter {
             if let subs = payload.life.subordinates {
                 // 既有部屬：補進新的子項目（班表/任務/會議/報告/紀錄）；不存在的部屬整筆新增
                 var arr = life.subordinates
-                func appendNewByID<T: Identifiable>(_ dst: inout [T], _ src: [T]) {
-                    let ids = Set(dst.map(\.id))
-                    dst.append(contentsOf: src.filter { !ids.contains($0.id) })
-                }
                 let cal = Calendar.current
                 for inc in subs {
                     if let idx = arr.firstIndex(where: { $0.id == inc.id }) {
@@ -602,6 +632,12 @@ enum UnifiedImporter {
     private static func mergeItems<T: Identifiable>(existing: [T], incoming: [T]) -> [T] {
         let existingIDs = Set(existing.map(\.id))
         return incoming.filter { !existingIDs.contains($0.id) }
+    }
+
+    /// 只補進 dst 中不存在（依 id）的項目；家庭成員與部屬深度合併共用。
+    private static func appendNewByID<T: Identifiable>(_ dst: inout [T], _ src: [T]) {
+        let ids = Set(dst.map(\.id))
+        dst.append(contentsOf: src.filter { !ids.contains($0.id) })
     }
 }
 
