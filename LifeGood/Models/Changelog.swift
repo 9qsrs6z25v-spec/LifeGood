@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.47", build: 700, date: "2026/07/22", notes: [
+            "【功能】部屬卡片（SubordinateDetailView）右上角新增「匯出圖片」按鈕：與既有「編輯」按鈕並列，一鍵把整張部屬卡片渲染成高解析 JPG 並開啟系統分享面板（LINE／訊息／郵件／存到相簿等）。匯出內容為藍色英雄卡（姓名、職等職稱、部門、入職日、主動性/潛力性/綜合分數看板與 KPI 統計）加上「目前所在分頁」的全部章節——主動性分頁：週報＋會議＋任務＋被標註＋請假＋已完成；潛力性分頁：優缺點＋成就／進步／缺失／疏失紀錄；執掌分頁：設備清單＋PM／警報時間軸——切到哪個分頁就匯出哪個分頁，方便分別分享日常表現、考核紀錄或設備保養狀況。實作對齊 TalentMatrixView.exportJPG／SubordinateItemCard.shareJPG 既有規格（ImageRenderer 固定 430pt 寬、3x 縮放、靜態版面不含進場動畫，寫入暫存目錄後以 ShareSheet 分享），檔名帶部屬姓名與時間戳（如「部屬卡片_王小明_20260722_1030.jpg」）。卡片其餘互動行為不變。"
+        ]),
         ChangelogEntry(version: "24.46", build: 699, date: "2026/07/22", notes: [
             "【修復編譯錯誤】部屬執掌設備清單（SubordinateEquipmentView.swift:123）：設備列「警報 N」標籤的 .foregroundStyle(eq.alarms.isEmpty ? .secondary : .red) 三元運算式中，Swift 型別推論把 .secondary 推成 HierarchicalShapeStyle，而 .red 在該型別上不存在，兩個分支型別無法統一，Xcode 回報「Member 'red' in 'HierarchicalShapeStyle'」與「Static property 'red' requires the types 'HierarchicalShapeStyle' and 'Color' be equivalent」兩條錯誤。改為兩側都明確標注 Color（Color.secondary : Color.red），顯示效果完全不變（無警報＝灰色、有警報＝紅色）。"
         ]),

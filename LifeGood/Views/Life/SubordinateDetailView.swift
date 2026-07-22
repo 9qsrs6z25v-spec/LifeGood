@@ -253,6 +253,7 @@ struct SubordinateDetailView: View {
     @State private var addingReport = false
     @State private var editingReport: WeeklyReport?
     @State private var showPremiumAlert = false
+    @State private var shareItem: CardShareURL?
 
     // 進場動畫旗標
     @State private var headerAppeared = false
@@ -407,12 +408,18 @@ struct SubordinateDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("編輯") {
-                        if subscription.isPremium { showEdit = true }
-                        else { showPremiumAlert = true }
-                    }.foregroundStyle(.green)
+                    HStack(spacing: 16) {
+                        Button { exportJPG(mentioned: mentionedItemsCache) } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        Button("編輯") {
+                            if subscription.isPremium { showEdit = true }
+                            else { showPremiumAlert = true }
+                        }.foregroundStyle(.green)
+                    }
                 }
             }
+            .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
             .sheet(isPresented: $showEdit) { AddSubordinateView(editing: subordinate) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $addingType) { type in
@@ -1367,6 +1374,60 @@ struct SubordinateDetailView: View {
         case .daily: return subordinate.proactivityScore(mentionedCount: mentionedCount)
         case .rating: return subordinate.potentialScore
         case .duty: return subordinate.equipments.count
+        }
+    }
+
+    // MARK: - 匯出圖片
+
+    private static let stampFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
+
+    /// 把部屬卡片（英雄卡 + 目前分頁全部章節）渲染成 JPG 並開啟系統分享面板
+    /// （對齊 TalentMatrixView.exportJPG／SubordinateItemCard.shareJPG 既有規格）。
+    @MainActor
+    private func exportJPG(mentioned: [SubordinateItemRef]) {
+        let content = exportContent(mentioned: mentioned)
+            .frame(width: 430)
+            .padding(.vertical, 20)
+            .background(Color(.systemGroupedBackground))
+            .environmentObject(lifeStore)
+            .environmentObject(subscription)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage, let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        let subName = subordinate.name.isEmpty ? "部屬" : subordinate.name
+        let name = "部屬卡片_\(subName)_\(Self.stampFmt.string(from: Date())).jpg"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do {
+            try data.write(to: url)
+            shareItem = CardShareURL(url: url)
+        } catch { }
+    }
+
+    /// 供 ImageRenderer 使用的靜態版面：英雄卡 + 目前分頁的全部章節（不含進場動畫修飾）。
+    @ViewBuilder
+    private func exportContent(mentioned: [SubordinateItemRef]) -> some View {
+        VStack(spacing: 16) {
+            headerCard(mentionedCount: mentioned.count)
+            switch detailTab {
+            case .daily:
+                weeklyReportSection
+                meetingSection
+                taskSection
+                mentionedSection(mentioned)
+                recordSection(.leave)
+                completedSection
+            case .rating:
+                proConSection
+                recordSection(.achievement)
+                recordSection(.improvement)
+                recordSection(.fault)
+                recordSection(.missOperation)
+            case .duty:
+                SubordinateEquipmentSection(subordinateId: subordinateId)
+                SubordinateEquipmentTimelineSection(subordinateId: subordinateId)
+            }
         }
     }
 
