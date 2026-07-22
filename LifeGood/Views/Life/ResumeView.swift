@@ -1468,12 +1468,12 @@ struct AddMilestoneView: View {
         if familyRole == .spouse {
             Toggle("填入結婚時間", isOn: $hasMarriageDate)
             if hasMarriageDate {
-                DatePicker("結婚日期", selection: $marriageDate, displayedComponents: .date)
+                DatePicker("結婚日期", selection: $marriageDate, in: ...Date(), displayedComponents: .date)
             }
             Toggle("已離婚", isOn: $isDivorced)
             if isDivorced {
                 DatePicker("離婚日期", selection: $divorceDate,
-                           in: (hasMarriageDate ? marriageDate : Date.distantPast)...,
+                           in: (hasMarriageDate ? marriageDate : Date.distantPast)...Date(),
                            displayedComponents: .date)
             }
         } else if familyRole == .otherRelative {
@@ -1487,7 +1487,7 @@ struct AddMilestoneView: View {
             TextField("備註（如 關係說明）", text: $relativeNote, axis: .vertical)
                 .lineLimit(2...4)
         } else {
-            DatePicker("出生日期", selection: $familyBirthday, displayedComponents: .date)
+            DatePicker("出生日期", selection: $familyBirthday, in: ...Date(), displayedComponents: .date)
         }
     }
 

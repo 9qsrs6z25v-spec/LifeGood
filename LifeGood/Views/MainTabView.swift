@@ -297,6 +297,10 @@ struct MainTabView: View {
     @State private var aiStopRequestedBeforeStart = false
     /// 麥克風進場動畫旗標：每次切到變動支出頁就從左下角彈一次
     @State private var micEntered = false
+    /// 麥克風進場動畫延遲任務：50ms 內快速切出又切回分頁會疊出多個 asyncAfter，
+    /// 較舊的一個可能在較新的已把 micEntered 設回 true 之後才觸發，導致動畫倒退閃爍；
+    /// 改用可取消的 Task，切換時先取消前一個再排新的。
+    @State private var micEnterTask: Task<Void, Never>?
 
     /// 是否在「收支 → 變動支出」分頁
     private var isOnVariableExpense: Bool {
@@ -388,9 +392,12 @@ struct MainTabView: View {
         }
         .onChange(of: isOnVariableExpense, initial: true) { _, isOn in
             // 每次切到變動支出頁，從左下角彈一次皮球進場
+            micEnterTask?.cancel()
             if isOn {
                 micEntered = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                micEnterTask = Task {
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    guard !Task.isCancelled else { return }
                     withAnimation(.spring(response: 0.55, dampingFraction: 0.5)) {
                         micEntered = true
                     }

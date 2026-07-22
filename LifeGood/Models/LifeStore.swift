@@ -80,6 +80,7 @@ class LifeStore: ObservableObject {
     func deleteFamilyMember(_ item: FamilyMember) {
         isLoading = true
         defer { isLoading = false }
+        Self.cleanupFamilyMemberFiles(item)
         familyMembers.removeAll { $0.id == item.id }
         // 解除配偶配對：ResumeView 儲存配偶關係時會雙向寫入 spouseId（見 ResumeView.swift
         // 附近 "spouseId = memberId" 的配對邏輯），刪除任一方若不清掉另一方的 spouseId，
@@ -88,6 +89,18 @@ class LifeStore: ObservableObject {
             familyMembers[i].spouseId = nil
         }
         save()
+    }
+
+    /// 刪除家庭成員時一併清掉兒女記錄照片與家庭相簿照片，
+    /// 否則檔案會永久留在磁碟並被 CloudKitManager.uploadAllLocalPhotos() 當成
+    /// 「未上傳的本機照片」反覆重傳（對齊 deleteOrgPerson／deleteBusinessCard 的既有寫法）。
+    private static func cleanupFamilyMemberFiles(_ item: FamilyMember) {
+        for record in item.childRecords {
+            if let name = record.photoFileName { ChildRecord.deletePhoto(name) }
+        }
+        for photo in item.familyPhotos {
+            if let name = photo.photoFileName { FamilyAlbumPhoto.deletePhoto(name) }
+        }
     }
 
     // MARK: - 里程碑 CRUD
@@ -637,6 +650,16 @@ class LifeStore: ObservableObject {
     func clearAll() {
         isLoading = true
         defer { isLoading = false }
+        // 清空前先刪除所有內嵌照片檔案，否則「清除所有資料」後照片仍留在磁碟／iCloud，
+        // 使用者會誤以為資料已完全清除（對齊 deleteFamilyMember／deleteOrgPerson／
+        // deleteBusinessCard 刪除單筆時的既有清理寫法）。
+        for member in familyMembers { Self.cleanupFamilyMemberFiles(member) }
+        for card in businessCards {
+            if let name = card.photoFileName { BusinessCard.deletePhoto(name) }
+        }
+        for person in orgPeople {
+            if let name = person.photoFileName { OrgPerson.deletePhoto(name) }
+        }
         profile = UserProfile()
         familyMembers.removeAll()
         milestones.removeAll()

@@ -390,9 +390,10 @@ struct EInvoiceSetupView: View {
     }
 
     private func attemptLink() {
-        // 驗證前先 trim：EInvoiceSyncManager.linkCarrier 內部也會 trim 頭尾空白／換行後才存入，
-        // 若這裡驗證用未 trim 的原始輸入，從其他 App 複製貼上帶尾端換行的條碼會被誤判格式錯誤。
-        let trimmedCardNo = inputCardNo.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 驗證前先 trim 並轉大寫：EInvoiceSyncManager.linkCarrier 內部只會 trim 不會轉大寫，
+        // .autocapitalization(.allCharacters) 只影響鍵盤輸入、對「貼上」的文字無效，
+        // 若使用者從簡訊/信件複製貼上小寫條碼，未轉大寫會被正確條碼誤判成格式錯誤。
+        let trimmedCardNo = inputCardNo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let pattern = #"^/[A-Z0-9.\-+]{7}$"#
         let cardOK = trimmedCardNo.range(of: pattern, options: .regularExpression) != nil
         guard cardOK else {
@@ -400,7 +401,7 @@ struct EInvoiceSetupView: View {
             showLinkAlert = true
             return
         }
-        sync.linkCarrier(cardNo: inputCardNo, cardEncrypt: inputCardEncrypt)
+        sync.linkCarrier(cardNo: trimmedCardNo, cardEncrypt: inputCardEncrypt)
         linkAlertMessage = "已連結。可使用「立即同步」測試是否成功。"
         showLinkAlert = true
     }

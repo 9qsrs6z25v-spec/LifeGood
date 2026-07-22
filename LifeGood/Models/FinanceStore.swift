@@ -86,8 +86,32 @@ class FinanceStore: ObservableObject {
     func update(_ item: RealEstate) {
         if let i = realEstates.firstIndex(where: { $0.id == item.id }) { realEstates[i] = item }
     }
-    func deleteRealEstate(at offsets: IndexSet) { realEstates.remove(atOffsets: offsets) }
-    func deleteRealEstate(_ item: RealEstate) { realEstates.removeAll { $0.id == item.id } }
+    func deleteRealEstate(at offsets: IndexSet) {
+        for item in offsets.map({ realEstates[$0] }) { Self.cleanupRealEstateFiles(item) }
+        realEstates.remove(atOffsets: offsets)
+    }
+    func deleteRealEstate(_ item: RealEstate) {
+        Self.cleanupRealEstateFiles(item)
+        realEstates.removeAll { $0.id == item.id }
+    }
+
+    /// 刪除房地產時一併清掉電梯保養/水電繳費/裝潢照片/文件檔案，
+    /// 否則檔案會永久留在磁碟並被 CloudKitManager.uploadAllLocalPhotos() 當成
+    /// 「未上傳的本機照片」反覆重傳（對齊 UnifiedImporter.applyUnified 的清理方式）。
+    private static func cleanupRealEstateFiles(_ item: RealEstate) {
+        for up in item.utilityPayments {
+            if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+        }
+        for rp in item.renovationPhotos {
+            for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
+        }
+        for em in item.elevatorMaintenances {
+            if let name = em.photoFileName { ElevatorMaintenance.deletePhoto(name) }
+        }
+        for doc in item.documents {
+            RealEstateDocument.deleteDocument(doc.fileName)
+        }
+    }
 
     // MARK: - 統計
 
