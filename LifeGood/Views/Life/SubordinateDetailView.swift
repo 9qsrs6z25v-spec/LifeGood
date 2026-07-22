@@ -253,7 +253,7 @@ struct SubordinateDetailView: View {
     @State private var addingReport = false
     @State private var editingReport: WeeklyReport?
     @State private var showPremiumAlert = false
-    @State private var shareItem: CardShareURL?
+    @State private var shareItem: CardSharePayload?
 
     // 進場動畫旗標
     @State private var headerAppeared = false
@@ -409,7 +409,10 @@ struct SubordinateDetailView: View {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
-                        Button { exportJPG(mentioned: mentionedItemsCache) } label: {
+                        Menu {
+                            Button { exportJPG(mentioned: mentionedItemsCache) } label: { Label("匯出圖片", systemImage: "photo") }
+                            Button { exportText(mentioned: mentionedItemsCache) } label: { Label("匯出文字", systemImage: "text.alignleft") }
+                        } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
                         Button("編輯") {
@@ -419,7 +422,7 @@ struct SubordinateDetailView: View {
                     }
                 }
             }
-            .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
             .sheet(isPresented: $showEdit) { AddSubordinateView(editing: subordinate) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $addingType) { type in
@@ -1401,7 +1404,7 @@ struct SubordinateDetailView: View {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         do {
             try data.write(to: url)
-            shareItem = CardShareURL(url: url)
+            shareItem = CardSharePayload(items: [url])
         } catch { }
     }
 
@@ -1429,6 +1432,113 @@ struct SubordinateDetailView: View {
                 SubordinateEquipmentTimelineSection(subordinateId: subordinateId)
             }
         }
+    }
+
+    /// 把部屬卡片（基本資料＋分數＋目前分頁內容）組成 Emoji 排版純文字並開啟系統分享面板。
+    private func exportText(mentioned: [SubordinateItemRef]) {
+        let divider = "━━━━━━━━━━━━━━"
+        let sub = subordinate
+        var lines: [String] = []
+        lines.append("👤 部屬卡片｜\(sub.name.isEmpty ? "未命名" : sub.name)")
+        lines.append(divider)
+        if !gradeTitleText.isEmpty { lines.append("💼 職稱：\(gradeTitleText)") }
+        if !departmentText.isEmpty { lines.append("🏢 部門：\(departmentText)") }
+        if !sub.plantArea.isEmpty { lines.append("🏭 廠區：\(sub.plantArea)") }
+        if let jd = sub.joinDate { lines.append("📅 入職：\(formatDate(jd))") }
+        lines.append("📊 主動性 \(sub.proactivityScore(mentionedCount: mentioned.count))｜潛力性 \(sub.potentialScore)｜綜合 \(sub.overallScore(mentionedCount: mentioned.count))")
+
+        switch detailTab {
+        case .daily:
+            let reports = sub.weeklyReports.filter { !$0.isCompleted }
+            if !reports.isEmpty {
+                lines.append(""); lines.append("📄 待完成報告（\(reports.count)）")
+                for r in reports.sorted(by: { $0.date > $1.date }) {
+                    lines.append("⬜️ \(r.topic.isEmpty ? "未命名報告" : r.topic)｜\(formatDate(r.date))")
+                }
+            }
+            let pendingMeetings = sub.meetings.filter { m in m.items.contains { !$0.isCompleted } || m.items.isEmpty }
+            if !pendingMeetings.isEmpty {
+                lines.append(""); lines.append("👥 會議")
+                for m in pendingMeetings.sorted(by: { $0.date > $1.date }) {
+                    let done = m.items.filter(\.isCompleted).count
+                    lines.append("• \(m.topic.isEmpty ? "未命名會議" : m.topic)｜\(formatDateTime(m.date))\(m.items.isEmpty ? "" : "｜議程 \(done)/\(m.items.count)")")
+                    for item in m.items where !item.isCompleted {
+                        var row = "　⬜️ \(item.content.isEmpty ? "未填內容" : item.content)"
+                        if let due = item.dueDate { row += "｜⏰ \(formatDate(due))" }
+                        lines.append(row)
+                    }
+                }
+            }
+            let tasks = sub.tasks.filter { !$0.isCompleted }
+            if !tasks.isEmpty {
+                lines.append(""); lines.append("📋 待完成任務（\(tasks.count)）")
+                for t in tasks.sorted(by: { $0.date > $1.date }) {
+                    var row = "⬜️ \(t.topic.isEmpty ? "未命名任務" : t.topic)"
+                    if let due = t.dueDate { row += "｜⏰ 截止 \(formatDate(due))" }
+                    lines.append(row)
+                }
+            }
+            let leaves = sub.records.filter { $0.type == .leave }
+            if !leaves.isEmpty {
+                lines.append(""); lines.append("🌴 請假記錄（\(leaves.count)）")
+                for rec in leaves.sorted(by: { $0.date > $1.date }).prefix(10) {
+                    var row = "• \(formatDate(rec.date))"
+                    if let lt = rec.leaveType { row += "｜\(lt.rawValue)" }
+                    if let h = rec.leaveHours, h > 0 { row += "｜\(String(format: "%g", h)) 小時" }
+                    lines.append(row)
+                }
+            }
+        case .rating:
+            let groups: [(SubordinateRecordType, String)] = [
+                (.pro, "👍 優點"), (.con, "👎 缺點"),
+                (.achievement, "🏆 成就"), (.improvement, "📈 進步"),
+                (.fault, "⚠️ 缺失"), (.missOperation, "❌ Miss Operation")
+            ]
+            for (type, title) in groups {
+                let recs = sub.records.filter { $0.type == type }
+                if !recs.isEmpty {
+                    lines.append(""); lines.append("\(title)（\(recs.count)）")
+                    for rec in recs.sorted(by: { $0.date > $1.date }) {
+                        lines.append("• \(rec.content.isEmpty ? "未填內容" : rec.content)｜\(formatDate(rec.date))")
+                    }
+                }
+            }
+        case .duty:
+            if !sub.equipments.isEmpty {
+                lines.append(""); lines.append("🛠 執掌設備（\(sub.equipments.count) 台）")
+                for eq in sub.equipments {
+                    var row = "• \(eq.name.isEmpty ? "未命名設備" : eq.name)｜🔧 PM \(eq.pmRecords.count)｜🚨 警報 \(eq.alarms.count)"
+                    if let last = eq.pmRecords.map(\.date).max() { row += "｜上次 PM \(formatDate(last))" }
+                    lines.append(row)
+                }
+                // 時間軸（新到舊）：PM 與警報合併，警報標示距同設備上次 PM 天數
+                struct Entry { let date: Date; let text: String }
+                var entries: [Entry] = []
+                for eq in sub.equipments {
+                    let name = eq.name.isEmpty ? "未命名設備" : eq.name
+                    let pmDates = eq.pmRecords.map(\.date).sorted()
+                    for pm in eq.pmRecords {
+                        entries.append(Entry(date: pm.date,
+                                             text: "🔧 \(formatDate(pm.date))｜\(name)｜PM 保養\(pm.note.isEmpty ? "" : "｜\(pm.note)")"))
+                    }
+                    for al in eq.alarms {
+                        let prior = pmDates.last(where: { $0 <= al.date })
+                        let daysText = prior.flatMap {
+                            Calendar.current.dateComponents([.day], from: $0, to: al.date).day
+                        }.map { "｜PM 後 \($0) 天" } ?? ""
+                        entries.append(Entry(date: al.date,
+                                             text: "🚨 \(formatDateTime(al.date))｜\(name)｜\(al.content.isEmpty ? "警報" : al.content)\(daysText)"))
+                    }
+                }
+                if !entries.isEmpty {
+                    lines.append(""); lines.append("⏱ PM／警報時間軸")
+                    for e in entries.sorted(by: { $0.date > $1.date }) {
+                        lines.append(e.text)
+                    }
+                }
+            }
+        }
+        shareItem = CardSharePayload(items: [lines.joined(separator: "\n")])
     }
 
     private func colorFor(_ type: SubordinateRecordType) -> Color {
@@ -2596,8 +2706,8 @@ enum SubordinateItemRef: Identifiable {
 
 private struct IDBox: Identifiable { let id: UUID }
 
-/// 分享圖片暫存檔 URL 的 Identifiable 包裝（供 .sheet(item:) 使用）
-private struct CardShareURL: Identifiable { let id = UUID(); let url: URL }
+/// 分享項目的 Identifiable 包裝（供 .sheet(item:) 使用）：可裝圖片暫存檔 URL 或純文字
+private struct CardSharePayload: Identifiable { let id = UUID(); let items: [Any] }
 
 struct SubordinateItemCard: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -2607,7 +2717,7 @@ struct SubordinateItemCard: View {
     @State private var showEdit = false
     @State private var openSub: Subordinate?
     @State private var openCard: IDBox?
-    @State private var shareItem: CardShareURL?
+    @State private var shareItem: CardSharePayload?
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
@@ -2643,8 +2753,83 @@ struct SubordinateItemCard: View {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         do {
             try data.write(to: url)
-            shareItem = CardShareURL(url: url)
+            shareItem = CardSharePayload(items: [url])
         } catch { }
+    }
+
+    /// 把卡片內容組成 Emoji 排版純文字並開啟系統分享面板
+    /// （LINE／訊息可直接貼上顯示，比 HTML 檔案更適合聊天分享）。
+    private func shareText() {
+        shareItem = CardSharePayload(items: [shareTextContent()])
+    }
+
+    private func assigneeName(_ id: UUID?) -> String? {
+        guard let id else { return nil }
+        return lifeStore.subordinates.first { $0.id == id }?.name
+    }
+
+    private func shareTextContent() -> String {
+        let divider = "━━━━━━━━━━━━━━"
+        var lines: [String] = []
+        switch ref {
+        case .task(let subId, let snap):
+            let t = lifeStore.subordinates.first { $0.id == subId }?.tasks.first { $0.id == snap.id } ?? snap
+            lines.append("📋 任務｜\(t.topic.isEmpty ? "未命名任務" : t.topic)")
+            lines.append(divider)
+            lines.append("🗓 任務日期：\(fmt(t.date))")
+            if let due = t.dueDate { lines.append("⏰ 截止日期：\(fmt(due))") }
+            if t.isCompleted, let at = t.completedAt { lines.append("✅ 完成時間：\(fmt(at))") }
+            if !t.content.isEmpty { lines.append(""); lines.append("📝 內容"); lines.append(t.content) }
+            if !t.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(t.note) }
+        case .meeting(let subId, let snap):
+            let m = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
+            lines.append("👥 會議｜\(m.topic.isEmpty ? "未命名會議" : m.topic)")
+            lines.append(divider)
+            lines.append("🕐 會議時間：\(fmt(m.date))")
+            lines.append("⏱ 會議長度：\(m.durationMinutes) 分鐘")
+            if !m.items.isEmpty {
+                let done = m.items.filter(\.isCompleted).count
+                lines.append("")
+                lines.append("📌 議程項目（\(done)/\(m.items.count) 完成）")
+                for item in m.items {
+                    var row = "\(item.isCompleted ? "✅" : "⬜️") \(item.content.isEmpty ? "未填內容" : item.content)"
+                    if let who = assigneeName(item.assigneeId) { row += "｜👤 \(who)" }
+                    lines.append(row)
+                    if item.isCompleted, let at = item.completedAt {
+                        lines.append("　└ 🏁 \(fmtDue(at)) 完成")
+                    } else if let due = item.dueDate {
+                        lines.append("　└ ⏰ 截止 \(fmtDue(due))")
+                    }
+                }
+            }
+            if !m.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(m.note) }
+        case .report(let subId, let snap):
+            let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
+            lines.append("📄 報告｜\(r.topic.isEmpty ? "未命名報告" : r.topic)")
+            lines.append(divider)
+            lines.append("🗓 報告日期：\(fmt(r.date))")
+            if r.isCompleted, let at = r.completedAt { lines.append("✅ 完成時間：\(fmt(at))") }
+            if !r.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(r.note) }
+        case .leave(let subId, let snap), .record(let subId, let snap):
+            let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
+            let emoji: String = {
+                switch rec.type {
+                case .pro: return "👍"; case .con: return "👎"
+                case .achievement: return "🏆"; case .improvement: return "📈"
+                case .fault: return "⚠️"; case .missOperation: return "❌"
+                case .leave: return "🌴"
+                }
+            }()
+            lines.append("\(emoji) \(rec.type.rawValue)｜\(rec.content.isEmpty ? "未填內容" : rec.content)")
+            lines.append(divider)
+            lines.append("🗓 日期：\(fmt(rec.date))")
+            if let end = rec.endDate { lines.append("🗓 結束：\(fmt(end))") }
+            if let lt = rec.leaveType { lines.append("🌴 假別：\(lt.rawValue)") }
+            if let hours = rec.leaveHours, hours > 0 { lines.append("⏱ 時數：\(String(format: "%g", hours)) 小時") }
+            if let sev = rec.severity { lines.append("⚠️ 嚴重度：\(sev.rawValue)") }
+            if !rec.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(rec.note) }
+        }
+        return lines.joined(separator: "\n")
     }
 
     var body: some View {
@@ -2662,7 +2847,12 @@ struct SubordinateItemCard: View {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
-                        Button { shareJPG() } label: { Image(systemName: "square.and.arrow.up") }
+                        Menu {
+                            Button { shareJPG() } label: { Label("匯出圖片", systemImage: "photo") }
+                            Button { shareText() } label: { Label("匯出文字", systemImage: "text.alignleft") }
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
                         Button("編輯") { showEdit = true }.bold().foregroundStyle(.green)
                     }
                 }
@@ -2670,7 +2860,7 @@ struct SubordinateItemCard: View {
             .sheet(isPresented: $showEdit) { editor }
             .sheet(item: $openSub) { s in SubordinateDetailView(subordinate: s) }
             .sheet(item: $openCard) { box in BusinessCardDetailView(cardId: box.id) }
-            .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
             .environment(\.openURL, OpenURLAction { url in handleMention(url) })
         }
     }
