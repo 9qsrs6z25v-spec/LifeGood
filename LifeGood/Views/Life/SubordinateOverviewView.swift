@@ -55,6 +55,7 @@ struct SubordinateOverviewView: View {
     @State private var editTarget: OverviewEditTarget?
     @State private var addPersonalKind: PersonalEventKind?   // 新增我的會議 / 事務
     @State private var subAddKind: SubAddKind?               // 新增部屬任務 / 會議 / 報告
+    @State private var sharePayload: OverviewSharePayload?   // 文字匯出分享
 
     /// 點擊總覽項目要開啟的編輯目標
     private enum OverviewEditTarget: Identifiable {
@@ -242,8 +243,14 @@ struct SubordinateOverviewView: View {
                 SubordinateItemCard(ref: target.itemRef)
             }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { addMenu }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 14) {
+                        Button { exportText() } label: { Image(systemName: "square.and.arrow.up") }
+                        addMenu
+                    }
+                }
             }
+            .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
             .sheet(item: $addPersonalKind) { kind in
                 PersonalEventEditor(initialDate: selectedDate, editing: nil, initialKind: kind)
             }
@@ -268,6 +275,126 @@ struct SubordinateOverviewView: View {
         } label: {
             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
         }
+    }
+
+    // MARK: - 文字匯出
+
+    private static let shareDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E)"; return f
+    }()
+    private static let shareShortFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d"; return f
+    }()
+    private static let shareTimeFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    }()
+
+    /// 把部屬總覽（請假／報告／會議／任務，含已完成收合區）組成 Emoji 排版純文字並分享
+    /// （對齊部屬卡片 exportText 規格：✅/⬜️ 並列、完成附 🏁、未完成附 ⏰）。
+    private func exportText() {
+        let divider = "━━━━━━━━━━━━━━"
+        var lines: [String] = []
+        lines.append("📊 部屬總覽｜\(Self.shareDateFmt.string(from: selectedDate))")
+        lines.append(divider)
+
+        // 當日請假
+        let leaves = todayLeaves
+        lines.append("")
+        lines.append("🌴 當日請假（\(leaves.count)）")
+        if leaves.isEmpty {
+            lines.append("・當日無人請假")
+        } else {
+            for it in leaves {
+                var row = "• \(it.sub.name.isEmpty ? "未命名" : it.sub.name)"
+                if let lt = it.rec.leaveType { row += "｜\(lt.rawValue)" }
+                if let h = it.rec.leaveHours, h > 0 { row += "｜\(String(format: "%g", h)) 小時" }
+                lines.append(row)
+            }
+        }
+
+        // 報告（本週全部 + 未完成；含已完成，狀態各自標示）
+        let reports = displayedReports
+        if !reports.isEmpty {
+            let done = reports.filter { $0.report.isCompleted }.count
+            lines.append("")
+            lines.append("📄 報告（\(done)/\(reports.count) 完成）")
+            for it in reports {
+                let who = it.sub.name.isEmpty ? "未命名" : it.sub.name
+                var row = "\(it.report.isCompleted ? "✅" : "⬜️") \(it.report.topic.isEmpty ? "未命名報告" : it.report.topic)｜\(who)"
+                switch it.status {
+                case .overdue: row += "｜⚠️ 逾期 \(Self.shareShortFmt.string(from: it.report.date))"
+                case .thisWeek, .pending: row += "｜\(Self.shareShortFmt.string(from: it.report.date))"
+                case .done:
+                    if let at = it.report.completedAt { row += "｜🏁 \(Self.shareShortFmt.string(from: at))" }
+                }
+                lines.append(row)
+            }
+        }
+
+        // 當日會議（議程 ✅/⬜️ 全列，含已完成）
+        let meetings = todayMeetings
+        lines.append("")
+        lines.append("👥 當日會議（\(meetings.count)）")
+        if meetings.isEmpty {
+            lines.append("・當日無會議")
+        } else {
+            for it in meetings {
+                let doneCnt = it.meeting.items.filter(\.isCompleted).count
+                var head = "• \(it.meeting.topic.isEmpty ? "未命名會議" : it.meeting.topic)｜\(Self.shareTimeFmt.string(from: it.meeting.date))｜\(it.meeting.durationMinutes) 分鐘"
+                if !it.meeting.items.isEmpty { head += "｜議程 \(doneCnt)/\(it.meeting.items.count)" }
+                lines.append(head)
+                for item in it.meeting.items {
+                    var row = "　\(item.isCompleted ? "✅" : "⬜️") \(item.content.isEmpty ? "未填內容" : item.content)"
+                    if item.isCompleted, let at = item.completedAt { row += "｜🏁 \(Self.shareShortFmt.string(from: at))" }
+                    else if let due = item.dueDate { row += "｜⏰ \(Self.shareShortFmt.string(from: due))" }
+                    lines.append(row)
+                }
+            }
+        }
+
+        // 未完成任務（跨所有日期）
+        let tasks = incompleteTasks
+        if !tasks.isEmpty {
+            lines.append("")
+            lines.append("📋 未完成任務（\(tasks.count)）")
+            for it in tasks {
+                let who = it.sub.name.isEmpty ? "未命名" : it.sub.name
+                var row = "⬜️ \(it.task.topic.isEmpty ? "未命名任務" : it.task.topic)｜\(who)"
+                if let due = it.task.dueDate { row += "｜⏰ 截止 \(Self.shareShortFmt.string(from: due))" }
+                lines.append(row)
+            }
+        }
+
+        // 未完成會議條目（跨所有會議）
+        let pendingItems = incompleteMeetingItems
+        if !pendingItems.isEmpty {
+            lines.append("")
+            lines.append("🗂 未完成會議條目（\(pendingItems.count)）")
+            for it in pendingItems {
+                let who = it.sub.name.isEmpty ? "未命名" : it.sub.name
+                var row = "⬜️ \(it.item.content.isEmpty ? "未填內容" : it.item.content)｜\(who)・\(it.meeting.topic.isEmpty ? "會議" : it.meeting.topic)"
+                if let due = it.item.dueDate { row += "｜⏰ \(Self.shareShortFmt.string(from: due))" }
+                lines.append(row)
+            }
+        }
+
+        // 已完成（報告 / 會議條目 / 任務，同底部收合卡內容）
+        let completed = overviewCompletedEntries.sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
+        if !completed.isEmpty {
+            lines.append("")
+            lines.append("✅ 已完成（\(completed.count)）")
+            for e in completed {
+                let emoji: String = {
+                    switch e.kind { case .report: return "📄"; case .meeting: return "👥"; case .task: return "📋" }
+                }()
+                var row = "🏁 "
+                if let at = e.completedAt { row += "\(Self.shareShortFmt.string(from: at))｜" }
+                row += "\(emoji) \(e.title.isEmpty ? "未命名" : e.title)｜\(e.subtitle)"
+                lines.append(row)
+            }
+        }
+
+        sharePayload = OverviewSharePayload(items: [lines.joined(separator: "\n")])
     }
 
     // MARK: - 請假
@@ -1065,3 +1192,6 @@ struct SubordinateOverviewView: View {
         Self.fmtDateTimeFormatter.string(from: date)
     }
 }
+
+/// 文字匯出分享項目的 Identifiable 包裝（供 .sheet(item:) 使用）
+private struct OverviewSharePayload: Identifiable { let id = UUID(); let items: [Any] }
