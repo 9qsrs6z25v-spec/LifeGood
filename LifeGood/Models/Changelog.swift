@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.45", build: 698, date: "2026/07/22", notes: [
+            "【功能】部屬項目預覽卡（SubordinateItemCard）右上角新增「分享」按鈕：點開部屬卡片的會議（以及任務／報告／請假／紀錄等所有同款預覽卡）後，可一鍵把卡片內容（標題、會議時間/長度、議程項目與完成狀態、備註等完整畫面）渲染成高解析 JPG 圖片，透過系統分享面板傳給其他人（LINE／訊息／郵件／存到相簿等）。實作對齊 TalentMatrixView.exportJPG 既有規格：ImageRenderer 以固定 420pt 寬、3x 縮放渲染靜態版面，寫入暫存目錄後以既有 ShareSheet（UIActivityViewController 包裝）開啟分享；檔名帶項目類型與時間戳（如「會議_20260722_1030.jpg」）。分享按鈕與既有「編輯」按鈕並列於導覽列右上角，卡片其餘互動（議程項目勾選、標註人員點擊、編輯）行為不變。"
+        ]),
         ChangelogEntry(version: "24.44", build: 697, date: "2026/07/22", notes: [
             "【功能】部屬卡片新增「執掌」分頁（第三個 Tab，與主動性／潛力性並列）：記錄部屬管理的設備與其保養/警報歷史。① 執掌設備清單：可新增多台設備（名稱＋備註），每台設備可登錄多筆預防保養（PM）記錄（日期＋保養內容）與多筆警報記錄（發生時間精確到時分＋警報內容）；設備列即時彙總 PM 次數、警報次數、近 30 天警報次數與上次 PM 日期。② 頁面下方新增「PM／警報時間軸」：把所有設備的 PM（綠色扳手節點）與警報（紅色鈴鐺節點）合併成單一時間軸（新到舊），每筆警報並自動標示「PM 後 N 天」（距同一設備上一次 PM 的天數），一眼看出保養與警報的相關性；附圖例（綠＝PM、紅＝警報）。③ 資料層：Subordinate 新增 equipments（[ManagedEquipment]，含 EquipmentPMRecord／EquipmentAlarm 子模型，逐元素容錯解碼），隨既有部屬資料一併走 iCloud 同步／完整備份／部屬單獨匯出，合併匯入時既有部屬依 id 補進新設備。④ 同步修正 AddSubordinateView（編輯部屬基本資料）重建 Subordinate 時帶回既有 equipments，避免編輯姓名/部門等基本欄位時執掌資料被空陣列覆蓋。新增檔案 SubordinateEquipmentView.swift（清單章節／時間軸章節／設備編輯 Sheet）。"
         ]),

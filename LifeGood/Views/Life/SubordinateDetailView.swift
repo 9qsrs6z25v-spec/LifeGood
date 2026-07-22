@@ -2535,6 +2535,9 @@ enum SubordinateItemRef: Identifiable {
 
 private struct IDBox: Identifiable { let id: UUID }
 
+/// 分享圖片暫存檔 URL 的 Identifiable 包裝（供 .sheet(item:) 使用）
+private struct CardShareURL: Identifiable { let id = UUID(); let url: URL }
+
 struct SubordinateItemCard: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
@@ -2543,6 +2546,7 @@ struct SubordinateItemCard: View {
     @State private var showEdit = false
     @State private var openSub: Subordinate?
     @State private var openCard: IDBox?
+    @State private var shareItem: CardShareURL?
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
@@ -2555,6 +2559,31 @@ struct SubordinateItemCard: View {
     private func fmtDue(_ d: Date) -> String {
         let c = Calendar.current.dateComponents([.hour, .minute], from: d)
         return (c.hour == 0 && c.minute == 0) ? Self.dateOnlyFmt.string(from: d) : Self.dateFmt.string(from: d)
+    }
+
+    // MARK: - 分享為圖片
+
+    private static let stampFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
+
+    /// 把卡片內容渲染成 JPG 並開啟系統分享面板（對齊 TalentMatrixView.exportJPG 既有寫法）。
+    @MainActor
+    private func shareJPG() {
+        let content = VStack(alignment: .leading, spacing: 16) { cardBody }
+            .frame(width: 420)
+            .padding(20)
+            .background(Color(.systemBackground))
+            .environmentObject(lifeStore)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage, let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        let name = "\(navTitle)_\(Self.stampFmt.string(from: Date())).jpg"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do {
+            try data.write(to: url)
+            shareItem = CardShareURL(url: url)
+        } catch { }
     }
 
     var body: some View {
@@ -2570,11 +2599,17 @@ struct SubordinateItemCard: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
-                ToolbarItem(placement: .topBarTrailing) { Button("編輯") { showEdit = true }.bold().foregroundStyle(.green) }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 16) {
+                        Button { shareJPG() } label: { Image(systemName: "square.and.arrow.up") }
+                        Button("編輯") { showEdit = true }.bold().foregroundStyle(.green)
+                    }
+                }
             }
             .sheet(isPresented: $showEdit) { editor }
             .sheet(item: $openSub) { s in SubordinateDetailView(subordinate: s) }
             .sheet(item: $openCard) { box in BusinessCardDetailView(cardId: box.id) }
+            .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
             .environment(\.openURL, OpenURLAction { url in handleMention(url) })
         }
     }
