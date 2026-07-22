@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.44", build: 697, date: "2026/07/22", notes: [
+            "【功能】部屬卡片新增「執掌」分頁（第三個 Tab，與主動性／潛力性並列）：記錄部屬管理的設備與其保養/警報歷史。① 執掌設備清單：可新增多台設備（名稱＋備註），每台設備可登錄多筆預防保養（PM）記錄（日期＋保養內容）與多筆警報記錄（發生時間精確到時分＋警報內容）；設備列即時彙總 PM 次數、警報次數、近 30 天警報次數與上次 PM 日期。② 頁面下方新增「PM／警報時間軸」：把所有設備的 PM（綠色扳手節點）與警報（紅色鈴鐺節點）合併成單一時間軸（新到舊），每筆警報並自動標示「PM 後 N 天」（距同一設備上一次 PM 的天數），一眼看出保養與警報的相關性；附圖例（綠＝PM、紅＝警報）。③ 資料層：Subordinate 新增 equipments（[ManagedEquipment]，含 EquipmentPMRecord／EquipmentAlarm 子模型，逐元素容錯解碼），隨既有部屬資料一併走 iCloud 同步／完整備份／部屬單獨匯出，合併匯入時既有部屬依 id 補進新設備。④ 同步修正 AddSubordinateView（編輯部屬基本資料）重建 Subordinate 時帶回既有 equipments，避免編輯姓名/部門等基本欄位時執掌資料被空陣列覆蓋。新增檔案 SubordinateEquipmentView.swift（清單章節／時間軸章節／設備編輯 Sheet）。"
+        ]),
         ChangelogEntry(version: "24.43", build: 696, date: "2026/07/21", notes: [
             "【修復】合併匯入時，既有家庭成員的疫苗接種紀錄（及其他子項目）整筆被丟棄：匯出端本身沒有問題（FamilyMember.encode 已含 vaccinations，JSON 備份檔內確實帶有疫苗資料），問題出在 UnifiedImporter 的「合併」模式——familyMembers 過去用 mergeItems 以整筆成員為單位去重，只要匯入檔裡的成員 id 在本機已存在（例如兩台裝置都有同一位兒子），整筆傳入資料連同疫苗接種、兒女記錄、日常記錄、家庭活動、相簿等所有子項目一起被靜默捨棄，於是「匯出有帶、合併匯入後卻看不到」。比照部屬（subordinates）既有的深度合併寫法改寫：既有成員（同 id）改為逐類子項目補進本機缺少的資料（childRecords／dailyRecords／familyEvents／familyPhotos 依 id 去重新增；疫苗接種依劑次 scheduleId 對應——本機已有該劑紀錄則保留本機、僅在本機缺施打日期或備註時補上，本機沒有的劑次整筆帶入），基本欄位（生日／出生年）僅在本機空缺時補上、不覆蓋本機既有資料；不存在的成員維持整筆新增。完整備份（FullBackup.restore）重用同一套 UnifiedImporter，一併修復。另將部屬合併區塊內的局部 appendNewByID 提升為 UnifiedImporter 私有共用 helper，供家庭成員與部屬兩處深度合併共用。「取代」模式行為不變。"
         ]),

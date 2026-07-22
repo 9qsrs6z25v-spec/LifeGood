@@ -602,6 +602,7 @@ enum UnifiedImporter {
                         appendNewByID(&s.meetings, inc.meetings)
                         appendNewByID(&s.tasks,    inc.tasks)
                         appendNewByID(&s.weeklyReports, inc.weeklyReports)
+                        appendNewByID(&s.equipments, inc.equipments)
                         for sh in inc.shifts where !s.shifts.contains(where: { cal.isDate($0.date, inSameDayAs: sh.date) }) {
                             s.shifts.append(sh)
                         }
@@ -728,6 +729,7 @@ enum SubordinateImporter {
                     r.tasksMerged    += appendNew(&s.tasks,    inc.tasks)
                     r.reportsMerged  += appendNew(&s.weeklyReports, inc.weeklyReports)
                     r.shiftsMerged   += appendNewShifts(&s.shifts, inc.shifts)
+                    _ = appendNew(&s.equipments, inc.equipments)
                     if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
                     if s.joinDate == nil { s.joinDate = inc.joinDate }
                     subs[idx] = s

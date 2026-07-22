@@ -259,7 +259,7 @@ struct SubordinateDetailView: View {
     // Tab 區塊進場旗標：切換 Tab 時重置並重播
     @State private var tabSectionsAppeared = false
 
-    enum DetailTab: String, CaseIterable { case daily = "主動性"; case rating = "潛力性" }
+    enum DetailTab: String, CaseIterable { case daily = "主動性"; case rating = "潛力性"; case duty = "執掌" }
     @State private var detailTab: DetailTab = .daily
     // matchedGeometryEffect：Tab 指示器平滑滑動（對齊 RealEstateDetailView / ChildDetailView 規格）
     @Namespace private var tabNamespace
@@ -311,11 +311,11 @@ struct SubordinateDetailView: View {
                                 }
                             } label: {
                                 HStack(spacing: 5) {
-                                    Image(systemName: tab == .daily ? "person.2.fill" : "star.fill")
+                                    Image(systemName: tabIcon(tab))
                                         .font(.caption2)
                                     Text(tab.rawValue)
                                         .font(.subheadline.weight(.semibold))
-                                    Text("\(tab == .daily ? subordinate.proactivityScore(mentionedCount: mentionedItemsCache.count) : subordinate.potentialScore)")
+                                    Text("\(tabBadgeValue(tab, mentionedCount: mentionedItemsCache.count))")
                                         .font(.caption.weight(.bold))
                                 }
                                 .padding(.horizontal, 16)
@@ -367,6 +367,15 @@ struct SubordinateDetailView: View {
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.13), value: tabSectionsAppeared)
+                    } else if detailTab == .duty {
+                        SubordinateEquipmentSection(subordinateId: subordinateId)
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.00), value: tabSectionsAppeared)
+                        SubordinateEquipmentTimelineSection(subordinateId: subordinateId)
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05), value: tabSectionsAppeared)
                     } else {
                         proConSection
                             .opacity(tabSectionsAppeared ? 1 : 0)
@@ -1340,6 +1349,24 @@ struct SubordinateDetailView: View {
         switch tab {
         case .daily: return Color(red: 0.22, green: 0.53, blue: 0.98)   // 藍
         case .rating: return Color(red: 0.96, green: 0.55, blue: 0.18)  // 橘
+        case .duty: return Color(red: 0.18, green: 0.62, blue: 0.60)    // 藍綠
+        }
+    }
+
+    private func tabIcon(_ tab: DetailTab) -> String {
+        switch tab {
+        case .daily: return "person.2.fill"
+        case .rating: return "star.fill"
+        case .duty: return "wrench.and.screwdriver.fill"
+        }
+    }
+
+    /// Tab 徽章數字：主動性/潛力性顯示分數，執掌顯示設備台數
+    private func tabBadgeValue(_ tab: DetailTab, mentionedCount: Int) -> Int {
+        switch tab {
+        case .daily: return subordinate.proactivityScore(mentionedCount: mentionedCount)
+        case .rating: return subordinate.potentialScore
+        case .duty: return subordinate.equipments.count
         }
     }
 

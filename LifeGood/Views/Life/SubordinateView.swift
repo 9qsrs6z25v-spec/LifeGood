@@ -979,7 +979,9 @@ struct AddSubordinateView: View {
             // 帶回既有班別，避免編輯部屬後排好的班被清掉
             shifts: editing?.shifts ?? [],
             plantArea: hasPlantArea ? plantArea.trimmingCharacters(in: .whitespaces) : "",
-            weeklyReports: editing?.weeklyReports ?? []
+            weeklyReports: editing?.weeklyReports ?? [],
+            // 帶回既有執掌設備（PM/警報記錄），避免編輯基本資料時被空陣列覆蓋
+            equipments: editing?.equipments ?? []
         )
         if editing != nil { lifeStore.update(item) } else { lifeStore.add(item) }
         dismiss()

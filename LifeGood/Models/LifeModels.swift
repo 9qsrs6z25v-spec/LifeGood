@@ -1260,17 +1260,21 @@ struct Subordinate: Identifiable, Codable {
     var plantArea: String
     /// 週報題目（可勾選完成；完成數併入主動性評分）
     var weeklyReports: [WeeklyReport]
+    /// 執掌設備（含預防保養 PM 記錄與警報記錄）
+    var equipments: [ManagedEquipment]
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
          department: String = "", note: String = "", gradeTitleId: UUID? = nil,
          departmentId: UUID? = nil, records: [SubordinateRecord] = [], joinDate: Date? = nil,
          meetings: [SubordinateMeeting] = [], tasks: [SubordinateTask] = [],
-         shifts: [SubordinateShift] = [], plantArea: String = "", weeklyReports: [WeeklyReport] = []) {
+         shifts: [SubordinateShift] = [], plantArea: String = "", weeklyReports: [WeeklyReport] = [],
+         equipments: [ManagedEquipment] = []) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
         self.departmentId = departmentId; self.records = records; self.joinDate = joinDate
         self.meetings = meetings; self.tasks = tasks; self.shifts = shifts
         self.plantArea = plantArea; self.weeklyReports = weeklyReports
+        self.equipments = equipments
     }
 
     init(from decoder: Decoder) throws {
@@ -1291,6 +1295,64 @@ struct Subordinate: Identifiable, Codable {
         shifts = (try? c.decode(LossyArray<SubordinateShift>.self, forKey: .shifts))?.elements ?? []
         plantArea = (try? c.decode(String.self, forKey: .plantArea)) ?? ""
         weeklyReports = (try? c.decode(LossyArray<WeeklyReport>.self, forKey: .weeklyReports))?.elements ?? []
+        equipments = (try? c.decode(LossyArray<ManagedEquipment>.self, forKey: .equipments))?.elements ?? []
+    }
+}
+
+// MARK: - 部屬執掌設備（含 PM 保養與警報記錄）
+
+/// 部屬管理（執掌）的設備：記錄預防保養（PM）時間與警報事件，
+/// 供部屬卡片「執掌」分頁以時間軸並列檢視 PM 與警報的相關性。
+struct ManagedEquipment: Identifiable, Codable {
+    let id: UUID
+    /// 設備名稱（如：CVD-01、冰機 A）
+    var name: String
+    /// 備註（位置、型號等）
+    var note: String
+    /// 預防保養（PM）記錄
+    var pmRecords: [EquipmentPMRecord]
+    /// 警報記錄
+    var alarms: [EquipmentAlarm]
+
+    init(id: UUID = UUID(), name: String = "", note: String = "",
+         pmRecords: [EquipmentPMRecord] = [], alarms: [EquipmentAlarm] = []) {
+        self.id = id; self.name = name; self.note = note
+        self.pmRecords = pmRecords; self.alarms = alarms
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        pmRecords = (try? c.decode(LossyArray<EquipmentPMRecord>.self, forKey: .pmRecords))?.elements ?? []
+        alarms = (try? c.decode(LossyArray<EquipmentAlarm>.self, forKey: .alarms))?.elements ?? []
+    }
+    private enum CodingKeys: String, CodingKey { case id, name, note, pmRecords, alarms }
+}
+
+/// 單筆預防保養（PM）記錄。
+struct EquipmentPMRecord: Identifiable, Codable {
+    let id: UUID
+    var date: Date
+    /// 保養內容／項目（選填）
+    var note: String
+
+    init(id: UUID = UUID(), date: Date = Date(), note: String = "") {
+        self.id = id; self.date = date; self.note = note
+    }
+}
+
+/// 單筆警報記錄。
+struct EquipmentAlarm: Identifiable, Codable {
+    let id: UUID
+    /// 警報發生時間（含時分）
+    var date: Date
+    /// 警報內容
+    var content: String
+
+    init(id: UUID = UUID(), date: Date = Date(), content: String = "") {
+        self.id = id; self.date = date; self.content = content
     }
 }
 
