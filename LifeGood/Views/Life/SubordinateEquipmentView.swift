@@ -120,7 +120,7 @@ struct SubordinateEquipmentSection: View {
                             .foregroundStyle(.green)
                         Label("警報 \(eq.alarms.count)", systemImage: "bell.badge.fill")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(eq.alarms.isEmpty ? .secondary : .red)
+                            .foregroundStyle(eq.alarms.isEmpty ? Color.secondary : Color.red)
                         if recentAlarms > 0 {
                             Text("30天內 \(recentAlarms) 次")
                                 .font(.system(size: 9, weight: .bold))

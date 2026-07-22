@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.46", build: 699, date: "2026/07/22", notes: [
+            "【修復編譯錯誤】部屬執掌設備清單（SubordinateEquipmentView.swift:123）：設備列「警報 N」標籤的 .foregroundStyle(eq.alarms.isEmpty ? .secondary : .red) 三元運算式中，Swift 型別推論把 .secondary 推成 HierarchicalShapeStyle，而 .red 在該型別上不存在，兩個分支型別無法統一，Xcode 回報「Member 'red' in 'HierarchicalShapeStyle'」與「Static property 'red' requires the types 'HierarchicalShapeStyle' and 'Color' be equivalent」兩條錯誤。改為兩側都明確標注 Color（Color.secondary : Color.red），顯示效果完全不變（無警報＝灰色、有警報＝紅色）。"
+        ]),
         ChangelogEntry(version: "24.45", build: 698, date: "2026/07/22", notes: [
             "【功能】部屬項目預覽卡（SubordinateItemCard）右上角新增「分享」按鈕：點開部屬卡片的會議（以及任務／報告／請假／紀錄等所有同款預覽卡）後，可一鍵把卡片內容（標題、會議時間/長度、議程項目與完成狀態、備註等完整畫面）渲染成高解析 JPG 圖片，透過系統分享面板傳給其他人（LINE／訊息／郵件／存到相簿等）。實作對齊 TalentMatrixView.exportJPG 既有規格：ImageRenderer 以固定 420pt 寬、3x 縮放渲染靜態版面，寫入暫存目錄後以既有 ShareSheet（UIActivityViewController 包裝）開啟分享；檔名帶項目類型與時間戳（如「會議_20260722_1030.jpg」）。分享按鈕與既有「編輯」按鈕並列於導覽列右上角，卡片其餘互動（議程項目勾選、標註人員點擊、編輯）行為不變。"
         ]),
