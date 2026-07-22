@@ -1449,32 +1449,38 @@ struct SubordinateDetailView: View {
 
         switch detailTab {
         case .daily:
-            let reports = sub.weeklyReports.filter { !$0.isCompleted }
+            // 含已完成事項一併匯出：✅/⬜️ 並列，完成者附完成時間
+            let reports = sub.weeklyReports
             if !reports.isEmpty {
-                lines.append(""); lines.append("📄 待完成報告（\(reports.count)）")
+                let done = reports.filter(\.isCompleted).count
+                lines.append(""); lines.append("📄 報告（\(done)/\(reports.count) 完成）")
                 for r in reports.sorted(by: { $0.date > $1.date }) {
-                    lines.append("⬜️ \(r.topic.isEmpty ? "未命名報告" : r.topic)｜\(formatDate(r.date))")
+                    var row = "\(r.isCompleted ? "✅" : "⬜️") \(r.topic.isEmpty ? "未命名報告" : r.topic)｜\(formatDate(r.date))"
+                    if r.isCompleted, let at = r.completedAt { row += "｜🏁 \(formatDate(at))" }
+                    lines.append(row)
                 }
             }
-            let pendingMeetings = sub.meetings.filter { m in m.items.contains { !$0.isCompleted } || m.items.isEmpty }
-            if !pendingMeetings.isEmpty {
+            if !sub.meetings.isEmpty {
                 lines.append(""); lines.append("👥 會議")
-                for m in pendingMeetings.sorted(by: { $0.date > $1.date }) {
+                for m in sub.meetings.sorted(by: { $0.date > $1.date }) {
                     let done = m.items.filter(\.isCompleted).count
                     lines.append("• \(m.topic.isEmpty ? "未命名會議" : m.topic)｜\(formatDateTime(m.date))\(m.items.isEmpty ? "" : "｜議程 \(done)/\(m.items.count)")")
-                    for item in m.items where !item.isCompleted {
-                        var row = "　⬜️ \(item.content.isEmpty ? "未填內容" : item.content)"
-                        if let due = item.dueDate { row += "｜⏰ \(formatDate(due))" }
+                    for item in m.items {
+                        var row = "　\(item.isCompleted ? "✅" : "⬜️") \(item.content.isEmpty ? "未填內容" : item.content)"
+                        if item.isCompleted, let at = item.completedAt { row += "｜🏁 \(formatDate(at))" }
+                        else if let due = item.dueDate { row += "｜⏰ \(formatDate(due))" }
                         lines.append(row)
                     }
                 }
             }
-            let tasks = sub.tasks.filter { !$0.isCompleted }
+            let tasks = sub.tasks
             if !tasks.isEmpty {
-                lines.append(""); lines.append("📋 待完成任務（\(tasks.count)）")
+                let done = tasks.filter(\.isCompleted).count
+                lines.append(""); lines.append("📋 任務（\(done)/\(tasks.count) 完成）")
                 for t in tasks.sorted(by: { $0.date > $1.date }) {
-                    var row = "⬜️ \(t.topic.isEmpty ? "未命名任務" : t.topic)"
-                    if let due = t.dueDate { row += "｜⏰ 截止 \(formatDate(due))" }
+                    var row = "\(t.isCompleted ? "✅" : "⬜️") \(t.topic.isEmpty ? "未命名任務" : t.topic)"
+                    if t.isCompleted, let at = t.completedAt { row += "｜🏁 \(formatDate(at))" }
+                    else if let due = t.dueDate { row += "｜⏰ 截止 \(formatDate(due))" }
                     lines.append(row)
                 }
             }
