@@ -219,17 +219,29 @@ struct StockView: View {
         var success = 0
         var fail = 0
 
+        // 平行送出每檔股票的報價請求：原本 for-in + await 逐檔序列等待，N 檔股票要等 N 次
+        // 網路往返（fetchPrice 內部 tse 抓不到還會再打一次 otc），使用者常要等上好幾秒才會看到
+        // 「更新報價中」結束。改用 TaskGroup 平行發送，總耗時趨近最慢的單一檔位；
+        // for await 消費結果的迴圈仍在呼叫端（@MainActor）執行，逐筆寫入 fetchStatus 保留
+        // 原本「即時角標回饋」的行為，也不需要額外跨 actor 的 MainActor.run。
         var priceUpdates: [UUID: Double] = [:]
-        for stock in targets {
-            if let price = await fetchPrice(symbol: stock.symbol) {
-                priceUpdates[stock.id] = price
-                // fetchStatus 逐筆更新提供即時角標回饋（綠/紅點），
-                // 本次 @State 更新不引發 store 序列化，成本可接受
-                fetchStatus[stock.id] = true
-                success += 1
-            } else {
-                fetchStatus[stock.id] = false
-                fail += 1
+        await withTaskGroup(of: (UUID, Double?).self) { group in
+            for stock in targets {
+                let id = stock.id
+                let symbol = stock.symbol
+                group.addTask {
+                    (id, await self.fetchPrice(symbol: symbol))
+                }
+            }
+            for await (id, price) in group {
+                if let price {
+                    priceUpdates[id] = price
+                    fetchStatus[id] = true
+                    success += 1
+                } else {
+                    fetchStatus[id] = false
+                    fail += 1
+                }
             }
         }
         // 批次套用全部現價：單次 @Published → 單次重繪 + 單次 JSON 序列化 + 單次 CloudKit push，

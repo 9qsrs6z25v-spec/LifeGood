@@ -31,15 +31,19 @@ final class InvoiceCategorizer: ObservableObject {
 
     /// 依 header / items 推斷分類；找不到回 .other
     func categorize(seller: String, items: [EInvoiceItem]) -> VariableCategory {
+        // 使用者自訂規則永遠優先於預設規則比對，否則使用者新增的規則會被 addRule 附加在
+        // 陣列尾端、排在同關鍵字的預設規則之後，categorize() 取第一個命中就永遠回傳預設分類，
+        // 使用者規則形同無效卻毫無提示。
+        let orderedRules = rules.filter(\.isUserDefined) + rules.filter { !$0.isUserDefined }
         // 1. 優先比對商家
-        for rule in rules where rule.matchSeller && !rule.keyword.isEmpty {
+        for rule in orderedRules where rule.matchSeller && !rule.keyword.isEmpty {
             if seller.localizedCaseInsensitiveContains(rule.keyword) {
                 return rule.category
             }
         }
         // 2. 再比對品項
         for item in items {
-            for rule in rules where rule.matchItem && !rule.keyword.isEmpty {
+            for rule in orderedRules where rule.matchItem && !rule.keyword.isEmpty {
                 if item.description.localizedCaseInsensitiveContains(rule.keyword) {
                     return rule.category
                 }

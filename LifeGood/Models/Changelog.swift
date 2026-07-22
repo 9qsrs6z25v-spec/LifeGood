@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.51", build: 704, date: "2026/07/22", notes: [
+            "【靜態除錯 v24.51】三路並行複查全部 86 個 Swift 檔（Models／Finance 分頁／人生分頁），修復 4 處真實問題：① NotificationManager 月/年重複事件的通知時間會漂移：advanceToNextOccurrence 找到「第一個未來次數」後，若該次數本身已被 Calendar 夾過（例如每月 31 號事件跳到 2 月被夾成 28 號），enumerateFires 誤把這個被夾過的日期當成新錨點繼續往後推算，導致後續每一期都改成從 28 號起算（3 月變 28 號），與行事曆畫面永遠錨定在原始 31 號算出的日期脫勾，通知時間與畫面顯示的日期對不上。改為 enumerateFires 一律以原始 baseFire 為錨點、只帶入起始期數索引往後推算。② InvoiceCategorizer：使用者新增的電子發票分類規則永遠排在預設規則之後（addRule 只會 append），若關鍵字與內建規則重複，categorize() 取第一個命中就永遠回傳預設分類，使用者規則形同無效且無任何提示；改為比對時使用者自訂規則優先於預設規則。③ AIVariableCategoryMapper 的中文分類字串比對第 4 步用 for-in 直接疊代 Dictionary 做子字串比對，Swift Dictionary 疊代順序每次啟動隨機，AI 回傳含多個關鍵字的複合字串（如「交通/稅費」）可能因疊代順序不同、在不同次啟動被分類成不同類別；改為依關鍵字長度由長到短排序後比對，結果穩定且優先命中較具體的關鍵字。④ MainTabView 浮動新增按鈕（FAB）拖曳時的畫面閃爍：拖曳手勢的 onChanged 幾乎每個像素觸發一次，但拖曳狀態（fabOffset／fabDragOffset／showQuickAdd）原本是 MainTabView 自己的 @State，即使已拆成 computed var，SwiftUI 仍視為同一棵樹整個重新求值，連帶重算頂部子功能列與底部 Tab Bar，拖曳「+」時明顯掉幀閃爍；拆成獨立的 FloatingActionButtonView（自己的 @State），讓 SwiftUI 的 diffing 把拖曳更新隔離在按鈕本身。同時把 StockView.refreshAllPrices() 的逐檔序列 await 改為 TaskGroup 平行送出報價請求，多檔股票更新報價的等待時間從「N 次序列網路往返」降到「最慢一檔的時間」，並維持原有逐筆即時角標回饋與批次寫入行為不變。CloudKit 30 秒節流／2 秒防抖、Life 分頁 30 個檔案複查後未發現新問題（既有 debounce／快取／off-main-thread 圖片載入等防護已到位）。"
+        ]),
         ChangelogEntry(version: "24.50", build: 703, date: "2026/07/22", notes: [
             "【功能】部屬總覽（SubordinateOverviewView）新增「文字匯出」分享：右上角「＋」選單旁新增分享按鈕，一鍵把整頁總覽組成 Emoji 排版純文字並開啟系統分享面板（LINE／訊息貼上即完整顯示）。內容對齊頁面結構且包含已完成項目：📊 標題列（選取日期）→ 🌴 當日請假（姓名/假別/時數）→ 📄 報告（完成進度 X/Y，✅/⬜️ 並列，逾期標 ⚠️、已完成附 🏁 完成日）→ 👥 當日會議（時間/長度/議程進度，議程項目 ✅/⬜️ 全列、已完成附 🏁、未完成附 ⏰ 截止）→ 📋 未完成任務（跨所有日期，附截止日）→ 🗂 未完成會議條目（跨所有會議）→ ✅ 已完成區（與頁面底部收合卡同內容：報告/會議條目/任務依完成時間新到舊，🏁 日期＋類型 Emoji＋標題＋部屬名）。排版規格對齊部屬卡片 v24.48/24.49 的文字匯出（粗分隔線、欄位 Emoji、縮排子行）。"
         ]),

@@ -710,8 +710,13 @@ enum AIVariableCategoryMapper {
         if let lc = table[lower] { return lc }
 
         // 4) 部分包含（AI 可能回傳「飲食/餐飲」這樣的複合字）
-        for (key, value) in table {
-            if normalized.contains(key) || lower.contains(key) { return value }
+        // Dictionary 的疊代順序是每次啟動隨機的（雜湊種子隨行程重啟變動），若直接對 table
+        // 做 for-in，遇到同時包含多個 key 的複合字（例如「交通/稅費」同時含「交通」與「稅」）
+        // 會依當次隨機順序回傳不同分類，同一段 AI 回應在不同次啟動可能分到不同類別。
+        // 改為依關鍵字長度由長到短排序後比對，確保結果穩定且優先命中較具體的關鍵字。
+        let orderedKeys = table.keys.sorted { $0.count > $1.count }
+        for key in orderedKeys {
+            if normalized.contains(key) || lower.contains(key) { return table[key] }
         }
         return nil
     }

@@ -273,11 +273,8 @@ struct MainTabView: View {
         return list
     }
 
-    @State private var showQuickAdd = false
     @State private var showAddIncome = false
     @State private var showAddExpense = false
-    @State private var fabOffset: CGSize = .zero
-    @State private var fabDragOffset: CGSize = .zero
 
     // MARK: - 語音 AI 記帳
     @StateObject private var aiSettings = AISettingsStore.shared
@@ -1198,125 +1195,7 @@ struct MainTabView: View {
     // MARK: - 浮動新增按鈕
 
     private var floatingActionButton: some View {
-        GeometryReader { geo in
-            // 基本佈局常數
-            let fabWidth: CGFloat = 130   // 顯示「新增收支」時的膠囊寬度（用於拖曳邊界）
-            let fabHeight: CGFloat = 52
-            let hPad: CGFloat = 20         // 距左/右邊距
-            let bottomPad: CGFloat = 80    // 距下緣（避開底部 Tab Bar）
-            let topMargin: CGFloat = 120   // 不可拖至此線以上（避開頂部子功能列）
-
-            // 拖曳上下界（offset 相對於 bottom-right 自然錨點）
-            let leftLimit  = -(geo.size.width  - fabWidth  - 2 * hPad)
-            let topLimit   = -(geo.size.height - fabHeight - bottomPad - topMargin)
-
-            let liveX = clamp(fabOffset.width  + fabDragOffset.width,  leftLimit, 0)
-            let liveY = clamp(fabOffset.height + fabDragOffset.height, topLimit,  0)
-
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    fabStack
-                        .offset(x: liveX, y: liveY)
-                        .gesture(
-                            DragGesture()
-                                .onChanged { v in
-                                    if showQuickAdd { showQuickAdd = false } // 拖曳時自動收起選單
-                                    fabDragOffset = v.translation
-                                }
-                                .onEnded { v in
-                                    let finalX = clamp(fabOffset.width  + v.translation.width,  leftLimit, 0)
-                                    let finalY = clamp(fabOffset.height + v.translation.height, topLimit,  0)
-                                    // 水平吸邊：靠近哪邊就吸過去
-                                    let snappedX: CGFloat = finalX < (leftLimit / 2) ? leftLimit : 0
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
-                                        fabOffset = CGSize(width: snappedX, height: finalY)
-                                        fabDragOffset = .zero
-                                    }
-                                }
-                        )
-                        .padding(.trailing, hPad)
-                        .padding(.bottom, bottomPad)
-                }
-            }
-        }
-        .ignoresSafeArea(.keyboard)
-    }
-
-    // UI美化：彈出選單加粗字重 + 更大內距 + 強化彩色陰影；主 FAB 雙層 shadow 加綠色光暈；
-    //         transition 改用 asymmetric scale(anchor:.bottom) 讓選單從 FAB 方向彈出/縮回
-    /// FAB + 彈出選單，獨立出來方便閱讀
-    private var fabStack: some View {
-        ZStack(alignment: .bottom) {
-            if showQuickAdd {
-                VStack(spacing: 10) {
-                    Button {
-                        showQuickAdd = false
-                        showAddIncome = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("新增收入")
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 18).padding(.vertical, 12)
-                        .background(Color.green)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                        .shadow(color: .green.opacity(0.45), radius: 10, y: 5)
-                    }
-
-                    Button {
-                        showQuickAdd = false
-                        showAddExpense = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "minus.circle.fill")
-                            Text("新增支出")
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 18).padding(.vertical, 12)
-                        .background(Color.red)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                        .shadow(color: .red.opacity(0.45), radius: 10, y: 5)
-                    }
-                }
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity),
-                    removal: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity)
-                ))
-                .padding(.bottom, 64)
-            }
-
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showQuickAdd.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: showQuickAdd ? "xmark" : "plus")
-                        .font(.title3.weight(.bold))
-                        .rotationEffect(.degrees(showQuickAdd ? 45 : 0))
-                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showQuickAdd)
-                    if !showQuickAdd {
-                        Text("新增收支")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, showQuickAdd ? 0 : 14)
-                .frame(minWidth: 52, minHeight: 52)
-                .background(showQuickAdd ? Color.secondary : Color.green)
-                .clipShape(Capsule())
-                // 深色基礎陰影 + 綠色光暈（展開時光暈消隱）
-                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
-                .shadow(color: showQuickAdd ? .clear : Color.green.opacity(0.38), radius: 14, y: 6)
-            }
-        }
-    }
-
-    private func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
-        min(upper, max(lower, value))
+        FloatingActionButtonView(showAddIncome: $showAddIncome, showAddExpense: $showAddExpense)
     }
 
     // MARK: - 內容區
@@ -1477,4 +1356,143 @@ struct MainTabView: View {
         .environmentObject(LifeStore())
         .environmentObject(SubscriptionManager.shared)
         .environmentObject(EInvoiceSyncManager.shared)
+}
+
+// MARK: - 浮動新增按鈕（獨立 View）
+//
+// 拖曳手勢的 onChanged 幾乎每個像素都會觸發一次；若拖曳狀態仍留在 MainTabView 自己的
+// @State 上，即使把 UI 拆成 computed var（如原本的 floatingActionButton／fabStack），
+// SwiftUI 仍會把整個 MainTabView.body 視為同一棵樹重新求值——連帶重算 topSubFeatureBar、
+// bottomTabBar 等整個分頁殼層，在使用者拖曳「+」按鈕時造成明顯畫面閃爍／掉幀。
+// 拆成獨立的 View struct、把拖曳相關 @State 收在這個 struct 內部，才能讓 SwiftUI 的
+// diffing 把它當成獨立子樹：拖曳只會重繪這個按鈕本身，不影響上層畫面。
+private struct FloatingActionButtonView: View {
+    @Binding var showAddIncome: Bool
+    @Binding var showAddExpense: Bool
+
+    @State private var showQuickAdd = false
+    @State private var fabOffset: CGSize = .zero
+    @State private var fabDragOffset: CGSize = .zero
+
+    var body: some View {
+        GeometryReader { geo in
+            // 基本佈局常數
+            let fabWidth: CGFloat = 130   // 顯示「新增收支」時的膠囊寬度（用於拖曳邊界）
+            let fabHeight: CGFloat = 52
+            let hPad: CGFloat = 20         // 距左/右邊距
+            let bottomPad: CGFloat = 80    // 距下緣（避開底部 Tab Bar）
+            let topMargin: CGFloat = 120   // 不可拖至此線以上（避開頂部子功能列）
+
+            // 拖曳上下界（offset 相對於 bottom-right 自然錨點）
+            let leftLimit  = -(geo.size.width  - fabWidth  - 2 * hPad)
+            let topLimit   = -(geo.size.height - fabHeight - bottomPad - topMargin)
+
+            let liveX = clamp(fabOffset.width  + fabDragOffset.width,  leftLimit, 0)
+            let liveY = clamp(fabOffset.height + fabDragOffset.height, topLimit,  0)
+
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    fabStack
+                        .offset(x: liveX, y: liveY)
+                        .gesture(
+                            DragGesture()
+                                .onChanged { v in
+                                    if showQuickAdd { showQuickAdd = false } // 拖曳時自動收起選單
+                                    fabDragOffset = v.translation
+                                }
+                                .onEnded { v in
+                                    let finalX = clamp(fabOffset.width  + v.translation.width,  leftLimit, 0)
+                                    let finalY = clamp(fabOffset.height + v.translation.height, topLimit,  0)
+                                    // 水平吸邊：靠近哪邊就吸過去
+                                    let snappedX: CGFloat = finalX < (leftLimit / 2) ? leftLimit : 0
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
+                                        fabOffset = CGSize(width: snappedX, height: finalY)
+                                        fabDragOffset = .zero
+                                    }
+                                }
+                        )
+                        .padding(.trailing, hPad)
+                        .padding(.bottom, bottomPad)
+                }
+            }
+        }
+        .ignoresSafeArea(.keyboard)
+    }
+
+    // UI美化：彈出選單加粗字重 + 更大內距 + 強化彩色陰影；主 FAB 雙層 shadow 加綠色光暈；
+    //         transition 改用 asymmetric scale(anchor:.bottom) 讓選單從 FAB 方向彈出/縮回
+    /// FAB + 彈出選單，獨立出來方便閱讀
+    private var fabStack: some View {
+        ZStack(alignment: .bottom) {
+            if showQuickAdd {
+                VStack(spacing: 10) {
+                    Button {
+                        showQuickAdd = false
+                        showAddIncome = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                            Text("新增收入")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18).padding(.vertical, 12)
+                        .background(Color.green)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                        .shadow(color: .green.opacity(0.45), radius: 10, y: 5)
+                    }
+
+                    Button {
+                        showQuickAdd = false
+                        showAddExpense = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "minus.circle.fill")
+                            Text("新增支出")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18).padding(.vertical, 12)
+                        .background(Color.red)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                        .shadow(color: .red.opacity(0.45), radius: 10, y: 5)
+                    }
+                }
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity),
+                    removal: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity)
+                ))
+                .padding(.bottom, 64)
+            }
+
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showQuickAdd.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: showQuickAdd ? "xmark" : "plus")
+                        .font(.title3.weight(.bold))
+                        .rotationEffect(.degrees(showQuickAdd ? 45 : 0))
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showQuickAdd)
+                    if !showQuickAdd {
+                        Text("新增收支")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, showQuickAdd ? 0 : 14)
+                .frame(minWidth: 52, minHeight: 52)
+                .background(showQuickAdd ? Color.secondary : Color.green)
+                .clipShape(Capsule())
+                // 深色基礎陰影 + 綠色光暈（展開時光暈消隱）
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+                .shadow(color: showQuickAdd ? .clear : Color.green.opacity(0.38), radius: 14, y: 6)
+            }
+        }
+    }
+
+    private func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
+        min(upper, max(lower, value))
+    }
 }
