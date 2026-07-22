@@ -62,6 +62,11 @@ struct TaxOverviewView: View {
     @State private var taxRowsAppeared = false
     @State private var checklistRowsAppeared = false
     @State private var tipsRowsAppeared = false
+    /// 年份切換進場動畫延遲任務：快速連續切換年份會疊出多個 asyncAfter，
+    /// 較舊的一個可能在較新的已把旗標設回 true 之後才觸發，動畫倒退造成閃爍；
+    /// 改用可取消的 Task（比照 MainTabView.micEnterTask 既有寫法），切換時先取消前一個再排新的。
+    @State private var yearNavAnimTask: Task<Void, Never>?
+    @State private var yearChangeRowsTask: Task<Void, Never>?
     // 拆成兩個獨立旗標：taxRecordsSection（稅務紀錄是否為空）與 taxSavingSection
     // （節稅記錄是否為空）是兩個互不相關的條件，常常一個空一個不空。共用同一個
     // @State 時，若其中一個空狀態先掛載並把旗標設成 true，之後另一個空狀態掛載時
@@ -213,7 +218,10 @@ struct TaxOverviewView: View {
                 taxRowsAppeared = false
                 checklistRowsAppeared = false
                 tipsRowsAppeared = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                yearChangeRowsTask?.cancel()
+                yearChangeRowsTask = Task {
+                    try? await Task.sleep(nanoseconds: 80_000_000)
+                    guard !Task.isCancelled else { return }
                     withAnimation(.spring(response: 0.50, dampingFraction: 0.82)) {
                         taxRowsAppeared = true
                         checklistRowsAppeared = true
@@ -222,6 +230,8 @@ struct TaxOverviewView: View {
                 }
             }
             .onDisappear {
+                yearNavAnimTask?.cancel()
+                yearChangeRowsTask?.cancel()
                 heroCardAppeared = false
                 emptyRecordsPulse = false
                 emptySavingPulse = false
@@ -241,7 +251,10 @@ struct TaxOverviewView: View {
                     selectedYear -= 1
                     heroCardAppeared = false
                     monthBarAppeared = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    yearNavAnimTask?.cancel()
+                    yearNavAnimTask = Task {
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                        guard !Task.isCancelled else { return }
                         withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
                             heroCardAppeared = true
                             monthBarAppeared = true
@@ -277,7 +290,10 @@ struct TaxOverviewView: View {
                     selectedYear += 1
                     heroCardAppeared = false
                     monthBarAppeared = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    yearNavAnimTask?.cancel()
+                    yearNavAnimTask = Task {
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                        guard !Task.isCancelled else { return }
                         withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
                             heroCardAppeared = true
                             monthBarAppeared = true

@@ -215,6 +215,7 @@ class FinanceStore: ObservableObject {
 
     func clearAll() {
         isLoading = true
+        for item in realEstates { Self.cleanupRealEstateFiles(item) }
         insurances.removeAll()
         stocks.removeAll()
         vehicles.removeAll()

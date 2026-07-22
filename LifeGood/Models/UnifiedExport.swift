@@ -563,17 +563,70 @@ enum UnifiedImporter {
             finance.insurances.append(contentsOf: newIns)
             result.insurances = newIns.count
 
-            let newStocks = mergeItems(existing: finance.stocks, incoming: payload.finance.stocks)
-            finance.stocks.append(contentsOf: newStocks)
-            result.stocks = newStocks.count
+            // 股票：既有股票（同 id）補進新的交易/股利子項目，不存在的股票整筆新增；
+            // 比照上方家庭成員/部屬的深度合併寫法，避免另一台裝置新增的交易紀錄在合併模式下被丟棄。
+            var stockArr = finance.stocks
+            var newStockCount = 0
+            for inc in payload.finance.stocks {
+                if let idx = stockArr.firstIndex(where: { $0.id == inc.id }) {
+                    var s = stockArr[idx]
+                    appendNewByID(&s.transactions, inc.transactions)
+                    appendNewByID(&s.dividends, inc.dividends)
+                    stockArr[idx] = s
+                } else {
+                    stockArr.append(inc)
+                    newStockCount += 1
+                }
+            }
+            finance.stocks = stockArr
+            result.stocks = newStockCount
 
-            let newVehicles = mergeItems(existing: finance.vehicles, incoming: payload.finance.vehicles)
-            finance.vehicles.append(contentsOf: newVehicles)
-            result.vehicles = newVehicles.count
+            // 車輛：既有車輛補進新的定期/變動支出子項目，不存在的車輛整筆新增。
+            var vehicleArr = finance.vehicles
+            var newVehicleCount = 0
+            for inc in payload.finance.vehicles {
+                if let idx = vehicleArr.firstIndex(where: { $0.id == inc.id }) {
+                    var v = vehicleArr[idx]
+                    appendNewByID(&v.fixedExpenses, inc.fixedExpenses)
+                    appendNewByID(&v.variableExpenses, inc.variableExpenses)
+                    vehicleArr[idx] = v
+                } else {
+                    vehicleArr.append(inc)
+                    newVehicleCount += 1
+                }
+            }
+            finance.vehicles = vehicleArr
+            result.vehicles = newVehicleCount
 
-            let newRE = mergeItems(existing: finance.realEstates, incoming: payload.finance.realEstates)
-            finance.realEstates.append(contentsOf: newRE)
-            result.realEstates = newRE.count
+            // 房地產：既有房地產（同 id）過去整筆被 mergeItems 丟棄，導致對方備份新增的水電繳費、
+            // 裝潢照片、文件等子項目在合併模式下永遠進不來，附件位元組又已被 FullBackup.restore
+            // 無條件寫入磁碟，造成沒有任何項目指向的孤兒檔案；改為既有房地產補進新的子項目。
+            var reArr = finance.realEstates
+            var newRECount = 0
+            for inc in payload.finance.realEstates {
+                if let idx = reArr.firstIndex(where: { $0.id == inc.id }) {
+                    var re = reArr[idx]
+                    appendNewByID(&re.mortgageItems, inc.mortgageItems)
+                    appendNewByID(&re.paidItems, inc.paidItems)
+                    appendNewByID(&re.variableExpenses, inc.variableExpenses)
+                    appendNewByID(&re.elevatorMaintenances, inc.elevatorMaintenances)
+                    appendNewByID(&re.landDeeds, inc.landDeeds)
+                    appendNewByID(&re.buildingDeeds, inc.buildingDeeds)
+                    appendNewByID(&re.floors, inc.floors)
+                    appendNewByID(&re.insuranceItems, inc.insuranceItems)
+                    appendNewByID(&re.propertyAssets, inc.propertyAssets)
+                    appendNewByID(&re.utilityPayments, inc.utilityPayments)
+                    appendNewByID(&re.extraMeters, inc.extraMeters)
+                    appendNewByID(&re.renovationPhotos, inc.renovationPhotos)
+                    appendNewByID(&re.documents, inc.documents)
+                    reArr[idx] = re
+                } else {
+                    reArr.append(inc)
+                    newRECount += 1
+                }
+            }
+            finance.realEstates = reArr
+            result.realEstates = newRECount
 
             let newMs = mergeItems(existing: life.milestones, incoming: payload.life.milestones)
             life.milestones.append(contentsOf: newMs)

@@ -259,6 +259,10 @@ struct SubordinateDetailView: View {
     @State private var headerAppeared = false
     // Tab 區塊進場旗標：切換 Tab 時重置並重播
     @State private var tabSectionsAppeared = false
+    /// tabSectionsAppeared 重播延遲任務：50ms 內快速切換 Tab 會疊出多個 asyncAfter，
+    /// 較舊的一個可能在較新的已把旗標設回 true 之後才觸發，動畫倒退造成閃爍；
+    /// 改用可取消的 Task（比照 MainTabView.micEnterTask 既有寫法），切換時先取消前一個再排新的。
+    @State private var tabSectionsAppearTask: Task<Void, Never>?
 
     enum DetailTab: String, CaseIterable { case daily = "主動性"; case rating = "潛力性"; case duty = "執掌" }
     @State private var detailTab: DetailTab = .daily
@@ -305,7 +309,10 @@ struct SubordinateDetailView: View {
                                 }
                                 // 切換 Tab 時重置進場動畫，讓新 Tab 區塊重新滑入
                                 tabSectionsAppeared = false
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                tabSectionsAppearTask?.cancel()
+                                tabSectionsAppearTask = Task {
+                                    try? await Task.sleep(nanoseconds: 50_000_000)
+                                    guard !Task.isCancelled else { return }
                                     withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
                                         tabSectionsAppeared = true
                                     }

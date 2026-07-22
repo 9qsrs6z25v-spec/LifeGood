@@ -256,7 +256,7 @@ struct AddIncomeView: View {
                             Divider()
                             Toggle("設定收入結束日", isOn: $hasEndDate.animation(.spring(response: 0.3, dampingFraction: 0.85)))
                             if hasEndDate {
-                                DatePicker("結束日期", selection: $endDate, displayedComponents: .date)
+                                DatePicker("結束日期", selection: $endDate, in: date..., displayedComponents: .date)
                                 Picker("結束原因", selection: $endReason) {
                                     ForEach(SalaryEndReason.allCases) { r in
                                         Label(r.rawValue, systemImage: r.icon).tag(r)
