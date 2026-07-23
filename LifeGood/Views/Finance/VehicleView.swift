@@ -69,6 +69,7 @@ struct VehicleView: View {
     @State private var sortOption: VehicleSortOption = .purchasePrice
     @State private var sortAscending = false
     @State private var depreciationEnabled = false
+    @State private var showDepreciationConfirm = false
     @State private var showPremiumAlert = false
     @State private var headerAppeared = false
     @State private var cardsAppeared = false
@@ -239,8 +240,11 @@ struct VehicleView: View {
             .toolbar {
                 ToolbarItem(placement: .bottomBar) {
                     Button {
-                        depreciationEnabled.toggle()
-                        if depreciationEnabled { applyDepreciation() }
+                        if depreciationEnabled {
+                            depreciationEnabled = false
+                        } else {
+                            showDepreciationConfirm = true
+                        }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: depreciationEnabled ? "arrow.down.right.circle.fill" : "arrow.down.right.circle")
@@ -251,6 +255,15 @@ struct VehicleView: View {
                         }
                     }
                 }
+            }
+            .alert("套用折舊估算？", isPresented: $showDepreciationConfirm) {
+                Button("套用", role: .destructive) {
+                    depreciationEnabled = true
+                    applyDepreciation()
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("將以每年 15% 折舊率計算後的金額覆蓋所有車輛目前的「目前估值」，覆蓋後無法復原，請先確認目前估值沒有其他來源的手動紀錄。")
             }
             .onDisappear {
                 headerAppeared = false

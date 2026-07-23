@@ -304,6 +304,7 @@ struct EquipmentEditorSheet: View {
     @State private var note = ""
     @State private var pmRecords: [EquipmentPMRecord] = []
     @State private var alarms: [EquipmentAlarm] = []
+    @State private var isSaving = false
 
     /// 統一 Section 標題（對齊 MeetingEditorSheet.editorSectionHeader 規格）
     private func editorSectionHeader(_ title: String, icon: String, tint: Color) -> some View {
@@ -408,7 +409,7 @@ struct EquipmentEditorSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .onAppear {
@@ -422,7 +423,9 @@ struct EquipmentEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
         let eq = ManagedEquipment(
             id: editing?.id ?? UUID(),
             name: name.trimmingCharacters(in: .whitespaces),

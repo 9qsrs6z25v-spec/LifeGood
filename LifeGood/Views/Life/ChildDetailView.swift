@@ -1063,6 +1063,7 @@ struct DailyRecordEditorSheet: View {
     @State private var foodName = ""
     @State private var sleepEnd = Date()
     @State private var note = ""
+    @State private var isSaving = false
 
     private var canSave: Bool {
         switch type {
@@ -1117,7 +1118,7 @@ struct DailyRecordEditorSheet: View {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green).disabled(!canSave)
+                        .bold().foregroundStyle(.green).disabled(!canSave || isSaving)
                 }
             }
             .onAppear { loadEditing() }
@@ -1140,7 +1141,9 @@ struct DailyRecordEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { dismiss(); return }
+        isSaving = true
         let rec = DailyRecord(
             id: editing?.id ?? UUID(), type: type, date: date,
             milkBrand: type == .milk ? milkBrand.trimmingCharacters(in: .whitespaces) : nil,
@@ -1205,6 +1208,7 @@ struct ChildRecordEditorSheet: View {
     // 較慢完成的前一次選取不該覆蓋較新的結果；用世代編號判斷完成時是否仍是最新一次選取
     // （同型修復見 OrgPersonEditor.photoLoadGeneration）。
     @State private var photoLoadGeneration = 0
+    @State private var isSaving = false
 
     private var canSave: Bool {
         switch type {
@@ -1291,7 +1295,7 @@ struct ChildRecordEditorSheet: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave)
+                    Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave || isSaving)
                 }
             }
             .onAppear { loadEditing() }
@@ -1642,7 +1646,9 @@ struct ChildRecordEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { dismiss(); return }
+        isSaving = true
         // 原始照片與最終結果不同（換照片或移除圖片）才刪除原檔；真正的刪除動作延到這裡才提交，
         // 使用者中途按「取消」不會遺失原本已存在的照片（見 photoItem onChange／移除圖片按鈕註解）。
         if let original = originalPhotoFileName, original != photoFileName {

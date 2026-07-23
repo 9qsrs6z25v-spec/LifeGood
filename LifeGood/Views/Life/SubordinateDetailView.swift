@@ -1622,6 +1622,7 @@ struct RecordEditorSheet: View {
     @State private var severity: MissOpSeverity = .normal
     @State private var leaveType: LeaveType = .personal
     @State private var leaveInfoAppeared = false
+    @State private var isSaving = false
 
     /// 對齊主畫面 colorFor(_:) 主題色，讓編輯頁 Section 色條與列表列行同色系。
     private var accent: Color {
@@ -1780,7 +1781,7 @@ struct RecordEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave)
+                    Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave || isSaving)
                 }
             }
             .onAppear {
@@ -1838,7 +1839,9 @@ struct RecordEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
         let rec = SubordinateRecord(
             id: editing?.id ?? UUID(), type: type,
             content: content.trimmingCharacters(in: .whitespaces),
@@ -2011,6 +2014,7 @@ struct MeetingEditorSheet: View {
     @State private var hasRecurrence = false
     @State private var items: [MeetingItem] = []
     @State private var note = ""
+    @State private var isSaving = false
 
     private var allSubordinates: [Subordinate] { lifeStore.subordinates }
 
@@ -2124,7 +2128,7 @@ struct MeetingEditorSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .onAppear {
@@ -2142,7 +2146,9 @@ struct MeetingEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
         let meeting = SubordinateMeeting(
             id: editing?.id ?? UUID(),
             topic: topic.trimmingCharacters(in: .whitespaces),
@@ -2179,6 +2185,7 @@ struct TaskEditorSheet: View {
     @State private var note = ""
     @State private var isCompleted = false
     @State private var assignedSubId = UUID()   // 指派給哪位部屬（可換人處理）
+    @State private var isSaving = false
 
     /// 統一 Section 標題：4pt 漸層色條 + 圖示 + 粗體文字，對齊 RecordEditorSheet.editorSectionHeader 規格。
     private func editorSectionHeader(_ title: String, icon: String, tint: Color = .cyan) -> some View {
@@ -2258,7 +2265,7 @@ struct TaskEditorSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .onAppear {
@@ -2277,6 +2284,8 @@ struct TaskEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         // 完成時間：原本未完成→改完成時記下現在；維持完成則沿用舊時間；取消完成則清空
         let completedAt: Date? = isCompleted ? (editing?.completedAt ?? Date()) : nil
         let task = SubordinateTask(
@@ -2321,6 +2330,7 @@ struct WeeklyReportEditorSheet: View {
     @State private var date = Date()
     @State private var note = ""
     @State private var isCompleted = false
+    @State private var isSaving = false
 
     /// 統一 Section 標題：4pt 漸層色條 + 圖示 + 粗體文字，對齊 RecordEditorSheet.editorSectionHeader 規格。
     private func editorSectionHeader(_ title: String, icon: String, tint: Color = .purple) -> some View {
@@ -2376,7 +2386,7 @@ struct WeeklyReportEditorSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .onAppear {
@@ -2390,7 +2400,9 @@ struct WeeklyReportEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
         let report = WeeklyReport(
             id: editing?.id ?? UUID(),
             topic: topic.trimmingCharacters(in: .whitespaces),

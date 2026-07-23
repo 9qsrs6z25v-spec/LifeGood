@@ -644,7 +644,13 @@ struct TaxOverviewView: View {
             .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
             .padding(.horizontal)
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                // 與 yearPicker 前後年份切換共用同一個 yearNavAnimTask：避免這裡自己排的
+                // 未持有 token 的 asyncAfter 和年份切換排的 Task 各自獨立觸發，較舊的一個
+                // 在較新的已把 monthBarAppeared 設回 false 之後才觸發，造成進度條動畫倒退閃爍。
+                yearNavAnimTask?.cancel()
+                yearNavAnimTask = Task {
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    guard !Task.isCancelled else { return }
                     monthBarAppeared = true
                 }
             }

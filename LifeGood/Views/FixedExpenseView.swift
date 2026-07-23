@@ -39,6 +39,7 @@ struct FixedExpenseView: View {
     @State private var previewExpense: Expense?
     @State private var headerAppeared = false
     @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
     @State private var categoryListAppeared = false
     @State private var cachedGroupedByCategory: [(key: FixedCategory, value: [Expense])] = []
 
@@ -418,9 +419,15 @@ struct FixedExpenseView: View {
             }
             .onAppear {
                 emptyIconPulse = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyIconPulse = true
                 }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
             }
 
             VStack(spacing: 10) {

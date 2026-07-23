@@ -589,6 +589,7 @@ struct IncomeView: View {
     // MARK: - 空狀態
 
     @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
 
     private var emptyState: some View {
         let isSearching = !searchText.trimmingCharacters(in: .whitespaces).isEmpty
@@ -640,11 +641,17 @@ struct IncomeView: View {
             }
             .onAppear {
                 emptyIconPulse = false
+                emptyPulseTask?.cancel()
                 if !isSearching {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    emptyPulseTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !Task.isCancelled else { return }
                         emptyIconPulse = true
                     }
                 }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
             }
 
             VStack(spacing: 10) {
