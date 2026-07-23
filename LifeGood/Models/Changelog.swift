@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.57", build: 710, date: "2026/07/23", notes: [
+            "【靜態除錯 v24.57】承接 v24.56 並行複查（Finance／Life Views 兩路），修復 9 處畫面閃爍問題：RealEstateView／SavingsInsuranceView／StockView／VehicleView（Finance）與 CareerView／BusinessCardView／LifeOverviewView／OverviewView／SubordinateRosterView（Life）的空狀態脈衝光環／進場動畫，皆使用未持有 token 的 DispatchQueue.main.asyncAfter(0.3~0.6s) 排程進場動畫，且對應 View 皆存在可快速重複掛載/卸載的真實觸發路徑（Finance 四頁由 MainTabView 頂部子功能列 pill 快速切換分頁觸發；CareerView 快速切換篩選分類；BusinessCardView 搜尋關鍵字在零筆/有筆間快速切換且原本連 onDisappear 重置都沒有；LifeOverviewView 為多個人生子分頁「無資料時」的共用回退畫面，快速切換子分頁即可觸發，同樣原本沒有 onDisappear 重置；OverviewView 由記帳模式分頁選單快速切出切回觸發；SubordinateRosterView 快速切換部屬部門篩選觸發），較舊一次掛載排程的 closure 可能在較新一次已把旗標重置為 false 之後才觸發，造成脈衝動畫倒退/跳幀閃爍，與 v24.51~24.55 已修復的同類案例（IncomeView／VariableExpenseView／FixedExpenseView／ChartView／TaxOverviewView／MainTabView 等）屬同一 bug class 但先前複查漏掉這 9 處；比照既有寫法統一改為可取消的 Task（onAppear 先取消前一個再排新的、onDisappear 一併取消）。另 Models 層複查（force-unwrap／型別錯誤／index 越界／retain cycle／競態條件）與 Finance／Life Views 兩路其餘檔案複查後未發現新問題（既有 debounce／快取／防重入寫法已到位）。"
+        ]),
         ChangelogEntry(version: "24.56", build: 709, date: "2026/07/23", notes: [
             "【靜態除錯 v24.56】並行複查全部 86 個 Swift 檔（Models／Finance Views／Life Views 三路），Models 部分修復 1 處真實問題：UnifiedImporter.applyUnified 的「取代」模式（完整備份還原）只在被淘汰的 Expense／RealEstate 上做匯入前清理（v24.53 已修復），但同一段落緊接著整批覆蓋的 familyMembers／businessCards／orgPeople 卻從未比照清理——FamilyMember 內嵌的兒女記錄照片、家庭相簿照片，以及 BusinessCard／OrgPerson 各自的大頭照，若使用者還原的完整備份中該筆家庭成員/名片/組織人脈已被移除或照片已被移除，舊照片檔案會永久留在磁碟上，並被 CloudKitManager.uploadAllLocalPhotos() 當成「未上傳的本機照片」反覆重傳；改為比照既有 Expense／RealEstate 的寫法，在整批覆蓋前先清掉被取代模式淘汰、不在新資料中的成員/名片/人脈之附帶照片檔案。Finance／Life Views 兩路複查仍在進行，結果將於後續版本補齊。"
         ]),

@@ -48,6 +48,7 @@ struct OverviewView: View {
     @State private var showAddRealEstate = false
     @State private var appearedCards: Set<String> = []
     @State private var ringPulse = false
+    @State private var ringPulseTask: Task<Void, Never>?
     @State private var recentListAppeared = false
     @State private var categoryListAppeared = false
     @State private var todayCardAppeared = false
@@ -149,15 +150,19 @@ struct OverviewView: View {
                             withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.10)) {
                                 todayCardAppeared = true
                             }
-                            // 先重置為 false，確保即使殘留計時器搶先將 ringPulse 設為 true，
-                            // 下方的計時器仍能產生 false→true 的變化讓 animation(value:) 重新作用
+                            // 先重置為 false，確保即使殘留 Task 搶先將 ringPulse 設為 true，
+                            // 下方的 Task 仍能產生 false→true 的變化讓 animation(value:) 重新作用
                             ringPulse = false
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            ringPulseTask?.cancel()
+                            ringPulseTask = Task {
+                                try? await Task.sleep(nanoseconds: 600_000_000)
+                                guard !Task.isCancelled else { return }
                                 ringPulse = true
                             }
                         }
                         .onDisappear {
                             // 重置旗標，讓下次 onAppear 時脈衝動畫與進場動畫都能重新觸發
+                            ringPulseTask?.cancel()
                             ringPulse = false
                             todayCardAppeared = false
                         }

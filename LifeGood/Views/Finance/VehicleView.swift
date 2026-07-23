@@ -74,6 +74,7 @@ struct VehicleView: View {
     @State private var headerAppeared = false
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
     @State private var vehiclesSectionHeaderAppeared = false  // [v2] Section 標頭進場動畫旗標
     // [v3] mini allocation bar 左展開動畫旗標
     @State private var miniBarAppeared = false
@@ -545,9 +546,16 @@ struct VehicleView: View {
                     .foregroundStyle(heroAccent.opacity(0.70))
             }
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyIconPulse = true
                 }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
             }
 
             VStack(spacing: 10) {

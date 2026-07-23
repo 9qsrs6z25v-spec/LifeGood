@@ -441,6 +441,7 @@ struct BusinessCardView: View {
     @State private var heroCardAppeared = false
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
 
     fileprivate struct ScannedCardDraft: Identifiable {
         let id = UUID()
@@ -659,12 +660,18 @@ struct BusinessCardView: View {
                     .foregroundStyle(isSearching ? .secondary : accent.opacity(0.72))
             }
             .onAppear {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
                 if !isSearching {
-                    emptyIconPulse = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    emptyPulseTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !Task.isCancelled else { return }
                         emptyIconPulse = true
                     }
                 }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
             }
 
             VStack(spacing: 10) {

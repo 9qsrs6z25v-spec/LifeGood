@@ -179,6 +179,7 @@ struct SubordinateRosterView: View {
     // 的這個視圖自己訂閱 objectWillChange，才能真正做到只讓子視圖重繪。
     @State private var hOffsetBox = RosterHOffsetBox()   // 日格水平捲動位移（同步凍結表頭；獨立物件避免波及棋盤格重算）
     @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
     @State private var didAutoScroll = false  // 開啟時自動捲到今天（僅一次）
 
     private let nameColWidth: CGFloat = 88
@@ -388,9 +389,18 @@ struct SubordinateRosterView: View {
                     .foregroundStyle(Color.indigo.opacity(0.70))
             }
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyIconPulse = true }
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    emptyIconPulse = true
+                }
             }
-            .onDisappear { emptyIconPulse = false }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+                emptyIconPulse = false
+            }
             VStack(spacing: 8) {
                 Text(selectedDeptId == nil ? "尚無部屬資料" : "此部門沒有部屬")
                     .font(.title3.weight(.semibold))

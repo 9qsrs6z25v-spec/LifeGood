@@ -52,6 +52,7 @@ struct CareerView: View {
     @State private var subCatRowsAppeared = false
     @State private var milestoneRowsAppeared = false
     @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
 
     /// careerMilestones 及其衍生統計值整包快取，避免 dashboardSection / subCategoryBreakdown /
     /// milestoneListSection 各自重新對 store.milestones 做 filter+sort（原本每次 render 約重跑 10 次）
@@ -560,11 +561,18 @@ struct CareerView: View {
                     .foregroundStyle(accent.opacity(0.72))
             }
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyIconPulse = true
                 }
             }
-            .onDisappear { emptyIconPulse = false }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+                emptyIconPulse = false
+            }
 
             VStack(spacing: 8) {
                 Text(selectedSub == nil ? "尚無職涯里程碑" : "此分類尚無紀錄")

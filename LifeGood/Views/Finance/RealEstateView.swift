@@ -61,6 +61,7 @@ struct RealEstateView: View {
     @State private var headerAppeared = false
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
 
     private var activeEstates: [RealEstate] {
         sorted(store.realEstates.filter { !$0.isSold })
@@ -465,9 +466,16 @@ struct RealEstateView: View {
                     .foregroundStyle(purpleAccent.opacity(0.72))
             }
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyIconPulse = true
                 }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
             }
 
             VStack(spacing: 10) {

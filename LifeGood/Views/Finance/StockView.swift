@@ -61,6 +61,7 @@ struct StockView: View {
     @State private var headerAppeared = false
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
 
     private var activeStocks: [Stock] { store.stocks.filter { !$0.isSold } }
     private var soldStocks: [Stock] { store.stocks.filter { $0.isSold } }
@@ -626,9 +627,16 @@ struct StockView: View {
                     .foregroundStyle(accent.opacity(0.70))
             }
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyIconPulse = true
                 }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
             }
 
             VStack(spacing: 10) {

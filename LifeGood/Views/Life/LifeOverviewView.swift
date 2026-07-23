@@ -38,6 +38,7 @@ struct LifeOverviewView: View {
     @State private var categoryRowsAppeared = false
     @State private var statsCardAppeared = false
     @State private var emptyMilestonePulse = false
+    @State private var emptyMilestonePulseTask: Task<Void, Never>?
 
     var body: some View {
         // 計算一次，避免 statsCard / milestoneTimeline / categoryBreakdown 各自重算（共 5 次）
@@ -366,9 +367,15 @@ struct LifeOverviewView: View {
             }
             .onAppear {
                 emptyMilestonePulse = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyMilestonePulseTask?.cancel()
+                emptyMilestonePulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyMilestonePulse = true
                 }
+            }
+            .onDisappear {
+                emptyMilestonePulseTask?.cancel()
             }
 
             VStack(spacing: 8) {
