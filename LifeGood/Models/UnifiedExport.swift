@@ -33,6 +33,9 @@ struct UnifiedExport: Codable {
         var departments: [Department]?
         var gradeTitles: [GradeTitle]?
         var healthProfile: HealthProfile?
+        var businessCards: [BusinessCard]?
+        var personalEvents: [PersonalEvent]?
+        var orgPeople: [OrgPerson]?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> UnifiedExport {
@@ -56,7 +59,10 @@ struct UnifiedExport: Codable {
                 subordinates: life.subordinates,
                 departments: life.departments,
                 gradeTitles: life.gradeTitles,
-                healthProfile: life.healthProfile
+                healthProfile: life.healthProfile,
+                businessCards: life.businessCards,
+                personalEvents: life.personalEvents,
+                orgPeople: life.orgPeople
             )
         )
     }
@@ -387,6 +393,9 @@ enum UnifiedImporter {
         var relationships: Int = 0
         var pets: Int = 0
         var schedules: Int = 0
+        var businessCards: Int = 0
+        var personalEvents: Int = 0
+        var orgPeople: Int = 0
 
         var summary: String {
             var parts: [String] = []
@@ -401,6 +410,9 @@ enum UnifiedImporter {
             if relationships > 0 { parts.append("人脈 \(relationships)") }
             if pets > 0 { parts.append("寵物 \(pets)") }
             if schedules > 0 { parts.append("行程 \(schedules)") }
+            if businessCards > 0 { parts.append("名片 \(businessCards)") }
+            if personalEvents > 0 { parts.append("個人行程 \(personalEvents)") }
+            if orgPeople > 0 { parts.append("組織人脈 \(orgPeople)") }
             return parts.isEmpty ? "沒有資料" : parts.joined(separator: "、")
         }
     }
@@ -489,6 +501,9 @@ enum UnifiedImporter {
             if let depts = payload.life.departments { life.departments = depts }
             if let gts = payload.life.gradeTitles { life.gradeTitles = gts }
             if let hp = payload.life.healthProfile { life.healthProfile = hp }
+            if let cards = payload.life.businessCards { life.businessCards = cards }
+            if let events = payload.life.personalEvents { life.personalEvents = events }
+            if let people = payload.life.orgPeople { life.orgPeople = people }
 
             result.expenses = payload.expense.expenses.count
             result.incomes = payload.expense.incomes.count
@@ -501,6 +516,9 @@ enum UnifiedImporter {
             result.relationships = payload.life.relationships.count
             result.pets = payload.life.pets.count
             result.schedules = payload.life.schedules.count
+            result.businessCards = payload.life.businessCards?.count ?? 0
+            result.personalEvents = payload.life.personalEvents?.count ?? 0
+            result.orgPeople = payload.life.orgPeople?.count ?? 0
 
         case .merge:
             if let rates = payload.expense.currencyRates {
@@ -677,6 +695,24 @@ enum UnifiedImporter {
             if let gts = payload.life.gradeTitles {
                 let newGts = mergeItems(existing: life.gradeTitles, incoming: gts)
                 life.gradeTitles.append(contentsOf: newGts)
+            }
+
+            if let cards = payload.life.businessCards {
+                let newCards = mergeItems(existing: life.businessCards, incoming: cards)
+                life.businessCards.append(contentsOf: newCards)
+                result.businessCards = newCards.count
+            }
+
+            if let events = payload.life.personalEvents {
+                let newEvents = mergeItems(existing: life.personalEvents, incoming: events)
+                life.personalEvents.append(contentsOf: newEvents)
+                result.personalEvents = newEvents.count
+            }
+
+            if let people = payload.life.orgPeople {
+                let newPeople = mergeItems(existing: life.orgPeople, incoming: people)
+                life.orgPeople.append(contentsOf: newPeople)
+                result.orgPeople = newPeople.count
             }
         }
 
