@@ -57,6 +57,7 @@ struct OrganizationView: View {
     @State private var pdfURL: IdentifiableURL?
     // 美化：空狀態脈衝光環動畫旗標
     @State private var orgEmptyPulse = false
+    @State private var orgEmptyPulseTask: Task<Void, Never>?
 
     private var rootDepartments: [Department] {
         // root = 沒有 upstream 的部門；若全部都有 upstream（可能成環），退而求其次抓部門裡的全部，
@@ -197,9 +198,16 @@ struct OrganizationView: View {
             }
             .onAppear {
                 orgEmptyPulse = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                orgEmptyPulseTask?.cancel()
+                orgEmptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     orgEmptyPulse = true
                 }
+            }
+            .onDisappear {
+                orgEmptyPulseTask?.cancel()
+                orgEmptyPulse = false
             }
 
             VStack(spacing: 10) {

@@ -143,6 +143,7 @@ struct FoodMapView: View {
     @State private var showListSheet = false
     @State private var photoOnly = false
     @State private var emptyIconPulse = false
+    @State private var emptyIconPulseTask: Task<Void, Never>?
     @State private var statsCardAppeared = false
 
     var body: some View {
@@ -349,13 +350,19 @@ struct FoodMapView: View {
                     .foregroundStyle(isPhotoFilter ? .secondary : accent.opacity(0.72))
             }
             .onAppear {
+                emptyIconPulseTask?.cancel()
                 if !isPhotoFilter {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    emptyIconPulseTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !Task.isCancelled else { return }
                         emptyIconPulse = true
                     }
                 }
             }
-            .onDisappear { emptyIconPulse = false }
+            .onDisappear {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
+            }
 
             VStack(spacing: 8) {
                 Text(isPhotoFilter ? "目前沒有附照片的餐廳" : "還沒有任何餐廳記錄")

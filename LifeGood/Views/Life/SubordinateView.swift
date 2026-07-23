@@ -66,6 +66,7 @@ struct SubordinateView: View {
     @State private var summaryAppeared = false
     @State private var rowsAppeared = false
     @State private var emptyIconPulse = false
+    @State private var emptyIconPulseTask: Task<Void, Never>?
     // [2026-06 v2] sectionHeader 進場旗標
     @State private var headerAppeared = false
 
@@ -624,9 +625,16 @@ struct SubordinateView: View {
             }
             .onAppear {
                 emptyIconPulse = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyIconPulse = true
                 }
+            }
+            .onDisappear {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
             }
 
             VStack(spacing: 10) {

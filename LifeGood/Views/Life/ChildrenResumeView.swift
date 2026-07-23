@@ -50,6 +50,7 @@ struct ChildrenResumeView: View {
     @State private var viewingChild: FamilyMember?
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
+    @State private var emptyIconPulseTask: Task<Void, Never>?
     /// [v2] 英雄統計卡進場動畫旗標
     @State private var heroAppeared = false
 
@@ -517,9 +518,16 @@ struct ChildrenResumeView: View {
             }
             .onAppear {
                 emptyIconPulse = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyIconPulse = true
                 }
+            }
+            .onDisappear {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
             }
 
             VStack(spacing: 8) {

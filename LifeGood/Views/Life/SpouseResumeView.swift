@@ -64,6 +64,8 @@ struct SpouseResumeView: View {
     // （同型修復比照 TaxOverviewView v24.22 拆分 emptyRecordsPulse／emptySavingPulse）。
     @State private var milestoneEmptyPulse = false
     @State private var expenseEmptyPulse = false
+    @State private var milestoneEmptyPulseTask: Task<Void, Never>?
+    @State private var expenseEmptyPulseTask: Task<Void, Never>?
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
@@ -465,7 +467,7 @@ struct SpouseResumeView: View {
                                   count: derived.isEmpty ? nil : derived.count)
         ) {
             if derived.isEmpty {
-                emptyPlaceholder(icon: "heart.text.square", text: "尚無相關里程碑", pulse: $milestoneEmptyPulse)
+                emptyPlaceholder(icon: "heart.text.square", text: "尚無相關里程碑", pulse: $milestoneEmptyPulse, pulseTask: $milestoneEmptyPulseTask)
             } else {
                 ForEach(Array(derived.enumerated()), id: \.element.id) { idx, m in
                     milestoneRow(m, accent: accent)
@@ -552,7 +554,7 @@ struct SpouseResumeView: View {
             footer: Text("變動支出中將「\(spouse?.chineseName ?? "配偶")」加入人員的紀錄會自動同步到此。")
         ) {
             if expenses.isEmpty {
-                emptyPlaceholder(icon: "bag", text: "尚無共同消費紀錄", color: accent, pulse: $expenseEmptyPulse)
+                emptyPlaceholder(icon: "bag", text: "尚無共同消費紀錄", color: accent, pulse: $expenseEmptyPulse, pulseTask: $expenseEmptyPulseTask)
             } else {
                 // 合計列
                 HStack(spacing: 12) {
@@ -675,7 +677,7 @@ struct SpouseResumeView: View {
     // MARK: - 空狀態佔位
     // [v3] 升級：雙層脈衝光環 + 漸層底圓，對齊 TaxOverviewView v2 / VariableExpenseView emptyStateView 規格
 
-    private func emptyPlaceholder(icon: String, text: String, color: Color = Self.heroAccent, pulse: Binding<Bool>) -> some View {
+    private func emptyPlaceholder(icon: String, text: String, color: Color = Self.heroAccent, pulse: Binding<Bool>, pulseTask: Binding<Task<Void, Never>?>) -> some View {
         VStack(spacing: 14) {
             ZStack {
                 Circle()
@@ -700,7 +702,16 @@ struct SpouseResumeView: View {
             }
             .onAppear {
                 pulse.wrappedValue = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pulse.wrappedValue = true }
+                pulseTask.wrappedValue?.cancel()
+                pulseTask.wrappedValue = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    pulse.wrappedValue = true
+                }
+            }
+            .onDisappear {
+                pulseTask.wrappedValue?.cancel()
+                pulse.wrappedValue = false
             }
             Text(text)
                 .font(.subheadline.weight(.medium))

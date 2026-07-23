@@ -39,6 +39,7 @@ struct LifeOverviewView: View {
     @State private var statsCardAppeared = false
     @State private var emptyMilestonePulse = false
     @State private var emptyMilestonePulseTask: Task<Void, Never>?
+    @State private var categoryRowsAppearedTask: Task<Void, Never>?
 
     var body: some View {
         // 計算一次，避免 statsCard / milestoneTimeline / categoryBreakdown 各自重算（共 5 次）
@@ -524,11 +525,17 @@ struct LifeOverviewView: View {
                     .padding(.horizontal)
                     .onAppear {
                         // 0.05s 延遲確保 view 完成佈局後再啟動動畫（對齊 milestoneTimelineSection）
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        categoryRowsAppearedTask?.cancel()
+                        categoryRowsAppearedTask = Task {
+                            try? await Task.sleep(nanoseconds: 50_000_000)
+                            guard !Task.isCancelled else { return }
                             withAnimation { categoryRowsAppeared = true }
                         }
                     }
-                    .onDisappear { categoryRowsAppeared = false }
+                    .onDisappear {
+                        categoryRowsAppearedTask?.cancel()
+                        categoryRowsAppeared = false
+                    }
                 }
             }
         }

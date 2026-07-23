@@ -38,6 +38,7 @@ struct GradeTitleView: View {
     @State private var addingDepartment = false
     @State private var heroAppeared = false
     @State private var rowsAppeared = false
+    @State private var rowsAppearedTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -120,11 +121,15 @@ struct GradeTitleView: View {
             .onAppear {
                 if !subscription.isPremium { showPremiumAlert = true }
                 withAnimation(.easeOut(duration: 0.55)) { heroAppeared = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                rowsAppearedTask?.cancel()
+                rowsAppearedTask = Task {
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    guard !Task.isCancelled else { return }
                     rowsAppeared = true
                 }
             }
             .onDisappear {
+                rowsAppearedTask?.cancel()
                 heroAppeared = false
                 rowsAppeared = false
             }

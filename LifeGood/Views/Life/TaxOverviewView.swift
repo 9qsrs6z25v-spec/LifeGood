@@ -74,6 +74,8 @@ struct TaxOverviewView: View {
     // 脈衝光環會直接停在動畫結束狀態（不透明度 0）、永遠不會播放。
     @State private var emptyRecordsPulse = false
     @State private var emptySavingPulse = false
+    @State private var emptyRecordsPulseTask: Task<Void, Never>?
+    @State private var emptySavingPulseTask: Task<Void, Never>?
 
     // MARK: - 商業邏輯（不動）
 
@@ -213,6 +215,8 @@ struct TaxOverviewView: View {
                 // 此處補齊其餘旗標，確保切換年份後：
                 //   1. emptyRecordsPulse/emptySavingPulse 歸零，下一個空狀態出現時脈衝動畫正確重啟
                 //   2. 列項旗標歸零後延遲 0.08 s 重播進場動畫，對齊英雄卡片節奏
+                emptyRecordsPulseTask?.cancel()
+                emptySavingPulseTask?.cancel()
                 emptyRecordsPulse = false
                 emptySavingPulse = false
                 taxRowsAppeared = false
@@ -232,6 +236,8 @@ struct TaxOverviewView: View {
             .onDisappear {
                 yearNavAnimTask?.cancel()
                 yearChangeRowsTask?.cancel()
+                emptyRecordsPulseTask?.cancel()
+                emptySavingPulseTask?.cancel()
                 heroCardAppeared = false
                 emptyRecordsPulse = false
                 emptySavingPulse = false
@@ -499,7 +505,12 @@ struct TaxOverviewView: View {
                             .foregroundStyle(Color.red.opacity(0.65))
                     }
                     .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptyRecordsPulse = true }
+                        emptyRecordsPulseTask?.cancel()
+                        emptyRecordsPulseTask = Task {
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            guard !Task.isCancelled else { return }
+                            emptyRecordsPulse = true
+                        }
                     }
                     Text("本年度尚無稅費紀錄")
                         .font(.subheadline.weight(.medium))
@@ -776,7 +787,12 @@ struct TaxOverviewView: View {
                             .foregroundStyle(Color.green.opacity(0.65))
                     }
                     .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { emptySavingPulse = true }
+                        emptySavingPulseTask?.cancel()
+                        emptySavingPulseTask = Task {
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            guard !Task.isCancelled else { return }
+                            emptySavingPulse = true
+                        }
                     }
                     VStack(spacing: 8) {
                         Text("本年度尚無節稅紀錄")

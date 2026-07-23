@@ -42,6 +42,7 @@ struct FamilyView: View {
     @State private var showPremiumAlert = false
     @State private var membersAppeared = false
     @State private var emptyIconPulse = false
+    @State private var emptyIconPulseTask: Task<Void, Never>?
     // [v2] 統計徽章橫列進場動畫旗標
     @State private var statsAppeared = false
 
@@ -303,11 +304,17 @@ struct FamilyView: View {
                     .foregroundStyle(accent.opacity(0.70))
             }
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyIconPulse = true
                 }
             }
-            .onDisappear { emptyIconPulse = false }
+            .onDisappear {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
+            }
 
             VStack(spacing: 8) {
                 Text("尚無家庭成員")

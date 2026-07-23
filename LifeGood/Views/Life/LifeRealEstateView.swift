@@ -52,6 +52,7 @@ struct LifeRealEstateView: View {
     @State private var showPremiumAlert = false
     @State private var headerAppeared = false
     @State private var emptyIconPulse = false
+    @State private var emptyIconPulseTask: Task<Void, Never>?
     // [v2] cityPanel 物件列交錯進場動畫旗標
     @State private var cityPanelRowsAppeared = false
     // [v3] 縣市分配彩條左展開動畫旗標
@@ -428,9 +429,16 @@ struct LifeRealEstateView: View {
             }
             .onAppear {
                 emptyIconPulse = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyIconPulse = true
                 }
+            }
+            .onDisappear {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
             }
 
             VStack(spacing: 10) {

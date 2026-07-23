@@ -368,6 +368,7 @@ struct ResumeView: View {
     @State private var selectedCategory: MilestoneCategory?
     @State private var showPremiumAlert = false
     @State private var emptyStatePulse = false
+    @State private var emptyStatePulseTask: Task<Void, Never>?
     @State private var rowsAppeared = false
     // [v3] 英雄卡進場動畫旗標
     @State private var heroCardAppeared = false
@@ -947,11 +948,17 @@ struct ResumeView: View {
                     .foregroundStyle(Color.orange.opacity(0.75))
             }
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                emptyStatePulseTask?.cancel()
+                emptyStatePulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
                     emptyStatePulse = true
                 }
             }
-            .onDisappear { emptyStatePulse = false }
+            .onDisappear {
+                emptyStatePulseTask?.cancel()
+                emptyStatePulse = false
+            }
 
             VStack(spacing: 8) {
                 Text("尚無里程碑")
