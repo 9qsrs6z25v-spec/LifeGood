@@ -484,6 +484,35 @@ enum UnifiedImporter {
                     RealEstateDocument.deleteDocument(doc.fileName)
                 }
             }
+            // FamilyMember 內嵌的兒女記錄照片／家庭相簿照片、BusinessCard／OrgPerson 各自的
+            // 大頭照，若未隨 replace 匯入被清掉，同樣會變成孤兒檔案並被
+            // CloudKitManager.uploadAllLocalPhotos() 當成「未上傳的本機照片」反覆重傳，
+            // 對齊上面 Expense／RealEstate 的清理方式；三者皆為 optional 欄位，只在匯入檔
+            // 實際帶有該類資料（下方才會整批覆蓋本機）時才清理，避免匯入檔未帶該類別時
+            // 誤刪本機既有照片。
+            if let members = payload.life.familyMembers {
+                let incomingMemberIds = Set(members.map(\.id))
+                for old in life.familyMembers where !incomingMemberIds.contains(old.id) {
+                    for record in old.childRecords {
+                        if let name = record.photoFileName { ChildRecord.deletePhoto(name) }
+                    }
+                    for photo in old.familyPhotos {
+                        if let name = photo.photoFileName { FamilyAlbumPhoto.deletePhoto(name) }
+                    }
+                }
+            }
+            if let cards = payload.life.businessCards {
+                let incomingCardIds = Set(cards.map(\.id))
+                for old in life.businessCards where !incomingCardIds.contains(old.id) {
+                    if let name = old.photoFileName { BusinessCard.deletePhoto(name) }
+                }
+            }
+            if let people = payload.life.orgPeople {
+                let incomingPeopleIds = Set(people.map(\.id))
+                for old in life.orgPeople where !incomingPeopleIds.contains(old.id) {
+                    if let name = old.photoFileName { OrgPerson.deletePhoto(name) }
+                }
+            }
             expense.expenses = payload.expense.expenses
             expense.incomes = payload.expense.incomes
             if let rates = payload.expense.currencyRates { expense.currencyRates = rates }
