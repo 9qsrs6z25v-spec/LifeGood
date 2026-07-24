@@ -82,6 +82,9 @@ struct AddExpenseView: View {
     @State private var note = ""
     @State private var showValidationError = false
     @State private var validationErrorMessage = "請輸入有效的名稱與金額（大於 0）。"
+    /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複紀錄
+    /// （同型修復見 AddIncomeView／AddVehicleView／AddStockView 等 isSaving 既有寫法）
+    @State private var isSaving = false
     /// 扣款帳戶選單的銀行餘額快取：allBankBalances() 內部雖已改為批次建表，
     /// 但 bankPicker 是 Form body 的一部分，每次按鍵都會重新求值、重建整批表——
     /// 改為只在 store.expenses／lifeStore.milestones 實際變動時（.task(id:)）才重算一次快取。
@@ -383,6 +386,7 @@ struct AddExpenseView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(isEditing ? "儲存" : "新增") { saveExpense() }
                         .bold().foregroundStyle(.green)
+                        .disabled(isSaving)
                 }
             }
             .onAppear {
@@ -1750,6 +1754,19 @@ struct AddExpenseView: View {
                         Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                     }
                 }
+                .onChange(of: selectedVehicleId) { _, newVehicleId in
+                    // 切換車輛後，若原本選的支出類別不適用於新車輛的動力類型（例如油電車換成
+                    // 純電車，「油錢」在新車輛的選項列表中已不存在），Picker 只是不顯示該選項，
+                    // 底層的 selectedVehicleExpenseCategory 狀態不會被自動改掉，存檔會把不合動力
+                    // 類型的類別寫進新車輛的變動支出；用新車輛重新算一次可用類別再校正。
+                    let newCategories = VehicleVariableCategory.categories(
+                        for: financeStore.vehicles.first(where: { $0.id == newVehicleId })?.powerType ?? .gasoline
+                    )
+                    if !newCategories.contains(selectedVehicleExpenseCategory),
+                       let fallback = newCategories.first {
+                        selectedVehicleExpenseCategory = fallback
+                    }
+                }
             }
         } header: {
             sectionHeader(title: "汽車資訊（連動理財模式）", accentColor: .teal)
@@ -2246,6 +2263,7 @@ struct AddExpenseView: View {
     // MARK: - 儲存
 
     private func saveExpense() {
+        guard !isSaving else { return }
         var trimmedTitle = title.trimmingCharacters(in: .whitespaces)
 
         // 變動支出：名稱留空時以分類名稱當預設（讓基本模式更省事）
@@ -2300,6 +2318,8 @@ struct AddExpenseView: View {
             return
         }
 
+        isSaving = true
+
         // 自訂幣別換算為 NT$（儲蓄險不適用，使用其自身幣別欄位）
         let amount = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
 
@@ -2319,6 +2339,14 @@ struct AddExpenseView: View {
             if mortgageLinkExisting, let reId = selectedMortgageRealEstateId {
                 linkedREId = reId
                 syncMortgageToExistingRealEstate(realEstateId: reId, expenseId: expenseId, amount: amount)
+                // 編輯時把房貸改連到另一筆不動產：舊不動產的 mortgageItems 只會由
+                // syncMortgageToExistingRealEstate 寫入新目標，不會自動清掉舊目標殘留的那筆，
+                // 否則會變成兩筆房地產各自掛著同一筆支出的房貸紀錄（其中一筆孤兒、金額不再更新）。
+                if let oldREId = editingExpense?.linkedRealEstateId, oldREId != reId,
+                   var oldRE = financeStore.realEstates.first(where: { $0.id == oldREId }) {
+                    oldRE.mortgageItems.removeAll { $0.linkedExpenseId == expenseId }
+                    financeStore.update(oldRE)
+                }
                 if let re = financeStore.realEstates.first(where: { $0.id == reId }) {
                     let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }).map { $0 + 1 } ?? re.mortgageItems.count
                     let mTitle = re.mortgageItems.first(where: { $0.linkedExpenseId == expenseId })?.title ?? "房貸"
@@ -2336,6 +2364,13 @@ struct AddExpenseView: View {
         if isCarLoan, let vehicleId = selectedVehicleId {
             linkedVehId = vehicleId
             syncCarLoanToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+            // 編輯時把車貸改連到另一輛車：清掉舊車輛殘留的那筆 fixedExpenses，
+            // 避免舊車輛留下孤兒車貸紀錄、金額不再隨這筆支出更新。
+            if let oldVehicleId = editingExpense?.linkedVehicleId, oldVehicleId != vehicleId,
+               var oldVehicle = financeStore.vehicles.first(where: { $0.id == oldVehicleId }) {
+                oldVehicle.fixedExpenses.removeAll { $0.linkedExpenseId == expenseId }
+                financeStore.update(oldVehicle)
+            }
         }
 
         // 固定支出一般類別關聯資產
@@ -2345,6 +2380,12 @@ struct AddExpenseView: View {
                 if let vehicleId = fixedLinkVehicleId {
                     linkedVehId = vehicleId
                     syncFixedToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+                    // 同上：改連到另一輛車時清掉舊車輛殘留的那筆 fixedExpenses。
+                    if let oldVehicleId = editingExpense?.linkedVehicleId, oldVehicleId != vehicleId,
+                       var oldVehicle = financeStore.vehicles.first(where: { $0.id == oldVehicleId }) {
+                        oldVehicle.fixedExpenses.removeAll { $0.linkedExpenseId == expenseId }
+                        financeStore.update(oldVehicle)
+                    }
                 }
             case .realEstate:
                 linkedREId = fixedLinkRealEstateId
@@ -2362,6 +2403,13 @@ struct AddExpenseView: View {
                 if let vehicleId = selectedVehicleId {
                     linkedVehId = vehicleId
                     syncVehicleVariableExpense(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+                    // 編輯時把變動支出改連到另一輛車：清掉舊車輛殘留的那筆 variableExpenses，
+                    // 避免舊車輛留下孤兒紀錄、金額不再隨這筆支出更新。
+                    if let oldVehicleId = editingExpense?.linkedVehicleId, oldVehicleId != vehicleId,
+                       var oldVehicle = financeStore.vehicles.first(where: { $0.id == oldVehicleId }) {
+                        oldVehicle.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
+                        financeStore.update(oldVehicle)
+                    }
                 }
             case .stock:
                 linkedStkId = syncStockInvestment(existingId: linkedStkId)
@@ -2372,6 +2420,16 @@ struct AddExpenseView: View {
                     if let reId = selectedRealEstateLinkId {
                         linkedREId = reId
                         syncRealEstateVariableExpense(realEstateId: reId, expenseId: expenseId, amount: amount)
+                        // 編輯時把變動支出改連到另一筆不動產：清掉舊不動產殘留的那筆紀錄
+                        // （可能落在 variableExpenses／paidItems／utilityPayments 三處之一），
+                        // 避免舊不動產留下孤兒紀錄、金額不再隨這筆支出更新。
+                        if let oldREId = editingExpense?.linkedRealEstateId, oldREId != reId,
+                           var oldRE = financeStore.realEstates.first(where: { $0.id == oldREId }) {
+                            oldRE.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
+                            oldRE.paidItems.removeAll { $0.linkedExpenseId == expenseId }
+                            oldRE.utilityPayments.removeAll { $0.linkedExpenseId == expenseId }
+                            financeStore.update(oldRE)
+                        }
                     }
                 } else {
                     let reId = syncNewRealEstateForVariable(existingId: linkedREId)

@@ -969,6 +969,8 @@ struct FamilyEventEditor: View {
     @State private var title: String = ""
     @State private var content: String = ""
     @State private var showDeleteConfirm = false
+    /// 存檔中鎖住儲存／刪除按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複紀錄
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
@@ -988,6 +990,7 @@ struct FamilyEventEditor: View {
                         } label: {
                             Label("刪除紀錄", systemImage: "trash")
                         }
+                        .disabled(isSaving)
                     }
                 }
             }
@@ -998,7 +1001,7 @@ struct FamilyEventEditor: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("儲存") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
@@ -1014,7 +1017,9 @@ struct FamilyEventEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var member = lifeStore.familyMembers.first(where: { $0.id == memberId }) else { return }
+        isSaving = true
         let id = editing?.id ?? UUID()
         let newEvent = FamilyEvent(
             id: id,
@@ -1032,8 +1037,10 @@ struct FamilyEventEditor: View {
     }
 
     private func deleteRecord() {
+        guard !isSaving else { return }
         guard var member = lifeStore.familyMembers.first(where: { $0.id == memberId }),
               let e = editing else { return }
+        isSaving = true
         member.familyEvents.removeAll { $0.id == e.id }
         lifeStore.update(member)
         dismiss()
@@ -1066,6 +1073,8 @@ struct FamilyAlbumPhotoEditor: View {
     // 較慢完成的前一次選取不該覆蓋較新的狀態；用世代編號判斷是否仍是最新一次選取
     // （同型修復見 OrgPersonEditor.photoLoadGeneration）。
     @State private var photoLoadGeneration = 0
+    /// 存檔中鎖住儲存／刪除按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複紀錄
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
@@ -1134,6 +1143,7 @@ struct FamilyAlbumPhotoEditor: View {
                         Button(role: .destructive) {
                             showDeleteConfirm = true
                         } label: { Label("刪除此筆", systemImage: "trash") }
+                        .disabled(isSaving)
                     }
                 }
             }
@@ -1144,7 +1154,7 @@ struct FamilyAlbumPhotoEditor: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("儲存") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
@@ -1190,7 +1200,9 @@ struct FamilyAlbumPhotoEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var member = lifeStore.familyMembers.first(where: { $0.id == memberId }) else { return }
+        isSaving = true
         let id = editing?.id ?? UUID()
         if let data = pendingImageData {
             if let oldName = photoFileName { FamilyAlbumPhoto.deletePhoto(oldName) }
@@ -1216,8 +1228,10 @@ struct FamilyAlbumPhotoEditor: View {
     }
 
     private func deleteRecord() {
+        guard !isSaving else { return }
         guard var member = lifeStore.familyMembers.first(where: { $0.id == memberId }),
               let e = editing else { return }
+        isSaving = true
         if let name = e.photoFileName { FamilyAlbumPhoto.deletePhoto(name) }
         member.familyPhotos.removeAll { $0.id == e.id }
         lifeStore.update(member)

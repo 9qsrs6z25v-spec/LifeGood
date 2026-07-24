@@ -712,9 +712,11 @@ struct VariableExpenseView: View {
                 re.utilityPayments.removeAll { $0.linkedExpenseId == expense.id }
                 financeStore.update(re)
             }
-            // 同步解除股票連結
+            // 同步解除股票連結（僅在該股票確實連結的是這筆被刪除的支出時才解除，
+            // 避免複製支出產生的重複 linkedStockId 誤刪原始支出的連結）
             if let stockId = expense.linkedStockId,
-               var stock = financeStore.stocks.first(where: { $0.id == stockId }) {
+               var stock = financeStore.stocks.first(where: { $0.id == stockId }),
+               stock.linkedExpenseId == expense.id {
                 stock.linkedExpenseId = nil
                 financeStore.update(stock)
             }

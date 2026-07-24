@@ -1547,6 +1547,7 @@ struct SettingsView: View {
 
     /// 完整備份（含照片 / 文件）：結構化資料在主執行緒準備，檔案 I/O 丟背景，避免卡 UI。
     private func exportFullBackup(photoRange: ClosedRange<Date>?) {
+        guard !backupBusy else { return }
         backupBusy = true
         ExportProgressModel.shared.isExporting = true
         ExportProgressModel.shared.fraction = 0

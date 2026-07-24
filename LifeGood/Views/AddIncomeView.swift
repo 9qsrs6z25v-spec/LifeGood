@@ -203,6 +203,15 @@ struct AddIncomeView: View {
                     }
 
                     DatePicker("日期", selection: $date, displayedComponents: .date)
+                        // 結束日期 Picker 的 in: date... 只限制往後使用者能選的範圍，
+                        // 不會反過來修正已選定的舊 endDate；開始日往後調整超過既有結束日時
+                        // （例如提前設定下個月才開始的新工作）在這裡一併同步，避免存出
+                        // endDate 早於 date 的無效資料（IncomeView.totalIncomeAll 月數計算會出錯）。
+                        .onChange(of: date) { _, newDate in
+                            if hasEndDate && endDate < newDate {
+                                endDate = newDate
+                            }
+                        }
                 } header: {
                     HStack(spacing: 10) {
                         Capsule()

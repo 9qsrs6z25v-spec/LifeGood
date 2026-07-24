@@ -2083,6 +2083,8 @@ struct BusinessCardEditor: View {
     @State private var address = ""
     @State private var note = ""
     @State private var date = Date()
+    /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複紀錄
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
@@ -2198,7 +2200,7 @@ struct BusinessCardEditor: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .onAppear {
@@ -2230,6 +2232,8 @@ struct BusinessCardEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         let id = editing?.id ?? UUID()
         // 新增 / 重新拍照辨識：有新的掃描照片時就用它，並把舊照片刪掉
         var photoFileName = editing?.photoFileName

@@ -3638,6 +3638,11 @@ fileprivate struct FloorItemEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String = ""
     @FocusState private var focused: Bool
+    /// onSave 最終寫回 store 是延後一個 runloop 的非同步操作（見 commitFloorEstate 註解），
+    /// sheet 收合動畫播完前快速連點「儲存」會讓兩次呼叫都讀到同一份舊 estate 快照各自
+    /// append，較晚落地的一次會覆蓋掉較早一次的結果，其中一筆新增物件會憑空消失；
+    /// 比照既有 isSaving 寫法鎖住按鈕，確保只送出一次。
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
@@ -3655,10 +3660,12 @@ fileprivate struct FloorItemEditor: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("儲存") {
+                        guard !isSaving else { return }
+                        isSaving = true
                         onSave(name)
                         dismiss()
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .onAppear {

@@ -996,6 +996,8 @@ struct StockTransactionEditor: View {
     @State private var lotsText: String = ""
     @State private var priceText: String = ""
     @State private var showDeleteConfirm = false
+    /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複交易紀錄
+    @State private var isSaving = false
 
     private var isEditing: Bool { editing != nil }
 
@@ -1060,6 +1062,7 @@ struct StockTransactionEditor: View {
                         } label: {
                             Label("刪除此筆交易", systemImage: "trash")
                         }
+                        .disabled(isSaving)
                     }
                 }
             }
@@ -1070,7 +1073,7 @@ struct StockTransactionEditor: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(isEditing ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(!canSave)
+                        .disabled(!canSave || isSaving)
                 }
             }
             .alert("確定刪除這筆交易？", isPresented: $showDeleteConfirm) {
@@ -1095,7 +1098,9 @@ struct StockTransactionEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var s = store.stocks.first(where: { $0.id == stockId }) else { dismiss(); return }
+        isSaving = true
         s.seedTransactionsFromLegacyIfNeeded()
         let lots = Double(lotsText) ?? 0
         let price = Double(priceText) ?? 0
@@ -1119,10 +1124,12 @@ struct StockTransactionEditor: View {
     }
 
     private func performDelete() {
+        guard !isSaving else { return }
         guard let e = editing,
               var s = store.stocks.first(where: { $0.id == stockId }) else {
             dismiss(); return
         }
+        isSaving = true
         s.transactions.removeAll { $0.id == e.id }
         s.recomputeFromTransactions()
         store.update(s)
@@ -1195,6 +1202,8 @@ struct StockDividendEditor: View {
     @State private var sharesAtEventText: String = ""
     @State private var note: String = ""
     @State private var showDeleteConfirm = false
+    /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複股利／收入／存款紀錄
+    @State private var isSaving = false
 
     private var isEditing: Bool { editing != nil }
     private var stock: Stock? { store.stocks.first(where: { $0.id == stockId }) }
@@ -1301,6 +1310,7 @@ struct StockDividendEditor: View {
                         } label: {
                             Label("刪除此筆股利", systemImage: "trash")
                         }
+                        .disabled(isSaving)
                     }
                 }
             }
@@ -1311,7 +1321,7 @@ struct StockDividendEditor: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(isEditing ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(!canSave)
+                        .disabled(!canSave || isSaving)
                 }
             }
             .alert("確定刪除這筆股利？", isPresented: $showDeleteConfirm) {
@@ -1395,7 +1405,9 @@ struct StockDividendEditor: View {
     // MARK: - Save / Delete
 
     private func save() {
+        guard !isSaving else { return }
         guard var stock = store.stocks.first(where: { $0.id == stockId }) else { return }
+        isSaving = true
         let lots = Double(lotsText) ?? 0
         let perShare = Double(perShareText) ?? 0
         let sharesAtEvent = Double(sharesAtEventText) ?? 0
@@ -1451,8 +1463,10 @@ struct StockDividendEditor: View {
     }
 
     private func performDelete() {
+        guard !isSaving else { return }
         guard let editing,
               var stock = store.stocks.first(where: { $0.id == stockId }) else { return }
+        isSaving = true
         if let incomeId = editing.linkedIncomeId {
             removeCashDividendIncome(incomeId: incomeId)
         }

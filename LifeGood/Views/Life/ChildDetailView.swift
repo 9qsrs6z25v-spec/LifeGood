@@ -1109,6 +1109,7 @@ struct DailyRecordEditorSheet: View {
                 if editing != nil {
                     Section {
                         Button(role: .destructive) { delete() } label: { Label("刪除", systemImage: "trash") }
+                            .disabled(isSaving)
                     }
                 }
             }
@@ -1162,7 +1163,9 @@ struct DailyRecordEditorSheet: View {
     }
 
     private func delete() {
+        guard !isSaving else { return }
         guard let e = editing, var member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { dismiss(); return }
+        isSaving = true
         member.dailyRecords.removeAll { $0.id == e.id }
         lifeStore.update(member)
         dismiss()
@@ -1276,7 +1279,7 @@ struct ChildRecordEditorSheet: View {
                 }
 
                 if editing != nil {
-                    Section { Button(role: .destructive) { delete() } label: { Label("刪除此記錄", systemImage: "trash") } }
+                    Section { Button(role: .destructive) { delete() } label: { Label("刪除此記錄", systemImage: "trash") }.disabled(isSaving) }
                 }
             }
             .navigationTitle(editing != nil ? "編輯\(type.rawValue)" : "新增\(type.rawValue)")
@@ -1669,7 +1672,9 @@ struct ChildRecordEditorSheet: View {
     }
 
     private func delete() {
+        guard !isSaving else { return }
         guard let e = editing, var member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { dismiss(); return }
+        isSaving = true
         member.childRecords.removeAll { $0.id == e.id }
         lifeStore.update(member); dismiss()
     }
