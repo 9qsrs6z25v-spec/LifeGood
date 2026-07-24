@@ -167,7 +167,16 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
 //      「新增收支」文字補上 lineLimit(1) + minimumScaleFactor(0.85)，避免大字級輔助模式
 //      下膠囊按鈕文字換行擠壓變形。
 //   純視覺調整，分頁切換、FAB 拖曳吸邊、AI 記帳等既有邏輯完全未變動。
-//   （下次美化本檔案時，可從 bottomTabBar／aiMicOverlay 繼續找可統一之處）
+// [2026-07 v3] 承接上方提示，本次美化 bottomTabBar／aiMicOverlay：
+//   10. tabItemLabel 選中膠囊：深色模式下漸層與外框不透明度同步提高
+//       （0.22/0.10→0.32/0.18，外框 0.18→0.32），修復與 topSubFeatureBar 分組膠囊相同的
+//       深色背景吃色問題；標籤文字補上 lineLimit(1) + minimumScaleFactor(0.8) 防截斷保護。
+//   11. aiMicButton：新增「啟動中」過渡態視覺回饋——按下麥克風到語音辨識真正開始錄音
+//       之間（多半在等權限對話框），主按鈕原本毫無變化容易讓人以為沒按到，現在會先
+//       輕縮小＋淡化（scale 0.92 / opacity 0.75），純讀取既有 aiStartingRecording 狀態，
+//       未新增任何判斷邏輯。
+//   純視覺調整，麥克風錄音／AI 記帳送出、分頁切換等既有邏輯完全未變動。
+//   （下次美化本檔案時，可從 exportProgressBar／FloatingActionButtonView 主體造型繼續找可統一之處）
 
 // MARK: - 主畫面
 
@@ -456,6 +465,9 @@ struct MainTabView: View {
 
     private var aiMicButton: some View {
         let listening = speechRecognizer.isRecording
+        // 美化：「按下→實際開始錄音」中間（多半在等權限對話框）原本毫無視覺回饋，
+        // 補上淡出＋縮小的過渡態，讓使用者知道按壓已被接收、正在啟動
+        let starting = aiStartingRecording && !listening
         return ZStack {
             // 外圍呼吸光暈
             Circle()
@@ -495,13 +507,15 @@ struct MainTabView: View {
                 // 紫色光暈：強調主題色、錄音時更亮
                 .shadow(color: Color.purple.opacity(listening ? 0.8 : 0.5),
                         radius: listening ? 18 : 14, x: 0, y: 4)
-                .scaleEffect(listening ? 1.08 : 1.0)
+                .scaleEffect(listening ? 1.08 : (starting ? 0.92 : 1.0))
+                .opacity(starting ? 0.75 : 1.0)
                 .animation(
                     listening
                     ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
                     : .easeInOut(duration: 0.2),
                     value: listening
                 )
+                .animation(.easeInOut(duration: 0.2), value: starting)
             Group {
                 if aiBusy {
                     ProgressView().tint(.white)
@@ -1187,14 +1201,19 @@ struct MainTabView: View {
             ZStack {
                 if isActive {
                     // 選中時的膠囊指示器：漸層填色 + 細框 + matchedGeometryEffect 跨頁籤滑動
+                    // 深色模式下提高不透明度，對齊 topSubFeatureBar 分組膠囊（v2）已修復的
+                    // 深色背景吃色問題，避免選中膠囊在深色模式下辨識度偏低
                     Capsule()
                         .fill(LinearGradient(
-                            colors: [Color.green.opacity(0.22), Color.green.opacity(0.10)],
+                            colors: [
+                                Color.green.opacity(colorScheme == .dark ? 0.32 : 0.22),
+                                Color.green.opacity(colorScheme == .dark ? 0.18 : 0.10)
+                            ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ))
                         .frame(width: 54, height: 30)
-                        .overlay(Capsule().stroke(Color.green.opacity(0.18), lineWidth: 0.75))
+                        .overlay(Capsule().stroke(Color.green.opacity(colorScheme == .dark ? 0.32 : 0.18), lineWidth: 0.75))
                         .matchedGeometryEffect(id: "activeTabIndicator", in: namespace)
                 } else {
                     // 佔位透明膠囊，確保圖示對齊不跳動
@@ -1208,8 +1227,11 @@ struct MainTabView: View {
                     .scaleEffect(isActive ? 1.05 : 1.0)
                     .animation(.spring(response: 0.28, dampingFraction: 0.7), value: isActive)
             }
+            // 補上防截斷保護：大字級輔助模式下「設定」等標籤維持單行，對齊全 App 文字自適應規格
             Text(label)
                 .font(.system(size: 10.5, weight: isActive ? .semibold : .regular))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .foregroundStyle(isActive ? Color.green : Color.secondary)
         .frame(maxWidth: .infinity)
