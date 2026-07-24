@@ -154,6 +154,25 @@ class ExpenseStore: ObservableObject {
         return sorted[count / 2]
     }
 
+    /// 今年累計收入（每年 1/1 重新起算）：逐月加總今年 1 月至本月的收入合計，
+    /// 單次收入計實際發生月份、週期收入依月金額逐月累計（年薪攤 12 個月），
+    /// 固定薪水設有結束日者結束月後不再計入（與 incomeTotal(for:) 同一套規則）。
+    var yearToDateIncomeTotal: Double {
+        let calendar = Calendar.current
+        let now = Date()
+        let currentMonth = calendar.component(.month, from: now)
+        var comps = calendar.dateComponents([.year], from: now)
+        comps.day = 1
+        var total: Double = 0
+        for month in 1...currentMonth {
+            comps.month = month
+            if let monthDate = calendar.date(from: comps) {
+                total += incomeTotal(for: monthDate)
+            }
+        }
+        return total
+    }
+
     /// 計算指定月份的收入合計
     private func incomeTotal(for date: Date) -> Double {
         let calendar = Calendar.current

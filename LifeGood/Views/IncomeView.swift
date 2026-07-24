@@ -326,9 +326,14 @@ struct IncomeView: View {
                 .padding(.top, 8)
             }
 
-            // KPI 橫列：累計收入 / 月均收入 / 固定月收
+            // KPI 橫列：累計收入 / 今年累計 / 月均收入 / 固定月收
             HStack(spacing: 0) {
                 kpiCell(label: "累計收入", value: fmt(stats.cumulative))
+                Rectangle()
+                    .fill(.white.opacity(0.25))
+                    .frame(width: 0.5, height: 28)
+                // 每年 1/1 重新起算的今年累計收入
+                kpiCell(label: "今年累計", value: fmt(store.yearToDateIncomeTotal))
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)

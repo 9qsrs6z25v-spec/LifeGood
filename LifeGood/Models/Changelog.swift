@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.59", build: 712, date: "2026/07/23", notes: [
+            "【功能】收入頁英雄卡 KPI 新增「今年累計」：在既有「累計收入」（從最早一筆到現在）旁新增每年 1/1 重新起算的今年累計收入，跨年自動歸零重計。計算方式（ExpenseStore.yearToDateIncomeTotal）：逐月加總今年 1 月至本月的收入合計，與既有 incomeTotal(for:) 同一套規則——單次收入計實際發生月份、每月週期收入逐月累計、年薪攤 12 個月、固定薪水設有結束日者結束月後不再計入。KPI 橫列由三格（累計收入／月均收入／固定月收）擴為四格（累計收入／今年累計／月均收入／固定月收），既有 kpiCell 的 minimumScaleFactor 縮放確保四格並列不換行。"
+        ]),
         ChangelogEntry(version: "24.58", build: 711, date: "2026/07/23", notes: [
             "【靜態除錯 v24.58】承接 v24.57 繼續複查全部 86 個 Swift 檔尚未覆蓋的空狀態脈衝/進場動畫，修復 11 處同一 bug class 的畫面閃爍：ChildrenResumeView／SubordinateView／OrganizationView／LifeRealEstateView（emptyIconPulse）、FoodMapView（emptyIconPulse，篩選「僅顯示有照片」快速切換即可觸發，原本 onAppear 就沒有取消保護）、ResumeView／FamilyView（emptyStatePulse／emptyIconPulse）、SpouseResumeView（emptyPlaceholder 共用元件，milestoneEmptyPulse／expenseEmptyPulse 兩處呼叫點）、TaxOverviewView（emptyRecordsPulse／emptySavingPulse，年份 Picker 已會歸零旗標卻從未取消對應 asyncAfter，快速切換年份會讓舊排程在新一輪重置後補一次遲到觸發）、GradeTitleView（rowsAppeared 進場動畫）、LifeOverviewView（categoryRowsAppeared 分類列進場動畫，此頁為 MainTabView 分頁根視圖，快速切換分頁即可觸發），皆比照既有寫法統一改為可取消的 Task（onAppear 先取消前一個再排新的、onDisappear 一併取消並歸零旗標）。另複查 TravelMapView／FoodMapView 的 sheet 切換延遲、BusinessCardView 掃描佇列/聯絡人匯入延遲、RealEstateDetailView 命名 Sheet 的鍵盤 focus 延遲、SubordinateRosterView 今日自動捲動（旗標僅觸發一次不會重複排程）等其餘 asyncAfter 用法，均為一次性交握、無可快速重複觸發路徑，不屬同一 bug class，未做改動。CloudKit 三條同步路徑（CloudSyncManager 30 秒節流＋2 秒防抖、EInvoiceSyncManager 間隔判斷、RemoteAdminManager 30 秒節流）複查後確認皆無新的繞過路徑；force-unwrap／as!／try! 複查僅有的幾處皆為編譯期常數 URL 或已由前置條件保證非空的陣列存取，retain cycle（Timer／NotificationCenter）複查亦均已妥善保護，未發現新問題。"
         ]),
