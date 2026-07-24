@@ -6,6 +6,24 @@ import SwiftUI
 // 以孩子的出生日期推算每一劑的「建議接種日」。使用者只需填入實際施打日期：
 // 有日期＝已完成、無日期＝尚未施打；逾期未打會自動標示「需盡快施打」。
 
+// MARK: - 美化紀錄（ChildVaccineScheduleView）
+// [2026-07 v1] 本次美化方向：
+//   1. header → 新增整體接種進度條（Capsule 雙層：底軌 + 漸層填色 + glow overlay），
+//      對齊 CareerView.subCategoryBreakdown / FinanceOverviewView.allocationSection
+//      進度條規格，doneCount/total 比例變動時以 spring 動畫平滑過渡；
+//      count 膠囊補上 minimumScaleFactor(0.7) + lineLimit(1) 防止大字級截斷
+//   2. stageHeader → 補上每期已完成／應接種劑數膠囊（如「2/3」），對齊
+//      FixedExpenseView.categoryHeader 計數膠囊規格，讓使用者不必逐列數算
+//      即可掌握各接種期完成度
+//   3. row 列表 + legacyRecordsSection 列 → 交錯淡入 + 向上進場動畫
+//      （rowsAppeared，以單一 onAppear 觸發、onDisappear 重置，不使用
+//      asyncAfter，避免重建/切頁造成動畫殘留閃爍，對齊 StockView.cardsAppeared 寫法）
+//   4. row 疫苗名稱 → 補上 lineLimit(1) + minimumScaleFactor(0.85)，避免大字級
+//      輔助模式下長疫苗名稱換行擠壓版面
+//   5. birthdayHint → 提示圖示改為漸層圓底 + 外框，對齊全 App 空狀態／提示區塊
+//      圖示錨點規格，取代原本無底色的裸圖示
+// 純視覺調整，未變動任何接種狀態判斷、日期推算或存檔邏輯。
+
 struct ChildVaccineScheduleView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
@@ -14,6 +32,8 @@ struct ChildVaccineScheduleView: View {
     @State private var editingItem: VaccineScheduleItem?
     @State private var editingLegacy: ChildRecord?
     @State private var showPremiumAlert = false
+    @State private var headerAppeared = false
+    @State private var rowsAppeared = false
 
     private let accent = Color.blue
 
@@ -58,10 +78,19 @@ struct ChildVaccineScheduleView: View {
             if child.birthday == nil {
                 birthdayHint
             }
+            let allItems = VaccineSchedule.taiwan
             ForEach(VaccineSchedule.groupedByStage, id: \.stage) { group in
-                stageHeader(group.stage)
+                stageHeader(group.stage, items: group.items)
                 ForEach(Array(group.items.enumerated()), id: \.element.id) { idx, item in
+                    let globalIdx = (allItems.firstIndex(where: { $0.id == item.id }) ?? idx)
                     row(item)
+                        .opacity(rowsAppeared ? 1 : 0)
+                        .offset(y: rowsAppeared ? 0 : 10)
+                        .animation(
+                            .spring(response: 0.42, dampingFraction: 0.84)
+                                .delay(min(0.02 * Double(globalIdx), 0.4)),
+                            value: rowsAppeared
+                        )
                     if idx < group.items.count - 1 {
                         Rectangle().fill(Color(.separator).opacity(0.18))
                             .frame(height: 0.5).padding(.leading, 56)
@@ -84,12 +113,24 @@ struct ChildVaccineScheduleView: View {
         .sheet(item: $editingLegacy) { rec in
             ChildRecordEditorSheet(childId: childId, type: .vaccination, editing: rec)
         }
+        .onAppear {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) { headerAppeared = true }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) { rowsAppeared = true }
+        }
+        .onDisappear {
+            headerAppeared = false
+            rowsAppeared = false
+        }
     }
 
     // MARK: 標頭 + 進度
 
+    private var completionRatio: Double {
+        total > 0 ? Double(doneCount) / Double(total) : 0
+    }
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Capsule()
                     .fill(LinearGradient(colors: [accent, accent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
@@ -101,10 +142,33 @@ struct ChildVaccineScheduleView: View {
                 Spacer()
                 Text("\(doneCount)/\(total)")
                     .font(.caption2.weight(.bold)).foregroundStyle(accent)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .contentTransition(.numericText())
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(accent.opacity(0.12)).clipShape(Capsule())
                     .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
             }
+
+            // 整體接種進度條：底軌 + 漸層填色 + glow overlay，對齊
+            // CareerView.subCategoryBreakdown mini 進度條規格
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color(.systemFill)).frame(height: 5)
+                    Capsule()
+                        .fill(LinearGradient(colors: [accent, accent.opacity(0.6)],
+                                             startPoint: .leading, endPoint: .trailing))
+                        .frame(width: geo.size.width * (headerAppeared ? completionRatio : 0), height: 5)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: headerAppeared)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: completionRatio)
+                    Capsule()
+                        .fill(LinearGradient(colors: [.white.opacity(0.28), .clear, .black.opacity(0.06)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .frame(width: geo.size.width * (headerAppeared ? completionRatio : 0), height: 5)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: headerAppeared)
+                }
+            }
+            .frame(height: 5)
+
             if overdueCount > 0 {
                 Label("\(overdueCount) 劑逾期，需盡快施打", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2.weight(.semibold))
@@ -112,6 +176,8 @@ struct ChildVaccineScheduleView: View {
             }
         }
         .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 6)
+        .opacity(headerAppeared ? 1 : 0)
+        .offset(y: headerAppeared ? 0 : 8)
     }
 
     /// 舊版以自由文字新增的疫苗紀錄（ChildRecord type == .vaccination）仍保留顯示，避免資料被隱藏。
@@ -120,7 +186,7 @@ struct ChildVaccineScheduleView: View {
         let legacy = child.childRecords.filter { $0.type == .vaccination }.sorted { $0.date > $1.date }
         if !legacy.isEmpty {
             stageHeader("其他疫苗紀錄")
-            ForEach(legacy) { rec in
+            ForEach(Array(legacy.enumerated()), id: \.element.id) { idx, rec in
                 Button {
                     if subscription.isPremium { editingLegacy = rec }
                     else { showPremiumAlert = true }
@@ -132,6 +198,7 @@ struct ChildVaccineScheduleView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
                                 Text(rec.title.isEmpty ? "疫苗" : rec.title).font(.subheadline).foregroundStyle(.primary)
+                                    .lineLimit(1).minimumScaleFactor(0.85)
                                 if let dose = rec.dose, !dose.isEmpty {
                                     Text(dose).font(.caption2)
                                         .padding(.horizontal, 6).padding(.vertical, 1.5)
@@ -151,6 +218,12 @@ struct ChildVaccineScheduleView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .opacity(rowsAppeared ? 1 : 0)
+                .offset(y: rowsAppeared ? 0 : 10)
+                .animation(
+                    .spring(response: 0.42, dampingFraction: 0.84).delay(min(0.02 * Double(idx), 0.3)),
+                    value: rowsAppeared
+                )
             }
             Text("以上為舊版手動新增的紀錄，點擊可編輯或刪除")
                 .font(.caption2).foregroundStyle(.tertiary)
@@ -159,8 +232,16 @@ struct ChildVaccineScheduleView: View {
     }
 
     private var birthdayHint: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "calendar.badge.exclamationmark").foregroundStyle(.orange)
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [.orange.opacity(0.22), .orange.opacity(0.09)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 26, height: 26)
+                Circle().stroke(Color.orange.opacity(0.22), lineWidth: 1).frame(width: 26, height: 26)
+                Image(systemName: "calendar.badge.exclamationmark")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.orange)
+            }
             Text("設定孩子的生日後，可自動推算每一劑的建議接種日")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -173,6 +254,23 @@ struct ChildVaccineScheduleView: View {
             .font(.caption.weight(.bold)).foregroundStyle(accent.opacity(0.85))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
+    }
+
+    /// 疫苗接種期分組標頭，附上該期已完成／應接種劑數膠囊（對齊 FixedExpenseView.categoryHeader 計數膠囊規格）。
+    private func stageHeader(_ stage: String, items: [VaccineScheduleItem]) -> some View {
+        let doneInStage = items.filter { dose(for: $0.id)?.isDone == true }.count
+        return HStack(spacing: 6) {
+            Text(stage)
+                .font(.caption.weight(.bold)).foregroundStyle(accent.opacity(0.85))
+            Spacer(minLength: 4)
+            Text("\(doneInStage)/\(items.count)")
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(accent.opacity(0.75))
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .padding(.horizontal, 6).padding(.vertical, 1.5)
+                .background(accent.opacity(0.10)).clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.18), lineWidth: 0.5))
+        }
+        .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
     }
 
     // MARK: 單列
@@ -190,6 +288,7 @@ struct ChildVaccineScheduleView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(item.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                            .lineLimit(1).minimumScaleFactor(0.85)
                         Text(item.dose)
                             .font(.caption2.weight(.medium))
                             .padding(.horizontal, 6).padding(.vertical, 1.5)

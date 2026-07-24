@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.66", build: 719, date: "2026/07/24", notes: [
+            "【美化】兒童疫苗接種時程頁（ChildVaccineScheduleView）：① 標頭新增整體接種進度條（漸層填色＋glow overlay，隨完成劑數以彈簧動畫平滑過渡），完成度計數膠囊補上防截斷保護；② 各接種期分組標頭補上「已完成／應接種」劑數膠囊，不必逐列數算即可掌握進度；③ 疫苗列表與舊版疫苗紀錄列改為交錯淡入＋向上進場動畫，並補上長疫苗名稱的自適應縮小保護；④ 未設定生日提示改為漸層圖示錨點，與全 App 提示區塊視覺一致。純視覺調整，接種狀態判斷、日期推算、存檔邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.65", build: 718, date: "2026/07/24", notes: [
             "【美化】部屬「執掌」分頁設備清單（SubordinateEquipmentView）對齊 SubordinateRosterView／GradeTitleView 規格：① 設備清單空狀態由靜態圖示升級為雙圈脈衝光環（double-pulse ring），使用可取消的 Task 排程，避免頁面快速切換造成動畫殘留閃爍；② 設備列、PM／警報時間軸列加入 stagger opacity+Y offset 入場動畫，與部門/職等等頁面列一致；③ 設備名稱、時間軸設備名稱補上 lineLimit+minimumScaleFactor，避免長名稱在大字級輔助模式下截斷或爆版；④ EquipmentEditorSheet 的 PM／警報空狀態提示補上圖示錨點，強化可辨識度。純視覺調整，設備新增/編輯/刪除、PM／警報記錄邏輯完全未變動。"
         ]),
