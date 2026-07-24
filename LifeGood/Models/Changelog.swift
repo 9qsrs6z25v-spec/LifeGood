@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.72", build: 725, date: "2026/07/24", notes: [
+            "【美化】升級訂閱頁（PaywallView）操作區：① 「還原購買」按鈕先前完全沒有讀取 SubscriptionManager.restoreInProgress 這個既有旗標，點下去後畫面毫無回饋；補上還原中的 ProgressView 圖示替換＋「還原中…」文案＋按鈕停用，對齊訂閱方案列 purchaseInProgress「處理中，請稍候…」的回饋規格；② 訂閱方案價格 Capsule（productRow／fallbackProductRow）補上 lineLimit+minimumScaleFactor 防截斷保護，避免大字級輔助模式下價格文字被裁切或撐破膠囊邊框。純視覺與載入狀態回饋調整，購買、還原購買、商品讀取等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.71", build: 724, date: "2026/07/24", notes: [
             "【美化】部屬「執掌」分頁設備編輯表單（EquipmentEditorSheet）補齊 PM／警報清單項目新增、刪除時的過場動畫：新增時彈簧淡入＋上滑，刪除時同款淡出，取代原本瞬間跳出/消失的生硬手感，對齊 AddExpenseView／ResumeGiftSection 既有清單新增/刪除過場規格。純視覺調整，PM／警報記錄的儲存、排序、刪除設備等既有商業邏輯完全未變動。"
         ]),

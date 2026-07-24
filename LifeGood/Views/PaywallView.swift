@@ -31,6 +31,17 @@ import StoreKit
 //      細邊框，對齊 SettingsView.actionRow badge 邊框規格，深色模式下 badge 輪廓更清晰。
 //   9. PremiumBanner 背景：補第二顆散景圓（左下）+ 頂部玻璃光澤，
 //      對齊 productRow v2 規格，橫幅與升級卡視覺語言統一。
+// [2026-07 v3] 本次美化方向（操作區「還原購買」載入狀態，聚焦這一個元件）：
+//   10. 還原購買按鈕：先前 SubscriptionManager.restoreInProgress 這個 @Published 旗標
+//       完全沒有被畫面讀取，使用者點下去後畫面毫無回饋、也能連續誤點（雖然 Model 端已有
+//       guard 防重入，但 UI 沒有對應顯示）。現補上：restoreInProgress 為 true 時，
+//       圖示替換為 ProgressView（tint 對齊按鈕次要文字色）並文案改為「還原中…」，
+//       按鈕加 .disabled(restoreInProgress)，對齊 productList 區 purchaseInProgress
+//       的「處理中，請稍候…」回饋規格，兩個非同步操作視覺語言一致。
+//   11. 訂閱方案價格 Capsule（productRow / fallbackProductRow）：補
+//       .lineLimit(1) + .minimumScaleFactor(0.7)，避免 Dynamic Type 開到最大級距或
+//       高單位金額（例如日後改參考幣別／較長貨幣符號）時文字被裁切或撐破 Capsule 邊框，
+//       對齊「大字自適應但不可小到無法辨識」的下限規格。
 
 // MARK: - 升級訂閱頁
 
@@ -397,6 +408,8 @@ struct PaywallView: View {
                 Text(product.displayPrice)
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(.white.opacity(0.22))
@@ -464,6 +477,8 @@ struct PaywallView: View {
             Text(product.fallbackPriceText)
                 .font(.headline.weight(.bold))
                 .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(.white.opacity(0.22))
@@ -551,9 +566,13 @@ struct PaywallView: View {
                 Task { await subscription.restorePurchases() }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "arrow.clockwise.circle")
-                        .font(.footnote.weight(.medium))
-                    Text("還原購買")
+                    if subscription.restoreInProgress {
+                        ProgressView().tint(.secondary).scaleEffect(0.75)
+                    } else {
+                        Image(systemName: "arrow.clockwise.circle")
+                            .font(.footnote.weight(.medium))
+                    }
+                    Text(subscription.restoreInProgress ? "還原中…" : "還原購買")
                         .font(.footnote.weight(.medium))
                 }
                 .foregroundStyle(.secondary)
@@ -567,6 +586,7 @@ struct PaywallView: View {
                 )
             }
             .buttonStyle(.plain)
+            .disabled(subscription.restoreInProgress)
         }
     }
 
