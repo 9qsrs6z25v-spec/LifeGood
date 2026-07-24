@@ -323,21 +323,9 @@ struct LifeFinanceView: View {
         // 一次取出，避免 toolbar + summaryHeader 各自重複計算 O(n×1200) 的銀行餘額展開
         let bankBalanceTWD = allBankBalanceInTWD
         NavigationStack {
-            VStack(spacing: 0) {
-                summaryHeader(balance: bankBalanceTWD)
-                    .opacity(headerAppeared ? 1 : 0)
-                    .offset(y: headerAppeared ? 0 : 22)
-                    .onAppear {
-                        withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                            headerAppeared = true
-                        }
-                    }
-                    .onDisappear {
-                        headerAppeared = false
-                    }
-                filterChips
-                milestoneList
-            }
+            // [對齊 SavingsInsuranceView 看板規格] 英雄看板與篩選列改為 List 內首個 Section，
+            // 隨內容一起捲動，不再固定釘在列表上方。
+            milestoneList(balance: bankBalanceTWD)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("財富")
             .toolbar {
@@ -504,7 +492,10 @@ struct LifeFinanceView: View {
                 )
             }
         )
-        .shadow(color: heroAccentDark.opacity(0.35), radius: 12, x: 0, y: 6)
+        // [對齊 SavingsInsuranceView 看板規格] 圓角 20 卡片 + 16pt 水平內縮，取代原本滿版無圓角橫幅
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: heroAccentDark.opacity(0.42), radius: 16, x: 0, y: 8)
+        .padding(.horizontal, 16)
     }
 
     // MARK: - 篩選
@@ -561,7 +552,7 @@ struct LifeFinanceView: View {
 
     // MARK: - 列表
 
-    private var milestoneList: some View {
+    private func milestoneList(balance: Double) -> some View {
         // 一次批次算好所有銀行帳戶餘額，避免每一列各自呼叫 bankBalances(for:)
         // 對 expenses/incomes 做 O(deposits × expenses) 全量掃描（對齊 AddExpenseView.allBankBalances() 的批次建表作法）
         let balancesByBank = allBankBalances()
@@ -571,6 +562,26 @@ struct LifeFinanceView: View {
             $0.category == .achievement && $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId != nil
         }, by: { $0.linkedBankMilestoneId! })
         return List {
+            Section {
+                summaryHeader(balance: balance)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 0, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .opacity(headerAppeared ? 1 : 0)
+                    .offset(y: headerAppeared ? 0 : 22)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                            headerAppeared = true
+                        }
+                    }
+                    .onDisappear {
+                        headerAppeared = false
+                    }
+                filterChips
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             ForEach(Array(filteredMilestones.enumerated()), id: \.element.id) { idx, item in
                 VStack(spacing: 0) {
                     milestoneRow(item, balances: balancesByBank[item.id])
@@ -599,6 +610,7 @@ struct LifeFinanceView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
                 rowsAppeared = true

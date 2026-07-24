@@ -406,29 +406,11 @@ struct ResumeView: View {
         // body 頂端一次計算，filteredByCategory / groupedSections / isEmpty 共用同一份陣列
         let sorted = allSorted
         return NavigationStack {
-            VStack(spacing: 0) {
-                // [v3] 頂部英雄統計卡：補齊全 App 主要列表頁均值
-                resumeHeroCard(sorted)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 4)
-                    .opacity(heroCardAppeared ? 1 : 0)
-                    .offset(y: heroCardAppeared ? 0 : 20)
-                    .onAppear {
-                        withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                            heroCardAppeared = true
-                        }
-                    }
-                    .onDisappear {
-                        // 重置旗標：切到其他分頁再切回時能重新播放英雄卡進場動畫，
-                        // 對齊 CareerView / FixedExpenseView 既有寫法。
-                        heroCardAppeared = false
-                    }
-
-                categoryFilter
-
+            // [對齊 SavingsInsuranceView 看板規格] 英雄卡與分類篩選列改為 List 內首個
+            // Section（headerSections），隨內容一起捲動，不再固定釘在列表上方。
+            Group {
                 if sorted.isEmpty {
-                    emptyState
+                    emptyStateList(sorted)
                 } else if let cat = selectedCategory {
                     filteredList(category: cat, sorted: sorted)
                 } else {
@@ -503,8 +485,52 @@ struct ResumeView: View {
 
     // MARK: - 列表
 
+    /// 英雄卡 + 分類篩選列（List 內首個 Section；grouped／filtered／empty 三種列表共用），
+    /// 對齊 SavingsInsuranceView summaryHeader 的「看板隨內容捲動」規格。
+    @ViewBuilder
+    private func headerSections(_ sorted: [LifeMilestone]) -> some View {
+        Section {
+            resumeHeroCard(sorted)
+                .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .opacity(heroCardAppeared ? 1 : 0)
+                .offset(y: heroCardAppeared ? 0 : 20)
+                .onAppear {
+                    withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                        heroCardAppeared = true
+                    }
+                }
+                .onDisappear {
+                    // 重置旗標：切到其他分頁再切回時能重新播放英雄卡進場動畫
+                    heroCardAppeared = false
+                }
+            categoryFilter
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+    }
+
+    /// 空狀態也包在同款 List 內，讓英雄卡／篩選列與其他兩種列表行為一致
+    private func emptyStateList(_ sorted: [LifeMilestone]) -> some View {
+        List {
+            headerSections(sorted)
+            Section {
+                emptyState
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
+    }
+
     private func groupedList(_ sorted: [LifeMilestone]) -> some View {
         List {
+            headerSections(sorted)
             ForEach(Array(groupedSections(sorted).enumerated()), id: \.element.category) { sectionIdx, section in
                 Section {
                     ForEach(Array(section.items.enumerated()), id: \.element.id) { rowIdx, item in
@@ -553,6 +579,7 @@ struct ResumeView: View {
     private func filteredList(category: MilestoneCategory, sorted: [LifeMilestone]) -> some View {
         let items = filteredByCategory(sorted)
         return List {
+            headerSections(sorted)
             if items.isEmpty {
                 Text("此分類尚無紀錄")
                     .foregroundStyle(.secondary).font(.subheadline)

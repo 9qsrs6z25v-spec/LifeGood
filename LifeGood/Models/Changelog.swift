@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.62", build: 715, date: "2026/07/24", notes: [
+            "【美化】履歷頁（ResumeView）與財富頁（LifeFinanceView）看板捲動行為對齊儲蓄險頁規格（承接 v24.61 股票頁同型調整）：兩頁的英雄看板＋篩選列過去都是固定釘在列表上方（VStack 外層、不隨捲動移動），與儲蓄險頁「看板為 List 首個 Section、隨內容一起捲動」的行為不一致。① 履歷頁：resumeHeroCard＋categoryFilter 抽成共用 headerSections（List 內首個 Section），分組列表／單分類篩選列表／空狀態三種模式共用（空狀態新增 emptyStateList 包裝，改為同款 insetGrouped List），捲動時看板隨內容上捲、大標題自動收合；② 財富頁：summaryHeader＋filterChips 移入 milestoneList 的 List 首個 Section，看板由滿版無圓角橫幅改為圓角 20 卡片＋主色光暈陰影（radius 16, y 8）＋16pt 水平內縮，對齊儲蓄險 summaryHeader 卡片規格，List 補 scrollContentBackground(.hidden)；milestoneList 改帶 balance 參數避免重複計算銀行餘額。兩頁看板內容、篩選、列表互動與進場動畫規格完全未變動。"
+        ]),
         ChangelogEntry(version: "24.61", build: 714, date: "2026/07/24", notes: [
             "【美化】股票頁（StockView）看板與捲動行為對齊儲蓄險頁規格：股票頁過去用自訂 stickyTitle（固定釘在頂部、隨捲動縮放淡出的「股票」大字）+ ScrollOffsetKey preference 追蹤捲動位移 + .inline 導覽列，與儲蓄險頁的系統標準大標題（.large，捲動自動收合進導覽列）行為不一致；英雄卡也是滿版無圓角橫幅（頂部還墊 44pt 補償 stickyTitle），與儲蓄險的圓角 20 卡片式看板視覺不同。本次整組對齊：① 移除 stickyTitle／scrollOffset／titleScale／titleOpacity／ScrollOffsetKey 整套自訂機制，改用 .navigationTitle(\"股票\") + .large 系統標準大標題，捲動收合行為與儲蓄險完全一致，也省去每次捲動觸發整個 body 重繪的成本；② 英雄卡改為圓角 20 卡片 + 橙色主色光暈陰影（radius 16, y 8）+ 16pt 水平內縮，對齊儲蓄險 summaryHeader 卡片規格，並移除 44pt 頂部補償；③ 空狀態分支同步移除 stickyTitle 疊層。看板內容（總市值/持股計數/損益 KPI/配置迷你條）與其餘互動完全未變動。"
         ]),
