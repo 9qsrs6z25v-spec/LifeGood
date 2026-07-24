@@ -54,7 +54,6 @@ struct StockView: View {
     @State private var editingItem: Stock?
     @State private var viewingItem: Stock?
     @State private var soldExpanded = false
-    @State private var scrollOffset: CGFloat = 0
     @State private var updateBanner: String?
     @State private var isUpdating = false
     @State private var fetchStatus: [UUID: Bool] = [:]
@@ -71,42 +70,22 @@ struct StockView: View {
         + soldStocks.reduce(0) { $0 + $1.marketValue }
     }
 
-    private var titleScale: CGFloat {
-        let progress = min(max(scrollOffset / 60, 0), 1)
-        return 1.0 - progress * 0.35
-    }
-
-    private var titleOpacity: Double {
-        let progress = min(max(scrollOffset / 60, 0), 1)
-        return 1.0 - Double(progress) * 0.5
-    }
-
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
+            // [對齊 SavingsInsuranceView 看板規格] 移除自訂 stickyTitle + scrollOffset 縮放機制，
+            // 改用系統標準大標題（.large，捲動自動收合），英雄卡隨內容捲動。
+            Group {
                 if store.stocks.isEmpty {
-                    VStack(spacing: 0) {
-                        stickyTitle
-                        emptyState
-                    }
+                    emptyState
                 } else {
                     ScrollView {
-                        // body 單次計算 active/sold，往下傳入各子區塊，避免 scrollOffset
-                        // 每次 onPreferenceChange 觸發整個 body 重繪時，summaryHeader／
-                        // activeStocksSectionHeader／allocationMiniBar／soldStackSection／
-                        // soldStackPreview 各自獨立重新 filter/sort store.stocks。
+                        // body 單次計算 active/sold，往下傳入各子區塊，避免各區塊
+                        // 各自獨立重新 filter/sort store.stocks。
                         let active = activeStocks
                         let sold = soldStocks
                         LazyVStack(spacing: 0) {
                             summaryHeader(active: active)
-                                .background(
-                                    GeometryReader { geo in
-                                        Color.clear.preference(
-                                            key: ScrollOffsetKey.self,
-                                            value: -geo.frame(in: .named("scroll")).minY
-                                        )
-                                    }
-                                )
+                                .padding(.top, 4)
 
                             LazyVStack(spacing: 12) {
                                 if !active.isEmpty {
@@ -146,13 +125,7 @@ struct StockView: View {
                             }
                         }
                     }
-                    .coordinateSpace(name: "scroll")
-                    .onPreferenceChange(ScrollOffsetKey.self) { newOffset in
-                        if abs(newOffset - scrollOffset) > 1 { scrollOffset = newOffset }
-                    }
                     .background(Color(.systemGroupedBackground))
-
-                    stickyTitle
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -163,7 +136,8 @@ struct StockView: View {
                     }
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("股票")
+            .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $showAdd) { AddStockView() }
             .sheet(item: $editingItem) { item in AddStockView(editing: item) }
             .sheet(item: $viewingItem) { item in StockDetailView(stock: item) }
@@ -277,22 +251,6 @@ struct StockView: View {
     }
 
     // MARK: - 黏著標題
-
-    private var stickyTitle: some View {
-        Text("股票")
-            .font(.system(size: 34 * titleScale, weight: .bold))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal)
-            .padding(.top, 4)
-            .padding(.bottom, 8)
-            .background(
-                LinearGradient(
-                    colors: [Color(.systemBackground), Color(.systemBackground).opacity(titleOpacity)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-    }
 
     // MARK: - 已賣出堆疊
 
@@ -536,7 +494,6 @@ struct StockView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .padding(.top, 44)
         .background(
             ZStack {
                 LinearGradient(
@@ -573,8 +530,13 @@ struct StockView: View {
                 )
             }
         )
+        // [對齊 SavingsInsuranceView 看板規格] 圓角 20 卡片 + 主色光暈陰影 + 16pt 水平內縮，
+        // 取代原本滿版無圓角橫幅（原 padding(.top, 44) 為 stickyTitle 補償、已隨其移除）
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color(red: 0.86, green: 0.36, blue: 0.06).opacity(0.42), radius: 16, x: 0, y: 8)
+        .padding(.horizontal, 16)
         .opacity(headerAppeared ? 1 : 0)
-        .offset(y: headerAppeared ? 0 : 20)
+        .offset(y: headerAppeared ? 0 : 22)
         .onAppear {
             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                 headerAppeared = true
@@ -894,9 +856,3 @@ struct StockView: View {
     }
 }
 
-private struct ScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}

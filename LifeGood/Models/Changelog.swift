@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.61", build: 714, date: "2026/07/24", notes: [
+            "【美化】股票頁（StockView）看板與捲動行為對齊儲蓄險頁規格：股票頁過去用自訂 stickyTitle（固定釘在頂部、隨捲動縮放淡出的「股票」大字）+ ScrollOffsetKey preference 追蹤捲動位移 + .inline 導覽列，與儲蓄險頁的系統標準大標題（.large，捲動自動收合進導覽列）行為不一致；英雄卡也是滿版無圓角橫幅（頂部還墊 44pt 補償 stickyTitle），與儲蓄險的圓角 20 卡片式看板視覺不同。本次整組對齊：① 移除 stickyTitle／scrollOffset／titleScale／titleOpacity／ScrollOffsetKey 整套自訂機制，改用 .navigationTitle(\"股票\") + .large 系統標準大標題，捲動收合行為與儲蓄險完全一致，也省去每次捲動觸發整個 body 重繪的成本；② 英雄卡改為圓角 20 卡片 + 橙色主色光暈陰影（radius 16, y 8）+ 16pt 水平內縮，對齊儲蓄險 summaryHeader 卡片規格，並移除 44pt 頂部補償；③ 空狀態分支同步移除 stickyTitle 疊層。看板內容（總市值/持股計數/損益 KPI/配置迷你條）與其餘互動完全未變動。"
+        ]),
         ChangelogEntry(version: "24.60", build: 713, date: "2026/07/23", notes: [
             "【美化】收入頁英雄卡 KPI 金額改為直式三行堆疊：v24.59 新增「今年累計」後 KPI 擴為四格，「NT$XX.X萬」單行顯示在窄格內被 minimumScaleFactor 縮得難讀。改為 NT$（小字）↵ 數字（15pt 粗體，放大近一倍）↵ 萬（小字）直式堆疊，數字成為視覺主體；新增 splitCurrency(_:) 把 ntdWanString 格式拆成幣別/數字/單位三段，未滿一萬（無「萬」字）時自動省略第三行。四格（累計收入/今年累計/月均收入/固定月收）一體適用，計算邏輯不變。"
         ]),
