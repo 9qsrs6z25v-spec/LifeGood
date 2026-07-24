@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.70", build: 723, date: "2026/07/24", notes: [
+            "【美化】旅遊相簿空狀態（TravelAlbumSheet）補齊本頁最後一處均值差距：原本用系統原生 ContentUnavailableView（純圖示＋文字，無動畫），與同檔案地圖 emptyOverlay 已升級的雙層脈衝光環規格不一致；改為 albumEmptyState：同款雙層脈衝光環＋漸層底圓＋細邊框＋.ultraThinMaterial 圓角卡片，並用可取消的 Task 排程管理脈衝動畫（sheet 開關時正確歸零，避免重疊計時任務）。純視覺調整，相簿照片彙整邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.69", build: 722, date: "2026/07/24", notes: [
             "【美化】旅遊地圖（TravelMapView）空狀態與篩選膠囊補齊與姊妹頁 FoodMapView 的均值差距：① emptyOverlay 原本單層呼吸縮放圓，且「有照片」篩選導致零筆時仍顯示「還沒有旅遊足跡」誤導文案；升級為雙層脈衝光環＋漸層底圓＋細邊框，並依 photoOnly 篩選狀態切換灰階提示「目前沒有附照片的地點／關閉右上角『有照片』開關可查看全部地點」，避免誤以為完全沒記錄過；背景改用 .ultraThinMaterial 圓角卡片，取代原本貼在地圖上的不透明色塊，深色模式更自然融入地圖底色；② chip()（期間／縣市篩選膠囊）補上選中彈簧動畫，修復切換篩選時瞬間跳變、無回彈手感的問題。純視覺與空狀態文案調整，地圖標註、資料聚合、篩選或排序等既有商業邏輯完全未變動。"
         ]),

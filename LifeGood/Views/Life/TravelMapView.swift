@@ -43,8 +43,16 @@ import UIKit
 //      期間／縣市篩選時膠囊是瞬間跳變而非彈簧回彈，與姊妹頁 FoodMapView.chip 的
 //      .spring(response:0.26, dampingFraction:0.72) 規格不一致；補上同款動畫修飾。
 //   純視覺與空狀態文案調整，地圖標註、資料聚合、篩選或排序等既有商業邏輯完全未變動。
-//   （下次美化本檔案時，可從 listSheet／citySection 卡片與 TravelAlbumSheet 空狀態
-//   （目前用系統原生 ContentUnavailableView，未套用本頁雙層光環規格）繼續找可統一之處）
+// [2026-07 v3] TravelAlbumSheet 空狀態補齊最後一處均值差距：
+//   10. 原本用系統原生 ContentUnavailableView（純圖示 + 文字，無動畫），與本檔案
+//       emptyOverlay 已升級的雙層脈衝光環規格不一致。改為 albumEmptyState：同款雙層
+//       脈衝光環 + 漸層底圓 + 細邊框 + .ultraThinMaterial 圓角卡片，並用可取消的
+//       Task 排程管理脈衝（onAppear 排程、onDisappear 取消歸零，避免 sheet 反覆開關
+//       時重疊多個計時任務）。純視覺調整，相簿照片彙整（entries／photoNames 展開）
+//       邏輯完全未變動。
+//   純視覺與空狀態文案調整，地圖標註、資料聚合、篩選或排序等既有商業邏輯完全未變動。
+//   （下次美化本檔案時，可從 listSheet／citySection 卡片（清單 sheet 內的縣市分組卡片
+//   目前僅套用系統 List 樣式，未比對是否需要圓角卡片化）繼續找可統一之處）
 
 // MARK: - 台灣縣市解析（自地址字串推斷縣市）
 
@@ -905,6 +913,9 @@ struct TravelAlbumSheet: View {
     let spots: [TravelSpotAggregate]
 
     @State private var viewingPhotoURL: IdentifiableURL?
+    @State private var emptyIconPulse = false
+    @State private var emptyIconPulseTask: Task<Void, Never>?
+    private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)   // 娛樂紫，對齊本頁地圖 accent
 
     /// (地點名稱, 照片檔名) 依地點展開
     private var entries: [(spot: String, name: String)] {
@@ -917,8 +928,7 @@ struct TravelAlbumSheet: View {
         NavigationStack {
             Group {
                 if entries.isEmpty {
-                    ContentUnavailableView("還沒有旅遊照片", systemImage: "photo.on.rectangle.angled",
-                                           description: Text("在娛樂支出附上照片，就會集結成相簿。"))
+                    albumEmptyState
                 } else {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 8) {
@@ -942,6 +952,63 @@ struct TravelAlbumSheet: View {
             }
             .sheet(item: $viewingPhotoURL) { wrapper in PhotoLightbox(url: wrapper.url) }
         }
+    }
+
+    // MARK: - 空狀態（雙層脈衝光環 + 漸層底圓，對齊 emptyOverlay／FoodMapView 既有規格）
+
+    private var albumEmptyState: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.25), lineWidth: 1.5)
+                    .frame(width: 100, height: 100)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                    .frame(width: 100, height: 100)
+                    .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.85), accent.opacity(0.50)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 60, height: 60)
+                    .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.75))
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .onAppear {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
+                emptyIconPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    emptyIconPulse = true
+                }
+            }
+            .onDisappear {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
+            }
+
+            Text("還沒有旅遊照片")
+                .font(.headline)
+            Text("在「娛樂」變動支出記錄時附上照片，\n這裡就會集結成相簿。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.vertical, 28)
+        .padding(.horizontal, 24)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.14), radius: 14, y: 4)
+        .padding(.horizontal, 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
