@@ -537,6 +537,7 @@ struct DepartmentEditor: View {
     @State private var downstreamIds: Set<UUID> = []
     @State private var peerIds: Set<UUID> = []
     @State private var showDeleteConfirm = false
+    @State private var isSaving = false
 
     private var isEditing: Bool { editingId != nil }
 
@@ -668,7 +669,7 @@ struct DepartmentEditor: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(isEditing ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .alert("確定要刪除這個部門嗎？", isPresented: $showDeleteConfirm) {
@@ -767,6 +768,8 @@ struct DepartmentEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         let id = editingId ?? UUID()
         let dept = Department(
             id: id,

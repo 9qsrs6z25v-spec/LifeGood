@@ -2259,6 +2259,7 @@ struct DepositEditorSheet: View {
     @State private var amountText = ""
     @State private var transferTargetId: UUID?
     @State private var adjustNote = ""
+    @State private var isSaving = false
 
     private var bankMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
@@ -2390,7 +2391,7 @@ struct DepositEditorSheet: View {
                         }
                     }
                     .bold().foregroundStyle(.green)
-                    .disabled(saveDisabled)
+                    .disabled(saveDisabled || isSaving)
                 }
             }
             .onAppear {
@@ -2412,7 +2413,9 @@ struct DepositEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         guard var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
+        isSaving = true
         // 「沖正」紀錄的 txType 在 onAppear 只會回填成 .deposit/.withdrawal（此表單沒有「編輯沖正」的重算 UI），
         // 若直接用預設值重建 BankDeposit 會把 isAdjust／note 清掉，等於使用者只是打開又存檔就把「沖正」
         // 紀錄靜默改成普通存提款、遺失對帳備註。這裡保留原始 isAdjust／note，避免資料被改型別。
@@ -2428,8 +2431,10 @@ struct DepositEditorSheet: View {
     }
 
     private func saveTransfer() {
+        guard !isSaving else { return }
         let amount = Double(amountText) ?? 0
         guard amount > 0, let targetId = transferTargetId else { return }
+        isSaving = true
 
         // 從本帳戶扣款
         if var fromMs = lifeStore.milestones.first(where: { $0.id == milestoneId }) {
@@ -2457,12 +2462,14 @@ struct DepositEditorSheet: View {
     }
 
     private func saveAdjust() {
+        guard !isSaving else { return }
         guard let targetAmount = Double(amountText),
               var ms = lifeStore.milestones.first(where: { $0.id == milestoneId }) else { dismiss(); return }
         let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let diff = targetAmount - currentBalance(expensesById: expensesById, incomesById: incomesById)
         guard diff != 0 else { dismiss(); return }
+        isSaving = true
         var list = ms.bankDeposits ?? []
         let trimmedNote = adjustNote.trimmingCharacters(in: .whitespaces)
         list.append(BankDeposit(

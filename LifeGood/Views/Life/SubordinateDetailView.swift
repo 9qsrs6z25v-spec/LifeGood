@@ -2571,9 +2571,6 @@ extension LifeStore {
         }
         return counts
     }
-
-    /// 某人被 @ 標註到的項目數
-    func mentionedCount(for subId: UUID) -> Int { mentionedCounts()[subId] ?? 0 }
 }
 
 /// 標註文字工具：文字內以乾淨的 `@名字` 儲存，顯示時再依名字解析為可點連結。

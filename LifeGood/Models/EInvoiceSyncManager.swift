@@ -130,6 +130,11 @@ final class EInvoiceSyncManager: ObservableObject {
                     skipped += 1
                     continue
                 }
+                // 作廢發票不應計入支出：政府 API 的 invStatus 非「開立」（例如「作廢」）代表商家已作廢此發票
+                if header.invStatus != "開立" {
+                    skipped += 1
+                    continue
+                }
                 do {
                     let items = try await client.fetchDetail(carrier: carrier, header: header)
                     let category = InvoiceCategorizer.shared.categorize(seller: header.sellerName,

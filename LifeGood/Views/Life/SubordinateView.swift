@@ -851,6 +851,7 @@ struct AddSubordinateView: View {
     @State private var note = ""
     @State private var hasPlantArea = false
     @State private var plantArea = ""
+    @State private var isSaving = false
 
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
@@ -880,7 +881,7 @@ struct AddSubordinateView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(!canSave)
+                        .disabled(!canSave || isSaving)
                 }
             }
             .onAppear { loadEditing() }
@@ -954,6 +955,8 @@ struct AddSubordinateView: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         let linkedTitle: String
         if let gtId = selectedGradeTitleId,
            let gt = lifeStore.gradeTitles.first(where: { $0.id == gtId }) {

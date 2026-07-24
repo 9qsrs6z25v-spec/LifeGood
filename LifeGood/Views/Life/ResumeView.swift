@@ -1360,6 +1360,7 @@ struct AddMilestoneView: View {
     @State private var insType: InsuranceType = .life
     @State private var premiumText = ""
     @State private var beneficiary = ""
+    @State private var isSaving = false
 
     private var isFamily: Bool { category == .family }
     private var isRealEstate: Bool { category == .realEstate }
@@ -1444,7 +1445,7 @@ struct AddMilestoneView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing != nil || editingFamily != nil ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(!canSave)
+                        .disabled(!canSave || isSaving)
                 }
             }
             .onAppear { loadEditing() }
@@ -1915,6 +1916,8 @@ struct AddMilestoneView: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         if isFamily {
             let isSpouse = familyRole == .spouse
             let isOther = familyRole == .otherRelative

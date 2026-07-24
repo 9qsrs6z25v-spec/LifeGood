@@ -75,8 +75,12 @@ struct HolographicBuildingView: View {
         .overlay(cornerBrackets.allowsHitTesting(false))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                pulse = 1.0
+            // 比照 tagsAppeared 的守衛：view 若因父層重建等原因重新觸發 onAppear，
+            // 不應在仍在振盪中的 repeatForever 動畫上再疊加一個新的，否則會產生跳動的視覺瑕疵。
+            if pulse != 1.0 {
+                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                    pulse = 1.0
+                }
             }
             if !tagsAppeared {
                 withAnimation(.easeOut(duration: 0.3)) {

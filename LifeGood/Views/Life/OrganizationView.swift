@@ -796,6 +796,7 @@ struct OrgPersonEditor: View {
     // 期間又重新開選單選了另一張、或按了「移除照片」，較慢完成的前一次選取不該覆蓋較新的
     // 狀態；用世代編號讓每次 Task 完成時檢查自己是否仍是最新一次選取。
     @State private var photoLoadGeneration = 0
+    @State private var isSaving = false
 
     private var isEditing: Bool { editingId != nil }
     private var existing: OrgPerson? {
@@ -960,7 +961,7 @@ struct OrgPersonEditor: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(isEditing ? "儲存" : "新增") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }
             .sheet(isPresented: $showCamera) {
@@ -1084,6 +1085,8 @@ struct OrgPersonEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         let id = editingId ?? UUID()
         var newPhoto = photoFileName
         if let data = pendingImageData {
