@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.65", build: 718, date: "2026/07/24", notes: [
+            "【美化】部屬「執掌」分頁設備清單（SubordinateEquipmentView）對齊 SubordinateRosterView／GradeTitleView 規格：① 設備清單空狀態由靜態圖示升級為雙圈脈衝光環（double-pulse ring），使用可取消的 Task 排程，避免頁面快速切換造成動畫殘留閃爍；② 設備列、PM／警報時間軸列加入 stagger opacity+Y offset 入場動畫，與部門/職等等頁面列一致；③ 設備名稱、時間軸設備名稱補上 lineLimit+minimumScaleFactor，避免長名稱在大字級輔助模式下截斷或爆版；④ EquipmentEditorSheet 的 PM／警報空狀態提示補上圖示錨點，強化可辨識度。純視覺調整，設備新增/編輯/刪除、PM／警報記錄邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.64", build: 717, date: "2026/07/24", notes: [
             "【靜態除錯 v24.64】三路並行複查全部 86 個 Swift 檔（force-unwrap／Optional／型別／index、retain cycle／競態、畫面閃爍／效能），修復 6 處真實問題：① 電子發票誤記作廢發票為支出：EInvoiceSyncManager.performSync 從財政部 API 取回發票後從未檢查 invStatus，商家已作廢（非「開立」）的發票仍會照常轉成一筆真的 Expense，比照既有 skipped 計數方式在寫入前補上狀態過濾。② 5 處「新增」表單漏補 isSaving 存檔重複送出守衛（此前各輪只修了「編輯」既有紀錄的表單，這 5 個是既有寫法統一套用時漏掉的「新增」個案，快速連點會用不同 UUID 建立兩筆重複紀錄）：OrganizationView（新增組織人員，連帶複製一張多餘的自動名片）、GradeTitleView（新增部門，並重複執行雙向關聯同步）、SubordinateView（新增部屬）、ResumeView（新增里程碑／家庭成員）、LifeFinanceView（新增銀行存款／提款／轉帳，最嚴重可能兩筆轉帳都送出、造成餘額算錯）。③ HolographicBuildingView 呼吸燈動畫缺重入守衛：pulse 的 repeatForever 動畫沒有比照同函式內 tagsAppeared 的守衛寫法，onAppear 若因父層重建等原因再次觸發，會在還在振盪中的舊動畫上疊加一個新的造成跳動（此元件目前無任何呼叫點尚未上線，先行修正避免未來串接後才出現閃爍）。④ 清除 SubordinateDetailView 死碼 mentionedCount(for:)：從未被呼叫、但簽章會誘使未來新增逐列呼叫點、重新引入已在 TalentMatrixView／SubordinateView 修復過的 O(N×M) 全量重掃描，直接刪除。CloudKit 30 秒節流／force-unwrap／O(n²) 聚合複查後確認其餘均無新問題（節流、快取、［weak self］等既有寫法均完整涵蓋）。"
         ]),

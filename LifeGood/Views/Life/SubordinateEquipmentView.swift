@@ -6,6 +6,16 @@ import SwiftUI
 // 頁面下方以單一時間軸並列 PM（綠）與警報（紅），一眼看出兩者的相關性；
 // 警報條目並標示「距該設備上次 PM N 天」輔助判讀。
 
+// MARK: - 美化紀錄（SubordinateEquipmentView）[2026-07]
+// 美化方向（對齊 SubordinateRosterView / GradeTitleView 等頁面規格，僅視覺調整，未動業務邏輯）：
+//   • 設備清單空狀態：靜態圖示 → 升級為 double-pulse ring（雙圈脈衝動畫），
+//     使用 Task + onAppear/onDisappear 取消，避免頁面切換後動畫殘留閃爍
+//   • 設備列（equipmentRow）加入 stagger opacity+Y offset 入場動畫，與部門/職等列一致
+//   • 時間軸列（timelineRow）同步加入 stagger 入場動畫
+//   • 設備名稱／時間軸設備名稱文字補 lineLimit(1)+minimumScaleFactor，避免長名稱在大字級下截斷或爆版
+//   • EquipmentEditorSheet 的 PM／警報空狀態提示補上圖示錨點（對齊 GradeTitleView noCandidatesHint 規格）
+//   下次美化可比照本頁補齊：PM／警報清單項目新增/刪除時的過場動畫
+
 // MARK: 設備清單章節
 
 struct SubordinateEquipmentSection: View {
@@ -16,6 +26,10 @@ struct SubordinateEquipmentSection: View {
     @State private var addingEquipment = false
     @State private var editingEquipment: ManagedEquipment?
     @State private var showPremiumAlert = false
+    @State private var rowsAppeared = false
+    @State private var rowsAppearedTask: Task<Void, Never>?
+    @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
 
     private let accent = Color.teal
 
@@ -56,20 +70,13 @@ struct SubordinateEquipmentSection: View {
             .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
 
             if subordinate.equipments.isEmpty {
-                HStack {
-                    Spacer()
-                    VStack(spacing: 6) {
-                        Image(systemName: "wrench.and.screwdriver")
-                            .font(.system(size: 26)).foregroundStyle(accent.opacity(0.4))
-                        Text("尚未新增設備").font(.caption).foregroundStyle(.secondary)
-                        Text("記錄部屬管理的設備、PM 保養與警報").font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    Spacer()
-                }
-                .padding(.vertical, 18)
+                emptyState
             } else {
                 ForEach(Array(subordinate.equipments.enumerated()), id: \.element.id) { idx, eq in
                     equipmentRow(eq)
+                        .opacity(rowsAppeared ? 1 : 0)
+                        .offset(y: rowsAppeared ? 0 : 12)
+                        .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04 * Double(idx)), value: rowsAppeared)
                     if idx < subordinate.equipments.count - 1 {
                         Rectangle().fill(Color(.separator).opacity(0.20))
                             .frame(height: 0.5).padding(.leading, 56)
@@ -83,12 +90,67 @@ struct SubordinateEquipmentSection: View {
         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
         .premiumLockAlert(isPresented: $showPremiumAlert)
+        .onAppear {
+            rowsAppearedTask?.cancel()
+            rowsAppearedTask = Task {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                guard !Task.isCancelled else { return }
+                rowsAppeared = true
+            }
+        }
+        .onDisappear {
+            rowsAppearedTask?.cancel()
+            rowsAppeared = false
+        }
         .sheet(isPresented: $addingEquipment) {
             EquipmentEditorSheet(subordinateId: subordinateId, editing: nil)
         }
         .sheet(item: $editingEquipment) { eq in
             EquipmentEditorSheet(subordinateId: subordinateId, editing: eq)
         }
+    }
+
+    // MARK: 空狀態（雙圈脈衝，對齊 SubordinateRosterView 規格）
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 62, height: 62)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 62, height: 62)
+                    .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .fill(LinearGradient(colors: [accent.opacity(0.16), accent.opacity(0.06)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 48, height: 48)
+                    .overlay(Circle().stroke(accent.opacity(0.22), lineWidth: 1))
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(.system(size: 20, weight: .light)).foregroundStyle(accent.opacity(0.75))
+            }
+            .onAppear {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    emptyIconPulse = true
+                }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+                emptyIconPulse = false
+            }
+            Text("尚未新增設備").font(.caption).foregroundStyle(.secondary)
+            Text("記錄部屬管理的設備、PM 保養與警報").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
     }
 
     @ViewBuilder
@@ -114,6 +176,7 @@ struct SubordinateEquipmentSection: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(eq.name.isEmpty ? "未命名設備" : eq.name)
                         .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                        .lineLimit(1).minimumScaleFactor(0.8)
                     HStack(spacing: 6) {
                         Label("PM \(eq.pmRecords.count)", systemImage: "wrench.fill")
                             .font(.system(size: 10, weight: .semibold))
@@ -155,6 +218,9 @@ struct SubordinateEquipmentSection: View {
 struct SubordinateEquipmentTimelineSection: View {
     @EnvironmentObject var lifeStore: LifeStore
     let subordinateId: UUID
+
+    @State private var rowsAppeared = false
+    @State private var rowsAppearedTask: Task<Void, Never>?
 
     private var subordinate: Subordinate {
         lifeStore.subordinates.first { $0.id == subordinateId } ?? Subordinate(name: "")
@@ -231,6 +297,9 @@ struct SubordinateEquipmentTimelineSection: View {
 
                 ForEach(Array(all.enumerated()), id: \.element.id) { idx, e in
                     timelineRow(e, isLast: idx == all.count - 1)
+                        .opacity(rowsAppeared ? 1 : 0)
+                        .offset(y: rowsAppeared ? 0 : 10)
+                        .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.03 * Double(idx)), value: rowsAppeared)
                 }
                 .padding(.bottom, 6)
             }
@@ -239,6 +308,18 @@ struct SubordinateEquipmentTimelineSection: View {
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.indigo.opacity(0.08), lineWidth: 0.75))
             .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
             .padding(.horizontal)
+            .onAppear {
+                rowsAppearedTask?.cancel()
+                rowsAppearedTask = Task {
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    guard !Task.isCancelled else { return }
+                    rowsAppeared = true
+                }
+            }
+            .onDisappear {
+                rowsAppearedTask?.cancel()
+                rowsAppeared = false
+            }
         }
     }
 
@@ -265,6 +346,7 @@ struct SubordinateEquipmentTimelineSection: View {
                 HStack(spacing: 6) {
                     Text(e.equipmentName)
                         .font(.caption.weight(.semibold)).foregroundStyle(.primary)
+                        .lineLimit(1).minimumScaleFactor(0.8)
                     Text(e.kind == .pm ? "PM 保養" : "警報")
                         .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 5).padding(.vertical, 1.5)
@@ -330,8 +412,9 @@ struct EquipmentEditorSheet: View {
 
                 Section {
                     if pmRecords.isEmpty {
-                        HStack {
+                        HStack(spacing: 6) {
                             Spacer()
+                            Image(systemName: "wrench").font(.caption).foregroundStyle(.tertiary)
                             Text("尚未新增 PM 記錄").font(.caption).foregroundStyle(.secondary)
                             Spacer()
                         }
@@ -363,8 +446,9 @@ struct EquipmentEditorSheet: View {
 
                 Section {
                     if alarms.isEmpty {
-                        HStack {
+                        HStack(spacing: 6) {
                             Spacer()
+                            Image(systemName: "bell.slash").font(.caption).foregroundStyle(.tertiary)
                             Text("尚未新增警報").font(.caption).foregroundStyle(.secondary)
                             Spacer()
                         }
