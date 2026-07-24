@@ -219,16 +219,39 @@ struct IncomeView: View {
         return (total, total / Double(monthCount))
     }
 
+    /// 把「NT$123.5萬」拆成（NT$／123.5／萬）三段，供 KPI 直式堆疊顯示；
+    /// 未滿一萬（無「萬」字）時 suffix 為空字串。
+    private func splitCurrency(_ s: String) -> (prefix: String, number: String, suffix: String) {
+        var str = s
+        var prefix = ""
+        if str.hasPrefix("NT$") { prefix = "NT$"; str.removeFirst(3) }
+        var suffix = ""
+        if str.hasSuffix("萬") { suffix = "萬"; str.removeLast() }
+        return (prefix, str, suffix)
+    }
+
+    // KPI 值改為直式三行堆疊（NT$ ↵ 數字 ↵ 萬）：四格並列時數字不再被縮到難讀
     private func kpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
+        let parts = splitCurrency(value)
+        return VStack(spacing: 2) {
             Text(label)
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
+            if !parts.prefix.isEmpty {
+                Text(parts.prefix)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            Text(parts.number)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.95))
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+            if !parts.suffix.isEmpty {
+                Text(parts.suffix)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)

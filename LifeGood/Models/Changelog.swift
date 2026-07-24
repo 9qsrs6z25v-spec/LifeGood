@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.60", build: 713, date: "2026/07/23", notes: [
+            "【美化】收入頁英雄卡 KPI 金額改為直式三行堆疊：v24.59 新增「今年累計」後 KPI 擴為四格，「NT$XX.X萬」單行顯示在窄格內被 minimumScaleFactor 縮得難讀。改為 NT$（小字）↵ 數字（15pt 粗體，放大近一倍）↵ 萬（小字）直式堆疊，數字成為視覺主體；新增 splitCurrency(_:) 把 ntdWanString 格式拆成幣別/數字/單位三段，未滿一萬（無「萬」字）時自動省略第三行。四格（累計收入/今年累計/月均收入/固定月收）一體適用，計算邏輯不變。"
+        ]),
         ChangelogEntry(version: "24.59", build: 712, date: "2026/07/23", notes: [
             "【功能】收入頁英雄卡 KPI 新增「今年累計」：在既有「累計收入」（從最早一筆到現在）旁新增每年 1/1 重新起算的今年累計收入，跨年自動歸零重計。計算方式（ExpenseStore.yearToDateIncomeTotal）：逐月加總今年 1 月至本月的收入合計，與既有 incomeTotal(for:) 同一套規則——單次收入計實際發生月份、每月週期收入逐月累計、年薪攤 12 個月、固定薪水設有結束日者結束月後不再計入。KPI 橫列由三格（累計收入／月均收入／固定月收）擴為四格（累計收入／今年累計／月均收入／固定月收），既有 kpiCell 的 minimumScaleFactor 縮放確保四格並列不換行。"
         ]),
