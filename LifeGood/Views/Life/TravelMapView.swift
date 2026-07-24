@@ -29,6 +29,22 @@ import UIKit
 //   6. 關閉按鈕維持 topBarLeading（左側），符合全 App 一致慣例。
 //   7. 未變動任何地圖標註、資料聚合（aggregates／spotsByCity／cityOptions）、篩選
 //      或排序等既有商業邏輯。
+// [2026-07 v2] emptyOverlay／chip 補齊與 FoodMapView 姊妹頁仍缺的兩處均值差距：
+//   8. emptyOverlay 原本只是單層 fill 圓配 0.94↔1.08 呼吸縮放，且「有照片」篩選導致
+//      零筆時仍顯示「還沒有旅遊足跡／在娛樂支出記錄地點…」，會誤導使用者以為完全沒
+//      記錄過，其實只是篩選條件太嚴。改為 photoOnly 感知：篩選中→灰階圖示 + 「目前
+//      沒有附照片的地點／關閉右上角『有照片』開關可查看全部地點」提示且不做脈衝
+//      （對齊 FoodMapView.emptyOverlay isPhotoFilter 分支）；真正尚無足跡→升級為
+//      雙層脈衝光環 + 漸層底圓 + 細邊框，並改用可取消的 Task 排程（onAppear 先取消
+//      前一個再排新的、onDisappear 一併取消歸零），對齊 FoodMapView／LifeOverviewView
+//      既有雙層光環空狀態規格。背景改用 .ultraThinMaterial 圓角卡片，取代原本貼在地
+//      圖上的不透明 systemGroupedBackground 色塊，深色模式下更自然融入地圖底色。
+//   9. chip()：scaleEffect(isSelected ? 1.04 : 1.0) 缺少對應 .animation(value:)，切換
+//      期間／縣市篩選時膠囊是瞬間跳變而非彈簧回彈，與姊妹頁 FoodMapView.chip 的
+//      .spring(response:0.26, dampingFraction:0.72) 規格不一致；補上同款動畫修飾。
+//   純視覺與空狀態文案調整，地圖標註、資料聚合、篩選或排序等既有商業邏輯完全未變動。
+//   （下次美化本檔案時，可從 listSheet／citySection 卡片與 TravelAlbumSheet 空狀態
+//   （目前用系統原生 ContentUnavailableView，未套用本頁雙層光環規格）繼續找可統一之處）
 
 // MARK: - 台灣縣市解析（自地址字串推斷縣市）
 
@@ -96,6 +112,7 @@ struct TravelMapView: View {
     @State private var showAlbumSheet = false
     @State private var photoOnly = false
     @State private var emptyIconPulse = false
+    @State private var emptyIconPulseTask: Task<Void, Never>?
     @State private var statsCardAppeared = false
 
     var body: some View {
@@ -250,37 +267,71 @@ struct TravelMapView: View {
         .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
     }
 
-    // MARK: - 空狀態
+    // MARK: - 空狀態（雙層脈衝光環 + 漸層底圓，photoOnly 篩選中另用灰階提示不做脈衝）
 
     private var emptyOverlay: some View {
-        VStack(spacing: 14) {
+        let isPhotoFilter = photoOnly
+        return VStack(spacing: 14) {
             ZStack {
-                Circle().fill(accent.opacity(0.16)).frame(width: 92, height: 92)
-                    .scaleEffect(emptyIconPulse ? 1.08 : 0.94)
+                if !isPhotoFilter {
+                    // 外層脈衝光環
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.25), lineWidth: 1.5)
+                        .frame(width: 100, height: 100)
+                        .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                        .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                    // 內層脈衝光環（延遲 0.3s 製造波紋層次）
+                    Circle()
+                        .stroke(accent.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
+                        .frame(width: 100, height: 100)
+                        .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
+                        .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                }
                 Circle()
-                    .fill(LinearGradient(colors: [accent.opacity(0.9), accent.opacity(0.5)],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .fill(
+                        LinearGradient(
+                            colors: isPhotoFilter
+                                ? [Color(.systemFill), Color(.secondarySystemFill)]
+                                : [accent.opacity(0.85), accent.opacity(0.50)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
                     .frame(width: 60, height: 60)
-                Image(systemName: "airplane.departure")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .overlay(Circle().stroke(.white.opacity(isPhotoFilter ? 0 : 0.30), lineWidth: 0.75))
+                Image(systemName: isPhotoFilter ? "photo" : "airplane.departure")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(isPhotoFilter ? .secondary : .white)
             }
-            Text("還沒有旅遊足跡")
+            .onAppear {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
+                guard !isPhotoFilter else { return }
+                emptyIconPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    emptyIconPulse = true
+                }
+            }
+            .onDisappear {
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
+            }
+
+            Text(isPhotoFilter ? "目前沒有附照片的地點" : "還沒有旅遊足跡")
                 .font(.headline)
-            Text("在「娛樂」變動支出記錄時選擇地點（並可附照片），\n這裡就會標出你去過的地方。")
+            Text(isPhotoFilter
+                 ? "關閉右上角「有照片」開關可查看全部地點"
+                 : "在「娛樂」變動支出記錄時選擇地點（並可附照片），\n這裡就會標出你去過的地方。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
-        .padding(24)
+        .padding(.vertical, 28)
+        .padding(.horizontal, 24)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.14), radius: 14, y: 4)
+        .padding(.horizontal, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground).opacity(0.92))
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                emptyIconPulse = true
-            }
-        }
-        .onDisappear { emptyIconPulse = false }
     }
 
     // MARK: - 清單 sheet（統計卡 + 依縣市分組）
@@ -490,6 +541,8 @@ struct TravelMapView: View {
                 .shadow(color: .black.opacity(isSelected ? 0.14 : 0), radius: 3, y: 1)
         }
         .buttonStyle(.plain)
+        // 補上選中彈簧動畫，對齊 FoodMapView.chip 規格，避免膠囊縮放瞬間跳變
+        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
     }
 
     // MARK: - 地圖初始置中
