@@ -155,7 +155,19 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
 //   6. aiCommitExpense 成功 toast 金額顯示改用全 App 共用 ntdWanString 萬/億智慧量級，
 //      取代原本高額時會顯示成長串裸整數（如 NT$ 1200000）的寫法；
 //      純顯示調整，未變動實際存入的 Expense.amount 或其他記帳邏輯。
-//   （下次美化本檔案時，可從 topSubFeatureBar／floatingActionButton 繼續找可統一之處）
+// [2026-07 v2] 承接上方提示，本次美化 topSubFeatureBar／floatingActionButton：
+//   7. subFeaturePill 標題文字補上 lineLimit(1) + minimumScaleFactor(0.8)：
+//      「我的行事曆」「部屬總覽」等 4~5 字標題在大字級輔助模式下，於橫向捲動膠囊列中
+//      原本沒有縮放保護，容易被壓縮換行撐高整條 topSubFeatureBar；對齊全 App 文字自適應規格。
+//   8. careerGroupedPills／familyGroupedPills 分組背景：固定 opacity(0.10) 在深色模式下
+//      因 systemBackground 接近純黑而被吃成幾乎看不見的灰框，改為依 colorScheme 切換
+//      （淺色維持 0.10、深色提高到 0.20；邊框 0.25→0.38），對齊 MacaronDatePicker v2
+//      依 colorScheme 切換底色的既有做法，新增 colorScheme Environment。
+//   9. FloatingActionButtonView.fabStack：彈出選單「新增收入」「新增支出」與收合時的
+//      「新增收支」文字補上 lineLimit(1) + minimumScaleFactor(0.85)，避免大字級輔助模式
+//      下膠囊按鈕文字換行擠壓變形。
+//   純視覺調整，分頁切換、FAB 拖曳吸邊、AI 記帳等既有邏輯完全未變動。
+//   （下次美化本檔案時，可從 bottomTabBar／aiMicOverlay 繼續找可統一之處）
 
 // MARK: - 主畫面
 
@@ -182,6 +194,7 @@ struct MainTabView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showPaywall: Bool = false
 
     private var currentMode: AppMode {
@@ -1019,10 +1032,12 @@ struct MainTabView: View {
             }
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
-        .background(Color.orange.opacity(0.10))
+        // 深色模式下 systemBackground 接近純黑，固定 0.10 底色會被吃成幾乎看不見的灰框，
+        // 比照 MacaronDatePicker v2 依 colorScheme 提高底色不透明度的做法
+        .background(Color.orange.opacity(colorScheme == .dark ? 0.20 : 0.10))
         .overlay(
             RoundedRectangle(cornerRadius: 22)
-                .stroke(Color.orange.opacity(0.25), lineWidth: 1)
+                .stroke(Color.orange.opacity(colorScheme == .dark ? 0.38 : 0.25), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 22))
     }
@@ -1047,10 +1062,11 @@ struct MainTabView: View {
             }
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
-        .background(Color.pink.opacity(0.10))
+        // 深色模式下同步提高底色不透明度，理由同 careerGroupedPills
+        .background(Color.pink.opacity(colorScheme == .dark ? 0.20 : 0.10))
         .overlay(
             RoundedRectangle(cornerRadius: 22)
-                .stroke(Color.pink.opacity(0.25), lineWidth: 1)
+                .stroke(Color.pink.opacity(colorScheme == .dark ? 0.38 : 0.25), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 22))
     }
@@ -1062,7 +1078,10 @@ struct MainTabView: View {
         }) {
             HStack(spacing: 4) {
                 Image(systemName: icon).font(.caption2)
-                Text(title).font(.caption.weight(isSelected ? .semibold : .medium))
+                Text(title)
+                    .font(.caption.weight(isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 if locked {
                     Image(systemName: "lock.fill").font(.system(size: 9))
                 }
@@ -1442,6 +1461,8 @@ private struct FloatingActionButtonView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "plus.circle.fill")
                             Text("新增收入")
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
                         }
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 18).padding(.vertical, 12)
@@ -1458,6 +1479,8 @@ private struct FloatingActionButtonView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "minus.circle.fill")
                             Text("新增支出")
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
                         }
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 18).padding(.vertical, 12)
@@ -1485,6 +1508,8 @@ private struct FloatingActionButtonView: View {
                     if !showQuickAdd {
                         Text("新增收支")
                             .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     }
                 }
                 .foregroundStyle(.white)
