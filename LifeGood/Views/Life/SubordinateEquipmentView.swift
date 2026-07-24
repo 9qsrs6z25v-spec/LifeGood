@@ -14,7 +14,14 @@ import SwiftUI
 //   • 時間軸列（timelineRow）同步加入 stagger 入場動畫
 //   • 設備名稱／時間軸設備名稱文字補 lineLimit(1)+minimumScaleFactor，避免長名稱在大字級下截斷或爆版
 //   • EquipmentEditorSheet 的 PM／警報空狀態提示補上圖示錨點（對齊 GradeTitleView noCandidatesHint 規格）
-//   下次美化可比照本頁補齊：PM／警報清單項目新增/刪除時的過場動畫
+// [2026-07 v2] EquipmentEditorSheet 補齊 PM／警報清單項目新增/刪除時的過場動畫：
+//   • 新增：Button 內的 append 包入 withAnimation(.spring(response:0.42, dampingFraction:0.78))；
+//     刪除：removeAll 同款包入，並在每筆 row 的 VStack 補上
+//     .transition(.opacity.combined(with: .move(edge: .top)))（對齊 AddExpenseView／
+//     ResumeGiftSection 既有清單新增/刪除過場規格），避免項目瞬間跳出/消失。
+//   純視覺調整，PM／警報記錄的儲存、排序（依日期新到舊）、刪除設備等既有商業邏輯完全未變動。
+//   （下次美化本檔案時，可從 SubordinateEquipmentTimelineSection 的 PM／警報圖示徽章是否
+//   也適合統一改用膠囊徽章樣式（對齊 spotRow／equipmentRow 既有規格）繼續找可統一之處）
 
 // MARK: 設備清單章節
 
@@ -426,7 +433,9 @@ struct EquipmentEditorSheet: View {
                             HStack {
                                 DatePicker("保養日期", selection: $pm.date, displayedComponents: .date)
                                 Button(role: .destructive) {
-                                    pmRecords.removeAll { $0.id == pm.id }
+                                    withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                                        pmRecords.removeAll { $0.id == pm.id }
+                                    }
                                 } label: {
                                     Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                                 }
@@ -434,9 +443,12 @@ struct EquipmentEditorSheet: View {
                             }
                             TextField("保養內容（選填）", text: $pm.note)
                         }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                     Button {
-                        pmRecords.append(EquipmentPMRecord())
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                            pmRecords.append(EquipmentPMRecord())
+                        }
                     } label: {
                         Label("新增 PM 記錄", systemImage: "plus.circle").foregroundStyle(.green)
                     }
@@ -460,7 +472,9 @@ struct EquipmentEditorSheet: View {
                             HStack {
                                 DatePicker("發生時間", selection: $al.date, displayedComponents: [.date, .hourAndMinute])
                                 Button(role: .destructive) {
-                                    alarms.removeAll { $0.id == al.id }
+                                    withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                                        alarms.removeAll { $0.id == al.id }
+                                    }
                                 } label: {
                                     Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                                 }
@@ -468,9 +482,12 @@ struct EquipmentEditorSheet: View {
                             }
                             TextField("警報內容（如：高溫警報、壓力異常）", text: $al.content)
                         }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                     Button {
-                        alarms.append(EquipmentAlarm())
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                            alarms.append(EquipmentAlarm())
+                        }
                     } label: {
                         Label("新增警報", systemImage: "plus.circle").foregroundStyle(.red)
                     }

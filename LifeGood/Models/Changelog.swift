@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.71", build: 724, date: "2026/07/24", notes: [
+            "【美化】部屬「執掌」分頁設備編輯表單（EquipmentEditorSheet）補齊 PM／警報清單項目新增、刪除時的過場動畫：新增時彈簧淡入＋上滑，刪除時同款淡出，取代原本瞬間跳出/消失的生硬手感，對齊 AddExpenseView／ResumeGiftSection 既有清單新增/刪除過場規格。純視覺調整，PM／警報記錄的儲存、排序、刪除設備等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.70", build: 723, date: "2026/07/24", notes: [
             "【美化】旅遊相簿空狀態（TravelAlbumSheet）補齊本頁最後一處均值差距：原本用系統原生 ContentUnavailableView（純圖示＋文字，無動畫），與同檔案地圖 emptyOverlay 已升級的雙層脈衝光環規格不一致；改為 albumEmptyState：同款雙層脈衝光環＋漸層底圓＋細邊框＋.ultraThinMaterial 圓角卡片，並用可取消的 Task 排程管理脈衝動畫（sheet 開關時正確歸零，避免重疊計時任務）。純視覺調整，相簿照片彙整邏輯完全未變動。"
         ]),
