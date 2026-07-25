@@ -80,6 +80,14 @@ import MapKit
 //      （下次美化本檔案時，可考慮 RestaurantDetailSheet.photoGallerySection 之後段落，
 //      或比照 TravelMapView 補上縣市分組所需的地址解析，惟後者屬新增資料維度，需先
 //      評估是否超出單純視覺調整範圍）
+// [2026-07 v8] 補齊 photoGallerySection 之後段落的視覺一致性缺口：
+//  22. RestaurantDetailSheet 底部「用地圖開啟」按鈕：原本是本 sheet 唯一沒有描邊／陰影
+//      的扁平元素（headerCard／photoGallerySection／visitsSection／companionCard 皆已有
+//      stroke + shadow），補上 Capsule 同款描邊（Color.blue.opacity(0.22), 0.75pt）與
+//      輕量陰影（Color.blue.opacity(0.14), radius 6），文字字重 medium→semibold 對齊
+//      全 App CTA 按鈕文字權重規格。純視覺調整，開啟地圖行為與座標計算完全未變動。
+//      （visitsSection／companionCard 已在 v2–v3 完成描邊與進場動畫，本輪聚焦補齊最後
+//      一處視覺缺口；下次美化本檔案時，可考慮比照 TravelMapView 補上縣市分組地址解析）
 
 // MARK: - 餐廳聚合資料
 
@@ -857,16 +865,25 @@ struct RestaurantDetailSheet: View {
                         companionCard(companion)
                     }
 
+                    // [v8] 底部「用地圖開啟」原本是全檔案唯一沒有描邊/陰影的扁平元素，
+                    // 與 headerCard／photoGallerySection／visitsSection／companionCard 皆已有的
+                    // 描邊＋陰影節奏不一致；補上 Capsule stroke + 輕量陰影，字重升級對齊
+                    // 其餘 CTA 文字權重，純視覺調整，開啟地圖行為完全未變動。
                     Button {
                         openInMaps()
                     } label: {
                         Label("用地圖開啟", systemImage: "map.fill")
-                            .font(.subheadline.weight(.medium))
+                            .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, 11)
                             .background(Color.blue.opacity(0.12))
                             .foregroundStyle(.blue)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.blue.opacity(0.22), lineWidth: 0.75)
+                            )
+                            .shadow(color: Color.blue.opacity(0.14), radius: 6, x: 0, y: 3)
                     }
                     .padding(.horizontal)
                 }

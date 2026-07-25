@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.79", build: 732, date: "2026/07/25", notes: [
+            "【美化】美食地圖餐廳詳情 sheet（FoodMapView.RestaurantDetailSheet）補齊最後一處視覺缺口：底部「用地圖開啟」按鈕原本是本 sheet 唯一沒有描邊／陰影的扁平元素，與 headerCard／photoGallerySection／visitsSection／companionCard 皆已有的描邊＋陰影節奏不一致；補上 Capsule 同款描邊與輕量陰影，文字字重 medium→semibold 對齊全 App CTA 按鈕文字權重規格。純視覺調整，開啟地圖行為與座標計算完全未變動。"
+        ]),
         ChangelogEntry(version: "24.78", build: 731, date: "2026/07/25", notes: [
             "【美化】醫療地圖畫面（MedicalMapView）就醫地點清單操作流暢性補強：本檔案自 v1 起完全沒有任何進場動畫，新增 clinicRowsAppeared 錯落淡入＋上移 12pt 進場動畫（spring 0.48/0.80，每列延遲 0.05s×idx），對齊 LifeOverviewView.categoryRowsAppeared／FamilyOverviewMap.houseRowsAppeared 等全 App 清單列進場動畫規格；容器 onAppear 用可取消 Task 延遲 0.05s 觸發、onDisappear 取消並重置旗標，避免快速切換分頁殘留 asyncAfter 造成閃爍。純視覺層調整，地點聚合、排序、就診紀錄等既有商業邏輯完全未變動。"
         ]),
