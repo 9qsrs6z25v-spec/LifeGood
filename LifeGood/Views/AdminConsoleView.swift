@@ -27,6 +27,13 @@ import SwiftUI
 //      與「訂閱」之間顯示 ProgressView + 「正在與 iCloud 同步設定…」提示列，寫入完成後自動
 //      消失；同時把「全功能免費」/「對外顯示人數」Toggle 與「套用門檻」按鈕在 isBusy 期間
 //      disabled，避免重複觸發。純 UI 呈現既有狀態旗標，未新增或變動任何遠端讀寫邏輯。
+// [2026-07 v3] 補齊「視覺一致性」缺口：console 內 5 個 Section 先前仍是預設純文字
+//   header（Section("...")），未套用 v1 就已在 pinGate/使用者人數列建立的漸層規格；
+//   全 App 多數頁面（SubordinateRosterView.RosterCellDetailSheet、OrganizationView 等）
+//   Section 標題已統一改為「4pt Capsule 漸層色條 + 圖示 + .subheadline.semibold」，
+//   此頁落後於均值。新增 sectionHeader(_:icon:color:) 輔助函式並套用到全部 5 個 Section
+//   （使用者人數＝藍／訂閱＝綠／對外顯示＝紫／版本更新紀錄＝靛／PIN＝橘），純標題視覺
+//   升級，Section 內容、Toggle、Button 行為完全未變動。
 // ─────────────────────────────────────────────
 
 /// 隱藏管理控制台（關於頁連點版本卡 20 下開啟，需輸入 PIN）。
@@ -160,7 +167,7 @@ struct AdminConsoleView: View {
     private var console: some View {
         Form {
             // 人數
-            Section("使用者人數（不重複 iCloud）") {
+            Section {
                 HStack(spacing: 12) {
                     // 36pt 藍色漸層圓圖示（對齊 SettingsView settingsActionRow）
                     ZStack {
@@ -193,6 +200,8 @@ struct AdminConsoleView: View {
                 } label: {
                     Label("重新整理人數 / 設定", systemImage: "arrow.clockwise")
                 }
+            } header: {
+                sectionHeader("使用者人數（不重複 iCloud）", icon: "person.3.fill", color: .blue)
             }
 
             // [v2] 載入狀態：isBusy 時顯示同步提示（寫入 CloudKit AppConfig 期間）
@@ -244,7 +253,7 @@ struct AdminConsoleView: View {
                 }
                 Toggle("本機開發者強制解鎖", isOn: $subscription.devOverride)
             } header: {
-                Text("訂閱")
+                sectionHeader("訂閱", icon: "crown.fill", color: .green)
             } footer: {
                 Text("「全功能免費」會即時影響所有使用者（寫入 iCloud 公開設定）。關閉後，免費期間就在用的早鳥使用者仍永久保留解鎖。")
             }
@@ -268,13 +277,13 @@ struct AdminConsoleView: View {
                 Button("套用門檻") { applyPublicDisplay() }
                     .disabled(admin.isBusy)
             } header: {
-                Text("對外顯示")
+                sectionHeader("對外顯示", icon: "eye.fill", color: .purple)
             } footer: {
                 Text("開啟且人數達門檻後，「關於」頁會顯示「已有 N 位使用者」。目前 \(admin.shouldShowPublicCount ? "會" : "不會")對外顯示。")
             }
 
             // 版本更新紀錄（內建，僅管理者檢視）
-            Section("版本更新紀錄") {
+            Section {
                 NavigationLink {
                     ChangelogListView()
                 } label: {
@@ -284,16 +293,20 @@ struct AdminConsoleView: View {
                     Text("最新：v\(latest.version)（build \(latest.build)）")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+            } header: {
+                sectionHeader("版本更新紀錄", icon: "doc.text.clock", color: .indigo)
             }
 
             // PIN
-            Section("PIN") {
+            Section {
                 SecureField("新的 PIN", text: $newPIN).keyboardType(.numberPad)
                 Button("更新 PIN") {
                     admin.setAdminPIN(newPIN)
                     newPIN = ""
                 }
                 .disabled(newPIN.trimmingCharacters(in: .whitespaces).isEmpty)
+            } header: {
+                sectionHeader("PIN", icon: "key.fill", color: .orange)
             }
 
             if let err = admin.lastError {
@@ -314,6 +327,27 @@ struct AdminConsoleView: View {
             }
         }
         .onDisappear { consoleAppeared = false }
+    }
+
+    // Section 標題輔助（4pt Capsule 漸層色條 + 圖示 + .subheadline.semibold，對齊全 App sectionHeader 規格）
+    private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .textCase(nil)
     }
 
     private func applyPublicDisplay() {

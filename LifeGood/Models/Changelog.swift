@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.76", build: 729, date: "2026/07/25", notes: [
+            "【美化】管理控制台（AdminConsoleView）補齊與全 App 均值的視覺一致性差距：control 頁 5 個 Section（使用者人數／訂閱／對外顯示／版本更新紀錄／PIN）原本仍是系統預設純文字標題，未套用本頁 v1 就已在 pinGate 鎖定頁與使用者人數列建立的漸層規格，也落後於 SubordinateRosterView／OrganizationView 等頁面早已統一的「4pt Capsule 漸層色條＋圖示＋.subheadline.semibold」Section 標題規格；新增共用 sectionHeader(_:icon:color:) 輔助函式並套用到全部 5 處（依內容各自搭配識別色：藍／綠／紫／靛／橘）。純標題視覺升級，Section 內容、Toggle／Button 行為與既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.75", build: 728, date: "2026/07/25", notes: [
             "【美化】美食地圖餐廳清單 sheet（FoodMapView.listSheet）補齊與姊妹頁 TravelMapView.listSheet 的均值差距：原本用系統原生 List(.insetGrouped) 裝載餐廳列，是地圖類清單 sheet 中唯一還沒升級成自訂圓角卡片的頁面；改為 ScrollView + restaurantListCard（VStack + RoundedRectangle 16pt 圓角＋細邊框＋陰影＋列間 Divider），對齊 TravelMapView.citySection 圓角卡規格（未額外做縣市分組，因本頁資料無對應縣市解析欄位，強加會超出單純視覺調整範圍）；restaurantRow 補上獨立 padding 與 contentShape，確保脫離 List 後點擊熱區與視覺間距不變；新增 restaurantListEmptyState，篩選（如「照片」開關）後清單結果為零筆時不再顯示裸露空白清單，改為輕量灰階圖示＋提示文字卡片。純視覺容器調整，排序、篩選、開啟詳細 sheet 等既有商業邏輯完全未變動。"
         ]),
