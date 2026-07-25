@@ -2379,8 +2379,10 @@ struct RealEstateDetailView: View {
             linkedCreditCardMilestoneId: source.linkedCreditCardMilestoneId,
             placeAddress: source.placeAddress,
             placeLatitude: source.placeLatitude,
-            placeLongitude: source.placeLongitude,
-            photoFileNames: source.photoFileNames
+            placeLongitude: source.placeLongitude
+            // photoFileNames 刻意不沿用：直接複製檔名會讓複製品與原始支出指向磁碟上
+            // 同一批照片檔，之後刪除任一邊都會把檔案實體刪掉、讓另一邊的照片憑空找不到
+            // （同型修復見 VariableExpenseView.duplicateExpense，該處本就不帶這個欄位）。
         )
         expenseStore.expenses.append(copy)
         // 房地產項目層級同步：依原本 source 出現在哪個陣列，clone 一份新項目
@@ -3034,8 +3036,10 @@ struct UtilityPaymentEditor: View {
     }
 
     private func deleteRecord() {
+        guard !isSaving else { return }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let e = editing else { return }
+        isSaving = true
         if let name = e.photoFileName { UtilityPayment.deletePhoto(name) }
         // 同步移除對應的變動支出與銀行扣款紀錄
         if let linkedId = e.linkedExpenseId,

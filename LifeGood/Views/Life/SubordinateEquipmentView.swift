@@ -541,7 +541,9 @@ struct EquipmentEditorSheet: View {
     }
 
     private func deleteEquipment() {
+        guard !isSaving else { return }
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
         sub.equipments.removeAll { $0.id == e.id }
         lifeStore.update(sub)
         dismiss()

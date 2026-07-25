@@ -1387,6 +1387,18 @@ struct AddRealEstateView: View {
             if let iid = saleIncId { expenseStore.incomes.removeAll { $0.id == iid }; saleIncId = nil }
         }
 
+        // 建物類型改為非透天厝、或關閉「有電梯」開關時，電梯保養記錄會整批不再寫入，
+        // 比照上方逐筆刪除鈕（elevatorPhotoLoadTasks 刪除按鈕）做法，一併刪除磁碟上的
+        // 保養照片，避免存檔後這些照片變成沒有任何欄位引用得到的孤兒檔案。
+        let elevatorSectionKept = buildingType == .townhouse && hasElevator
+        if !elevatorSectionKept {
+            for item in elevatorItems {
+                if let fn = item.photoFileName {
+                    ElevatorMaintenance.deletePhoto(fn)
+                }
+            }
+        }
+
         let re = RealEstate(
             id: reId, name: trimmedName,
             city: city,
@@ -1402,8 +1414,8 @@ struct AddRealEstateView: View {
             saleLinkedIncomeId: saleIncId,
             note: trimmedNote,
             buildingType: buildingType,
-            hasElevator: buildingType == .townhouse && hasElevator,
-            elevatorMaintenances: (buildingType == .townhouse && hasElevator)
+            hasElevator: elevatorSectionKept,
+            elevatorMaintenances: elevatorSectionKept
                 ? elevatorItems.map { ElevatorMaintenance(id: $0.id, date: $0.date, photoFileName: $0.photoFileName) }
                 : [],
             pingCount: Double(pingCountText) ?? 0,

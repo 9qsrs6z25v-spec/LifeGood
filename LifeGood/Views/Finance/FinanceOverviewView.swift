@@ -78,13 +78,20 @@ struct FinanceOverviewView: View {
     }
 
     var body: some View {
-        // 一次計算，避免 totalAssetsCard / assetCards / allocationSection 各自重算
+        // 一次計算，避免 totalAssetsCard / assetCards / allocationSection 各自重算：
+        // 股票／汽車／房地產市值原本 body 內每處各自呼叫 store.total*Value（各自 filter+reduce
+        // 全量陣列），單次 render 合計最多被呼叫 5 次，比照本檔案已對 insSummary 做過的單一計算
+        // 規格補齊（同型修復見本檔案 insSummary 的既有寫法）。
         let insSummary = insuranceSummaryNTD
-        let allocations = ntdAllocations(insVal: insSummary.value)
+        let stockVal = store.totalStockValue
+        let vehicleVal = store.totalVehicleValue
+        let reVal = store.totalRealEstateValue
+        let allocations = ntdAllocations(insVal: insSummary.value, stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal)
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    totalAssetsCard(allocations, insVal: insSummary.value, insPaid: insSummary.paid)
+                    totalAssetsCard(allocations, insVal: insSummary.value, insPaid: insSummary.paid,
+                                     stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal)
                         .padding(.horizontal)
                         .opacity(appearedCards.contains("total") ? 1 : 0)
                         .offset(y: appearedCards.contains("total") ? 0 : 20)
@@ -110,7 +117,8 @@ struct FinanceOverviewView: View {
                             miniBarTask = nil
                         }
 
-                    assetCards(insVal: insSummary.value, insPaid: insSummary.paid)
+                    assetCards(insVal: insSummary.value, insPaid: insSummary.paid,
+                               stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal)
                     allocationSection(allocations)
                     cashFlowSection
                         .opacity(cashFlowSectionAppeared ? 1 : 0)
@@ -156,8 +164,8 @@ struct FinanceOverviewView: View {
         }
     }
 
-    private func totalAssetsNTD(insVal: Double) -> Double {
-        insVal + store.totalStockValue + store.totalVehicleValue + store.totalRealEstateValue
+    private func totalAssetsNTD(insVal: Double, stockVal: Double, vehicleVal: Double, reVal: Double) -> Double {
+        insVal + stockVal + vehicleVal + reVal
     }
 
     private var totalAssetCount: Int {
@@ -173,7 +181,8 @@ struct FinanceOverviewView: View {
     // ③ 底部：加分隔線 + mini 資產配置彩條，讓用戶一眼看出資產結構分布，
     //    色彩邏輯與下方 allocationSection 的橫向彩條完全對應。
 
-    private func totalAssetsCard(_ allocations: [AssetAllocation], insVal: Double, insPaid: Double) -> some View {
+    private func totalAssetsCard(_ allocations: [AssetAllocation], insVal: Double, insPaid: Double,
+                                  stockVal: Double, vehicleVal: Double, reVal: Double) -> some View {
         let pl = (insVal - insPaid) + stockProfitLoss
 
         return VStack(spacing: 0) {
@@ -183,7 +192,7 @@ struct FinanceOverviewView: View {
                     Text("總資產")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
-                    Text(fmt(totalAssetsNTD(insVal: insVal)))
+                    Text(fmt(totalAssetsNTD(insVal: insVal, stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal)))
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
@@ -310,24 +319,25 @@ struct FinanceOverviewView: View {
 
     private var stockProfitLoss: Double { store.totalStockProfitLoss }
 
-    private func assetCards(insVal: Double, insPaid: Double) -> some View {
+    private func assetCards(insVal: Double, insPaid: Double,
+                             stockVal: Double, vehicleVal: Double, reVal: Double) -> some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
                 assetCard(title: "儲蓄險", amount: insVal,
                           profitLoss: insVal - insPaid,
                           icon: "shield.fill", color: .blue,
                           count: store.insurances.count, key: "insurance")
-                assetCard(title: "股票", amount: store.totalStockValue,
+                assetCard(title: "股票", amount: stockVal,
                           profitLoss: stockProfitLoss,
                           icon: "chart.line.uptrend.xyaxis", color: .orange,
                           count: store.stocks.filter { !$0.isSold }.count, key: "stock")
             }
             HStack(spacing: 12) {
-                assetCard(title: "汽車", amount: store.totalVehicleValue,
+                assetCard(title: "汽車", amount: vehicleVal,
                           profitLoss: nil,
                           icon: "car.fill", color: .teal,
                           count: store.vehicles.count, key: "vehicle")
-                assetCard(title: "房地產", amount: store.totalRealEstateValue,
+                assetCard(title: "房地產", amount: reVal,
                           profitLoss: nil,
                           icon: "building.2.fill", color: .purple,
                           count: store.realEstates.filter { !$0.isSold }.count, key: "realEstate")
@@ -447,25 +457,25 @@ struct FinanceOverviewView: View {
 
     // MARK: - 資產配置
 
-    private func ntdAllocations(insVal: Double) -> [AssetAllocation] {
-        let total = insVal + store.totalStockValue + store.totalVehicleValue + store.totalRealEstateValue
+    private func ntdAllocations(insVal: Double, stockVal: Double, vehicleVal: Double, reVal: Double) -> [AssetAllocation] {
+        let total = insVal + stockVal + vehicleVal + reVal
         guard total > 0 else { return [] }
         var result: [AssetAllocation] = []
         if insVal > 0 {
             result.append(AssetAllocation(type: .savingsInsurance, value: insVal,
                                           percentage: insVal / total * 100))
         }
-        if store.totalStockValue > 0 {
-            result.append(AssetAllocation(type: .stock, value: store.totalStockValue,
-                                          percentage: store.totalStockValue / total * 100))
+        if stockVal > 0 {
+            result.append(AssetAllocation(type: .stock, value: stockVal,
+                                          percentage: stockVal / total * 100))
         }
-        if store.totalVehicleValue > 0 {
-            result.append(AssetAllocation(type: .vehicle, value: store.totalVehicleValue,
-                                          percentage: store.totalVehicleValue / total * 100))
+        if vehicleVal > 0 {
+            result.append(AssetAllocation(type: .vehicle, value: vehicleVal,
+                                          percentage: vehicleVal / total * 100))
         }
-        if store.totalRealEstateValue > 0 {
-            result.append(AssetAllocation(type: .realEstate, value: store.totalRealEstateValue,
-                                          percentage: store.totalRealEstateValue / total * 100))
+        if reVal > 0 {
+            result.append(AssetAllocation(type: .realEstate, value: reVal,
+                                          percentage: reVal / total * 100))
         }
         return result.sorted { $0.value > $1.value }
     }
@@ -671,9 +681,12 @@ struct FinanceOverviewView: View {
             }
             .padding(.horizontal)
 
-            let flow = store.monthlyCashFlow
+            // monthlyCashFlow 本身就是 monthlyRentalIncome - monthlyMortgagePayment，
+            // 三個分開呼叫等於對 realEstates 多做兩次重複的 filter+reduce；改由 income/mortgage
+            // 算一次後推導 flow，避免這個隨進場動畫旗標獨立重繪的區塊每次都重算三遍。
             let income = store.monthlyRentalIncome
             let mortgage = store.monthlyMortgagePayment
+            let flow = income - mortgage
 
             if income == 0 && mortgage == 0 {
                 // 空狀態：無房地產現金流資料

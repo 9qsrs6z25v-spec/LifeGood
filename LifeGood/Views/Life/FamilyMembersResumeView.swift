@@ -1075,6 +1075,9 @@ struct FamilyAlbumPhotoEditor: View {
     @State private var photoLoadGeneration = 0
     /// 存檔中鎖住儲存／刪除按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複紀錄
     @State private var isSaving = false
+    /// 相簿選取的照片（尤其 iCloud 原圖）仍在下載/解碼時鎖住儲存按鈕，避免使用者搶先按下
+    /// 「儲存」，讓 save() 在 pendingImageData 還沒寫入前就已存檔完成、選取的照片被悄悄丟棄。
+    @State private var isPhotoLoading = false
 
     var body: some View {
         NavigationStack {
@@ -1154,7 +1157,7 @@ struct FamilyAlbumPhotoEditor: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("儲存") { save() }
                         .bold().foregroundStyle(.green)
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving || isPhotoLoading)
                 }
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
@@ -1175,13 +1178,19 @@ struct FamilyAlbumPhotoEditor: View {
             .onChange(of: photoItem) { _, item in
                 photoLoadGeneration += 1
                 let generation = photoLoadGeneration
+                guard let item else { isPhotoLoading = false; return }
+                isPhotoLoading = true
                 Task {
-                    guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+                    guard let data = try? await item.loadTransferable(type: Data.self) else {
+                        await MainActor.run { if generation == photoLoadGeneration { isPhotoLoading = false } }
+                        return
+                    }
                     let decoded = UIImage(data: data)
                     await MainActor.run {
                         guard generation == photoLoadGeneration else { return }
                         pendingImageData = data
                         pendingImage = decoded
+                        isPhotoLoading = false
                     }
                 }
             }

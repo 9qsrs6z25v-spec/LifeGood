@@ -106,6 +106,10 @@ struct RealEstateView: View {
                             .listRowInsets(EdgeInsets())
                     }
                 } else {
+                    // 已出售清單每列 delay 都要用到「有幾筆持有中」當偏移量，一次算好避免
+                    // activeEstates（filter+sort 全量 store.realEstates）被逐列重複呼叫
+                    // （同型修復見 StockDetailView sortedTransactions／sortedDividends）。
+                    let activeCount = activeEstates.count
                     ForEach(Array(activeEstates.enumerated()), id: \.element.id) { idx, item in
                         estateCard(item)
                             .offset(y: cardsAppeared ? 0 : 30)
@@ -136,7 +140,7 @@ struct RealEstateView: View {
                                     .opacity(cardsAppeared ? 1 : 0)
                                     .animation(
                                         .spring(response: 0.5, dampingFraction: 0.8)
-                                            .delay(Double(activeEstates.count + idx) * 0.05),
+                                            .delay(Double(activeCount + idx) * 0.05),
                                         value: cardsAppeared
                                     )
                                     .listRowBackground(Color.clear)
@@ -252,19 +256,12 @@ struct RealEstateView: View {
         for ve in item.variableExpenses { if let id = ve.linkedExpenseId { expenseIds.insert(id) } }
         for ins in item.insuranceItems { if let id = ins.linkedExpenseId { expenseIds.insert(id) } }
         for asset in item.propertyAssets { if let id = asset.linkedExpenseId { expenseIds.insert(id) } }
+        // 水電繳費／裝潢照片／電梯保養照片／附件文件的磁碟＋CloudKit 清理，
+        // FinanceStore.deleteRealEstate(_:) 下方已統一做（cleanupRealEstateFiles），
+        // 這裡只需收集 linkedExpenseId；重複呼叫 deletePhoto/deleteDocument 只會讓
+        // 已刪除的檔案再觸發一次多餘的 CloudKit 刪除網路請求，磁碟端則因 try? 靜默忽略。
         for up in item.utilityPayments {
             if let id = up.linkedExpenseId { expenseIds.insert(id) }
-            if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
-        }
-        for rp in item.renovationPhotos {
-            for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
-        }
-        // 清除電梯保養照片、附件文件檔案（先前遺漏，會永久留在磁碟上並被反覆重傳 CloudKit）
-        for em in item.elevatorMaintenances {
-            if let name = em.photoFileName { ElevatorMaintenance.deletePhoto(name) }
-        }
-        for doc in item.documents {
-            RealEstateDocument.deleteDocument(doc.fileName)
         }
         if let id = item.linkedExpenseId { expenseIds.insert(id) }
         if let id = item.saleLinkedExpenseId { expenseIds.insert(id) }

@@ -821,7 +821,16 @@ struct IncomeView: View {
             let income = incomes[index]
             if let stockId = income.linkedStockId,
                var stock = financeStore.stocks.first(where: { $0.id == stockId }) {
-                stock.linkedIncomeId = nil
+                // 一檔股票可能同時有「賣出獲利」（stock.linkedIncomeId）與多筆「配息」
+                // （stock.dividends[i].linkedIncomeId）各自連結不同收入，只能清掉真正
+                // 對應本筆被刪收入的那個欄位，避免刪配息卻連帶清掉不相干的賣出獲利連結，
+                // 或刪賣出獲利卻留下配息指向已刪除收入的孤兒連結。
+                if stock.linkedIncomeId == income.id {
+                    stock.linkedIncomeId = nil
+                }
+                if let divIdx = stock.dividends.firstIndex(where: { $0.linkedIncomeId == income.id }) {
+                    stock.dividends[divIdx].linkedIncomeId = nil
+                }
                 financeStore.update(stock)
             }
             if let bankId = income.linkedBankMilestoneId,

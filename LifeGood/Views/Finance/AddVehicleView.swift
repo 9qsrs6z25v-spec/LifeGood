@@ -212,6 +212,12 @@ struct AddVehicleView: View {
             }
 
             DatePicker("購入日期", selection: $purchaseDate, displayedComponents: .date)
+                .onChange(of: purchaseDate) { _, newValue in
+                    // 售出日期 DatePicker 用 in: purchaseDate... 限制往後可選範圍，只擋新選取、
+                    // 不會回頭修正已選定的舊值；購入日期後調若晚於既有售出日期，會存出售出早於
+                    // 購入的無效資料（同型修復見 AddIncomeView 起薪/結束日 v24.63 已知問題）。
+                    if soldDate < newValue { soldDate = newValue }
+                }
 
             Toggle("已售出", isOn: $isSold)
             if isSold {

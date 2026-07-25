@@ -1857,7 +1857,9 @@ struct RecordEditorSheet: View {
     }
 
     private func deleteRecord() {
+        guard !isSaving else { return }
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
         sub.records.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
     }
@@ -2162,7 +2164,9 @@ struct MeetingEditorSheet: View {
     }
 
     private func deleteMeeting() {
+        guard !isSaving else { return }
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
         sub.meetings.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
     }
@@ -2311,7 +2315,9 @@ struct TaskEditorSheet: View {
     }
 
     private func deleteTask() {
+        guard !isSaving else { return }
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
         sub.tasks.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
     }
@@ -2418,7 +2424,9 @@ struct WeeklyReportEditorSheet: View {
     }
 
     private func deleteReport() {
+        guard !isSaving else { return }
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
         sub.weeklyReports.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
     }

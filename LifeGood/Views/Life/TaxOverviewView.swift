@@ -658,11 +658,17 @@ struct TaxOverviewView: View {
                 // 與 yearPicker 前後年份切換共用同一個 yearNavAnimTask：避免這裡自己排的
                 // 未持有 token 的 asyncAfter 和年份切換排的 Task 各自獨立觸發，較舊的一個
                 // 在較新的已把 monthBarAppeared 設回 false 之後才觸發，造成進度條動畫倒退閃爍。
+                // 由零筆年度切到有筆年度時，本區塊會比 yearPicker 排的 Task（50ms）更早重新掛載、
+                // 搶先取消掉它——原本這裡只補回 monthBarAppeared，heroCardAppeared 的復原就此
+                // 被吃掉，年度摘要卡在該年度會永遠停在 opacity 0；比照補回同一組旗標。
                 yearNavAnimTask?.cancel()
                 yearNavAnimTask = Task {
                     try? await Task.sleep(nanoseconds: 120_000_000)
                     guard !Task.isCancelled else { return }
-                    monthBarAppeared = true
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                        heroCardAppeared = true
+                        monthBarAppeared = true
+                    }
                 }
             }
         }

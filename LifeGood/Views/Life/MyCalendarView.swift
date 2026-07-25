@@ -138,6 +138,11 @@ struct MyCalendarView: View {
                             }
                         }
                         .onDisappear { weekCardAppeared = false }
+                    // 未來 30 天里程碑：區塊本體早已實作完成（含空狀態與「還有 N 個」溢出列），
+                    // 但先前重整版面時漏了呼叫點，導致英雄卡「未來 30 天」計數旁始終看不到內容。
+                    if !upcomingMS.isEmpty {
+                        upcomingMilestonesSection(milestones: upcomingMS)
+                    }
                     // 部屬事項（請假 / 會議 / 任務 / 未完成會議 / 未完成任務）
                     if !lifeStore.subordinates.isEmpty {
                         subordinateAgendaSection(date: startOfSelectedDay)

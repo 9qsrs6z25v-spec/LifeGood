@@ -52,6 +52,7 @@ struct MultiPhotoGallery: View {
     @State private var showPhotosPicker: Bool = false
     @State private var viewingURL: IdentifiableURL?
     @State private var pendingDeleteName: String?
+    @State private var photoLoadTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -120,18 +121,32 @@ struct MultiPhotoGallery: View {
                       matching: .images)
         .onChange(of: pickerItems) { _, items in
             guard !items.isEmpty else { return }
-            Task {
+            // 原本是無主的裸 Task，不隨畫面關閉自動取消：多選張數多、iCloud 原圖需下載時，
+            // 使用者若在載入完成前就關閉表單（取消／儲存），Task 仍會在背景繼續把照片寫入磁碟，
+            // 但寫完後 append 的對象已是脫離畫面的 fileNames，資料從未被任何紀錄引用到，
+            // 變成永久孤兒檔案。改用可取消的 Task：畫面消失時取消，且取消時把這批已寫入磁碟
+            // 但還沒機會被採用的照片一併刪除。
+            photoLoadTask?.cancel()
+            photoLoadTask = Task {
                 var added: [String] = []
                 for item in items {
+                    guard !Task.isCancelled else { break }
                     if let data = try? await item.loadTransferable(type: Data.self), let name = onSaveImage(data) {
                         added.append(name)
                     }
+                }
+                guard !Task.isCancelled else {
+                    added.forEach(onDeleteFile)
+                    return
                 }
                 await MainActor.run {
                     fileNames.append(contentsOf: added)
                     pickerItems = []
                 }
             }
+        }
+        .onDisappear {
+            photoLoadTask?.cancel()
         }
         .sheet(item: $viewingURL) { wrapper in
             PhotoLightbox(url: wrapper.url)

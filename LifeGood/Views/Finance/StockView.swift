@@ -424,8 +424,8 @@ struct StockView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 6) {
-                    // 持股計數膠囊
-                    Text("\(store.stocks.count) 檔")
+                    // 持股計數膠囊：比照上方市值排除已出售，避免賣光一檔後市值降了、計數卻沒變
+                    Text("\(active.count) 檔")
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 11).padding(.vertical, 5)
                         .background(.white.opacity(0.22))
