@@ -42,6 +42,16 @@ import UIKit
 //      OrganizationView／FoodMapView／BusinessCardView／RenovationPhotoEditor／
 //      RealEstateDetailView 內同型 UIImage(contentsOfFile:) 同步讀檔改用 AsyncLocalImage／
 //      AsyncThumbnailView，全 App 已無殘留。）
+//
+// [2026-07 v3] 就醫地點清單操作流暢性補強（本檔案自 v1 起完全沒有任何進場動畫）：
+//  10. clinicMapSection 清單列（medExpenses 依地點聚合後排序顯示）新增 clinicRowsAppeared
+//      錯落淡入 + 上移 12pt 進場動畫（spring 0.48/0.80，每列延遲 0.05s×idx），對齊
+//      LifeOverviewView.categoryRowsAppeared／FamilyOverviewMap.houseRowsAppeared 等
+//      全 App 清單列進場動畫規格；容器 onAppear 用可取消 Task 延遲 0.05s 觸發、
+//      onDisappear 取消並重置旗標，避免快速切換分頁殘留 asyncAfter 造成閃爍
+//      （對齊 v24.57/58 靜態除錯已修復的規格）。其餘量測／過敏／用藥／健檢／里程碑／
+//      保障各 section 尚未補齊同型動畫，留待下一輪美化對齊，避免單次改動範圍過大。
+//      純視覺層調整，地點聚合、排序、就診紀錄等既有商業邏輯完全未變動。
 
 // MARK: - 就醫地點聚合
 
@@ -68,6 +78,10 @@ struct MedicalMapView: View {
     @State private var showEditProfile = false
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var selectedPlace: MedicalPlaceAggregate?
+
+    // [2026-07 v3] 就醫地點清單錯落進場動畫旗標，對齊 LifeOverviewView.categoryRowsAppeared 規格
+    @State private var clinicRowsAppeared = false
+    @State private var clinicRowsAppearedTask: Task<Void, Never>?
 
     private var health: HealthProfile { lifeStore.healthProfile }
 
@@ -233,8 +247,29 @@ struct MedicalMapView: View {
                         id: \.element.id) { idx, place in
                     Button { selectedPlace = place } label: { clinicRow(place) }
                         .buttonStyle(.plain)
+                        // [v3] 錯落淡入 + 上移，對齊 LifeOverviewView.categoryRowsAppeared 規格
+                        .opacity(clinicRowsAppeared ? 1 : 0)
+                        .offset(y: clinicRowsAppeared ? 0 : 12)
+                        .animation(
+                            .spring(response: 0.48, dampingFraction: 0.80).delay(0.05 * Double(idx)),
+                            value: clinicRowsAppeared
+                        )
                     if idx < places.count - 1 { Divider().padding(.leading, 62) }
                 }
+            }
+            .onAppear {
+                // 0.05s 延遲確保 view 完成佈局後再啟動動畫，並用可取消 Task 避免
+                // 快速切換分頁時殘留的 asyncAfter 造成閃爍（對齊 v24.57/58 靜態除錯規格）
+                clinicRowsAppearedTask?.cancel()
+                clinicRowsAppearedTask = Task {
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation { clinicRowsAppeared = true }
+                }
+            }
+            .onDisappear {
+                clinicRowsAppearedTask?.cancel()
+                clinicRowsAppeared = false
             }
         }
         .padding(.vertical, 8)

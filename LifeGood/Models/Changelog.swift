@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.78", build: 731, date: "2026/07/25", notes: [
+            "【美化】醫療地圖畫面（MedicalMapView）就醫地點清單操作流暢性補強：本檔案自 v1 起完全沒有任何進場動畫，新增 clinicRowsAppeared 錯落淡入＋上移 12pt 進場動畫（spring 0.48/0.80，每列延遲 0.05s×idx），對齊 LifeOverviewView.categoryRowsAppeared／FamilyOverviewMap.houseRowsAppeared 等全 App 清單列進場動畫規格；容器 onAppear 用可取消 Task 延遲 0.05s 觸發、onDisappear 取消並重置旗標，避免快速切換分頁殘留 asyncAfter 造成閃爍。純視覺層調整，地點聚合、排序、就診紀錄等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.77", build: 730, date: "2026/07/25", notes: [
             "【美化】家庭總覽街道地圖（FamilyOverviewMap）大字自適應與空狀態補強：房子標籤與成員姓名自 v1 調大字級後從未補上 minimumScaleFactor，較長姓名或系統加大字級時會被直接截斷，補上 0.75 下限的等比縮小；上排無爸媽／親屬時原本只留一塊純空白佔位，改為淡化虛線房屋外框＋「尚無其他成員」提示，與其餘頁面空狀態需有明確提示的規格一致。純視覺與文字顯示調整，成員分組、房子歸類等既有商業邏輯完全未變動。"
         ]),
