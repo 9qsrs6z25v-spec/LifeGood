@@ -63,6 +63,23 @@ import MapKit
 //      與同列「總花費」顯示規格不一致；兩處改用共用 Double.ntdWanString（對齊同檔案
 //      restaurantRow 已使用的規格），並移除只剩單一呼叫點、與共用元件重複的私有
 //      fmtWan(_:) 死碼。純顯示層調整，就診/造訪聚合等既有邏輯未變動。
+// [2026-07 v7] 餐廳清單 sheet 補齊與姊妹頁 TravelMapView.listSheet 的均值差距：
+//  19. listSheet 原本用系統原生 List(.insetGrouped) 裝載餐廳列，是「地圖類清單 sheet」
+//      唯一還沒升級成自訂圓角卡片的頁面，深色模式下 List 分隔線/背景與本檔案其餘卡片
+//      風格不一致；改為 ScrollView + restaurantListCard（VStack + RoundedRectangle 16pt
+//      圓角＋細邊框＋陰影＋列間 Divider），對齊 TravelMapView.citySection 圓角卡規格。
+//      （未比照 TravelMapView 額外做縣市分組——本頁餐廳資料無對應縣市解析欄位，若強加
+//      會超出單純視覺調整範圍，故僅統一「容器樣式」，維持原本單一清單排序）。
+//  20. restaurantRow 補上獨立 padding（水平 14／垂直 11）＋ contentShape(Rectangle())，
+//      取代原本依賴 List 列自帶 inset 的寫法，確保脫離 List 後點擊熱區與視覺間距不變。
+//  21. 新增 restaurantListEmptyState：篩選（如「照片」開關）後清單結果為零筆時，原本
+//      只會看到裸露的空白 List，新增輕量灰階圖示＋提示文字卡片，對齊 emptyOverlay
+//      isPhotoFilter 分支的簡化提示規格（不做全頁雙層脈衝光環，因這只是清單內的次要
+//      篩選態，非首次使用的頁面級空狀態）。
+//      純視覺容器調整，排序、篩選、開啟詳細 sheet 等既有商業邏輯完全未變動。
+//      （下次美化本檔案時，可考慮 RestaurantDetailSheet.photoGallerySection 之後段落，
+//      或比照 TravelMapView 補上縣市分組所需的地址解析，惟後者屬新增資料維度，需先
+//      評估是否超出單純視覺調整範圍）
 
 // MARK: - 餐廳聚合資料
 
@@ -389,32 +406,24 @@ struct FoodMapView: View {
     private func listSheet(_ aggs: [RestaurantAggregate]) -> some View {
         let items = sortedAggregates(from: aggs)
         return NavigationStack {
-            VStack(spacing: 0) {
-                statsCard(items)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(FoodMapSort.allCases) { s in
-                            chip(s.rawValue, isSelected: sort == s, tint: .orange) { sort = s }
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                }
-                .padding(.vertical, 8)
-                List {
-                    ForEach(items) { agg in
-                        Button {
-                            showListSheet = false
-                            // 等 sheet 關閉再開另一張詳細 sheet
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                                selectedAggregate = agg
+            ScrollView {
+                VStack(spacing: 14) {
+                    statsCard(items)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(FoodMapSort.allCases) { s in
+                                chip(s.rawValue, isSelected: sort == s, tint: .orange) { sort = s }
                             }
-                        } label: {
-                            restaurantRow(agg)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 12)
+                    }
+                    if items.isEmpty {
+                        restaurantListEmptyState
+                    } else {
+                        restaurantListCard(items)
                     }
                 }
-                .listStyle(.insetGrouped)
+                .padding(.vertical, 16)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("餐廳清單（\(items.count)）")
@@ -426,6 +435,48 @@ struct FoodMapView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// 餐廳清單圓角卡片（對齊 TravelMapView.citySection 圓角卡 + 分隔線規格）
+    private func restaurantListCard(_ items: [RestaurantAggregate]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { idx, agg in
+                Button {
+                    showListSheet = false
+                    // 等 sheet 關閉再開另一張詳細 sheet
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        selectedAggregate = agg
+                    }
+                } label: {
+                    restaurantRow(agg)
+                }
+                .buttonStyle(.plain)
+                if idx < items.count - 1 { Divider().padding(.leading, 60) }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+    }
+
+    /// 篩選後餐廳清單為空狀態（對齊 emptyOverlay isPhotoFilter 分支的輕量灰階提示規格）
+    private var restaurantListEmptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "fork.knife.circle")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.tertiary)
+            Text("目前沒有符合篩選條件的餐廳")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .padding(.horizontal)
     }
 
     // MARK: - 篩選 chip（對齊 FilterChip 規格：shadow + scaleEffect）
@@ -673,7 +724,8 @@ struct FoodMapView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .contentShape(Rectangle())
     }
 
     // MARK: - 資料聚合

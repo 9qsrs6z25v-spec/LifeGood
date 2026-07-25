@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.75", build: 728, date: "2026/07/25", notes: [
+            "【美化】美食地圖餐廳清單 sheet（FoodMapView.listSheet）補齊與姊妹頁 TravelMapView.listSheet 的均值差距：原本用系統原生 List(.insetGrouped) 裝載餐廳列，是地圖類清單 sheet 中唯一還沒升級成自訂圓角卡片的頁面；改為 ScrollView + restaurantListCard（VStack + RoundedRectangle 16pt 圓角＋細邊框＋陰影＋列間 Divider），對齊 TravelMapView.citySection 圓角卡規格（未額外做縣市分組，因本頁資料無對應縣市解析欄位，強加會超出單純視覺調整範圍）；restaurantRow 補上獨立 padding 與 contentShape，確保脫離 List 後點擊熱區與視覺間距不變；新增 restaurantListEmptyState，篩選（如「照片」開關）後清單結果為零筆時不再顯示裸露空白清單，改為輕量灰階圖示＋提示文字卡片。純視覺容器調整，排序、篩選、開啟詳細 sheet 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.74", build: 727, date: "2026/07/25", notes: [
             "【美化】部屬新增流程「選擇部屬」空狀態（SubordinateDetailView.AddSubItemSheet）：尚無部屬時原本顯示系統原生 ContentUnavailableView（純圖示＋文字，無動畫，且圖示色與 kind 無關固定為系統灰），是全 App 少數還沒補上動態回饋的頁面級空狀態；改為 62pt 雙圈脈衝光環（double-pulse ring：外圈 1.35 倍縮放呼吸＋內圈延遲 0.3 秒錯開）＋漸層底圓＋細邊框，對齊 SubordinateEquipmentView／SubordinateRosterView 等既有頁面空狀態規格，主題色改用 kind.color（任務＝cyan／會議＝indigo／報告＝purple，與清單列圖示識別色一致），動畫改用可取消的 Task 排程（onAppear 先取消前一個再排新的、onDisappear 一併取消歸零），避免 sheet 快速開關造成動畫殘留閃爍。純視覺調整，選擇部屬、切換至對應編輯 Sheet 等既有商業邏輯完全未變動。"
         ]),
