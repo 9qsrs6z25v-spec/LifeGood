@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.77", build: 730, date: "2026/07/25", notes: [
+            "【美化】家庭總覽街道地圖（FamilyOverviewMap）大字自適應與空狀態補強：房子標籤與成員姓名自 v1 調大字級後從未補上 minimumScaleFactor，較長姓名或系統加大字級時會被直接截斷，補上 0.75 下限的等比縮小；上排無爸媽／親屬時原本只留一塊純空白佔位，改為淡化虛線房屋外框＋「尚無其他成員」提示，與其餘頁面空狀態需有明確提示的規格一致。純視覺與文字顯示調整，成員分組、房子歸類等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.76", build: 729, date: "2026/07/25", notes: [
             "【美化】管理控制台（AdminConsoleView）補齊與全 App 均值的視覺一致性差距：control 頁 5 個 Section（使用者人數／訂閱／對外顯示／版本更新紀錄／PIN）原本仍是系統預設純文字標題，未套用本頁 v1 就已在 pinGate 鎖定頁與使用者人數列建立的漸層規格，也落後於 SubordinateRosterView／OrganizationView 等頁面早已統一的「4pt Capsule 漸層色條＋圖示＋.subheadline.semibold」Section 標題規格；新增共用 sectionHeader(_:icon:color:) 輔助函式並套用到全部 5 處（依內容各自搭配識別色：藍／綠／紫／靛／橘）。純標題視覺升級，Section 內容、Toggle／Button 行為與既有商業邏輯完全未變動。"
         ]),

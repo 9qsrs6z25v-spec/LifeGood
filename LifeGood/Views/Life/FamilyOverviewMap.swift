@@ -33,6 +33,17 @@ import SwiftUI
 //      仍是寫死的淺草綠 LinearGradient，深色模式下這塊「街道底圖」會維持刺眼的亮綠色，
 //      與其餘全深色的畫面格格不入。改為依 colorScheme 切換：淺色模式維持原本淺草綠，
 //      深色模式改用深墨綠（模擬夜間街景），兩者都以 systemGroupedBackground 起筆過渡。
+// [2026-07 v4] 大字自適應補強（本檔案自 v1 起字級只有調大，從未補過 minimumScaleFactor）：
+//  15. 屋頂標籤（house.label）與人名（personChip 內 Text）固定寬度 130pt／50pt 容器中
+//      只有 lineLimit(1)，遇到較長名字（4 字以上）或系統輔助模式加大字級時會直接被
+//      truncation 吃掉尾字；補上 minimumScaleFactor(0.75) 讓文字先等比縮小再截斷，
+//      下限 0.75 仍維持可辨識，對齊 ResumeGiftSection v2 / StockDetailView v3 等
+//      全 App「大字先縮小、不無限截斷」的自適應規格。純文字顯示調整，房子分組、
+//      成員歸類等既有商業邏輯完全未變動。
+//  16. topHouses 為空時（無爸媽／親屬）原本只留一塊等高 Color.clear 佔位，街道上方
+//      顯得像版面錯誤的空白破洞；改為淡化的虛線房屋外框佔位符（house.fill 圖示 +
+//      「尚無其他成員」提示文字，透明度 0.35），讓「這裡本來就沒有房子」與「資料還在
+//      載入」在視覺上有明確區隔，對齊全 App 其餘頁面「空狀態需有明確提示」規格。
 
 // MARK: - 家庭總覽（街道式）
 
@@ -169,8 +180,9 @@ struct FamilyOverviewMap: View {
                         .frame(width: HouseView.fixedWidth)
                     }
                     if topHouses.isEmpty {
-                        // 占位：沒有上排房子時保留高度，街道仍會在中間
-                        Color.clear.frame(height: 130)
+                        // [v4] 占位：沒有上排房子時改用淡化虛線房屋提示，取代純空白，
+                        // 保留高度讓街道仍在中間，同時明確傳達「這裡本來就沒有房子」
+                        topHousesEmptyPlaceholder
                     }
                 }
                 .padding(.horizontal, 24)
@@ -247,6 +259,28 @@ struct FamilyOverviewMap: View {
         let bottomCount = max(bottomHouses.count, 1)
         let count = max(topCount, bottomCount)
         return CGFloat(count) * (HouseView.fixedWidth + 24) + 48
+    }
+
+    /// [v4] 上排無房子時的淡化空狀態提示，取代原本的純空白佔位
+    private var topHousesEmptyPlaceholder: some View {
+        VStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .foregroundStyle(.secondary.opacity(0.35))
+                .frame(width: HouseView.fixedWidth, height: 92)
+                .overlay(
+                    VStack(spacing: 6) {
+                        Image(systemName: "house.fill")
+                            .font(.system(size: 20))
+                        Text("尚無其他成員")
+                            .font(.caption2)
+                            .minimumScaleFactor(0.75)
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(.secondary.opacity(0.45))
+                )
+            Color.clear.frame(height: 34)
+        }
     }
 
     // MARK: - 街道
@@ -364,6 +398,8 @@ struct HouseView: View {
                     .font(.caption.weight(.bold))
                     .foregroundStyle(house.kind.roofColor)
                     .lineLimit(1)
+                    // [v4] 較長名字或加大字級時先等比縮小，避免直接被截斷
+                    .minimumScaleFactor(0.75)
                     .padding(.top, 6)
 
                 // [v2] 分隔線改主題色細線（0.5pt），對齊全 App separator 規格
@@ -428,6 +464,8 @@ struct HouseView: View {
                 .font(.system(size: 10))
                 .lineLimit(1)
                 .truncationMode(.middle)
+                // [v4] 先等比縮小到 0.75 下限再觸發中間截斷，短名字在大字級下也不會被吃字
+                .minimumScaleFactor(0.75)
                 .frame(maxWidth: 50)
         }
     }
