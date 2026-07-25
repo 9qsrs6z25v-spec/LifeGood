@@ -1877,8 +1877,19 @@ struct RecordEditorSheet: View {
 // CompletedEntry.Kind.color 已建立的識別色慣例），清單列圖示改用該色套上標準漸層圓，
 // 選到哪種項目就呈現對應色，與選完後開啟的編輯器 Section 識別色一致。
 // 純視覺層調整，未變動 pickedSubId 選取、切換至對應 EditorSheet 等既有商業邏輯。
-// （下次美化本檔案時，可從 AddSubItemSheet 空狀態 ContentUnavailableView 或其他仍留有
-//   待辦的畫面繼續找可統一之處）
+// [2026-07 v2] 承接 v1 末尾待辦：AddSubItemSheet 空狀態原本是系統原生 ContentUnavailableView
+// （純圖示 + 文字，無動畫），與本檔案／SubordinateEquipmentView／SubordinateRosterView
+// 等既有頁面級空狀態已升級的雙圈脈衝光環（double-pulse ring）規格不一致，是「選擇部屬」
+// 這個入口畫面唯一還沒補上動態回饋的角落。改為 emptyState：62pt 雙圈 stroke 光環（外圈
+// 1.35→1.62 縮放呼吸 + 內圈延遲 0.3s 錯開）+ 漸層底圓 + 細邊框，圖示與描述文字沿用原
+// ContentUnavailableView 的 "person.2.slash" / 引導文案；主題色改用 kind.color（任務＝
+// cyan／會議＝indigo／報告＝purple，對齊清單列已套用的識別色慣例），取代原本與 kind
+// 無關的系統預設灰。動畫改用可取消的 Task 排程（onAppear 先取消前一個再排新的、
+// onDisappear 一併取消歸零），對齊 SubordinateEquipmentView.emptyState 既有寫法，避免
+// sheet 快速開關造成動畫殘留閃爍。純視覺層調整，pickedSubId 選取、切換至對應
+// EditorSheet 等既有商業邏輯完全未變動。
+// （下次美化本檔案時，可留意其餘子頁面是否仍有零星未套用漸層圖示圓／統一 Section 標頭
+//   規格的角落）
 
 /// 可從行事曆 / 部屬總覽的「＋」新增的部屬項目類型
 enum SubAddKind: String, Identifiable, CaseIterable {
@@ -1914,6 +1925,8 @@ struct AddSubItemSheet: View {
     @Environment(\.dismiss) private var dismiss
     let kind: SubAddKind
     @State private var pickedSubId: UUID?
+    @State private var emptyIconPulse = false
+    @State private var emptyPulseTask: Task<Void, Never>?
 
     var body: some View {
         if let subId = pickedSubId {
@@ -1926,8 +1939,7 @@ struct AddSubItemSheet: View {
             NavigationStack {
                 Group {
                     if lifeStore.subordinates.isEmpty {
-                        ContentUnavailableView("尚無部屬", systemImage: "person.2.slash",
-                                               description: Text("請先在『部屬』頁新增部屬，才能建立\(kind.title)"))
+                        emptyState
                     } else {
                         List {
                             ForEach(lifeStore.subordinates.sorted { $0.name < $1.name }) { sub in
@@ -1980,6 +1992,52 @@ struct AddSubItemSheet: View {
                 }
             }
         }
+    }
+
+    // MARK: 空狀態（雙圈脈衝，對齊 SubordinateEquipmentView.emptyState 規格）
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .stroke(kind.color.opacity(emptyIconPulse ? 0 : 0.28), lineWidth: 1.5)
+                    .frame(width: 62, height: 62)
+                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .stroke(kind.color.opacity(emptyIconPulse ? 0 : 0.14), lineWidth: 1)
+                    .frame(width: 62, height: 62)
+                    .scaleEffect(emptyIconPulse ? 1.62 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
+                Circle()
+                    .fill(LinearGradient(colors: [kind.color.opacity(0.16), kind.color.opacity(0.06)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 48, height: 48)
+                    .overlay(Circle().stroke(kind.color.opacity(0.22), lineWidth: 1))
+                Image(systemName: "person.2.slash")
+                    .font(.system(size: 20, weight: .light)).foregroundStyle(kind.color.opacity(0.75))
+            }
+            .onAppear {
+                emptyIconPulse = false
+                emptyPulseTask?.cancel()
+                emptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    emptyIconPulse = true
+                }
+            }
+            .onDisappear {
+                emptyPulseTask?.cancel()
+                emptyIconPulse = false
+            }
+            Text("尚無部屬").font(.caption).foregroundStyle(.secondary)
+            Text("請先在『部屬』頁新增部屬，才能建立\(kind.title)")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
     }
 }
 
