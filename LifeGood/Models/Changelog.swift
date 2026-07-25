@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.80", build: 733, date: "2026/07/25", notes: [
+            "【美化】醫療地圖畫面（MedicalMapView）補齊 v24.78 留下的待辦：量測趨勢／過敏／服用中藥物／健檢紀錄／健康里程碑／醫療保障六個清單型 section，全部補上與就醫地點清單同規格的錯落淡入＋上移 12pt 進場動畫（spring 0.48/0.80，每列延遲 0.05s×idx，可取消 Task 延遲觸發＋onDisappear 重置，避免分頁切換閃爍）；抽出共用私有函式 staggeredRow／triggerStaggeredAppear，避免六處重複動畫樣板。本畫面清單型 section 進場動畫至此已全數收斂一致。純視覺層調整，健康資料讀取、排序、就診紀錄等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.79", build: 732, date: "2026/07/25", notes: [
             "【美化】美食地圖餐廳詳情 sheet（FoodMapView.RestaurantDetailSheet）補齊最後一處視覺缺口：底部「用地圖開啟」按鈕原本是本 sheet 唯一沒有描邊／陰影的扁平元素，與 headerCard／photoGallerySection／visitsSection／companionCard 皆已有的描邊＋陰影節奏不一致；補上 Capsule 同款描邊與輕量陰影，文字字重 medium→semibold 對齊全 App CTA 按鈕文字權重規格。純視覺調整，開啟地圖行為與座標計算完全未變動。"
         ]),

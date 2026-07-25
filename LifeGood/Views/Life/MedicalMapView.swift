@@ -52,6 +52,17 @@ import UIKit
 //      （對齊 v24.57/58 靜態除錯已修復的規格）。其餘量測／過敏／用藥／健檢／里程碑／
 //      保障各 section 尚未補齊同型動畫，留待下一輪美化對齊，避免單次改動範圍過大。
 //      純視覺層調整，地點聚合、排序、就診紀錄等既有商業邏輯完全未變動。
+//
+// [2026-07 v4] 補齊 v3 留下的待辦：其餘六個清單型 section（量測／過敏／用藥／健檢／
+//  健康里程碑／醫療保障）全部補上與 clinicRowsAppeared 同規格的錯落淡入＋上移 12pt
+//  進場動畫（spring 0.48/0.80，每列延遲 0.05s×idx，容器 onAppear 可取消 Task 延遲
+//  0.05s 觸發、onDisappear 取消並重置旗標）。抽出 staggeredRow(_:appeared:index:) 與
+//  triggerStaggeredAppear(_:appeared:task:) 兩個共用私有函式，避免六個 section 各自
+//  重複同一段動畫樣板；本檔案自此清單型 section 進場動畫已全數收斂一致，無殘留缺口。
+//  純視覺層調整，量測／過敏／用藥／健檢／里程碑／保障資料讀取與排序等既有商業邏輯
+//  完全未變動。
+//  （下次美化本檔案時，可轉往其他仍留有待辦的畫面，或複查 summaryCard 英雄卡是否
+//    也適合補上進場動畫，對齊全 App 其餘英雄卡規格）
 
 // MARK: - 就醫地點聚合
 
@@ -82,6 +93,20 @@ struct MedicalMapView: View {
     // [2026-07 v3] 就醫地點清單錯落進場動畫旗標，對齊 LifeOverviewView.categoryRowsAppeared 規格
     @State private var clinicRowsAppeared = false
     @State private var clinicRowsAppearedTask: Task<Void, Never>?
+
+    // [2026-07 v4] 其餘五個清單型 section 補齊同型錯落進場動畫旗標，規格與 clinicRowsAppeared 一致
+    @State private var measurementRowsAppeared = false
+    @State private var measurementRowsAppearedTask: Task<Void, Never>?
+    @State private var allergyRowsAppeared = false
+    @State private var allergyRowsAppearedTask: Task<Void, Never>?
+    @State private var medicationRowsAppeared = false
+    @State private var medicationRowsAppearedTask: Task<Void, Never>?
+    @State private var checkupRowsAppeared = false
+    @State private var checkupRowsAppearedTask: Task<Void, Never>?
+    @State private var milestoneRowsAppeared = false
+    @State private var milestoneRowsAppearedTask: Task<Void, Never>?
+    @State private var insuranceRowsAppeared = false
+    @State private var insuranceRowsAppearedTask: Task<Void, Never>?
 
     private var health: HealthProfile { lifeStore.healthProfile }
 
@@ -303,22 +328,28 @@ struct MedicalMapView: View {
             if recent.isEmpty {
                 emptyHint("尚無量測；點右上『健康檔案』新增體重 / 血壓", icon: "waveform.path.ecg")
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(recent.prefix(6).enumerated()), id: \.element.id) { idx, m in
-                        HStack(spacing: 8) {
-                            Image(systemName: "calendar").font(.caption2).foregroundStyle(.pink)
-                            Text(Self.dateFmt.string(from: m.date)).font(.subheadline)
-                            Spacer()
-                            Text(measurementSummary(m))
-                                .font(.caption2.weight(.semibold)).foregroundStyle(.pink)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(Color.pink.opacity(0.10)).clipShape(Capsule())
-                                .overlay(Capsule().stroke(Color.pink.opacity(0.20), lineWidth: 0.6))
+                triggerStaggeredAppear(
+                    VStack(spacing: 0) {
+                        ForEach(Array(recent.prefix(6).enumerated()), id: \.element.id) { idx, m in
+                            staggeredRow(
+                                HStack(spacing: 8) {
+                                    Image(systemName: "calendar").font(.caption2).foregroundStyle(.pink)
+                                    Text(Self.dateFmt.string(from: m.date)).font(.subheadline)
+                                    Spacer()
+                                    Text(measurementSummary(m))
+                                        .font(.caption2.weight(.semibold)).foregroundStyle(.pink)
+                                        .padding(.horizontal, 8).padding(.vertical, 3)
+                                        .background(Color.pink.opacity(0.10)).clipShape(Capsule())
+                                        .overlay(Capsule().stroke(Color.pink.opacity(0.20), lineWidth: 0.6))
+                                }
+                                .padding(.horizontal, 14).padding(.vertical, 9),
+                                appeared: measurementRowsAppeared, index: idx
+                            )
+                            if idx < min(recent.count, 6) - 1 { Divider().padding(.leading, 14) }
                         }
-                        .padding(.horizontal, 14).padding(.vertical, 9)
-                        if idx < min(recent.count, 6) - 1 { Divider().padding(.leading, 14) }
-                    }
-                }
+                    },
+                    appeared: $measurementRowsAppeared, task: $measurementRowsAppearedTask
+                )
             }
         }
         .padding(.vertical, 8)
@@ -331,28 +362,34 @@ struct MedicalMapView: View {
     private var allergySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("過敏", icon: "allergens", trailing: "\(health.allergies.count) 項")
-            VStack(spacing: 0) {
-                ForEach(Array(health.allergies.enumerated()), id: \.element.id) { idx, a in
-                    HStack(spacing: 12) {
-                        rowIcon("allergens", color: .orange)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(a.name.isEmpty ? "未命名" : a.name).font(.subheadline.weight(.medium))
-                            if !a.reaction.isEmpty {
-                                Text(a.reaction).font(.caption).foregroundStyle(.secondary)
+            triggerStaggeredAppear(
+                VStack(spacing: 0) {
+                    ForEach(Array(health.allergies.enumerated()), id: \.element.id) { idx, a in
+                        staggeredRow(
+                            HStack(spacing: 12) {
+                                rowIcon("allergens", color: .orange)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(a.name.isEmpty ? "未命名" : a.name).font(.subheadline.weight(.medium))
+                                    if !a.reaction.isEmpty {
+                                        Text(a.reaction).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if let s = a.severity {
+                                    Text(s.rawValue).font(.caption2).foregroundStyle(.orange)
+                                        .padding(.horizontal, 8).padding(.vertical, 3)
+                                        .background(Color.orange.opacity(0.12)).clipShape(Capsule())
+                                        .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
+                                }
                             }
-                        }
-                        Spacer()
-                        if let s = a.severity {
-                            Text(s.rawValue).font(.caption2).foregroundStyle(.orange)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(Color.orange.opacity(0.12)).clipShape(Capsule())
-                                .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
-                        }
+                            .padding(.horizontal, 14).padding(.vertical, 9),
+                            appeared: allergyRowsAppeared, index: idx
+                        )
+                        if idx < health.allergies.count - 1 { Divider().padding(.leading, 62) }
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    if idx < health.allergies.count - 1 { Divider().padding(.leading, 62) }
-                }
-            }
+                },
+                appeared: $allergyRowsAppeared, task: $allergyRowsAppearedTask
+            )
         }
         .padding(.vertical, 8)
         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 16))
@@ -365,22 +402,28 @@ struct MedicalMapView: View {
         let meds = health.activeMedications
         return VStack(alignment: .leading, spacing: 8) {
             sectionHeader("服用中藥物", icon: "pills.fill", trailing: "\(meds.count) 種")
-            VStack(spacing: 0) {
-                ForEach(Array(meds.enumerated()), id: \.element.id) { idx, m in
-                    HStack(spacing: 12) {
-                        rowIcon("pills.fill", color: .blue)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(m.name.isEmpty ? "未命名藥物" : m.name).font(.subheadline.weight(.medium))
-                            if !m.dosage.isEmpty {
-                                Text(m.dosage).font(.caption).foregroundStyle(.secondary)
+            triggerStaggeredAppear(
+                VStack(spacing: 0) {
+                    ForEach(Array(meds.enumerated()), id: \.element.id) { idx, m in
+                        staggeredRow(
+                            HStack(spacing: 12) {
+                                rowIcon("pills.fill", color: .blue)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(m.name.isEmpty ? "未命名藥物" : m.name).font(.subheadline.weight(.medium))
+                                    if !m.dosage.isEmpty {
+                                        Text(m.dosage).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
                             }
-                        }
-                        Spacer()
+                            .padding(.horizontal, 14).padding(.vertical, 9),
+                            appeared: medicationRowsAppeared, index: idx
+                        )
+                        if idx < meds.count - 1 { Divider().padding(.leading, 62) }
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    if idx < meds.count - 1 { Divider().padding(.leading, 62) }
-                }
-            }
+                },
+                appeared: $medicationRowsAppeared, task: $medicationRowsAppearedTask
+            )
         }
         .padding(.vertical, 8)
         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 16))
@@ -405,26 +448,32 @@ struct MedicalMapView: View {
             if checkups.isEmpty {
                 emptyHint("尚無健檢紀錄；點右上『健康檔案』新增", icon: "stethoscope")
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(checkups.prefix(6).enumerated()), id: \.element.id) { idx, c in
-                        HStack(alignment: .top, spacing: 12) {
-                            rowIcon("stethoscope", color: .purple)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(c.title.isEmpty ? "健檢" : c.title).font(.subheadline.weight(.medium))
-                                HStack(spacing: 6) {
-                                    Text(Self.dateFmt.string(from: c.date))
-                                    if !c.place.isEmpty { Text("· \(c.place)") }
-                                }.font(.caption).foregroundStyle(.secondary)
-                                if !c.result.isEmpty {
-                                    Text(c.result).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                triggerStaggeredAppear(
+                    VStack(spacing: 0) {
+                        ForEach(Array(checkups.prefix(6).enumerated()), id: \.element.id) { idx, c in
+                            staggeredRow(
+                                HStack(alignment: .top, spacing: 12) {
+                                    rowIcon("stethoscope", color: .purple)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(c.title.isEmpty ? "健檢" : c.title).font(.subheadline.weight(.medium))
+                                        HStack(spacing: 6) {
+                                            Text(Self.dateFmt.string(from: c.date))
+                                            if !c.place.isEmpty { Text("· \(c.place)") }
+                                        }.font(.caption).foregroundStyle(.secondary)
+                                        if !c.result.isEmpty {
+                                            Text(c.result).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                        }
+                                    }
                                 }
-                            }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 14).padding(.vertical, 9),
+                                appeared: checkupRowsAppeared, index: idx
+                            )
+                            if idx < min(checkups.count, 6) - 1 { Divider().padding(.leading, 62) }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14).padding(.vertical, 9)
-                        if idx < min(checkups.count, 6) - 1 { Divider().padding(.leading, 62) }
-                    }
-                }
+                    },
+                    appeared: $checkupRowsAppeared, task: $checkupRowsAppearedTask
+                )
             }
         }
         .padding(.vertical, 8)
@@ -437,23 +486,29 @@ struct MedicalMapView: View {
     private func milestoneSection(_ items: [LifeMilestone]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("健康里程碑", icon: "cross.fill", trailing: "\(items.count) 筆")
-            VStack(spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { idx, ms in
-                    HStack(alignment: .top, spacing: 12) {
-                        rowIcon("cross.fill", color: accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(ms.title.isEmpty ? "健康事件" : ms.title).font(.subheadline.weight(.medium))
-                            Text(Self.dateFmt.string(from: ms.date)).font(.caption).foregroundStyle(.secondary)
-                            if !ms.note.isEmpty {
-                                Text(ms.note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            triggerStaggeredAppear(
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, ms in
+                        staggeredRow(
+                            HStack(alignment: .top, spacing: 12) {
+                                rowIcon("cross.fill", color: accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ms.title.isEmpty ? "健康事件" : ms.title).font(.subheadline.weight(.medium))
+                                    Text(Self.dateFmt.string(from: ms.date)).font(.caption).foregroundStyle(.secondary)
+                                    if !ms.note.isEmpty {
+                                        Text(ms.note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    }
+                                }
                             }
-                        }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14).padding(.vertical, 9),
+                            appeared: milestoneRowsAppeared, index: idx
+                        )
+                        if idx < items.count - 1 { Divider().padding(.leading, 62) }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    if idx < items.count - 1 { Divider().padding(.leading, 62) }
-                }
-            }
+                },
+                appeared: $milestoneRowsAppeared, task: $milestoneRowsAppearedTask
+            )
         }
         .padding(.vertical, 8)
         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 16))
@@ -465,28 +520,34 @@ struct MedicalMapView: View {
     private func insuranceSection(_ items: [LifeMilestone]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("醫療保障", icon: "checkmark.shield.fill", trailing: "\(items.count) 張")
-            VStack(spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { idx, ms in
-                    HStack(spacing: 12) {
-                        rowIcon("checkmark.shield.fill", color: accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(insuranceTitle(ms)).font(.subheadline.weight(.medium))
-                            if let company = ms.insuranceCompany, !company.isEmpty {
-                                Text(company).font(.caption).foregroundStyle(.secondary)
+            triggerStaggeredAppear(
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, ms in
+                        staggeredRow(
+                            HStack(spacing: 12) {
+                                rowIcon("checkmark.shield.fill", color: accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(insuranceTitle(ms)).font(.subheadline.weight(.medium))
+                                    if let company = ms.insuranceCompany, !company.isEmpty {
+                                        Text(company).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if let t = ms.insuranceType {
+                                    Text(t.rawValue).font(.caption2).foregroundStyle(accent)
+                                        .padding(.horizontal, 8).padding(.vertical, 3)
+                                        .background(accent.opacity(0.12)).clipShape(Capsule())
+                                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                                }
                             }
-                        }
-                        Spacer()
-                        if let t = ms.insuranceType {
-                            Text(t.rawValue).font(.caption2).foregroundStyle(accent)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(accent.opacity(0.12)).clipShape(Capsule())
-                                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
-                        }
+                            .padding(.horizontal, 14).padding(.vertical, 9),
+                            appeared: insuranceRowsAppeared, index: idx
+                        )
+                        if idx < items.count - 1 { Divider().padding(.leading, 62) }
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    if idx < items.count - 1 { Divider().padding(.leading, 62) }
-                }
-            }
+                },
+                appeared: $insuranceRowsAppeared, task: $insuranceRowsAppearedTask
+            )
         }
         .padding(.vertical, 8)
         .background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 16))
@@ -517,6 +578,36 @@ struct MedicalMapView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    /// [2026-07 v4] 錯落淡入＋上移 12pt 進場動畫，抽出為共用修飾器，
+    /// 規格對齊 clinicRowsAppeared（spring 0.48/0.80，每列延遲 0.05s×idx），
+    /// 供 measurement／allergy／medication／checkup／milestone／insurance 六個 section 共用。
+    private func staggeredRow<V: View>(_ content: V, appeared: Bool, index: Int) -> some View {
+        content
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared ? 0 : 12)
+            .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.05 * Double(index)), value: appeared)
+    }
+
+    /// 容器 onAppear 用可取消 Task 延遲 0.05s 觸發錯落動畫、onDisappear 取消並重置旗標，
+    /// 避免快速切換分頁殘留 asyncAfter 造成閃爍（對齊 v24.57/58 靜態除錯規格）。
+    private func triggerStaggeredAppear<V: View>(
+        _ content: V, appeared: Binding<Bool>, task: Binding<Task<Void, Never>?>
+    ) -> some View {
+        content
+            .onAppear {
+                task.wrappedValue?.cancel()
+                task.wrappedValue = Task {
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation { appeared.wrappedValue = true }
+                }
+            }
+            .onDisappear {
+                task.wrappedValue?.cancel()
+                appeared.wrappedValue = false
+            }
     }
 
     /// 依主題色繪製 36pt 漸層圓形圖示，對齊 HealthProfileEditView.rowIcon 列行圖示規格
