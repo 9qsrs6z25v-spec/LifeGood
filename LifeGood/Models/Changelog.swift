@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.81", build: 734, date: "2026/07/25", notes: [
+            "【美化】部屬設備清單（SubordinateEquipmentSection.equipmentRow）補齊 v2 留下的待辦：PM／警報數量標籤原本是無底色裸 Label，與同一列「30天內 N 次」及全 App 計數膠囊規格不一致；統一改為膠囊徽章（background+clipShape(Capsule)，警報數為 0 時底色改用中性 tertiarySystemFill，避免誤讀為異常）。純視覺調整，PM／警報筆數計算與顯示條件完全未變動。"
+        ]),
         ChangelogEntry(version: "24.80", build: 733, date: "2026/07/25", notes: [
             "【美化】醫療地圖畫面（MedicalMapView）補齊 v24.78 留下的待辦：量測趨勢／過敏／服用中藥物／健檢紀錄／健康里程碑／醫療保障六個清單型 section，全部補上與就醫地點清單同規格的錯落淡入＋上移 12pt 進場動畫（spring 0.48/0.80，每列延遲 0.05s×idx，可取消 Task 延遲觸發＋onDisappear 重置，避免分頁切換閃爍）；抽出共用私有函式 staggeredRow／triggerStaggeredAppear，避免六處重複動畫樣板。本畫面清單型 section 進場動畫至此已全數收斂一致。純視覺層調整，健康資料讀取、排序、就診紀錄等既有商業邏輯完全未變動。"
         ]),

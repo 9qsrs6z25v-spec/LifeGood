@@ -20,8 +20,14 @@ import SwiftUI
 //     .transition(.opacity.combined(with: .move(edge: .top)))（對齊 AddExpenseView／
 //     ResumeGiftSection 既有清單新增/刪除過場規格），避免項目瞬間跳出/消失。
 //   純視覺調整，PM／警報記錄的儲存、排序（依日期新到舊）、刪除設備等既有商業邏輯完全未變動。
-//   （下次美化本檔案時，可從 SubordinateEquipmentTimelineSection 的 PM／警報圖示徽章是否
-//   也適合統一改用膠囊徽章樣式（對齊 spotRow／equipmentRow 既有規格）繼續找可統一之處）
+// [2026-07 v3] equipmentRow 的「PM N／警報 N」數量標籤，補齊統一膠囊徽章樣式：
+//   • 原本是無底色裸 Label，與同一列「30天內 N 次」徽章及 TravelMapView.spotRow「造訪 N 次」
+//     既有膠囊規格（padding+background opacity+clipShape(Capsule)）不一致；
+//     統一補上膠囊底色，警報為 0 時改用中性 Color(.tertiarySystemFill) 避免誤讀為異常。
+//   純視覺調整，PM／警報筆數計算與顯示條件完全未變動。
+//   （下次美化本檔案時，可考慮 SubordinateEquipmentTimelineSection.timelineRow 左側 22pt
+//   節點圖示是否也要補上 stroke 外框，對齊 equipmentRow／spotRow 36–44pt 錨點圖示的
+//   漸層+外框規格，讓時間軸節點與清單列圖示質感一致）
 
 // MARK: 設備清單章節
 
@@ -186,11 +192,16 @@ struct SubordinateEquipmentSection: View {
                         .lineLimit(1).minimumScaleFactor(0.8)
                     HStack(spacing: 6) {
                         Label("PM \(eq.pmRecords.count)", systemImage: "wrench.fill")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.green)
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(Color.green.opacity(0.12)).foregroundStyle(.green)
+                            .clipShape(Capsule())
                         Label("警報 \(eq.alarms.count)", systemImage: "bell.badge.fill")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(eq.alarms.isEmpty ? Color(.tertiarySystemFill) : Color.red.opacity(0.12))
                             .foregroundStyle(eq.alarms.isEmpty ? Color.secondary : Color.red)
+                            .clipShape(Capsule())
                         if recentAlarms > 0 {
                             Text("30天內 \(recentAlarms) 次")
                                 .font(.system(size: 9, weight: .bold))
