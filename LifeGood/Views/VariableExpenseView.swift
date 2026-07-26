@@ -32,6 +32,11 @@ import SwiftUI
 //   14. 補入第三顆散景裝飾圓（中右 55pt，white.opacity(0.05)），
 //       對齊 IncomeView.summaryHeader 三圓規格（右上主圓 + 左下次圓 + 中右微光），
 //       讓色彩層次與其他英雄卡對齊。
+// [2026-07 v5] 本次美化方向（monthSummaryHeader 大字金額防截斷）：
+//   15. 「本月變動支出」32pt 大字金額補上 .lineLimit(1) + .minimumScaleFactor(0.5)，
+//       對齊 IncomeView.summaryHeader / Finance/AddStockView / Finance/RealEstateView
+//       等姊妹英雄卡既有的大字防截斷規格；金額位數很多（例如萬元以上）時自動縮小字級，
+//       避免在小螢幕裝置上被裁切，且縮放下限仍維持可辨識大小（同步補齊 FixedExpenseView）。
 
 struct VariableExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -251,6 +256,8 @@ struct VariableExpenseView: View {
                     Text(formatCurrency(total))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                         .contentTransition(.numericText())
                 }
                 Spacer()

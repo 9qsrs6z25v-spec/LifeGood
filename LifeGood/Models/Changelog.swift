@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.89", build: 742, date: "2026/07/26", notes: [
+            "【美化】變動支出／固定支出頁（VariableExpenseView／FixedExpenseView）monthSummaryHeader 大字金額防截斷：兩頁「本月變動支出」「本月固定支出」32pt 大字金額原本缺少 .lineLimit(1)／.minimumScaleFactor，與同款英雄卡 IncomeView.summaryHeader、Finance/AddStockView、Finance/RealEstateView 等既有防截斷規格不一致，金額位數較多（例如逼近或超過十萬、百萬）時在小螢幕裝置上有被裁切的風險。兩處皆補上 .lineLimit(1) + .minimumScaleFactor(0.5)，縮放下限維持可辨識大小，並在檔頭美化紀錄註解補上本次調整方向。純顯示層調整，金額試算、進度條比率等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.88", build: 741, date: "2026/07/26", notes: [
             "【美化】車輛卡片（VehicleDetailView）金額量級單位一致性：flashCard 估值大字、底部「購入」值原本各自呼叫私有 fmtWan(_:)（僅 %g 除以萬，無條件只顯示「萬」），與同檔案 vehicleKpiStrip／fixedExpenseRow／variableExpenseRow 皆已改用共用 Double.ntdWanString（跟進萬→億進位邊界）不一致，車輛估值一旦達 1 億以上會顯示成 5～6 位數的鉅額「萬」數字。新增 splitWan(_:)／splitWanLabel(_:) 從 ntdWanString 拆出數字／單位二段，供大字沿用既有字級與 contentTransition 動畫設計，兩處呼叫點改用新函式，並移除已無呼叫端的私有 fmtWan 死碼。純顯示層調整，估值、購入價、折舊率等既有試算邏輯完全未變動。"
         ]),

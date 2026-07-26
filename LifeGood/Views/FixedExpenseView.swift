@@ -30,6 +30,11 @@ import SwiftUI
 //      top→center 玻璃反光覆蓋層，對齊 OverviewView.monthlyBalanceCard v3 /
 //      IncomeView.summaryHeader v4 / FinanceOverviewView.totalAssetsCard v3 英雄卡玻璃光澤規格；
 //      補齊全 App 六張英雄卡中此張缺少的一層光澤（與 VariableExpenseView 同步補齊）。
+// [2026-07 v5] 本次美化方向（fixedSummaryHeader 大字金額防截斷）：
+//  14. 「本月固定支出」32pt 大字金額補上 .lineLimit(1) + .minimumScaleFactor(0.5)，
+//      對齊 IncomeView.summaryHeader / Finance/AddStockView / Finance/RealEstateView
+//      等姊妹英雄卡既有的大字防截斷規格；金額位數很多（例如萬元以上）時自動縮小字級，
+//      避免在小螢幕裝置上被裁切，且縮放下限仍維持可辨識大小（同步補齊 VariableExpenseView）。
 
 struct FixedExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -195,6 +200,8 @@ struct FixedExpenseView: View {
                     Text(formatCurrency(monthlyTotal))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                         .contentTransition(.numericText())
                 }
                 Spacer()
