@@ -699,6 +699,11 @@ struct MyCalendarView: View {
                 }
             )
             .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(isSelected ? Color.white.opacity(0.35) : Color(.separator).opacity(0.12),
+                            lineWidth: 0.75)
+            )
             .shadow(
                 color: isSelected ? Color.green.opacity(0.42) : .clear,
                 radius: 8, x: 0, y: 4
@@ -1509,8 +1514,16 @@ struct MyCalendarView: View {
 //    主畫面可視性，不影響 NotificationManager 既有的排程/取消/重新排程行為。
 // ⑫ 純視覺層調整，未變動 eventsOn()／occurs()／reminderMinutes 讀寫、通知排程、
 //    Apple 行事曆同步等既有商業邏輯。
-// （下次美化本檔案時，可考慮：weekDayCard／monthGrid 等月曆格狀元件是否也有可比照
-//   eventRow 統一化的次要標記，或改往其他仍留有待辦的畫面）
+// [2026-07 v5] 補齊 v4 留下的待辦（本檔案並無獨立 monthGrid 元件，僅 weekDayCard
+// 一個月曆格狀元件，故改為直接檢視 weekDayCard 本身）：
+// ⑬ weekDayCard 54×74pt 圓角卡片先前只有 background + shadow，缺少 overlay 細邊框，
+//    與同檔案 appleCalendarBanner、三個 section 卡片（當日事件／本週快覽／未來里程碑）
+//    既有的 RoundedRectangle stroke 規格不一致，深色模式下卡片邊界較模糊。補上
+//    overlay(RoundedRectangle(cornerRadius: 14).stroke(...))：選中時 white.opacity(0.35)
+//    （對齊 TravelMapView.statsCard 白色徽章邊框慣例），未選中時 separator.opacity(0.12)
+//    （對齊本檔案 section 卡片既有邊框規格），純視覺層調整，不影響選取／事件點呈現邏輯。
+// ⑭ 純視覺層調整，未變動 weekDates／selectedDate 綁定、weekEventsMap 等既有商業邏輯。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct PersonalEventEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
