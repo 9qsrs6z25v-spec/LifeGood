@@ -76,7 +76,16 @@ struct CameraPicker: UIViewControllerRepresentable {
 //     以 .transition(.opacity) + .animation(.easeOut(duration: 0.28), value:) 淡入，
 //     時間常數直接對齊 PhotoLightbox.imageAppeared，讓 App 內兩個全螢幕照片檢視器
 //     載圖手感一致。純視覺調整，未動任何照片讀取／快取邏輯。
-//   （下次美化本元件時，可從這裡接著找其他可統一之處，例如底部資訊面板進場動畫。）
+//
+// [2026-07 v4] 底部資訊面板進場動畫：
+//   • RenovationStackViewer 底部標題／頁碼／備註／日期資訊面板原本一開啟就直接
+//     定位顯示，全 App 其餘英雄卡（TravelMapView.statsCard／MedicalMapView.summaryCard
+//     等）皆已有 opacity 0→1 + 上移 20pt 的 spring(0.55/0.78) 進場動畫，此面板是同類
+//     元件中唯一還沒補上的。新增 infoPanelAppeared 旗標，onAppear 觸發、onDisappear
+//     歸零（避免分頁切換或重新開啟時動畫不重播）。純視覺調整，未動任何商業邏輯。
+//   （下次美化本元件時，可考慮 ExpensePhotoStackViewer 是本元件在 RealEstateDetailView.swift
+//     的姊妹版本，目前規格明顯落後──缺大圖淡入、頁碼還是純文字非膠囊、無日期圖示前綴、
+//     空狀態仍是純文字、底部面板也無進場動畫，可整批對齊本元件已有的規格。）
 
 // MARK: - 裝潢照片編輯器（支援多張照片）
 
@@ -281,6 +290,9 @@ struct RenovationStackViewer: View {
     let record: RenovationPhoto
     @Environment(\.dismiss) private var dismiss
     @State private var currentIndex: Int = 0
+    // [v4] 底部資訊面板進場動畫旗標，對齊 TravelMapView.statsCardAppeared 等
+    // 全 App 英雄卡進場動畫規格（spring 0.55/0.78 + opacity/offset）。
+    @State private var infoPanelAppeared = false
 
     var body: some View {
         NavigationStack {
@@ -364,6 +376,17 @@ struct RenovationStackViewer: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(.ultraThinMaterial)
                         .padding(.bottom, 32)
+                        // [v4] 底部資訊面板進場動畫：opacity 0→1 + 上移 20pt，
+                        // spring(0.55/0.78) 對齊全 App 英雄卡進場動畫規格，
+                        // 取代原本一開啟就直接定位、毫無過場的生硬手感。
+                        .opacity(infoPanelAppeared ? 1 : 0)
+                        .offset(y: infoPanelAppeared ? 0 : 20)
+                        .onAppear {
+                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                                infoPanelAppeared = true
+                            }
+                        }
+                        .onDisappear { infoPanelAppeared = false }
                     }
                 }
             }

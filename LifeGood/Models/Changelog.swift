@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.91", build: 744, date: "2026/07/26", notes: [
+            "【美化】裝潢照片堆疊瀏覽器（RenovationStackViewer）補齊 v24.90 留下的待辦：底部標題／頁碼／備註／日期資訊面板原本一開啟就直接定位顯示，與全 App 其餘英雄卡（TravelMapView.statsCard／MedicalMapView.summaryCard 等）皆已有的「opacity 0→1 + 上移 20pt，spring(0.55/0.78)」進場動畫規格不一致，是同類元件中唯一還沒補上的。新增 infoPanelAppeared 旗標，onAppear 觸發進場、onDisappear 歸零避免重複開啟時動畫不重播，並在檔頭美化紀錄補上本次調整方向與下次可接續方向（ExpensePhotoStackViewer 為本元件姊妹版本，規格明顯落後，可整批補齊）。純視覺層調整，照片讀取、翻頁、刪除等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.90", build: 743, date: "2026/07/26", notes: [
             "【美化】裝潢照片堆疊瀏覽器（RenovationStackViewer）大圖載入淡入動畫：逐張展開的大圖原本 AsyncLocalImage 一讀到檔案就直接把 ZoomableImageView 硬切換上畫面，與同檔案（MultiPhotoGallery.swift）另一個全螢幕單張檢視器 PhotoLightbox 已有的「載入完成後 easeOut(0.28) 淡入」規格不一致，快速左右滑動翻頁時尤其明顯是生硬的一次性跳出。改為 img 由 nil→有值時以 .transition(.opacity) + .animation(.easeOut(duration: 0.28), value:) 淡入，時間常數直接對齊 PhotoLightbox.imageAppeared，讓 App 內兩個全螢幕照片檢視器載圖手感一致，並在檔頭美化紀錄補上本次調整方向與下次可接續的方向（底部資訊面板進場動畫），方便下次查找。純視覺層調整，照片讀取、快取、刪除等既有商業邏輯完全未變動。"
         ]),
