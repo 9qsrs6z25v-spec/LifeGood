@@ -25,9 +25,15 @@ import SwiftUI
 //     既有膠囊規格（padding+background opacity+clipShape(Capsule)）不一致；
 //     統一補上膠囊底色，警報為 0 時改用中性 Color(.tertiarySystemFill) 避免誤讀為異常。
 //   純視覺調整，PM／警報筆數計算與顯示條件完全未變動。
-//   （下次美化本檔案時，可考慮 SubordinateEquipmentTimelineSection.timelineRow 左側 22pt
-//   節點圖示是否也要補上 stroke 外框，對齊 equipmentRow／spotRow 36–44pt 錨點圖示的
-//   漸層+外框規格，讓時間軸節點與清單列圖示質感一致）
+// [2026-07 v4] 補齊 v3 留下的待辦：SubordinateEquipmentTimelineSection.timelineRow 左側
+//   22pt 節點圖示原本只是單層 fill(color.opacity(0.15)) 純色圓，與 equipmentRow（36pt）／
+//   TravelMapView.spotRow（44pt）等錨點圖示既有的「LinearGradient 漸層 + Circle().stroke
+//   外框」規格不一致。改為同款漸層（topLeading→bottomTrailing，0.22→0.09）+
+//   Circle().stroke(color.opacity(0.28), lineWidth: 0.75)，小尺寸邊框寬度比照
+//   spotRow 44pt 規格而非 equipmentRow 36pt 的 1pt，避免小圓上邊框顯得過粗。
+//   純視覺調整，PM／警報時間軸排序、天數計算等既有商業邏輯完全未變動。
+//   （本檔案設備清單空狀態、equipmentRow、timelineRow 進場動畫、PM／警報膠囊徽章與
+//   節點圖示規格至此已全數收斂一致；下次美化可轉往其他仍留有待辦的畫面）
 
 // MARK: 設備清單章節
 
@@ -348,7 +354,11 @@ struct SubordinateEquipmentTimelineSection: View {
             // 左側：節點 + 連接線
             VStack(spacing: 0) {
                 ZStack {
-                    Circle().fill(color.opacity(0.15)).frame(width: 22, height: 22)
+                    Circle()
+                        .fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0.09)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 22, height: 22)
+                    Circle().stroke(color.opacity(0.28), lineWidth: 0.75).frame(width: 22, height: 22)
                     Image(systemName: e.kind == .pm ? "wrench.fill" : "bell.fill")
                         .font(.system(size: 9, weight: .bold)).foregroundStyle(color)
                 }

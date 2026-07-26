@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.86", build: 739, date: "2026/07/26", notes: [
+            "【美化】部屬設備清單 PM／警報時間軸節點圖示一致性（SubordinateEquipmentView.SubordinateEquipmentTimelineSection）：補齊 v24.81 留下的待辦，timelineRow 左側 22pt 節點圖示原本只是單層純色圓（fill(color.opacity(0.15))），與同檔案 equipmentRow（36pt）、TravelMapView.spotRow（44pt）等錨點圖示既有的「LinearGradient 漸層 + Circle().stroke 外框」規格不一致。改為同款漸層（topLeading→bottomTrailing，0.22→0.09）+ 細邊框（lineWidth 0.75，依小尺寸比照 spotRow 而非 equipmentRow 的 1pt），讓時間軸節點與清單列圖示質感收斂一致。純視覺層調整，PM／警報時間軸排序、天數計算等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.85", build: 738, date: "2026/07/26", notes: [
             "【美化】醫療地圖畫面（MedicalMapView）補齊 v24.80 留下的待辦：健康狀況總結英雄卡（summaryCard）補上進場動畫（opacity 0→1 + 上移 20pt，spring 0.55/0.78），對齊 TravelMapView.statsCardAppeared／FoodMapView.headerCard 等全 App 英雄卡進場動畫規格，容器 onDisappear 重置旗標避免分頁切換殘留舊狀態。至此本畫面英雄卡與六個清單型 section 進場動畫已全數收斂一致。純視覺層調整，BMI／血型／KPI／今年醫療支出等既有資料讀取與計算邏輯完全未變動。"
         ]),
