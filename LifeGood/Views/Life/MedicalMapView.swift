@@ -61,8 +61,15 @@ import UIKit
 //  重複同一段動畫樣板；本檔案自此清單型 section 進場動畫已全數收斂一致，無殘留缺口。
 //  純視覺層調整，量測／過敏／用藥／健檢／里程碑／保障資料讀取與排序等既有商業邏輯
 //  完全未變動。
-//  （下次美化本檔案時，可轉往其他仍留有待辦的畫面，或複查 summaryCard 英雄卡是否
-//    也適合補上進場動畫，對齊全 App 其餘英雄卡規格）
+//
+// [2026-07 v5] 補齊 v4 留下的待辦：summaryCard 健康狀況總結英雄卡加入進場動畫
+//  （summaryCardAppeared：opacity 0→1 + offset y 20→0，spring 0.55/0.78），對齊
+//  TravelMapView.statsCardAppeared／FoodMapView.headerCard 等全 App 英雄卡進場動畫
+//  規格；容器 onDisappear 重置旗標，避免分頁切換時殘留舊狀態造成下次進場動畫失效
+//  （對齊 v24.57/58 靜態除錯已修復的規格）。純視覺層調整，BMI／血型／KPI／今年醫療
+//  支出等既有資料讀取與計算邏輯完全未變動。
+//  （下次美化本檔案時，可轉往其他仍留有待辦的畫面，本檔案英雄卡與六個清單型 section
+//    進場動畫至此已全數收斂一致，無殘留缺口）
 
 // MARK: - 就醫地點聚合
 
@@ -107,6 +114,9 @@ struct MedicalMapView: View {
     @State private var milestoneRowsAppearedTask: Task<Void, Never>?
     @State private var insuranceRowsAppeared = false
     @State private var insuranceRowsAppearedTask: Task<Void, Never>?
+
+    // [2026-07 v5] 健康狀況總結英雄卡進場動畫旗標，對齊 TravelMapView.statsCardAppeared 規格
+    @State private var summaryCardAppeared = false
 
     private var health: HealthProfile { lifeStore.healthProfile }
 
@@ -228,6 +238,14 @@ struct MedicalMapView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: Color(red: 0.04, green: 0.44, blue: 0.52).opacity(0.35), radius: 14, x: 0, y: 7)
         .padding(.horizontal)
+        .opacity(summaryCardAppeared ? 1 : 0)
+        .offset(y: summaryCardAppeared ? 0 : 20)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                summaryCardAppeared = true
+            }
+        }
+        .onDisappear { summaryCardAppeared = false }
     }
 
     private var divider: some View {

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.85", build: 738, date: "2026/07/26", notes: [
+            "【美化】醫療地圖畫面（MedicalMapView）補齊 v24.80 留下的待辦：健康狀況總結英雄卡（summaryCard）補上進場動畫（opacity 0→1 + 上移 20pt，spring 0.55/0.78），對齊 TravelMapView.statsCardAppeared／FoodMapView.headerCard 等全 App 英雄卡進場動畫規格，容器 onDisappear 重置旗標避免分頁切換殘留舊狀態。至此本畫面英雄卡與六個清單型 section 進場動畫已全數收斂一致。純視覺層調整，BMI／血型／KPI／今年醫療支出等既有資料讀取與計算邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.84", build: 737, date: "2026/07/26", notes: [
             "【修復編譯錯誤】旅遊地圖空狀態圖示（TravelMapView.swift:311）：.foregroundStyle(isPhotoFilter ? .secondary : .white) 三元運算式中，Swift 型別推論以第一個分支 .secondary 錨定為 HierarchicalShapeStyle，第二個分支 .white 在該型別上會回傳 Color 而非 HierarchicalShapeStyle，兩分支型別無法統一，Xcode 回報「Static property 'white' requires the types 'HierarchicalShapeStyle' and 'Color' be equivalent」與「Member 'white' in 'HierarchicalShapeStyle' produces result of type 'Color', but context expects 'HierarchicalShapeStyle'」兩條錯誤——與 v24.46 部屬執掌設備清單修過的為同型問題（階層樣式成員在前、具體顏色在後的混用三元式）。改為兩側都明確標注 Color（Color.secondary : Color.white），顯示效果完全不變。已全案掃描其餘同型寫法：色彩成員在前者型別可正確錨定為 Color、或已有明確 : Color 型別標注，均無此問題。"
         ]),
