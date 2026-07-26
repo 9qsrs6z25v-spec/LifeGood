@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.88", build: 741, date: "2026/07/26", notes: [
+            "【美化】車輛卡片（VehicleDetailView）金額量級單位一致性：flashCard 估值大字、底部「購入」值原本各自呼叫私有 fmtWan(_:)（僅 %g 除以萬，無條件只顯示「萬」），與同檔案 vehicleKpiStrip／fixedExpenseRow／variableExpenseRow 皆已改用共用 Double.ntdWanString（跟進萬→億進位邊界）不一致，車輛估值一旦達 1 億以上會顯示成 5～6 位數的鉅額「萬」數字。新增 splitWan(_:)／splitWanLabel(_:) 從 ntdWanString 拆出數字／單位二段，供大字沿用既有字級與 contentTransition 動畫設計，兩處呼叫點改用新函式，並移除已無呼叫端的私有 fmtWan 死碼。純顯示層調整，估值、購入價、折舊率等既有試算邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.87", build: 740, date: "2026/07/26", notes: [
             "【美化】我的行事曆（MyCalendarView）本週快覽日期卡邊框一致性：補齊 v24（eventRow 徽章統一化）留下的待辦，weekDayCard 54×74pt 圓角卡片先前只有 background + shadow，缺少 overlay 細邊框，與同檔案 appleCalendarBanner、三個 section 卡片（當日事件／本週快覽／未來里程碑）既有的 RoundedRectangle stroke 規格不一致，深色模式下卡片邊界較模糊。補上 overlay(RoundedRectangle(cornerRadius: 14).stroke(...))：選中時 white.opacity(0.35)（對齊 TravelMapView.statsCard 白色徽章邊框慣例），未選中時 separator.opacity(0.12)（對齊本檔案 section 卡片既有邊框規格）。純視覺層調整，選取日期、事件計算、Apple 行事曆同步等既有商業邏輯完全未變動。"
         ]),

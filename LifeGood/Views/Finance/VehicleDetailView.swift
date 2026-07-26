@@ -166,7 +166,16 @@ struct SoldStamp: View {
 //      記錄，此區塊會完全留白、無任何提示，與 StockDetailView（交易/股利空狀態卡）、
 //      RealEstateDetailView（emptySectionRow）等同型詳情頁不一致。新增 emptyExpensesCard，
 //      兩份清單皆空時顯示「尚無支出記錄」提示卡，對齊全 App 空狀態設計規格。
-//      （下次美化本元件時，可從這裡接著找其他可統一之處）
+// [2026-07 v4] 金額量級單位（萬／億）一致性：
+//  13. flashCard 估值大字、底部「購入」值原本各自呼叫私有 fmtWan(_:)（僅 `%g` 除以萬，
+//      無條件只顯示「萬」），車輛估值一旦達 1 億以上會顯示成 5～6 位數的「萬」大數字
+//      （例如 12345.7萬），未跟進全 App 共用 Double.ntdWanString 既有的萬→億量級進位規則，
+//      與同檔案 vehicleKpiStrip／fixedExpenseRow／variableExpenseRow（皆用 fmt = ntdWanString）
+//      不一致。新增 splitWan(_:) 從 ntdWanString 拆出「數字／單位」二段供大字沿用既有字級設計，
+//      兩處呼叫點改用 splitWan，並移除已無呼叫端的私有 fmtWan 死碼。純顯示層調整，估值／
+//      購入價等既有試算邏輯完全未變動。
+//      （下次美化本元件時：StockDetailView／RealEstateDetailView 的閃卡估值大字亦各自手刻
+//      同款 fmtWan，可比照本次做法一併統一，是可接續尋找之處）
 
 // MARK: - 汽車檢視卡片
 
@@ -292,13 +301,15 @@ struct VehicleDetailView: View {
             VStack(spacing: 4) {
                 // v3：補上 minimumScaleFactor + lineLimit + contentTransition，
                 // 對齊 StockDetailView 市值大字規格，防止高額估值截斷並讓切換車輛時平滑過渡
-                Text("\(fmtWan(vehicle.currentValue))")
+                // v4：改用 splitWan 取代 fmtWan，估值達 1 億以上自動換算為「億元」單位
+                let estimate = splitWan(vehicle.currentValue)
+                Text(estimate.number)
                     .font(.system(size: 52, weight: .bold, design: .rounded))
                     .foregroundStyle(rarity.textColor)
                     .minimumScaleFactor(0.55)
                     .lineLimit(1)
                     .contentTransition(.numericText())
-                Text("萬元")
+                Text("\(estimate.unit)元")
                     .font(.subheadline)
                     .foregroundStyle(rarity == .legendary ? .white.opacity(0.6) : .secondary)
             }
@@ -309,7 +320,7 @@ struct VehicleDetailView: View {
                 VStack(spacing: 2) {
                     Text("購入")
                         .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text("\(fmtWan(vehicle.purchasePrice)) 萬")
+                    Text(splitWanLabel(vehicle.purchasePrice))
                         .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
                 }
                 Spacer()
@@ -715,7 +726,19 @@ struct VehicleDetailView: View {
         v.ntdWanString
     }
 
-    private func fmtWan(_ v: Double) -> String {
-        String(format: "%g", v / 10000)
+    /// v4：從共用 ntdWanString 拆出「數字」與「萬／億」量級單位，供大字估值沿用既有字級／
+    /// 動畫設計；跟進 ntdWanString 既有的萬→億進位邊界，取代僅換算到萬的舊版 fmtWan。
+    private func splitWan(_ v: Double) -> (number: String, unit: String) {
+        var s = v.ntdWanString
+        if s.hasPrefix("NT$") { s.removeFirst(3) }
+        if s.hasSuffix("億") { return (String(s.dropLast()), "億") }
+        if s.hasSuffix("萬") { return (String(s.dropLast()), "萬") }
+        return (s, "")
+    }
+
+    /// v4：「數字 單位」單行組字（無單位時省略空格），供底部資訊列等窄欄位使用。
+    private func splitWanLabel(_ v: Double) -> String {
+        let parts = splitWan(v)
+        return parts.unit.isEmpty ? parts.number : "\(parts.number) \(parts.unit)"
     }
 }
