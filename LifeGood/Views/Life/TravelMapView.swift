@@ -320,6 +320,20 @@ struct TravelMapView: View {
                     emptyIconPulse = true
                 }
             }
+            // [除錯] photoOnly 切換不會改變外層 ZStack 的身分，單靠 onAppear/onDisappear
+            // 不會在篩選切換時重觸發；空清單時來回切一次「有照片」篩選會讓脈衝動畫永久
+            // 停止（對齊 FoodMapView.emptyOverlay 的既有修法，改用 onChange 明確驅動）。
+            .onChange(of: photoOnly) { _, filtering in
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
+                if !filtering {
+                    emptyIconPulseTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !Task.isCancelled else { return }
+                        emptyIconPulse = true
+                    }
+                }
+            }
             .onDisappear {
                 emptyIconPulseTask?.cancel()
                 emptyIconPulse = false

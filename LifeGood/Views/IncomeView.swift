@@ -679,6 +679,20 @@ struct IncomeView: View {
                     }
                 }
             }
+            // [除錯] isSearching 只是本地計算值，不會改變外層 ZStack 的身分，
+            // 單靠 onAppear/onDisappear 不會在搜尋文字變化時重觸發；空清單時
+            // 搜尋一次再清空會讓脈衝動畫永久停止（對齊 FoodMapView.emptyOverlay 的既有修法）。
+            .onChange(of: isSearching) { _, searching in
+                emptyPulseTask?.cancel()
+                emptyIconPulse = false
+                if !searching {
+                    emptyPulseTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !Task.isCancelled else { return }
+                        emptyIconPulse = true
+                    }
+                }
+            }
             .onDisappear {
                 emptyPulseTask?.cancel()
             }
