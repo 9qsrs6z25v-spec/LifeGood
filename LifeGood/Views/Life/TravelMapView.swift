@@ -308,7 +308,7 @@ struct TravelMapView: View {
                     .overlay(Circle().stroke(.white.opacity(isPhotoFilter ? 0 : 0.30), lineWidth: 0.75))
                 Image(systemName: isPhotoFilter ? "photo" : "airplane.departure")
                     .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(isPhotoFilter ? .secondary : .white)
+                    .foregroundStyle(isPhotoFilter ? Color.secondary : Color.white)
             }
             .onAppear {
                 emptyIconPulseTask?.cancel()

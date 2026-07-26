@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.84", build: 737, date: "2026/07/26", notes: [
+            "【修復編譯錯誤】旅遊地圖空狀態圖示（TravelMapView.swift:311）：.foregroundStyle(isPhotoFilter ? .secondary : .white) 三元運算式中，Swift 型別推論以第一個分支 .secondary 錨定為 HierarchicalShapeStyle，第二個分支 .white 在該型別上會回傳 Color 而非 HierarchicalShapeStyle，兩分支型別無法統一，Xcode 回報「Static property 'white' requires the types 'HierarchicalShapeStyle' and 'Color' be equivalent」與「Member 'white' in 'HierarchicalShapeStyle' produces result of type 'Color', but context expects 'HierarchicalShapeStyle'」兩條錯誤——與 v24.46 部屬執掌設備清單修過的為同型問題（階層樣式成員在前、具體顏色在後的混用三元式）。改為兩側都明確標注 Color（Color.secondary : Color.white），顯示效果完全不變。已全案掃描其餘同型寫法：色彩成員在前者型別可正確錨定為 Color、或已有明確 : Color 型別標注，均無此問題。"
+        ]),
         ChangelogEntry(version: "24.83", build: 736, date: "2026/07/26", notes: [
             "【靜態除錯 v24.83】延續 v24.82 找到的 FoodMapView.emptyOverlay 同一 bug class（篩選/搜尋狀態切換不會改變外層 ZStack 身分，onAppear/onDisappear 不會重觸發），分兩路並行複查 Models 資料層（ExpenseStore／FinanceStore／LifeStore／CloudKitManager 等 18 檔）與 Views 畫面層（70+ 檔）後，在畫面層找到 3 處尚未套用 onChange 修法的殘留實例：① VariableExpenseView.emptyStateView、② IncomeView.emptyState 的雙層脈衝光環皆只在 onAppear/onDisappear 管理 Task，isSearching 由 searchText 計算而來、不會改變畫面身分，空清單時搜尋一次再清空搜尋框會讓脈衝動畫永久停止；③ TravelMapView.emptyOverlay 的 header 註解宣稱已「對齊 FoodMapView」，但實際只複製了視覺與 Task 取消寫法，未補上 onChange(of: photoOnly)，來回切一次「有照片」篩選一樣會讓脈衝永久停止。三處皆比照 FoodMapView.swift 既有的 onChange(of:) 修法補上（先取消舊 Task、旗標歸零，非篩選/搜尋狀態才重新排程）。Models 資料層複查後確認 force-unwrap／as!／try!、retain cycle、isSyncing 競態守衛、O(n²) 迴圈、重複 I/O 均無新問題（CloudSyncManager 既有 2 秒防抖＋30 秒節流架構正確，未變動）。",
         ]),
