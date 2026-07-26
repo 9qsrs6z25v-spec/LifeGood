@@ -67,6 +67,16 @@ struct CameraPicker: UIViewControllerRepresentable {
 //   2. RenovationStackViewer 空狀態「沒有照片」：從純文字升級為圖示 + 文字直式排版
 //      （semi-transparent 圓形圖示徽章 + 說明文字），對齊全 App 空狀態慣例
 //      （MultiPhotoGallery.emptyState 同款結構，僅配色改為白色系以搭配黑底全螢幕）。
+//
+// [2026-07 v3] 大圖載入淡入動畫：
+//   • RenovationStackViewer 逐張展開的大圖原本 AsyncLocalImage 一讀到檔案就直接把
+//     ZoomableImageView 硬切換上畫面，與同檔案（MultiPhotoGallery.swift）另一個
+//     全螢幕單張檢視器 PhotoLightbox 已有的「載入完成後 easeOut(0.28) 淡入」規格
+//     不一致，快速左右滑動翻頁時尤其明顯是生硬的一次性跳出。改為 img 由 nil→有值時
+//     以 .transition(.opacity) + .animation(.easeOut(duration: 0.28), value:) 淡入，
+//     時間常數直接對齊 PhotoLightbox.imageAppeared，讓 App 內兩個全螢幕照片檢視器
+//     載圖手感一致。純視覺調整，未動任何照片讀取／快取邏輯。
+//   （下次美化本元件時，可從這裡接著找其他可統一之處，例如底部資訊面板進場動畫。）
 
 // MARK: - 裝潢照片編輯器（支援多張照片）
 
@@ -302,10 +312,14 @@ struct RenovationStackViewer: View {
                                 ZStack {
                                     if let img {
                                         ZoomableImageView(image: img)
+                                            .transition(.opacity)
                                     } else {
                                         ProgressView().tint(.white)
                                     }
                                 }
+                                // [v3] 對齊 PhotoLightbox.imageAppeared 淡入時間常數，
+                                // 讀圖完成瞬間由 nil→有值時平滑淡入，取代原本的生硬硬切。
+                                .animation(.easeOut(duration: 0.28), value: img != nil)
                             }
                             .tag(idx)
                         }

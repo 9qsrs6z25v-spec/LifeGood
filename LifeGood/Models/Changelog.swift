@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.90", build: 743, date: "2026/07/26", notes: [
+            "【美化】裝潢照片堆疊瀏覽器（RenovationStackViewer）大圖載入淡入動畫：逐張展開的大圖原本 AsyncLocalImage 一讀到檔案就直接把 ZoomableImageView 硬切換上畫面，與同檔案（MultiPhotoGallery.swift）另一個全螢幕單張檢視器 PhotoLightbox 已有的「載入完成後 easeOut(0.28) 淡入」規格不一致，快速左右滑動翻頁時尤其明顯是生硬的一次性跳出。改為 img 由 nil→有值時以 .transition(.opacity) + .animation(.easeOut(duration: 0.28), value:) 淡入，時間常數直接對齊 PhotoLightbox.imageAppeared，讓 App 內兩個全螢幕照片檢視器載圖手感一致，並在檔頭美化紀錄補上本次調整方向與下次可接續的方向（底部資訊面板進場動畫），方便下次查找。純視覺層調整，照片讀取、快取、刪除等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.89", build: 742, date: "2026/07/26", notes: [
             "【美化】變動支出／固定支出頁（VariableExpenseView／FixedExpenseView）monthSummaryHeader 大字金額防截斷：兩頁「本月變動支出」「本月固定支出」32pt 大字金額原本缺少 .lineLimit(1)／.minimumScaleFactor，與同款英雄卡 IncomeView.summaryHeader、Finance/AddStockView、Finance/RealEstateView 等既有防截斷規格不一致，金額位數較多（例如逼近或超過十萬、百萬）時在小螢幕裝置上有被裁切的風險。兩處皆補上 .lineLimit(1) + .minimumScaleFactor(0.5)，縮放下限維持可辨識大小，並在檔頭美化紀錄註解補上本次調整方向。純顯示層調整，金額試算、進度條比率等既有商業邏輯完全未變動。"
         ]),
