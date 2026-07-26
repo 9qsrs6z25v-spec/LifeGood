@@ -21,6 +21,13 @@ import SceneKit
 //   6. floors 為空時（尚未新增任何樓層物件）補 HUD 風格空狀態：虛線切角框 + 圖示 +
 //      「尚無樓層資料」提示文字，取代原本清單直接留白的視覺缺口。
 //   純視覺／互動回饋層調整，未動 SceneKit 3D 建築渲染、樓層排序與選取邏輯。
+// [2026-07 v3] FloorTagView 大字自適應補強：
+//   7. 樓層編號（floorNumber）與樓層功能（functions）文字原本沒有 minimumScaleFactor，
+//      使用者輸入較長樓層代號（如 "B2-地下停車場"）或多個功能標籤以「・」串接時，
+//      在系統輔助大字體設定下會被直接裁切成省略號，是本元件唯一缺文字自適應防護的地方。
+//      補上 lineLimit(1) + minimumScaleFactor(0.7)，讓長字串改為自動縮小顯示、
+//      不至於小到無法辨識，對齊全 App 文字自適應規格（VehicleDetailView / ResumeGiftSection 等）。
+//   純視覺層調整，未動樓層資料、排序或選取邏輯。
 //   （下次美化本元件時，可從這裡接著找其他可統一之處）
 
 // MARK: - 全息 HUD 配色
@@ -250,6 +257,8 @@ private struct FloorTagView: View {
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundStyle(isSelected ? .white : Color.white.opacity(0.95))
                         .shadow(color: isSelected ? HoloPalette.neonCyan : .clear, radius: 4)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     Spacer(minLength: 0)
                 }
                 if !floor.functions.isEmpty {
@@ -257,6 +266,7 @@ private struct FloorTagView: View {
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(HoloPalette.neonCyan.opacity(isSelected ? 1.0 : 0.75))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
             }
             .padding(.horizontal, 10)

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.92", build: 745, date: "2026/07/26", notes: [
+            "【美化】全息大樓視圖（HolographicBuildingView）樓層標籤大字自適應：側邊樓層清單的樓層編號與功能標籤原本沒有 minimumScaleFactor，是本元件目前唯一缺文字自適應防護的地方，使用者輸入較長樓層代號或多個功能標籤以「・」串接、或開啟系統輔助大字體時會被直接裁切成省略號。補上 lineLimit(1) + minimumScaleFactor(0.7)，讓長字串改為自動縮小顯示、不至於小到無法辨識，對齊全 App 文字自適應規格。純視覺層調整，樓層資料、排序與選取邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.91", build: 744, date: "2026/07/26", notes: [
             "【美化】裝潢照片堆疊瀏覽器（RenovationStackViewer）補齊 v24.90 留下的待辦：底部標題／頁碼／備註／日期資訊面板原本一開啟就直接定位顯示，與全 App 其餘英雄卡（TravelMapView.statsCard／MedicalMapView.summaryCard 等）皆已有的「opacity 0→1 + 上移 20pt，spring(0.55/0.78)」進場動畫規格不一致，是同類元件中唯一還沒補上的。新增 infoPanelAppeared 旗標，onAppear 觸發進場、onDisappear 歸零避免重複開啟時動畫不重播，並在檔頭美化紀錄補上本次調整方向與下次可接續方向（ExpensePhotoStackViewer 為本元件姊妹版本，規格明顯落後，可整批補齊）。純視覺層調整，照片讀取、翻頁、刪除等既有商業邏輯完全未變動。"
         ]),
