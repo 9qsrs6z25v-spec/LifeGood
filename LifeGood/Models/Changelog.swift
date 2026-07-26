@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.82", build: 735, date: "2026/07/26", notes: [
+            "【靜態除錯 v24.82】針對 v24.74～v24.81 新增的動畫/視覺程式碼做 bug-focused 複查（分兩路並行複查 SubordinateDetailView／SubordinateEquipmentView 與 MedicalMapView／FoodMapView，另手動複查 AdminConsoleView／FamilyOverviewMap 純視覺 diff），修復 2 處真實問題：① SubordinateDetailView 切換 Tab 時排的 50ms 延遲重播 Task（tabSectionsAppearTask）只在切換時取消重排，畫面本身缺少 onDisappear，若在切換 Tab 後 50ms 內就把整個 sheet 收合關閉，尚未觸發的 Task 仍會在畫面消失後補跑 withAnimation；補上 onDisappear 取消該 Task，對齊同檔案其餘可取消 Task 一律要有 onDisappear 的既有規格。② FoodMapView.emptyOverlay 雙層脈衝光環的 onAppear／onDisappear 掛在外層 ZStack 上，但「照片」篩選開關只會讓內層脈衝環用 if !isPhotoFilter 條件插入/移除、外層 ZStack 身分不變，導致空清單時來回切一次篩選開關後脈衝動畫永久停止（關閉時 Task 未取消、旗標未歸零；重新開啟時環雖重新插入，但已無 Task 讓 emptyIconPulse 從 false 變 true 觸發 animation(value:)）；改用 onChange(of: isPhotoFilter) 明確以篩選狀態驅動 Task 生命週期修復。SubordinateDetailView／SubordinateEquipmentView 的 isSaving 存檔刪除競態守衛、force-unwrap、retain cycle、O(n²) 迴圈複查後確認均無新問題（既有 6 處 delete() 守衛與新增的 EquipmentEditorSheet 均正確套用）。",
+        ]),
         ChangelogEntry(version: "24.81", build: 734, date: "2026/07/25", notes: [
             "【美化】部屬設備清單（SubordinateEquipmentSection.equipmentRow）補齊 v2 留下的待辦：PM／警報數量標籤原本是無底色裸 Label，與同一列「30天內 N 次」及全 App 計數膠囊規格不一致；統一改為膠囊徽章（background+clipShape(Capsule)，警報數為 0 時底色改用中性 tertiarySystemFill，避免誤讀為異常）。純視覺調整，PM／警報筆數計算與顯示條件完全未變動。"
         ]),

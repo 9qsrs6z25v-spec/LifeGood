@@ -349,6 +349,11 @@ struct SubordinateDetailView: View {
                             tabSectionsAppeared = true
                         }
                     }
+                    .onDisappear {
+                        // 畫面關閉時取消尚未觸發的 Tab 切換重播任務，避免 sheet 收合中途
+                        // 仍在 50ms 延遲內的 Task 補跑 withAnimation，在已消失的畫面上留下動畫殘留
+                        tabSectionsAppearTask?.cancel()
+                    }
 
                     if detailTab == .daily {
                         weeklyReportSection

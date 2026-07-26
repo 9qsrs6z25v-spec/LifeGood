@@ -384,6 +384,23 @@ struct FoodMapView: View {
                     }
                 }
             }
+            // [除錯] photoOnly 切換不會改變外層 ZStack 的身分（只有內層脈衝環用
+            // if !isPhotoFilter 條件插入/移除），單靠 onAppear/onDisappear 不會在
+            // 篩選切換時重觸發；空狀態時來回切一次「照片」開關會讓脈衝動畫永久停止
+            // （關閉時 Task 未取消、旗標未歸零；重新開啟時環是新插入但已無 Task 讓
+            // emptyIconPulse 從 false 變 true，animation(value:) 不會對初始插入播放）。
+            // 改用 onChange(of:) 明確以 isPhotoFilter 驅動 Task 生命週期。
+            .onChange(of: isPhotoFilter) { _, filtering in
+                emptyIconPulseTask?.cancel()
+                emptyIconPulse = false
+                if !filtering {
+                    emptyIconPulseTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !Task.isCancelled else { return }
+                        emptyIconPulse = true
+                    }
+                }
+            }
             .onDisappear {
                 emptyIconPulseTask?.cancel()
                 emptyIconPulse = false
