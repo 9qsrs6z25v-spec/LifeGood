@@ -45,6 +45,17 @@ import Charts
 //      [.white.opacity(0.18),.clear] top→center），與 OverviewView / IncomeView /
 //      VariableExpenseView / FixedExpenseView / FinanceOverviewView 英雄卡片
 //      glass shine 規格完全統一，消除此卡片是全 App 唯一缺漏的視覺不均衡現象。
+// [2026-07 v5] 金額量級單位一致性修復：
+//  17. trendChart Y 軸刻度 abbreviateCurrency(_:)：原本只到「萬」量級（≥1萬顯示
+//      "%.0f萬"），未滿 1 萬則混用英式縮寫 "%.1fk"（如 "3.5k"），與全 App 其餘畫面
+//      一律使用「萬／億」中文量級單位的慣例不一致，且金額趨勢達 1 億以上時會被顯示成
+//      「12000萬」這種鉅額萬數字。改為比照 FinanceOverviewView.fmtShort／
+//      Double.ntdWanString 既有規格：≥1億 → "%.1f億"、≥1萬 → "%.0f萬"、
+//      其餘維持原始整數，移除不一致的 "k" 縮寫分支。純顯示層調整，圖表資料、
+//      期間切換、拖曳選點等既有邏輯完全未變動。
+//      （下次美化本檔案時：可留意 trendChart／variablePieChart／fixedPieChart 三個
+//      分頁的空狀態圖示圓與骨架載入動畫規格是否有可再收斂之處，或轉往其他仍留有
+//      待辦的畫面）
 
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
@@ -1304,11 +1315,8 @@ struct ChartView: View {
     }
 
     private func abbreviateCurrency(_ value: Double) -> String {
-        if value >= 10000 {
-            return String(format: "%.0f萬", value / 10000)
-        } else if value >= 1000 {
-            return String(format: "%.1fk", value / 1000)
-        }
+        if value >= 100_000_000 { return String(format: "%.1f億", value / 100_000_000) }
+        if value >= 10_000 { return String(format: "%.0f萬", value / 10_000) }
         return String(format: "%.0f", value)
     }
 

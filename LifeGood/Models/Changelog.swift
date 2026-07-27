@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.00", build: 753, date: "2026/07/27", notes: [
+            "【美化】支出趨勢圖 Y 軸金額量級單位一致性（ChartView）：trendChart 圖表 Y 軸刻度標籤 abbreviateCurrency(_:) 原本只到「萬」量級（≥1萬顯示「%.0f萬」），未滿 1 萬則混用英式縮寫「%.1fk」（如「3.5k」），與全 App 其餘畫面一律使用中文「萬／億」量級單位的慣例不一致，且月支出趨勢達 1 億以上時會被顯示成「12000萬」這種鉅額萬數字。改為比照 FinanceOverviewView.fmtShort／共用 Double.ntdWanString 既有規格：≥1億 顯示「%.1f億」、≥1萬 顯示「%.0f萬」，移除不一致的「k」英式縮寫分支。純顯示層調整，圖表資料、期間切換、拖曳選點等既有邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.99", build: 752, date: "2026/07/27", notes: [
             "【美化】房地產詳情頁（RealEstateDetailView）金額量級單位一致性：補齊 v24.98 為 StockDetailView 完成美化時留下的待辦。flashCard 估值大字、底部「購入」值原本各自呼叫私有 fmtWan(_:)（僅 %g 除以萬，無條件只顯示「萬」），估值一旦達 1 億以上會顯示成 5～6 位數的鉅額「萬」數字，與同檔案 mortgageItems／paidItems／calcRow 等皆已改用共用 Double.ntdWanString（已支援萬→億自動進位）不一致。新增 splitWan(_:)／splitWanLabel(_:) 從 ntdWanString 拆出「數字／單位」二段供大字沿用既有字級與 contentTransition 動畫設計，移除已無呼叫端的私有 fmtWan 死碼；作法對齊 VehicleDetailView.splitWan 既有規格。至此股票／車輛／房地產三款詳情頁閃卡估值大字量級單位規格已完全收斂一致。純顯示層調整，估值、購入價、增值率等既有試算邏輯完全未變動。"
         ]),
