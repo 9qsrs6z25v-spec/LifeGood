@@ -66,6 +66,16 @@ import UniformTypeIdentifiers
 //      （SettingsView 全檔案圖示圓規格至此已收斂一致；下次美化本檔案時可轉往複查各
 //        Section footer 說明文字的字級／行距是否有落差，或改往其他仍有未收斂圖示圓
 //        殘留的畫面）
+// [2026-07 v10] providerKeySection footer 字級落差修復（承接 v9 breadcrumb 指出的
+//      「複查各 Section footer 字級是否有落差」）：
+//  20. p.helpText（各 AI 供應商申請 Key 教學＋額外扣款警語）先前額外覆寫
+//      .font(.caption2)，是全檔案 10 處 Section footer 中唯一縮小字級的一處，
+//      比 dataStatsSection／iCloudSyncSection／currencyRateSection 等其餘說明性
+//      footer 使用的系統預設 .footnote 更小，內容又包含金額扣款資訊，字級不該是
+//      全頁最小。移除該覆寫，改回與其餘 9 處一致的預設 footer 字級；「關於」區
+//      版權宣告（1431 行）字體較小、置中、.tertiary 色，屬刻意的小字版權印刷慣例，
+//      與說明性 footer 是不同類別，不在此次調整範圍。純文字字級調整，
+//      helpText 內容、Provider 選擇、Key 讀寫等既有商業邏輯完全未變動。
 
 // MARK: - Share Sheet (UIKit bridge)
 
@@ -985,7 +995,7 @@ struct SettingsView: View {
                 }
             }
         } footer: {
-            Text(p.helpText).font(.caption2)
+            Text(p.helpText)
         }
     }
 

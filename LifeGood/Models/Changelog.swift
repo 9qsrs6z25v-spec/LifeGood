@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.96", build: 749, date: "2026/07/27", notes: [
+            "【美化】設定頁（SettingsView）AI 供應商說明字級一致性修復：「使用中的 AI 服務」下方各供應商（Claude／OpenAI／Gemini）Section 的申請 Key 教學與扣款金額提醒文字，先前額外覆寫 .font(.caption2)，是全檔案 10 處 Section footer 說明文字中唯一縮小字級的一處，比其餘資料統計、iCloud 同步、匯率設定等說明性 footer 使用的系統預設字級更小——內容又包含每次解析約需扣款多少金額的重要資訊，字級反而是全頁最小，容易被忽略或難以閱讀。移除該覆寫，改回與其餘 9 處說明性 footer 一致的預設字級；「關於」區版權宣告維持原本置中小字的版權印刷慣例，屬不同類別不受影響。純文字字級調整，供應商 Key 讀寫、選用中服務判斷等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.95", build: 748, date: "2026/07/27", notes: [
             "【美化】支出照片堆疊瀏覽器（ExpensePhotoStackViewer）補齊姊妹元件待辦：補齊 v24.91 為 RenovationStackViewer（裝潢照片堆疊瀏覽器）完成美化時留下的待辦——ExpensePhotoStackViewer（支出照片堆疊瀏覽器，用於各項支出的收據/照片檢視）規格明顯落後，本次整批補齊。空狀態從裸 Text(\"沒有照片\") 升級為 52pt 圓形圖示（photo，白 0.10 底 + 0.18 邊框）+ subheadline 說明文字；大圖讀取完成加入 opacity 淡入轉場（.transition(.opacity) + .animation(.easeOut(duration:0.28))），取代原本讀圖完成瞬間的生硬硬切；頁碼從純文字改為半透明 Capsule 膠囊徽章；日期加 calendar 圖示前綴；標題字重升級為 .bold；底部資訊面板加入進場動畫（opacity 0→1 + 上移 20pt，spring 0.55/0.78），取代原本一開啟就直接定位、毫無過場的手感，容器 onDisappear 重置旗標避免重複開啟時動畫不重播。至此支出／裝潢兩款照片堆疊瀏覽器視覺規格已完全對齊。純視覺層調整，支出照片讀取、翻頁、刪除等既有商業邏輯完全未變動。"
         ]),
