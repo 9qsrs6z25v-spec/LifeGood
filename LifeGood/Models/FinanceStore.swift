@@ -46,7 +46,6 @@ class FinanceStore: ObservableObject {
     func update(_ item: SavingsInsurance) {
         if let i = insurances.firstIndex(where: { $0.id == item.id }) { insurances[i] = item }
     }
-    func deleteInsurance(at offsets: IndexSet) { insurances.remove(atOffsets: offsets) }
     func deleteInsurance(_ item: SavingsInsurance) { insurances.removeAll { $0.id == item.id } }
 
     // MARK: - 股票 CRUD
@@ -55,7 +54,6 @@ class FinanceStore: ObservableObject {
     func update(_ item: Stock) {
         if let i = stocks.firstIndex(where: { $0.id == item.id }) { stocks[i] = item }
     }
-    func deleteStock(at offsets: IndexSet) { stocks.remove(atOffsets: offsets) }
     func deleteStock(_ item: Stock) { stocks.removeAll { $0.id == item.id } }
 
     /// 批次更新多筆股票現價：單次 @Published 觸發（一次重繪、一次 JSON 序列化、一次 CloudKit 推送），
@@ -77,7 +75,6 @@ class FinanceStore: ObservableObject {
     func update(_ item: Vehicle) {
         if let i = vehicles.firstIndex(where: { $0.id == item.id }) { vehicles[i] = item }
     }
-    func deleteVehicle(at offsets: IndexSet) { vehicles.remove(atOffsets: offsets) }
     func deleteVehicle(_ item: Vehicle) { vehicles.removeAll { $0.id == item.id } }
 
     // MARK: - 房地產 CRUD
@@ -85,10 +82,6 @@ class FinanceStore: ObservableObject {
     func add(_ item: RealEstate) { realEstates.append(item) }
     func update(_ item: RealEstate) {
         if let i = realEstates.firstIndex(where: { $0.id == item.id }) { realEstates[i] = item }
-    }
-    func deleteRealEstate(at offsets: IndexSet) {
-        for item in offsets.map({ realEstates[$0] }) { Self.cleanupRealEstateFiles(item) }
-        realEstates.remove(atOffsets: offsets)
     }
     func deleteRealEstate(_ item: RealEstate) {
         Self.cleanupRealEstateFiles(item)

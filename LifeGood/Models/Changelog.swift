@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.94", build: 747, date: "2026/07/27", notes: [
+            "【靜態除錯 v24.94：移除 FinanceStore 未使用的 offset 刪除方法，消除潛在 index 越界地雷】deleteInsurance(at:)／deleteStock(at:)／deleteVehicle(at:)／deleteRealEstate(at:) 這組以 IndexSet 直接對 insurances／stocks／vehicles／realEstates 陣列做 remove(atOffsets:) 的方法，全庫已無任何呼叫端（SavingsInsuranceView／StockView／VehicleView／RealEstateView 等清單畫面實際都是用 ID 比對的 deleteX(_:) 版本刪除，並非 List.onDelete）。這組方法本身也不像 ExpenseStore.delete(at:from:) 那樣先把 offsets 限制在來源陣列範圍內、且沒有另外接受「目前畫面顯示用的（已排序/篩選）清單」參數，而上述四個清單畫面全部都是排序過（依現值/市值/日期等）才顯示——若日後有人比照其他清單很自然地幫這四個畫面接上原生 .onDelete 並直接傳入畫面排序後的 offsets，會出現與排序前陣列 index 對不上而刪錯項目、或 offsets 超出陣列範圍直接 crash 的問題，屬於使用者要求複查的「index 越界」同一類風險。因目前確認零呼叫端、非任何現有畫面路徑會觸發，採直接移除（而非幫死代碼補防護），消除地雷本身而不留下引誘日後誤用的 API。純 Models 層變動，未影響任何現有刪除邏輯或使用者可觸發的行為。"
+        ]),
         ChangelogEntry(version: "24.93", build: 746, date: "2026/07/27", notes: [
             "【靜態除錯 v24.93：修復電子發票同步永久漏匯入的邊界問題】EInvoiceSyncManager.syncNow() 過去直接以上次同步當下的 lastSyncDate 作為下一次查詢區間的起點，完全沒有重疊緩衝。財政部電子發票載具查詢平台的資料入帳存在已知延遲（部分特店延後 1～3 天才批次上傳），若某張發票在開立當天查詢不到，等它終於出現在平台上時，下一輪同步的起點早已前進到它的開立日之後，往後任何一次同步都不會再涵蓋那個日期區間，這筆消費會被永久靜默漏匯入、且無任何錯誤提示——與本檔案過去 v24.53／56／64／73 修復過的「孤兒/漏匯入」同一類問題，唯獨同步日期區間本身沒有補上緩衝。修法：新增 3 天回溯緩衝，起點改為 lastSyncDate 往前推 3 天；重疊區間內已匯入過的發票由既有的 alreadyImported（以 invNum 去重）機制擋下，不會造成重複建立支出，僅是每次多查詢幾天份的區間。本輪同時複查 ChildVaccineSchedule／LifeModels（含班表跨日休息扣除、PersonalEvent 重複規則）、UnifiedExport 匯入清理、AIService、SubscriptionManager、BackupManager／FullBackup 串流備份、FinanceModels 複利與交易重算等多個較少被提及的檔案，以及全庫 force-unwrap／as!／try!／Timer／NotificationCenter retain cycle／ForEach 索引範圍，均確認已妥善保護、無新問題。"
         ]),
