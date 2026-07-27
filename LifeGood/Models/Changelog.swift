@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.01", build: 754, date: "2026/07/27", notes: [
+            "【美化】兒女詳情頁編輯表單 Section 標頭一致性（ChildDetailView）：DailyRecordEditorSheet（喝奶/食物/睡眠記錄）與 ChildRecordEditorSheet（疫苗/過敏/成長/就醫/教育/興趣/紀念、日期／備註／插入圖片）共 13 處 Section，原本全是系統預設純文字標題，是 ChildDetailView.swift 內唯一還沒套用「4pt 漸層 Capsule 色條 + 圖示 + 粗體標題」規格的區塊，與 HealthProfileEditView.healthEditorSectionHeader／MyCalendarView.editorSectionHeader／ResumeView.profileEditorSectionHeader 等全 App 編輯表單慣例落差明顯。新增檔案層級共用 childEditorSectionHeader(_:icon:color:)，圖示沿用既有 DailyRecordType/ChildRecordType.icon，色彩新增 accent 計算屬性對齊 ChildDetailView.dailyColor／colorFor 同型別同色彩規格（備註類 Section 統一用中性 .secondary，對齊全 App慣例）。純視覺層調整，Section 內欄位、canSave／save()／delete() 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.00", build: 753, date: "2026/07/27", notes: [
             "【美化】支出趨勢圖 Y 軸金額量級單位一致性（ChartView）：trendChart 圖表 Y 軸刻度標籤 abbreviateCurrency(_:) 原本只到「萬」量級（≥1萬顯示「%.0f萬」），未滿 1 萬則混用英式縮寫「%.1fk」（如「3.5k」），與全 App 其餘畫面一律使用中文「萬／億」量級單位的慣例不一致，且月支出趨勢達 1 億以上時會被顯示成「12000萬」這種鉅額萬數字。改為比照 FinanceOverviewView.fmtShort／共用 Double.ntdWanString 既有規格：≥1億 顯示「%.1f億」、≥1萬 顯示「%.0f萬」，移除不一致的「k」英式縮寫分支。純顯示層調整，圖表資料、期間切換、拖曳選點等既有邏輯完全未變動。"
         ]),

@@ -46,7 +46,18 @@ import MapKit
 //     Capsule 膠囊徽章樣式，對齊 ResumeView.spendingSection／ResumeGiftSection／
 //     OrganizationView／SpouseResumeView 全 App「還有 N 筆…」統一規格。
 //   • 純視覺與標點統一，未動 prefix(20) 截斷邏輯或筆數計算。
-//   （下次美化本元件時，可從這裡接著找其他可統一之處）
+// [2026-07 v8] DailyRecordEditorSheet／ChildRecordEditorSheet 編輯表單 Section header 補齊：
+//   • 兩個編輯 Sheet（喝奶/食物/睡眠記錄、疫苗/過敏/成長/就醫/教育/興趣/紀念、日期／備註／
+//     插入圖片，共 13 處）原本全是系統預設純文字 Section("標題")，是本檔案內唯一還沒套用
+//     「4pt 漸層 Capsule 色條 + 圖示 + 粗體標題」規格的區塊，與 HealthProfileEditView.
+//     healthEditorSectionHeader／MyCalendarView.editorSectionHeader／ResumeView.
+//     profileEditorSectionHeader 等全 App 編輯表單慣例落差明顯。新增檔案層級共用
+//     childEditorSectionHeader(_:icon:color:)，圖示沿用 DailyRecordType/ChildRecordType.icon，
+//     色彩新增 accent 計算屬性對齊 ChildDetailView.dailyColor／colorFor 同型別同色彩規格
+//     （備註類 Section 統一用 .secondary 中性色，對齊 HealthProfileEditView 慣例）。
+//     刪除按鈕獨立 Section 維持無標頭（對齊 HealthProfileEditView 各編輯 Sheet 慣例）。
+//     純視覺層調整，Section 內欄位、canSave／save()／delete() 等既有商業邏輯完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -1047,6 +1058,24 @@ struct ChildDetailView: View {
 
 }
 
+/// 子編輯 Sheet 共用 Section header：4pt 漸層 Capsule 色條 + 圖示 + 粗體標題，
+/// 對齊 HealthProfileEditView.healthEditorSectionHeader／MyCalendarView.editorSectionHeader 規格；
+/// DailyRecordEditorSheet／ChildRecordEditorSheet 共用。
+@ViewBuilder
+private func childEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
+
 // MARK: - 日常記錄編輯 Sheet
 
 struct DailyRecordEditorSheet: View {
@@ -1073,24 +1102,37 @@ struct DailyRecordEditorSheet: View {
         }
     }
 
+    // 對齊 ChildDetailView.dailyColor 規格，讓編輯表單 Section header 與清單列圖示圓同色
+    private var accent: Color {
+        switch type {
+        case .milk: return .blue
+        case .food: return .green
+        case .sleep: return .indigo
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 switch type {
                 case .milk:
-                    Section("喝奶記錄") {
+                    Section {
                         HStack { Text("時間"); Spacer(); FiveMinuteDateTimePicker(selection: $date).fixedSize() }
                         TextField("奶粉品牌（選填）", text: $milkBrand)
                         HStack { TextField("ml 數", text: $mlText).keyboardType(.numberPad); Text("ml").foregroundStyle(.secondary) }
+                    } header: {
+                        childEditorSectionHeader("喝奶記錄", icon: type.icon, color: accent)
                     }
                 case .food:
-                    Section("食物記錄") {
+                    Section {
                         HStack { Text("時間"); Spacer(); FiveMinuteDateTimePicker(selection: $date).fixedSize() }
                         TextField("食物名稱", text: $foodName)
                         HStack { TextField("ml 數（選填）", text: $mlText).keyboardType(.numberPad); Text("ml").foregroundStyle(.secondary) }
+                    } header: {
+                        childEditorSectionHeader("食物記錄", icon: type.icon, color: accent)
                     }
                 case .sleep:
-                    Section("睡眠記錄") {
+                    Section {
                         HStack { Text("入睡時間"); Spacer(); FiveMinuteDateTimePicker(selection: $date).fixedSize() }
                         HStack { Text("起床時間"); Spacer(); FiveMinuteDateTimePicker(selection: $sleepEnd, minimumDate: date).fixedSize() }
                         if sleepEnd > date {
@@ -1101,10 +1143,14 @@ struct DailyRecordEditorSheet: View {
                                 Text(String(format: "%.1f 小時", hours)).foregroundStyle(.blue)
                             }
                         }
+                    } header: {
+                        childEditorSectionHeader("睡眠記錄", icon: type.icon, color: accent)
                     }
                 }
-                Section("備註") {
+                Section {
                     TextField("選填", text: $note, axis: .vertical).lineLimit(2)
+                } header: {
+                    childEditorSectionHeader("備註", icon: "text.bubble.fill", color: .secondary)
                 }
                 if editing != nil {
                     Section {
@@ -1220,6 +1266,19 @@ struct ChildRecordEditorSheet: View {
         }
     }
 
+    // 對齊 ChildDetailView.colorFor 規格，讓編輯表單 Section header 與清單列圖示圓同色
+    private var accent: Color {
+        switch type {
+        case .vaccination: return .blue
+        case .allergy: return .red
+        case .growth: return .green
+        case .medical: return .orange
+        case .education: return .purple
+        case .hobby: return .pink
+        case .memorable: return .yellow
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -1232,10 +1291,18 @@ struct ChildRecordEditorSheet: View {
                 case .hobby: hobbyFields
                 case .memorable: memorableFields
                 }
-                Section("日期") { DatePicker("日期", selection: $date, displayedComponents: .date) }
-                Section("備註") { TextField("選填", text: $note, axis: .vertical).lineLimit(2...5) }
+                Section {
+                    DatePicker("日期", selection: $date, displayedComponents: .date)
+                } header: {
+                    childEditorSectionHeader("日期", icon: "calendar", color: accent)
+                }
+                Section {
+                    TextField("選填", text: $note, axis: .vertical).lineLimit(2...5)
+                } header: {
+                    childEditorSectionHeader("備註", icon: "text.bubble.fill", color: .secondary)
+                }
 
-                Section("插入圖片") {
+                Section {
                     PhotosPicker(selection: $photoItem, matching: .images) {
                         HStack {
                             Image(systemName: "photo")
@@ -1276,6 +1343,8 @@ struct ChildRecordEditorSheet: View {
                             Label("移除圖片", systemImage: "xmark.circle")
                         }
                     }
+                } header: {
+                    childEditorSectionHeader("插入圖片", icon: "photo.fill", color: accent)
                 }
 
                 if editing != nil {
@@ -1403,29 +1472,37 @@ struct ChildRecordEditorSheet: View {
     }
 
     private var vaccinationFields: some View {
-        Section("疫苗資訊") {
+        Section {
             TextField("疫苗名稱（如：五合一）", text: $title)
             TextField("劑次（如：第 1 劑、追加）", text: $dose)
             clinicAutocompleteField(label: "接種院所（選填）")
+        } header: {
+            childEditorSectionHeader("疫苗資訊", icon: type.icon, color: accent)
         }
     }
     private var allergyFields: some View {
-        Section("過敏資訊") {
+        Section {
             TextField("過敏原（如：花生、牛奶）", text: $title)
             Picker("嚴重度", selection: $severity) { ForEach(AllergySeverity.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
             TextField("反應描述（如：紅疹、氣喘）", text: $detail, axis: .vertical).lineLimit(1...3)
+        } header: {
+            childEditorSectionHeader("過敏資訊", icon: type.icon, color: accent)
         }
     }
     private var growthFields: some View {
-        Section("成長數據") {
+        Section {
             HStack { TextField("身高", text: $heightText).keyboardType(.decimalPad); Text("cm").foregroundStyle(.secondary) }
             HStack { TextField("體重", text: $weightText).keyboardType(.decimalPad); Text("kg").foregroundStyle(.secondary) }
+        } header: {
+            childEditorSectionHeader("成長數據", icon: type.icon, color: accent)
         }
     }
     private var medicalFields: some View {
-        Section("就醫資訊") {
+        Section {
             TextField("症狀/診斷", text: $title)
             clinicAutocompleteField(label: "院所（選填）")
+        } header: {
+            childEditorSectionHeader("就醫資訊", icon: type.icon, color: accent)
         }
     }
 
@@ -1622,13 +1699,25 @@ struct ChildRecordEditorSheet: View {
         detailFieldFocused = false
     }
     private var educationFields: some View {
-        Section("教育里程碑") { TextField("事件", text: $title); TextField("學校或單位（選填）", text: $detail) }
+        Section {
+            TextField("事件", text: $title); TextField("學校或單位（選填）", text: $detail)
+        } header: {
+            childEditorSectionHeader("教育里程碑", icon: type.icon, color: accent)
+        }
     }
     private var hobbyFields: some View {
-        Section("興趣才藝") { TextField("項目", text: $title); TextField("描述（選填）", text: $detail, axis: .vertical).lineLimit(1...3) }
+        Section {
+            TextField("項目", text: $title); TextField("描述（選填）", text: $detail, axis: .vertical).lineLimit(1...3)
+        } header: {
+            childEditorSectionHeader("興趣才藝", icon: type.icon, color: accent)
+        }
     }
     private var memorableFields: some View {
-        Section("紀念時刻") { TextField("事件", text: $title); TextField("描述（選填）", text: $detail, axis: .vertical).lineLimit(1...3) }
+        Section {
+            TextField("事件", text: $title); TextField("描述（選填）", text: $detail, axis: .vertical).lineLimit(1...3)
+        } header: {
+            childEditorSectionHeader("紀念時刻", icon: type.icon, color: accent)
+        }
     }
 
     private func loadEditing() {
