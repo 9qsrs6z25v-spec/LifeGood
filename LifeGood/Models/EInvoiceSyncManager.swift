@@ -89,11 +89,20 @@ final class EInvoiceSyncManager: ObservableObject {
 
     // MARK: - 同步入口
 
+    /// 財政部載具查詢平台的發票入帳有已知延遲（部分商家/特店延後批次上傳，常見 1～3 天），
+    /// 若每次都直接從「上次同步當下」當作查詢起點，lastSyncDate 逐次前進，
+    /// 一旦某張發票在它自己的開立日當天查不到、要等 1～3 天後才會出現在平台上，
+    /// 下一次同步的起點早已經過了它的開立日，之後永遠不會再查到那個區間 → 該筆消費永久漏匯入。
+    /// 每次同步固定往回多查 3 天當緩衝；重疊區間已查過的發票靠 alreadyImported（invNum）去重，
+    /// 不會造成重複匯入，只是多打幾天份的查詢。
+    private static let syncLookbackBuffer: TimeInterval = 3 * 86400
+
     /// 手動同步：從上次同步日（或預設 30 天前）到今天
     func syncNow(expenseStore: ExpenseStore) async {
         guard let carrier else { return }
         let end = Date()
-        let start = lastSyncDate ?? Calendar.current.date(byAdding: .day, value: -30, to: end) ?? end
+        let start = lastSyncDate.map { $0.addingTimeInterval(-Self.syncLookbackBuffer) }
+            ?? Calendar.current.date(byAdding: .day, value: -30, to: end) ?? end
         await performSync(carrier: carrier, from: start, to: end, expenseStore: expenseStore)
     }
 

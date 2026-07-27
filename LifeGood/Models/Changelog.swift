@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.93", build: 746, date: "2026/07/27", notes: [
+            "【靜態除錯 v24.93：修復電子發票同步永久漏匯入的邊界問題】EInvoiceSyncManager.syncNow() 過去直接以上次同步當下的 lastSyncDate 作為下一次查詢區間的起點，完全沒有重疊緩衝。財政部電子發票載具查詢平台的資料入帳存在已知延遲（部分特店延後 1～3 天才批次上傳），若某張發票在開立當天查詢不到，等它終於出現在平台上時，下一輪同步的起點早已前進到它的開立日之後，往後任何一次同步都不會再涵蓋那個日期區間，這筆消費會被永久靜默漏匯入、且無任何錯誤提示——與本檔案過去 v24.53／56／64／73 修復過的「孤兒/漏匯入」同一類問題，唯獨同步日期區間本身沒有補上緩衝。修法：新增 3 天回溯緩衝，起點改為 lastSyncDate 往前推 3 天；重疊區間內已匯入過的發票由既有的 alreadyImported（以 invNum 去重）機制擋下，不會造成重複建立支出，僅是每次多查詢幾天份的區間。本輪同時複查 ChildVaccineSchedule／LifeModels（含班表跨日休息扣除、PersonalEvent 重複規則）、UnifiedExport 匯入清理、AIService、SubscriptionManager、BackupManager／FullBackup 串流備份、FinanceModels 複利與交易重算等多個較少被提及的檔案，以及全庫 force-unwrap／as!／try!／Timer／NotificationCenter retain cycle／ForEach 索引範圍，均確認已妥善保護、無新問題。"
+        ]),
         ChangelogEntry(version: "24.92", build: 745, date: "2026/07/26", notes: [
             "【美化】全息大樓視圖（HolographicBuildingView）樓層標籤大字自適應：側邊樓層清單的樓層編號與功能標籤原本沒有 minimumScaleFactor，是本元件目前唯一缺文字自適應防護的地方，使用者輸入較長樓層代號或多個功能標籤以「・」串接、或開啟系統輔助大字體時會被直接裁切成省略號。補上 lineLimit(1) + minimumScaleFactor(0.7)，讓長字串改為自動縮小顯示、不至於小到無法辨識，對齊全 App 文字自適應規格。純視覺層調整，樓層資料、排序與選取邏輯完全未變動。"
         ]),
