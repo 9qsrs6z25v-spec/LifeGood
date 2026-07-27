@@ -81,6 +81,16 @@ import ImageIO
 //      與 mortgageItems／paidItems／variableExpenses／elevatorContent 四處不一致。
 //      改呼叫既有 emptySectionRow(_:)，至此全檔案六處空狀態視覺統一。
 //      純視覺調整，未變動樓層物件或房屋資料集錦的任何既有資料邏輯。
+//
+// [2026-07 v7] ExpensePhotoStackViewer 補齊 v24.91 留下的待辦（與姊妹元件
+//   RenovationStackViewer 對齊規格，詳見 RenovationPhotoEditor.swift）：
+//  22. 空狀態從裸 Text("沒有照片") 升級為 52pt 圓形圖示（photo，白 0.10 底 +
+//      0.18 邊框）+ subheadline 說明文字；圖片載入完成加入
+//      .transition(.opacity) + .animation(.easeOut(duration:0.28), value: img != nil)
+//      淡入；頁碼從純文字改為半透明 Capsule 膠囊徽章；日期加 calendar 圖示前綴；
+//      標題字重 .semibold → .bold 對齊；底部資訊面板加入 infoPanelAppeared 進場動畫
+//      （opacity 0→1 + 上移 20pt，spring 0.55/0.78），onDisappear 歸零避免重播殘留。
+//      純視覺層調整，支出照片讀取、翻頁、刪除等既有商業邏輯完全未變動。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -3194,6 +3204,8 @@ struct ExpensePhotoStackViewer: View {
     let expense: Expense
     @Environment(\.dismiss) private var dismiss
     @State private var currentIndex: Int = 0
+    // [v7] 底部資訊面板進場動畫旗標，對齊 RenovationStackViewer.infoPanelAppeared 規格。
+    @State private var infoPanelAppeared = false
 
     var body: some View {
         NavigationStack {
@@ -3201,7 +3213,22 @@ struct ExpensePhotoStackViewer: View {
                 Color.black.ignoresSafeArea()
 
                 if expense.photoFileNames.isEmpty {
-                    Text("沒有照片").foregroundStyle(.white.opacity(0.7))
+                    VStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.10))
+                                .frame(width: 52, height: 52)
+                            Circle()
+                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                                .frame(width: 52, height: 52)
+                            Image(systemName: "photo")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                        Text("沒有照片")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
                 } else {
                     TabView(selection: $currentIndex) {
                         ForEach(Array(expense.photoFileNames.enumerated()), id: \.offset) { idx, name in
@@ -3210,10 +3237,12 @@ struct ExpensePhotoStackViewer: View {
                                 ZStack {
                                     if let img {
                                         ZoomableImageView(image: img)
+                                            .transition(.opacity)
                                     } else {
                                         ProgressView().tint(.white)
                                     }
                                 }
+                                .animation(.easeOut(duration: 0.28), value: img != nil)
                             }
                             .tag(idx)
                         }
@@ -3250,12 +3279,16 @@ struct ExpensePhotoStackViewer: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(displayTitle)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white)
                 Spacer()
+                // 頁碼升級為半透明 Capsule 膠囊徽章，對齊 RenovationStackViewer 規格。
                 Text("\(currentIndex + 1) / \(expense.photoFileNames.count)")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.90))
+                    .padding(.horizontal, 9).padding(.vertical, 3)
+                    .background(.white.opacity(0.20))
+                    .clipShape(Capsule())
             }
             if !expense.title.isEmpty && !trimmedNote.isEmpty {
                 Text(expense.title)
@@ -3263,14 +3296,29 @@ struct ExpensePhotoStackViewer: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)
             }
-            Text(fmtDate(expense.date))
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.65))
+            // 日期加 calendar 圖示前綴，對齊 RenovationStackViewer 日期 icon+text 語言。
+            HStack(spacing: 4) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 10, weight: .medium))
+                Text(fmtDate(expense.date))
+                    .font(.caption2)
+            }
+            .foregroundStyle(.white.opacity(0.65))
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.ultraThinMaterial)
         .padding(.bottom, 32)
+        // [v7] 底部資訊面板進場動畫：opacity 0→1 + 上移 20pt，spring(0.55/0.78)，
+        // 對齊 RenovationStackViewer 規格，取代原本一開啟就直接定位的生硬手感。
+        .opacity(infoPanelAppeared ? 1 : 0)
+        .offset(y: infoPanelAppeared ? 0 : 20)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                infoPanelAppeared = true
+            }
+        }
+        .onDisappear { infoPanelAppeared = false }
     }
 
     private static let _dateFmt: DateFormatter = {

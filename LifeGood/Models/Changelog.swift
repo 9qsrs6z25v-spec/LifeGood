@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.95", build: 748, date: "2026/07/27", notes: [
+            "【美化】支出照片堆疊瀏覽器（ExpensePhotoStackViewer）補齊姊妹元件待辦：補齊 v24.91 為 RenovationStackViewer（裝潢照片堆疊瀏覽器）完成美化時留下的待辦——ExpensePhotoStackViewer（支出照片堆疊瀏覽器，用於各項支出的收據/照片檢視）規格明顯落後，本次整批補齊。空狀態從裸 Text(\"沒有照片\") 升級為 52pt 圓形圖示（photo，白 0.10 底 + 0.18 邊框）+ subheadline 說明文字；大圖讀取完成加入 opacity 淡入轉場（.transition(.opacity) + .animation(.easeOut(duration:0.28))），取代原本讀圖完成瞬間的生硬硬切；頁碼從純文字改為半透明 Capsule 膠囊徽章；日期加 calendar 圖示前綴；標題字重升級為 .bold；底部資訊面板加入進場動畫（opacity 0→1 + 上移 20pt，spring 0.55/0.78），取代原本一開啟就直接定位、毫無過場的手感，容器 onDisappear 重置旗標避免重複開啟時動畫不重播。至此支出／裝潢兩款照片堆疊瀏覽器視覺規格已完全對齊。純視覺層調整，支出照片讀取、翻頁、刪除等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.94", build: 747, date: "2026/07/27", notes: [
             "【靜態除錯 v24.94：移除 FinanceStore 未使用的 offset 刪除方法，消除潛在 index 越界地雷】deleteInsurance(at:)／deleteStock(at:)／deleteVehicle(at:)／deleteRealEstate(at:) 這組以 IndexSet 直接對 insurances／stocks／vehicles／realEstates 陣列做 remove(atOffsets:) 的方法，全庫已無任何呼叫端（SavingsInsuranceView／StockView／VehicleView／RealEstateView 等清單畫面實際都是用 ID 比對的 deleteX(_:) 版本刪除，並非 List.onDelete）。這組方法本身也不像 ExpenseStore.delete(at:from:) 那樣先把 offsets 限制在來源陣列範圍內、且沒有另外接受「目前畫面顯示用的（已排序/篩選）清單」參數，而上述四個清單畫面全部都是排序過（依現值/市值/日期等）才顯示——若日後有人比照其他清單很自然地幫這四個畫面接上原生 .onDelete 並直接傳入畫面排序後的 offsets，會出現與排序前陣列 index 對不上而刪錯項目、或 offsets 超出陣列範圍直接 crash 的問題，屬於使用者要求複查的「index 越界」同一類風險。因目前確認零呼叫端、非任何現有畫面路徑會觸發，採直接移除（而非幫死代碼補防護），消除地雷本身而不留下引誘日後誤用的 API。純 Models 層變動，未影響任何現有刪除邏輯或使用者可觸發的行為。"
         ]),
