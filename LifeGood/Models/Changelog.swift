@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.99", build: 752, date: "2026/07/27", notes: [
+            "【美化】房地產詳情頁（RealEstateDetailView）金額量級單位一致性：補齊 v24.98 為 StockDetailView 完成美化時留下的待辦。flashCard 估值大字、底部「購入」值原本各自呼叫私有 fmtWan(_:)（僅 %g 除以萬，無條件只顯示「萬」），估值一旦達 1 億以上會顯示成 5～6 位數的鉅額「萬」數字，與同檔案 mortgageItems／paidItems／calcRow 等皆已改用共用 Double.ntdWanString（已支援萬→億自動進位）不一致。新增 splitWan(_:)／splitWanLabel(_:) 從 ntdWanString 拆出「數字／單位」二段供大字沿用既有字級與 contentTransition 動畫設計，移除已無呼叫端的私有 fmtWan 死碼；作法對齊 VehicleDetailView.splitWan 既有規格。至此股票／車輛／房地產三款詳情頁閃卡估值大字量級單位規格已完全收斂一致。純顯示層調整，估值、購入價、增值率等既有試算邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.98", build: 751, date: "2026/07/27", notes: [
             "【美化】股票詳情頁（StockDetailView）金額量級單位一致性：補齊 v24.88 為 VehicleDetailView（車輛詳情頁）完成美化時留下的待辦。flashCard 市值大字原本呼叫私有 fmtWan(_:)（僅 %.1f 除以萬，無條件只顯示「萬」），市值一旦達 1 億以上會顯示成 5～6 位數的鉅額「萬」數字，下方輔助文字也固定寫死「（萬元）」，與同檔案 infoRow 損益／報酬率（皆透過共用 fmt = ntdWanString，已支援萬→億自動進位）不一致。新增 splitWan(_:) 從 ntdWanString 拆出「數字／單位」二段供大字沿用既有字級與 contentTransition 動畫設計，輔助文字改為讀取拆出的單位動態組字（達 1 億以上自動顯示「億元」），移除已無呼叫端的私有 fmtWan 死碼；作法對齊 VehicleDetailView.splitWan 既有規格。純顯示層調整，市值、損益、報酬率等既有試算邏輯完全未變動。"
         ]),

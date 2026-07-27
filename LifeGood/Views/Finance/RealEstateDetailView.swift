@@ -91,6 +91,17 @@ import ImageIO
 //      標題字重 .semibold → .bold 對齊；底部資訊面板加入 infoPanelAppeared 進場動畫
 //      （opacity 0→1 + 上移 20pt，spring 0.55/0.78），onDisappear 歸零避免重播殘留。
 //      純視覺層調整，支出照片讀取、翻頁、刪除等既有商業邏輯完全未變動。
+//
+// [2026-07 v8] 補齊 StockDetailView v4／VehicleDetailView v4 留下的待辦：金額量級單位
+//   （萬／億）一致性：
+//  23. flashCard 估值大字、底部「購入」值原本各自呼叫私有 fmtWan(_:)（僅 `%g` 除以萬，
+//      無條件只顯示「萬」），估值一旦達 1 億以上會顯示成 5～6 位數的鉅額「萬」數字，與
+//      同檔案 mortgageItems／paidItems／calcRow 等皆已改用共用 Double.ntdWanString
+//      不一致。新增 splitWan(_:)／splitWanLabel(_:) 從 ntdWanString 拆出「數字／單位」
+//      二段供大字沿用既有字級與 contentTransition 動畫設計，移除已無呼叫端的私有
+//      fmtWan 死碼；作法對齊 VehicleDetailView.splitWan 既有規格。純顯示層調整，估值、
+//      購入價、增值率等既有試算邏輯完全未變動。
+//      （下次美化本檔案時：可全檔案複查是否還有其他手刻金額格式殘留待統一）
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -365,13 +376,15 @@ struct RealEstateDetailView: View {
             .padding(.horizontal, 24)
 
             VStack(spacing: 4) {
-                Text("\(fmtWan(estate.currentValue))")
+                // v8：改用 splitWan 取代 fmtWan，估值達 1 億以上自動換算為「億元」單位
+                let estimate = splitWan(estate.currentValue)
+                Text(estimate.number)
                     .font(.system(size: 52, weight: .bold, design: .rounded))
                     .foregroundStyle(rarity.textColor)
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
                     .contentTransition(.numericText())
-                Text("萬元")
+                Text("\(estimate.unit)元")
                     .font(.subheadline)
                     .foregroundStyle(rarity == .legendary ? .white.opacity(0.6) : .secondary)
             }
@@ -381,7 +394,7 @@ struct RealEstateDetailView: View {
                 VStack(spacing: 2) {
                     Text("購入")
                         .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text("\(fmtWan(estate.purchasePrice)) 萬")
+                    Text(splitWanLabel(estate.purchasePrice))
                         .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
                 }
                 Spacer()
@@ -2315,8 +2328,20 @@ struct RealEstateDetailView: View {
         v.ntdWanString
     }
 
-    private func fmtWan(_ v: Double) -> String {
-        String(format: "%g", v / 10000)
+    /// v8：從共用 ntdWanString 拆出「數字」與「萬／億」量級單位，供大字估值沿用既有字級／
+    /// 動畫設計；跟進 ntdWanString 既有的萬→億進位邊界，取代僅換算到萬的舊版 fmtWan。
+    private func splitWan(_ v: Double) -> (number: String, unit: String) {
+        var s = v.ntdWanString
+        if s.hasPrefix("NT$") { s.removeFirst(3) }
+        if s.hasSuffix("億") { return (String(s.dropLast()), "億") }
+        if s.hasSuffix("萬") { return (String(s.dropLast()), "萬") }
+        return (s, "")
+    }
+
+    /// v8：「數字 單位」單行組字（無單位時省略空格），供底部資訊列等窄欄位使用。
+    private func splitWanLabel(_ v: Double) -> String {
+        let parts = splitWan(v)
+        return parts.unit.isEmpty ? parts.number : "\(parts.number) \(parts.unit)"
     }
 
     private static let _dateFmt: DateFormatter = {
