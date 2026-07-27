@@ -174,8 +174,8 @@ struct SoldStamp: View {
 //      不一致。新增 splitWan(_:) 從 ntdWanString 拆出「數字／單位」二段供大字沿用既有字級設計，
 //      兩處呼叫點改用 splitWan，並移除已無呼叫端的私有 fmtWan 死碼。純顯示層調整，估值／
 //      購入價等既有試算邏輯完全未變動。
-//      （下次美化本元件時：StockDetailView／RealEstateDetailView 的閃卡估值大字亦各自手刻
-//      同款 fmtWan，可比照本次做法一併統一，是可接續尋找之處）
+//      （StockDetailView 已於 v24.98 比照本次做法補齊；RealEstateDetailView 的閃卡
+//      估值大字仍是同款手刻 fmtWan，可接續尋找之處）
 
 // MARK: - 汽車檢視卡片
 

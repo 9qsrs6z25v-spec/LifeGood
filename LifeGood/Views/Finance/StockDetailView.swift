@@ -47,6 +47,17 @@ import SwiftUI
 //  20. accountSection 圖示圓：38pt → 44pt + Circle().stroke(color.opacity(0.18), 0.75pt)，
 //      對齊 VehicleView v3 / StockView v3 / IncomeView 44pt 圖示圓邊框規格。
 //  21. noteCard Capsule 側條：height 16 → 20，對齊全 App sectionHeader 標準 Capsule 高度規格。
+// [2026-07 v4] 補齊 VehicleDetailView v4 留下的待辦：金額量級單位（萬／億）一致性：
+//  22. flashCard 市值大字原本呼叫私有 fmtWan(_:)（僅 `%.1f` 除以萬，無條件只顯示「萬」），
+//      市值一旦達 1 億以上會顯示成 5～6 位數的「萬」大數字，且下方輔助文字固定寫死
+//      「（萬元）」，未跟進全 App 共用 Double.ntdWanString 既有的萬→億量級進位規則，
+//      與同檔案 infoRow 損益／報酬率（皆透過 fmt = ntdWanString）不一致。
+//      新增 splitWan(_:) 從 ntdWanString 拆出「數字／單位」二段供大字沿用既有字級設計，
+//      輔助文字改為讀 splitWan 的 unit 動態組字，移除已無呼叫端的私有 fmtWan 死碼；
+//      對齊 VehicleDetailView.splitWan 既有做法。純顯示層調整，市值／損益等既有試算
+//      邏輯完全未變動。
+//      （下次美化本檔案時：RealEstateDetailView 的閃卡估值大字仍是同款手刻 fmtWan，
+//      可比照本次做法一併統一，是可接續尋找之處）
 
 struct StockDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -199,13 +210,15 @@ struct StockDetailView: View {
             // 市值（大字）
             VStack(spacing: 4) {
                 // [v3] minimumScaleFactor + contentTransition 防長數字溢出並平滑過渡
-                Text(fmtWan(stock.marketValue))
+                // [v4] 改用 splitWan 取代 fmtWan，市值達 1 億以上自動換算為「億元」單位
+                let market = splitWan(stock.marketValue)
+                Text(market.number)
                     .font(.system(size: 52, weight: .bold, design: .rounded))
                     .foregroundStyle(rarity.textColor)
                     .minimumScaleFactor(0.55)
                     .lineLimit(1)
                     .contentTransition(.numericText())
-                Text(stock.isSold ? "賣出市值（萬元）" : "目前市值（萬元）")
+                Text(stock.isSold ? "賣出市值（\(market.unit)元）" : "目前市值（\(market.unit)元）")
                     .font(.subheadline)
                     .foregroundStyle(rarity == .legendary ? .white.opacity(0.6) : .secondary)
             }
@@ -967,9 +980,14 @@ struct StockDetailView: View {
         v.ntdWanString
     }
 
-    private func fmtWan(_ v: Double) -> String {
-        let wan = v / 10000
-        return String(format: "%.1f", wan)
+    /// [v4] 從共用 ntdWanString 拆出「數字」與「萬／億」量級單位，供大字市值沿用既有字級／
+    /// 動畫設計；跟進 ntdWanString 既有的萬→億進位邊界，取代僅換算到萬的舊版 fmtWan。
+    private func splitWan(_ v: Double) -> (number: String, unit: String) {
+        var s = v.ntdWanString
+        if s.hasPrefix("NT$") { s.removeFirst(3) }
+        if s.hasSuffix("億") { return (String(s.dropLast()), "億") }
+        if s.hasSuffix("萬") { return (String(s.dropLast()), "萬") }
+        return (s, "")
     }
 
     private static let _dateFmt: DateFormatter = {

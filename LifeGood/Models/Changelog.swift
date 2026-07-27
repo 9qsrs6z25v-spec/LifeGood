@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.98", build: 751, date: "2026/07/27", notes: [
+            "【美化】股票詳情頁（StockDetailView）金額量級單位一致性：補齊 v24.88 為 VehicleDetailView（車輛詳情頁）完成美化時留下的待辦。flashCard 市值大字原本呼叫私有 fmtWan(_:)（僅 %.1f 除以萬，無條件只顯示「萬」），市值一旦達 1 億以上會顯示成 5～6 位數的鉅額「萬」數字，下方輔助文字也固定寫死「（萬元）」，與同檔案 infoRow 損益／報酬率（皆透過共用 fmt = ntdWanString，已支援萬→億自動進位）不一致。新增 splitWan(_:) 從 ntdWanString 拆出「數字／單位」二段供大字沿用既有字級與 contentTransition 動畫設計，輔助文字改為讀取拆出的單位動態組字（達 1 億以上自動顯示「億元」），移除已無呼叫端的私有 fmtWan 死碼；作法對齊 VehicleDetailView.splitWan 既有規格。純顯示層調整，市值、損益、報酬率等既有試算邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.97", build: 750, date: "2026/07/27", notes: [
             "【美化】共用馬卡龍日期選擇器（MacaronDatePicker）進場動畫一致性：本元件在兩個呼叫端（我的行事曆 MyCalendarView／部屬總覽 SubordinateOverviewView）都夾在「已有進場動畫的英雄卡」與「已有錯落進場動畫的清單 section」中間，是唯一一個一開啟畫面就直接定位、沒有進場過場的區塊，讓整條卷軸的進場節奏中間斷了一拍。改為元件自帶進場旗標（opacity 0→1 + 上移 14pt，spring 0.52/0.80，delay 0.06s 銜接在英雄卡之後），畫面消失時歸零避免分頁切換或重新開啟時動畫不重播；採自包含寫法，不需呼叫端額外傳入狀態，兩處呼叫端自動獲得一致效果。純視覺層調整，日期選取、快捷鍵、allowFuture 未來日期過濾等既有商業邏輯完全未變動。"
         ]),
