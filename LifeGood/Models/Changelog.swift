@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.02", build: 755, date: "2026/07/27", notes: [
+            "【美化】旅遊地圖地點清單 sheet 空狀態補齊（TravelMapView）：listSheet 內 spots 為空時（多為 photoOnly「有照片」篩選到 0 筆，但下層「地點清單」按鈕不受此篩選影響、仍可點開），原本 sortPicker 下方是一片空白、沒有任何提示，與已有空狀態提示的姊妹頁 FoodMapView.restaurantListEmptyState 不一致。新增 spotsListEmptyState：對齊 FoodMapView 圓角卡（systemBackground＋16pt 圓角＋細邊框）規格，文案沿用本檔案 emptyOverlay isPhotoFilter 分支既有用語，讓地圖層／清單 sheet 層兩處空狀態說法一致。另確認 listSheet／citySection 圓角卡規格已於 FoodMapView v7 追上、兩姊妹頁視覺已對齊，不再需要調整。純視覺與空狀態文案調整，spotsByCity 分組、排序等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.01", build: 754, date: "2026/07/27", notes: [
             "【美化】兒女詳情頁編輯表單 Section 標頭一致性（ChildDetailView）：DailyRecordEditorSheet（喝奶/食物/睡眠記錄）與 ChildRecordEditorSheet（疫苗/過敏/成長/就醫/教育/興趣/紀念、日期／備註／插入圖片）共 13 處 Section，原本全是系統預設純文字標題，是 ChildDetailView.swift 內唯一還沒套用「4pt 漸層 Capsule 色條 + 圖示 + 粗體標題」規格的區塊，與 HealthProfileEditView.healthEditorSectionHeader／MyCalendarView.editorSectionHeader／ResumeView.profileEditorSectionHeader 等全 App 編輯表單慣例落差明顯。新增檔案層級共用 childEditorSectionHeader(_:icon:color:)，圖示沿用既有 DailyRecordType/ChildRecordType.icon，色彩新增 accent 計算屬性對齊 ChildDetailView.dailyColor／colorFor 同型別同色彩規格（備註類 Section 統一用中性 .secondary，對齊全 App慣例）。純視覺層調整，Section 內欄位、canSave／save()／delete() 等既有商業邏輯完全未變動。"
         ]),

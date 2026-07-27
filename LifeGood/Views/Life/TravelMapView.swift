@@ -51,8 +51,15 @@ import UIKit
 //       時重疊多個計時任務）。純視覺調整，相簿照片彙整（entries／photoNames 展開）
 //       邏輯完全未變動。
 //   純視覺與空狀態文案調整，地圖標註、資料聚合、篩選或排序等既有商業邏輯完全未變動。
-//   （下次美化本檔案時，可從 listSheet／citySection 卡片（清單 sheet 內的縣市分組卡片
-//   目前僅套用系統 List 樣式，未比對是否需要圓角卡片化）繼續找可統一之處）
+// [2026-07 v4] 補上 v3 留下的待辦：listSheet／citySection 已於 FoodMapView v7 追上同款
+//   圓角卡＋分隔線規格（兩姊妹頁已對齊，不再需要調整）；改為補齊真正剩下的空狀態缺口——
+//   listSheet 內 spots 為空（多為 photoOnly「有照片」篩選到 0 筆，但 bottomOverlay「地點
+//   清單」按鈕不受此篩選影響、仍可點開）時，原本 sortPicker 下方是一片空白，未提示原因。
+//   新增 spotsListEmptyState：對齊 FoodMapView.restaurantListEmptyState 圓角卡規格，文案
+//   沿用 emptyOverlay isPhotoFilter 分支用語，讓地圖層／清單 sheet 層兩處空狀態說法一致。
+//   純視覺與空狀態文案調整，spotsByCity／排序等既有商業邏輯完全未變動。
+//   （下次美化本檔案時，可留意 sortPicker 目前用系統 segmented Picker，與 FoodMapView 同
+//   排序功能改用的水平捲動 chip 樣式不同，可評估是否需要統一為同款互動元件）
 
 // MARK: - 台灣縣市解析（自地址字串推斷縣市）
 
@@ -364,8 +371,12 @@ struct TravelMapView: View {
                 VStack(spacing: 14) {
                     statsCard(spots)
                     sortPicker
-                    ForEach(spotsByCity(spots), id: \.city) { group in
-                        citySection(group.city, items: group.items)
+                    if spots.isEmpty {
+                        spotsListEmptyState
+                    } else {
+                        ForEach(spotsByCity(spots), id: \.city) { group in
+                            citySection(group.city, items: group.items)
+                        }
                     }
                 }
                 .padding(.vertical, 16)
@@ -386,6 +397,31 @@ struct TravelMapView: View {
             ForEach(FoodMapSort.allCases) { s in Text(s.rawValue).tag(s) }
         }
         .pickerStyle(.segmented)
+        .padding(.horizontal)
+    }
+
+    /// listSheet 篩選後（多為 photoOnly「有照片」開關）0 筆時的卡片式提示，
+    /// 對齊 FoodMapView.restaurantListEmptyState 圓角卡規格；文案沿用 emptyOverlay
+    /// isPhotoFilter 分支用語，讓兩個空狀態（地圖層／清單 sheet 層）說法一致。
+    private var spotsListEmptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: photoOnly ? "photo" : "figure.walk.circle")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.tertiary)
+            Text(photoOnly ? "目前沒有附照片的地點" : "還沒有旅遊足跡")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            if photoOnly {
+                Text("關閉右上角「有照片」開關可查看全部地點")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
         .padding(.horizontal)
     }
 
