@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "24.97", build: 750, date: "2026/07/27", notes: [
+            "【美化】共用馬卡龍日期選擇器（MacaronDatePicker）進場動畫一致性：本元件在兩個呼叫端（我的行事曆 MyCalendarView／部屬總覽 SubordinateOverviewView）都夾在「已有進場動畫的英雄卡」與「已有錯落進場動畫的清單 section」中間，是唯一一個一開啟畫面就直接定位、沒有進場過場的區塊，讓整條卷軸的進場節奏中間斷了一拍。改為元件自帶進場旗標（opacity 0→1 + 上移 14pt，spring 0.52/0.80，delay 0.06s 銜接在英雄卡之後），畫面消失時歸零避免分頁切換或重新開啟時動畫不重播；採自包含寫法，不需呼叫端額外傳入狀態，兩處呼叫端自動獲得一致效果。純視覺層調整，日期選取、快捷鍵、allowFuture 未來日期過濾等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "24.96", build: 749, date: "2026/07/27", notes: [
             "【美化】設定頁（SettingsView）AI 供應商說明字級一致性修復：「使用中的 AI 服務」下方各供應商（Claude／OpenAI／Gemini）Section 的申請 Key 教學與扣款金額提醒文字，先前額外覆寫 .font(.caption2)，是全檔案 10 處 Section footer 說明文字中唯一縮小字級的一處，比其餘資料統計、iCloud 同步、匯率設定等說明性 footer 使用的系統預設字級更小——內容又包含每次解析約需扣款多少金額的重要資訊，字級反而是全頁最小，容易被忽略或難以閱讀。移除該覆寫，改回與其餘 9 處說明性 footer 一致的預設字級；「關於」區版權宣告維持原本置中小字的版權印刷慣例，屬不同類別不受影響。純文字字級調整，供應商 Key 讀寫、選用中服務判斷等既有商業邏輯完全未變動。"
         ]),

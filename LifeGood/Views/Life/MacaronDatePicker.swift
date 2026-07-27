@@ -21,6 +21,16 @@ import SwiftUI
 //   8. pillButton 標籤／日期文字補 lineLimit(1) + minimumScaleFactor(0.8)：
 //      5 顆膠囊在小螢幕（SE）+ 大字體輔助設定下容易被壓縮換行變形，
 //      加上後可自動縮小但不低於可辨識下限，對齊全 App 文字自適應規格。
+// [2026-07 v3] 進場動畫一致性：本元件在兩個呼叫端（MyCalendarView／SubordinateOverviewView）
+//   都夾在「已有 opacity+offset 進場動畫的英雄卡」與「已有錯落進場動畫的清單 section」中間，
+//   是唯一一個一開啟畫面就直接定位、沒有進場過場的區塊，讓整條卷軸的進場節奏中間斷了一拍。
+//   改為元件自帶 appeared 旗標（opacity 0→1 + 上移 14pt，spring 0.52/0.80，delay 0.06s 銜接在
+//   兩處呼叫端英雄卡之後），onDisappear 歸零避免分頁切換/重新開啟時動畫不重播；採自包含寫法
+//   （不需呼叫端額外傳入狀態），對齊 ExpensePhotoStackViewer／RenovationStackViewer 等共用元件
+//   自行管理進場動畫的既有慣例，兩個呼叫端都自動獲得一致效果。純視覺調整，日期選取、
+//   allowFuture 過濾等既有商業邏輯完全未變動。
+//   （下次美化本元件時，可留意 DatePicker(.compact) 系統元件在深色模式下的原生外觀是否
+//   仍與卡片其餘手刻元素有落差，或轉往其他仍留有待辦的畫面）
 
 /// 馬卡龍色調的精簡日期選擇器：第一行 5 顆相對日期按鈕，第二行 compact DatePicker。
 struct MacaronDatePicker: View {
@@ -29,6 +39,7 @@ struct MacaronDatePicker: View {
     var allowFuture: Bool = true
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var appeared = false
     private let calendar = Calendar.current
     private static let mdFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "M/d"; return f
@@ -99,6 +110,14 @@ struct MacaronDatePicker: View {
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
         .padding(.horizontal)
+        .opacity(appeared ? 1 : 0)
+        .offset(y: appeared ? 0 : 14)
+        .onAppear {
+            withAnimation(.spring(response: 0.52, dampingFraction: 0.80).delay(0.06)) {
+                appeared = true
+            }
+        }
+        .onDisappear { appeared = false }
     }
 
     private func pillButton(label: String, offset: Int, color: Color) -> some View {
