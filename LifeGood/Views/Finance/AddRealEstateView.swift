@@ -1501,7 +1501,7 @@ struct AddRealEstateView: View {
             for asset in re.propertyAssets { if let id = asset.linkedExpenseId { expenseIds.insert(id) } }
             for up in re.utilityPayments {
                 if let id = up.linkedExpenseId { expenseIds.insert(id) }
-                if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+                for name in up.photoFileNames { UtilityPayment.deletePhoto(name) }
             }
             for rp in re.renovationPhotos {
                 for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }

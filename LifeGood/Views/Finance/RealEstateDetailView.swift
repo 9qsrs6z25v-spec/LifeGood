@@ -1629,16 +1629,16 @@ struct RealEstateDetailView: View {
         case .document(let d):
             previewingDocumentURL = IdentifiableURL(url: d.fileURL)
         case .utility(let u):
-            guard let name = u.photoFileName else {
+            guard !u.photoFileNames.isEmpty else {
                 editingUtilityPayment = u
                 return
             }
-            let url = UtilityPayment.photosDirectory.appendingPathComponent(name)
+            let urls = u.photoFileNames.map { UtilityPayment.photosDirectory.appendingPathComponent($0) }
             let amountText: String = u.amount > 0 ? fmt(u.amount) : ""
             let noteParts = [amountText, u.note.trimmingCharacters(in: .whitespaces)]
                 .filter { !$0.isEmpty }
             cutePhotoDraft = CutePhotoDraft(
-                urls: [url],
+                urls: urls,
                 title: "\(u.type.rawValue) 繳費",
                 note: noteParts.joined(separator: "・"),
                 date: u.date,
