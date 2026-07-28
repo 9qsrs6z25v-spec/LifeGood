@@ -56,6 +56,20 @@ import Charts
 //      （下次美化本檔案時：可留意 trendChart／variablePieChart／fixedPieChart 三個
 //      分頁的空狀態圖示圓與骨架載入動畫規格是否有可再收斂之處，或轉往其他仍留有
 //      待辦的畫面）
+// [2026-07 v6] 承接上方待辦，本次美化「載入圖表資料…」載入狀態：
+//  18. 主體 isLoading 卡片：原本是裸 ProgressView + 純文字，是全 App 載入態中
+//      唯一還在用系統原生 spinner、且與空狀態雙層脈衝光環／漸層圖示圓設計語言
+//      脫節的地方。改為對齊 trendChart／variablePieChart／fixedPieChart 空狀態的
+//      雙層脈衝光環 + 漸層圖示圓（chart.bar.fill 圖示以線性旋轉取代圈圈 spinner），
+//      並補上 7 條長條圖骨架佔位條（隨脈衝呼吸淡入淡出），讓「即將出現長條圖」的
+//      預期更明確；卡片補上 Color.green.opacity(0.10) 細邊框，對齊全 App 卡片統一
+//      規格。新增 chartLoadingPulse／chartLoadingSpin 旗標與可取消
+//      chartLoadingPulseTask（寫法比照既有四個 EmptyPulse 旗標：loadChartData()
+//      重載時歸零＋onDisappear 取消，避免快速切換週期時動畫從中途開始）。
+//      純視覺層調整，資料載入流程、期間切換、拖曳選點等既有邏輯完全未變動。
+//      （下次美化本檔案時：可留意 chartHeroCard 頂部行內小 ProgressView（isLoading
+//      時的 0.65 倍縮小 spinner）是否也可比照本次改為與大卡一致的迷你脈衝圖示，
+//      或轉往其他仍留有待辦的畫面）
 
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
@@ -116,6 +130,13 @@ struct ChartView: View {
     // 圓餅圖例行交錯進場動畫旗標（v3 美化，各圓餅頁各用一個旗標避免頁面切換時互相重置）
     @State private var variablePieRowsAppeared = false
     @State private var fixedPieRowsAppeared = false
+    // [v6 美化] 圖表載入卡雙層脈衝光環／圖示旋轉／骨架長條旗標，寫法與上面四個
+    // EmptyPulse 旗標同源（可取消 Task 延遲觸發，避免快速連續切換週期時動畫從中途開始）
+    @State private var chartLoadingPulse = false
+    @State private var chartLoadingSpin = false
+    @State private var chartLoadingPulseTask: Task<Void, Never>?
+    /// 載入骨架長條高度，暗示即將出現的長條圖形狀
+    private static let chartSkeletonHeights: [CGFloat] = [22, 38, 30, 46, 34, 26, 40]
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -154,18 +175,68 @@ struct ChartView: View {
                         }
 
                     if isLoading {
-                        VStack(spacing: 14) {
-                            ProgressView()
-                                .tint(.green)
-                                .scaleEffect(1.3)
+                        // [v6 美化] 原本是裸 ProgressView + 純文字，與全 App 其餘空狀態
+                        // （雙層脈衝光環 + 漸層圖示圓）視覺語言脫節，是本檔案唯一還在用
+                        // 系統原生 spinner 的地方。改為對齊 trendChart 等空狀態的雙層脈衝
+                        // 光環 + 漸層圖示圓（旋轉的長條圖示取代圈圈 spinner），下方補上
+                        // 長條圖骨架佔位條，讓「即將出現長條圖」的預期更明確。
+                        VStack(spacing: 16) {
+                            ZStack {
+                                Circle()
+                                    .stroke(Color.green.opacity(chartLoadingPulse ? 0 : 0.24), lineWidth: 1.5)
+                                    .frame(width: 78, height: 78)
+                                    .scaleEffect(chartLoadingPulse ? 1.42 : 1.0)
+                                    .animation(.easeOut(duration: 1.3).repeatForever(autoreverses: false), value: chartLoadingPulse)
+                                Circle()
+                                    .stroke(Color.green.opacity(chartLoadingPulse ? 0 : 0.12), lineWidth: 1)
+                                    .frame(width: 78, height: 78)
+                                    .scaleEffect(chartLoadingPulse ? 1.65 : 1.0)
+                                    .animation(.easeOut(duration: 1.3).delay(0.25).repeatForever(autoreverses: false), value: chartLoadingPulse)
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.green.opacity(0.22), Color.green.opacity(0.09)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 60, height: 60)
+                                    .overlay(Circle().stroke(Color.green.opacity(0.20), lineWidth: 1))
+                                Image(systemName: "chart.bar.fill")
+                                    .font(.system(size: 22, weight: .medium))
+                                    .foregroundStyle(Color.green)
+                                    .rotationEffect(.degrees(chartLoadingSpin ? 360 : 0))
+                                    .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: chartLoadingSpin)
+                            }
+                            .onAppear {
+                                guard !chartLoadingPulse else { return }
+                                chartLoadingPulseTask?.cancel()
+                                chartLoadingPulseTask = Task { @MainActor in
+                                    try? await Task.sleep(nanoseconds: 200_000_000)
+                                    guard !Task.isCancelled else { return }
+                                    chartLoadingPulse = true
+                                    chartLoadingSpin = true
+                                }
+                            }
+
+                            HStack(alignment: .bottom, spacing: 7) {
+                                ForEach(Array(Self.chartSkeletonHeights.enumerated()), id: \.offset) { _, height in
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color.green.opacity(chartLoadingPulse ? 0.20 : 0.09))
+                                        .frame(width: 14, height: height)
+                                }
+                            }
+                            .frame(height: 46, alignment: .bottom)
+                            .animation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true), value: chartLoadingPulse)
+
                             Text("載入圖表資料…")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 48)
+                        .padding(.vertical, 36)
                         .background(Color(.systemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.green.opacity(0.10), lineWidth: 0.75))
                         .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
                         .padding(.horizontal)
                     } else {
@@ -194,6 +265,7 @@ struct ChartView: View {
                 variablePiePulseTask?.cancel()
                 fixedPiePulseTask?.cancel()
                 typeBreakdownPulseTask?.cancel()
+                chartLoadingPulseTask?.cancel()
                 // 重置英雄卡進場旗標：切到其他子功能再切回 Chart 分頁時能重新播放進場動畫
                 // （其餘圖表旗標已在 loadChartData() 內因資料重載而歸零，僅此旗標未被涵蓋）
                 heroCardAppeared = false
@@ -214,10 +286,13 @@ struct ChartView: View {
         variablePiePulseTask?.cancel()
         fixedPiePulseTask?.cancel()
         typeBreakdownPulseTask?.cancel()
+        chartLoadingPulseTask?.cancel()
         trendEmptyPulse = false
         variablePieEmptyPulse = false
         fixedPieEmptyPulse = false
         typeBreakdownEmptyPulse = false
+        chartLoadingPulse = false
+        chartLoadingSpin = false
         // 重置圓餅圖例行與類型比例的進場動畫旗標：與 empty pulse 旗標相同，
         // isLoading=true 會移除這些 view，若旗標卡在 true，
         // 重載後 onAppear 不再觸發 state 變化，進場動畫不會重播。
