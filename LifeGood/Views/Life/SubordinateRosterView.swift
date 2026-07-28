@@ -35,6 +35,15 @@ import SwiftUI
 //     timeRow       — 假日列標題以紅色呈現，與 dayHeader 週末紅字視覺一致；
 //     shiftIcon()   — 班別圖示對照函式（nightShift: moon.fill / eveningShift: moon.stars /
 //                     holidayDuty: sun.max.fill / dayDuty: sun.min.fill）。
+// v4 美化方向（RosterCellDetailSheet.dateSection 標頭一致性）：
+//   dateSection 原本是本 sheet 唯一還在用系統預設 Text("操作日期") 純文字標頭的 Section，
+//   同一個 sheet 內 shiftSection／summarySection／actionSection 三個 Section 早在 v2
+//   就已改用 sectionHeader(_:icon:color:) 輔助（Capsule 漸層色條 + 圖示 + 粗體標題），
+//   引入輔助函式當下漏改了最上面的日期 Section，是本 sheet 唯一的落差。改為呼叫
+//   sectionHeader("操作日期", icon: "calendar", color: .blue)，藍色呼應同 Section 內
+//   左右翻頁 chevron 按鈕既有的 .blue 著色。純視覺層調整，dayOffset 切換、日期綁定、
+//   下方班別設定套用邏輯完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 // MARK: - 班別時間設定（可自訂，存於本機 UserDefaults）
 
@@ -861,7 +870,7 @@ private struct RosterCellDetailSheet: View {
                 .buttonStyle(.plain)
             }
         } header: {
-            Text("操作日期")
+            sectionHeader("操作日期", icon: "calendar", color: .blue)
         } footer: {
             Text("這裡可微調或直接選日期，下方的班別設定都會套用到這一天。")
         }

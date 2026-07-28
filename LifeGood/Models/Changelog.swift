@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.14", build: 767, date: "2026/07/28", notes: [
+            "【美化】部屬排班詳情 Sheet「操作日期」標頭一致性（SubordinateRosterView.RosterCellDetailSheet）：dateSection 原本是本 sheet 唯一還在用系統預設 Text(\"操作日期\") 純文字標頭的 Section，同一個 sheet 內 shiftSection／summarySection／actionSection 三個 Section 早在 v2 就已改用共用 sectionHeader(_:icon:color:) 輔助（Capsule 漸層色條 + 圖示 + 粗體標題），引入輔助函式當下漏改了最上面的日期 Section，是本 sheet 唯一的落差。改為呼叫 sectionHeader(\"操作日期\", icon: \"calendar\", color: .blue)，藍色呼應同 Section 內左右翻頁 chevron 按鈕既有的 .blue 著色。純視覺層調整，dayOffset 切換、日期綁定、下方班別設定套用等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.13", build: 766, date: "2026/07/28", notes: [
             "【美化】兒童疫苗接種時程「施打編輯」Sheet（ChildVaccineScheduleView.VaccineDoseEditorSheet）：該 sheet 先前是裸 Form + 系統預設 Label 標頭（灰階圖示、無色條），是本檔案唯一沒對齊「4pt 漸層 Capsule 色條 + 主題色圖示」標頭規格的地方（外層清單標頭、HealthProfileEditView 四個子編輯 sheet 皆已是此規格）。新增同款式 vaccineEditorSectionHeader(_:icon:color:)，三個 Section 一律改用：疫苗資訊／施打狀態沿用外層藍色主題，備註採全 App 慣例的 secondary 色。另補上 Toggle「已完成施打」.tint(accent)（避免系統預設綠色與本頁藍色主題衝突）與疫苗名稱／劑次文字 lineLimit(2) + minimumScaleFactor(0.85)（避免長名稱在大字級輔助模式下裁切）。純視覺層調整，接種狀態判斷、日期推算、草稿寫回與存檔邏輯完全未變動。"
         ]),
