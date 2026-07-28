@@ -242,6 +242,7 @@ struct FamilyAlbumPhoto: Identifiable, Codable, Equatable {
     }
 
     static func savePhoto(_ data: Data, id: UUID) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         guard (try? data.write(to: url)) != nil else { return nil }
@@ -371,6 +372,7 @@ struct ChildRecord: Identifiable, Codable {
     }
 
     static func savePhoto(_ data: Data, id: UUID) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString).jpg"
         guard (try? data.write(to: photosDirectory.appendingPathComponent(name))) != nil else { return nil }
         PhotoCloudSync.upload(directory: "ChildRecordPhotos", fileName: name)
@@ -378,6 +380,7 @@ struct ChildRecord: Identifiable, Codable {
     }
 
     static func saveSketch(_ data: Data, id: UUID) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString)_sketch.jpg"
         guard (try? data.write(to: photosDirectory.appendingPathComponent(name))) != nil else { return nil }
         PhotoCloudSync.upload(directory: "ChildRecordPhotos", fileName: name)
@@ -1525,6 +1528,7 @@ struct BusinessCard: Identifiable, Codable {
     }
 
     static func savePhoto(_ data: Data, id: UUID) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         guard (try? data.write(to: url)) != nil else { return nil }
@@ -1717,6 +1721,7 @@ struct OrgPerson: Identifiable, Codable {
     }
 
     static func savePhoto(_ data: Data, id: UUID) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         guard (try? data.write(to: url)) != nil else { return nil }

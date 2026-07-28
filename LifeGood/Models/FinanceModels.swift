@@ -749,6 +749,7 @@ struct ElevatorMaintenance: Identifiable, Codable {
     }
 
     static func savePhoto(_ data: Data, id: UUID) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         guard (try? data.write(to: url)) != nil else { return nil }
@@ -813,6 +814,7 @@ struct UtilityPayment: Identifiable, Codable {
     }
 
     static func savePhoto(_ data: Data, id: UUID) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         guard (try? data.write(to: url)) != nil else { return nil }
@@ -977,6 +979,7 @@ struct RenovationPhoto: Identifiable, Codable {
     }
 
     static func savePhoto(_ data: Data, id: UUID = UUID()) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(id.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         guard (try? data.write(to: url)) != nil else { return nil }

@@ -485,6 +485,7 @@ extension Expense {
 
     /// 將 jpeg 資料寫入並回傳檔名（同時推送 CloudKit）；寫入失敗回傳 nil，避免呼叫端存進一筆指向不存在檔案的紀錄
     static func savePhoto(_ data: Data, expenseId: UUID, photoId: UUID = UUID()) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
         let name = "\(expenseId.uuidString)_\(photoId.uuidString).jpg"
         let url = photosDirectory.appendingPathComponent(name)
         guard (try? data.write(to: url)) != nil else { return nil }

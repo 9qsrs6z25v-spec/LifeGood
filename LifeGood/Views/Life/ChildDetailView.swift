@@ -1453,7 +1453,8 @@ struct ChildRecordEditorSheet: View {
                         ChildRecord.applySketchEffect(origImage)
                     }.value
                     if let sketched, let sketchData = sketched.jpegData(compressionQuality: 0.85) {
-                        try? sketchData.write(to: sketchPath)
+                        // 唯一繞過 ChildRecord.saveSketch 的直接寫檔路徑，補上同一套存檔壓縮
+                        try? ImageCompressor.compressForStorage(sketchData).write(to: sketchPath)
                         PhotoCloudSync.upload(directory: "ChildRecordPhotos", fileName: sketchName)
                     }
                     // 運算期間使用者可能已把 Toggle 切回原圖：不檢查會讓這裡把已經正確顯示的

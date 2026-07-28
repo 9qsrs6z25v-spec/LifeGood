@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.03", build: 756, date: "2026/07/28", notes: [
+            "【功能】照片存檔統一壓縮（1080P 長邊 + JPEG 80%）：使用者反映照片檔案太大導致匯出備份檔過大。新增 ImageCompressor.compressForStorage(_:)（CloudKitManager.swift，與 PhotoCloudSync 同檔）：存檔前解碼影像 → 長邊超過 1920px（1080P 規格）就等比例縮小 → JPEG 80% 重新編碼；無法解碼（非影像資料）或壓縮結果反而更大（來源已是小圖/高壓縮檔）時維持原資料不動，確保永不變差。套用於全部 10 個照片寫檔路徑：記帳收據（Expense.savePhoto）、兒女記錄照片與素描（ChildRecord.savePhoto/saveSketch，含 ChildDetailView.regeneratePreview 唯一繞過 saveSketch 的直接寫檔路徑）、家庭相簿（FamilyAlbumPhoto）、名片頭像（BusinessCard）、組織人員（OrgPerson）、電梯保養（ElevatorMaintenance）、水電繳費（UtilityPayment）、裝修照片（RenovationPhoto）。效果：本機儲存占用、iCloud 照片上傳量、完整備份/匯出檔案大小全面下降（現代手機原圖動輒 3–8MB，壓縮後多在數百 KB）；既有已存的大圖不受影響（僅新存檔生效）。分享用途的高解析輸出（人才矩陣/部屬卡片匯出 JPG 0.95）刻意不壓縮，維持分享畫質。"
+        ]),
         ChangelogEntry(version: "25.02", build: 755, date: "2026/07/27", notes: [
             "【美化】旅遊地圖地點清單 sheet 空狀態補齊（TravelMapView）：listSheet 內 spots 為空時（多為 photoOnly「有照片」篩選到 0 筆，但下層「地點清單」按鈕不受此篩選影響、仍可點開），原本 sortPicker 下方是一片空白、沒有任何提示，與已有空狀態提示的姊妹頁 FoodMapView.restaurantListEmptyState 不一致。新增 spotsListEmptyState：對齊 FoodMapView 圓角卡（systemBackground＋16pt 圓角＋細邊框）規格，文案沿用本檔案 emptyOverlay isPhotoFilter 分支既有用語，讓地圖層／清單 sheet 層兩處空狀態說法一致。另確認 listSheet／citySection 圓角卡規格已於 FoodMapView v7 追上、兩姊妹頁視覺已對齊，不再需要調整。純視覺與空狀態文案調整，spotsByCity 分組、排序等既有商業邏輯完全未變動。"
         ]),

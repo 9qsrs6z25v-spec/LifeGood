@@ -665,6 +665,45 @@ final class CloudKitManager {
 
 /// 由 LifeModels / FinanceModels 中各 `savePhoto` / `deletePhoto` 呼叫。
 /// 本身 thread-safe，未開啟 iCloud 同步時為 no-op。
+// MARK: - 照片儲存壓縮
+
+/// 照片存檔前的統一壓縮：長邊縮到 1920pt 內（1080P）+ JPEG 80%。
+/// 各模型的 savePhoto/saveSketch 寫檔前呼叫，縮小本機占用、iCloud 上傳量與匯出備份檔大小。
+enum ImageCompressor {
+    /// 長邊上限（1080P 規格的長邊 1920）。
+    static let maxDimension: CGFloat = 1920
+    /// JPEG 壓縮品質。
+    static let jpegQuality: CGFloat = 0.8
+
+    /// 壓縮影像資料：解碼 → 長邊超過 1920pt 就等比例縮小 → JPEG 80% 重新編碼。
+    /// 無法解碼（非影像資料）時原樣返回；壓縮結果反而更大（來源已是小圖/高壓縮檔）時也原樣返回。
+    static func compressForStorage(_ data: Data) -> Data {
+        guard let image = UIImage(data: data) else { return data }
+        let pixelW = image.size.width * image.scale
+        let pixelH = image.size.height * image.scale
+        let longest = max(pixelW, pixelH)
+
+        let output: UIImage
+        if longest > maxDimension {
+            let ratio = maxDimension / longest
+            let newSize = CGSize(width: (pixelW * ratio).rounded(.down),
+                                 height: (pixelH * ratio).rounded(.down))
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1   // newSize 已是像素尺寸，避免再乘裝置 scale
+            output = UIGraphicsImageRenderer(size: newSize, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: newSize))
+            }
+        } else {
+            output = image
+        }
+
+        guard let jpeg = output.jpegData(compressionQuality: jpegQuality), jpeg.count < data.count else {
+            return data
+        }
+        return jpeg
+    }
+}
+
 enum PhotoCloudSync {
     static func upload(directory: String, fileName: String) {
         guard CloudSyncManager.shared.isEnabled else { return }
