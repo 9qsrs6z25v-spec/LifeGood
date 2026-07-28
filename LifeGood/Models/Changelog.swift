@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.08", build: 761, date: "2026/07/28", notes: [
+            "【美化】部門職等頁空狀態補齊脈衝動畫（GradeTitleView）：deptEmptyState／gradeTitleEmptyState 兩處空狀態，檔案自身 [2026-06] 美化紀錄雖曾宣稱已是「double-pulse ring」，實際上只有靜態同心圓描邊、沒有任何動畫，與全 App 其餘空狀態（OrganizationView.emptyState／IncomeView.emptyState 等）共用的雙層脈衝呼吸環規格不一致。改為外層/內層 Circle().stroke + scaleEffect + repeatForever 動畫，各自搭配獨立的 deptEmptyPulse／gradeEmptyPulse 旗標與可取消 Task（onAppear 延遲 0.3s 觸發、onDisappear 取消歸零），數值與寫法逐一比照 OrganizationView.emptyState 既有規格複製，部門／職等兩個空狀態互不干擾、可同時顯示。純視覺層調整，部門與職等資料模型、儲存、雙向同步等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.07", build: 760, date: "2026/07/28", notes: [
             "【美化】旅遊地圖清單排序控制項互動元件統一（TravelMapView）：listSheet 排序控制項（造訪次數／總花費／最近造訪）原本是系統 .segmented Picker，是全 App 排序功能中，唯一還在用系統元件的一處——同型姊妹頁 FoodMapView.listSheet 排序功能早已改用水平捲動 chip 列（帶選中彈簧動畫），兩姊妹頁清單 sheet 上半部視覺語言因此不一致。改為 ScrollView(.horizontal) + 本檔案既有 chip() 助手（城市／期間篩選已在用同一款元件，含 spring(0.26/0.72) 選中動畫），spacing／padding 對齊 FoodMapView 排序 chip 列規格。sort 綁定、sortedSpots／spotsByCity 排序邏輯完全未變動，純互動元件外觀替換，屬 v25.02 為本檔案留下的待辦事項。"
         ]),

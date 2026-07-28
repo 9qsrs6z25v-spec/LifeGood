@@ -29,6 +29,15 @@ import SwiftUI
 //     toggle 加 easeInOut(0.15) 過場動畫，避免選取狀態切換太生硬
 //   • 三處重複的「尚無其他部門可選」提示合併為 noCandidatesHint，補上圖示錨點
 //   本次僅調整 DepartmentEditor 視覺呈現，未變動任何雙向同步 / 儲存邏輯
+//
+// [2026-07 v4] 本次美化方向（deptEmptyState / gradeTitleEmptyState 補齊脈衝動畫）：
+//   • 兩處空狀態原本雖在 [v1] 紀錄自稱「double-pulse ring」，實際上僅有靜態同心圓描邊，
+//     缺少全 App 其餘空狀態（OrganizationView / SubordinateRosterView / IncomeView 等）
+//     共用的雙層脈衝呼吸環動畫，補上外層/內層 Circle().stroke + scaleEffect + repeatForever
+//     動畫，並各自加入獨立的 deptEmptyPulse / gradeEmptyPulse 旗標與可取消 Task，
+//     於 onAppear 延遲 0.3s 觸發、onDisappear 取消並歸零，對齊 OrganizationView.emptyState
+//     規格與寫法，避免動畫洩漏。
+//   • 本次僅調整這兩處空狀態視覺呈現，未變動任何部門/職等資料模型、儲存或驗證邏輯。
 
 struct GradeTitleView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -39,6 +48,11 @@ struct GradeTitleView: View {
     @State private var heroAppeared = false
     @State private var rowsAppeared = false
     @State private var rowsAppearedTask: Task<Void, Never>?
+    // [2026-07 v4] 空狀態脈衝光環動畫旗標，部門/職等各自獨立（對齊 OrganizationView.orgEmptyPulse 規格）
+    @State private var deptEmptyPulse = false
+    @State private var deptEmptyPulseTask: Task<Void, Never>?
+    @State private var gradeEmptyPulse = false
+    @State private var gradeEmptyPulseTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -348,6 +362,18 @@ struct GradeTitleView: View {
     private var deptEmptyState: some View {
         VStack(spacing: 14) {
             ZStack {
+                // [v4] 外層脈衝光環（對齊 OrganizationView.emptyState 雙層脈衝規格）
+                Circle()
+                    .stroke(Color.indigo.opacity(deptEmptyPulse ? 0 : 0.22), lineWidth: 1.5)
+                    .frame(width: 96, height: 96)
+                    .scaleEffect(deptEmptyPulse ? 1.38 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: deptEmptyPulse)
+                // [v4] 內層脈衝光環（延遲 0.3s，波紋層次）
+                Circle()
+                    .stroke(Color.indigo.opacity(deptEmptyPulse ? 0 : 0.11), lineWidth: 1)
+                    .frame(width: 96, height: 96)
+                    .scaleEffect(deptEmptyPulse ? 1.68 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: deptEmptyPulse)
                 // [v2] 主圓升級為 LinearGradient fill + stroke 描邊
                 Circle()
                     .fill(LinearGradient(
@@ -358,11 +384,22 @@ struct GradeTitleView: View {
                 Circle()
                     .stroke(Color.indigo.opacity(0.35), lineWidth: 1)
                     .frame(width: 70, height: 70)
-                Circle().stroke(Color.indigo.opacity(0.18), lineWidth: 1.5).frame(width: 82, height: 82)
-                Circle().stroke(Color.indigo.opacity(0.08), lineWidth: 1).frame(width: 96, height: 96)
                 Image(systemName: "building.2")
                     .font(.system(size: 28, weight: .light))
                     .foregroundStyle(Color.indigo.opacity(0.55))
+            }
+            .onAppear {
+                deptEmptyPulse = false
+                deptEmptyPulseTask?.cancel()
+                deptEmptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    deptEmptyPulse = true
+                }
+            }
+            .onDisappear {
+                deptEmptyPulseTask?.cancel()
+                deptEmptyPulse = false
             }
             VStack(spacing: 4) {
                 Text("尚未建立任何部門")
@@ -380,6 +417,18 @@ struct GradeTitleView: View {
     private var gradeTitleEmptyState: some View {
         VStack(spacing: 14) {
             ZStack {
+                // [v4] 外層脈衝光環（對齊 OrganizationView.emptyState 雙層脈衝規格）
+                Circle()
+                    .stroke(Color.purple.opacity(gradeEmptyPulse ? 0 : 0.22), lineWidth: 1.5)
+                    .frame(width: 96, height: 96)
+                    .scaleEffect(gradeEmptyPulse ? 1.38 : 1.0)
+                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: gradeEmptyPulse)
+                // [v4] 內層脈衝光環（延遲 0.3s，波紋層次）
+                Circle()
+                    .stroke(Color.purple.opacity(gradeEmptyPulse ? 0 : 0.11), lineWidth: 1)
+                    .frame(width: 96, height: 96)
+                    .scaleEffect(gradeEmptyPulse ? 1.68 : 1.0)
+                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: gradeEmptyPulse)
                 // [v2] 主圓升級為 LinearGradient fill + stroke 描邊
                 Circle()
                     .fill(LinearGradient(
@@ -390,11 +439,22 @@ struct GradeTitleView: View {
                 Circle()
                     .stroke(Color.purple.opacity(0.35), lineWidth: 1)
                     .frame(width: 70, height: 70)
-                Circle().stroke(Color.purple.opacity(0.18), lineWidth: 1.5).frame(width: 82, height: 82)
-                Circle().stroke(Color.purple.opacity(0.08), lineWidth: 1).frame(width: 96, height: 96)
                 Image(systemName: "list.number")
                     .font(.system(size: 28, weight: .light))
                     .foregroundStyle(Color.purple.opacity(0.55))
+            }
+            .onAppear {
+                gradeEmptyPulse = false
+                gradeEmptyPulseTask?.cancel()
+                gradeEmptyPulseTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    gradeEmptyPulse = true
+                }
+            }
+            .onDisappear {
+                gradeEmptyPulseTask?.cancel()
+                gradeEmptyPulse = false
             }
             VStack(spacing: 4) {
                 Text("尚未設定職等")
