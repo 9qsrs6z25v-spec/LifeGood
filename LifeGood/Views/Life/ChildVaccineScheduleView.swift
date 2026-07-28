@@ -22,7 +22,17 @@ import SwiftUI
 //      輔助模式下長疫苗名稱換行擠壓版面
 //   5. birthdayHint → 提示圖示改為漸層圓底 + 外框，對齊全 App 空狀態／提示區塊
 //      圖示錨點規格，取代原本無底色的裸圖示
-// 純視覺調整，未變動任何接種狀態判斷、日期推算或存檔邏輯。
+// [2026-07 v2] 補齊 VaccineDoseEditorSheet（施打編輯 Sheet）：
+//   6. 該 sheet 先前是裸 Form + 系統預設 Label 標頭（灰階圖示、無色條），與外層清單／
+//      HealthProfileEditView 四個子編輯 sheet 已統一的「4pt 漸層 Capsule 色條 + 主題色圖示 +
+//      .subheadline.semibold」標頭規格不一致，是本檔案最後一處未對齊的裸元件；新增同款式
+//      vaccineEditorSectionHeader(_:icon:color:)，三個 Section 一律改用，備註沿用全 App
+//      慣例採 secondary 色，其餘沿用外層藍色主題（accent）。
+//   7. Toggle「已完成施打」補上 .tint(accent)，避免系統預設綠色與本頁藍色主題色衝突；
+//      疫苗名稱／劑次文字補 lineLimit(2) + minimumScaleFactor(0.85)，避免長疫苗名稱在
+//      大字級輔助模式下被裁切。
+//   8. 純視覺調整，未變動任何接種狀態判斷、日期推算、草稿寫回或存檔邏輯。
+//   （下次美化本檔案時：主列表與編輯 sheet 皆已完成規格對齊，可轉往其他仍留有待辦的畫面）
 
 struct ChildVaccineScheduleView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -384,6 +394,9 @@ struct VaccineDoseEditorSheet: View {
     @State private var date = Date()
     @State private var note = ""
 
+    // [v2] 沿用外層 ChildVaccineScheduleView 的藍色主題色，讓 Sheet 與觸發它的清單視覺一致
+    private let accent = Color.blue
+
     private var child: FamilyMember? { lifeStore.familyMembers.first { $0.id == childId } }
 
     private static let dateFmt: DateFormatter = {
@@ -398,6 +411,7 @@ struct VaccineDoseEditorSheet: View {
                         Text("疫苗").foregroundStyle(.secondary)
                         Spacer()
                         Text("\(item.name)．\(item.dose)").fontWeight(.medium)
+                            .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.trailing)
                     }
                     HStack {
                         Text("建議接種").foregroundStyle(.secondary)
@@ -412,11 +426,12 @@ struct VaccineDoseEditorSheet: View {
                         Text(item.note).font(.caption).foregroundStyle(.secondary)
                     }
                 } header: {
-                    Label("疫苗資訊", systemImage: "syringe.fill")
+                    vaccineEditorSectionHeader("疫苗資訊", icon: "syringe.fill", color: accent)
                 }
 
                 Section {
                     Toggle("已完成施打", isOn: $hasDate.animation(.spring(response: 0.3, dampingFraction: 0.85)))
+                        .tint(accent)
                     if hasDate {
                         DatePicker("施打日期", selection: $date, displayedComponents: .date)
                     } else {
@@ -424,13 +439,13 @@ struct VaccineDoseEditorSheet: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } header: {
-                    Label("施打狀態", systemImage: "checkmark.seal")
+                    vaccineEditorSectionHeader("施打狀態", icon: "checkmark.seal.fill", color: accent)
                 }
 
                 Section {
                     TextField("備註（接種院所、反應、提醒等）", text: $note, axis: .vertical).lineLimit(2...5)
                 } header: {
-                    Label("備註", systemImage: "note.text")
+                    vaccineEditorSectionHeader("備註", icon: "note.text", color: .secondary)
                 }
             }
             .navigationTitle(item.name)
@@ -469,5 +484,23 @@ struct VaccineDoseEditorSheet: View {
         }
         lifeStore.update(member)
         dismiss()
+    }
+}
+
+/// VaccineDoseEditorSheet 專用 Section 標頭：4pt 漸層 Capsule 色條 + 圖示 + 標題，
+/// 與 HealthProfileEditView.healthEditorSectionHeader 同款式，讓裸 Form 標頭升級為
+/// 與全 App 其他編輯 Sheet 一致的視覺語言（見 v2 美化紀錄）。
+@ViewBuilder
+private func vaccineEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
     }
 }
