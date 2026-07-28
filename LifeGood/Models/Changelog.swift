@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.11", build: 764, date: "2026/07/28", notes: [
+            "【美化】支出圖表頁英雄卡載入指示器（ChartView）：chartHeroCard 頂部標籤旁的白色系統原生 ProgressView（0.65 倍縮小 spinner）是本檔案最後一處殘留系統 spinner 的地方，與 25.10 版大卡（isLoading 卡片）改用的漸層圖示圓＋旋轉 chart.bar.fill 語言不一致。改為 14pt 迷你版同款造型（白色系漸層圓 + 旋轉圖示），共用大卡既有的 chartLoadingSpin 旗標（不新增 state），兩處圖示同步旋轉，視覺語言完全統一。純視覺層調整，isLoading 判斷邏輯、金額格式化等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.10", build: 763, date: "2026/07/28", notes: [
             "【美化】支出圖表頁載入狀態（ChartView）：isLoading 卡片原本是裸 ProgressView + 純文字，是全 App 載入態中唯一還在用系統原生 spinner、且與 trendChart／variablePieChart／fixedPieChart 空狀態雙層脈衝光環＋漸層圖示圓設計語言脫節的地方。改為雙層脈衝光環 + 漸層圖示圓（chart.bar.fill 圖示以線性旋轉取代圈圈 spinner），下方補上 7 條長條圖骨架佔位條（隨脈衝呼吸淡入淡出），讓「即將出現長條圖」的預期更明確；卡片補上細邊框對齊全 App 卡片統一規格。新增 chartLoadingPulse／chartLoadingSpin 旗標與可取消 chartLoadingPulseTask，寫法比照既有四個 EmptyPulse 旗標（loadChartData() 重載時歸零＋onDisappear 取消，避免快速切換週期時動畫從中途開始）。純視覺層調整，資料載入流程、期間切換、拖曳選點等既有商業邏輯完全未變動。"
         ]),

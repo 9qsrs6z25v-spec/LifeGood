@@ -67,9 +67,14 @@ import Charts
 //      chartLoadingPulseTask（寫法比照既有四個 EmptyPulse 旗標：loadChartData()
 //      重載時歸零＋onDisappear 取消，避免快速切換週期時動畫從中途開始）。
 //      純視覺層調整，資料載入流程、期間切換、拖曳選點等既有邏輯完全未變動。
-//      （下次美化本檔案時：可留意 chartHeroCard 頂部行內小 ProgressView（isLoading
-//      時的 0.65 倍縮小 spinner）是否也可比照本次改為與大卡一致的迷你脈衝圖示，
-//      或轉往其他仍留有待辦的畫面）
+// [2026-07 v7] 承接上方待辦，本次美化 chartHeroCard 頂部行內小型載入指示器：
+//  19. 頂部標籤旁的白色系統原生 ProgressView（0.65 倍縮小 spinner）是本檔案最後一處
+//      殘留系統 spinner 的地方，與大卡（isLoading 卡片）改用的漸層圖示圓＋旋轉
+//      chart.bar.fill 語言不一致。改為 14pt 迷你版同款造型（白色系漸層圓 + 旋轉
+//      圖示），共用大卡既有的 chartLoadingSpin 旗標（不新增 state），兩處圖示同步
+//      旋轉。純視覺層調整，isLoading 判斷邏輯、金額格式化等既有邏輯完全未變動。
+//      （本檔案 isLoading 相關視覺已全數收斂一致；下次美化本檔案時可留意其餘互動
+//      細節，或轉往其他仍留有待辦的畫面）
 
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
@@ -334,9 +339,23 @@ struct ChartView: View {
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.78))
                         if isLoading {
-                            ProgressView()
-                                .tint(.white.opacity(0.80))
-                                .scaleEffect(0.65)
+                            // [v7 美化] 原本是白色系統原生 ProgressView（0.65 倍縮小 spinner），
+                            // 與下方大卡「載入圖表資料…」改用的漸層圖示圓＋旋轉圖示語言不一致，
+                            // 是本檔案最後一處殘留系統 spinner 的地方。改為迷你版同款造型
+                            // （白色系漸層圓 + chart.bar.fill 旋轉圖示），共用大卡的 chartLoadingSpin
+                            // 旗標，兩處圖示同步旋轉、視覺語言完全統一。純視覺層調整，載入狀態
+                            // 判斷邏輯（isLoading）本身未變動。
+                            ZStack {
+                                Circle()
+                                    .fill(.white.opacity(0.18))
+                                    .overlay(Circle().stroke(.white.opacity(0.32), lineWidth: 0.75))
+                                Image(systemName: "chart.bar.fill")
+                                    .font(.system(size: 7, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.88))
+                                    .rotationEffect(.degrees(chartLoadingSpin ? 360 : 0))
+                                    .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: chartLoadingSpin)
+                            }
+                            .frame(width: 14, height: 14)
                         }
                     }
                     Text(isLoading ? "---" : formatCurrency(totalForPeriod))
