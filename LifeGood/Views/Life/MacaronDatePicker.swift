@@ -29,8 +29,15 @@ import SwiftUI
 //   （不需呼叫端額外傳入狀態），對齊 ExpensePhotoStackViewer／RenovationStackViewer 等共用元件
 //   自行管理進場動畫的既有慣例，兩個呼叫端都自動獲得一致效果。純視覺調整，日期選取、
 //   allowFuture 過濾等既有商業邏輯完全未變動。
-//   （下次美化本元件時，可留意 DatePicker(.compact) 系統元件在深色模式下的原生外觀是否
-//   仍與卡片其餘手刻元素有落差，或轉往其他仍留有待辦的畫面）
+// [2026-07 v4] 承接上一版留下的待辦：compact DatePicker 主題色統一：
+//   9. DatePicker(.compact) 先前未指定 .tint，沿用全 App 系統藍 accentColor，
+//      是卡片內唯一一處跟 5 顆馬卡龍快捷鍵、分隔線、標籤色完全無關的元素，
+//      展開的日曆彈出視窗選中日期圓圈也是系統藍，與整張卡片的莫蘭迪馬卡龍語言脫節。
+//      新增 pickerTint（介於薰衣草與玫瑰之間的霧霧莫蘭迪紫，不偏袒任一顆快捷鍵色），
+//      套用 .tint(pickerTint) 到 DatePicker：文字按鈕與彈出日曆選中態改用此色，
+//      呼應卡片整體粉彩基調；純視覺調整，日期選取、allowFuture 過濾等既有邏輯完全未變動。
+//   （下次美化本元件時，可留意 DatePicker(.compact) 彈出日曆本身其餘系統原生配色
+//   是否仍與卡片有落差，或轉往其他仍留有待辦的畫面）
 
 /// 馬卡龍色調的精簡日期選擇器：第一行 5 顆相對日期按鈕，第二行 compact DatePicker。
 struct MacaronDatePicker: View {
@@ -41,6 +48,9 @@ struct MacaronDatePicker: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var appeared = false
     private let calendar = Calendar.current
+    // [v4] compact DatePicker 專用強調色：霧霧莫蘭迪紫，介於薰衣草／玫瑰兩顆快捷鍵色之間，
+    // 取代系統預設藍色，讓文字按鈕與彈出日曆選中態都融入卡片整體馬卡龍配色
+    private let pickerTint = Color(red: 0.62, green: 0.48, blue: 0.68)
     private static let mdFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "M/d"; return f
     }()
@@ -97,6 +107,7 @@ struct MacaronDatePicker: View {
                 }
                 .datePickerStyle(.compact)
                 .labelsHidden()
+                .tint(pickerTint)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)

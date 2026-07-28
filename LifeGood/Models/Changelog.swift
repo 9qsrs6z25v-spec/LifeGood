@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.12", build: 765, date: "2026/07/28", notes: [
+            "【美化】自訂日期選擇器主題色統一（MacaronDatePicker）：底部 compact DatePicker 先前未指定 .tint，沿用全 App 系統藍 accentColor，是卡片內唯一一處跟 5 顆馬卡龍快捷鍵、分隔線、標籤色完全無關的元素，展開的彈出日曆選中日期圓圈也是系統藍，與整張卡片的莫蘭迪馬卡龍語言脫節。新增 pickerTint（介於薰衣草與玫瑰之間的霧霧莫蘭迪紫，不偏袒任一顆快捷鍵色），套用 .tint(pickerTint) 到 DatePicker：文字按鈕與彈出日曆選中態改用此色，呼應卡片整體粉彩基調。純視覺層調整，日期選取、allowFuture 過濾等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.11", build: 764, date: "2026/07/28", notes: [
             "【美化】支出圖表頁英雄卡載入指示器（ChartView）：chartHeroCard 頂部標籤旁的白色系統原生 ProgressView（0.65 倍縮小 spinner）是本檔案最後一處殘留系統 spinner 的地方，與 25.10 版大卡（isLoading 卡片）改用的漸層圖示圓＋旋轉 chart.bar.fill 語言不一致。改為 14pt 迷你版同款造型（白色系漸層圓 + 旋轉圖示），共用大卡既有的 chartLoadingSpin 旗標（不新增 state），兩處圖示同步旋轉，視覺語言完全統一。純視覺層調整，isLoading 判斷邏輯、金額格式化等既有商業邏輯完全未變動。"
         ]),
