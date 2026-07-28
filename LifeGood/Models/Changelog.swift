@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.09", build: 762, date: "2026/07/28", notes: [
+            "【美化】主畫面匯出進度條／浮動新增按鈕主體造型（MainTabView）：exportProgressBar 原本只有裸文字百分比、進度軌道無邊框、與下方導覽列之間沒有視覺交界，補上 16pt 漸層圖示圓錨點（arrow.up.doc.fill）、百分比數字 contentTransition(.numericText()) 平滑過場、軌道 Capsule 描邊、頂部 0.5pt 分隔線（對齊 bottomTabBar 上緣分隔線規格）。FloatingActionButtonView.fabStack 主 FAB 與「新增收入」「新增支出」兩顆選單按鈕，是本檔案僅存的三處純色扁平按鈕（Color.green／.red／.secondary），改為漸層底 + 頂部 glass shine 白色高光 + 細邊框，對齊全 App 漸層按鈕/英雄卡片統一規格。純視覺層調整，匯出進度計算、拖曳吸邊、彈出選單開關、新增收入／支出導頁等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.08", build: 761, date: "2026/07/28", notes: [
             "【美化】部門職等頁空狀態補齊脈衝動畫（GradeTitleView）：deptEmptyState／gradeTitleEmptyState 兩處空狀態，檔案自身 [2026-06] 美化紀錄雖曾宣稱已是「double-pulse ring」，實際上只有靜態同心圓描邊、沒有任何動畫，與全 App 其餘空狀態（OrganizationView.emptyState／IncomeView.emptyState 等）共用的雙層脈衝呼吸環規格不一致。改為外層/內層 Circle().stroke + scaleEffect + repeatForever 動畫，各自搭配獨立的 deptEmptyPulse／gradeEmptyPulse 旗標與可取消 Task（onAppear 延遲 0.3s 觸發、onDisappear 取消歸零），數值與寫法逐一比照 OrganizationView.emptyState 既有規格複製，部門／職等兩個空狀態互不干擾、可同時顯示。純視覺層調整，部門與職等資料模型、儲存、雙向同步等既有商業邏輯完全未變動。"
         ]),

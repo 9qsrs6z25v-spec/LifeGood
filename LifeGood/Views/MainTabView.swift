@@ -176,7 +176,25 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
 //       輕縮小＋淡化（scale 0.92 / opacity 0.75），純讀取既有 aiStartingRecording 狀態，
 //       未新增任何判斷邏輯。
 //   純視覺調整，麥克風錄音／AI 記帳送出、分頁切換等既有邏輯完全未變動。
-//   （下次美化本檔案時，可從 exportProgressBar／FloatingActionButtonView 主體造型繼續找可統一之處）
+// [2026-07 v4] 承接上方待辦，本次美化 exportProgressBar／FloatingActionButtonView 主體造型：
+//  12. exportProgressBar：
+//      ① 標籤補上 16pt 漸層圖示圓錨點（arrow.up.doc.fill），對齊全 App「圖示圓 + 文字」
+//         標籤設計語言，取代原本裸文字沒有視覺錨點的寫法；
+//      ② 進度百分比補 contentTransition(.numericText())，數字跳動時平滑過場，
+//         對齊 pieChartBody 金額數字規格；
+//      ③ 軌道 Capsule 補 stroke(Color.green.opacity(0.22))，深色模式下與純色底更好區分；
+//      ④ 頂部補 0.5pt 分隔線（Color(.separator).opacity(0.18)），對齊 bottomTabBar 上緣
+//         分隔線規格，讓匯出條與下方導覽列有清楚的視覺交界。
+//  13. FloatingActionButtonView.fabStack：
+//      ① 主 FAB 與「新增收入」「新增支出」兩顆選單按鈕，底色從純色 Color.green／.red／
+//         .secondary 升級為 LinearGradient（topLeading→bottomTrailing），對齊全 App
+//         漸層按鈕/卡片設計語言，取代本檔案內僅存的三處純色扁平按鈕；
+//      ② 三顆按鈕補上頂部 glass shine 白色高光 overlay（.white.opacity(0.18)→.clear，
+//         clip 至 Capsule），與 chartHeroCard／英雄卡片 glass shine 規格一致；
+//      ③ 三顆按鈕補 Capsule().stroke(.white.opacity(0.22)) 細邊框，強化按鈕邊緣立體感。
+//   純視覺調整，拖曳吸邊、彈出選單開關、新增收入／支出導頁等既有邏輯完全未變動。
+//   （下次美化本檔案時，可從 topSubFeatureBar 分組膠囊之外的其餘子功能列細節，
+//   或轉往其他仍留有待辦的畫面）
 
 // MARK: - 主畫面
 
@@ -1123,16 +1141,32 @@ struct MainTabView: View {
 
     private var exportProgressBar: some View {
         VStack(spacing: 1) {
-            HStack {
+            HStack(spacing: 5) {
                 Spacer()
+                // [v4] 16pt 漸層圖示圓錨點，取代裸文字，對齊全 App「圖示圓 + 文字」標籤語言
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                    Image(systemName: "arrow.up.doc.fill")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 14, height: 14)
                 Text("匯出 \(Int(exportProgress.fraction * 100))%")
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.2), value: exportProgress.fraction)
                     .padding(.trailing, 14)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.green.opacity(0.14))
+                    Capsule()
+                        .fill(Color.green.opacity(0.14))
+                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
                     Capsule()
                         .fill(LinearGradient(
                             colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)],
@@ -1147,6 +1181,13 @@ struct MainTabView: View {
         }
         .padding(.bottom, 1)
         .background(.ultraThinMaterial)
+        // [v4] 頂部 0.5pt 分隔線，對齊 bottomTabBar 上緣分隔線規格，與下方導覽列劃出清楚交界
+        .overlay(
+            Rectangle()
+                .fill(Color(.separator).opacity(0.18))
+                .frame(height: 0.5),
+            alignment: .top
+        )
         .transition(.opacity)
     }
 
@@ -1488,9 +1529,13 @@ private struct FloatingActionButtonView: View {
                         }
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 18).padding(.vertical, 12)
-                        .background(Color.green)
+                        // [v4] 純色 → 漸層底 + 頂部 glass shine 高光 + 細邊框，對齊全 App 漸層按鈕規格
+                        .background(fabGradientBackground(
+                            colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)]
+                        ))
                         .foregroundStyle(.white)
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.75))
                         .shadow(color: .green.opacity(0.45), radius: 10, y: 5)
                     }
 
@@ -1506,9 +1551,12 @@ private struct FloatingActionButtonView: View {
                         }
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 18).padding(.vertical, 12)
-                        .background(Color.red)
+                        .background(fabGradientBackground(
+                            colors: [Color(red: 0.98, green: 0.38, blue: 0.38), Color(red: 0.76, green: 0.14, blue: 0.18)]
+                        ))
                         .foregroundStyle(.white)
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.75))
                         .shadow(color: .red.opacity(0.45), radius: 10, y: 5)
                     }
                 }
@@ -1537,12 +1585,26 @@ private struct FloatingActionButtonView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, showQuickAdd ? 0 : 14)
                 .frame(minWidth: 52, minHeight: 52)
-                .background(showQuickAdd ? Color.secondary : Color.green)
+                .background(fabGradientBackground(
+                    colors: showQuickAdd
+                        ? [Color(.systemGray), Color(.systemGray2)]
+                        : [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)]
+                ))
                 .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.75))
                 // 深色基礎陰影 + 綠色光暈（展開時光暈消隱）
                 .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
                 .shadow(color: showQuickAdd ? .clear : Color.green.opacity(0.38), radius: 14, y: 6)
             }
+        }
+    }
+
+    // [v4] 主 FAB／彈出選單三顆按鈕共用：漸層底 + 頂部 glass shine 白色高光，
+    //      對齊 chartHeroCard／全 App 英雄卡片 glass shine 統一規格
+    private func fabGradientBackground(colors: [Color]) -> some View {
+        ZStack {
+            LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [.white.opacity(0.18), .clear], startPoint: .top, endPoint: .center)
         }
     }
 
