@@ -702,6 +702,51 @@ enum ImageCompressor {
         }
         return jpeg
     }
+
+    // MARK: 一鍵壓縮既有照片
+
+    /// 批次壓縮結果統計。
+    struct BatchResult {
+        var scanned = 0          // 掃描檔案數
+        var compressed = 0       // 實際被壓縮（變小）的檔案數
+        var bytesBefore = 0      // 掃描檔案原始總大小
+        var bytesAfter = 0       // 處理後總大小
+        var savedMB: Double { Double(bytesBefore - bytesAfter) / 1_048_576 }
+    }
+
+    /// App 內所有照片資料夾（與各模型 photosDirectory 名稱一一對應；新增照片類型時記得同步）。
+    static let knownPhotoDirectories: [String] = [
+        "ExpensePhotos", "ChildRecordPhotos", "FamilyAlbumPhotos", "BusinessCardPhotos",
+        "OrgPersonPhotos", "ElevatorPhotos", "UtilityPhotos", "RenovationPhotos"
+    ]
+
+    /// 一鍵壓縮既有照片：走訪所有照片資料夾，逐檔套用 compressForStorage，
+    /// 變小才回寫並重新上傳 iCloud 覆蓋雲端大圖；已是小圖者不動。
+    /// 同步阻塞（IO 密集），請在背景執行緒呼叫。
+    static func recompressAllStoredPhotos() -> BatchResult {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        var result = BatchResult()
+        for dirName in knownPhotoDirectories {
+            let dir = docs.appendingPathComponent(dirName, isDirectory: true)
+            guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+            for url in files where url.pathExtension.lowercased() == "jpg" {
+                guard let data = try? Data(contentsOf: url) else { continue }
+                result.scanned += 1
+                result.bytesBefore += data.count
+                let out = compressForStorage(data)
+                if out.count < data.count, (try? out.write(to: url)) != nil {
+                    result.compressed += 1
+                    result.bytesAfter += out.count
+                    // 覆蓋雲端同名檔，避免下次同步又把大圖拉回來
+                    PhotoCloudSync.upload(directory: dirName, fileName: url.lastPathComponent)
+                } else {
+                    result.bytesAfter += data.count
+                }
+            }
+        }
+        return result
+    }
 }
 
 enum PhotoCloudSync {

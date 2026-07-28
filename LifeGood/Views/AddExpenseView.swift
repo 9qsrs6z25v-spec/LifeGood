@@ -2585,6 +2585,7 @@ struct AddExpenseView: View {
                 re.utilityPayments[idx] = UtilityPayment(
                     id: old.id, type: old.type, date: date, amount: amount,
                     photoFileName: old.photoFileName,
+                    photoFileNames: old.photoFileNames,
                     note: note.trimmingCharacters(in: .whitespaces),
                     linkedExpenseId: expenseId
                 )

@@ -1050,7 +1050,7 @@ struct RealEstateDetailView: View {
         let photoCount = estate.renovationPhotos.reduce(0) { $0 + max(1, $1.photoFileNames.count) }
         let expensePhotoCount = expensePhotos.reduce(0) { $0 + $1.photoFileNames.count }
         let docCount = estate.documents.count
-        let utilityPhotoCount = estate.utilityPayments.filter { $0.photoFileName != nil }.count
+        let utilityPhotoCount = estate.utilityPayments.reduce(0) { $0 + $1.photoFileNames.count }
         let elevatorPhotoCount = estate.elevatorMaintenances.filter { $0.photoFileName != nil }.count
         let total = photoCount + expensePhotoCount + docCount + utilityPhotoCount + elevatorPhotoCount
         return total > 0 ? "\(total) 筆" : "尚無"
@@ -2072,7 +2072,7 @@ struct RealEstateDetailView: View {
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color(.tertiarySystemFill))
                         .clipShape(Capsule())
-                    if p.photoFileName != nil {
+                    if !p.photoFileNames.isEmpty {
                         Button {
                             if let url = p.photoURL { viewingPhotoURL = url }
                         } label: {
@@ -2134,7 +2134,7 @@ struct RealEstateDetailView: View {
                         .contentTransition(.numericText())
                 }
                 Spacer(minLength: 4)
-                if p.photoFileName != nil {
+                if !p.photoFileNames.isEmpty {
                     Button {
                         if let url = p.photoURL { viewingPhotoURL = url }
                     } label: {
@@ -2296,7 +2296,7 @@ struct RealEstateDetailView: View {
         }
         for up in estate.utilityPayments {
             if let linkedId = up.linkedExpenseId { linkedIds.insert(linkedId) }
-            if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+            for name in up.photoFileNames { UtilityPayment.deletePhoto(name) }
         }
         // 清除裝潢照片檔案（多張）
         for rp in estate.renovationPhotos {
@@ -2796,11 +2796,8 @@ struct UtilityPaymentEditor: View {
     @State private var date = Date()
     @State private var amountText = ""
     @State private var note = ""
-    @State private var photoFileName: String?
-    @State private var photoItem: PhotosPickerItem?
-    // 防止連續選兩張照片時新舊 Task 並行互相刪對方剛存好的檔案（同型修復見
-    // ElevatorMaintenanceEditor.photoLoadTask）：每次選擇先取消前一個未完成的載入。
-    @State private var photoLoadTask: Task<Void, Never>?
+    // 收據照片（多張）：改用 MultiPhotoGallery（可拍照連拍 / 相簿多選 / 燈箱檢視 / 刪除）
+    @State private var photoFileNames: [String] = []
     @State private var showDeleteConfirm = false
     @State private var showError = false
     @State private var selectedBankMilestoneId: UUID?
@@ -2931,24 +2928,13 @@ struct UtilityPaymentEditor: View {
                 }
 
                 Section("收據照片") {
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        HStack {
-                            Image(systemName: "photo")
-                            Text(photoFileName == nil ? "選擇照片" : "更換照片")
-                            Spacer()
-                            if photoFileName != nil {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                            }
-                        }
-                    }
-                    if photoFileName != nil {
-                        Button(role: .destructive) {
-                            if let name = photoFileName { UtilityPayment.deletePhoto(name) }
-                            photoFileName = nil
-                        } label: {
-                            Label("移除照片", systemImage: "xmark.circle")
-                        }
-                    }
+                    MultiPhotoGallery(
+                        fileNames: $photoFileNames,
+                        urlFor: { UtilityPayment.photosDirectory.appendingPathComponent($0) },
+                        onSaveImage: { UtilityPayment.savePhoto($0, id: UUID()) },
+                        onDeleteFile: { UtilityPayment.deletePhoto($0) },
+                        title: "收據照片"
+                    )
                 }
 
                 Section("備註") {
@@ -2972,7 +2958,17 @@ struct UtilityPaymentEditor: View {
             .navigationTitle(editing == nil ? "新增繳費紀錄" : "編輯繳費紀錄")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") {
+                        // 本次 session 新拍/新選的照片已寫入磁碟但未儲存進紀錄，
+                        // 取消時清掉避免孤兒檔案（既有照片不動；同型寫法見 RenovationPhotoEditor.cancel）
+                        let original = Set(editing?.photoFileNames ?? [])
+                        for name in photoFileNames where !original.contains(name) {
+                            UtilityPayment.deletePhoto(name)
+                        }
+                        dismiss()
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving)
                 }
@@ -2983,27 +2979,13 @@ struct UtilityPaymentEditor: View {
                     date = e.date
                     amountText = e.amount > 0 ? String(format: "%.0f", e.amount) : ""
                     note = e.note
-                    photoFileName = e.photoFileName
+                    photoFileNames = e.photoFileNames
                     // 載入既有的扣款目標（從連結的 Expense 讀回）
                     if let expId = e.linkedExpenseId,
                        let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
                         selectedBankMilestoneId = exp.linkedBankMilestoneId
                         selectedBankCurrency = exp.linkedBankCurrency ?? "NT$"
                         selectedCreditCardMilestoneId = exp.linkedCreditCardMilestoneId
-                    }
-                }
-            }
-            .onChange(of: photoItem) { _, item in
-                photoLoadTask?.cancel()
-                photoLoadTask = Task {
-                    if let item, let data = try? await item.loadTransferable(type: Data.self) {
-                        guard !Task.isCancelled else { return }
-                        if let oldName = photoFileName {
-                            UtilityPayment.deletePhoto(oldName)
-                        }
-                        // 檔名用全新 UUID（而非沿用編輯中記錄不變的 id），避免同路徑覆寫
-                        // 造成縮圖快取的舊圖不更新，對齊 BusinessCardView.save() 同型修復。
-                        photoFileName = UtilityPayment.savePhoto(data, id: UUID())
                     }
                 }
             }
@@ -3055,7 +3037,8 @@ struct UtilityPaymentEditor: View {
 
         let record = UtilityPayment(
             id: recordId, type: type, date: date, amount: amount,
-            photoFileName: photoFileName,
+            photoFileName: photoFileNames.first,
+            photoFileNames: photoFileNames,
             note: note.trimmingCharacters(in: .whitespaces),
             linkedExpenseId: expenseId
         )
@@ -3075,7 +3058,7 @@ struct UtilityPaymentEditor: View {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let e = editing else { return }
         isSaving = true
-        if let name = e.photoFileName { UtilityPayment.deletePhoto(name) }
+        for name in e.photoFileNames { UtilityPayment.deletePhoto(name) }
         // 同步移除對應的變動支出與銀行扣款紀錄
         if let linkedId = e.linkedExpenseId,
            let exp = expenseStore.expenses.first(where: { $0.id == linkedId }) {
@@ -3175,7 +3158,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .renovation(let p): return p.photoFileNames
         case .expense(let e): return e.photoFileNames
         case .document: return []
-        case .utility(let u): return u.photoFileName.map { [$0] } ?? []
+        case .utility(let u): return u.photoFileNames
         case .elevator(let m): return m.photoFileName.map { [$0] } ?? []
         }
     }

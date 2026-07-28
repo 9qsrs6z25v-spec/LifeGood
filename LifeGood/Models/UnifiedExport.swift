@@ -472,7 +472,7 @@ enum UnifiedImporter {
             let incomingRealEstateIds = Set(payload.finance.realEstates.map(\.id))
             for old in finance.realEstates where !incomingRealEstateIds.contains(old.id) {
                 for up in old.utilityPayments {
-                    if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+                    for name in up.photoFileNames { UtilityPayment.deletePhoto(name) }
                 }
                 for rp in old.renovationPhotos {
                     for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }

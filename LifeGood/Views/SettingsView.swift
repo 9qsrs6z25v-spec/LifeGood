@@ -204,6 +204,9 @@ struct SettingsView: View {
     // 沒有守衛時快速連點同一顆按鈕會並發跑兩個 Task 各自寫同一個檔名、各自把 activeShareItem 蓋過去，
     // 造成分享面板閃爍/重開，比照旁邊「完整備份」backupBusy 既有規格補上。
     @State private var exportBusy = false
+    // 一鍵壓縮既有照片：busy 防連點 + 完成結果訊息
+    @State private var compressBusy = false
+    @State private var compressResultMessage: String?
     @State private var showBackupRange = false     // 完整備份的時間範圍選擇
     @State private var importResultMessage = ""
     @State private var showImportResult = false
@@ -310,6 +313,15 @@ struct SettingsView: View {
                 Button("確定") {}
             } message: {
                 Text(exportErrorMessage)
+            }
+            // 一鍵壓縮既有照片：完成結果
+            .alert("照片壓縮完成", isPresented: Binding(
+                get: { compressResultMessage != nil },
+                set: { if !$0 { compressResultMessage = nil } }
+            )) {
+                Button("確定") { compressResultMessage = nil }
+            } message: {
+                Text(compressResultMessage ?? "")
             }
             // 匯入
             .fileImporter(
@@ -1057,6 +1069,46 @@ struct SettingsView: View {
             .foregroundStyle(.primary)
             .disabled(backupBusy)
 
+            // 一鍵壓縮既有照片（新照片存檔時已自動壓縮；此工具處理歷史大圖）
+            Button {
+                recompressStoredPhotos()
+            } label: {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.indigo.opacity(0.22), Color.indigo.opacity(0.09)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 36, height: 36)
+                        Circle()
+                            .stroke(Color.indigo.opacity(0.20), lineWidth: 1)
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "arrow.down.right.and.arrow.up.left")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.indigo)
+                    }
+                    .shadow(color: Color.indigo.opacity(0.15), radius: 4, x: 0, y: 2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("一鍵壓縮既有照片")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            if compressBusy { ProgressView().scaleEffect(0.7) }
+                        }
+                        Text("把過去存的大圖縮到 1080P JPEG 80%，縮小備份檔")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+            }
+            .foregroundStyle(.primary)
+            .disabled(compressBusy)
+
             // 匯出 CSV
             Button {
                 exportCSV()
@@ -1487,6 +1539,28 @@ struct SettingsView: View {
     // exportJSON／exportCSV／exportSubordinates：與 exportFullBackup 同一模式——只有讀取
     // @Published 屬性組出純 struct 快照這步留在主執行緒（很快），實際 JSON 編碼／CSV 組字串
     // 這種資料量大時會卡 UI 的重運算搬到背景執行緒，寫完檔再跳回主執行緒更新分享項目。
+
+    /// 一鍵壓縮既有照片：IO 密集，移到背景執行緒跑完再回主執行緒更新結果。
+    private func recompressStoredPhotos() {
+        guard !compressBusy else { return }
+        compressBusy = true
+        Task.detached(priority: .userInitiated) {
+            let result = ImageCompressor.recompressAllStoredPhotos()
+            await MainActor.run {
+                compressBusy = false
+                if result.scanned == 0 {
+                    compressResultMessage = "沒有找到照片檔案。"
+                } else if result.compressed == 0 {
+                    compressResultMessage = "掃描 \(result.scanned) 張照片，全部已是壓縮尺寸，無需再處理。"
+                } else {
+                    compressResultMessage = String(
+                        format: "掃描 %d 張、壓縮 %d 張，共省下 %.1f MB。",
+                        result.scanned, result.compressed, result.savedMB
+                    )
+                }
+            }
+        }
+    }
 
     private func exportJSON() {
         guard !exportBusy else { return }

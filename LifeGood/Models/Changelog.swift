@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.04", build: 757, date: "2026/07/28", notes: [
+            "【功能】一鍵壓縮既有照片 + 電費收據拍照連拍：① 設定頁「資料管理」新增「一鍵壓縮既有照片」（ImageCompressor.recompressAllStoredPhotos）：走訪全部 8 個照片資料夾（記帳收據/兒女記錄/家庭相簿/名片/組織人員/電梯保養/水電繳費/裝修照片），逐檔套用 v25.03 的 1080P 長邊 + JPEG 80% 壓縮，變小才回寫並重新上傳 iCloud 覆蓋雲端大圖，完成後彈窗回報「掃描 N 張、壓縮 M 張、省下 X MB」；IO 密集移背景執行緒執行、busy 旗標防連點。② 新增連拍相機 MultiShotCameraPicker（RenovationPhotoEditor.swift，與 CameraPicker 並列）：UIImagePickerController 預設介面拍一張就得離開，改用官方多拍做法 showsCameraControls=false + 自訂快門 overlay 呼叫 takePicture()，每按一次快門立即「存檔→壓縮→上傳 iCloud」並累計「已拍 N 張」，按「完成」才離開；無相機裝置（模擬器）退回相簿選取。MultiPhotoGallery 的「拍照」改用此連拍相機，記帳收據/裝修照片等所有多照片頁一體受惠。③ 電費（水電瓦斯繳費 UtilityPayment）收據照片由單張升級為多張：資料模型新增 photoFileNames 陣列（保留舊 photoFileName 欄位向下相容，舊資料自動升級為單元素陣列；恆同步 first 供舊版讀取），編輯器（UtilityPaymentEditor）原本只有相簿單選的 PhotosPicker，改用 MultiPhotoGallery（拍照連拍/相簿多選/燈箱檢視/逐張刪除），正面回應「新增電費只有上傳圖片、沒有拍照」的需求；取消時清除本次新拍未儲存的照片避免孤兒檔案。連動更新：繳費列表/總覽照片計數與照片指示改看多張陣列、四處刪除路徑（房產刪除×2/單筆刪除/取代匯入清理）改為逐張刪除、AddExpenseView 重建繳費紀錄時帶回完整照片陣列、照片總覽 .utility 分支回傳全部照片。"
+        ]),
         ChangelogEntry(version: "25.03", build: 756, date: "2026/07/28", notes: [
             "【功能】照片存檔統一壓縮（1080P 長邊 + JPEG 80%）：使用者反映照片檔案太大導致匯出備份檔過大。新增 ImageCompressor.compressForStorage(_:)（CloudKitManager.swift，與 PhotoCloudSync 同檔）：存檔前解碼影像 → 長邊超過 1920px（1080P 規格）就等比例縮小 → JPEG 80% 重新編碼；無法解碼（非影像資料）或壓縮結果反而更大（來源已是小圖/高壓縮檔）時維持原資料不動，確保永不變差。套用於全部 10 個照片寫檔路徑：記帳收據（Expense.savePhoto）、兒女記錄照片與素描（ChildRecord.savePhoto/saveSketch，含 ChildDetailView.regeneratePreview 唯一繞過 saveSketch 的直接寫檔路徑）、家庭相簿（FamilyAlbumPhoto）、名片頭像（BusinessCard）、組織人員（OrgPerson）、電梯保養（ElevatorMaintenance）、水電繳費（UtilityPayment）、裝修照片（RenovationPhoto）。效果：本機儲存占用、iCloud 照片上傳量、完整備份/匯出檔案大小全面下降（現代手機原圖動輒 3–8MB，壓縮後多在數百 KB）；既有已存的大圖不受影響（僅新存檔生效）。分享用途的高解析輸出（人才矩陣/部屬卡片匯出 JPG 0.95）刻意不壓縮，維持分享畫質。"
         ]),

@@ -93,7 +93,7 @@ class FinanceStore: ObservableObject {
     /// 「未上傳的本機照片」反覆重傳（對齊 UnifiedImporter.applyUnified 的清理方式）。
     private static func cleanupRealEstateFiles(_ item: RealEstate) {
         for up in item.utilityPayments {
-            if let name = up.photoFileName { UtilityPayment.deletePhoto(name) }
+            for name in up.photoFileNames { UtilityPayment.deletePhoto(name) }
         }
         for rp in item.renovationPhotos {
             for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }

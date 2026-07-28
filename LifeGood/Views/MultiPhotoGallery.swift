@@ -108,7 +108,9 @@ struct MultiPhotoGallery: View {
             }
         }
         .sheet(isPresented: $showCamera) {
-            CameraPicker { image in
+            // 連拍相機：拍一張存一張（onSaveImage → 各模型 savePhoto → ImageCompressor 壓縮
+            // → PhotoCloudSync 上傳），按「完成」才離開，可一次連拍多張收據/照片。
+            MultiShotCameraPicker { image in
                 if let data = image.jpegData(compressionQuality: 0.85), let name = onSaveImage(data) {
                     fileNames.append(name)
                 }

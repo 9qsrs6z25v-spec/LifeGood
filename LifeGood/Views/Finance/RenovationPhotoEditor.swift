@@ -43,6 +43,149 @@ struct CameraPicker: UIViewControllerRepresentable {
     }
 }
 
+// MARK: - 連拍相機（自訂快門，可連續拍多張，按「完成」才離開）
+//
+// UIImagePickerController 預設相機介面拍一張就得離開；改用官方支援多拍的做法：
+// showsCameraControls = false + cameraOverlayView 自訂快門呼叫 takePicture()，
+// didFinishPicking 回呼後不 dismiss，鏡頭回到即時預覽即可再拍下一張。
+// 每拍一張立即回傳 onPicked（呼叫端存檔→ImageCompressor 壓縮→PhotoCloudSync 上傳）。
+// 裝置無相機（模擬器）時退回相簿選取，行為同 CameraPicker。
+
+struct MultiShotCameraPicker: UIViewControllerRepresentable {
+    /// 每拍成一張呼叫一次
+    var onPicked: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            picker.sourceType = .camera
+            picker.showsCameraControls = false
+            let overlay = MultiShotOverlayView(frame: UIScreen.main.bounds)
+            overlay.onShutter = { [weak picker] in picker?.takePicture() }
+            overlay.onDone = { context.coordinator.finish() }
+            picker.cameraOverlayView = overlay
+            context.coordinator.overlay = overlay
+        } else {
+            picker.sourceType = .photoLibrary
+        }
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: MultiShotCameraPicker
+        weak var overlay: MultiShotOverlayView?
+        private var shotCount = 0
+        init(_ parent: MultiShotCameraPicker) { self.parent = parent }
+
+        func finish() { parent.dismiss() }
+
+        func imagePickerController(_ picker: UIImagePickerController,
+                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                parent.onPicked(image)
+                shotCount += 1
+                overlay?.setCount(shotCount)
+            }
+            // 相簿後援模式（無相機）沒有 overlay：選完一張即離開，行為同 CameraPicker
+            if picker.sourceType != .camera { parent.dismiss() }
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
+    }
+}
+
+/// 連拍相機的自訂控制列：底部黑色半透明橫條（取消｜快門｜完成 N 張）。
+final class MultiShotOverlayView: UIView {
+    var onShutter: (() -> Void)?
+    var onDone: (() -> Void)?
+
+    private let doneButton = UIButton(type: .system)
+    private let countLabel = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+
+        let bar = UIView()
+        bar.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(bar)
+
+        // 快門：68pt 白圈 + 內圓
+        let shutter = UIButton(type: .custom)
+        shutter.translatesAutoresizingMaskIntoConstraints = false
+        shutter.layer.cornerRadius = 34
+        shutter.layer.borderWidth = 4
+        shutter.layer.borderColor = UIColor.white.cgColor
+        let inner = UIView()
+        inner.translatesAutoresizingMaskIntoConstraints = false
+        inner.backgroundColor = .white
+        inner.layer.cornerRadius = 27
+        inner.isUserInteractionEnabled = false
+        shutter.addSubview(inner)
+        shutter.addTarget(self, action: #selector(shutterTapped), for: .touchUpInside)
+        bar.addSubview(shutter)
+
+        doneButton.setTitle("完成", for: .normal)
+        doneButton.setTitleColor(.white, for: .normal)
+        doneButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
+        doneButton.translatesAutoresizingMaskIntoConstraints = false
+        doneButton.addTarget(self, action: #selector(doneTapped), for: .touchUpInside)
+        bar.addSubview(doneButton)
+
+        countLabel.text = ""
+        countLabel.textColor = UIColor.white.withAlphaComponent(0.85)
+        countLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(countLabel)
+
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            bar.heightAnchor.constraint(equalToConstant: 130),
+
+            shutter.centerXAnchor.constraint(equalTo: bar.centerXAnchor),
+            shutter.topAnchor.constraint(equalTo: bar.topAnchor, constant: 16),
+            shutter.widthAnchor.constraint(equalToConstant: 68),
+            shutter.heightAnchor.constraint(equalToConstant: 68),
+            inner.centerXAnchor.constraint(equalTo: shutter.centerXAnchor),
+            inner.centerYAnchor.constraint(equalTo: shutter.centerYAnchor),
+            inner.widthAnchor.constraint(equalToConstant: 54),
+            inner.heightAnchor.constraint(equalToConstant: 54),
+
+            doneButton.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -24),
+            doneButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor),
+
+            countLabel.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 24),
+            countLabel.centerYAnchor.constraint(equalTo: shutter.centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// 只讓控制列吃事件，其餘區域穿透給相機預覽（避免蓋住對焦手勢）
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        point.y >= bounds.height - 130
+    }
+
+    func setCount(_ n: Int) {
+        countLabel.text = n > 0 ? "已拍 \(n) 張" : ""
+        doneButton.setTitle(n > 0 ? "完成(\(n))" : "完成", for: .normal)
+    }
+
+    @objc private func shutterTapped() { onShutter?() }
+    @objc private func doneTapped() { onDone?() }
+}
+
 // MARK: - 美化紀錄（RenovationPhotoEditor / RenovationStackViewer）
 // [2026-06] 第一次美化方向：
 //   1. renoSectionHeader 輔助：統一三個 Section（基本資訊 / 照片 / 備註）標題列，

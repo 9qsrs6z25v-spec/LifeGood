@@ -787,21 +787,47 @@ struct UtilityPayment: Identifiable, Codable {
     var type: UtilityType
     var date: Date
     var amount: Double
+    /// 舊版單張照片欄位（保留供舊版本讀取；恆同步為 photoFileNames.first）
     var photoFileName: String?
+    /// 收據照片（可多張；可拍照連拍或相簿多選）
+    var photoFileNames: [String]
     var note: String
     /// 連結到記帳模式變動支出的 ID（雙向同步用）
     var linkedExpenseId: UUID?
 
     init(id: UUID = UUID(), type: UtilityType = .water, date: Date = Date(),
-         amount: Double = 0, photoFileName: String? = nil, note: String = "",
-         linkedExpenseId: UUID? = nil) {
+         amount: Double = 0, photoFileName: String? = nil, photoFileNames: [String] = [],
+         note: String = "", linkedExpenseId: UUID? = nil) {
         self.id = id; self.type = type; self.date = date; self.amount = amount
-        self.photoFileName = photoFileName; self.note = note
+        // 兩欄位互補：只給單張就放進多張陣列；只給多張就把第一張回填舊欄位
+        var names = photoFileNames
+        if names.isEmpty, let single = photoFileName { names = [single] }
+        self.photoFileNames = names
+        self.photoFileName = photoFileName ?? names.first
+        self.note = note
         self.linkedExpenseId = linkedExpenseId
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        type = (try? c.decode(UtilityType.self, forKey: .type)) ?? .water
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        amount = (try? c.decode(Double.self, forKey: .amount)) ?? 0
+        photoFileName = try? c.decodeIfPresent(String.self, forKey: .photoFileName)
+        var names = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
+        // 舊資料只有單張欄位：升級為多張陣列
+        if names.isEmpty, let single = photoFileName { names = [single] }
+        photoFileNames = names
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        linkedExpenseId = try? c.decodeIfPresent(UUID.self, forKey: .linkedExpenseId)
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, type, date, amount, photoFileName, photoFileNames, note, linkedExpenseId
+    }
+
     var photoURL: URL? {
-        guard let name = photoFileName else { return nil }
+        guard let name = photoFileNames.first ?? photoFileName else { return nil }
         return Self.photosDirectory.appendingPathComponent(name)
     }
 
