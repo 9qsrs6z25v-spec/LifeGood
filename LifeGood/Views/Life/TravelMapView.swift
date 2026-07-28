@@ -58,8 +58,15 @@ import UIKit
 //   新增 spotsListEmptyState：對齊 FoodMapView.restaurantListEmptyState 圓角卡規格，文案
 //   沿用 emptyOverlay isPhotoFilter 分支用語，讓地圖層／清單 sheet 層兩處空狀態說法一致。
 //   純視覺與空狀態文案調整，spotsByCity／排序等既有商業邏輯完全未變動。
-//   （下次美化本檔案時，可留意 sortPicker 目前用系統 segmented Picker，與 FoodMapView 同
-//   排序功能改用的水平捲動 chip 樣式不同，可評估是否需要統一為同款互動元件）
+// [2026-07 v5] sortPicker 互動元件統一：
+//   11. listSheet 排序控制項原本是系統 .segmented Picker，是全 App／同型姊妹頁
+//       FoodMapView.listSheet 排序功能唯一還在用系統元件的一處（FoodMapView 已改用
+//       水平捲動 chip 列），兩姊妹頁清單 sheet 上半部視覺語言不一致。改為 ScrollView(.horizontal)
+//       + 既有 chip() 助手（本檔案城市／期間篩選已在用，帶 spring(0.26/0.72) 選中動畫），
+//       spacing/padding 對齊 FoodMapView 排序 chip 列規格（spacing 8、水平 padding 12）。
+//       sort／FoodMapSort 綁定與排序邏輯（sortedSpots／spotsByCity）完全未變動，純互動
+//       元件外觀替換。
+//   （下次美化本檔案時，可從這裡接著找其他可統一之處，或轉往其他仍留有待辦的畫面）
 
 // MARK: - 台灣縣市解析（自地址字串推斷縣市）
 
@@ -393,11 +400,14 @@ struct TravelMapView: View {
     }
 
     private var sortPicker: some View {
-        Picker("排序", selection: $sort) {
-            ForEach(FoodMapSort.allCases) { s in Text(s.rawValue).tag(s) }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(FoodMapSort.allCases) { s in
+                    chip(s.rawValue, isSelected: sort == s) { sort = s }
+                }
+            }
+            .padding(.horizontal, 12)
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal)
     }
 
     /// listSheet 篩選後（多為 photoOnly「有照片」開關）0 筆時的卡片式提示，

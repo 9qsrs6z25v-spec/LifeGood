@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.07", build: 760, date: "2026/07/28", notes: [
+            "【美化】旅遊地圖清單排序控制項互動元件統一（TravelMapView）：listSheet 排序控制項（造訪次數／總花費／最近造訪）原本是系統 .segmented Picker，是全 App 排序功能中，唯一還在用系統元件的一處——同型姊妹頁 FoodMapView.listSheet 排序功能早已改用水平捲動 chip 列（帶選中彈簧動畫），兩姊妹頁清單 sheet 上半部視覺語言因此不一致。改為 ScrollView(.horizontal) + 本檔案既有 chip() 助手（城市／期間篩選已在用同一款元件，含 spring(0.26/0.72) 選中動畫），spacing／padding 對齊 FoodMapView 排序 chip 列規格。sort 綁定、sortedSpots／spotsByCity 排序邏輯完全未變動，純互動元件外觀替換，屬 v25.02 為本檔案留下的待辦事項。"
+        ]),
         ChangelogEntry(version: "25.06", build: 759, date: "2026/07/28", notes: [
             "【除錯】靜態排查發現一組跨 5 個檔案的同一 bug class：房地產／股票／儲蓄險等資產詳情頁存檔時，會用 expenseStore.update() 整筆重建連結的 Expense 紀錄（同步金額／日期／備註），但重建時都沒有帶回該 Expense 既有的 photoFileNames，而 Expense 建構子預設空陣列、update() 又是整筆覆蓋、不做欄位合併——若使用者曾在 AddExpenseView 為這筆連結支出另外上傳收據照片，之後只要回到資產頁重新存檔（例如改個金額），該照片會被默默清空、實體檔案永久變孤兒（本機與 iCloud 都不會再被刪除或引用）。逐一修正 5 處：RealEstateDetailView.UtilityPaymentEditor.save()、AddRealEstateView 的 syncInsuranceExpense／syncAssetExpense／syncSaleExpense、AddStockView.syncSoldExpense、AddSavingsInsuranceView.syncFixedExpense，改為重建前先讀回原 Expense 的 photoFileNames 帶入新物件。另外複查了 RealEstateDetailView／VariableExpenseView 的「複製支出」（duplicateLinkedExpense／duplicateExpense）與 AddExpenseView／AddRealEstateView 的 UtilityPayment 同步——這幾處確認是刻意設計（複製品不沿用原照片避免共用檔案；UtilityPayment 自己的收據照片存於獨立的 UtilityPhotos 資料夾，與 Expense 的 ExpensePhotos 是兩組不同檔案，本就不該互相覆蓋），非本次 bug class，未變動。另複查全 App 力度解包／as!／try!／Timer／NotificationCenter retain cycle／CloudKit 30 秒節流／O(n²) 迴圈，均未發現新問題。",
         ]),
