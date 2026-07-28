@@ -565,6 +565,10 @@ struct AddSavingsInsuranceView: View {
     private func syncFixedExpense(insuranceId: UUID, existingExpenseId: UUID?, name: String, note: String) -> UUID {
         let expenseId = existingExpenseId ?? UUID()
 
+        // 帶回既有 photoFileNames：使用者可能在 AddExpenseView 為這筆連結支出另外附加照片，
+        // 本函式每次存檔都整筆重建 Expense，不帶回會把照片默默清空、原始檔案變孤兒
+        // （同一 bug class 見 AddRealEstateView.syncInsuranceExpense 上方註解）。
+        let existingPhotos = existingExpenseId.flatMap { id in expenseStore.expenses.first(where: { $0.id == id })?.photoFileNames } ?? []
         let expense = Expense(
             id: expenseId,
             title: name,
@@ -576,7 +580,8 @@ struct AddSavingsInsuranceView: View {
             insuranceSubCategory: .savings,
             linkedInsuranceId: insuranceId,
             note: note,
-            currencyCode: currencyCode
+            currencyCode: currencyCode,
+            photoFileNames: existingPhotos
         )
 
         if existingExpenseId != nil {

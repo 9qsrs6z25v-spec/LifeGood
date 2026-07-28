@@ -1593,11 +1593,17 @@ struct AddRealEstateView: View {
     private func syncInsuranceExpense(reId: UUID, reName: String, item: InsuranceItemState) -> UUID {
         let expenseId = item.linkedExpenseId ?? UUID()
         let title = item.policyNumber.isEmpty ? "\(reName) - 保險" : "\(reName) - \(item.policyNumber)"
+        // 帶回既有 photoFileNames：這幾個 item state 沒有自己的照片欄位，但連結的 Expense
+        // 本身可在 AddExpenseView 一般編輯時另外附加照片；本函式每次存檔都整筆重建 Expense，
+        // 若不帶回會把使用者在 AddExpenseView 附加的照片默默清空、原始檔案變孤兒（同一 bug
+        // class 也修過 RealEstateDetailView.UtilityPaymentEditor.save()，見該處註解）。
+        let existingPhotos = item.linkedExpenseId.flatMap { id in expenseStore.expenses.first(where: { $0.id == id })?.photoFileNames } ?? []
         let expense = Expense(
             id: expenseId, title: title, amount: item.amount, date: purchaseDate,
             expenseType: .variable, variableCategory: .realEstate,
             linkedRealEstateId: reId,
-            realEstateExpenseCategory: .insurance, note: ""
+            realEstateExpenseCategory: .insurance, note: "",
+            photoFileNames: existingPhotos
         )
         if item.linkedExpenseId != nil { expenseStore.update(expense) }
         else { expenseStore.add(expense) }
@@ -1607,12 +1613,15 @@ struct AddRealEstateView: View {
     private func syncAssetExpense(reId: UUID, reName: String, item: AssetItemState) -> UUID {
         let expenseId = item.linkedExpenseId ?? UUID()
         let label = item.name.isEmpty ? item.category.rawValue : item.name
+        // 帶回既有 photoFileNames，理由同 syncInsuranceExpense 上方註解。
+        let existingPhotos = item.linkedExpenseId.flatMap { id in expenseStore.expenses.first(where: { $0.id == id })?.photoFileNames } ?? []
         let expense = Expense(
             id: expenseId, title: "\(reName) - \(label)",
             amount: item.amount, date: purchaseDate,
             expenseType: .variable, variableCategory: .realEstate,
             linkedRealEstateId: reId,
-            realEstateExpenseCategory: item.category, note: ""
+            realEstateExpenseCategory: item.category, note: "",
+            photoFileNames: existingPhotos
         )
         if item.linkedExpenseId != nil { expenseStore.update(expense) }
         else { expenseStore.add(expense) }
@@ -1724,11 +1733,14 @@ struct AddRealEstateView: View {
 
     private func syncSaleExpense(reId: UUID, name: String, loss: Double, date: Date, existingId: UUID?) -> UUID {
         let expId = existingId ?? UUID()
+        // 帶回既有 photoFileNames，理由同 syncInsuranceExpense 上方註解。
+        let existingPhotos = existingId.flatMap { id in expenseStore.expenses.first(where: { $0.id == id })?.photoFileNames } ?? []
         let expense = Expense(
             id: expId, title: "售出 \(name)（虧損）",
             amount: loss, date: date,
             expenseType: .variable, variableCategory: .realEstate,
-            linkedRealEstateId: reId, note: ""
+            linkedRealEstateId: reId, note: "",
+            photoFileNames: existingPhotos
         )
         if existingId != nil { expenseStore.update(expense) }
         else { expenseStore.add(expense) }

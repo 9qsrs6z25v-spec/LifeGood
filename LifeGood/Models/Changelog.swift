@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.06", build: 759, date: "2026/07/28", notes: [
+            "【除錯】靜態排查發現一組跨 5 個檔案的同一 bug class：房地產／股票／儲蓄險等資產詳情頁存檔時，會用 expenseStore.update() 整筆重建連結的 Expense 紀錄（同步金額／日期／備註），但重建時都沒有帶回該 Expense 既有的 photoFileNames，而 Expense 建構子預設空陣列、update() 又是整筆覆蓋、不做欄位合併——若使用者曾在 AddExpenseView 為這筆連結支出另外上傳收據照片，之後只要回到資產頁重新存檔（例如改個金額），該照片會被默默清空、實體檔案永久變孤兒（本機與 iCloud 都不會再被刪除或引用）。逐一修正 5 處：RealEstateDetailView.UtilityPaymentEditor.save()、AddRealEstateView 的 syncInsuranceExpense／syncAssetExpense／syncSaleExpense、AddStockView.syncSoldExpense、AddSavingsInsuranceView.syncFixedExpense，改為重建前先讀回原 Expense 的 photoFileNames 帶入新物件。另外複查了 RealEstateDetailView／VariableExpenseView 的「複製支出」（duplicateLinkedExpense／duplicateExpense）與 AddExpenseView／AddRealEstateView 的 UtilityPayment 同步——這幾處確認是刻意設計（複製品不沿用原照片避免共用檔案；UtilityPayment 自己的收據照片存於獨立的 UtilityPhotos 資料夾，與 Expense 的 ExpensePhotos 是兩組不同檔案，本就不該互相覆蓋），非本次 bug class，未變動。另複查全 App 力度解包／as!／try!／Timer／NotificationCenter retain cycle／CloudKit 30 秒節流／O(n²) 迴圈，均未發現新問題。",
+        ]),
         ChangelogEntry(version: "25.05", build: 758, date: "2026/07/28", notes: [
             "【除錯】v25.04 電費多張照片功能上線後的靜態排查：全面檢視 Models/ 共用狀態與同步邏輯（強制解包、as!/try!、Timer/NotificationCenter 是否用 [weak self]、CloudKit 30 秒節流是否被繞過、O(n²) 迴圈、UI 過度重繪）均未發現問題，本次修正聚焦於較新的 photoFileNames 多張照片欄位有兩處仍誤用舊版單張 photoFileName 的殘留：① RealEstateDetailView「房屋照片集錦」點擊水電繳費項目時，只取 photoFileName 開單張預覽，多拍的第 2 張以後照片被燈箱忽略；改為讀取完整 photoFileNames 陣列。② AddRealEstateView 新增房產流程中途自動存檔後又取消回滾（cancelAndRollback）時，水電繳費照片只刪除 photoFileName 這一張，第 2 張以後的暫存照片留在本機成孤兒檔案並被雲端上傳程式重複偵測上傳；改為逐張刪除 photoFileNames 陣列中所有檔案。",
         ]),

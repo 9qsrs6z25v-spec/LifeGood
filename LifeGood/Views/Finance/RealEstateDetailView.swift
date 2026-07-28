@@ -3026,7 +3026,15 @@ struct UtilityPaymentEditor: View {
             note: note.trimmingCharacters(in: .whitespaces),
             linkedBankMilestoneId: selectedBankMilestoneId,
             linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
-            linkedCreditCardMilestoneId: selectedCreditCardMilestoneId
+            linkedCreditCardMilestoneId: selectedCreditCardMilestoneId,
+            // 此編輯器只管理 UtilityPayment 自己的收據照片（photoFileNames 狀態，存於
+            // UtilityPhotos 資料夾），與 Expense 自己在 AddExpenseView 可另外附加的一般
+            // 照片（存於 ExpensePhotos 資料夾）是兩組互不相干的檔案。先前這裡完全沒帶
+            // photoFileNames，Expense 建構子預設為 []，導致每次在本頁編輯繳費金額／日期
+            // 存檔時，expenseStore.update() 直接整筆覆蓋，把使用者曾在 AddExpenseView
+            // 為這筆連結支出另外上傳的照片默默清空（陣列變空、原始檔案永久變孤兒），
+            // 因此需帶回 previousExpense 既有的 photoFileNames 才不會遺失。
+            photoFileNames: previousExpense?.photoFileNames ?? []
         )
         if editing?.linkedExpenseId != nil {
             expenseStore.update(expense)
