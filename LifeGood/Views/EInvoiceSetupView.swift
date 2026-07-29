@@ -41,6 +41,18 @@ import SwiftUI
 //      「完成」鈕原放在 topBarTrailing，與全 App 同類 sheet 既有規格（TalentMatrixView／
 //      SubordinateRosterView，以及本檔案同層的 EInvoiceHistoryView「關閉」鈕）皆置於
 //      topBarLeading 不一致；改為 topBarLeading，對齊「關閉按鈕統一放在視窗左側」規格。
+// [2026-07 v4] 補齊「新增規則」表單 Section header 缺口：
+//  14. CategoryRulesEditorView 的 .sheet(isPresented: $showAdd)「新增規則」表單三個
+//      Section（關鍵字／分類／比對範圍）原本是系統預設純文字 Section("標題")，與同一
+//      struct 主列表（依分類分組的 rules Section header：22pt 漸層圖示圓 + 文字）已有
+//      裝飾、以及全 App 編輯表單慣例（HealthProfileEditView.healthEditorSectionHeader／
+//      MyCalendarView.editorSectionHeader／ResumeView.profileEditorSectionHeader／
+//      ChildDetailView.childEditorSectionHeader）皆不一致。新增 CategoryRulesEditorView
+//      私有共用 ruleEditorSectionHeader(_:icon:color:)（4pt 漸層 Capsule 色條 + 圖示 +
+//      .subheadline.semibold 標題），對齊本檔案主畫面既有 einvoiceSectionHeader 同款規格
+//      （兩者分屬不同 struct 故各自持有，寫法完全一致）。純視覺層調整，新增規則的
+//      關鍵字／分類／比對開關等既有商業邏輯完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 // MARK: - 主畫面
 
@@ -770,19 +782,25 @@ struct CategoryRulesEditorView: View {
             .sheet(isPresented: $showAdd) {
                 NavigationStack {
                     Form {
-                        Section("關鍵字") {
+                        Section {
                             TextField("商家或品項關鍵字", text: $newKeyword)
+                        } header: {
+                            ruleEditorSectionHeader("關鍵字", icon: "text.magnifyingglass", color: .blue)
                         }
-                        Section("分類") {
+                        Section {
                             Picker("變動支出分類", selection: $newCategory) {
                                 ForEach(VariableCategory.allCases) { c in
                                     Label(c.rawValue, systemImage: c.icon).tag(c)
                                 }
                             }
+                        } header: {
+                            ruleEditorSectionHeader("分類", icon: "tag.fill", color: .purple)
                         }
-                        Section("比對範圍") {
+                        Section {
                             Toggle("比對商家名稱", isOn: $newMatchSeller)
                             Toggle("比對品項描述", isOn: $newMatchItem)
+                        } header: {
+                            ruleEditorSectionHeader("比對範圍", icon: "checklist", color: .orange)
                         }
                     }
                     .navigationTitle("新增規則")
@@ -849,6 +867,23 @@ struct CategoryRulesEditorView: View {
                 }
             }
             Spacer()
+        }
+    }
+
+    /// 美化：「新增規則」表單 Section header，對齊 EInvoiceSetupView.einvoiceSectionHeader
+    /// 同款規格（4pt 漸層 Capsule 色條 + 圖示 + .subheadline.semibold 標題）。
+    private func ruleEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.6)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
         }
     }
 }

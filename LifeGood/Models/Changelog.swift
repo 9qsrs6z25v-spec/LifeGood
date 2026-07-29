@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.21", build: 774, date: "2026/07/29", notes: [
+            "【美化】電子發票分類規則「新增規則」表單 Section header 補齊（EInvoiceSetupView）：CategoryRulesEditorView 的新增規則 sheet 內「關鍵字／分類／比對範圍」三個 Section 原本是系統預設純文字 Section(\"標題\")，與同一 struct 主列表既有的分類 Section header（22pt 漸層圖示圓 + 文字）及全 App 編輯表單慣例（HealthProfileEditView.healthEditorSectionHeader／MyCalendarView.editorSectionHeader／ChildDetailView.childEditorSectionHeader 等）皆不一致。新增 ruleEditorSectionHeader(_:icon:color:)（4pt 漸層 Capsule 色條 + 圖示 + .subheadline.semibold 標題），對齊本檔案主畫面既有 einvoiceSectionHeader 同款規格。純視覺層調整，新增規則的關鍵字／分類／比對開關等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.20", build: 773, date: "2026/07/29", notes: [
             "【美化】部屬清單頁部門篩選空狀態收尾（SubordinateView）：subordinateSections 篩選後 filtered.isEmpty 分支原本是裸 Text(\"此部門尚無部屬\")，未包圖示錨點、垂直置中純文字直接鋪在 List 裡，與同檔案 emptyStateView（頁面首次無部屬資料時的雙層脈衝光環大型空狀態）及全 App 其餘「篩選後零筆」次要空狀態（ResumeView.categoryEmptyState／FoodMapView.restaurantListEmptyState）不一致，同一頁面內兩種空狀態呈現落差明顯。新增 filteredEmptyState：56pt 藍色圖示圓（person.2.slash + emptyStateView 同款 accent 藍，含細邊框）+ 說明文字，對齊 ResumeView.categoryEmptyState 規格（次要篩選態僅用輕量卡片，不做全頁大型脈衝動畫，該規格保留給頁面首次無資料的 emptyStateView）。純視覺層調整，部門篩選邏輯、部屬資料來源、排序與拖曳等既有商業邏輯完全未變動。"
         ]),
