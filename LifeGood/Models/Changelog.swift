@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.20", build: 773, date: "2026/07/29", notes: [
+            "【美化】部屬清單頁部門篩選空狀態收尾（SubordinateView）：subordinateSections 篩選後 filtered.isEmpty 分支原本是裸 Text(\"此部門尚無部屬\")，未包圖示錨點、垂直置中純文字直接鋪在 List 裡，與同檔案 emptyStateView（頁面首次無部屬資料時的雙層脈衝光環大型空狀態）及全 App 其餘「篩選後零筆」次要空狀態（ResumeView.categoryEmptyState／FoodMapView.restaurantListEmptyState）不一致，同一頁面內兩種空狀態呈現落差明顯。新增 filteredEmptyState：56pt 藍色圖示圓（person.2.slash + emptyStateView 同款 accent 藍，含細邊框）+ 說明文字，對齊 ResumeView.categoryEmptyState 規格（次要篩選態僅用輕量卡片，不做全頁大型脈衝動畫，該規格保留給頁面首次無資料的 emptyStateView）。純視覺層調整，部門篩選邏輯、部屬資料來源、排序與拖曳等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.19", build: 772, date: "2026/07/29", notes: [
             "【美化】管理控制台細節收尾（AdminConsoleView）：控制台使用者人數列先前是全 App 唯一顯示大型數字卻沒有防截斷保護的地方——其餘頁面金額類數字皆已透過 ntdWanString 或個別補上 minimumScaleFactor，本頁「目前人數」卻仍是裸 Text(admin.userCount)，使用者數成長到 5 位數以上時可能被系統預設截斷；補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊全 App 大字自適應規格。另「版本更新紀錄」Section 內「最新：v...」摘要行原本是裸 .caption 純文字，與同一 Section 底下 NavigationLink 進去的 ChangelogListView.changelogHeader 版本徽章（藍→靛漸層 Capsule）風格脫節；改為迷你版同款漸層 Capsule 徽章 + build 輔助文字，讓摘要行與詳情頁版本徽章視覺語言一致。純視覺層調整，人數讀取、版本紀錄資料來源、PIN 解鎖、訂閱門檻切換等既有商業邏輯完全未變動。"
         ]),

@@ -22,6 +22,17 @@ import SwiftUI
 //      - 部門膠囊：.overlay(Capsule().stroke(Color(.separator).opacity(0.18), lineWidth: 0.6))
 //   4. 列表新增 activeSubordinatesSectionHeader（4pt Capsule 漸層側條 + 人數計數徽章），
 //      對齊 StockView.activeStocksSectionHeader 設計語言。
+// [2026-07 v3] 補齊「部門篩選後零筆」次要空狀態缺口：
+//   5. subordinateSections 篩選後 filtered.isEmpty 分支原本是裸 Text("此部門尚無部屬")，
+//      未包圖示錨點，與同檔案 emptyStateView（頁面首次無部屬資料時的雙層脈衝光環大型空
+//      狀態）及全 App 其餘「篩選後零筆」次要空狀態（ResumeView.categoryEmptyState／
+//      FoodMapView.restaurantListEmptyState）不一致，兩種空狀態呈現落差明顯。新增
+//      filteredEmptyState：56pt 藍色圖示圓（person.2.slash + emptyStateView 同款
+//      accent 藍）+ 說明文字，對齊 ResumeView.categoryEmptyState 規格（次要篩選態僅用
+//      輕量卡片，不做全頁大型脈衝動畫，該規格保留給頁面首次無資料的 emptyStateView）。
+//      純視覺層調整，部門篩選邏輯、部屬資料來源等既有商業邏輯完全未變動。
+//      （下次美化本檔案時：可留意 subordinateRow／summaryStatsCard 是否仍有其他可與
+//      全 App 均值對齊之處，或轉往其他仍留有待辦的畫面）
 
 enum SubordinateSortOption: String, CaseIterable, Identifiable {
     case name = "姓名"
@@ -196,10 +207,8 @@ struct SubordinateView: View {
 
         if filtered.isEmpty {
             Section {
-                Text("此部門尚無部屬")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 24)
+                filteredEmptyState
+                    .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -671,6 +680,29 @@ struct SubordinateView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 44)
+    }
+
+    /// [v3] 部門篩選後零筆時的次要空狀態：輕量圖示＋文字卡片，對齊 ResumeView
+    /// .categoryEmptyState 規格（篩選態不做全頁雙層脈衝光環，僅頁面首次無資料的
+    /// emptyStateView 才用大型脈衝設計），取代原本裸露 Text 造成的視覺缺口。
+    private var filteredEmptyState: some View {
+        let accent = Color(red: 0.22, green: 0.53, blue: 0.98)
+        return VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(accent.opacity(0.12))
+                    .frame(width: 56, height: 56)
+                    .overlay(Circle().stroke(accent.opacity(0.20), lineWidth: 1))
+                Image(systemName: "person.2.slash")
+                    .font(.system(size: 22, weight: .light))
+                    .foregroundStyle(accent.opacity(0.75))
+            }
+            Text("此部門尚無部屬")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
     }
 
     // MARK: - 部屬列
