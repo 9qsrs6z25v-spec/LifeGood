@@ -2071,7 +2071,17 @@ struct IdentifiableUUID: Identifiable {
     let id: UUID
 }
 
-// MARK: - 名片編輯
+// MARK: - 美化紀錄（BusinessCardEditor）
+// [2026-07 v1] 本次美化方向（BusinessCardEditor — 新增／編輯名片表單）：
+//   1. Section header：6 個 Section（基本資訊／電話／Email／傳真／地址／其他）原本全用系統
+//      預設純文字 Section("...")，與同檔案 BusinessCardDetailView.contactCard／noteCard、
+//      OrganizationView.orgPersonEditorSectionHeader／ChildDetailView.childEditorSectionHeader／
+//      ResumeView.profileEditorSectionHeader 等全 App 編輯表單「4pt 漸層 Capsule 側條 + 圖示 +
+//      粗體標題」規格脫節。新增 businessCardEditorSectionHeader(_:icon:color:)，依內容給主題色
+//      （基本資訊＝indigo／電話＝blue／Email＝purple／傳真＝orange／地址＝teal／其他＝secondary）；
+//      刪除名片 Section 維持無標頭，對齊全 App 編輯表單「刪除區塊不加標頭」慣例。
+//   純視覺層調整，欄位資料綁定、OCR 預填／編輯載入、新增刪除電話與 Email／save() 等既有商業
+//   邏輯完全未變動。（下次美化本檔案時，可從這裡接著找其他可統一之處）
 
 struct BusinessCardEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -2097,17 +2107,35 @@ struct BusinessCardEditor: View {
     /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複紀錄
     @State private var isSaving = false
 
+    // [2026-07 v1] 對齊 OrganizationView.orgPersonEditorSectionHeader / ChildDetailView.
+    // childEditorSectionHeader 既有共用寫法（4pt 漸層 Capsule 色條 + 圖示 + .subheadline.semibold 標題）。
+    private func businessCardEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 7) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     TextField("姓名", text: $name)
                     TextField("公司名稱", text: $company)
                     TextField("部門", text: $department)
                     TextField("職稱", text: $jobTitle)
                     TextField("主要業務（可搜尋）", text: $primaryBusiness)
+                } header: {
+                    businessCardEditorSectionHeader("基本資訊", icon: "person.text.rectangle.fill", color: .indigo)
                 }
-                Section("電話") {
+                Section {
                     ForEach(phones.indices, id: \.self) { idx in
                         HStack {
                             TextField("電話 \(phones.count > 1 ? "\(idx + 1)" : "")",
@@ -2132,9 +2160,11 @@ struct BusinessCardEditor: View {
                     } label: {
                         Label("新增電話", systemImage: "plus.circle").foregroundStyle(.green)
                     }
+                } header: {
+                    businessCardEditorSectionHeader("電話", icon: "phone.fill", color: .blue)
                 }
 
-                Section("Email") {
+                Section {
                     ForEach(emails.indices, id: \.self) { idx in
                         HStack {
                             TextField("Email \(emails.count > 1 ? "\(idx + 1)" : "")",
@@ -2161,9 +2191,11 @@ struct BusinessCardEditor: View {
                     } label: {
                         Label("新增 Email", systemImage: "plus.circle").foregroundStyle(.green)
                     }
+                } header: {
+                    businessCardEditorSectionHeader("Email", icon: "envelope.fill", color: .purple)
                 }
 
-                Section("傳真") {
+                Section {
                     ForEach(faxes.indices, id: \.self) { idx in
                         HStack {
                             TextField("傳真 \(faxes.count > 1 ? "\(idx + 1)" : "")",
@@ -2186,14 +2218,20 @@ struct BusinessCardEditor: View {
                     } label: {
                         Label("新增傳真", systemImage: "plus.circle").foregroundStyle(.green)
                     }
+                } header: {
+                    businessCardEditorSectionHeader("傳真", icon: "printer.fill", color: .orange)
                 }
 
-                Section("地址") {
+                Section {
                     TextField("地址", text: $address)
+                } header: {
+                    businessCardEditorSectionHeader("地址", icon: "mappin.circle.fill", color: .teal)
                 }
-                Section("其他") {
+                Section {
                     DatePicker("收集日期", selection: $date, displayedComponents: .date)
                     TextField("備註", text: $note, axis: .vertical).lineLimit(2...5)
+                } header: {
+                    businessCardEditorSectionHeader("其他", icon: "text.bubble.fill", color: .secondary)
                 }
                 if editing != nil {
                     Section {
