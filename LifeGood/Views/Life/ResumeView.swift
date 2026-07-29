@@ -237,6 +237,21 @@ struct ProfileFlashCard: View {
 //      loadProfile()／save() 寫回 store 等既有商業邏輯完全未變動。
 //   下次美化本檔案時：可考慮把 fmtAssets() 之外的其餘 ResumeView 元件（如
 //   ResumeGiftSection 以外仍待均值化的清單列）一併比對，或轉往其他仍留有待辦的畫面。
+// [2026-07 v2] 承接上方待辦，補齊 ResumeView 主列表（milestoneRow／mySpendingSection）
+//   最後的空狀態與大字自適應缺口：
+//   4. filteredList 單一分類篩選後零筆時，原本是裸 Text("此分類尚無紀錄")，未包在 List
+//      Section 內、也沒有圖示錨點，與同檔案 emptyStateList 的 emptyState（雙層脈衝光環）
+//      及全 App 其餘「篩選後零筆」次要空狀態（FoodMapView.restaurantListEmptyState）不
+//      一致。新增 categoryEmptyState(_:)：56pt 分類色圖示圓（cat.icon + categoryColor）
+//      + 說明文字，包入 Section 對齊 List 版面規格；僅次要篩選態使用輕量卡片，不做
+//      全頁大型脈衝動畫（該規格保留給頁面首次無資料的 emptyState）。
+//   5. milestoneRow／spendingRow 標題文字原本只有 lineLimit(1)，缺 minimumScaleFactor，
+//      大字級輔助模式下長標題／消費項目名稱會被裁切（…）而非縮小顯示；補上
+//      minimumScaleFactor(0.85)，對齊全 App 大字自適應規格（可縮小但不到無法辨識）。
+//   6. 移除 spendingRow 改用 ntdWanString（v1）後已無任何呼叫端的私有
+//      formatCurrency(_:) / currencyFormatter 死碼。
+//   純視覺層調整，篩選邏輯、里程碑/消費資料來源、刪除等既有商業邏輯完全未變動。
+//   （下次美化本檔案時：可轉往其他仍留有待辦的畫面）
 
 private func profileEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
     HStack(spacing: 7) {
@@ -581,8 +596,12 @@ struct ResumeView: View {
         return List {
             headerSections(sorted)
             if items.isEmpty {
-                Text("此分類尚無紀錄")
-                    .foregroundStyle(.secondary).font(.subheadline)
+                Section {
+                    categoryEmptyState(category)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
             } else {
                 Section {
                     ForEach(Array(items.enumerated()), id: \.element.id) { rowIdx, item in
@@ -783,6 +802,7 @@ struct ResumeView: View {
                 Text(e.title.isEmpty ? (e.variableCategory?.rawValue ?? "未分類") : e.title)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 HStack(spacing: 5) {
                     // 日期：tertiarySystemFill Capsule 徽章（對齊 OverviewView.recentRow 日期規格）
                     Text(formatExpenseDate(e.date))
@@ -827,19 +847,9 @@ struct ResumeView: View {
         .padding(.vertical, 4)
     }
 
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f
-    }()
-
     private static let expenseDateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "M/d"; return f
     }()
-
-    private func formatCurrency(_ v: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
-    }
 
     private func formatExpenseDate(_ d: Date) -> String {
         Self.expenseDateFormatter.string(from: d)
@@ -1002,6 +1012,29 @@ struct ResumeView: View {
         .padding(.vertical, 40)
     }
 
+    /// 單一分類篩選後零筆時的次要空狀態：輕量圖示＋文字卡片，對齊 FoodMapView
+    /// .restaurantListEmptyState 規格（篩選態不做全頁雙層脈衝光環，僅頁面首次無資料的
+    /// emptyState 才用大型脈衝設計），取代原本裸露 Text 造成的視覺缺口。
+    private func categoryEmptyState(_ cat: MilestoneCategory) -> some View {
+        let accent = categoryColor(cat)
+        return VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(accent.opacity(0.12))
+                    .frame(width: 56, height: 56)
+                    .overlay(Circle().stroke(accent.opacity(0.20), lineWidth: 1))
+                Image(systemName: cat.icon)
+                    .font(.system(size: 22, weight: .light))
+                    .foregroundStyle(accent.opacity(0.75))
+            }
+            Text("此分類尚無紀錄")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
+    }
+
     private func milestoneRow(_ item: LifeMilestone) -> some View {
         let accent = categoryColor(item.category)
         return HStack(alignment: .center, spacing: 0) {
@@ -1043,6 +1076,7 @@ struct ResumeView: View {
                 Text(item.title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
 
                 HStack(spacing: 5) {
                     // 分類膠囊徽章：[v3] 補 Capsule stroke 細邊框（對齊 FamilyView v2 / SubordinateView v2 規格）
