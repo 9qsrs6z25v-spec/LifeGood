@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.19", build: 772, date: "2026/07/29", notes: [
+            "【美化】管理控制台細節收尾（AdminConsoleView）：控制台使用者人數列先前是全 App 唯一顯示大型數字卻沒有防截斷保護的地方——其餘頁面金額類數字皆已透過 ntdWanString 或個別補上 minimumScaleFactor，本頁「目前人數」卻仍是裸 Text(admin.userCount)，使用者數成長到 5 位數以上時可能被系統預設截斷；補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊全 App 大字自適應規格。另「版本更新紀錄」Section 內「最新：v...」摘要行原本是裸 .caption 純文字，與同一 Section 底下 NavigationLink 進去的 ChangelogListView.changelogHeader 版本徽章（藍→靛漸層 Capsule）風格脫節；改為迷你版同款漸層 Capsule 徽章 + build 輔助文字，讓摘要行與詳情頁版本徽章視覺語言一致。純視覺層調整，人數讀取、版本紀錄資料來源、PIN 解鎖、訂閱門檻切換等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.18", build: 771, date: "2026/07/29", notes: [
             "【美化】報稅總覽頁金額量級單位一致性收尾（TaxOverviewView）：v4 已將年收入 KPI／節稅累積／月份長條／扣除額徽章四類共 5 處改用共用 Double.ntdWanString（萬／億量級），但當時遺留一處缺口——fmt(_:) 本身仍呼叫獨立的私有 NumberFormatter（無條件全位數，如「NT$1,234,567」），是全檔案 7 處呼叫點（年度稅費支出大字、稅務紀錄列金額、節稅子分類合計/上限/來源拆解膠囊）中唯一沒有萬/億量級單位的格式，尤其 annualSummaryCard 32pt 年度稅費支出大字與旁邊已用 fmtShort 的年收入膠囊並排時數字長度懸殊，高稅費年度更有擠壓大字排版的風險。改為 fmt(_:) 也呼叫共用 ntdWanString，與 fmtShort 完全等價後移除重複的 fmtShort(_:) 與已無呼叫端的私有 currencyFormatter 死碼，5 處原呼叫點改呼叫 fmt(_:)；年度稅費支出大字補上 lineLimit(1) + minimumScaleFactor(0.6)，對齊右側年收入 KPI 膠囊已有的防截斷規格。純顯示層調整，稅費加總、節稅累積、扣除額試算等既有商業邏輯完全未變動。"
         ]),

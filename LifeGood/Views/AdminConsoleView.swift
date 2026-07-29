@@ -34,6 +34,15 @@ import SwiftUI
 //   此頁落後於均值。新增 sectionHeader(_:icon:color:) 輔助函式並套用到全部 5 個 Section
 //   （使用者人數＝藍／訂閱＝綠／對外顯示＝紫／版本更新紀錄＝靛／PIN＝橘），純標題視覺
 //   升級，Section 內容、Toggle、Button 行為完全未變動。
+// [2026-07 v4] 補齊兩處細節：
+//   1. 「目前人數」數字補上 .lineLimit(1) + .minimumScaleFactor(0.6)：本頁是全 App
+//      唯一顯示大型數字卻沒有防截斷保護的地方（其餘頁面金額類數字皆已透過 ntdWanString
+//      或個別補上 minimumScaleFactor），使用者數成長到 5 位數以上時可自動縮字，不會被裁切。
+//   2. 「版本更新紀錄」Section 內「最新：v...」摘要行，原本是裸 .caption Text，
+//      與同一 Section 底下 NavigationLink 進去的 ChangelogListView.changelogHeader
+//      版本徽章（藍→靛漸層 Capsule）風格脫節；改為迷你版同款漸層 Capsule 徽章 +
+//      build 輔助文字，讓摘要行與詳情頁版本徽章視覺語言一致。
+//   純視覺層調整，人數讀取、版本紀錄資料來源等既有商業邏輯完全未變動。
 // ─────────────────────────────────────────────
 
 /// 隱藏管理控制台（關於頁連點版本卡 20 下開啟，需輸入 PIN）。
@@ -193,6 +202,8 @@ struct AdminConsoleView: View {
                     Text("\(admin.userCount)")
                         .bold()
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
                 }
                 Button {
@@ -290,8 +301,28 @@ struct AdminConsoleView: View {
                     Label("檢視更新紀錄（\(Changelog.entries.count) 版）", systemImage: "doc.text.clock")
                 }
                 if let latest = Changelog.entries.first {
-                    Text("最新：v\(latest.version)（build \(latest.build)）")
-                        .font(.caption).foregroundStyle(.secondary)
+                    // [v4] 迷你版本徽章，對齊 ChangelogListView.changelogHeader 藍→靛漸層規格
+                    HStack(spacing: 6) {
+                        Text("最新")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("v\(latest.version)")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2.5)
+                            .background(
+                                Capsule().fill(
+                                    LinearGradient(
+                                        colors: [Color.blue, Color.indigo],
+                                        startPoint: .leading, endPoint: .trailing
+                                    )
+                                )
+                            )
+                            .foregroundStyle(.white)
+                        Text("build \(latest.build)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } header: {
                 sectionHeader("版本更新紀錄", icon: "doc.text.clock", color: .indigo)
