@@ -425,6 +425,8 @@ struct BusinessCardView: View {
     @State private var showAdd = false
     @State private var viewingCardId: UUID?
     @State private var searchText = ""
+    @State private var debouncedSearchText = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
     @State private var showPremiumAlert = false
     @State private var showContactPicker = false
     // 拍名片掃描
@@ -451,8 +453,8 @@ struct BusinessCardView: View {
 
     private var filteredCards: [BusinessCard] {
         let sorted = lifeStore.businessCards.sorted { $0.date > $1.date }
-        if searchText.isEmpty { return sorted }
-        let q = searchText.lowercased()
+        if debouncedSearchText.isEmpty { return sorted }
+        let q = debouncedSearchText.lowercased()
         return sorted.filter { card in
             card.name.lowercased().contains(q)
             || card.company.lowercased().contains(q)
@@ -732,6 +734,15 @@ struct BusinessCardView: View {
                         TextField("搜尋姓名、公司、職稱、主要業務", text: $searchText)
                             .textFieldStyle(.plain)
                             .font(.subheadline)
+                            .onChange(of: searchText) { _, newValue in
+                                searchDebounceTask?.cancel()
+                                searchDebounceTask = Task {
+                                    try? await Task.sleep(nanoseconds: 300_000_000)
+                                    guard !Task.isCancelled else { return }
+                                    debouncedSearchText = newValue
+                                }
+                            }
+                            .onDisappear { searchDebounceTask?.cancel() }
                         if !searchText.isEmpty {
                             Button {
                                 searchText = ""
