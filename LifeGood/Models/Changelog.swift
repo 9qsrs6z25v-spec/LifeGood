@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.23", build: 776, date: "2026/07/29", notes: [
+            "【美化】共用照片檢視器載入／失敗狀態黑底對比收尾（AddRealEstateView.PhotoViewerSheet）：本元件是 AddRealEstateView 物件照片、RealEstateDetailView 房屋資料照片、FamilyMembersResumeView 家人照片共用的全螢幕縮放檢視器，先前雖已修正過關閉／重設鈕位置，但載入中的 ProgressView() 沒有指定 tint，在純黑背景上呈現系統預設灰色、辨識度低，與 MultiPhotoGallery.PhotoLightbox／RealEstateDetailView／RenovationPhotoEditor 等其餘黑底載入圈皆已補上 .tint(.white) 的規格不一致；讀檔失敗狀態的圖示與文字也用 .secondary（跟隨系統配色，淺色模式下在純黑背景上會偏深灰、對比不足）。改為 ProgressView 補上 .tint(.white)，失敗狀態圖示加上淡白色圓底錨點、圖示與文字統一改用分層透明度的白色，深淺色模式在黑背景上皆清楚可辨；另外圖片讀取完成後加入 0.25 秒淡入動畫（imageAppeared），取代原本讀檔完成瞬間硬切出現的生硬感，對齊 MultiPhotoGallery.PhotoLightbox 既有的淡入規格。純視覺層調整，縮放／拖曳手勢、關閉與重設鈕邏輯、照片讀檔流程完全未變動。"
+        ]),
         ChangelogEntry(version: "25.22", build: 775, date: "2026/07/29", notes: [
             "【美化】組織圖「新增／編輯人員」表單 Section header 補齊（OrganizationView.OrgPersonEditor）：本表單是全檔案唯一仍在用系統預設純文字 Section 標頭（Section(\"基本資訊\")／header: { Text(\"頭像\") } 等 8 處）的地方，與同檔案 DepartmentDetailView.peopleSection／OrgPersonDetailView.sectionCard 早已升級的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」規格脫節。新增共用 orgPersonEditorSectionHeader(_:icon:color:)，寫法對齊 ChildDetailView.childEditorSectionHeader／ResumeView.profileEditorSectionHeader 既有做法；8 個 Section 各自依內容給主題色（基本資訊＝indigo／頭像＝blue／利害關係＝purple／記事＝secondary／子女＝pink／派系與相關人員＝orange／名片連結＝teal／狀態＝gray），刪除人員 Section 維持無標頭（對齊全 App 編輯表單慣例）。順手移除 OrgPersonDetailView.formatCurrency／currencyFormatter 兩處已無任何呼叫端的死碼（金額顯示改用 ntdWanString 後遺留）。純視覺層調整，欄位資料綁定、gradeTitleId／departmentId 連動邏輯、children／relations 新增刪除、save()／delete() 等既有商業邏輯完全未變動。"
         ]),

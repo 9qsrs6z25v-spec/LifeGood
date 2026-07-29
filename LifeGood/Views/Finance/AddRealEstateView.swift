@@ -1984,6 +1984,16 @@ extension URL: @retroactive Identifiable {
 //      慣例不符的殘留個案（MultiPhotoGallery.PhotoLightbox v2 當時誤判為「唯一例外」，
 //      實際上此處也是同一慣例的漏網之魚，一併補上）。
 //   2. 「重設縮放」圖示鈕：原本佔用左側，改移至 topBarTrailing，避免與關閉鈕位置衝突。
+// [2026-07 v2] 載入狀態 / 失敗狀態補上黑底對比與進場動畫，聚焦這一個元件：
+//   3. ProgressView() 原本沒有 tint，在純黑背景上呈現系統預設灰色、辨識度低；
+//      補上 .tint(.white)，對齊 MultiPhotoGallery.PhotoLightbox／RealEstateDetailView／
+//      RenovationPhotoEditor 等黑底載入圈的既有規格。
+//   4. 失敗狀態原本用 .secondary（跟隨系統配色，在黑底上淺色模式會偏深灰、對比不足），
+//      改為 .white.opacity 分層 + 圖示加淡白色圓底錨點，確保深淺色模式在黑背景上都清楚可辨。
+//   5. 圖片載入完成加入淡入動畫（imageAppeared），取代原本讀檔完成瞬間硬切出現的生硬感，
+//      對齊 MultiPhotoGallery.PhotoLightbox 的淡入規格。
+//   本次僅調整載入中／失敗兩種狀態與進場過場的視覺呈現，縮放/拖曳手勢、關閉／重設鈕邏輯、
+//   讀檔流程完全未變動。
 struct PhotoViewerSheet: View {
     let url: URL
     @Environment(\.dismiss) private var dismiss
@@ -1996,6 +2006,7 @@ struct PhotoViewerSheet: View {
     // 重新評估、連帶在主執行緒重複讀檔＋解碼造成縮放時明顯卡頓。
     @State private var loadedImage: UIImage?
     @State private var loadFailed = false
+    @State private var imageAppeared = false
 
     var body: some View {
         NavigationStack {
@@ -2007,6 +2018,10 @@ struct PhotoViewerSheet: View {
                             .frame(width: geo.size.width, height: geo.size.height)
                             .scaleEffect(scale)
                             .offset(offset)
+                            .opacity(imageAppeared ? 1 : 0)
+                            .onAppear {
+                                withAnimation(.easeOut(duration: 0.25)) { imageAppeared = true }
+                            }
                             .gesture(
                                 MagnificationGesture()
                                     .onChanged { value in
@@ -2043,11 +2058,21 @@ struct PhotoViewerSheet: View {
                     }
                 } else if loadFailed {
                     VStack(spacing: 12) {
-                        Image(systemName: "photo.slash").font(.largeTitle).foregroundStyle(.secondary)
-                        Text("無法載入照片").foregroundStyle(.secondary)
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.08))
+                                .frame(width: 64, height: 64)
+                            Image(systemName: "photo.slash")
+                                .font(.title2)
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                        Text("無法載入照片")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.55))
                     }
                 } else {
                     ProgressView()
+                        .tint(.white)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
