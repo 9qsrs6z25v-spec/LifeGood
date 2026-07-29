@@ -49,6 +49,20 @@ import SwiftUI
 //      四類共 5 處呼叫點字首統一補齊「NT$」；月份長條金額欄位加 lineLimit(1) +
 //      minimumScaleFactor(0.7)，扣除額已累積徽章加 lineLimit(1)，防止補上字首後在既有窄欄位/
 //      膠囊內截斷。純顯示層調整，稅費加總、節稅累積、扣除額試算等既有邏輯未變動。
+//      （v4 遺留缺口：fmt(_:) 本身仍是無條件全位數 NumberFormatter，annualSummaryCard 32pt
+//      年度稅費支出大字與 fmtShort 並排卻是唯一沒有萬/億量級單位的一處，高稅費年度可能顯示
+//      成 6～7 位數「NT$1,234,567」擠壓大字排版，下次美化時應一併統一）
+// [2026-07 v5] 承接 v4 遺留缺口，統一 fmt(_:) 與 fmtShort(_:)：
+//  19. fmt(_:) 原本呼叫獨立的私有 NumberFormatter（無條件全位數，如「NT$1,234,567」），
+//      是全檔案 7 處呼叫點（年度稅費支出大字、稅務紀錄列金額、節稅子分類合計/上限/來源拆解
+//      膠囊）中唯一沒有萬/億量級單位的格式，與同卡片內 fmtShort（年收入／節稅累積／月份長條／
+//      扣除額徽章）並排時數字長度差異懸殊，稅費較高的年度大字更有溢出風險。改為與 fmtShort
+//      相同呼叫共用 Double.ntdWanString，兩支函式從此完全等價；移除已無呼叫端的私有
+//      currencyFormatter 死碼與重複的 fmtShort(_:)，5 處原呼叫點改呼叫 fmt(_:)。
+//  20. annualSummaryCard 年度稅費支出大字補上 lineLimit(1) + minimumScaleFactor(0.6)，
+//      對齊右側年收入 KPI 膠囊已有的防截斷規格。
+//      純顯示層調整，稅費加總、節稅累積、扣除額試算等既有商業邏輯完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct TaxOverviewView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
@@ -342,6 +356,8 @@ struct TaxOverviewView: View {
                     Text(fmt(taxTotal))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
                     if taxTotal > 0 && estimatedAnnualIncome > 0 {
                         HStack(spacing: 4) {
@@ -363,7 +379,7 @@ struct TaxOverviewView: View {
                         Text("預估年收入")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.62))
-                        Text(fmtShort(estimatedAnnualIncome))
+                        Text(fmt(estimatedAnnualIncome))
                             .font(.system(size: 14, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .lineLimit(1)
@@ -390,7 +406,7 @@ struct TaxOverviewView: View {
                 taxStatDivider()
                 taxStatCell(icon: "doc.text.fill",        label: "稅費筆數", value: "\(exps.count) 筆", color: Color(red: 1.00, green: 0.78, blue: 0.75))
                 taxStatDivider()
-                taxStatCell(icon: "leaf.fill",            label: "節稅累積", value: fmtShort(savingTotal), color: Color(red: 0.62, green: 1.00, blue: 0.75))
+                taxStatCell(icon: "leaf.fill",            label: "節稅累積", value: fmt(savingTotal), color: Color(red: 0.62, green: 1.00, blue: 0.75))
             }
         }
         .padding(20)
@@ -638,7 +654,7 @@ struct TaxOverviewView: View {
                         }
                         .frame(height: 12)
 
-                        Text(fmtShort(item.amount))
+                        Text(fmt(item.amount))
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                             .frame(width: 66, alignment: .trailing)
@@ -830,7 +846,7 @@ struct TaxOverviewView: View {
                     Text("年度節稅總額")
                         .font(.subheadline.weight(.semibold))
                     Spacer()
-                    Text(fmtShort(savingTotal))
+                    Text(fmt(savingTotal))
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -1008,7 +1024,7 @@ struct TaxOverviewView: View {
                             Text("\(sub.rawValue)扣除額")
                                 .font(.subheadline.weight(.semibold))
                             if acc > 0 {
-                                Text("已累積 \(fmtShort(acc))")
+                                Text("已累積 \(fmt(acc))")
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundStyle(.green)
                                     .lineLimit(1)
@@ -1093,18 +1109,9 @@ struct TaxOverviewView: View {
 
     // MARK: - 格式化輔助
 
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f
-    }()
-
+    // [v5] 改呼叫共用 ntdWanString：取代舊版無條件全位數 NumberFormatter，
+    // 與 fmtShort 合併為同一支（見檔頭 v5 美化紀錄）
     private func fmt(_ v: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
-    }
-
-    // [v4] 改呼叫共用 ntdWanString：補齊 NT$ 字首 + 萬轉億邊界防呆（見檔頭 v4 美化紀錄）
-    private func fmtShort(_ v: Double) -> String {
         v.ntdWanString
     }
 

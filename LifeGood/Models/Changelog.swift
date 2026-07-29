@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.18", build: 771, date: "2026/07/29", notes: [
+            "【美化】報稅總覽頁金額量級單位一致性收尾（TaxOverviewView）：v4 已將年收入 KPI／節稅累積／月份長條／扣除額徽章四類共 5 處改用共用 Double.ntdWanString（萬／億量級），但當時遺留一處缺口——fmt(_:) 本身仍呼叫獨立的私有 NumberFormatter（無條件全位數，如「NT$1,234,567」），是全檔案 7 處呼叫點（年度稅費支出大字、稅務紀錄列金額、節稅子分類合計/上限/來源拆解膠囊）中唯一沒有萬/億量級單位的格式，尤其 annualSummaryCard 32pt 年度稅費支出大字與旁邊已用 fmtShort 的年收入膠囊並排時數字長度懸殊，高稅費年度更有擠壓大字排版的風險。改為 fmt(_:) 也呼叫共用 ntdWanString，與 fmtShort 完全等價後移除重複的 fmtShort(_:) 與已無呼叫端的私有 currencyFormatter 死碼，5 處原呼叫點改呼叫 fmt(_:)；年度稅費支出大字補上 lineLimit(1) + minimumScaleFactor(0.6)，對齊右側年收入 KPI 膠囊已有的防截斷規格。純顯示層調整，稅費加總、節稅累積、扣除額試算等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.17", build: 770, date: "2026/07/29", notes: [
             "【美化】履歷頁列表空狀態與大字自適應收尾（ResumeView）：filteredList 單一分類篩選後零筆時，原本是裸 Text(\"此分類尚無紀錄\")，未包在 List Section 內也沒有圖示錨點，與同檔案 emptyStateList 的雙層脈衝空狀態、以及全 App 其餘「篩選後零筆」次要空狀態（FoodMapView.restaurantListEmptyState）不一致。新增 categoryEmptyState(_:)：56pt 分類主題色圖示圓 + 說明文字，包入 Section 對齊 List 版面規格，僅次要篩選態用輕量卡片、不做全頁大型脈衝動畫（該規格保留給頁面首次無資料的 emptyState）。另補齊 milestoneRow／spendingRow 標題文字缺失的 minimumScaleFactor(0.85)，避免大字級輔助模式下長標題被裁切而非縮小；並移除 spendingRow 改用 ntdWanString 後已無呼叫端的私有 formatCurrency(_:)／currencyFormatter 死碼。純視覺層調整，分類篩選、里程碑與消費資料來源、刪除等既有商業邏輯完全未變動。"
         ]),
