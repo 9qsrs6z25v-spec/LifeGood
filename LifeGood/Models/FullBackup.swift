@@ -138,10 +138,18 @@ enum FullBackup {
         var written = 0
         if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
             for att in manifest.attachments {
-                // break → continue：單筆讀取失敗不中斷後續附件的還原
+                // 附件之間無分隔符，全靠 manifest 的 size 依序切割位元組；一旦某筆
+                // size 校驗失敗（檔案截斷／manifest 損壞），讀取游標即與檔案內容錯位。
+                // 過去用 continue 想「跳過壞的一筆、繼續救後面的」，但錯位後 fh.read
+                // 仍會從錯誤位置讀到「等長」的其他附件資料，bytes.count == att.size
+                // 多半仍會通過（只有讀到檔尾才會失敗），於是後續每一筆都被寫入來源
+                // 錯誤的位元組內容、卻頂著正確的檔名寫進磁碟——不是漏還原，而是把
+                // 其他附件的內容悄悄覆蓋成別筆照片／文件，屬於靜默資料損毀，比整批
+                // 略過更嚴重。錯位後已無法復原正確邊界，改為直接停止還原附件迴圈，
+                // 並如實回報 written 筆數，不再假裝繼續救援。
                 guard att.size >= 0, att.size <= maxAttachmentSize,
                       let bytes = try fh.read(upToCount: att.size),
-                      bytes.count == att.size else { continue }
+                      bytes.count == att.size else { break }
                 let dirURL = docs.appendingPathComponent(att.directory, isDirectory: true)
                 try? fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
                 let dest = dirURL.appendingPathComponent(att.fileName)

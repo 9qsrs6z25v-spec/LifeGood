@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.15", build: 768, date: "2026/07/29", notes: [
+            "【靜態除錯 v25.15】複查 Models 層（ExpenseStore／FinanceStore／LifeStore／CloudKitManager／CloudSyncManager／EInvoiceSyncManager／BackupManager／FullBackup／UnifiedExport／RemoteAdmin／SubscriptionManager 等）與相片／圖表／清單類 Views（ChartView、MultiPhotoGallery、RenovationPhotoEditor、MyCalendarView、SubordinateRosterView、TravelMapView、FamilyOverviewMap 等），排查強制解包、index 越界、retain cycle、競態條件、畫面閃爍與效能瓶頸。找到並修復 1 處真實問題：FullBackup.restore() 附件還原迴圈中，單一附件因檔案截斷或 manifest 損壞未通過 size 校驗時，過去用 continue 想「跳過壞的一筆、救回後面的」，但附件之間在檔案裡沒有分隔符、全靠依序讀取 size 位元組定位，一旦某筆校驗失敗，讀取游標就與檔案內容永久錯位；由於 bytes.count == att.size 只在讀到檔尾時才會失手，錯位後續每一筆 continue 讀到的其實是「別筆附件的位元組」但長度剛好對得上，於是被當成合法資料，頂著正確檔名寫回磁碟——不是漏還原，而是靜默把多張照片／文件覆蓋成錯誤內容，比整批略過更嚴重。改為在校驗失敗當下 break 停止附件迴圈，並如實回報 written 筆數，不再對已知錯位的資料繼續假裝還原。CloudSyncManager 30 秒節流／2 秒防抖、isSyncing 並行守衛、@Published 主執行緒隔離複查後確認正常，Views 層既有的快取／防抖／背景讀圖規格亦均符合既有修復慣例，未發現新問題。"
+        ]),
         ChangelogEntry(version: "25.14", build: 767, date: "2026/07/28", notes: [
             "【美化】部屬排班詳情 Sheet「操作日期」標頭一致性（SubordinateRosterView.RosterCellDetailSheet）：dateSection 原本是本 sheet 唯一還在用系統預設 Text(\"操作日期\") 純文字標頭的 Section，同一個 sheet 內 shiftSection／summarySection／actionSection 三個 Section 早在 v2 就已改用共用 sectionHeader(_:icon:color:) 輔助（Capsule 漸層色條 + 圖示 + 粗體標題），引入輔助函式當下漏改了最上面的日期 Section，是本 sheet 唯一的落差。改為呼叫 sectionHeader(\"操作日期\", icon: \"calendar\", color: .blue)，藍色呼應同 Section 內左右翻頁 chevron 按鈕既有的 .blue 著色。純視覺層調整，dayOffset 切換、日期綁定、下方班別設定套用等既有商業邏輯完全未變動。"
         ]),
