@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.22", build: 775, date: "2026/07/29", notes: [
+            "【美化】組織圖「新增／編輯人員」表單 Section header 補齊（OrganizationView.OrgPersonEditor）：本表單是全檔案唯一仍在用系統預設純文字 Section 標頭（Section(\"基本資訊\")／header: { Text(\"頭像\") } 等 8 處）的地方，與同檔案 DepartmentDetailView.peopleSection／OrgPersonDetailView.sectionCard 早已升級的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」規格脫節。新增共用 orgPersonEditorSectionHeader(_:icon:color:)，寫法對齊 ChildDetailView.childEditorSectionHeader／ResumeView.profileEditorSectionHeader 既有做法；8 個 Section 各自依內容給主題色（基本資訊＝indigo／頭像＝blue／利害關係＝purple／記事＝secondary／子女＝pink／派系與相關人員＝orange／名片連結＝teal／狀態＝gray），刪除人員 Section 維持無標頭（對齊全 App 編輯表單慣例）。順手移除 OrgPersonDetailView.formatCurrency／currencyFormatter 兩處已無任何呼叫端的死碼（金額顯示改用 ntdWanString 後遺留）。純視覺層調整，欄位資料綁定、gradeTitleId／departmentId 連動邏輯、children／relations 新增刪除、save()／delete() 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.21", build: 774, date: "2026/07/29", notes: [
             "【美化】電子發票分類規則「新增規則」表單 Section header 補齊（EInvoiceSetupView）：CategoryRulesEditorView 的新增規則 sheet 內「關鍵字／分類／比對範圍」三個 Section 原本是系統預設純文字 Section(\"標題\")，與同一 struct 主列表既有的分類 Section header（22pt 漸層圖示圓 + 文字）及全 App 編輯表單慣例（HealthProfileEditView.healthEditorSectionHeader／MyCalendarView.editorSectionHeader／ChildDetailView.childEditorSectionHeader 等）皆不一致。新增 ruleEditorSectionHeader(_:icon:color:)（4pt 漸層 Capsule 色條 + 圖示 + .subheadline.semibold 標題），對齊本檔案主畫面既有 einvoiceSectionHeader 同款規格。純視覺層調整，新增規則的關鍵字／分類／比對開關等既有商業邏輯完全未變動。"
         ]),

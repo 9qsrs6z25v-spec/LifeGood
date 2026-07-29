@@ -40,6 +40,21 @@ import UniformTypeIdentifiers
 //  14. DepartmentDetailView.relationsCard：上游/下游部門標籤升級為「3pt Capsule 側條 + 圖示 + .caption.semibold」；
 //      chipText 補 .overlay(Capsule().stroke(color.opacity(0.22), lineWidth:0.6)) 邊框；
 //      容器補雙層 shadow，對齊 VehicleView / StockView chipText 邊框規格。
+// [2026-07 v3] 本次美化方向（OrgPersonEditor「新增／編輯人員」表單 Section header 補齊）：
+//  15. OrgPersonEditor 是本檔案唯一仍在用系統預設純文字 Section 標頭（Section("基本資訊")／
+//      header: { Text("頭像") } 等 8 處）的地方，與同檔案 DepartmentDetailView.peopleSection／
+//      OrgPersonDetailView.sectionCard 早已升級的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」
+//      規格脫節，也是全 App 新增/編輯表單中少數還沒補齊此規格的殘留頁面。新增共用
+//      orgPersonEditorSectionHeader(_:icon:color:)，寫法對齊 ChildDetailView.
+//      childEditorSectionHeader／ResumeView.profileEditorSectionHeader 既有做法；8 個 Section
+//      各自依內容給主題色（基本資訊＝indigo／頭像＝blue／利害關係＝purple／記事＝secondary／
+//      子女＝pink／派系與相關人員＝orange／名片連結＝teal／狀態＝gray），刪除人員 Section 維持
+//      無標頭（對齊 HealthProfileEditView／ChildDetailView 各編輯表單慣例）。順手移除
+//      OrgPersonDetailView.formatCurrency／currencyFormatter 兩處已無任何呼叫端的死碼
+//      （金額顯示改用 ntdWanString 後遺留）。純視覺層調整，欄位資料綁定、gradeTitleId／
+//      departmentId 連動邏輯、children／relations 新增刪除、save()／delete() 等既有商業邏輯
+//      完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 // MARK: - 公司組織頁
 
@@ -759,6 +774,22 @@ struct DepartmentDetailView: View {
     }
 }
 
+// [2026-07 v3] Section header：對齊 ChildDetailView.childEditorSectionHeader / ResumeView.profileEditorSectionHeader
+// 既有共用寫法（4pt 漸層 Capsule 色條 + 圖示 + .subheadline.semibold 標題）。
+private func orgPersonEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
+
 // MARK: - 人員編輯器
 
 struct OrgPersonEditor: View {
@@ -807,7 +838,7 @@ struct OrgPersonEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     TextField("姓名", text: $name)
 
                     Picker("職等", selection: $gradeTitleId) {
@@ -837,25 +868,27 @@ struct OrgPersonEditor: View {
                     if hasBirthday {
                         DatePicker("生日", selection: $birthday, displayedComponents: .date)
                     }
+                } header: {
+                    orgPersonEditorSectionHeader("基本資訊", icon: "person.fill", color: .indigo)
                 }
 
                 Section {
                     photoSection
                 } header: {
-                    Text("頭像")
+                    orgPersonEditorSectionHeader("頭像", icon: "photo.fill", color: .blue)
                 }
 
                 Section {
                     TextField("例：他是我直屬主管的好朋友、他掌握決策權…", text: $relationship, axis: .vertical)
                         .lineLimit(3...6)
                 } header: {
-                    Text("我與他的利害關係")
+                    orgPersonEditorSectionHeader("我與他的利害關係", icon: "person.2.fill", color: .purple)
                 }
 
                 Section {
                     TextField("選填記事", text: $note, axis: .vertical).lineLimit(2...5)
                 } header: {
-                    Text("記事")
+                    orgPersonEditorSectionHeader("記事", icon: "text.bubble.fill", color: .secondary)
                 }
 
                 Section {
@@ -878,7 +911,7 @@ struct OrgPersonEditor: View {
                             .foregroundStyle(.green)
                     }
                 } header: {
-                    Text("他的子女")
+                    orgPersonEditorSectionHeader("他的子女", icon: "figure.2.and.child.holdinghands", color: .pink)
                 } footer: {
                     Text("方便記住對方家庭背景，找話題用。")
                 }
@@ -916,7 +949,7 @@ struct OrgPersonEditor: View {
                             .font(.caption).foregroundStyle(.tertiary)
                     }
                 } header: {
-                    Text("派系與相關人員")
+                    orgPersonEditorSectionHeader("派系與相關人員", icon: "person.3.fill", color: .orange)
                 } footer: {
                     Text("標記同盟（綠）/ 對手（紅）/ 中立（灰）/ 前輩 / 後輩，組織圖頭像會用主導關係的顏色標示。")
                 }
@@ -930,7 +963,7 @@ struct OrgPersonEditor: View {
                         }
                     }
                 } header: {
-                    Text("名片連結")
+                    orgPersonEditorSectionHeader("名片連結", icon: "person.text.rectangle.fill", color: .teal)
                 } footer: {
                     Text("連結後，名片詳細頁可一鍵跳轉至此人員，反之亦然。")
                 }
@@ -941,7 +974,7 @@ struct OrgPersonEditor: View {
                         DatePicker("離職日期", selection: $leftDate, displayedComponents: .date)
                     }
                 } header: {
-                    Text("狀態")
+                    orgPersonEditorSectionHeader("狀態", icon: "briefcase.fill", color: .gray)
                 }
 
                 if isEditing {
@@ -1682,17 +1715,7 @@ struct OrgPersonDetailView: View {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
     }()
 
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .currency
-        f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f
-    }()
-
     private func formatDate(_ date: Date) -> String {
         Self.dateFormatter.string(from: date)
-    }
-
-    private func formatCurrency(_ v: Double) -> String {
-        Self.currencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 }
