@@ -44,6 +44,14 @@ import SwiftUI
 //  19. childCard shadow 升級為雙層：accent 色調光暈（radius 6, opacity 0.18）+
 //      黑底基礎（radius 8, opacity 0.06），對齊 SubordinateOverviewView v3 /
 //      MyCalendarView 雙層 shadow 規格，提升卡片立體感。
+// [2026-07 v4] 大字自適應補齊：
+//  20. heroStatsCard 頂部「兒女總覽」42pt 總數大字原本沒有 lineLimit/minimumScaleFactor，
+//      是本卡片唯一沒有防截斷保護的大字（同卡片 heroKpiCell 的 KPI 數字、childCard 的
+//      角色/年齡膠囊皆已有 lineLimit(1) + minimumScaleFactor），資料量大或大字級輔助模式下
+//      有被截斷風險。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊 heroKpiCell 既有
+//      防截斷規格，維持在可辨識最小字級以上。純視覺調整，children.count 等既有資料邏輯
+//      完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct ChildrenResumeView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -154,6 +162,8 @@ struct ChildrenResumeView: View {
                             .font(.system(size: 42, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .contentTransition(.numericText())
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                         Text("位")
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.75))

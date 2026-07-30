@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.27", build: 780, date: "2026/07/30", notes: [
+            "【美化】兒女履歷頁英雄卡總數大字自適應收尾（ChildrenResumeView）：heroStatsCard 頂部「兒女總覽」42pt 總數大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是本卡片唯一沒有這道防護的大字——同卡片 heroKpiCell 的 KPI 數字（兒子／女兒／生涯紀錄）與 childCard 的角色／年齡膠囊皆早已補上；比照 AdminConsoleView v25.19 為「目前人數」大字補齊的同一規格，加上 .lineLimit(1) + .minimumScaleFactor(0.6)，讓卡片內大字防截斷規格全數收斂一致，同時維持在可辨識最小字級以上。純視覺層調整，兒女總數統計、性別分類等既有資料邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.26", build: 779, date: "2026/07/30", notes: [
             "【靜態除錯 v25.26：修復部屬資料合併匯入的 O(n²) 主執行緒卡頓】UnifiedImporter.applyUnified（統一匯入／合併模式）與 SubordinateImporter.importData（部屬專用匯入／合併模式）兩處班表合併邏輯，原本各自對每筆匯入班別用 `arr.contains(where: { cal.isDate($0.date, inSameDayAs: sh.date) })` 逐一比對既有班表去重，是「既有班別數 × 匯入班別數」的 O(n²) 迴圈，且逐次比對還用了比直接比較日期更重的 Calendar.isDate。SubordinateImporter.importData 由 SettingsView 匯入按鈕直接同步呼叫、未離開主執行緒，使用者用「合併」模式還原多年份、多位部屬的完整備份時（例如 5 位部屬、每位累積約 700 筆班別），約需跑 250 萬次 Calendar.isDate 比對，會讓 App 在匯入當下明顯卡頓甚至觸發看門狗判定無回應。改為兩處都先用 `Set(startOfDay 的日期)` 建一次既有班別的日期索引，逐筆比對改為 O(1) 的 Set 查詢，整體複雜度降為 O(n+m)；去重語意（同一天已有班別就保留現有、不覆蓋；本輪匯入內同一天的重複班別也會互相去重）與修改前完全一致，僅為效能重寫。另複查 TalentMatrixView／HolographicBuildingView／FamilyOverviewMap／MedicalMapView／CareerView／MyCalendarView／SubordinateDetailView／AddExpenseView／AIService／RemoteAdmin／RestaurantSearch／FeatureGate／InvoiceCategorizer／LifeModels／FinanceModels／EInvoiceClient／EInvoiceSyncManager 等檔案的強制解包、index 越界、retain cycle、競態條件、SwiftUI 過度重繪與其餘 O(n²) 迴圈，均確認已有既有防護或非使用者可觸發熱路徑，未發現新問題。"
         ]),
