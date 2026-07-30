@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.34", build: 787, date: "2026/07/30", notes: [
+            "【美化】理財資產總覽金額量級單位一致性收尾（FinanceChartView）：私有 fmtShort(_:) 原本只在「≥1億」「≥1萬」兩個分支手刻換算，未滿 1 萬則委派給共用 fmt(_:)（= Double.ntdWanString，固定帶「NT$」字首），造成同一個 helper 依金額大小輸出格式不一致——本檔案 6 處呼叫點（英雄卡總資產、資產配置圖甜甜圈中心／圖例列、房地產／儲蓄險明細列）皆設計成不重複顯示 NT$ 字首（頁面已用「NT$ 市值估算」副標或 currencyCode 標籤另外標示幣別），未滿 1 萬的小額資產卻會意外冒出「NT$」字首，且缺少 ntdWanString 既有的「捨入至萬位上限應進位為億」邊界防呆。改為 fmtShort(_:) 自行處理全部三個量級、不再委派 fmt(_:)，並補上與 ntdWanString 一致的億進位邊界防呆；另外 chartYAxis 座標軸金額縮寫 abbreviate(_:) 只到「萬」量級、未滿 1 萬還混用英式縮寫「%.0fk」，與全 App 中文「萬／億」量級單位慣例不一致（同型問題已於 ChartView.abbreviateCurrency 修過），因其邏輯與修正後的 fmtShort(_:) 完全等價，移除重複的 abbreviate(_:)，唯一呼叫點改呼叫 fmtShort(_:)；並移除已無任何呼叫端的私有 currencyFormatter 死碼。純顯示層調整，總資產／資產配置／房地產與儲蓄險績效等既有試算邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.33", build: 786, date: "2026/07/30", notes: [
             "【美化】健康檔案健檢清單補上「下次回診」徽章（HealthProfileEditView）：CheckupEditor 早已能設定「下次回診／追蹤日」（nextDueDate），但外層健檢清單列先前完全沒有顯示這個欄位，使用者得逐筆點開才知道有沒有排定回診，容易忘記追蹤——是本檔案 v4 完成過敏嚴重度分級著色後，唯一還留著「有欄位卻沒著色顯示」缺口的小節。新增 nextDueBadge(_:)，比照同檔案 severityColor 的交通號誌語意分級著色（已逾期＝紅／30 天內即將到期＝橘／30 天以上尚有餘裕＝綠），加在清單列右側，不必進入編輯畫面就能一眼判斷急迫程度；用藥清單「服用中／已停用」原本就已有著色徽章，此輪確認毋須再調整。純視覺層調整，僅新增讀取既有 nextDueDate 欄位並著色顯示，CheckupEditor 的寫回邏輯、upsert／刪除等既有商業邏輯完全未變動。"
         ]),

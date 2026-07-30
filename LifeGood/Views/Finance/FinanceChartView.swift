@@ -51,6 +51,24 @@ import Charts
 //  21. insuranceSummarySection 已繳金額膠囊 + 預估報酬率膠囊：
 //      中性膠囊用 Color(.separator).opacity(0.40) 線寬 0.6；彩色膠囊用 rateColor.opacity(0.22)，
 //      讓全頁所有 Capsule 標籤均具備細描邊，視覺層次一致。
+// [2026-07-v6] 金額量級單位（萬／億）一致性收尾：
+//  22. fmtShort(_:) 原本只在「≥1億」「≥1萬」兩個分支手刻換算，未滿 1 萬則委派給 fmt(_:)
+//      （= 共用 Double.ntdWanString，固定帶「NT$」字首），造成同一個 helper 依金額大小輸出
+//      格式不一致——本檔案 6 處呼叫點（英雄卡總資產、資產配置圖甜甜圈中心／圖例列、房地產／
+//      儲蓄險明細列）皆設計成「不重複顯示 NT$ 字首」（頁面已用「NT$ 市值估算」等副標或
+//      currencyCode 標籤另外標示幣別），未滿 1 萬的小額資產卻會意外冒出「NT$」字首，且缺少
+//      ntdWanString 既有的「捨入至萬位上限應進位為億」邊界防呆（可能顯示成不合理的
+//      「10000萬」）。改為 fmtShort(_:) 自行處理全部三個量級、不再委派 fmt(_:)，並補上與
+//      ntdWanString 一致的億進位邊界防呆，讓 6 處呼叫點無論金額大小格式都一致。
+//  23. chartYAxis 座標軸金額縮寫 abbreviate(_:) 只到「萬」量級，未滿 1 萬還混用英式縮寫
+//      「%.0fk」，與全 App 其餘畫面／本檔案 fmtShort 一律使用中文「萬／億」量級單位的慣例
+//      不一致（同型問題已於 ChartView.abbreviateCurrency 修過），且股票損益達 1 億以上時
+//      Y 軸會被標成「12000萬」這種鉅額萬數字。abbreviate(_:) 與修正後的 fmtShort(_:) 邏輯
+//      完全等價，移除重複的私有 abbreviate(_:)，唯一呼叫點（chartYAxis 刻度標籤）改呼叫
+//      fmtShort(_:)。
+//  24. 移除已無任何呼叫端的私有 currencyFormatter 死碼（金額顯示皆已改用 ntdWanString /
+//      fmtShort，此靜態 NumberFormatter 實例從未被讀取）。
+//      純顯示層調整，總資產／資產配置／房地產與儲蓄險績效等既有試算邏輯完全未變動。
 
 struct FinanceChartView: View {
     @EnvironmentObject var store: FinanceStore
@@ -505,7 +523,7 @@ struct FinanceChartView: View {
                         AxisGridLine()
                         AxisValueLabel {
                             if let v = value.as(Double.self) {
-                                Text(abbreviate(v)).font(.caption2)
+                                Text(fmtShort(v)).font(.caption2)
                             }
                         }
                     }
@@ -897,25 +915,20 @@ struct FinanceChartView: View {
         }
     }
 
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f
-    }()
-
     private func fmt(_ v: Double) -> String {
         v.ntdWanString
     }
 
+    // [v6] 自成一體、不再委派 fmt(_:)：本檔案呼叫點皆不需要 NT$ 字首，
+    // 三個量級（億／萬／個位數）格式一致，並補上與 ntdWanString 相同的億進位邊界防呆。
     private func fmtShort(_ v: Double) -> String {
-        if v >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
-        if v >= 10_000 { return String(format: "%.0f萬", v / 10_000) }
-        return fmt(v)
-    }
-
-    private func abbreviate(_ v: Double) -> String {
-        if abs(v) >= 10_000 { return String(format: "%.0f萬", v / 10_000) }
-        if abs(v) >= 1000 { return String(format: "%.0fk", v / 1000) }
+        let a = abs(v)
+        if a >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
+        if a >= 10_000 {
+            let wan = v / 10_000
+            if abs(wan) >= 9_999.95 { return String(format: "%.1f億", v / 100_000_000) }
+            return String(format: "%.0f萬", wan)
+        }
         return String(format: "%.0f", v)
     }
 }
