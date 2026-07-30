@@ -44,8 +44,16 @@ import SwiftUI
 //   12. 外層過敏清單列的嚴重度徽章原本無論輕/中/重度一律固定橘色，與新版選擇器的
 //       三色分級不一致；改用同一份 severityColor(_:)，兩處色彩語意統一。
 //   13. 純視覺層調整，draft.severity 讀寫與 onAppear 預設值回填等既有商業邏輯完全未變動。
-//   下次美化方向：本檔案七大 Section、四個子編輯 sheet 與過敏嚴重度分級已完成規格對齊；
-//   可留意用藥／健檢清單目前是否也有可比照分級著色的欄位，或轉往其他仍留有待辦的畫面。
+// [2026-07 v5] 承接上一版待辦，找到用藥／健檢清單裡「有欄位卻沒著色顯示」的缺口：
+//   14. CheckupEditor 可設定「下次回診 / 追蹤日」（nextDueDate），但外層 checkupSection 清單列
+//       先前完全沒有顯示這個欄位——使用者得逐筆點開健檢紀錄才知道有沒有排定回診，容易忘記追蹤。
+//       新增 nextDueBadge(_:)：比照 severityColor 的交通號誌語意分級著色（已逾期＝紅／30 天內
+//       即將到期＝橘／30 天以上尚有餘裕＝綠），加在清單列右側，一眼判斷急迫程度，不必進入編輯
+//       畫面才能得知。用藥清單「服用中／已停用」原本就已有著色徽章，此輪確認毋須再調整。
+//   15. 純視覺層調整，僅新增讀取既有 c.nextDueDate 欄位並著色顯示；CheckupEditor 的
+//       hasNextDue／nextDue 寫回邏輯、upsert／刪除等既有商業邏輯完全未變動。
+//   下次美化方向：本檔案七大 Section、四個子編輯 sheet、過敏嚴重度分級與健檢回診徽章皆已對齊；
+//   可轉往其他仍留有待辦的畫面繼續巡查。
 
 struct HealthProfileEditView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -315,6 +323,10 @@ struct HealthProfileEditView: View {
                             }
                             .font(.caption).foregroundStyle(.secondary)
                         }
+                        Spacer()
+                        if let due = c.nextDueDate {
+                            nextDueBadge(due)
+                        }
                     }
                     .contentShape(Rectangle())
                 }
@@ -377,6 +389,24 @@ struct HealthProfileEditView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    /// 健檢「下次回診 / 追蹤日」徽章：先前 CheckupEditor 可設定 nextDueDate，但外層清單列完全沒有
+    /// 顯示這個欄位，使用者得逐筆點開才知道有沒有排定回診；比照過敏嚴重度 severityColor 的交通號誌
+    /// 語意分級著色：已逾期＝紅／30 天內＝橘／30 天以上＝綠，一眼判斷急迫程度（見 v5 美化紀錄）。
+    private func nextDueBadge(_ date: Date) -> some View {
+        let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: date)).day ?? 0
+        let color: Color = days < 0 ? .red : (days <= 30 ? .orange : .green)
+        let label = days < 0 ? "已逾期 \(Self.dateFmt.string(from: date))" : "回診 \(Self.dateFmt.string(from: date))"
+        return HStack(spacing: 3) {
+            Image(systemName: "bell.badge.fill").font(.system(size: 9, weight: .semibold))
+            Text(label).font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(color.opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(color.opacity(0.24), lineWidth: 0.6))
     }
 
     /// Section header：4pt 漸層 Capsule 色條 + 圖示 + 標題 + 計數膠囊，對齊

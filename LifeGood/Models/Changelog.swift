@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.33", build: 786, date: "2026/07/30", notes: [
+            "【美化】健康檔案健檢清單補上「下次回診」徽章（HealthProfileEditView）：CheckupEditor 早已能設定「下次回診／追蹤日」（nextDueDate），但外層健檢清單列先前完全沒有顯示這個欄位，使用者得逐筆點開才知道有沒有排定回診，容易忘記追蹤——是本檔案 v4 完成過敏嚴重度分級著色後，唯一還留著「有欄位卻沒著色顯示」缺口的小節。新增 nextDueBadge(_:)，比照同檔案 severityColor 的交通號誌語意分級著色（已逾期＝紅／30 天內即將到期＝橘／30 天以上尚有餘裕＝綠），加在清單列右側，不必進入編輯畫面就能一眼判斷急迫程度；用藥清單「服用中／已停用」原本就已有著色徽章，此輪確認毋須再調整。純視覺層調整，僅新增讀取既有 nextDueDate 欄位並著色顯示，CheckupEditor 的寫回邏輯、upsert／刪除等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.32", build: 785, date: "2026/07/30", notes: [
             "【美化】主畫面頂部子功能列選中膠囊漸層收尾（MainTabView.subFeaturePill）：子功能列（收支/理財/人生分頁下方的橫向捲動膠囊）選中狀態原本是扁平純色 tint 底，是同一條列裡唯一還沒升級的一環——職涯／家庭分組外框（careerGroupedPills／familyGroupedPills）與正上方底部導覽列選中指示器（tabItemLabel）都早已是漸層＋深色模式加強不透明度規格。改為 LinearGradient（tint→tint 78% 透明度）＋頂部玻璃光澤覆層，外框細邊框選中時同步改為白色半透明，對齊 v25.09 FloatingActionButtonView 主 FAB「漸層＋glass shine＋白色細邊框」三件式規格，讓子功能列與全 App 其餘選中膠囊視覺一致。純視覺層調整，isSelected 判斷、分頁切換、鎖定功能導頁等既有邏輯完全未變動。"
         ]),
