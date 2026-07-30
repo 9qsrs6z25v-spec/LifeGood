@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.31", build: 784, date: "2026/07/30", notes: [
+            "【美化】家人紀錄／相簿編輯表單 Section header 補齊（FamilyMembersResumeView.FamilyEventEditor／FamilyAlbumPhotoEditor）：新增/編輯紀錄與新增/編輯照片兩個 sheet 共 5 個 Section（基本資訊 ×2／內容／照片／備註）原本是本檔案唯二仍在用系統預設純文字 Section(\"...\") 標頭的地方，與同檔案 FamilyMembersResumeView.sectionHeader／FamilyMemberDetailView.sectionHeaderWithAdd 早已升級的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」規格脫節，也是全 App「表單 Section header 補齊」系列（BusinessCardEditor v25.24／OrgPersonEditor v25.22／EInvoiceSetupView v25.21／ChildDetailView v25.01）尚未覆蓋到的最後兩個編輯 sheet。新增共用 familyEditorSectionHeader(_:icon:color:)，依內容給主題色（基本資訊＝indigo／內容／備註＝secondary／照片＝teal），刪除紀錄／刪除此筆兩個 Section 維持無標頭，對齊全 App 編輯表單慣例。純視覺層調整，欄位資料綁定、save()／deleteRecord() 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.30", build: 783, date: "2026/07/30", notes: [
             "【美化】首頁本月收支英雄卡「收支餘額」大字自適應收尾（OverviewView）：monthlyBalanceCard 頂部「收支餘額」大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同卡片三個金額數字中最寬的一個（多了正負號，且金額本身也最大）——v4 已為同卡「本月收入」／「本月支出」兩個子欄位補上 minimumScaleFactor(0.72)，這裡當時被漏掉。比照近期 LifeOverviewView v25.29／LifeRealEstateView v25.28／ChildrenResumeView v25.27 同一輪「英雄卡大字自適應收尾」規格，加上 .lineLimit(1) + .minimumScaleFactor(0.6)，讓大額（含負數）結餘在小螢幕上不會被裁切，同時維持在可辨識最小字級以上。純視覺層調整，balance／isPositive 等既有商業邏輯完全未變動。"
         ]),

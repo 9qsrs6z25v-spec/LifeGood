@@ -60,6 +60,18 @@ import PhotosUI
 //      Double.ntdWanString，並補上 lineLimit(1) + minimumScaleFactor(0.7)（對齊 StockView /
 //      TaxOverviewView 等同類 Capsule 金額徽章防截斷規格）。移除已無呼叫端的私有
 //      smartGiftAmount／formatGiftTotal／currencyFormatter 死碼。純顯示層調整，禮金加總等既有邏輯未變動。
+// [2026-07 v5] 表單 Section header 補齊：FamilyEventEditor（新增/編輯紀錄）與
+//      FamilyAlbumPhotoEditor（新增/編輯照片）共 5 個 Section（基本資訊 ×2／內容／照片／備註）
+//      原本是本檔案唯二仍在用系統預設純文字 Section("...") 標頭的地方，與同檔案
+//      FamilyMembersResumeView.sectionHeader／FamilyMemberDetailView.sectionHeaderWithAdd
+//      早已升級的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」規格脫節，也是全 App 這輪
+//      「表單 Section header 補齊」系列（BusinessCardEditor v25.24／OrgPersonEditor v25.22／
+//      EInvoiceSetupView v25.21／ChildDetailView v25.01）尚未覆蓋到的最後兩個編輯 sheet。
+//      新增共用 familyEditorSectionHeader(_:icon:color:)，依內容給主題色（基本資訊＝indigo／
+//      內容／備註＝secondary／照片＝teal），刪除紀錄／刪除此筆兩個 Section 維持無標頭
+//      （對齊 ChildDetailView v25.01 慣例：刪除區塊不加標頭）。純視覺層調整，日期/標題/內容/
+//      照片欄位綁定、save()／deleteRecord() 等既有商業邏輯完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 // ─────────────────────────────────────────────
 
 // MARK: - 家人履歷 列表
@@ -958,6 +970,24 @@ struct FamilyMemberDetailView: View {
 
 // MARK: - 紀錄編輯器
 
+/// 紀錄／相簿編輯 Sheet 共用 Section header：4pt 漸層 Capsule 色條 + 圖示 + 粗體標題，
+/// 對齊 ChildDetailView.childEditorSectionHeader／OrganizationView.orgPersonEditorSectionHeader
+/// 規格；FamilyEventEditor／FamilyAlbumPhotoEditor 共用。
+@ViewBuilder
+private func familyEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
+
 struct FamilyEventEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
@@ -975,13 +1005,17 @@ struct FamilyEventEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     DatePicker("日期", selection: $date, displayedComponents: .date)
                     TextField("標題", text: $title)
+                } header: {
+                    familyEditorSectionHeader("基本資訊", icon: "person.text.rectangle", color: .indigo)
                 }
-                Section("內容") {
+                Section {
                     TextField("選填，紀錄這天的事情", text: $content, axis: .vertical)
                         .lineLimit(5...12)
+                } header: {
+                    familyEditorSectionHeader("內容", icon: "note.text", color: .secondary)
                 }
                 if editing != nil {
                     Section {
@@ -1082,12 +1116,14 @@ struct FamilyAlbumPhotoEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     DatePicker("日期", selection: $date, displayedComponents: .date)
                     TextField("標題", text: $title)
+                } header: {
+                    familyEditorSectionHeader("基本資訊", icon: "person.text.rectangle", color: .indigo)
                 }
 
-                Section("照片") {
+                Section {
                     if let img = pendingImage {
                         Image(uiImage: img)
                             .resizable().scaledToFit()
@@ -1135,10 +1171,14 @@ struct FamilyAlbumPhotoEditor: View {
                             Label("移除照片", systemImage: "xmark.circle")
                         }
                     }
+                } header: {
+                    familyEditorSectionHeader("照片", icon: "photo", color: .teal)
                 }
 
-                Section("備註") {
+                Section {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                } header: {
+                    familyEditorSectionHeader("備註", icon: "note.text", color: .secondary)
                 }
 
                 if editing != nil {
