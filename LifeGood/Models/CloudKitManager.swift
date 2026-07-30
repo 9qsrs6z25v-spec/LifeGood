@@ -714,11 +714,10 @@ enum ImageCompressor {
         var savedMB: Double { Double(bytesBefore - bytesAfter) / 1_048_576 }
     }
 
-    /// App 內所有照片資料夾（與各模型 photosDirectory 名稱一一對應；新增照片類型時記得同步）。
-    static let knownPhotoDirectories: [String] = [
-        "ExpensePhotos", "ChildRecordPhotos", "FamilyAlbumPhotos", "BusinessCardPhotos",
-        "OrgPersonPhotos", "ElevatorPhotos", "UtilityPhotos", "RenovationPhotos"
-    ]
+    /// App 內所有照片資料夾。直接沿用 CloudKitManager.photoDirectories，
+    /// 避免兩份清單分開維護而漏掉新資料夾（原本這裡缺少 "RealEstateDocuments"，
+    /// 導致以「文件」流程匯入的收據/權狀照片永遠不會被一鍵壓縮工具處理到）。
+    static let knownPhotoDirectories: [String] = CloudKitManager.photoDirectories
 
     /// 一鍵壓縮既有照片：走訪所有照片資料夾，逐檔套用 compressForStorage，
     /// 變小才回寫並重新上傳 iCloud 覆蓋雲端大圖；已是小圖者不動。

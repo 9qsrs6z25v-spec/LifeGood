@@ -110,9 +110,17 @@ struct MultiPhotoGallery: View {
         .sheet(isPresented: $showCamera) {
             // 連拍相機：拍一張存一張（onSaveImage → 各模型 savePhoto → ImageCompressor 壓縮
             // → PhotoCloudSync 上傳），按「完成」才離開，可一次連拍多張收據/照片。
+            // JPEG 編碼＋ImageCompressor 二次解碼壓縮＋磁碟寫入原本直接同步跑在
+            // UIImagePickerController delegate 回呼所在的主執行緒，每拍一張就卡住
+            // 即時預覽與快門回應；改用背景執行緒處理，只在寫入完成後才回主執行緒
+            // 更新 fileNames。
             MultiShotCameraPicker { image in
-                if let data = image.jpegData(compressionQuality: 0.85), let name = onSaveImage(data) {
-                    fileNames.append(name)
+                Task.detached(priority: .userInitiated) {
+                    guard let data = image.jpegData(compressionQuality: 0.85),
+                          let name = onSaveImage(data) else { return }
+                    await MainActor.run {
+                        fileNames.append(name)
+                    }
                 }
             }
             .ignoresSafeArea()
@@ -129,7 +137,11 @@ struct MultiPhotoGallery: View {
             // 變成永久孤兒檔案。改用可取消的 Task：畫面消失時取消，且取消時把這批已寫入磁碟
             // 但還沒機會被採用的照片一併刪除。
             photoLoadTask?.cancel()
-            photoLoadTask = Task {
+            // 用 Task.detached：原本裸 Task 會沿用 onChange 所在的 MainActor context，
+            // 每張照片的 onSaveImage（savePhoto → ImageCompressor 壓縮 → 磁碟寫入）
+            // 其實仍在主執行緒逐張跑完才輪到下一張，多選張數一多就會卡住畫面；
+            // 改成真正的背景執行緒，只在最後 append 時才回主執行緒。
+            photoLoadTask = Task.detached(priority: .userInitiated) {
                 var added: [String] = []
                 for item in items {
                     guard !Task.isCancelled else { break }

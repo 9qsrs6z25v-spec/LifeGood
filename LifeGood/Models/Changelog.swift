@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.25", build: 778, date: "2026/07/30", notes: [
+            "【效能】連拍相機／相簿多選存檔改在背景執行緒處理，避免拍照時卡頓（MultiPhotoGallery）：MultiShotCameraPicker 每拍一張，JPEG 編碼＋ImageCompressor 二次解碼壓縮＋磁碟寫入原本都同步跑在 UIImagePickerController delegate 回呼所在的主執行緒，此路徑被記帳收據、裝潢照片、水電繳費收據、帳單照片等 4 處共用，連拍時每一次快門都會讓即時預覽卡住、快門回應變慢，違背「連拍」設計初衷；PhotosPicker 相簿多選路徑同樣問題（.onChange 內原本是裸 Task，沿用 View 所在的 MainActor context，逐張處理仍在主執行緒跑完才輪到下一張）。改為 Task.detached(priority: .userInitiated) 背景處理，只在存檔完成後才用 MainActor.run 回主執行緒更新 fileNames，對齊 SettingsView.recompressStoredPhotos 既有的 Task.detached + MainActor.run 慣例。",
+            "【修復】一鍵壓縮既有照片工具漏掉 RealEstateDocuments 資料夾（ImageCompressor.knownPhotoDirectories）：CloudKitManager.photoDirectories（CloudKit 同步／完整備份用）列了 9 個照片資料夾，但 ImageCompressor.knownPhotoDirectories（僅供 SettingsView 一鍵壓縮工具使用）只列了其中 8 個，獨漏 \"RealEstateDocuments\"；使用者以「匯入文件」流程把房屋權狀/收據拍成 jpg 存進這個資料夾時，會被 CloudKit 同步與備份正常收錄，卻永遠不會被批次壓縮工具處理到。改為讓 knownPhotoDirectories 直接沿用 photoDirectories，兩份清單合一，之後新增照片資料夾不會再漏同步第二份清單。"
+        ]),
         ChangelogEntry(version: "25.24", build: 777, date: "2026/07/29", notes: [
             "【美化】名片「新增／編輯」表單 Section header 補齊（BusinessCardView.BusinessCardEditor）：本表單是全檔案唯一仍在用系統預設純文字 Section 標頭（Section(\"基本資訊\")／Section(\"電話\")／Section(\"Email\")／Section(\"傳真\")／Section(\"地址\")／Section(\"其他\") 共 6 處）的地方，與同檔案 BusinessCardDetailView.contactCard／noteCard 早已升級、以及全 App 編輯表單 OrganizationView.orgPersonEditorSectionHeader／ChildDetailView.childEditorSectionHeader／ResumeView.profileEditorSectionHeader 既有的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」規格脫節。新增共用 businessCardEditorSectionHeader(_:icon:color:)，6 個 Section 各自依內容給主題色（基本資訊＝indigo／電話＝blue／Email＝purple／傳真＝orange／地址＝teal／其他＝secondary），刪除名片 Section 維持無標頭（對齊全 App 編輯表單慣例）。純視覺層調整，欄位資料綁定、OCR 預填／編輯載入、新增刪除電話與 Email、save() 等既有商業邏輯完全未變動。"
         ]),
