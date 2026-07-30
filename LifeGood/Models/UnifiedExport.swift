@@ -703,8 +703,13 @@ enum UnifiedImporter {
                         appendNewByID(&s.tasks,    inc.tasks)
                         appendNewByID(&s.weeklyReports, inc.weeklyReports)
                         appendNewByID(&s.equipments, inc.equipments)
-                        for sh in inc.shifts where !s.shifts.contains(where: { cal.isDate($0.date, inSameDayAs: sh.date) }) {
-                            s.shifts.append(sh)
+                        var existingShiftDays = Set(s.shifts.map { cal.startOfDay(for: $0.date) })
+                        for sh in inc.shifts {
+                            let day = cal.startOfDay(for: sh.date)
+                            if !existingShiftDays.contains(day) {
+                                s.shifts.append(sh)
+                                existingShiftDays.insert(day)
+                            }
                         }
                         if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
                         if s.joinDate == nil { s.joinDate = inc.joinDate }
@@ -872,9 +877,15 @@ enum SubordinateImporter {
     /// 班別以「同一天」去重：該天已有班別就保留現有、不覆蓋
     private static func appendNewShifts(_ arr: inout [SubordinateShift], _ incoming: [SubordinateShift]) -> Int {
         let cal = Calendar.current
+        var existingDays = Set(arr.map { cal.startOfDay(for: $0.date) })
         var added = 0
-        for sh in incoming where !arr.contains(where: { cal.isDate($0.date, inSameDayAs: sh.date) }) {
-            arr.append(sh); added += 1
+        for sh in incoming {
+            let day = cal.startOfDay(for: sh.date)
+            if !existingDays.contains(day) {
+                arr.append(sh)
+                existingDays.insert(day)
+                added += 1
+            }
         }
         return added
     }
