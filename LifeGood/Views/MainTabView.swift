@@ -193,8 +193,17 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
 //         clip 至 Capsule），與 chartHeroCard／英雄卡片 glass shine 規格一致；
 //      ③ 三顆按鈕補 Capsule().stroke(.white.opacity(0.22)) 細邊框，強化按鈕邊緣立體感。
 //   純視覺調整，拖曳吸邊、彈出選單開關、新增收入／支出導頁等既有邏輯完全未變動。
-//   （下次美化本檔案時，可從 topSubFeatureBar 分組膠囊之外的其餘子功能列細節，
-//   或轉往其他仍留有待辦的畫面）
+// [2026-07 v5] 承接上方待辦，本次美化 subFeaturePill 選中膠囊本體：
+//  14. subFeaturePill 選中底色原本是扁平純色 tint（.background(isSelected ? tint : …)），
+//      是 topSubFeatureBar 家族中唯一還沒升級的一環——careerGroupedPills／
+//      familyGroupedPills 分組外框（v2）與正上方 tabItemLabel 選中指示器（既有）
+//      都已是漸層 + 深色模式加強不透明度規格，子功能列本身的膠囊反而還停在扁平色。
+//      改為 LinearGradient（tint → tint.opacity(0.78)，topLeading→bottomTrailing）
+//      + 頂部玻璃光澤覆層（.white.opacity(0.20)→.clear, top→center），
+//      overlay 細邊框同步從固定 .primary.opacity(0.08) 改為選中時 .white.opacity(0.24)、
+//      未選中維持原樣，對齊 FAB 按鈕（v25.09）「漸層 + glass shine + 白色細邊框」三件式規格。
+//      純視覺調整，isSelected 判斷、分頁/子功能切換等既有邏輯完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 // MARK: - 主畫面
 
@@ -1119,13 +1128,24 @@ struct MainTabView: View {
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
-            .background(isSelected ? tint : Color(.tertiarySystemFill))
+            // [v5] 選中底色：純色 tint → 漸層 + 頂部玻璃光澤，對齊全 App 選中膠囊
+            // （tabItemLabel 選中指示器／FAB 按鈕）漸層規格，取代本檔案子功能列
+            // 膠囊本身仍是唯一還在用扁平純色的地方。
+            .background(
+                ZStack {
+                    if isSelected {
+                        LinearGradient(colors: [tint, tint.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        LinearGradient(colors: [.white.opacity(0.20), .clear], startPoint: .top, endPoint: .center)
+                    } else {
+                        Color(.tertiarySystemFill)
+                    }
+                }
+            )
             .foregroundStyle(isSelected ? .white : .primary)
             .clipShape(Capsule())
             .overlay(
                 Capsule()
-                    .stroke(.primary.opacity(0.08), lineWidth: 0.6)
-                    .opacity(isSelected ? 0 : 1)
+                    .stroke(isSelected ? .white.opacity(0.24) : .primary.opacity(0.08), lineWidth: isSelected ? 0.75 : 0.6)
             )
             .shadow(
                 color: isSelected ? tint.opacity(0.38) : .clear,

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.32", build: 785, date: "2026/07/30", notes: [
+            "【美化】主畫面頂部子功能列選中膠囊漸層收尾（MainTabView.subFeaturePill）：子功能列（收支/理財/人生分頁下方的橫向捲動膠囊）選中狀態原本是扁平純色 tint 底，是同一條列裡唯一還沒升級的一環——職涯／家庭分組外框（careerGroupedPills／familyGroupedPills）與正上方底部導覽列選中指示器（tabItemLabel）都早已是漸層＋深色模式加強不透明度規格。改為 LinearGradient（tint→tint 78% 透明度）＋頂部玻璃光澤覆層，外框細邊框選中時同步改為白色半透明，對齊 v25.09 FloatingActionButtonView 主 FAB「漸層＋glass shine＋白色細邊框」三件式規格，讓子功能列與全 App 其餘選中膠囊視覺一致。純視覺層調整，isSelected 判斷、分頁切換、鎖定功能導頁等既有邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.31", build: 784, date: "2026/07/30", notes: [
             "【美化】家人紀錄／相簿編輯表單 Section header 補齊（FamilyMembersResumeView.FamilyEventEditor／FamilyAlbumPhotoEditor）：新增/編輯紀錄與新增/編輯照片兩個 sheet 共 5 個 Section（基本資訊 ×2／內容／照片／備註）原本是本檔案唯二仍在用系統預設純文字 Section(\"...\") 標頭的地方，與同檔案 FamilyMembersResumeView.sectionHeader／FamilyMemberDetailView.sectionHeaderWithAdd 早已升級的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」規格脫節，也是全 App「表單 Section header 補齊」系列（BusinessCardEditor v25.24／OrgPersonEditor v25.22／EInvoiceSetupView v25.21／ChildDetailView v25.01）尚未覆蓋到的最後兩個編輯 sheet。新增共用 familyEditorSectionHeader(_:icon:color:)，依內容給主題色（基本資訊＝indigo／內容／備註＝secondary／照片＝teal），刪除紀錄／刪除此筆兩個 Section 維持無標頭，對齊全 App 編輯表單慣例。純視覺層調整，欄位資料綁定、save()／deleteRecord() 等既有商業邏輯完全未變動。"
         ]),
