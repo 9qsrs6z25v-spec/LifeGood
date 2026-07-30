@@ -41,6 +41,14 @@ import MapKit
 //  13. itemRow 日期膠囊補 stroke border：購入日期 green + 售出日期 red 膠囊各補
 //      .overlay(Capsule().stroke(color.opacity(0.22), lineWidth:0.6))，
 //      對齊 CareerView v2 / OverviewView.recentRow v3 日期膠囊細邊框規格。
+// [2026-07 v4] 大字自適應補齊：
+//  14. summaryHeader 頂部「不動產概況」40pt 總物件數大字原本沒有 lineLimit／
+//      minimumScaleFactor 防截斷保護，是本卡片唯一沒有這道防護的大字（同卡片
+//      heroKpiCell 的 KPI 數字早已於 v2 補上 minimumScaleFactor(0.72)）。補上
+//      .lineLimit(1) + .minimumScaleFactor(0.6)，對齊 AdminConsoleView v25.19／
+//      ChildrenResumeView v25.27 同類「英雄卡總數大字」防截斷修法。純視覺層調整，
+//      不動產筆數統計、持有中／已售出分類等既有資料邏輯完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct LifeRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -158,6 +166,8 @@ struct LifeRealEstateView: View {
                     Text("\(financeStore.realEstates.count)")
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
                     Text("筆不動產紀錄")
                         .font(.caption2.weight(.medium))

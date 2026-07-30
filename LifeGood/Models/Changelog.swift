@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.28", build: 781, date: "2026/07/30", notes: [
+            "【美化】不動產總覽頁英雄卡總數大字自適應收尾（LifeRealEstateView）：summaryHeader 頂部「不動產概況」40pt 總物件數大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是本卡片唯一沒有這道防護的大字——同卡片 heroKpiCell 的 KPI 數字（購入／持有中／已售出）早已於 v2 補上 minimumScaleFactor(0.72)；比照 AdminConsoleView v25.19 為「目前人數」大字、ChildrenResumeView v25.27 為「兒女總覽」大字補齊的同一規格，加上 .lineLimit(1) + .minimumScaleFactor(0.6)，讓卡片內大字防截斷規格全數收斂一致，同時維持在可辨識最小字級以上。純視覺層調整，不動產筆數統計、持有中／已售出分類等既有資料邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.27", build: 780, date: "2026/07/30", notes: [
             "【美化】兒女履歷頁英雄卡總數大字自適應收尾（ChildrenResumeView）：heroStatsCard 頂部「兒女總覽」42pt 總數大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是本卡片唯一沒有這道防護的大字——同卡片 heroKpiCell 的 KPI 數字（兒子／女兒／生涯紀錄）與 childCard 的角色／年齡膠囊皆早已補上；比照 AdminConsoleView v25.19 為「目前人數」大字補齊的同一規格，加上 .lineLimit(1) + .minimumScaleFactor(0.6)，讓卡片內大字防截斷規格全數收斂一致，同時維持在可辨識最小字級以上。純視覺層調整，兒女總數統計、性別分類等既有資料邏輯完全未變動。"
         ]),
