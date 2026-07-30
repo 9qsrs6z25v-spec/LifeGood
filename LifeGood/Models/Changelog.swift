@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.30", build: 783, date: "2026/07/30", notes: [
+            "【美化】首頁本月收支英雄卡「收支餘額」大字自適應收尾（OverviewView）：monthlyBalanceCard 頂部「收支餘額」大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同卡片三個金額數字中最寬的一個（多了正負號，且金額本身也最大）——v4 已為同卡「本月收入」／「本月支出」兩個子欄位補上 minimumScaleFactor(0.72)，這裡當時被漏掉。比照近期 LifeOverviewView v25.29／LifeRealEstateView v25.28／ChildrenResumeView v25.27 同一輪「英雄卡大字自適應收尾」規格，加上 .lineLimit(1) + .minimumScaleFactor(0.6)，讓大額（含負數）結餘在小螢幕上不會被裁切，同時維持在可辨識最小字級以上。純視覺層調整，balance／isPositive 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.29", build: 782, date: "2026/07/30", notes: [
             "【美化】人生總覽頁統計卡大字自適應收尾（LifeOverviewView）：statsCard 三格 statBadge（總里程碑／本年新增／分類數）的 22pt 數字大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是本頁唯一沒有這道防護的大字——同頁 categoryBreakdown 筆數．佔比膠囊、milestoneTimeline 計數膠囊皆為短字串無此風險，但里程碑累積多年後總數可能達 3～4 位數，擠壓固定寬度欄位。比照 ChildrenResumeView v25.27／LifeRealEstateView v25.28 為卡片大字補齊的同一規格，加上 .lineLimit(1) + .minimumScaleFactor(0.6)，讓數字在資料量成長時自動縮字、不會被裁切，同時維持在可辨識最小字級以上。純視覺層調整，里程碑統計計算等既有商業邏輯完全未變動。"
         ]),

@@ -39,6 +39,13 @@ import SwiftUI
 //   9. recentRow 分類 Capsule 膠囊：補入 overlay Capsule stroke 細邊框（accent.opacity(0.22) 0.6pt），
 //      對齊 ExpenseRow / incomeRow category Capsule 膠囊設計規格，
 //      消除最近交易行分類標籤無邊框、其他列表行有邊框的視覺不均衡。
+// [2026-07 v5] 承接 v4 留下的漏網之魚：monthlyBalanceCard「收支餘額」大字補入
+//   lineLimit(1) + minimumScaleFactor(0.6)。v4 已補齊同卡「本月收入」/「本月支出」兩個子
+//   欄位的防截斷規格，但這裡是三個數字中最寬的一個（多了 "+"／"-" 符號，且金額本身也最大），
+//   當時被漏掉；比照 LifeOverviewView／LifeRealEstateView／ChildrenResumeView 近期同一輪
+//   「英雄卡大字自適應收尾」規格補上，避免大額（含負數）結餘在小螢幕上被截斷。
+//   純視覺層調整，balance／isPositive 等既有商業邏輯完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct OverviewView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -332,10 +339,15 @@ struct OverviewView: View {
                         .foregroundStyle(.white.opacity(0.45))
                 }
                 Spacer()
+                // [v5] 補入 minimumScaleFactor + lineLimit，收支餘額是本卡三個數字中最寬的一個
+                // （"+"／"-" 符號 + 金額），v4 只補了收入／支出兩個子欄位，漏了這裡，
+                // 大額結餘（含負數）在小螢幕上原本沒有防截斷保護。
                 Text((isPositive ? "+" : "") + smartCurrency(balance))
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
                     .contentTransition(.numericText())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .shadow(
                         color: isPositive ? .clear : Color.red.opacity(0.45),
                         radius: 8, x: 0, y: 2
