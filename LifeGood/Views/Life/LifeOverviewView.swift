@@ -23,6 +23,14 @@ import SwiftUI
 //  11. milestoneTimelineSection 日期文字：從純 .caption2 .tertiary 升級為小型 Capsule
 //      徽章（calendar 圖示 + tertiarySystemFill 底色），對齊 OverviewView.recentRow
 //      日期 Capsule 設計語言，強化行內視覺層次。
+// [2026-07 v4] 補齊 statBadge 大字防截斷缺口：
+//  12. statBadge 22pt 數字大字（總里程碑／本年新增／分類數）原本沒有 lineLimit/
+//      minimumScaleFactor，是本頁唯一沒有防截斷保護的大字（同頁 categoryBreakdown 筆數
+//      膠囊、milestoneTimeline 計數膠囊皆為短字串無此風險，但里程碑累積多年後總數可能
+//      達 3～4 位數，擠壓固定寬度欄位）。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，
+//      對齊 ChildrenResumeView.heroKpiCell / AdminConsoleView「目前人數」既有規格。
+//      純視覺層調整，milestone 統計計算等既有商業邏輯完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct LifeOverviewView: View {
     @EnvironmentObject var store: LifeStore
@@ -160,6 +168,8 @@ struct LifeOverviewView: View {
             Text("\(count)")
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .contentTransition(.numericText())
             Text(title)
                 .font(.caption2)
