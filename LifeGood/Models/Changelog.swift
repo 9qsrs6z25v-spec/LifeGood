@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.44", build: 797, date: "2026/07/31", notes: [
+            "【美化】存款/提款/轉帳/沖正新增/編輯表單 Section header 補齊（LifeFinanceView.DepositEditorSheet）：「轉帳資訊」「沖正」「幣別 存款‧提款」共 3 個 Section 原本是系統預設純文字標頭，是全 App「表單 Section header 補齊」系列（StockDetailView.stockEditorSectionHeader／RealEstateDetailView.realEstateEditorSectionHeader／SubordinateView.subordinateEditorSectionHeader 等既有做法）尚未覆蓋到的一處，與同檔案主畫面 summaryHeader／milestoneRow 早已升級的漸層視覺規格脫節。新增共用 depositEditorSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題），主題色依語意分配（轉帳資訊＝blue，呼應轉入帳戶選單／沖正＝orange，呼應差額正負著色／存款‧提款＝green，呼應本表單既有「新增」按鈕綠色），避免另外發明新配色。純標題視覺升級，日期／金額欄位資料綁定、save()／saveTransfer()／saveAdjust()／delete() 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.43", build: 796, date: "2026/07/31", notes: [
             "【美化】部屬「新增/編輯」表單 Section header 補齊（SubordinateView.AddSubordinateView）：本表單是全檔案唯一仍在用系統預設純文字 Section 標頭（Section(\"基本資訊\")／Section(\"備註\") 共 2 處）的地方，與同檔案列表 activeSubordinatesSectionHeader、全 App 其餘新增/編輯表單（OrganizationView.orgPersonEditorSectionHeader／ChildDetailView.childEditorSectionHeader）早已升級的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」規格脫節。新增共用 subordinateEditorSectionHeader(_:icon:color:)，基本資訊＝indigo（沿用全 App「基本資訊」慣例色）／備註＝secondary，避免另外發明新配色。純標題視覺升級，姓名／入職日期／職位／部門／廠區／備註欄位資料綁定、canSave()／save() 等既有商業邏輯完全未變動。"
         ]),

@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - 美化紀錄（LifeFinanceView · v3 · 2026-06-26）
+// MARK: - 美化紀錄（LifeFinanceView · v7 · 2026-07-31）
 // [2026-06 v1] 本次美化方向：
 //   1. summaryHeader → 升級為藍色漸層英雄卡片（對齊 SavingsInsuranceView summaryHeader 規格）：
 //      銀行總餘額台幣等值大字 + 計數膠囊 + 餘額正負色 + 散景裝飾圓；
@@ -61,6 +61,14 @@ import SwiftUI
 //      處理萬/億量級；改為「-」+ ntdWanString（對齊 StockDetailView 損益金額 "(pl >= 0 ? "+" :
 //      "") + fmt(pl)" 的正負號拼接慣例）。以上四處純顯示層調整，額度／年費／消費金額等既有
 //      試算與資料綁定邏輯未變動。
+// [2026-07 v7] DepositEditorSheet 新增/編輯表單 Section header 補齊：
+//  18. 「轉帳資訊」「沖正」「幣別 存款‧提款」共 3 個 Section 原本是系統預設純文字標頭，
+//      是全 App「表單 Section header 補齊」系列（StockDetailView.stockEditorSectionHeader／
+//      RealEstateDetailView.realEstateEditorSectionHeader 等既有做法）尚未覆蓋到的一處。新增
+//      depositEditorSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題），
+//      主題色依語意分配（轉帳資訊＝blue／沖正＝orange，呼應差額正負著色／存款‧提款＝green，
+//      呼應本表單既有「新增」按鈕綠色）。純標題視覺升級，save()／saveTransfer()／saveAdjust()
+//      等既有商業邏輯完全未變動。
 
 // MARK: - 固定支出週期展開（共用）
 
@@ -2301,6 +2309,29 @@ struct DepositEditorSheet: View {
         v.ntdWanString
     }
 
+    // 【美化方向】存款/提款/轉帳/沖正編輯 sheet Section header：轉帳資訊／沖正／
+    // 「幣別 存款‧提款」三個 Section 原本是系統預設純文字標頭，是全 App「表單 Section header
+    // 補齊」系列（StockDetailView.stockEditorSectionHeader／RealEstateDetailView.
+    // realEstateEditorSectionHeader 等既有做法）尚未覆蓋到的一處。新增檔案層級共用
+    // depositEditorSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題），
+    // 主題色依語意分配（轉帳資訊＝blue，呼應轉入帳戶／沖正＝orange，呼應差額正負著色／
+    // 存款‧提款＝green，呼應本表單既有「新增」按鈕綠色）。純標題視覺升級，欄位資料綁定、
+    // save()／saveTransfer()／saveAdjust() 等既有商業邏輯完全未變動。
+    private func depositEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .textCase(nil)
+    }
+
     var body: some View {
         let expensesById = Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let incomesById = Dictionary(expenseStore.incomes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -2323,7 +2354,7 @@ struct DepositEditorSheet: View {
                 }
 
                 if txType == .transfer {
-                    Section("轉帳資訊") {
+                    Section {
                         Picker("轉入帳戶", selection: $transferTargetId) {
                             Text("請選擇").tag(nil as UUID?)
                             ForEach(bankMilestones) { ms in
@@ -2337,9 +2368,11 @@ struct DepositEditorSheet: View {
                             Text(currency).foregroundStyle(.secondary)
                             TextField("金額", text: $amountText).keyboardType(.decimalPad)
                         }
+                    } header: {
+                        depositEditorSectionHeader("轉帳資訊", icon: "arrow.left.arrow.right", color: .blue)
                     }
                 } else if txType == .adjust {
-                    Section("沖正") {
+                    Section {
                         HStack {
                             Text("目前總額").foregroundStyle(.secondary)
                             Spacer()
@@ -2361,14 +2394,18 @@ struct DepositEditorSheet: View {
                             }
                         }
                         TextField("備註（如：對帳調整）", text: $adjustNote, axis: .vertical).lineLimit(2...3)
+                    } header: {
+                        depositEditorSectionHeader("沖正", icon: "arrow.triangle.2.circlepath", color: .orange)
                     }
                 } else {
-                    Section("\(currency) \(txType.rawValue)") {
+                    Section {
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                         HStack {
                             Text(currency).foregroundStyle(.secondary)
                             TextField("金額", text: $amountText).keyboardType(.decimalPad)
                         }
+                    } header: {
+                        depositEditorSectionHeader("\(currency) \(txType.rawValue)", icon: "banknote.fill", color: .green)
                     }
                 }
 
