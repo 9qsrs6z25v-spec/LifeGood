@@ -58,6 +58,23 @@ import SwiftUI
 //      邏輯完全未變動。
 //      （下次美化本檔案時：RealEstateDetailView 的閃卡估值大字仍是同款手刻 fmtWan，
 //      可比照本次做法一併統一，是可接續尋找之處）
+// [2026-07 v5] 補齊 StockTransactionEditor／StockDividendEditor（新增／編輯交易／股利 sheet）：
+//  23. 兩個獨立編輯 sheet 共 6 個 Section（基本×2／張數‧單價／配股股數／配息計算／備註／
+//      入帳‧連結銀行）先前全部是系統預設純文字標頭，是本檔案主畫面 sectionHeader 早已升級的
+//      Capsule 側條規格尚未覆蓋到的兩個編輯 sheet，也是全 App「表單 Section header 補齊」系列
+//      （RealEstateDetailView.realEstateEditorSectionHeader／ResumeView.AddMilestoneView 等）
+//      尚未覆蓋到的畫面。新增檔案層級共用 stockEditorSectionHeader(_:icon:color:)，
+//      主題色依語意分配（基本＝indigo／張數‧單價＝orange，呼應主畫面 sectionHeader 橙色主題／
+//      配股股數＝teal／配息計算＝pink，呼應總配息數字既有 .pink 著色／備註＝secondary／
+//      入帳‧連結銀行＝blue，呼應既有 building.columns.fill 圖示色）；刪除紀錄 Section
+//      （原本就無標頭）維持不變。
+//  24. 兩處「總金額／總配息」預覽數字原本各自手刻 formatNT／formatCash（NumberFormatter
+//      currencyStyle），僅顯示到個位數 NT$ 整數，金額大時（萬元以上）與同檔案 infoRow 損益
+//      ／flashCard 市值早已統一的 Double.ntdWanString 萬／億量級格式不一致；改為直接呼叫
+//      .ntdWanString，並移除兩個已無呼叫端的 formatNT／_ntFmt／formatCash／_cashFmt 死碼。
+//      純視覺層調整，交易／股利存檔、刪除、銀行同步等既有商業邏輯完全未變動。
+//      （下次美化本檔案時：兩個編輯 sheet 已對齊全檔案 section header／金額規格，
+//      可轉往其他仍留有待辦的畫面）
 
 struct StockDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -1000,6 +1017,25 @@ struct StockDetailView: View {
 
 // MARK: - 交易紀錄編輯器
 
+// MARK: - 交易 / 股利編輯 sheet 共用 Section header
+// 【美化 v5】StockTransactionEditor／StockDividendEditor 共用，4pt 漸層 Capsule 側條
+// + 圖示 + 粗體標題，對齊全 App「表單 Section header 補齊」系列規格
+// （RealEstateDetailView.realEstateEditorSectionHeader／ResumeView.milestoneSectionHeader 等既有做法）。
+fileprivate func stockEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 8) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 16)
+        Image(systemName: icon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+    .textCase(nil)
+}
+
 struct StockTransactionEditor: View {
     @EnvironmentObject var store: FinanceStore
     @EnvironmentObject var lifeStore: LifeStore
@@ -1037,13 +1073,13 @@ struct StockTransactionEditor: View {
                     }
                     .pickerStyle(.segmented)
                 } header: {
-                    Text("基本")
+                    stockEditorSectionHeader("基本", icon: "calendar", color: .indigo)
                 } footer: {
                     Text("台股交割：成交日 T+2 個營業日。實際扣款／入帳日：\(formatTradeDate(StockTransaction.taiwanSettlementDate(from: date)))")
                         .font(.caption2)
                 }
 
-                Section("張數 / 單價") {
+                Section {
                     HStack {
                         TextField("張數", text: $lotsText)
                             .keyboardType(.decimalPad)
@@ -1066,11 +1102,13 @@ struct StockTransactionEditor: View {
                         HStack {
                             Text("總金額").font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                            Text(formatNT(amountPreview))
+                            Text(amountPreview.ntdWanString)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(kind == .buy ? .red : .green)
                         }
                     }
+                } header: {
+                    stockEditorSectionHeader("張數 / 單價", icon: "chart.bar.fill", color: .orange)
                 }
 
                 if isEditing {
@@ -1186,14 +1224,6 @@ struct StockTransactionEditor: View {
         return String(format: "%g", v)
     }
 
-    private static let _ntFmt: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0; return f
-    }()
-    private func formatNT(_ v: Double) -> String {
-        Self._ntFmt.string(from: NSNumber(value: v)) ?? "NT$0"
-    }
-
     private static let _tradeDateFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/MM/dd"; return f
     }()
@@ -1252,14 +1282,14 @@ struct StockDividendEditor: View {
                     }
                     .pickerStyle(.segmented)
                 } header: {
-                    Text("基本")
+                    stockEditorSectionHeader("基本", icon: "calendar", color: .indigo)
                 } footer: {
                     Text(kindFooterText)
                         .font(.caption2)
                 }
 
                 if kind == .stock {
-                    Section("配股股數") {
+                    Section {
                         HStack {
                             TextField("發放張數", text: $lotsText)
                                 .keyboardType(.decimalPad)
@@ -1273,9 +1303,11 @@ struct StockDividendEditor: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
+                    } header: {
+                        stockEditorSectionHeader("配股股數", icon: "arrow.triangle.2.circlepath.circle.fill", color: .teal)
                     }
                 } else {
-                    Section("配息計算") {
+                    Section {
                         HStack {
                             Text("NT$").foregroundStyle(.secondary)
                             TextField("每股配息", text: $perShareText)
@@ -1290,16 +1322,20 @@ struct StockDividendEditor: View {
                             HStack {
                                 Text("總配息").font(.caption).foregroundStyle(.secondary)
                                 Spacer()
-                                Text(formatCash(cashTotalPreview))
+                                Text(cashTotalPreview.ntdWanString)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.pink)
                             }
                         }
+                    } header: {
+                        stockEditorSectionHeader("配息計算", icon: "dollarsign.circle.fill", color: .pink)
                     }
                 }
 
-                Section("備註") {
+                Section {
                     TextField("選填", text: $note, axis: .vertical).lineLimit(2...4)
+                } header: {
+                    stockEditorSectionHeader("備註", icon: "note.text", color: .secondary)
                 }
 
                 if let bankInfo = bankInfoText {
@@ -1312,7 +1348,7 @@ struct StockDividendEditor: View {
                                 .foregroundStyle(.secondary)
                         }
                     } header: {
-                        Text(kind == .cash ? "入帳銀行" : "連結銀行")
+                        stockEditorSectionHeader(kind == .cash ? "入帳銀行" : "連結銀行", icon: "building.columns.fill", color: .blue)
                     } footer: {
                         if kind == .cash {
                             Text("配息會自動建立一筆「投資」類收入並寫入此銀行帳戶。")
@@ -1410,14 +1446,6 @@ struct StockDividendEditor: View {
                 sharesAtEventText = "\(Int(currentHeldShares))"
             }
         }
-    }
-
-    private static let _cashFmt: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0; return f
-    }()
-    private func formatCash(_ v: Double) -> String {
-        Self._cashFmt.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     // MARK: - Save / Delete

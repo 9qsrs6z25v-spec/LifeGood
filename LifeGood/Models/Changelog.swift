@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.41", build: 794, date: "2026/07/31", notes: [
+            "【美化】股票「新增/編輯交易／股利」表單 Section header 補齊 + 金額量級單位一致性（StockDetailView.StockTransactionEditor／StockDividendEditor）：兩個獨立編輯 sheet 共 6 個 Section（基本×2／張數‧單價／配股股數／配息計算／備註／入帳‧連結銀行）原本全是系統預設純文字標頭，是本檔案主畫面 sectionHeader 早已升級、也是全 App「表單 Section header 補齊」系列（RealEstateDetailView.ElevatorMaintenanceEditor／ResumeView.AddMilestoneView 等）尚未覆蓋到的兩個編輯 sheet。新增共用 stockEditorSectionHeader(_:icon:color:)，主題色依語意分配（基本＝indigo／張數‧單價＝orange，呼應主畫面 sectionHeader 橙色主題／配股股數＝teal／配息計算＝pink，呼應總配息數字既有 .pink 著色／備註＝secondary／入帳‧連結銀行＝blue）。同時把「總金額」「總配息」預覽數字原本手刻的 formatNT／formatCash（NumberFormatter，僅顯示個位數 NT$ 整數）改為與同檔案 infoRow／flashCard 一致的 Double.ntdWanString（萬／億量級），並移除兩個已無呼叫端的格式化死碼。純視覺層調整，交易／股利存檔、刪除、銀行同步等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.40", build: 793, date: "2026/07/31", notes: [
             "【美化】不動產物件「電梯保養／水電繳費」新增/編輯表單 Section header 補齊（RealEstateDetailView.ElevatorMaintenanceEditor／UtilityPaymentEditor）：兩個獨立編輯 sheet 共 4 個 Section（保養記錄／基本資訊／收據照片／備註）原本是系統預設純文字標頭，是本檔案唯二仍未升級、也是全 App「表單 Section header 補齊」系列（ResumeView.AddMilestoneView／BusinessCardEditor／FamilyMembersResumeView／OrgPersonEditor／EInvoiceSetupView）尚未覆蓋到的兩個編輯 sheet，與同檔案主畫面 sectionHeader／collapsibleSection 早已升級的 Capsule 側條標頭風格脫節。新增共用 realEstateEditorSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題），主題色沿用既有列規格（保養記錄＝teal，比照 elevatorContent 列 wrench 圖示色；基本資訊＝indigo／收據照片＝teal／備註＝secondary，比照全 App 慣例配色），刪除紀錄／扣款目標兩個無標頭 Section 維持不變。純視覺層調整，欄位資料綁定、save()／deleteRecord() 等既有商業邏輯完全未變動。"
         ]),
