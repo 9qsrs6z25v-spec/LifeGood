@@ -101,6 +101,18 @@ import ImageIO
 //      二段供大字沿用既有字級與 contentTransition 動畫設計，移除已無呼叫端的私有
 //      fmtWan 死碼；作法對齊 VehicleDetailView.splitWan 既有規格。純顯示層調整，估值、
 //      購入價、增值率等既有試算邏輯完全未變動。
+//
+// [2026-07 v9] 電梯保養／水電繳費「新增／編輯」表單 Section header 補齊：
+//  24. ElevatorMaintenanceEditor（保養記錄）與 UtilityPaymentEditor（基本資訊／收據照片／
+//      備註）共 4 處，是本檔案唯二仍在用系統預設純文字 Section("...") 標頭的獨立編輯
+//      sheet，與同檔案 RealEstateDetailView.sectionHeader／collapsibleSection 早已升級的
+//      Capsule 側條規格脫節，也是全 App「表單 Section header 補齊」系列（ResumeView.
+//      AddMilestoneView／BusinessCardEditor／FamilyMembersResumeView／OrgPersonEditor 等）
+//      尚未覆蓋到的兩個編輯 sheet。新增檔案層級共用 realEstateEditorSectionHeader(_:icon:
+//      color:)，主題色沿用既有列規格（保養記錄＝teal，對齊 elevatorContent 列圖示色；
+//      基本資訊＝indigo／收據照片＝teal／備註＝secondary，對齊全 App 慣例配色），刪除
+//      Section／扣款目標 Section（原本就無標頭）維持不變。純視覺層調整，欄位資料綁定、
+//      save()／deleteRecord() 等既有商業邏輯完全未變動。
 //      （下次美化本檔案時：可全檔案複查是否還有其他手刻金額格式殘留待統一）
 
 struct RealEstateDetailView: View {
@@ -2659,6 +2671,24 @@ fileprivate struct SwipeableRow<Content: View>: View {
     }
 }
 
+// MARK: - 編輯 sheet 共用 Section header
+// 【美化 v9】ElevatorMaintenanceEditor／UtilityPaymentEditor 共用，4pt 漸層 Capsule 側條
+// + 圖示 + 粗體標題，對齊全 App「表單 Section header 補齊」系列規格
+// （ResumeView.AddMilestoneView／BusinessCardEditor／FamilyMembersResumeView 等既有做法）。
+fileprivate func realEstateEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 8) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.45)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 14)
+        Image(systemName: icon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
+
 // MARK: - 電梯保養編輯
 
 struct ElevatorMaintenanceEditor: View {
@@ -2684,7 +2714,7 @@ struct ElevatorMaintenanceEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("保養記錄") {
+                Section {
                     DatePicker("保養日期", selection: $date, displayedComponents: .date)
 
                     PhotosPicker(selection: $photoItem, matching: .images) {
@@ -2705,6 +2735,8 @@ struct ElevatorMaintenanceEditor: View {
                             Label("移除照片", systemImage: "xmark.circle")
                         }
                     }
+                } header: {
+                    realEstateEditorSectionHeader("保養記錄", icon: "wrench.and.screwdriver.fill", color: .teal)
                 }
 
                 if editing != nil {
@@ -2872,7 +2904,7 @@ struct UtilityPaymentEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     Picker("類型", selection: $type) {
                         ForEach(UtilityType.allCases) { t in
                             Label(t.rawValue, systemImage: t.icon).tag(t)
@@ -2883,6 +2915,8 @@ struct UtilityPaymentEditor: View {
                         Text("NT$").foregroundStyle(.secondary)
                         TextField("金額", text: $amountText).keyboardType(.decimalPad)
                     }
+                } header: {
+                    realEstateEditorSectionHeader("基本資訊", icon: "list.bullet.rectangle.fill", color: .indigo)
                 }
 
                 if hasPaymentTargets {
@@ -2927,7 +2961,7 @@ struct UtilityPaymentEditor: View {
                     }
                 }
 
-                Section("收據照片") {
+                Section {
                     MultiPhotoGallery(
                         fileNames: $photoFileNames,
                         urlFor: { UtilityPayment.photosDirectory.appendingPathComponent($0) },
@@ -2935,10 +2969,14 @@ struct UtilityPaymentEditor: View {
                         onDeleteFile: { UtilityPayment.deletePhoto($0) },
                         title: "收據照片"
                     )
+                } header: {
+                    realEstateEditorSectionHeader("收據照片", icon: "photo.on.rectangle.angled", color: .teal)
                 }
 
-                Section("備註") {
+                Section {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                } header: {
+                    realEstateEditorSectionHeader("備註", icon: "note.text", color: .secondary)
                 }
 
                 if editing != nil {

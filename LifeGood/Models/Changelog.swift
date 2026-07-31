@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.40", build: 793, date: "2026/07/31", notes: [
+            "【美化】不動產物件「電梯保養／水電繳費」新增/編輯表單 Section header 補齊（RealEstateDetailView.ElevatorMaintenanceEditor／UtilityPaymentEditor）：兩個獨立編輯 sheet 共 4 個 Section（保養記錄／基本資訊／收據照片／備註）原本是系統預設純文字標頭，是本檔案唯二仍未升級、也是全 App「表單 Section header 補齊」系列（ResumeView.AddMilestoneView／BusinessCardEditor／FamilyMembersResumeView／OrgPersonEditor／EInvoiceSetupView）尚未覆蓋到的兩個編輯 sheet，與同檔案主畫面 sectionHeader／collapsibleSection 早已升級的 Capsule 側條標頭風格脫節。新增共用 realEstateEditorSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題），主題色沿用既有列規格（保養記錄＝teal，比照 elevatorContent 列 wrench 圖示色；基本資訊＝indigo／收據照片＝teal／備註＝secondary，比照全 App 慣例配色），刪除紀錄／扣款目標兩個無標頭 Section 維持不變。純視覺層調整，欄位資料綁定、save()／deleteRecord() 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.39", build: 792, date: "2026/07/31", notes: [
             "【美化】人生履歷「新增/編輯紀錄」表單 Section header 補齊（ResumeView.AddMilestoneView）：基本資訊／備註／調薪資訊／心境與規劃／銀行／信用卡／電子票證／會員／證券／保險共 16 個 Section 先前全部是預設純文字標頭，是全 App「表單 Section header 補齊」系列（BusinessCardEditor／FamilyMembersResumeView／OrgPersonEditor／EInvoiceSetupView／ChildDetailView）尚未覆蓋、且欄位數量最多的一個表單，落後於均值。新增共用 milestoneSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題），主題色與圖示直接沿用既有分類 enum（銀行／信用卡／證券／保險比照 FinanceSubCategory.icon 與 LifeFinanceView 既有配色；調薪／心境與規劃比照 CareerView.subColor 的 salaryAdjust／resign 配色），備註一律 secondary，避免另外發明新配色。純標題視覺升級，欄位資料綁定、canSave()／save() 等既有商業邏輯完全未變動。"
         ]),
