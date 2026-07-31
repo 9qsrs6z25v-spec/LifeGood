@@ -31,6 +31,15 @@ import SwiftUI
 //      accent 藍）+ 說明文字，對齊 ResumeView.categoryEmptyState 規格（次要篩選態僅用
 //      輕量卡片，不做全頁大型脈衝動畫，該規格保留給頁面首次無資料的 emptyStateView）。
 //      純視覺層調整，部門篩選邏輯、部屬資料來源等既有商業邏輯完全未變動。
+// [2026-07 v4] 補齊「新增/編輯部屬」表單 Section header：
+//   6. AddSubordinateView 是本檔案唯一仍在用系統預設純文字 Section 標頭
+//      （Section("基本資訊")／Section("備註") 共 2 處）的地方，與同檔案列表
+//      activeSubordinatesSectionHeader、全 App 其餘新增/編輯表單（OrganizationView.
+//      orgPersonEditorSectionHeader／ChildDetailView.childEditorSectionHeader）早已升級
+//      的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」規格脫節。新增共用
+//      subordinateEditorSectionHeader(_:icon:color:)，基本資訊＝indigo（沿用全 App
+//      「基本資訊」慣例色）／備註＝secondary。純視覺層調整，欄位資料綁定、
+//      canSave()／save() 等既有商業邏輯完全未變動。
 //      （下次美化本檔案時：可留意 subordinateRow／summaryStatsCard 是否仍有其他可與
 //      全 App 均值對齊之處，或轉往其他仍留有待辦的畫面）
 
@@ -868,6 +877,23 @@ struct SubordinateView: View {
 
 // MARK: - 新增/編輯部屬
 
+// [2026-07 v4] Section header：對齊 OrganizationView.orgPersonEditorSectionHeader／
+// ChildDetailView.childEditorSectionHeader 既有共用寫法（4pt 漸層 Capsule 側條 + 圖示 +
+// .subheadline.semibold 標題）。
+private func subordinateEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
+
 struct AddSubordinateView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
@@ -892,7 +918,7 @@ struct AddSubordinateView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     TextField("姓名", text: $name)
                     Toggle("填入入職日期", isOn: $hasJoinDate)
                     if hasJoinDate {
@@ -901,9 +927,13 @@ struct AddSubordinateView: View {
                     gradeTitlePicker
                     departmentPicker
                     plantAreaField
+                } header: {
+                    subordinateEditorSectionHeader("基本資訊", icon: "person.fill", color: .indigo)
                 }
-                Section("備註") {
+                Section {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                } header: {
+                    subordinateEditorSectionHeader("備註", icon: "text.bubble.fill", color: .secondary)
                 }
             }
             .navigationTitle(editing != nil ? "編輯部屬" : "新增部屬")

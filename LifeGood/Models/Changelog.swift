@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.43", build: 796, date: "2026/07/31", notes: [
+            "【美化】部屬「新增/編輯」表單 Section header 補齊（SubordinateView.AddSubordinateView）：本表單是全檔案唯一仍在用系統預設純文字 Section 標頭（Section(\"基本資訊\")／Section(\"備註\") 共 2 處）的地方，與同檔案列表 activeSubordinatesSectionHeader、全 App 其餘新增/編輯表單（OrganizationView.orgPersonEditorSectionHeader／ChildDetailView.childEditorSectionHeader）早已升級的「4pt 漸層 Capsule 側條 + 圖示 + 粗體標題」規格脫節。新增共用 subordinateEditorSectionHeader(_:icon:color:)，基本資訊＝indigo（沿用全 App「基本資訊」慣例色）／備註＝secondary，避免另外發明新配色。純標題視覺升級，姓名／入職日期／職位／部門／廠區／備註欄位資料綁定、canSave()／save() 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.42", build: 795, date: "2026/07/31", notes: [
             "【美化】股票新增/編輯「扣款帳戶」選單餘額金額量級單位一致性（AddStockView.fmtBalance）：銀行/證券帳戶餘額標籤原本自製 NumberFormatter 手刻「NT$ X萬」（NT$ 後多一個空白、無條件捨去小數、未處理億級單位），是 AddExpenseView.formatBankBalance／LifeFinanceView.fmtBal 已修復的同一支金額格式中，全 App 僅剩尚未跟進的一處，餘額達千萬以上時會顯示成不合理的鉅額「萬」數字。改呼叫全 App 共用的 Double.ntdWanString，並移除已無呼叫端的 balanceFormatter 死碼。純視覺層調整，帳戶餘額計算、扣款帳戶選取等既有商業邏輯完全未變動。"
         ]),
