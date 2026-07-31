@@ -271,8 +271,8 @@ struct SubordinateEquipmentTimelineSection: View {
                                             equipmentName: name, text: pm.note, daysSincePM: nil))
             }
             for al in eq.alarms {
-                // 該設備在警報發生前最近的一次 PM
-                let prior = pmDates.last(where: { $0 <= al.date })
+                // 該設備在警報發生前最近的一次 PM（pmDates 已排序，二分搜尋取代線性掃描）
+                let prior = Self.lastDate(lessThanOrEqualTo: al.date, in: pmDates)
                 let days = prior.flatMap {
                     Calendar.current.dateComponents([.day], from: $0, to: al.date).day
                 }
@@ -281,6 +281,22 @@ struct SubordinateEquipmentTimelineSection: View {
             }
         }
         return result.sorted { $0.date > $1.date }
+    }
+
+    /// 在已遞增排序的 sortedDates 中，二分搜尋「不晚於 date」的最後一筆日期。
+    private static func lastDate(lessThanOrEqualTo date: Date, in sortedDates: [Date]) -> Date? {
+        var lo = 0, hi = sortedDates.count - 1
+        var result: Date? = nil
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if sortedDates[mid] <= date {
+                result = sortedDates[mid]
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return result
     }
 
     private static let dateTimeFmt: DateFormatter = {

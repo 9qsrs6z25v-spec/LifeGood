@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.36", build: 789, date: "2026/07/31", notes: [
+            "【靜態除錯 v25.36：修復部屬執掌設備「PM／警報時間軸」的 O(警報數×PM筆數) 線性掃描】SubordinateEquipmentTimelineSection.entries 為每一筆警報計算「發生前最近一次 PM」時，用 `pmDates.last(where: { $0 <= al.date })` 對該設備已排序的 pmDates 陣列逐一線性掃描——pmDates 明明已經 `.sorted()` 過，卻沒利用這個排序特性，是同一類「已排序資料卻仍線性掃描」問題（近兩輪 v25.26／v25.35 分別在部屬匯入合併與班表棋盤格修過），使該畫面重算成本隨單一設備的 PM／警報紀錄雙雙隨年資累積而變成 O(警報數 × PM筆數)。改為新增 lastDate(lessThanOrEqualTo:in:) 二分搜尋，對已排序的 pmDates 以 O(log n) 取代 O(n) 線性掃描，語意（取不晚於警報時間的最後一筆 PM 日期）與原本完全等價。純效能調整，時間軸顯示內容、天數計算、排序與其餘互動邏輯未變動。經全面複查 Models 全部檔案與 Views 其餘大型清單／地圖／時間軸畫面（CloudKitManager／CloudSyncManager 節流防抖、各 Store 強制解包與 retain cycle、GradeTitleView／StockView／AppleCalendarBridge／SubscriptionManager／RemoteAdmin 既有 [weak self] 與主執行緒防護），未發現其餘新問題。"
+        ]),
         ChangelogEntry(version: "25.35", build: 788, date: "2026/07/31", notes: [
             "【靜態除錯 v25.35】兩路並行複查 Models 全部檔案、Views 頂層檔案、Views/Life 與 Views/Finance 大型清單／棋盤格畫面（強制解包／Optional／型別錯誤／index 越界、retain cycle／競態條件、畫面閃爍、O(n²) 效能瓶頸），發現並修復一個真實問題：SubordinateRosterView（部屬班表棋盤格）的 shiftFor(_:_:) 與 leaveFor(_:_:) 逐格對該部屬「全部歷史」shifts／records 陣列做線性掃描，兩者只增不減、隨使用年資持續變長，使整張棋盤格的重算成本是 O(部屬數 × 顯示天數 × 該人歷史筆數)——多年累積下來，每次月份切換／部門篩選／甚至其他頁面編輯任何一位部屬觸發 LifeStore 的 objectWillChange 都會讓這張表整批重算，隨資料量增長會越來越卡頓。改為在 hScrollContent 進場時一次建立 buildShiftLookup()／buildLeaveLookup() 兩張「部屬 id → 日期 → 班別／請假別」查表（每人歷史只掃描一次），棋盤格逐格改為 O(1) 字典查詢；請假查表額外把展開範圍夾在目前顯示月份頭尾之間，避免舊資料 endDate 異常時展開出天文數字次數的迴圈。純效能調整，班別／請假顯示結果與原本逐格線性掃描完全等價，UI 與互動邏輯未變動。其餘複查範圍（CloudKitManager／CloudSyncManager 30 秒節流與 2 秒防抖、各 Store 的 reloadFromCloud key 交集守衛、Timer／NotificationCenter／completion closure 之 [weak self]、OrganizationView／MyCalendarView／TaxOverviewView 既有的一次性查表優化、SettingsView／AddRealEstateView 等）均確認正常，未發現新問題。"
         ]),
