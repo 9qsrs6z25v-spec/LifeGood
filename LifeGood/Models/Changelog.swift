@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.42", build: 795, date: "2026/07/31", notes: [
+            "【美化】股票新增/編輯「扣款帳戶」選單餘額金額量級單位一致性（AddStockView.fmtBalance）：銀行/證券帳戶餘額標籤原本自製 NumberFormatter 手刻「NT$ X萬」（NT$ 後多一個空白、無條件捨去小數、未處理億級單位），是 AddExpenseView.formatBankBalance／LifeFinanceView.fmtBal 已修復的同一支金額格式中，全 App 僅剩尚未跟進的一處，餘額達千萬以上時會顯示成不合理的鉅額「萬」數字。改呼叫全 App 共用的 Double.ntdWanString，並移除已無呼叫端的 balanceFormatter 死碼。純視覺層調整，帳戶餘額計算、扣款帳戶選取等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.41", build: 794, date: "2026/07/31", notes: [
             "【美化】股票「新增/編輯交易／股利」表單 Section header 補齊 + 金額量級單位一致性（StockDetailView.StockTransactionEditor／StockDividendEditor）：兩個獨立編輯 sheet 共 6 個 Section（基本×2／張數‧單價／配股股數／配息計算／備註／入帳‧連結銀行）原本全是系統預設純文字標頭，是本檔案主畫面 sectionHeader 早已升級、也是全 App「表單 Section header 補齊」系列（RealEstateDetailView.ElevatorMaintenanceEditor／ResumeView.AddMilestoneView 等）尚未覆蓋到的兩個編輯 sheet。新增共用 stockEditorSectionHeader(_:icon:color:)，主題色依語意分配（基本＝indigo／張數‧單價＝orange，呼應主畫面 sectionHeader 橙色主題／配股股數＝teal／配息計算＝pink，呼應總配息數字既有 .pink 著色／備註＝secondary／入帳‧連結銀行＝blue）。同時把「總金額」「總配息」預覽數字原本手刻的 formatNT／formatCash（NumberFormatter，僅顯示個位數 NT$ 整數）改為與同檔案 infoRow／flashCard 一致的 Double.ntdWanString（萬／億量級），並移除兩個已無呼叫端的格式化死碼。純視覺層調整，交易／股利存檔、刪除、銀行同步等既有商業邏輯完全未變動。"
         ]),

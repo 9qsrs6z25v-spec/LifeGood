@@ -24,6 +24,14 @@ import SwiftUI
 //      (橘色圓角橫幅 + 警告圖示)，對齊 showError 時已使用的 errorBanner 規格。
 //  12. calcKPICell 標籤圓點：7pt 純色小圓點 → 26pt LinearGradient 漸層填色圓 + stroke 描邊，
 //      對齊 IncomeView / FinanceOverviewView 圖示圓規格，讓試算欄位標籤更具層次。
+// [2026-07 v3] 金額量級單位一致性修復：
+//  13. fmtBalance（accountPicker「扣款帳戶」選單銀行/證券帳戶餘額標籤）原本手刻
+//      NumberFormatter + 條件式「NT$ X萬」，是 AddExpenseView.formatBankBalance／
+//      LifeFinanceView.fmtBal 已修復的同一支金額格式（先前兩處也是各自手刻，
+//      已改呼叫共用 Double.ntdWanString）中，全 App 僅剩尚未跟進的一處。改呼叫
+//      ntdWanString，移除已無呼叫端的 balanceFormatter 死碼。純視覺層調整，
+//      帳戶餘額計算、扣款帳戶選取等既有商業邏輯完全未變動。
+//      （下次美化本檔案時：可轉往其他仍留有待辦的畫面）
 
 // MARK: - 台股報價資料
 
@@ -486,18 +494,14 @@ struct AddStockView: View {
         return result
     }
 
-    private static let balanceFormatter: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
-    }()
-
+    // 【美化方向】扣款帳戶選單餘額格式：先前自製 NumberFormatter 手刻「NT$ X萬」
+    // （NT$ 後多一個空白、無條件捨去小數、未處理億級單位），與同一系列已修復的
+    // AddExpenseView.formatBankBalance／LifeFinanceView.fmtBal（皆已改呼叫共用
+    // Double.ntdWanString："NT$1.2萬" 無空白、億以上自動換算、非整數保留一位小數）
+    // 風格不一致，餘額達千萬以上時也會顯示成不合理的鉅額「萬」數字。改呼叫共用
+    // ntdWanString，與全 App 金額量級顯示規則對齊。純視覺調整，未變動帳戶餘額計算邏輯。
     private func fmtBalance(_ value: Double) -> String {
-        if abs(value) >= 10000 {
-            let str = Self.balanceFormatter.string(from: NSNumber(value: value / 10000)) ?? "0"
-            return "NT$ \(str)萬"
-        } else {
-            let str = Self.balanceFormatter.string(from: NSNumber(value: value)) ?? "0"
-            return "NT$ \(str)"
-        }
+        value.ntdWanString
     }
 
     private var accountPickerLabel: String {
