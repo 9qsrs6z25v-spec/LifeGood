@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.37", build: 790, date: "2026/07/31", notes: [
+            "【美化】人才矩陣評分明細分隔線主題色收尾（TalentMatrixView.breakdownGroup）：breakdownCard 懸浮卡片內「主動性（日常）」「潛力（評分）」兩組評分明細，標題列下方原本沿用系統灰色 Divider()，是本檔案唯一還沒套用主題色分隔線的元素——同一張卡片外框、summaryHeroCard 內部分隔線都早已改用跟隨主題色的細線，與 .regularMaterial 卡片背景較協調（同型作法見 FamilyOverviewMap.HouseView／ChildVaccineScheduleView 既有規格）。改為 Rectangle().fill(color.opacity(0.20)).frame(height: 0.5)，跟隨呼叫端傳入的主動性／潛力主題色。純視覺層調整，分數計算與明細列內容等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.36", build: 789, date: "2026/07/31", notes: [
             "【靜態除錯 v25.36：修復部屬執掌設備「PM／警報時間軸」的 O(警報數×PM筆數) 線性掃描】SubordinateEquipmentTimelineSection.entries 為每一筆警報計算「發生前最近一次 PM」時，用 `pmDates.last(where: { $0 <= al.date })` 對該設備已排序的 pmDates 陣列逐一線性掃描——pmDates 明明已經 `.sorted()` 過，卻沒利用這個排序特性，是同一類「已排序資料卻仍線性掃描」問題（近兩輪 v25.26／v25.35 分別在部屬匯入合併與班表棋盤格修過），使該畫面重算成本隨單一設備的 PM／警報紀錄雙雙隨年資累積而變成 O(警報數 × PM筆數)。改為新增 lastDate(lessThanOrEqualTo:in:) 二分搜尋，對已排序的 pmDates 以 O(log n) 取代 O(n) 線性掃描，語意（取不晚於警報時間的最後一筆 PM 日期）與原本完全等價。純效能調整，時間軸顯示內容、天數計算、排序與其餘互動邏輯未變動。經全面複查 Models 全部檔案與 Views 其餘大型清單／地圖／時間軸畫面（CloudKitManager／CloudSyncManager 節流防抖、各 Store 強制解包與 retain cycle、GradeTitleView／StockView／AppleCalendarBridge／SubscriptionManager／RemoteAdmin 既有 [weak self] 與主執行緒防護），未發現其餘新問題。"
         ]),

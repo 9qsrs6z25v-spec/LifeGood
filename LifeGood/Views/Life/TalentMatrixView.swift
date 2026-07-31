@@ -149,6 +149,14 @@ extension Subordinate {
 //  15. 象限人數計算抽取為 computed properties（starCount / potentialCount /
 //      hardWorkerCount / needsImprovCount）+ quadrantLabel() helper，
 //      供英雄卡與圖例雙用，消除重複計算。
+// [2026-07 v4] 補齊 breakdownGroup 分隔線主題色：原本沿用系統灰色 Divider()，
+//   是本檔案唯一還沒套用主題色分隔線的元素——同檔案 breakdownCard 卡片外框、
+//   summaryHeroCard 內部分隔線皆早已改用對應主題色的 Rectangle().fill(color.opacity)
+//   細線（對齊 FamilyOverviewMap.HouseView / ChildVaccineScheduleView 既有規格）。
+//   改為 Rectangle().fill(color.opacity(0.20)).frame(height: 0.5)，跟隨呼叫端傳入的
+//   主動性／潛力主題色，與 .regularMaterial 卡片背景更協調。純視覺層調整，
+//   分數計算、items 明細列內容等既有商業邏輯完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 // MARK: - 人才矩陣（主動性 × 潛力 散布圖）
 
@@ -773,6 +781,7 @@ struct TalentMatrixView: View {
     }
 
     // [v1] 升級為 Capsule 側條 + 分數 Capsule 徽章；明細列加分/扣分改彩色膠囊
+    // [v4] 分隔線改用主題色 Rectangle 細線，取代系統灰色 Divider()
     private func breakdownGroup(_ title: String, color: Color, total: Int,
                                 items: [(label: String, points: Int)]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -793,7 +802,7 @@ struct TalentMatrixView: View {
                     .clipShape(Capsule())
                     .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.5))
             }
-            Divider()
+            Rectangle().fill(color.opacity(0.20)).frame(height: 0.5)
             ForEach(Array(items.enumerated()), id: \.offset) { _, it in
                 HStack {
                     Text(it.label).font(.caption).foregroundStyle(.primary)
