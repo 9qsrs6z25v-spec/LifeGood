@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.39", build: 792, date: "2026/07/31", notes: [
+            "【美化】人生履歷「新增/編輯紀錄」表單 Section header 補齊（ResumeView.AddMilestoneView）：基本資訊／備註／調薪資訊／心境與規劃／銀行／信用卡／電子票證／會員／證券／保險共 16 個 Section 先前全部是預設純文字標頭，是全 App「表單 Section header 補齊」系列（BusinessCardEditor／FamilyMembersResumeView／OrgPersonEditor／EInvoiceSetupView／ChildDetailView）尚未覆蓋、且欄位數量最多的一個表單，落後於均值。新增共用 milestoneSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題），主題色與圖示直接沿用既有分類 enum（銀行／信用卡／證券／保險比照 FinanceSubCategory.icon 與 LifeFinanceView 既有配色；調薪／心境與規劃比照 CareerView.subColor 的 salaryAdjust／resign 配色），備註一律 secondary，避免另外發明新配色。純標題視覺升級，欄位資料綁定、canSave()／save() 等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.38", build: 791, date: "2026/07/31", notes: [
             "【美化】職涯履歷清單卡片邊框一致性收尾（CareerView）：subCategoryBreakdown／milestoneListSection 兩張清單卡片與 emptyMilestoneState 空狀態卡片，三處背景卡從 .clipShape(RoundedRectangle) 直接跳到 .shadow，缺少 overlay stroke 細邊框——本檔案頂部 summaryCard／statCard 儀表板卡片早已套用 RoundedRectangle(cornerRadius:16).stroke(color.opacity(0.12), 0.75pt)，形成「上方儀表板有邊框、下方清單卡片沒邊框」的視覺落差。補上同規格 stroke（中性 Color(.separator).opacity(0.12) 通用於無單一主題色的清單卡片），深色模式下同樣可見一圈淡邊框，讓同一畫面卡片邊框規格一致。純視覺層調整，清單資料、篩選狀態、進場動畫等既有商業邏輯完全未變動。"
         ]),

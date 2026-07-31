@@ -1319,6 +1319,32 @@ struct ResumeView: View {
 //   row helper（Text("NT$") + TextField + .numberPad 鍵盤），salaryField／careerExtraSection／
 //   financeDetailSection 五處呼叫點統一改用，往後新增金額欄位時比照呼叫即可維持一致樣式。
 //   純顯示層重構，未變動任何欄位的資料綁定、驗證或試算邏輯。
+// [2026-07 v3] 補齊「表單 Section header」缺口：本表單基本資訊／備註／調薪資訊／心境與規劃／
+//   銀行／信用卡／電子票證／會員／證券／保險共 16 個 Section 先前全部是預設純文字
+//   header（Section("...")），是全 App「表單 Section header 補齊」系列（BusinessCardEditor
+//   v25.24／FamilyMembersResumeView v25.31／OrgPersonEditor v25.22／EInvoiceSetupView
+//   v25.21／ChildDetailView v25.01）尚未覆蓋到、且欄位數量最多的一個表單，落後於均值。
+//   新增 milestoneSectionHeader(_:icon:color:)（4pt 漸層 Capsule 側條 + 圖示 + 粗體標題，
+//   規格與 familyEditorSectionHeader 一致），主題色與圖示直接沿用既有分類 enum（bank／
+//   creditCard／securities／insurance 用 FinanceSubCategory.icon + LifeFinanceView.colorFor
+//   同款藍/橘/綠/紫；調薪／心境與規劃比照 CareerView.subColor 的 salaryAdjust＝cyan／
+//   resign＝red），備註一律 secondary，避免另外發明一套不同調色。純標題視覺升級，
+//   Section 內容、欄位綁定、canSave／save() 等既有商業邏輯完全未變動。
+// ─────────────────────────────────────────────
+
+private func milestoneSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    HStack(spacing: 7) {
+        Capsule()
+            .fill(LinearGradient(colors: [color, color.opacity(0.70)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: 18)
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+    }
+}
 
 struct AddMilestoneView: View {
     @EnvironmentObject var store: LifeStore
@@ -1432,7 +1458,7 @@ struct AddMilestoneView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                Section {
                     Picker("分類", selection: $category) {
                         ForEach(MilestoneCategory.allCases) { cat in
                             Label(cat.displayName, systemImage: cat.icon).tag(cat)
@@ -1456,6 +1482,8 @@ struct AddMilestoneView: View {
                         TextField("標題", text: $title)
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                     }
+                } header: {
+                    milestoneSectionHeader("基本資訊", icon: "person.text.rectangle.fill", color: .indigo)
                 }
                 if isFinance {
                     financeDetailSection
@@ -1464,8 +1492,10 @@ struct AddMilestoneView: View {
                     careerExtraSection
                 }
                 if !isFamily && !isRealEstate && !isCareer && !isFinance {
-                    Section("備註") {
+                    Section {
                         TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                    } header: {
+                        milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
                     }
                 }
             }
@@ -1730,7 +1760,7 @@ struct AddMilestoneView: View {
     @ViewBuilder
     private var careerExtraSection: some View {
         if careerSub == .salaryAdjust {
-            Section("調薪資訊") {
+            Section {
                 currencyField("調薪前薪水", text: $salaryBeforeText)
                 currencyField("調薪後薪水", text: $salaryAfterText)
                 HStack {
@@ -1746,18 +1776,26 @@ struct AddMilestoneView: View {
                     }
                 }
                 DatePicker("日期", selection: $date, displayedComponents: .date)
+            } header: {
+                milestoneSectionHeader("調薪資訊", icon: "dollarsign.arrow.circlepath", color: .cyan)
             }
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         } else if careerSub == .resign {
-            Section("心境與規劃") {
+            Section {
                 TextField("心境", text: $mood, axis: .vertical).lineLimit(3)
                 TextField("未來規劃", text: $futurePlan, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("心境與規劃", icon: "arrow.right.square", color: .red)
             }
         } else {
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         }
     }
@@ -1779,7 +1817,7 @@ struct AddMilestoneView: View {
     private var financeDetailSection: some View {
         switch financeSub {
         case .bank:
-            Section("銀行資訊") {
+            Section {
                 TextField("銀行名稱", text: $bankName)
                 TextField("分行（選填）", text: $branchName)
                 TextField("帳號（選填）", text: $accountNumber).keyboardType(.numberPad)
@@ -1787,12 +1825,16 @@ struct AddMilestoneView: View {
                     ForEach(BankAccountType.allCases) { t in Text(t.rawValue).tag(t) }
                 }
                 DatePicker("開戶日期", selection: $date, displayedComponents: .date)
+            } header: {
+                milestoneSectionHeader("銀行資訊", icon: FinanceSubCategory.bank.icon, color: .blue)
             }
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         case .creditCard:
-            Section("信用卡資訊") {
+            Section {
                 bankNamePicker
                 TextField("卡別名稱（如：御璽卡）", text: $cardName)
                 TextField("卡號末四碼（選填）", text: $cardLastFour).keyboardType(.numberPad)
@@ -1805,31 +1847,43 @@ struct AddMilestoneView: View {
                 if hasExpiryDate {
                     expiryMonthYearPicker
                 }
+            } header: {
+                milestoneSectionHeader("信用卡資訊", icon: FinanceSubCategory.creditCard.icon, color: .orange)
             }
-            Section("綁定電子票證") {
+            Section {
                 TextField("悠遊卡卡號（選填）", text: $easyCardNumber).keyboardType(.numbersAndPunctuation)
                 TextField("一卡通卡號（選填）", text: $iPassNumber).keyboardType(.numbersAndPunctuation)
+            } header: {
+                milestoneSectionHeader("綁定電子票證", icon: "wallet.pass.fill", color: .teal)
             }
-            Section("綁定會員") {
+            Section {
                 TextField("Happy Go 卡號（選填）", text: $happyGoNumber).keyboardType(.numbersAndPunctuation)
+            } header: {
+                milestoneSectionHeader("綁定會員", icon: "star.circle.fill", color: .pink)
             }
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         case .securities:
-            Section("證券資訊") {
+            Section {
                 TextField("券商名稱", text: $bankName)
                 TextField("帳號（選填）", text: $accountNumber).keyboardType(.numberPad)
                 Picker("帳戶類型", selection: $secAccType) {
                     ForEach(SecuritiesAccountType.allCases) { t in Text(t.rawValue).tag(t) }
                 }
                 DatePicker("開戶日期", selection: $date, displayedComponents: .date)
+            } header: {
+                milestoneSectionHeader("證券資訊", icon: FinanceSubCategory.securities.icon, color: .green)
             }
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         case .insurance:
-            Section("保險資訊") {
+            Section {
                 TextField("保險公司", text: $insuranceCompany)
                 TextField("保單號碼（選填）", text: $policyNumber)
                 Picker("險種", selection: $insType) {
@@ -1842,9 +1896,13 @@ struct AddMilestoneView: View {
                     DatePicker("到期日", selection: $expiryDate, displayedComponents: .date)
                 }
                 TextField("受益人（選填）", text: $beneficiary)
+            } header: {
+                milestoneSectionHeader("保險資訊", icon: FinanceSubCategory.insurance.icon, color: .purple)
             }
-            Section("備註") {
+            Section {
                 TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+            } header: {
+                milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         }
     }
