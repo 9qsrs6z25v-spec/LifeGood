@@ -112,7 +112,7 @@ private struct RosterHOffsetKey: PreferenceKey {
 
 /// 用獨立 ObservableObject 承載水平捲動位移：先前用 SubordinateRosterView 自身的
 /// @State 存放時，即使 1pt 節流門檻已生效，真實拖曳時位移量幾乎每影格都超過門檻，
-/// 導致整個 body（含棋盤格 O(人數 × 天數) 的 shiftFor/leaveFor 逐筆掃描）連帶重算，
+/// 導致整個 body（含棋盤格重建與 buildShiftLookup/buildLeaveLookup 查表建置）連帶重算，
 /// 造成捲動卡頓／閃爍。改由 RosterFrozenHeader 這個子視圖單獨觀察此物件，
 /// 讓位移變化只讓表頭子視圖重繪，不會波及父視圖的棋盤格。
 private final class RosterHOffsetBox: ObservableObject {
@@ -470,7 +470,7 @@ struct SubordinateRosterView: View {
             .overlay(alignment: .topLeading) {
                 // 凍結表頭：以實際水平捲動量即時平移。抽成獨立子視圖只觀察 hOffsetBox，
                 // 讓每影格的位移更新只讓這一小塊表頭重繪，不會連帶讓整個棋盤格
-                // （O(人數 × 天數) 的 shiftFor/leaveFor 逐筆掃描）跟著重算，避免捲動卡頓/閃爍。
+                // （含 buildShiftLookup/buildLeaveLookup 查表建置）跟著重算，避免捲動卡頓/閃爍。
                 RosterFrozenHeader(box: hOffsetBox, days: days, nameColWidth: nameColWidth,
                                    headerH: headerH, cellW: cellW, viewportW: viewportW, bodyWidth: bodyWidth)
             }
@@ -509,6 +509,12 @@ struct SubordinateRosterView: View {
 
     @ViewBuilder
     private func hScrollContent(bodyWidth: CGFloat, rows: [RosterRow]) -> some View {
+        // 一次建好本月「人員 × 日期 → 班別／請假」查表，取代原本 shiftFor/leaveFor 逐格對
+        // sub.shifts／sub.records 全量線性掃描（兩者只增不減，會隨使用年資持續變長）；
+        // 建表成本為 O(人數 × 該人歷史筆數)，之後每一格都是 O(1) 字典查詢，
+        // 避免整張棋盤格淪為 O(人數 × 天數 × 歷史筆數)。
+        let shiftLookup = buildShiftLookup()
+        let leaveLookup = buildLeaveLookup()
         let content = ScrollView(.horizontal, showsIndicators: true) {
             VStack(spacing: 0) {
                 // 隱形錨點列（height 0）：供 ScrollViewReader 自動捲到今天
@@ -520,7 +526,12 @@ struct SubordinateRosterView: View {
                 ForEach(rows) { row in
                     switch row {
                     case .header:        gridHeaderRow()
-                    case .person(let p): HStack(spacing: 0) { ForEach(days, id: \.self) { d in cell(p, d) } }
+                    case .person(let p):
+                        HStack(spacing: 0) {
+                            ForEach(days, id: \.self) { d in
+                                cell(p, d, shiftLookup: shiftLookup, leaveLookup: leaveLookup)
+                            }
+                        }
                     }
                 }
             }
@@ -581,9 +592,12 @@ struct SubordinateRosterView: View {
             .overlay(Rectangle().stroke(Color(.separator).opacity(0.2), lineWidth: 0.5))
     }
 
-    private func cell(_ sub: Subordinate, _ day: Date) -> some View {
-        let leave = leaveFor(sub, day)
-        let shift = shiftFor(sub, day)
+    private func cell(_ sub: Subordinate, _ day: Date,
+                       shiftLookup: [UUID: [Date: ShiftType]],
+                       leaveLookup: [UUID: [Date: LeaveType]]) -> some View {
+        let key = Calendar.current.startOfDay(for: day)
+        let leave = leaveLookup[sub.id]?[key]
+        let shift = shiftLookup[sub.id]?[key]
         let weekend = isWeekend(day)
         return Button {
             detail = RosterCell(subId: sub.id, date: day)
@@ -614,20 +628,44 @@ struct SubordinateRosterView: View {
 
     // MARK: 計算
 
-    private func shiftFor(_ sub: Subordinate, _ day: Date) -> ShiftType? {
+    /// 建立「部屬 id → 日期（startOfDay）→ 班別」查表：對每人的 shifts 只掃描一次。
+    private func buildShiftLookup() -> [UUID: [Date: ShiftType]] {
         let cal = Calendar.current
-        return sub.shifts.first { cal.isDate($0.date, inSameDayAs: day) }?.type
+        var result: [UUID: [Date: ShiftType]] = [:]
+        for p in people {
+            var map: [Date: ShiftType] = [:]
+            for s in p.shifts { map[cal.startOfDay(for: s.date)] = s.type }
+            result[p.id] = map
+        }
+        return result
     }
 
-    private func leaveFor(_ sub: Subordinate, _ day: Date) -> LeaveType? {
+    /// 建立「部屬 id → 日期（startOfDay）→ 請假別」查表：只展開目前顯示月份內的日期，
+    /// 避免長天期請假紀錄被無謂展開到看不見的月份。
+    private func buildLeaveLookup() -> [UUID: [Date: LeaveType]] {
         let cal = Calendar.current
-        let d = cal.startOfDay(for: day)
-        for r in sub.records where r.type == .leave {
-            let s = cal.startOfDay(for: r.date)
-            let e = cal.startOfDay(for: r.endDate ?? r.date)
-            if d >= s && d <= e { return r.leaveType ?? .personal }
+        let visibleDays = Set(days.map { cal.startOfDay(for: $0) })
+        // 先夾在目前顯示月份的頭尾之間再展開，避免請假紀錄的 endDate 因舊資料異常
+        // （例如遠未來日期）而讓迴圈跑出可見月份之外的天文數字次數。
+        guard let monthStart = days.first.map({ cal.startOfDay(for: $0) }),
+              let monthEnd = days.last.map({ cal.startOfDay(for: $0) }) else { return [:] }
+        var result: [UUID: [Date: LeaveType]] = [:]
+        for p in people {
+            var map: [Date: LeaveType] = [:]
+            for r in p.records where r.type == .leave {
+                let s = max(cal.startOfDay(for: r.date), monthStart)
+                let e = min(cal.startOfDay(for: r.endDate ?? r.date), monthEnd)
+                guard s <= e else { continue }
+                var d = s
+                while d <= e {
+                    if visibleDays.contains(d) { map[d] = r.leaveType ?? .personal }
+                    guard let next = cal.date(byAdding: .day, value: 1, to: d) else { break }
+                    d = next
+                }
+            }
+            result[p.id] = map
         }
-        return nil
+        return result
     }
 
     private func isWeekend(_ d: Date) -> Bool {

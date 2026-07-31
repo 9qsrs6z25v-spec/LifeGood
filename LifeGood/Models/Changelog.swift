@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.35", build: 788, date: "2026/07/31", notes: [
+            "【靜態除錯 v25.35】兩路並行複查 Models 全部檔案、Views 頂層檔案、Views/Life 與 Views/Finance 大型清單／棋盤格畫面（強制解包／Optional／型別錯誤／index 越界、retain cycle／競態條件、畫面閃爍、O(n²) 效能瓶頸），發現並修復一個真實問題：SubordinateRosterView（部屬班表棋盤格）的 shiftFor(_:_:) 與 leaveFor(_:_:) 逐格對該部屬「全部歷史」shifts／records 陣列做線性掃描，兩者只增不減、隨使用年資持續變長，使整張棋盤格的重算成本是 O(部屬數 × 顯示天數 × 該人歷史筆數)——多年累積下來，每次月份切換／部門篩選／甚至其他頁面編輯任何一位部屬觸發 LifeStore 的 objectWillChange 都會讓這張表整批重算，隨資料量增長會越來越卡頓。改為在 hScrollContent 進場時一次建立 buildShiftLookup()／buildLeaveLookup() 兩張「部屬 id → 日期 → 班別／請假別」查表（每人歷史只掃描一次），棋盤格逐格改為 O(1) 字典查詢；請假查表額外把展開範圍夾在目前顯示月份頭尾之間，避免舊資料 endDate 異常時展開出天文數字次數的迴圈。純效能調整，班別／請假顯示結果與原本逐格線性掃描完全等價，UI 與互動邏輯未變動。其餘複查範圍（CloudKitManager／CloudSyncManager 30 秒節流與 2 秒防抖、各 Store 的 reloadFromCloud key 交集守衛、Timer／NotificationCenter／completion closure 之 [weak self]、OrganizationView／MyCalendarView／TaxOverviewView 既有的一次性查表優化、SettingsView／AddRealEstateView 等）均確認正常，未發現新問題。"
+        ]),
         ChangelogEntry(version: "25.34", build: 787, date: "2026/07/30", notes: [
             "【美化】理財資產總覽金額量級單位一致性收尾（FinanceChartView）：私有 fmtShort(_:) 原本只在「≥1億」「≥1萬」兩個分支手刻換算，未滿 1 萬則委派給共用 fmt(_:)（= Double.ntdWanString，固定帶「NT$」字首），造成同一個 helper 依金額大小輸出格式不一致——本檔案 6 處呼叫點（英雄卡總資產、資產配置圖甜甜圈中心／圖例列、房地產／儲蓄險明細列）皆設計成不重複顯示 NT$ 字首（頁面已用「NT$ 市值估算」副標或 currencyCode 標籤另外標示幣別），未滿 1 萬的小額資產卻會意外冒出「NT$」字首，且缺少 ntdWanString 既有的「捨入至萬位上限應進位為億」邊界防呆。改為 fmtShort(_:) 自行處理全部三個量級、不再委派 fmt(_:)，並補上與 ntdWanString 一致的億進位邊界防呆；另外 chartYAxis 座標軸金額縮寫 abbreviate(_:) 只到「萬」量級、未滿 1 萬還混用英式縮寫「%.0fk」，與全 App 中文「萬／億」量級單位慣例不一致（同型問題已於 ChartView.abbreviateCurrency 修過），因其邏輯與修正後的 fmtShort(_:) 完全等價，移除重複的 abbreviate(_:)，唯一呼叫點改呼叫 fmtShort(_:)；並移除已無任何呼叫端的私有 currencyFormatter 死碼。純顯示層調整，總資產／資產配置／房地產與儲蓄險績效等既有試算邏輯完全未變動。"
         ]),
