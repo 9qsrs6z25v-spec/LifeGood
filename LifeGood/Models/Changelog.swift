@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.38", build: 791, date: "2026/07/31", notes: [
+            "【美化】職涯履歷清單卡片邊框一致性收尾（CareerView）：subCategoryBreakdown／milestoneListSection 兩張清單卡片與 emptyMilestoneState 空狀態卡片，三處背景卡從 .clipShape(RoundedRectangle) 直接跳到 .shadow，缺少 overlay stroke 細邊框——本檔案頂部 summaryCard／statCard 儀表板卡片早已套用 RoundedRectangle(cornerRadius:16).stroke(color.opacity(0.12), 0.75pt)，形成「上方儀表板有邊框、下方清單卡片沒邊框」的視覺落差。補上同規格 stroke（中性 Color(.separator).opacity(0.12) 通用於無單一主題色的清單卡片），深色模式下同樣可見一圈淡邊框，讓同一畫面卡片邊框規格一致。純視覺層調整，清單資料、篩選狀態、進場動畫等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.37", build: 790, date: "2026/07/31", notes: [
             "【美化】人才矩陣評分明細分隔線主題色收尾（TalentMatrixView.breakdownGroup）：breakdownCard 懸浮卡片內「主動性（日常）」「潛力（評分）」兩組評分明細，標題列下方原本沿用系統灰色 Divider()，是本檔案唯一還沒套用主題色分隔線的元素——同一張卡片外框、summaryHeroCard 內部分隔線都早已改用跟隨主題色的細線，與 .regularMaterial 卡片背景較協調（同型作法見 FamilyOverviewMap.HouseView／ChildVaccineScheduleView 既有規格）。改為 Rectangle().fill(color.opacity(0.20)).frame(height: 0.5)，跟隨呼叫端傳入的主動性／潛力主題色。純視覺層調整，分數計算與明細列內容等既有商業邏輯完全未變動。"
         ]),

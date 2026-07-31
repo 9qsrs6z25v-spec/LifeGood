@@ -37,7 +37,17 @@ import SwiftUI
 //  19. subtitleText salaryAdjust 薪前後金額：String(format:"NT$%.0f") 原樣輸出整數台幣，
 //      高薪資時字串過長（例：NT$1200000 → NT$1500000）；改用 .ntdWanString 萬/億智慧量級，
 //      對齊全 App 金額顯示規格（IncomeView / FinanceOverviewView 等），且不換行更省寬度。
-//      （下次美化本檔案時，可從這裡接著找其他可統一之處）
+// [2026-07 v5] 補齊卡片邊框一致性缺口：
+//  20. subCategoryBreakdown／milestoneListSection 清單卡片、emptyMilestoneState 空狀態卡片，
+//      三處 .background → .clipShape(RoundedRectangle(cornerRadius:16)) → .shadow 之間都缺
+//      overlay stroke 細邊框，而本檔頂部 summaryCard／statCard（240-244、291-295 行）
+//      早已套用 RoundedRectangle(cornerRadius:16).stroke(color.opacity(0.12), 0.75pt)，
+//      造成同一畫面「上方儀表板卡片有邊框、下方清單卡片沒邊框」的視覺落差。
+//      補上 .overlay(RoundedRectangle(cornerRadius:16).stroke(Color(.separator).opacity(0.12),
+//      lineWidth:0.75))，中性 separator 色可通用於任兩張清單卡片（不像 statCard 有單一
+//      主題色可用），深色模式下同樣可見一圈淡邊框。純視覺層調整，清單資料、篩選、
+//      進場動畫等既有商業邏輯完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct CareerView: View {
     @EnvironmentObject var store: LifeStore
@@ -418,6 +428,11 @@ struct CareerView: View {
                 }
                 .background(Color(.systemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
+                // [v5] 補 overlay stroke 細邊框，對齊本檔 summaryCard／statCard 卡片邊框規格
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+                )
                 .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
                 .onAppear {
@@ -489,6 +504,11 @@ struct CareerView: View {
                 }
                 .background(Color(.systemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
+                // [v5] 補 overlay stroke 細邊框，對齊本檔 summaryCard／statCard 卡片邊框規格
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+                )
                 .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
                 .padding(.horizontal)
                 .onAppear {
@@ -613,6 +633,11 @@ struct CareerView: View {
         .padding(.vertical, 44)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        // [v5] 補 overlay stroke 細邊框，對齊本檔 summaryCard／statCard 卡片邊框規格
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
     }
