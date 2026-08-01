@@ -88,6 +88,17 @@ import MapKit
 //      全 App CTA 按鈕文字權重規格。純視覺調整，開啟地圖行為與座標計算完全未變動。
 //      （visitsSection／companionCard 已在 v2–v3 完成描邊與進場動畫，本輪聚焦補齊最後
 //      一處視覺缺口；下次美化本檔案時，可考慮比照 TravelMapView 補上縣市分組地址解析）
+// [2026-08 v9] visitsSection 金額量級一致性補漏：
+//  23. RestaurantDetailSheet.visitsSection 每筆造訪金額原本呼叫本檔案私有 fmtNum(_:)
+//      （純千分位整數格式，無萬/億量級轉換），是 v5／v6 兩輪「金額量級一致性」清查時
+//      唯一漏掉的呼叫點——v5 修的是 statsCard／restaurantRow，v6 修的是
+//      detailKpiCell，兩輪都沒碰到 visitsSection 這筆逐次金額，單次餐費金額較高時
+//      （如萬元等級聚餐）會與同 sheet 其餘金額顯示規格不一致。改呼叫共用
+//      Double.ntdWanString，並移除只剩單一呼叫點的私有 fmtNum(_:)／decimalFormatter
+//      死碼；同時補上 .lineLimit(1) + .minimumScaleFactor(0.7) 防截斷，對齊
+//      visitsSection 同列日期／同行者膠囊已有的防護規格。純顯示層調整，
+//      exp.amount 等既有資料完全未變動。
+//      （下次美化本檔案時，可考慮比照 TravelMapView 補上縣市分組所需的地址解析）
 
 // MARK: - 餐廳聚合資料
 
@@ -1153,9 +1164,11 @@ struct RestaurantDetailSheet: View {
 
                         Spacer(minLength: 4)
 
-                        Text("NT$ \(fmtNum(exp.amount))")
+                        Text(exp.amount.ntdWanString)
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundStyle(Color(red: 0.85, green: 0.32, blue: 0.05))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                             .contentTransition(.numericText())
                     }
                     .padding(.horizontal, 14)
@@ -1271,19 +1284,10 @@ struct RestaurantDetailSheet: View {
         ])
     }
 
-    private static let decimalFormatter: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        return f
-    }()
-
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"
         return f
     }()
-
-    private func fmtNum(_ v: Double) -> String {
-        Self.decimalFormatter.string(from: NSNumber(value: v)) ?? "0"
-    }
 
     private func fmtDate(_ date: Date) -> String {
         Self.dateFormatter.string(from: date)
