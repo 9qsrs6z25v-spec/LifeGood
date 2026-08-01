@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.51", build: 804, date: "2026/08/01", notes: [
+            "【美化 v25.51】FinanceOverviewView.swift 理財總覽頁英雄卡「總資產」大字補上防截斷：totalAssetsCard 頂部「總資產」34pt 大字（彙總房地產＋股票＋保險＋車輛四大類、全頁金額最大的一個數字）原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同一張卡片內唯一缺這道防護的欄位——右側「投資損益」KPI 膠囊、下方「N 項資產」計數膠囊皆已有。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊 RealEstateView／VehicleView 等同型 hero 卡「大字自適應收尾」規格（沿用同系列 v25.28～v25.30／v25.49 使用的 0.6 縮放下限），讓資產總額達億級量級時自動縮字而不被系統裁切，同時維持在可辨識最小字級以上。純視覺層調整，totalAssetsNTD／fmt 等既有金額計算與資料綁定完全未變動。",
+        ]),
         ChangelogEntry(version: "25.50", build: 803, date: "2026/08/01", notes: [
             "【美化 v25.50】FoodMapView.swift 餐廳詳情「造訪紀錄」金額量級補漏：RestaurantDetailSheet.visitsSection 每筆造訪金額原本呼叫私有 fmtNum(_:)（純千分位整數格式，無萬/億量級轉換），是 v25.x 系列早前 v5／v6 兩輪「金額量級一致性」清查（分別修 statsCard／restaurantRow 與 detailKpiCell）都沒碰到的一處，單次餐費金額較高時會與同 sheet 其餘金額顯示規格不一致。改為呼叫共用 Double.ntdWanString，並移除只剩單一呼叫點的私有 fmtNum(_:)／decimalFormatter 死碼，補上 .lineLimit(1) + .minimumScaleFactor(0.7) 防截斷。純顯示層調整，exp.amount 等既有資料完全未變動。",
         ]),

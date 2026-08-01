@@ -42,6 +42,12 @@ import SwiftUI
 //  15. cashFlowSection 空狀態圖示圓：純 Color(.systemFill) →
 //      LinearGradient (secondarySystemFill→systemFill) + stroke (separator.0.35, 1pt)，
 //      對齊 emptyPlaceholder 設計規格，保持全頁空狀態視覺一致性。
+// [2026-08 v5] 本次美化方向：
+//  16. totalAssetsCard 頂部「總資產」34pt 大字：補上 lineLimit(1) + minimumScaleFactor(0.6)，
+//      是本卡片內唯一缺少防截斷保護的數字（右側「投資損益」KPI 與下方「N 項資產」膠囊皆已有），
+//      也是全頁彙總四大類資產（房地產＋股票＋保險＋車輛）後金額最大的一個欄位，
+//      對齊同型 hero 卡規格（Finance/RealEstateView.swift 房產總估值／Finance/VehicleView.swift 車輛總估值等），
+//      避免資產達億級量級時在小螢幕上被系統裁切。
 
 struct FinanceOverviewView: View {
     @EnvironmentObject var store: FinanceStore
@@ -195,6 +201,8 @@ struct FinanceOverviewView: View {
                     Text(fmt(totalAssetsNTD(insVal: insVal, stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal)))
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
                     // 項目計數膠囊
                     Text("\(totalAssetCount) 項資產")
