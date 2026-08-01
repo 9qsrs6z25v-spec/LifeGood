@@ -38,6 +38,22 @@ import PhotosUI
 //      裸台幣整數，與同排「目前估值 / 增值」兩格已採用的萬/億智慧量級格式不一致，
 //      月租偏高時字串明顯較長；改為 rentalAmt ≥1萬 顯示「X.X萬」、≥1億 顯示「X.X億」，
 //      對齊同卡其餘 KPI 格與 RealEstateDetailView.fmt(_:) 的顯示規格。
+// [2026-08 v4] 補齊「房屋資料」分頁 Section header 補齊（雖然本檔案 v1 註記已統一升級
+//   所有 Section header，但「房屋資料」分頁的 propertyDetailSection／土地權狀／建物權狀／
+//   詳細（新增權狀）共 4 處當時被漏掉，仍是系統預設純文字標頭，與「理財」分頁物件資訊／
+//   價值／租金收入等早已升級的 Capsule 側條規格不一致）：
+//  12. propertyDetailSection 改用 reSectionHeader("房屋資料", house.fill, .cyan)，色彩對齊
+//      Tab 切換器「房屋資料」分頁既有的青藍主題色。
+//  13. 新增 reSectionHeader(_:icon:color:trailing:) 多載，讓動態編號 Section（土地/建物
+//      權狀，筆數可能為 0～N 筆）也能沿用同一份色條＋圖示＋標題排版，右側原本裸紅色
+//      「－」刪除鈕原樣保留、位置與觸發邏輯完全未變動，僅改用共用 helper 排版。
+//      土地權狀＝brown（doc.text.fill）／建物權狀＝indigo（building.2.fill）。
+//  14. 「詳細」（新增權狀選單所在 Section）改用 reSectionHeader("詳細",
+//      plus.rectangle.on.rectangle, .teal)。
+//      純視覺層調整，Section 內欄位綁定、新增/刪除權狀、儲存等既有商業邏輯完全未變動；
+//      featureToggleList 小型 popover（300×460）的 Section("理財")／Section("房屋資料")
+//      維持系統原生列表樣式不變（純開關清單、非主要內容 Section，套用漸層標頭反而過重）。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct AddRealEstateView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -708,7 +724,7 @@ struct AddRealEstateView: View {
     }
 
     private var propertyDetailSection: some View {
-        Section("房屋資料") {
+        Section(header: reSectionHeader("房屋資料", icon: "house.fill", color: .cyan)) {
             Picker("建物類型", selection: $buildingType) {
                 ForEach(BuildingType.allCases) { type in
                     Text(type.rawValue).tag(type)
@@ -755,9 +771,10 @@ struct AddRealEstateView: View {
                     Text("㎡").foregroundStyle(.secondary)
                 }
             } header: {
-                HStack {
-                    Text("土地權狀 \((landDeedItems.firstIndex(where: { $0.id == item.id }) ?? 0) + 1)")
-                    Spacer()
+                reSectionHeader(
+                    "土地權狀 \((landDeedItems.firstIndex(where: { $0.id == item.id }) ?? 0) + 1)",
+                    icon: "doc.text.fill", color: .brown
+                ) {
                     Button { landDeedItems.removeAll { $0.id == item.id } } label: {
                         Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                     }.buttonStyle(.plain)
@@ -781,9 +798,10 @@ struct AddRealEstateView: View {
                     Text("㎡").foregroundStyle(.secondary)
                 }
             } header: {
-                HStack {
-                    Text("建物權狀 \((bldgDeedItems.firstIndex(where: { $0.id == item.id }) ?? 0) + 1)")
-                    Spacer()
+                reSectionHeader(
+                    "建物權狀 \((bldgDeedItems.firstIndex(where: { $0.id == item.id }) ?? 0) + 1)",
+                    icon: "building.2.fill", color: .indigo
+                ) {
                     Button { bldgDeedItems.removeAll { $0.id == item.id } } label: {
                         Image(systemName: "minus.circle.fill").foregroundStyle(.red)
                     }.buttonStyle(.plain)
@@ -791,7 +809,7 @@ struct AddRealEstateView: View {
             }
         }
 
-        Section("詳細") {
+        Section(header: reSectionHeader("詳細", icon: "plus.rectangle.on.rectangle", color: .teal)) {
             Menu {
                 Button {
                     landDeedItems.append(LandDeedState(id: UUID(), situation: "", number: "", areaText: ""))
@@ -1754,6 +1772,14 @@ struct AddRealEstateView: View {
     // MARK: - 美化輔助：Section Header（Capsule 側條 + 彩色圖示 + 粗體標題）
 
     private func reSectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        reSectionHeader(title, icon: icon, color: color) { EmptyView() }
+    }
+
+    /// 動態編號 Section（土地/建物權狀）專用：補上可選的右側操作按鈕（如刪除），
+    /// 與無 trailing 版本共用同一份色條＋圖示＋標題排版，避免另立一套樣式。
+    private func reSectionHeader<Trailing: View>(
+        _ title: String, icon: String, color: Color, @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
         HStack(spacing: 9) {
             Capsule()
                 .fill(
@@ -1769,6 +1795,8 @@ struct AddRealEstateView: View {
             Text(title)
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
+            Spacer()
+            trailing()
         }
         .textCase(nil)
     }
