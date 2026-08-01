@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - 美化紀錄（LifeFinanceView · v7 · 2026-07-31）
+// MARK: - 美化紀錄（LifeFinanceView · v8 · 2026-08-01）
 // [2026-06 v1] 本次美化方向：
 //   1. summaryHeader → 升級為藍色漸層英雄卡片（對齊 SavingsInsuranceView summaryHeader 規格）：
 //      銀行總餘額台幣等值大字 + 計數膠囊 + 餘額正負色 + 散景裝飾圓；
@@ -69,6 +69,14 @@ import SwiftUI
 //      主題色依語意分配（轉帳資訊＝blue／沖正＝orange，呼應差額正負著色／存款‧提款＝green，
 //      呼應本表單既有「新增」按鈕綠色）。純標題視覺升級，save()／saveTransfer()／saveAdjust()
 //      等既有商業邏輯完全未變動。
+// [2026-08 v8] insuranceDetail「保費」金額量級補齊：
+//  19. 承接 v6 對同一張 FinanceCardView 明細卡「額度」「年費」的修法，「保費」原本仍是
+//      「NT$\(fmtNum(pa))」純整數無量級轉換，是 v6 當時漏掉、同一批 infoRow 金額欄位中
+//      唯一沒跟進 ntdWanString 的一處。改呼叫共用 Double.ntdWanString；fmtNum(_:) 本身在
+//      同一 struct 內仍有 depositRow／餘額列等其他呼叫端（非本次金額欄位性質，維持原樣），
+//      故保留不動，僅改「保費」這一處呼叫點。純顯示層調整，保費／到期日等既有資料綁定
+//      完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 // MARK: - 固定支出週期展開（共用）
 
@@ -1309,7 +1317,7 @@ struct FinanceCardView: View {
         if let co = item.insuranceCompany, !co.isEmpty { infoRow("保險公司", co) }
         if let pn = item.policyNumber, !pn.isEmpty { infoRow("保單號碼", pn) }
         if let it = item.insuranceType { infoRow("險種", it.rawValue) }
-        if let pa = item.premiumAmount, pa > 0 { infoRow("保費", "NT$\(fmtNum(pa))") }
+        if let pa = item.premiumAmount, pa > 0 { infoRow("保費", pa.ntdWanString) }
         infoRow("生效日", fmtDate(item.date))
         if let ed = item.expiryDate { infoRow("到期日", fmtDate(ed)) }
         if let b = item.beneficiary, !b.isEmpty { infoRow("受益人", b) }

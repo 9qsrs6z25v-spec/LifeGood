@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.48", build: 801, date: "2026/08/01", notes: [
+            "【美化 v25.48】LifeFinanceView.swift 保險明細卡「保費」金額量級補齊：insuranceDetail 的「保費」欄位原本直接用「NT$\\(fmtNum(pa))」純整數格式顯示，是 v25.x 系列早前 v6 修復同一張明細卡（FinanceCardView）「額度」「年費」金額量級時漏掉的一處，與同卡緊接的「額度」「年費」（已改呼叫共用 Double.ntdWanString，支援萬/億自動換算）風格不一致，保費金額較高時會顯示成未分級的長整數。改為呼叫 pa.ntdWanString，對齊同卡其餘金額欄位規格；fmtNum(_:) 在同一 struct 內仍有 depositRow／餘額列等其他呼叫端（非金額量級欄位性質），維持原樣不動。純顯示層調整，保費／到期日等既有資料綁定與試算邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.47", build: 800, date: "2026/08/01", notes: [
             "【美化 v25.47】AddRealEstateView.swift「房屋資料」分頁 Section header 補齊：propertyDetailSection（房屋資料基本欄位）／landDetailSection 動態編號的土地權狀／建物權狀／詳細（新增權狀選單）共 4 處，先前雖然本檔案最早一版美化紀錄已註記「統一升級所有 Section header」，但這 4 處當時被漏掉，仍停留在系統預設純文字 Section(\"...\") 標頭，與同檔案「理財」分頁物件資訊／價值／租金收入等早已升級的「4pt Capsule 漸層側條＋圖示＋粗體標題」規格不一致。新增 reSectionHeader(_:icon:color:trailing:) 多載，讓動態編號 Section 也能沿用同一份排版並在右側保留原本裸紅色「－」刪除鈕（土地權狀＝brown／建物權狀＝indigo），房屋資料＝cyan（對齊 Tab 切換器房屋資料分頁既有主題色）、詳細＝teal；featureToggleList 小型功能開關 popover 維持系統原生列表樣式不變（純開關清單、非主要內容 Section）。純視覺層調整，欄位資料綁定、新增/刪除權狀、儲存等既有商業邏輯完全未變動。",
         ]),
