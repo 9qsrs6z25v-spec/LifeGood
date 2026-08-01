@@ -513,26 +513,34 @@ enum UnifiedImporter {
                     if let name = old.photoFileName { OrgPerson.deletePhoto(name) }
                 }
             }
-            expense.expenses = payload.expense.expenses
-            expense.incomes = payload.expense.incomes
-            if let rates = payload.expense.currencyRates { expense.currencyRates = rates }
+            // expense／life 各自的多筆屬性指派原本各自觸發一次 save()（ExpenseStore 每次
+            // 都把 expenses+incomes 兩份一起重編碼；LifeStore 每次都把全部 13 個集合一起重編碼），
+            // 還原/覆蓋整批匯入時最多分別造成 2 次與 13 次完全重複的編碼與畫面重繪；
+            // 比照 GradeTitleView 既有的 withBatch 用法，改成各自只存檔一次。
+            expense.withBatch {
+                expense.expenses = payload.expense.expenses
+                expense.incomes = payload.expense.incomes
+                if let rates = payload.expense.currencyRates { expense.currencyRates = rates }
+            }
             finance.insurances = payload.finance.insurances
             finance.stocks = payload.finance.stocks
             finance.vehicles = payload.finance.vehicles
             finance.realEstates = payload.finance.realEstates
-            if let profile = payload.life.profile { life.profile = profile }
-            if let members = payload.life.familyMembers { life.familyMembers = members }
-            life.milestones = payload.life.milestones
-            life.relationships = payload.life.relationships
-            life.pets = payload.life.pets
-            life.schedules = payload.life.schedules
-            if let subs = payload.life.subordinates { life.subordinates = subs }
-            if let depts = payload.life.departments { life.departments = depts }
-            if let gts = payload.life.gradeTitles { life.gradeTitles = gts }
-            if let hp = payload.life.healthProfile { life.healthProfile = hp }
-            if let cards = payload.life.businessCards { life.businessCards = cards }
-            if let events = payload.life.personalEvents { life.personalEvents = events }
-            if let people = payload.life.orgPeople { life.orgPeople = people }
+            life.withBatch {
+                if let profile = payload.life.profile { life.profile = profile }
+                if let members = payload.life.familyMembers { life.familyMembers = members }
+                life.milestones = payload.life.milestones
+                life.relationships = payload.life.relationships
+                life.pets = payload.life.pets
+                life.schedules = payload.life.schedules
+                if let subs = payload.life.subordinates { life.subordinates = subs }
+                if let depts = payload.life.departments { life.departments = depts }
+                if let gts = payload.life.gradeTitles { life.gradeTitles = gts }
+                if let hp = payload.life.healthProfile { life.healthProfile = hp }
+                if let cards = payload.life.businessCards { life.businessCards = cards }
+                if let events = payload.life.personalEvents { life.personalEvents = events }
+                if let people = payload.life.orgPeople { life.orgPeople = people }
+            }
 
             result.expenses = payload.expense.expenses.count
             result.incomes = payload.expense.incomes.count
@@ -550,61 +558,145 @@ enum UnifiedImporter {
             result.orgPeople = payload.life.orgPeople?.count ?? 0
 
         case .merge:
-            if let rates = payload.expense.currencyRates {
-                let newRates = mergeItems(existing: expense.currencyRates, incoming: rates)
-                expense.currencyRates.append(contentsOf: newRates)
-            }
-            // 個人檔案為單一物件：合併模式僅在本機尚無資料時填入，避免匯入別人的備份就把
-            // 自己的姓名/生日等個人資料覆蓋掉；比照下方健康檔案既有的合併寫法。
-            if let profile = payload.life.profile, life.profile.isEmpty { life.profile = profile }
-            // 健康檔案為單一物件：合併模式僅在本機尚無資料時填入，避免覆蓋既有健康檔案
-            if let hp = payload.life.healthProfile, life.healthProfile.isEmpty { life.healthProfile = hp }
-            if let members = payload.life.familyMembers {
-                // 既有成員（同 id）過去整筆被 mergeItems 丟棄，導致對方備份裡的疫苗接種、
-                // 兒女記錄等子項目在合併模式下永遠進不來；比照下方部屬（subordinates）的
-                // 深度合併寫法：既有成員補進新的子項目、不存在的成員整筆新增。
-                var arr = life.familyMembers
-                var addedMembers = 0
-                for inc in members {
-                    if let idx = arr.firstIndex(where: { $0.id == inc.id }) {
-                        var m = arr[idx]
-                        appendNewByID(&m.childRecords, inc.childRecords)
-                        appendNewByID(&m.dailyRecords, inc.dailyRecords)
-                        appendNewByID(&m.familyEvents, inc.familyEvents)
-                        appendNewByID(&m.familyPhotos, inc.familyPhotos)
-                        // 疫苗接種：同一劑次（scheduleId）本機已有紀錄則保留本機，
-                        // 僅補上本機缺少的施打日期/備註；本機沒有的劑次整筆帶入。
-                        for v in inc.vaccinations {
-                            if let vi = m.vaccinations.firstIndex(where: { $0.scheduleId == v.scheduleId }) {
-                                if m.vaccinations[vi].administeredDate == nil, let d = v.administeredDate {
-                                    m.vaccinations[vi].administeredDate = d
-                                }
-                                if m.vaccinations[vi].note.isEmpty, !v.note.isEmpty {
-                                    m.vaccinations[vi].note = v.note
-                                }
-                            } else {
-                                m.vaccinations.append(v)
-                            }
-                        }
-                        // 基本欄位僅在本機空缺時補上，不覆蓋本機既有資料
-                        if m.birthday == nil { m.birthday = inc.birthday }
-                        if m.birthYear == nil { m.birthYear = inc.birthYear }
-                        arr[idx] = m
-                    } else {
-                        arr.append(inc)
-                        addedMembers += 1
-                    }
+            // expense／life 的多筆屬性合併原本各自散落多處、各自觸發一次 save()（ExpenseStore
+            // 每次都把 expenses+incomes 一起重編碼；LifeStore 每次都把全部 13 個集合一起重編碼），
+            // 合併匯入一份涵蓋多類別的備份時會造成多次完全重複的編碼與畫面重繪；
+            // 比照 GradeTitleView 既有的 withBatch 用法，改成各自只存檔一次（finance 的
+            // 4 個集合各自獨立存檔互不重疊，不受此問題影響，維持原樣）。
+            expense.withBatch {
+                if let rates = payload.expense.currencyRates {
+                    let newRates = mergeItems(existing: expense.currencyRates, incoming: rates)
+                    expense.currencyRates.append(contentsOf: newRates)
                 }
-                life.familyMembers = arr
-                result.familyMembers = addedMembers
-            }
-            let newExpenses = mergeItems(existing: expense.expenses, incoming: payload.expense.expenses)
-            expense.expenses.append(contentsOf: newExpenses)
-            result.expenses = newExpenses.count
+                let newExpenses = mergeItems(existing: expense.expenses, incoming: payload.expense.expenses)
+                expense.expenses.append(contentsOf: newExpenses)
+                result.expenses = newExpenses.count
 
-            let newIncomes = mergeItems(existing: expense.incomes, incoming: payload.expense.incomes)
-            expense.incomes.append(contentsOf: newIncomes)
-            result.incomes = newIncomes.count
+                let newIncomes = mergeItems(existing: expense.incomes, incoming: payload.expense.incomes)
+                expense.incomes.append(contentsOf: newIncomes)
+                result.incomes = newIncomes.count
+            }
+
+            life.withBatch {
+                // 個人檔案為單一物件：合併模式僅在本機尚無資料時填入，避免匯入別人的備份就把
+                // 自己的姓名/生日等個人資料覆蓋掉；比照下方健康檔案既有的合併寫法。
+                if let profile = payload.life.profile, life.profile.isEmpty { life.profile = profile }
+                // 健康檔案為單一物件：合併模式僅在本機尚無資料時填入，避免覆蓋既有健康檔案
+                if let hp = payload.life.healthProfile, life.healthProfile.isEmpty { life.healthProfile = hp }
+                if let members = payload.life.familyMembers {
+                    // 既有成員（同 id）過去整筆被 mergeItems 丟棄，導致對方備份裡的疫苗接種、
+                    // 兒女記錄等子項目在合併模式下永遠進不來；比照下方部屬（subordinates）的
+                    // 深度合併寫法：既有成員補進新的子項目、不存在的成員整筆新增。
+                    var arr = life.familyMembers
+                    var addedMembers = 0
+                    for inc in members {
+                        if let idx = arr.firstIndex(where: { $0.id == inc.id }) {
+                            var m = arr[idx]
+                            appendNewByID(&m.childRecords, inc.childRecords)
+                            appendNewByID(&m.dailyRecords, inc.dailyRecords)
+                            appendNewByID(&m.familyEvents, inc.familyEvents)
+                            appendNewByID(&m.familyPhotos, inc.familyPhotos)
+                            // 疫苗接種：同一劑次（scheduleId）本機已有紀錄則保留本機，
+                            // 僅補上本機缺少的施打日期/備註；本機沒有的劑次整筆帶入。
+                            for v in inc.vaccinations {
+                                if let vi = m.vaccinations.firstIndex(where: { $0.scheduleId == v.scheduleId }) {
+                                    if m.vaccinations[vi].administeredDate == nil, let d = v.administeredDate {
+                                        m.vaccinations[vi].administeredDate = d
+                                    }
+                                    if m.vaccinations[vi].note.isEmpty, !v.note.isEmpty {
+                                        m.vaccinations[vi].note = v.note
+                                    }
+                                } else {
+                                    m.vaccinations.append(v)
+                                }
+                            }
+                            // 基本欄位僅在本機空缺時補上，不覆蓋本機既有資料
+                            if m.birthday == nil { m.birthday = inc.birthday }
+                            if m.birthYear == nil { m.birthYear = inc.birthYear }
+                            arr[idx] = m
+                        } else {
+                            arr.append(inc)
+                            addedMembers += 1
+                        }
+                    }
+                    life.familyMembers = arr
+                    result.familyMembers = addedMembers
+                }
+
+                let newMs = mergeItems(existing: life.milestones, incoming: payload.life.milestones)
+                life.milestones.append(contentsOf: newMs)
+                result.milestones = newMs.count
+
+                let newRel = mergeItems(existing: life.relationships, incoming: payload.life.relationships)
+                life.relationships.append(contentsOf: newRel)
+                result.relationships = newRel.count
+
+                let newPets = mergeItems(existing: life.pets, incoming: payload.life.pets)
+                life.pets.append(contentsOf: newPets)
+                result.pets = newPets.count
+
+                let newSchs = mergeItems(existing: life.schedules, incoming: payload.life.schedules)
+                life.schedules.append(contentsOf: newSchs)
+                result.schedules = newSchs.count
+
+                if let subs = payload.life.subordinates {
+                    // 既有部屬：補進新的子項目（班表/任務/會議/報告/紀錄）；不存在的部屬整筆新增
+                    var arr = life.subordinates
+                    let cal = Calendar.current
+                    for inc in subs {
+                        if let idx = arr.firstIndex(where: { $0.id == inc.id }) {
+                            var s = arr[idx]
+                            appendNewByID(&s.records,  inc.records)
+                            appendNewByID(&s.meetings, inc.meetings)
+                            appendNewByID(&s.tasks,    inc.tasks)
+                            appendNewByID(&s.weeklyReports, inc.weeklyReports)
+                            appendNewByID(&s.equipments, inc.equipments)
+                            var existingShiftDays = Set(s.shifts.map { cal.startOfDay(for: $0.date) })
+                            for sh in inc.shifts {
+                                let day = cal.startOfDay(for: sh.date)
+                                if !existingShiftDays.contains(day) {
+                                    s.shifts.append(sh)
+                                    existingShiftDays.insert(day)
+                                }
+                            }
+                            if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
+                            if s.joinDate == nil { s.joinDate = inc.joinDate }
+                            arr[idx] = s
+                        } else {
+                            arr.append(inc)
+                        }
+                    }
+                    life.subordinates = arr
+                }
+
+                if let depts = payload.life.departments {
+                    let newDepts = mergeItems(existing: life.departments, incoming: depts)
+                    life.departments.append(contentsOf: newDepts)
+                }
+
+                if let gts = payload.life.gradeTitles {
+                    let newGts = mergeItems(existing: life.gradeTitles, incoming: gts)
+                    life.gradeTitles.append(contentsOf: newGts)
+                }
+
+                if let cards = payload.life.businessCards {
+                    let newCards = mergeItems(existing: life.businessCards, incoming: cards)
+                    life.businessCards.append(contentsOf: newCards)
+                    result.businessCards = newCards.count
+                }
+
+                if let events = payload.life.personalEvents {
+                    let newEvents = mergeItems(existing: life.personalEvents, incoming: events)
+                    life.personalEvents.append(contentsOf: newEvents)
+                    result.personalEvents = newEvents.count
+                }
+
+                if let people = payload.life.orgPeople {
+                    let newPeople = mergeItems(existing: life.orgPeople, incoming: people)
+                    life.orgPeople.append(contentsOf: newPeople)
+                    result.orgPeople = newPeople.count
+                }
+            }
 
             let newIns = mergeItems(existing: finance.insurances, incoming: payload.finance.insurances)
             finance.insurances.append(contentsOf: newIns)
@@ -674,80 +766,6 @@ enum UnifiedImporter {
             }
             finance.realEstates = reArr
             result.realEstates = newRECount
-
-            let newMs = mergeItems(existing: life.milestones, incoming: payload.life.milestones)
-            life.milestones.append(contentsOf: newMs)
-            result.milestones = newMs.count
-
-            let newRel = mergeItems(existing: life.relationships, incoming: payload.life.relationships)
-            life.relationships.append(contentsOf: newRel)
-            result.relationships = newRel.count
-
-            let newPets = mergeItems(existing: life.pets, incoming: payload.life.pets)
-            life.pets.append(contentsOf: newPets)
-            result.pets = newPets.count
-
-            let newSchs = mergeItems(existing: life.schedules, incoming: payload.life.schedules)
-            life.schedules.append(contentsOf: newSchs)
-            result.schedules = newSchs.count
-
-            if let subs = payload.life.subordinates {
-                // 既有部屬：補進新的子項目（班表/任務/會議/報告/紀錄）；不存在的部屬整筆新增
-                var arr = life.subordinates
-                let cal = Calendar.current
-                for inc in subs {
-                    if let idx = arr.firstIndex(where: { $0.id == inc.id }) {
-                        var s = arr[idx]
-                        appendNewByID(&s.records,  inc.records)
-                        appendNewByID(&s.meetings, inc.meetings)
-                        appendNewByID(&s.tasks,    inc.tasks)
-                        appendNewByID(&s.weeklyReports, inc.weeklyReports)
-                        appendNewByID(&s.equipments, inc.equipments)
-                        var existingShiftDays = Set(s.shifts.map { cal.startOfDay(for: $0.date) })
-                        for sh in inc.shifts {
-                            let day = cal.startOfDay(for: sh.date)
-                            if !existingShiftDays.contains(day) {
-                                s.shifts.append(sh)
-                                existingShiftDays.insert(day)
-                            }
-                        }
-                        if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
-                        if s.joinDate == nil { s.joinDate = inc.joinDate }
-                        arr[idx] = s
-                    } else {
-                        arr.append(inc)
-                    }
-                }
-                life.subordinates = arr
-            }
-
-            if let depts = payload.life.departments {
-                let newDepts = mergeItems(existing: life.departments, incoming: depts)
-                life.departments.append(contentsOf: newDepts)
-            }
-
-            if let gts = payload.life.gradeTitles {
-                let newGts = mergeItems(existing: life.gradeTitles, incoming: gts)
-                life.gradeTitles.append(contentsOf: newGts)
-            }
-
-            if let cards = payload.life.businessCards {
-                let newCards = mergeItems(existing: life.businessCards, incoming: cards)
-                life.businessCards.append(contentsOf: newCards)
-                result.businessCards = newCards.count
-            }
-
-            if let events = payload.life.personalEvents {
-                let newEvents = mergeItems(existing: life.personalEvents, incoming: events)
-                life.personalEvents.append(contentsOf: newEvents)
-                result.personalEvents = newEvents.count
-            }
-
-            if let people = payload.life.orgPeople {
-                let newPeople = mergeItems(existing: life.orgPeople, incoming: people)
-                life.orgPeople.append(contentsOf: newPeople)
-                result.orgPeople = newPeople.count
-            }
         }
 
         return result
@@ -822,46 +840,51 @@ enum SubordinateImporter {
         dec.dateDecodingStrategy = .iso8601
         guard let payload = try? dec.decode(SubordinateExport.self, from: data) else { return r }
 
-        // 部門 / 職等：補進缺少的（依 id），讓部屬參照能正確顯示
-        if let depts = payload.departments {
-            let ids = Set(life.departments.map(\.id))
-            let add = depts.filter { !ids.contains($0.id) }
-            if !add.isEmpty { life.departments.append(contentsOf: add); r.departmentsAdded = add.count }
-        }
-        if let gts = payload.gradeTitles {
-            let ids = Set(life.gradeTitles.map(\.id))
-            let add = gts.filter { !ids.contains($0.id) }
-            if !add.isEmpty { life.gradeTitles.append(contentsOf: add); r.gradeTitlesAdded = add.count }
-        }
-
-        switch mode {
-        case .replace:
-            life.subordinates = payload.subordinates
-            r.added = payload.subordinates.count
-
-        case .merge:
-            var subs = life.subordinates
-            for inc in payload.subordinates {
-                // 對應現有部屬：先比 id，再退而求其次比「同名同部門」
-                let idx = subs.firstIndex(where: { $0.id == inc.id })
-                    ?? subs.firstIndex(where: { !inc.name.isEmpty && $0.name == inc.name && $0.department == inc.department })
-                if let idx = idx {
-                    var s = subs[idx]
-                    r.recordsMerged  += appendNew(&s.records,  inc.records)
-                    r.meetingsMerged += appendNew(&s.meetings, inc.meetings)
-                    r.tasksMerged    += appendNew(&s.tasks,    inc.tasks)
-                    r.reportsMerged  += appendNew(&s.weeklyReports, inc.weeklyReports)
-                    r.shiftsMerged   += appendNewShifts(&s.shifts, inc.shifts)
-                    _ = appendNew(&s.equipments, inc.equipments)
-                    if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
-                    if s.joinDate == nil { s.joinDate = inc.joinDate }
-                    subs[idx] = s
-                    r.updated += 1
-                } else {
-                    subs.append(inc); r.added += 1
-                }
+        // 部門／職等／部屬最多各觸發一次 life.subordinates/departments/gradeTitles 的指派，
+        // 每次都各自觸發 LifeStore.save() 把全部 13 個集合一起重編碼；比照 UnifiedImporter
+        // 既有的 withBatch 用法，整段包起來只存檔一次。
+        life.withBatch {
+            // 部門 / 職等：補進缺少的（依 id），讓部屬參照能正確顯示
+            if let depts = payload.departments {
+                let ids = Set(life.departments.map(\.id))
+                let add = depts.filter { !ids.contains($0.id) }
+                if !add.isEmpty { life.departments.append(contentsOf: add); r.departmentsAdded = add.count }
             }
-            life.subordinates = subs   // 單次指派 → 單次存檔
+            if let gts = payload.gradeTitles {
+                let ids = Set(life.gradeTitles.map(\.id))
+                let add = gts.filter { !ids.contains($0.id) }
+                if !add.isEmpty { life.gradeTitles.append(contentsOf: add); r.gradeTitlesAdded = add.count }
+            }
+
+            switch mode {
+            case .replace:
+                life.subordinates = payload.subordinates
+                r.added = payload.subordinates.count
+
+            case .merge:
+                var subs = life.subordinates
+                for inc in payload.subordinates {
+                    // 對應現有部屬：先比 id，再退而求其次比「同名同部門」
+                    let idx = subs.firstIndex(where: { $0.id == inc.id })
+                        ?? subs.firstIndex(where: { !inc.name.isEmpty && $0.name == inc.name && $0.department == inc.department })
+                    if let idx = idx {
+                        var s = subs[idx]
+                        r.recordsMerged  += appendNew(&s.records,  inc.records)
+                        r.meetingsMerged += appendNew(&s.meetings, inc.meetings)
+                        r.tasksMerged    += appendNew(&s.tasks,    inc.tasks)
+                        r.reportsMerged  += appendNew(&s.weeklyReports, inc.weeklyReports)
+                        r.shiftsMerged   += appendNewShifts(&s.shifts, inc.shifts)
+                        _ = appendNew(&s.equipments, inc.equipments)
+                        if s.plantArea.isEmpty, !inc.plantArea.isEmpty { s.plantArea = inc.plantArea }
+                        if s.joinDate == nil { s.joinDate = inc.joinDate }
+                        subs[idx] = s
+                        r.updated += 1
+                    } else {
+                        subs.append(inc); r.added += 1
+                    }
+                }
+                life.subordinates = subs   // withBatch 內：與其餘 department/gradeTitle 變更合併只存檔一次
+            }
         }
         return r
     }

@@ -1698,13 +1698,16 @@ struct RecordEditorSheet: View {
                     } header: {
                         editorSectionHeader("請假資訊", icon: "calendar.badge.clock")
                     }
+                    // restDeductionHours 會逐日走訪 date...endDate 並對 sub.shifts 做線性掃描，
+                    // FiveMinuteDateTimePicker 拖曳/捲動時每一格都觸發 Form body 重新求值。
+                    // 先前把這兩行搬進下方 Section 的內容 closure 裡「只算一次」，但下面
+                    // .animation(value:) 是掛在 Section 之外的修飾詞鏈上，看不到 Section
+                    // closure 內的區域變數，只能改呼叫 computedLeaveHours（內部又重呼叫一次
+                    // restDeductionHours），等於一次 render 其實還是重算 2 次。搬到 Section
+                    // 外層、與 .animation 同一層級，兩處都能直接讀同一份已算好的值。
+                    let deduction = restDeductionHours
+                    let leaveHours = max(0, endDate.timeIntervalSince(date) / 3600 - deduction)
                     Section {
-                        // restDeductionHours 會逐日走訪 date...endDate 並對 sub.shifts 做線性掃描，
-                        // FiveMinuteDateTimePicker 拖曳/捲動時每一格都觸發 Form body 重新求值；
-                        // 原本這裡與下方 computedLeaveHours（內部又重呼叫一次 restDeductionHours）
-                        // 加起來一次 render 會重算 4 次，拖曳期間等於每格都重掃 4 次。改為只算一次。
-                        let deduction = restDeductionHours
-                        let leaveHours = max(0, endDate.timeIntervalSince(date) / 3600 - deduction)
                         HStack {
                             Text("開始時間")
                             Spacer()
@@ -1746,7 +1749,7 @@ struct RecordEditorSheet: View {
                     }
                     .opacity(leaveInfoAppeared ? 1 : 0)
                     .offset(y: leaveInfoAppeared ? 0 : 10)
-                    .animation(.easeInOut(duration: 0.2), value: computedLeaveHours)
+                    .animation(.easeInOut(duration: 0.2), value: leaveHours)
                 } else {
                     Section {
                         DatePicker("發生日期", selection: $date, displayedComponents: .date)

@@ -591,6 +591,18 @@ class ExpenseStore: ObservableObject {
         }
     }
 
+    /// 供外部（匯入／還原等一次操作觸及 expenses/incomes/currencyRates 多筆屬性）使用：
+    /// 暫停期間每筆 didSet 都不觸發 save()，body 結束後才統一存檔一次，
+    /// 避免例如「還原備份」同時指派 expenses 與 incomes 時，save() 各自把兩個陣列一起重複編碼兩次。
+    /// 用法與 LifeStore.withBatch(_:) 一致。
+    func withBatch(_ body: () -> Void) {
+        isLoading = true
+        defer { isLoading = false }
+        body()
+        save()
+        saveCurrencyRates()
+    }
+
     @discardableResult
     private func load() -> Bool {
         isLoading = true
