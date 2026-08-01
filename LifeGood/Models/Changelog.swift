@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.54", build: 807, date: "2026/08/01", notes: [
+            "【美化 v25.54】SavingsInsuranceView.swift 保單總覽英雄卡「保單總覽」大字補上防截斷：summaryHeader 頂部 32pt 大字（換算 NT$ 後的保單總估值，同卡片內金額最大的一個數字）原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同一張卡片內唯一缺這道防護的欄位——下方「已繳總額」「帳面損益」KPI 欄位共用的 kpiCell 早就有 .lineLimit(1).minimumScaleFactor(0.6)。補上同規格的 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊 LifeRealEstateView／LifeOverviewView／OverviewView／VehicleView／FinanceOverviewView 等同型 hero 卡「大字自適應收尾」系列規格，讓保單估值達億級量級時自動縮字而不被系統裁切，同時維持在可辨識最小字級以上。純視覺層調整，totalCurrentNT／fmtSmart 等既有金額計算與資料綁定完全未變動。",
+        ]),
         ChangelogEntry(version: "25.53", build: 806, date: "2026/08/01", notes: [
             "【美化 v25.53】RealEstateDetailView.swift「樓層物件命名」表單 Section header 補齊：FloorItemEditor（新增／重新命名樓層物件的極簡 sheet）原本是裸系統 Section(\"物件名稱\")，先前 v9 複查時誤以為 ElevatorMaintenanceEditor／UtilityPaymentEditor 已是「本檔案唯二」未套用共用 realEstateEditorSectionHeader 的編輯 sheet，實際漏掉了這個更早就存在的第三處。改呼叫既有 realEstateEditorSectionHeader(\"物件名稱\", icon: \"shippingbox.fill\", color: .brown)，圖示語意對齊本檔案 assetsSection 空狀態既有的 shippingbox 用法。純視覺層調整，物件命名、新增/重新命名等既有商業邏輯完全未變動。",
         ]),

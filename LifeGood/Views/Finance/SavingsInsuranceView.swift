@@ -47,6 +47,12 @@ import SwiftUI
 //  17. insuranceCard 進度條：在 ZStack 頂層加入 glow overlay Capsule
 //      （LinearGradient [white.opacity(0.28), clear, black.opacity(0.08)] top→bottom），
 //      對齊 OverviewView.categoryRow / VariableExpenseView / FinanceChartView v3 彩條 glow 規格。
+// [2026-08 v4] 本次美化方向（v25.54 大字自適應收尾）：
+//  18. summaryHeader「保單總覽」32pt 大字補上 .lineLimit(1) + .minimumScaleFactor(0.6)：
+//      同卡片內 kpiCell（已繳總額／帳面損益）早就有這道防截斷保護，唯獨這個全卡最大的
+//      主要數字漏掉，估值達億級量級時可能被系統裁切。對齊 LifeRealEstateView v25.28／
+//      LifeOverviewView v25.29／OverviewView v25.30／VehicleView v25.49／
+//      FinanceOverviewView v25.51 同系列「英雄卡大字自適應收尾」規格。
 
 struct SavingsInsuranceView: View {
     @EnvironmentObject var store: FinanceStore
@@ -230,6 +236,8 @@ struct SavingsInsuranceView: View {
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                     if hasItems {
                         Text(otherItems.isEmpty ? "保單目前估值" : "保單目前估值（含外幣換算）")
                             .font(.caption2.weight(.medium))
