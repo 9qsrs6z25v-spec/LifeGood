@@ -38,6 +38,16 @@ import SwiftUI
 //      對齊全 App 損益膠囊細邊框規格（FinanceOverviewView / StockView）。
 //  12. fmtShort「NT$%.0f萬」→「%.1f萬」：去掉 NT$ 前綴、加 1 位小數，
 //      對齊 TaxOverviewView v3 / OverviewView.smartCurrency 的萬量級顯示規格。
+//
+// [2026-08 v13] summaryHeader 英雄卡大字自適應收尾：
+//  13. 頂部「車輛總估值」32pt 大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，
+//      是同卡片內唯一缺這道防護的數字——右上角「折舊損失」KPI 膠囊已有
+//      .lineLimit(1).minimumScaleFactor(0.7)，這裡當時被漏掉；估值達億量級或機型/幣別
+//      顯示較長字串時可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，
+//      對齊 OverviewView v25.30／LifeOverviewView v25.29／LifeRealEstateView v25.28／
+//      ChildrenResumeView v25.27 同一輪「英雄卡大字自適應收尾」規格，讓大額估值在小螢幕
+//      上自動縮字而不被截斷，同時維持在可辨識最小字級以上。純視覺層調整，totalValue／
+//      fmtShort 等既有金額計算與資料綁定完全未變動。
 
 enum VehicleSortOption: String, CaseIterable, Identifiable {
     case purchasePrice = "購入價格"
@@ -336,6 +346,8 @@ struct VehicleView: View {
                     Text(fmtShort(totalValue))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
                     if totalValue > 0 {
                         Text("購入成本 \(fmtShort(totalCost))")

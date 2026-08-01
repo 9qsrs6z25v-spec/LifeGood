@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.49", build: 802, date: "2026/08/01", notes: [
+            "【美化 v25.49】VehicleView.swift 車輛總覽頁英雄卡大字自適應收尾：summaryHeader 頂部「車輛總估值」32pt 大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同卡片內唯一缺這道防護的數字——右上角「折舊損失」KPI 膠囊已有 .lineLimit(1).minimumScaleFactor(0.7)，這裡當時被漏掉，估值達億量級時可能在小螢幕上被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊 OverviewView v25.30／LifeOverviewView v25.29／LifeRealEstateView v25.28／ChildrenResumeView v25.27 同一輪「英雄卡大字自適應收尾」規格，讓大額估值自動縮字而不被截斷，同時維持在可辨識最小字級以上。純視覺層調整，totalValue／fmtShort 等既有金額計算與資料綁定完全未變動。",
+        ]),
         ChangelogEntry(version: "25.48", build: 801, date: "2026/08/01", notes: [
             "【美化 v25.48】LifeFinanceView.swift 保險明細卡「保費」金額量級補齊：insuranceDetail 的「保費」欄位原本直接用「NT$\\(fmtNum(pa))」純整數格式顯示，是 v25.x 系列早前 v6 修復同一張明細卡（FinanceCardView）「額度」「年費」金額量級時漏掉的一處，與同卡緊接的「額度」「年費」（已改呼叫共用 Double.ntdWanString，支援萬/億自動換算）風格不一致，保費金額較高時會顯示成未分級的長整數。改為呼叫 pa.ntdWanString，對齊同卡其餘金額欄位規格；fmtNum(_:) 在同一 struct 內仍有 depositRow／餘額列等其他呼叫端（非金額量級欄位性質），維持原樣不動。純顯示層調整，保費／到期日等既有資料綁定與試算邏輯完全未變動。",
         ]),
