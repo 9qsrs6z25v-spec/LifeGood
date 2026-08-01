@@ -34,6 +34,14 @@ import SwiftUI
 //     隨展開狀態以 spring 動畫平滑旋轉 90 度，展開內容補上淡入 + 由上滑入的過場，
 //     整體與 header/總計/giftRow 的粉紅視覺語言一致。
 //   • 純視覺加強，未動任何禮金篩選、分組或金額邏輯，展開/收合狀態行為不變。
+// [2026-08 v5] 圖示圓補齊立體陰影（本檔案唯一還缺的標準元素）：
+//   • v1 筆記聲稱 giftRow 對齊 SpouseResumeView.expenseRow 視覺規格，但該規格本身有
+//     .shadow(color: accent.opacity(0.22), radius: 6, y: 3)，本檔案三處圖示圓（總計 34pt／
+//     分類 32pt／giftRow 28pt）卻從未加上陰影，是全檔唯一還平貼卡片背景、缺立體感的元素。
+//   • 總計列 34pt 圖示圓補標準陰影（對齊 ChildrenResumeView / CareerView / SpouseResumeView
+//     expenseRow 34pt 左右圖示圓陰影規格）；分類列 32pt 圖示圓對齊 FixedExpenseView 32pt
+//     圖示圓陰影規格；giftRow 28pt 圖示圓因列表重複出現，用較輕陰影避免長列表視覺過重。
+//   • 純視覺加強，未動任何禮金資料、分類或金額邏輯。
 //   （下次美化本元件時，可從這裡接著找其他可統一之處）
 
 /// 履歷頁通用：列出某人收到的禮金紀錄，依社交子分類分組顯示。
@@ -79,6 +87,8 @@ struct ResumeGiftSection: View {
                         )
                         .frame(width: 34, height: 34)
                         .overlay(Circle().stroke(accent.opacity(0.22), lineWidth: 1))
+                        // [v5] 標準立體陰影，對齊 ChildrenResumeView / CareerView 34pt 圖示圓規格
+                        .shadow(color: accent.opacity(0.22), radius: 6, x: 0, y: 3)
                     Image(systemName: "gift.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(accent)
@@ -135,6 +145,8 @@ struct ResumeGiftSection: View {
                                 )
                                 .frame(width: 32, height: 32)
                                 .overlay(Circle().stroke(accent.opacity(0.18), lineWidth: 1))
+                                // [v5] 對齊 FixedExpenseView 32pt 圖示圓陰影規格
+                                .shadow(color: accent.opacity(0.20), radius: 5, x: 0, y: 2)
                             Image(systemName: group.sub.icon)
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(accent)
@@ -236,6 +248,8 @@ struct ResumeGiftSection: View {
                 Circle()
                     .stroke(accent.opacity(0.20), lineWidth: 0.75)
                     .frame(width: 28, height: 28)
+                    // [v5] 較輕陰影：giftRow 於長列表中重複出現，避免陰影堆疊過重
+                    .shadow(color: accent.opacity(0.18), radius: 4, x: 0, y: 2)
                 Image(systemName: "gift")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(accent.opacity(0.80))
