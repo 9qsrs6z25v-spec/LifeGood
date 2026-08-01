@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.53", build: 806, date: "2026/08/01", notes: [
+            "【美化 v25.53】RealEstateDetailView.swift「樓層物件命名」表單 Section header 補齊：FloorItemEditor（新增／重新命名樓層物件的極簡 sheet）原本是裸系統 Section(\"物件名稱\")，先前 v9 複查時誤以為 ElevatorMaintenanceEditor／UtilityPaymentEditor 已是「本檔案唯二」未套用共用 realEstateEditorSectionHeader 的編輯 sheet，實際漏掉了這個更早就存在的第三處。改呼叫既有 realEstateEditorSectionHeader(\"物件名稱\", icon: \"shippingbox.fill\", color: .brown)，圖示語意對齊本檔案 assetsSection 空狀態既有的 shippingbox 用法。純視覺層調整，物件命名、新增/重新命名等既有商業邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.52", build: 805, date: "2026/08/01", notes: [
             "【美化 v25.52】ResumeGiftSection.swift 履歷「收到的禮金」圖示圓補齊立體陰影：本元件 v1 筆記聲稱三處圖示圓（總計列 34pt／分類列 32pt／giftRow 28pt）對齊 SpouseResumeView.expenseRow 視覺規格，但該規格本身有陰影，本元件卻從未加上，是全檔案唯一還平貼卡片背景、缺立體感的元素。補上對齊全 App 標準的 accent 色系陰影（總計列對齊 ChildrenResumeView／CareerView 34pt 圖示圓規格；分類列對齊 FixedExpenseView 32pt 規格；giftRow 因於長列表中重複出現改用較輕陰影，避免視覺過重）。純視覺層調整，未變動任何禮金資料、分類或金額邏輯。",
         ]),

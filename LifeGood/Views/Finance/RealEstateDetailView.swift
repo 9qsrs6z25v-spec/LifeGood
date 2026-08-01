@@ -113,6 +113,15 @@ import ImageIO
 //      基本資訊＝indigo／收據照片＝teal／備註＝secondary，對齊全 App 慣例配色），刪除
 //      Section／扣款目標 Section（原本就無標頭）維持不變。純視覺層調整，欄位資料綁定、
 //      save()／deleteRecord() 等既有商業邏輯完全未變動。
+//
+// [2026-08 v10] FloorItemEditor（樓層物件命名 sheet）Section header 補齊（v9 補漏）：
+//  25. v9 筆記聲稱 ElevatorMaintenanceEditor／UtilityPaymentEditor 是「本檔案唯二」仍用系統
+//      預設純文字 Section("...") 的編輯 sheet，實際上早於 v9 就存在的 FloorItemEditor（新增／
+//      重新命名樓層物件的極簡 sheet）也是裸 Section("物件名稱")，當時複查漏掉，是本檔案目前
+//      僅剩一處未接上 realEstateEditorSectionHeader 的獨立編輯 sheet。改呼叫既有
+//      realEstateEditorSectionHeader("物件名稱", icon: "shippingbox.fill", color: .brown)，
+//      主題色與圖示對齊 assetsSection 空狀態（v3 已用 shippingbox 代表「物件」語意）。純視覺層
+//      調整，name／isSaving／onSave 等既有新增、重新命名商業邏輯完全未變動。
 //      （下次美化本檔案時：可全檔案複查是否還有其他手刻金額格式殘留待統一）
 
 struct RealEstateDetailView: View {
@@ -3753,9 +3762,11 @@ fileprivate struct FloorItemEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("物件名稱") {
+                Section {
                     TextField("例如：衣櫃 / 第一格", text: $name)
                         .focused($focused)
+                } header: {
+                    realEstateEditorSectionHeader("物件名稱", icon: "shippingbox.fill", color: .brown)
                 }
             }
             .navigationTitle(isEditing ? "重新命名物件" : "新增物件")
