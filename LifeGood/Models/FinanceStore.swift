@@ -12,6 +12,9 @@ class FinanceStore: ObservableObject {
     private let reKey = "lifegood_realestates"
     private var isLoading = false
     private let saveQueue = DispatchQueue(label: "com.lifegood.financestore.save", qos: .utility)
+    /// 記錄每個 key 上次成功套用到 @Published 屬性的原始 Data，供 load() 判斷是否真的有變更，
+    /// 避免雲端這輪只改了其中一個 key 時，其餘資料仍用「完全相同」的內容重新賦值造成無謂重繪。
+    private var lastLoadedRawData: [String: Data] = [:]
 
     init() {
         load()
@@ -61,11 +64,16 @@ class FinanceStore: ObservableObject {
     func batchUpdateStockPrices(_ updates: [UUID: Double]) {
         guard !updates.isEmpty else { return }
         var updated = stocks
+        var changed = false
         for idx in updated.indices {
-            if let price = updates[updated[idx].id] {
+            if let price = updates[updated[idx].id], updated[idx].currentPrice != price {
                 updated[idx].currentPrice = price
+                changed = true
             }
         }
+        // 報價與現有值完全相同時（例如休市或 API 回傳同一收盤價）跳過賦值，
+        // 避免觸發不必要的 @Published 重繪與 CloudKit 推送。
+        guard changed else { return }
         stocks = updated
     }
 
@@ -179,18 +187,27 @@ class FinanceStore: ObservableObject {
         let decoder = JSONDecoder()
         // 各集合改用「逐筆容錯」解碼：單一筆損壞（例如舊資料/壞的 CloudKit 合併）
         // 不會讓整批保單/股票/車輛/房地產資料整批消失（對齊 LifeStore.lossyDecodeArray 的作法）
-        if let v = Self.lossyDecodeArray([SavingsInsurance].self, key: insKey, decoder: decoder) { insurances = v }
-        if let v = Self.lossyDecodeArray([Stock].self, key: stockKey, decoder: decoder) { stocks = v }
-        if let v = Self.lossyDecodeArray([Vehicle].self, key: vehicleKey, decoder: decoder) { vehicles = v }
-        if let v = Self.lossyDecodeArray([RealEstate].self, key: reKey, decoder: decoder) { realEstates = v }
+        if let v = lossyDecodeArray([SavingsInsurance].self, key: insKey, decoder: decoder) { insurances = v }
+        if let v = lossyDecodeArray([Stock].self, key: stockKey, decoder: decoder) { stocks = v }
+        if let v = lossyDecodeArray([Vehicle].self, key: vehicleKey, decoder: decoder) { vehicles = v }
+        if let v = lossyDecodeArray([RealEstate].self, key: reKey, decoder: decoder) { realEstates = v }
+    }
+
+    /// 讀取 key 目前在 UserDefaults 的原始 Data；若與上次成功套用的內容完全相同則回傳 nil，
+    /// 讓呼叫端略過解碼／賦值，避免同一批資料重複觸發 @Published 造成無謂重繪。
+    private func rawDataIfChanged(_ key: String) -> Data? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        if lastLoadedRawData[key] == data { return nil }
+        lastLoadedRawData[key] = data
+        return data
     }
 
     /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
-    /// key 不存在 → 回傳 nil（不覆蓋預設值）；存在但全空 → 回傳 []。
-    private static func lossyDecodeArray<Element: Decodable>(
+    /// key 不存在、或與上次套用的內容相同 → 回傳 nil（不覆蓋現有值）；存在且有變更但全空 → 回傳 []。
+    private func lossyDecodeArray<Element: Decodable>(
         _ type: [Element].Type, key: String, decoder: JSONDecoder
     ) -> [Element]? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        guard let data = rawDataIfChanged(key) else { return nil }
         if let items = try? decoder.decode([Element].self, from: data) { return items }
         if let raw = try? decoder.decode([FailableDecodable<Element>].self, from: data) {
             return raw.compactMap { $0.value }

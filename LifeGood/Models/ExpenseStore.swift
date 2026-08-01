@@ -19,6 +19,9 @@ class ExpenseStore: ObservableObject {
     private let currencyRatesKey = "lifegood_currency_rates"
     private var isLoading = false
     private let saveQueue = DispatchQueue(label: "com.lifegood.expensestore.save", qos: .utility)
+    /// 記錄每個 key 上次成功套用到 @Published 屬性的原始 Data，供 load() 判斷是否真的有變更，
+    /// 避免雲端這輪只改了其中一個 key 時，其餘資料仍用「完全相同」的內容重新賦值造成無謂重繪。
+    private var lastLoadedRawData: [String: Data] = [:]
 
     init() {
         load()
@@ -42,8 +45,11 @@ class ExpenseStore: ObservableObject {
            Set(keys).isDisjoint(with: [saveKey, incomeKey, currencyRatesKey]) {
             return
         }
-        load()
-        modifyID = UUID()
+        // load() 內部已按 key 比對原始 Data，只有真的有變更才回傳 true；
+        // 藉此避免這 3 個 key 只有其中一個變更時，其餘未變的資料仍觸發 ChartView 重算。
+        if load() {
+            modifyID = UUID()
+        }
     }
 
     // MARK: - 支出 CRUD
@@ -585,22 +591,34 @@ class ExpenseStore: ObservableObject {
         }
     }
 
-    private func load() {
+    @discardableResult
+    private func load() -> Bool {
         isLoading = true
         defer { isLoading = false }
         let decoder = JSONDecoder()
+        var changed = false
         // 逐筆容錯解碼：單一筆損壞（舊資料格式／CloudKit 合併壞掉）不會讓整批記帳/收入資料消失
-        if let v = Self.lossyDecodeArray([Expense].self, key: saveKey, decoder: decoder) { expenses = v }
-        if let v = Self.lossyDecodeArray([Income].self, key: incomeKey, decoder: decoder) { incomes = v }
-        if let v = Self.lossyDecodeArray([CurrencyRate].self, key: currencyRatesKey, decoder: decoder) { currencyRates = v }
+        if let v = lossyDecodeArray([Expense].self, key: saveKey, decoder: decoder) { expenses = v; changed = true }
+        if let v = lossyDecodeArray([Income].self, key: incomeKey, decoder: decoder) { incomes = v; changed = true }
+        if let v = lossyDecodeArray([CurrencyRate].self, key: currencyRatesKey, decoder: decoder) { currencyRates = v; changed = true }
+        return changed
+    }
+
+    /// 讀取 key 目前在 UserDefaults 的原始 Data；若與上次成功套用的內容完全相同則回傳 nil，
+    /// 讓呼叫端略過解碼／賦值，避免同一批資料重複觸發 @Published 造成無謂重繪。
+    private func rawDataIfChanged(_ key: String) -> Data? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        if lastLoadedRawData[key] == data { return nil }
+        lastLoadedRawData[key] = data
+        return data
     }
 
     /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
-    /// key 不存在 → 回傳 nil（不覆蓋預設值）；存在但全空 → 回傳 []。
-    private static func lossyDecodeArray<Element: Decodable>(
+    /// key 不存在、或與上次套用的內容相同 → 回傳 nil（不覆蓋現有值）；存在且有變更但全空 → 回傳 []。
+    private func lossyDecodeArray<Element: Decodable>(
         _ type: [Element].Type, key: String, decoder: JSONDecoder
     ) -> [Element]? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        guard let data = rawDataIfChanged(key) else { return nil }
         if let items = try? decoder.decode([Element].self, from: data) { return items }
         if let raw = try? decoder.decode([FailableDecodable<Element>].self, from: data) {
             return raw.compactMap { $0.value }

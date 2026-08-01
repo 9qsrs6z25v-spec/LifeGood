@@ -17,6 +17,11 @@ class LifeStore: ObservableObject {
 
     private var isLoading = false
     private let saveQueue = DispatchQueue(label: "com.lifegood.lifestore.save", qos: .utility)
+    /// 記錄每個 key 上次成功套用到 @Published 屬性的原始 Data，供 load() 判斷是否真的有變更。
+    /// reloadFromCloud() 只要有任一 owned key 命中就會整批呼叫 load()，但雲端這輪可能只改了
+    /// 其中一個 key（例如 life_pets）；若不比對直接照舊全部重新賦值，其餘 12 個集合會用「完全相同」
+    /// 的資料再次觸發 @Published／進場動畫，造成畫面無謂重繪閃爍。
+    private var lastLoadedRawData: [String: Data] = [:]
 
     /// 本 Store 負責的所有 UserDefaults key，供 reloadFromCloud 比對 userInfo["keys"] 用
     private static let ownedKeys: Set<String> = [
@@ -592,34 +597,43 @@ class LifeStore: ObservableObject {
         defer { isLoading = false }
         let decoder = JSONDecoder()
 
-        if let data = UserDefaults.standard.data(forKey: "life_profile"),
+        if let data = rawDataIfChanged("life_profile"),
            let p = try? decoder.decode(UserProfile.self, from: data) {
             profile = p
         }
         // 各集合改用「逐筆容錯」解碼：單一筆損壞不會讓整批消失（避免家庭/部屬等資料整批不見）
-        if let items = Self.lossyDecodeArray([FamilyMember].self, key: "life_family", decoder: decoder) { familyMembers = items }
-        if let items = Self.lossyDecodeArray([LifeMilestone].self, key: "life_milestones", decoder: decoder) { milestones = items }
-        if let items = Self.lossyDecodeArray([Relationship].self, key: "life_relationships", decoder: decoder) { relationships = items }
-        if let items = Self.lossyDecodeArray([Pet].self, key: "life_pets", decoder: decoder) { pets = items }
-        if let items = Self.lossyDecodeArray([Schedule].self, key: "life_schedules", decoder: decoder) { schedules = items }
-        if let items = Self.lossyDecodeArray([Subordinate].self, key: "life_subordinates", decoder: decoder) { subordinates = items }
-        if let items = Self.lossyDecodeArray([Department].self, key: "life_departments", decoder: decoder) { departments = items }
-        if let items = Self.lossyDecodeArray([GradeTitle].self, key: "life_grade_titles", decoder: decoder) { gradeTitles = items }
-        if let items = Self.lossyDecodeArray([BusinessCard].self, key: "life_business_cards", decoder: decoder) { businessCards = items }
-        if let items = Self.lossyDecodeArray([PersonalEvent].self, key: "life_personal_events", decoder: decoder) { personalEvents = items }
-        if let items = Self.lossyDecodeArray([OrgPerson].self, key: "life_org_people", decoder: decoder) { orgPeople = items }
-        if let data = UserDefaults.standard.data(forKey: "life_health_profile"),
+        if let items = lossyDecodeArray([FamilyMember].self, key: "life_family", decoder: decoder) { familyMembers = items }
+        if let items = lossyDecodeArray([LifeMilestone].self, key: "life_milestones", decoder: decoder) { milestones = items }
+        if let items = lossyDecodeArray([Relationship].self, key: "life_relationships", decoder: decoder) { relationships = items }
+        if let items = lossyDecodeArray([Pet].self, key: "life_pets", decoder: decoder) { pets = items }
+        if let items = lossyDecodeArray([Schedule].self, key: "life_schedules", decoder: decoder) { schedules = items }
+        if let items = lossyDecodeArray([Subordinate].self, key: "life_subordinates", decoder: decoder) { subordinates = items }
+        if let items = lossyDecodeArray([Department].self, key: "life_departments", decoder: decoder) { departments = items }
+        if let items = lossyDecodeArray([GradeTitle].self, key: "life_grade_titles", decoder: decoder) { gradeTitles = items }
+        if let items = lossyDecodeArray([BusinessCard].self, key: "life_business_cards", decoder: decoder) { businessCards = items }
+        if let items = lossyDecodeArray([PersonalEvent].self, key: "life_personal_events", decoder: decoder) { personalEvents = items }
+        if let items = lossyDecodeArray([OrgPerson].self, key: "life_org_people", decoder: decoder) { orgPeople = items }
+        if let data = rawDataIfChanged("life_health_profile"),
            let h = try? decoder.decode(HealthProfile.self, from: data) {
             healthProfile = h
         }
     }
 
+    /// 讀取 key 目前在 UserDefaults 的原始 Data；若與上次成功套用的內容完全相同則回傳 nil，
+    /// 讓呼叫端略過解碼／賦值，避免同一批資料重複觸發 @Published 造成無謂重繪。
+    private func rawDataIfChanged(_ key: String) -> Data? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        if lastLoadedRawData[key] == data { return nil }
+        lastLoadedRawData[key] = data
+        return data
+    }
+
     /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素，保留其餘資料。
-    /// key 不存在 → 回傳 nil（不覆蓋預設值）；存在但全空 → 回傳 []。
-    private static func lossyDecodeArray<Element: Decodable>(
+    /// key 不存在、或與上次套用的內容相同 → 回傳 nil（不覆蓋現有值）；存在且有變更但全空 → 回傳 []。
+    private func lossyDecodeArray<Element: Decodable>(
         _ type: [Element].Type, key: String, decoder: JSONDecoder
     ) -> [Element]? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        guard let data = rawDataIfChanged(key) else { return nil }
         if let items = try? decoder.decode([Element].self, from: data) { return items }
         // 整批失敗 → 逐筆解碼保留可解的元素
         if let raw = try? decoder.decode([FailableDecodable<Element>].self, from: data) {
