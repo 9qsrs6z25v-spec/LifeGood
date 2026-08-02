@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.63", build: 816, date: "2026/08/02", notes: [
+            "【美化 v25.63】RealEstateDetailView.swift「可愛風照片瀏覽器」CutePhotoViewer.photoArea 載入狀態補上主題色：本元件依 CutePhotoDraft.Kind（裝潢紀錄／支出照片／水電收據／電梯保養）各自有專屬 accent 色，找不到照片時的圖示已用 draft.kind.accent.opacity(0.6) 上色，緊接在同一個 else 分支裡的載入中 ProgressView() 卻從一開始就是系統預設灰色轉輪，是全檔案「可愛風照片瀏覽器」四種色系裡唯一沒有跟上主題色的狀態、也是本檔案唯一沒有 .tint() 的 ProgressView（姊妹元件 AddRealEstateView.PhotoViewerSheet 已於 v25.23 補上 .tint(.white)）。補上 .tint(draft.kind.accent)，讓「載入中→找不到照片」切換時轉輪與圖示同色系過渡，不會從灰轉彩顯得突兀。純視覺層調整，didLoad／urls 等既有讀取與非同步下載邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.62", build: 815, date: "2026/08/02", notes: [
             "【美化 v25.62】AddVehicleView.swift 車輛新增／編輯頁「定期支出」「變動支出」列表補齊進場動畫：同一支 Form 裡，vehiclePreviewCard 英雄卡（cardAppeared）與試算區 calcSection（calcSectionAppeared）都已有 spring 進場動畫，但緊接在兩者之間、使用者最常滑動瀏覽也最常操作（點列編輯、左滑刪除）的定期／變動支出兩大清單，ForEach 列卻從頭到尾都是裸出現，是全檔案唯一還沒對齊進場規格的角落。新增 fixedExpensesAppeared／variableExpensesAppeared 兩個旗標，比照 SpouseResumeView.expenseRow／ResumeGiftSection.giftRow 既有規格：ForEach 改用 enumerated 索引取代原本的隱式 Identifiable 走訪，逐列 opacity(0→1) + offset(y: 12→0)，以 spring(response:0.44, dampingFraction:0.82) 依索引 × 0.04 秒交錯延遲（上限 14 列，避免長清單延遲過久才播完）；觸發點掛在各自 Section 的 onAppear（而非 ForEach 內每一列），避免 Form 捲動時 lazy-load 重複觸發淡出又重播。並在檔案頂端補上本輪美化方向註記，方便下次查找同檔案均值性。純視覺層調整，onDelete 依 IndexSet 對應 fixedExpenses／variableExpenses 原始順序刪除、linkedExpenseId 連動記帳明細等既有邏輯完全未變動。",
         ]),

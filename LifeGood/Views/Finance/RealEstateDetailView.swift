@@ -131,6 +131,14 @@ import ImageIO
 //      理論上會無限換行撐高卡片。補上 .lineLimit(2) + .minimumScaleFactor(0.7)，對齊
 //      VehicleDetailView v5 同批規格，讓超長名稱自動縮字換行但不致無法辨識。純視覺層調整，
 //      estate.name 等既有資料完全未變動。
+//
+// [2026-08 v12] CutePhotoViewer.photoArea 載入狀態補上主題色：
+//  27. 找不到照片時的圖示已用 draft.kind.accent.opacity(0.6) 上色（裝潢＝粉紫／支出＝蜜桃／
+//      水電＝對應色／電梯＝薄荷綠），緊接在同一個 else 分支裡的載入中 ProgressView() 卻是
+//      系統預設灰色，是本檔案「可愛風照片瀏覽器」四種色系裡唯一沒有跟上主題色的狀態、也是全檔
+//      案唯一沒有 .tint() 的 ProgressView（AddRealEstateView.PhotoViewerSheet 已於 v25.23
+//      補上 .tint(.white)）。補上 .tint(draft.kind.accent)，讓「載入中→找不到」轉場時顏色
+//      一致，不會從灰轉彩。純視覺層調整，didLoad／urls 等既有讀取邏輯完全未變動。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -3605,7 +3613,9 @@ struct CutePhotoViewer: View {
                                             .font(.subheadline.weight(.medium))
                                             .foregroundStyle(.secondary)
                                     } else {
+                                        // [v12] 補齊主題色，避免載入中→找不到照片切換時顏色從灰轉彩
                                         ProgressView()
+                                            .tint(draft.kind.accent)
                                     }
                                 }
                             )
