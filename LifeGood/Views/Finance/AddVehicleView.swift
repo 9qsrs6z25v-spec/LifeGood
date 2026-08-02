@@ -29,6 +29,17 @@ import SwiftUI
 //      shortDateFormatter 改為靜態共用實例，避免每次 render 重新分配。
 //  12. calcSection 進場動畫：加入 calcSectionAppeared spring 旗標 + opacity+Y offset 進場，
 //      對齊 AddSavingsInsuranceView.cardAppeared / AddStockView 進場規格。
+// [2026-08 v3] 本次美化方向（定期／變動支出列表補齊進場動畫）：
+//  13. fixedExpenseSection／variableExpenseSection 的 ForEach 列先前完全沒有進場動畫，
+//      是全檔案唯一還沒對齊的角落——同一支 Form 裡 vehiclePreviewCard（cardAppeared）與
+//      calcSection（calcSectionAppeared）都已有 spring 進場，這兩個「最常滑動瀏覽」的
+//      清單區塊卻是裸出現。新增 fixedExpensesAppeared／variableExpensesAppeared 旗標，
+//      比照 SpouseResumeView.expenseRow / ResumeGiftSection.giftRow 規格：ForEach 改用
+//      enumerated 索引，每列 opacity(0→1) + offset(12→0)，spring(0.44, 0.82) 依索引
+//      × 0.04s 交錯延遲（上限 14 列，避免長清單延遲過久）；觸發點掛在各自 Section 的
+//      onAppear（而非 ForEach 內每列），避免 Form 捲動時 lazy-load 重複觸發。
+//      （下次美化本檔案時：主要欄位、英雄卡、兩大支出清單、試算區皆已對齊進場動畫規格，
+//      可轉往其他仍留有待辦的畫面）
 
 struct AddVehicleView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -64,6 +75,9 @@ struct AddVehicleView: View {
     // v2 進場動畫旗標
     @State private var cardAppeared = false
     @State private var calcSectionAppeared = false
+    // v3 進場動畫旗標：定期／變動支出列表交錯進場
+    @State private var fixedExpensesAppeared = false
+    @State private var variableExpensesAppeared = false
 
     // MARK: - 編輯/新增項目
 
@@ -249,7 +263,7 @@ struct AddVehicleView: View {
 
     private var fixedExpenseSection: some View {
         Section {
-            ForEach(fixedExpenses) { fe in
+            ForEach(Array(fixedExpenses.enumerated()), id: \.element.id) { idx, fe in
                 Button {
                     if let expId = fe.linkedExpenseId,
                        let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
@@ -293,6 +307,15 @@ struct AddVehicleView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // [v3] 交錯淡入 + 向上進場動畫，對齊 SpouseResumeView.expenseRow /
+                // ResumeGiftSection.giftRow 清單列規格
+                .opacity(fixedExpensesAppeared ? 1 : 0)
+                .offset(y: fixedExpensesAppeared ? 0 : 12)
+                .animation(
+                    .spring(response: 0.44, dampingFraction: 0.82)
+                        .delay(0.04 * Double(min(idx, 14))),
+                    value: fixedExpensesAppeared
+                )
             }
             .onDelete(perform: deleteFixedExpenses)
 
@@ -310,13 +333,18 @@ struct AddVehicleView: View {
                 Text("定期支出合計每月 \(formatCurrency(monthlyTotal))，與記帳模式的固定支出連動。")
             }
         }
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.05)) {
+                fixedExpensesAppeared = true
+            }
+        }
     }
 
     // MARK: - 變動支出
 
     private var variableExpenseSection: some View {
         Section {
-            ForEach(variableExpenses) { ve in
+            ForEach(Array(variableExpenses.enumerated()), id: \.element.id) { idx, ve in
                 Button {
                     if let expId = ve.linkedExpenseId,
                        let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
@@ -363,6 +391,15 @@ struct AddVehicleView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // [v3] 交錯淡入 + 向上進場動畫，對齊 SpouseResumeView.expenseRow /
+                // ResumeGiftSection.giftRow 清單列規格
+                .opacity(variableExpensesAppeared ? 1 : 0)
+                .offset(y: variableExpensesAppeared ? 0 : 12)
+                .animation(
+                    .spring(response: 0.44, dampingFraction: 0.82)
+                        .delay(0.04 * Double(min(idx, 14))),
+                    value: variableExpensesAppeared
+                )
             }
             .onDelete(perform: deleteVariableExpenses)
 
@@ -380,6 +417,11 @@ struct AddVehicleView: View {
                 Text("變動支出合計 \(formatCurrency(total))，與記帳模式的變動支出連動。")
             } else {
                 Text("油錢、停車、洗車、臨時維修等支出，每筆單獨記錄。")
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.08)) {
+                variableExpensesAppeared = true
             }
         }
     }

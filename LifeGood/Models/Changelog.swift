@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.62", build: 815, date: "2026/08/02", notes: [
+            "【美化 v25.62】AddVehicleView.swift 車輛新增／編輯頁「定期支出」「變動支出」列表補齊進場動畫：同一支 Form 裡，vehiclePreviewCard 英雄卡（cardAppeared）與試算區 calcSection（calcSectionAppeared）都已有 spring 進場動畫，但緊接在兩者之間、使用者最常滑動瀏覽也最常操作（點列編輯、左滑刪除）的定期／變動支出兩大清單，ForEach 列卻從頭到尾都是裸出現，是全檔案唯一還沒對齊進場規格的角落。新增 fixedExpensesAppeared／variableExpensesAppeared 兩個旗標，比照 SpouseResumeView.expenseRow／ResumeGiftSection.giftRow 既有規格：ForEach 改用 enumerated 索引取代原本的隱式 Identifiable 走訪，逐列 opacity(0→1) + offset(y: 12→0)，以 spring(response:0.44, dampingFraction:0.82) 依索引 × 0.04 秒交錯延遲（上限 14 列，避免長清單延遲過久才播完）；觸發點掛在各自 Section 的 onAppear（而非 ForEach 內每一列），避免 Form 捲動時 lazy-load 重複觸發淡出又重播。並在檔案頂端補上本輪美化方向註記，方便下次查找同檔案均值性。純視覺層調整，onDelete 依 IndexSet 對應 fixedExpenses／variableExpenses 原始順序刪除、linkedExpenseId 連動記帳明細等既有邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.61", build: 814, date: "2026/08/02", notes: [
             "【美化 v25.61】LifeFinanceView.swift「FinanceCardView」頭卡 headerCard 三分支立體感補齊：headerCard 依 sub 型別切三種頭卡樣式（creditCardHeader 仿信用卡 banner／bankPassbookHeader 仿銀行存摺／defaultHeader 證券與保險共用），其中 creditCardHeader、bankPassbookHeader 外層都已有 .overlay(RoundedRectangle.stroke) 描邊 + .shadow 立體陰影，唯獨 defaultHeader（證券／保險兩大類明細頁最常進入的頭卡，三分支中觸及頻率最高的一支）從一開始就只有 .clipShape 平貼卡片背景，沒有描邊也沒有陰影，在同一支 headerCard 切換路徑上是視覺深度規格最落後的一角，使用者在信用卡/存摺頭卡與證券/保險頭卡之間切換瀏覽時能感覺到 defaultHeader 明顯「較扁」。比照 bankPassbookHeader（同樣立於 Color(.systemBackground) 中性底色、非彩色漸層卡）既有數值，補上 .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1)) + .shadow(color: Color.black.opacity(0.12), radius: 6, y: 3)，並在 defaultHeader 上方加註本輪美化方向說明，方便下次查找同檔案均值性。純視覺層調整，item／sub 等既有資料綁定與金額計算完全未變動。",
         ]),
