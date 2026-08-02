@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.58", build: 811, date: "2026/08/02", notes: [
+            "【美化 v25.58】車輛／房地產／股票三款詳情頁閃卡「名稱」大字補齊防截斷，收斂姊妹元件規格：VehicleDetailView.flashCard 的 Text(vehicle.name)（.title.bold()）原本完全沒有 multilineTextAlignment／lineLimit／minimumScaleFactor，外層 VStack 也沒有橫向 padding，是 Vehicle／RealEstate／Stock 三款同型閃卡「名稱」大字中規格最落後的一處——RealEstateDetailView.estate.name／StockDetailView.stock.name 雖然已有 .multilineTextAlignment(.center) + 外層 .padding(.horizontal, 24)，但同樣沒補上 lineLimit／minimumScaleFactor，長名稱理論上會無限換行撐高卡片。三檔一次補齊：VehicleDetailView 補上 .multilineTextAlignment(.center) + .lineLimit(2) + .minimumScaleFactor(0.7) + 外層 .padding(.horizontal, 24)；RealEstateDetailView／StockDetailView 各自補上 .lineLimit(2) + .minimumScaleFactor(0.7)。三款閃卡「名稱」大字規格至此完全一致，超長車名/物件名/股票全名（例如含年份配備等級的完整車型名、含棟別樓層的房產命名、公司完整全名）都能自動縮字換行、不致無法辨識，也不會頂到卡片邊緣。純視覺層調整，vehicle.name／estate.name／stock.name 等既有資料綁定與商業邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.57", build: 810, date: "2026/08/02", notes: [
             "【美化 v25.57】SubordinateView.swift 部屬總覽頁英雄卡大字自適應收尾：summaryStatsCard 頂部「部屬總覽」28pt「N 位部屬」大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同卡片內唯一缺這道防護的數字——下方「平均評分」「優秀（90+）」「待提升（<70）」三格 summaryKpiCell 早已有 .lineLimit(1).minimumScaleFactor(0.7)，這裡當時被漏掉，團隊人數較多或右側排序膠囊較長時可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊 VehicleView v25.49／FinanceOverviewView v25.51／SavingsInsuranceView v25.54 等同一輪「英雄卡大字自適應收尾」規格，讓部屬人數自動縮字而不被裁切，同時維持在可辨識最小字級以上。純視覺層調整，total／avg／excellent／needImprovement 等既有統計計算與資料綁定完全未變動。",
         ]),

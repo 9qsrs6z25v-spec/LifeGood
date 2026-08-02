@@ -123,6 +123,14 @@ import ImageIO
 //      主題色與圖示對齊 assetsSection 空狀態（v3 已用 shippingbox 代表「物件」語意）。純視覺層
 //      調整，name／isSaving／onSave 等既有新增、重新命名商業邏輯完全未變動。
 //      （下次美化本檔案時：可全檔案複查是否還有其他手刻金額格式殘留待統一）
+//
+// [2026-08 v11] flashCard 房地產名稱補齊防截斷：
+//  26. Text(estate.name)（.title.bold()，已置中對齊）原本沒有 lineLimit／minimumScaleFactor，
+//      是 Vehicle／RealEstate／Stock 三款同型閃卡車名/物件名/股票名大字中，唯二仍缺這道防護的
+//      其中一處（另一處 StockDetailView 同步補齊）。長物件名稱（例如含棟別/樓層完整命名）
+//      理論上會無限換行撐高卡片。補上 .lineLimit(2) + .minimumScaleFactor(0.7)，對齊
+//      VehicleDetailView v5 同批規格，讓超長名稱自動縮字換行但不致無法辨識。純視覺層調整，
+//      estate.name 等既有資料完全未變動。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -384,6 +392,8 @@ struct RealEstateDetailView: View {
                     .font(.title.weight(.bold))
                     .foregroundStyle(rarity == .legendary ? .white : .primary)
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
 
                 if !estate.fullAddress.isEmpty {
                     Text(estate.fullAddress)

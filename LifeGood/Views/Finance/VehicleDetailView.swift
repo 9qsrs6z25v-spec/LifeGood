@@ -176,6 +176,16 @@ struct SoldStamp: View {
 //      購入價等既有試算邏輯完全未變動。
 //      （StockDetailView 已於 v24.98、RealEstateDetailView 已於 v24.99 比照本次做法
 //      補齊，全 App 詳情頁閃卡估值大字量級單位規格至此已收斂一致）
+// [2026-08 v5] flashCard 車名補齊姊妹閃卡防截斷規格：
+//  14. Text(vehicle.name)（.title.bold()）原本沒有 multilineTextAlignment／lineLimit／
+//      minimumScaleFactor，也沒有橫向 padding，是 Vehicle／RealEstate／Stock 三款同型閃卡中
+//      唯一缺這組防護的車名大字——RealEstateDetailView.estate.name／StockDetailView.stock.name
+//      皆已有 .multilineTextAlignment(.center) + 外層 .padding(.horizontal, 24)，長車名在本頁
+//      沒有橫向留白、換行也會靠左而非置中，與姊妹頁面觀感不一致。補上
+//      .multilineTextAlignment(.center) + .lineLimit(2) + .minimumScaleFactor(0.7)，
+//      並在外層 VStack 加上 .padding(.horizontal, 24)，對齊兩個姊妹閃卡規格，
+//      讓超長車名（例如含年份/配備等級的完整車型名）自動縮字換行但不致無法辨識，
+//      也不會頂到卡片邊緣。純視覺層調整，vehicle.name／brand 等既有資料完全未變動。
 
 // MARK: - 汽車檢視卡片
 
@@ -288,6 +298,9 @@ struct VehicleDetailView: View {
                 Text(vehicle.name)
                     .font(.title.weight(.bold))
                     .foregroundStyle(rarity == .legendary ? .white : .primary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
 
                 if !vehicle.brand.isEmpty {
                     Text(vehicle.brand)
@@ -296,6 +309,7 @@ struct VehicleDetailView: View {
                 }
             }
             .padding(.top, 16)
+            .padding(.horizontal, 24)
 
             // 估值（大字）
             VStack(spacing: 4) {

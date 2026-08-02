@@ -73,6 +73,13 @@ import SwiftUI
 //      ／flashCard 市值早已統一的 Double.ntdWanString 萬／億量級格式不一致；改為直接呼叫
 //      .ntdWanString，並移除兩個已無呼叫端的 formatNT／_ntFmt／formatCash／_cashFmt 死碼。
 //      純視覺層調整，交易／股利存檔、刪除、銀行同步等既有商業邏輯完全未變動。
+// [2026-08 v6] flashCard 股票名稱補齊防截斷：
+//  25. Text(stock.name)（.title.bold()，已置中對齊）原本沒有 lineLimit／minimumScaleFactor，
+//      是 Vehicle／RealEstate／Stock 三款同型閃卡車名/物件名/股票名大字中，唯二仍缺這道防護的
+//      其中一處（另一處 RealEstateDetailView 同步補齊）。長股票全名（例如完整公司名稱）
+//      理論上會無限換行撐高卡片。補上 .lineLimit(2) + .minimumScaleFactor(0.7)，對齊
+//      VehicleDetailView v5 同批規格，讓超長名稱自動縮字換行但不致無法辨識。純視覺層調整，
+//      stock.name 等既有資料完全未變動。
 //      （下次美化本檔案時：兩個編輯 sheet 已對齊全檔案 section header／金額規格，
 //      可轉往其他仍留有待辦的畫面）
 
@@ -207,6 +214,8 @@ struct StockDetailView: View {
                     .font(.title.weight(.bold))
                     .foregroundStyle(rarity == .legendary ? .white : .primary)
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
 
                 if !stock.symbol.isEmpty {
                     // [v2] RoundedRectangle → Capsule + stroke 細邊框，對齊全 App 標籤膠囊規格
