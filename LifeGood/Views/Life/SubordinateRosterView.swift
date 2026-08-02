@@ -289,6 +289,13 @@ struct SubordinateRosterView: View {
             .sheet(isPresented: $showSettings) {
                 ShiftScheduleSettingsView(scheduleStore: scheduleStore)
             }
+            .onChange(of: lifeStore.departments.map(\.id)) { _, ids in
+                // 所選部門被刪除時，篩選回復為「全部部門」，避免殘留孤兒 UUID 讓名單假性清空
+                // （對齊 SubordinateView／TalentMatrixView 既有修復規格）
+                if let id = selectedDeptId, !ids.contains(id) {
+                    selectedDeptId = nil
+                }
+            }
         }
     }
 
