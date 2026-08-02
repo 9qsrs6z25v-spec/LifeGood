@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.60", build: 813, date: "2026/08/02", notes: [
+            "【美化 v25.60】SubordinateDetailView.swift「@ 標註」建議清單 MentionTextField.row 首次補齊視覺規格：本元件自導入以來，建議清單每一列（部屬／名片人名）都是裸 24pt 單色 SF Symbol 圖示（無底圓、無描邊）+ 純文字 kind 標籤（無底色），與同檔案 meetingItemOverviewRow／CompletedCollapsibleCard 等既有清單列早已統一的 28-36pt LinearGradient 漸層圖示圓（fill 0.20→0.08 + stroke 0.22 lineWidth 1）與 Capsule 底色標籤規格不一致，是全檔案「@ 標註」這個高頻互動入口唯一還沒跟上規格的角落。圖示改為 28pt 漸層圓（部屬＝blue／名片＝teal，沿用既有識別色）+ 細描邊；trailing 的「部屬」/「名片」標籤改用 Capsule().fill(color.opacity(0.14)) 包底色，對齊 kind 標籤慣例；分隔線縮排隨圖示加寬同步從 40 調整為 50，維持與文字對齊。純視覺層調整，updateQuery／insert／suggestions 等既有 @ 標註偵測與插入邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.59", build: 812, date: "2026/08/02", notes: [
             "【美化 v25.59】ResumeGiftSection.swift「收到的禮金」giftRow 兩顆小膠囊補齊描邊：本元件 header 計數膠囊、總計金額膠囊、分類計數膠囊皆已在先前幾版陸續補上 Capsule().stroke 細邊框，唯獨 giftRow（每一筆禮金列）內「日期」與「同行者」兩顆小膠囊從 v1 建立以來就沒有描邊，是全檔案僅剩還平貼、輪廓不明的膠囊徽章，長禮金清單一大排 giftRow 並排捲動時尤其顯眼與其他膠囊不一致。日期膠囊補上 Capsule().stroke(accent.opacity(0.18), lineWidth: 0.6)，對齊本檔其餘粉紅主題膠囊描邊強度；同行者膠囊底色是中性 tertiarySystemFill（非粉紅主題色），改用 Color(.separator).opacity(0.25) 中性描邊，避免誤用粉紅色框住灰底徽章。純視覺層調整，禮金資料、社交子分類分組或金額加總等既有商業邏輯完全未變動。",
         ]),

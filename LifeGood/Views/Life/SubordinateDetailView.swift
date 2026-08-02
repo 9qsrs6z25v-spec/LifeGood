@@ -2731,7 +2731,7 @@ struct MentionTextField: View {
                     ForEach(suggestions) { p in
                         Button { insert(p) } label: { row(p) }
                             .buttonStyle(.plain)
-                        if p.id != suggestions.last?.id { Divider().padding(.leading, 40) }
+                        if p.id != suggestions.last?.id { Divider().padding(.leading, 50) }
                     }
                 }
                 .background(Color(.tertiarySystemBackground))
@@ -2742,10 +2742,17 @@ struct MentionTextField: View {
     }
 
     private func row(_ p: MentionPerson) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: p.kind == .sub ? "person.fill" : "person.crop.rectangle.stack.fill")
-                .font(.system(size: 13)).foregroundStyle(p.kind == .sub ? Color.blue : Color.teal)
-                .frame(width: 24)
+        let tint: Color = p.kind == .sub ? .blue : .teal
+        return HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [tint.opacity(0.20), tint.opacity(0.08)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 28, height: 28)
+                Circle().stroke(tint.opacity(0.22), lineWidth: 1).frame(width: 28, height: 28)
+                Image(systemName: p.kind == .sub ? "person.fill" : "person.crop.rectangle.stack.fill")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(tint)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(p.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                 if !p.subtitle.isEmpty {
@@ -2754,8 +2761,11 @@ struct MentionTextField: View {
             }
             Spacer(minLength: 4)
             Text(p.kind == .sub ? "部屬" : "名片")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(p.kind == .sub ? Color.blue : Color.teal)
+                .font(.caption2.weight(.bold))
+                .padding(.horizontal, 6).padding(.vertical, 1.5)
+                .background(tint.opacity(0.14))
+                .foregroundStyle(tint)
+                .clipShape(Capsule())
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .contentShape(Rectangle())
@@ -2779,6 +2789,17 @@ struct MentionTextField: View {
         activeQuery = nil
     }
 }
+
+// MARK: - 美化紀錄（MentionTextField）
+// [2026-08 v1] 首次美化：MentionTextField 自 4b07cbb 導入後（供 RecordEditorSheet／
+// MeetingEditorSheet／TaskEditorSheet／WeeklyReportEditorSheet 共用的 @ 標註輸入框），
+// row(_:) 建議清單列一直沿用裸 24pt 單色 SF Symbol 圖示（無底圓）+ 純文字 kind 標籤
+// （無底色），與本檔案 meetingItemOverviewRow／CompletedCollapsibleCard 等既有列的
+// 28-36pt LinearGradient 漸層圖示圓（fill 0.20→0.08 + stroke 0.22 lineWidth 1）與
+// Capsule 底色標籤規格不一致。改為：圖示套上 28pt 漸層圓（依 kind 用 blue／teal 識別色）
+// + stroke 描邊；trailing 的「部屬」/「名片」標籤改用 Capsule().fill(color.opacity(0.14))
+// 包底色，與 kind.color 標籤慣例一致。Divider 對齊縮排隨圖示加寬同步從 40→50。
+// 純視覺調整，未變動 updateQuery／insert／suggestions 等既有 @ 標註邏輯。
 
 // MARK: - 部屬事項預覽卡（點開先看卡片，右上角編輯才進入編輯）
 
