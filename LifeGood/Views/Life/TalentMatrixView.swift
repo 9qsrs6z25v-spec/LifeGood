@@ -290,6 +290,19 @@ struct TalentMatrixView: View {
             .onChange(of: deptFilterRaw) { _, _ in
                 selected = nil
             }
+            // 所選部門被刪除時，從篩選中移除該部門 id（對齊 SubordinateView 既有修復規格：用 id 陣列
+            // 觀察，避免 Department 需 Equatable）。GradeTitleView.deleteDepartment 刪除部門時只會
+            // 清空受影響 Subordinate/OrgPerson 的 departmentId，不會主動清理這裡持久化的
+            // talentMatrixDeptFilter，若不處理，殘留的孤兒 UUID 會讓 members 篩不到任何人、
+            // 畫面顯示「所選部門沒有部屬」的空狀態假象，且已刪除的部門不再出現在篩選選單裡，
+            // 使用者難以察覺原因，只能記得手動切回「全部部門」。
+            .onChange(of: lifeStore.departments.map(\.id)) { _, ids in
+                let validIds = Set(ids)
+                let filtered = selectedDeptIds.intersection(validIds)
+                if filtered != selectedDeptIds {
+                    deptFilterRaw = filtered.map(\.uuidString).joined(separator: ",")
+                }
+            }
         }
     }
 
