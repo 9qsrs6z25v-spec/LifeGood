@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.59", build: 812, date: "2026/08/02", notes: [
+            "【美化 v25.59】ResumeGiftSection.swift「收到的禮金」giftRow 兩顆小膠囊補齊描邊：本元件 header 計數膠囊、總計金額膠囊、分類計數膠囊皆已在先前幾版陸續補上 Capsule().stroke 細邊框，唯獨 giftRow（每一筆禮金列）內「日期」與「同行者」兩顆小膠囊從 v1 建立以來就沒有描邊，是全檔案僅剩還平貼、輪廓不明的膠囊徽章，長禮金清單一大排 giftRow 並排捲動時尤其顯眼與其他膠囊不一致。日期膠囊補上 Capsule().stroke(accent.opacity(0.18), lineWidth: 0.6)，對齊本檔其餘粉紅主題膠囊描邊強度；同行者膠囊底色是中性 tertiarySystemFill（非粉紅主題色），改用 Color(.separator).opacity(0.25) 中性描邊，避免誤用粉紅色框住灰底徽章。純視覺層調整，禮金資料、社交子分類分組或金額加總等既有商業邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.58", build: 811, date: "2026/08/02", notes: [
             "【美化 v25.58】車輛／房地產／股票三款詳情頁閃卡「名稱」大字補齊防截斷，收斂姊妹元件規格：VehicleDetailView.flashCard 的 Text(vehicle.name)（.title.bold()）原本完全沒有 multilineTextAlignment／lineLimit／minimumScaleFactor，外層 VStack 也沒有橫向 padding，是 Vehicle／RealEstate／Stock 三款同型閃卡「名稱」大字中規格最落後的一處——RealEstateDetailView.estate.name／StockDetailView.stock.name 雖然已有 .multilineTextAlignment(.center) + 外層 .padding(.horizontal, 24)，但同樣沒補上 lineLimit／minimumScaleFactor，長名稱理論上會無限換行撐高卡片。三檔一次補齊：VehicleDetailView 補上 .multilineTextAlignment(.center) + .lineLimit(2) + .minimumScaleFactor(0.7) + 外層 .padding(.horizontal, 24)；RealEstateDetailView／StockDetailView 各自補上 .lineLimit(2) + .minimumScaleFactor(0.7)。三款閃卡「名稱」大字規格至此完全一致，超長車名/物件名/股票全名（例如含年份配備等級的完整車型名、含棟別樓層的房產命名、公司完整全名）都能自動縮字換行、不致無法辨識，也不會頂到卡片邊緣。純視覺層調整，vehicle.name／estate.name／stock.name 等既有資料綁定與商業邏輯完全未變動。",
         ]),

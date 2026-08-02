@@ -42,6 +42,14 @@ import SwiftUI
 //     expenseRow 34pt 左右圖示圓陰影規格）；分類列 32pt 圖示圓對齊 FixedExpenseView 32pt
 //     圖示圓陰影規格；giftRow 28pt 圖示圓因列表重複出現，用較輕陰影避免長列表視覺過重。
 //   • 純視覺加強，未動任何禮金資料、分類或金額邏輯。
+// [2026-08 v6] giftRow 兩顆小膠囊補齊描邊（本檔案最後一處膠囊描邊缺口）：
+//   • 本檔案 header 計數膠囊、總計金額膠囊、分類計數膠囊皆已有 Capsule().stroke 細邊框，
+//     唯獨 giftRow 內「日期」與「同行者」兩顆小膠囊從 v1 建立以來就沒有描邊，是全檔僅剩
+//     還平貼、輪廓不明的膠囊徽章，長列表中一大排 giftRow 並排時尤其顯眼。
+//   • 日期膠囊補上 Capsule().stroke(accent.opacity(0.18), lineWidth: 0.6)，對齊本檔其餘
+//     粉紅主題膠囊描邊強度；同行者膠囊底色是中性 tertiarySystemFill（非粉紅主題），改用
+//     Color(.separator).opacity(0.25) 中性描邊，避免誤用粉紅色框住灰底徽章。
+//   • 純視覺加強，未動任何禮金資料、分類、同行者或金額邏輯。
 //   （下次美化本元件時，可從這裡接著找其他可統一之處）
 
 /// 履歷頁通用：列出某人收到的禮金紀錄，依社交子分類分組顯示。
@@ -263,14 +271,17 @@ struct ResumeGiftSection: View {
                 }
                 HStack(spacing: 5) {
                     // 日期改為粉紅 Capsule 膠囊徽章
+                    // [v6] 補 stroke 細邊框，對齊本檔總計/分類金額膠囊、header 計數膠囊皆有的描邊規格
                     Text(formatDate(e.date))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(accent.opacity(0.80))
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(accent.opacity(0.08))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(accent.opacity(0.18), lineWidth: 0.6))
 
                     if let payer = e.diningMember, !payer.isEmpty {
+                        // [v6] 中性 tertiarySystemFill 膠囊同樣補描邊，避免同列僅此徽章缺邊框
                         Text(payer)
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.secondary)
@@ -278,6 +289,7 @@ struct ResumeGiftSection: View {
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Color(.tertiarySystemFill))
                             .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color(.separator).opacity(0.25), lineWidth: 0.6))
                     }
                 }
             }
