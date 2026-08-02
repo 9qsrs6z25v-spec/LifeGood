@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.61", build: 814, date: "2026/08/02", notes: [
+            "【美化 v25.61】LifeFinanceView.swift「FinanceCardView」頭卡 headerCard 三分支立體感補齊：headerCard 依 sub 型別切三種頭卡樣式（creditCardHeader 仿信用卡 banner／bankPassbookHeader 仿銀行存摺／defaultHeader 證券與保險共用），其中 creditCardHeader、bankPassbookHeader 外層都已有 .overlay(RoundedRectangle.stroke) 描邊 + .shadow 立體陰影，唯獨 defaultHeader（證券／保險兩大類明細頁最常進入的頭卡，三分支中觸及頻率最高的一支）從一開始就只有 .clipShape 平貼卡片背景，沒有描邊也沒有陰影，在同一支 headerCard 切換路徑上是視覺深度規格最落後的一角，使用者在信用卡/存摺頭卡與證券/保險頭卡之間切換瀏覽時能感覺到 defaultHeader 明顯「較扁」。比照 bankPassbookHeader（同樣立於 Color(.systemBackground) 中性底色、非彩色漸層卡）既有數值，補上 .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1)) + .shadow(color: Color.black.opacity(0.12), radius: 6, y: 3)，並在 defaultHeader 上方加註本輪美化方向說明，方便下次查找同檔案均值性。純視覺層調整，item／sub 等既有資料綁定與金額計算完全未變動。",
+        ]),
         ChangelogEntry(version: "25.60", build: 813, date: "2026/08/02", notes: [
             "【美化 v25.60】SubordinateDetailView.swift「@ 標註」建議清單 MentionTextField.row 首次補齊視覺規格：本元件自導入以來，建議清單每一列（部屬／名片人名）都是裸 24pt 單色 SF Symbol 圖示（無底圓、無描邊）+ 純文字 kind 標籤（無底色），與同檔案 meetingItemOverviewRow／CompletedCollapsibleCard 等既有清單列早已統一的 28-36pt LinearGradient 漸層圖示圓（fill 0.20→0.08 + stroke 0.22 lineWidth 1）與 Capsule 底色標籤規格不一致，是全檔案「@ 標註」這個高頻互動入口唯一還沒跟上規格的角落。圖示改為 28pt 漸層圓（部屬＝blue／名片＝teal，沿用既有識別色）+ 細描邊；trailing 的「部屬」/「名片」標籤改用 Capsule().fill(color.opacity(0.14)) 包底色，對齊 kind 標籤慣例；分隔線縮排隨圖示加寬同步從 40 調整為 50，維持與文字對齊。純視覺層調整，updateQuery／insert／suggestions 等既有 @ 標註偵測與插入邏輯完全未變動。",
         ]),

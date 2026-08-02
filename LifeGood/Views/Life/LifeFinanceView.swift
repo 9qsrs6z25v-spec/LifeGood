@@ -970,6 +970,9 @@ struct FinanceCardView: View {
     }
 
     /// 預設樣式（證券／保險）
+    /// 【美化 v25.61】headerCard 三分支（creditCardHeader／bankPassbookHeader／defaultHeader）補齊立體感一致性：
+    /// 另兩支 case 卡片外層都已有 stroke(黑 0.06~white 0.15) + shadow(黑 0.12~0.18)，唯獨本 case（股票／保險，最常見的一支）
+    /// 原本平貼無邊框無陰影。已補上與 bankPassbookHeader 相同的中性描邊 + 陰影（同樣立於 systemBackground、非彩色漸層卡）。
     private var defaultHeader: some View {
         VStack(spacing: 10) {
             Image(systemName: sub.icon)
@@ -995,6 +998,11 @@ struct FinanceCardView: View {
         .frame(maxWidth: .infinity)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 6, y: 3)
         .padding(.horizontal)
     }
 
