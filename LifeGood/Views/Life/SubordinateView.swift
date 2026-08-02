@@ -40,8 +40,17 @@ import SwiftUI
 //      subordinateEditorSectionHeader(_:icon:color:)，基本資訊＝indigo（沿用全 App
 //      「基本資訊」慣例色）／備註＝secondary。純視覺層調整，欄位資料綁定、
 //      canSave()／save() 等既有商業邏輯完全未變動。
-//      （下次美化本檔案時：可留意 subordinateRow／summaryStatsCard 是否仍有其他可與
-//      全 App 均值對齊之處，或轉往其他仍留有待辦的畫面）
+// [2026-08 v5] 補齊 summaryStatsCard 英雄卡大字自適應收尾：
+//   7. 頂部「部屬總覽」28pt「N 位部屬」大字原本沒有 lineLimit／minimumScaleFactor
+//      防截斷保護，是本卡片唯一缺這道防護的數字——下方三格 summaryKpiCell（平均評分／
+//      優秀／待提升）早已有 .lineLimit(1).minimumScaleFactor(0.7)。補上
+//      .lineLimit(1) + .minimumScaleFactor(0.6)，對齊 VehicleView v25.49／
+//      FinanceOverviewView v25.51／SavingsInsuranceView v25.54 等同系列「英雄卡大字
+//      自適應收尾」規格，讓部屬人數字串在大團隊、超長排序膠囊擠壓卡片寬度時自動縮字
+//      而不被系統裁切，同時維持在可辨識最小字級以上。純視覺層調整，total／avg／
+//      excellent／needImprovement 等既有統計計算完全未變動。
+//      （下次美化本檔案時：可留意 subordinateRow 是否仍有其他可與全 App 均值對齊之處，
+//      或轉往其他仍留有待辦的畫面）
 
 enum SubordinateSortOption: String, CaseIterable, Identifiable {
     case name = "姓名"
@@ -416,6 +425,8 @@ struct SubordinateView: View {
                     Text("\(total) 位部屬")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
                 }
                 Spacer()

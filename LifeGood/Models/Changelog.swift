@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.57", build: 810, date: "2026/08/02", notes: [
+            "【美化 v25.57】SubordinateView.swift 部屬總覽頁英雄卡大字自適應收尾：summaryStatsCard 頂部「部屬總覽」28pt「N 位部屬」大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同卡片內唯一缺這道防護的數字——下方「平均評分」「優秀（90+）」「待提升（<70）」三格 summaryKpiCell 早已有 .lineLimit(1).minimumScaleFactor(0.7)，這裡當時被漏掉，團隊人數較多或右側排序膠囊較長時可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊 VehicleView v25.49／FinanceOverviewView v25.51／SavingsInsuranceView v25.54 等同一輪「英雄卡大字自適應收尾」規格，讓部屬人數自動縮字而不被裁切，同時維持在可辨識最小字級以上。純視覺層調整，total／avg／excellent／needImprovement 等既有統計計算與資料綁定完全未變動。",
+        ]),
         ChangelogEntry(version: "25.56", build: 809, date: "2026/08/02", notes: [
             "【靜態除錯 v25.56】延續 v25.55 抓到的 bug class 繼續複查同族視圖，在 SubordinateRosterView.swift（部屬班表棋盤格）發現同一問題的第 3 個受害頁：selectedDeptId（部門篩選，驅動 people／rosterRows 名單與空狀態文案「此部門沒有部屬」）在 GradeTitleView.deleteDepartment 刪除部門後不會被清理——刪部門只會把受影響 Subordinate 的 departmentId 清成 nil，從未通知任何頁面的本地篩選狀態。情境重現：使用者在部屬班表篩選到單一部門後，去部門職等頁刪除該部門，篩選選單裡雖已看不到該部門選項，但 selectedDeptId 仍停留在已刪除的孤兒 UUID，導致 people 因為比對 $0.departmentId == selectedDeptId 全部篩不到，畫面顯示「此部門沒有部屬」的假空狀態，讓人誤以為班表資料整批消失，只能記得手動點回「全部部門」才能復原——與 SubordinateView（v22.x 前已修）、TalentMatrixView（v25.55 已修）是同一道漏防護。比照兩者既有寫法，在 SubordinateRosterView body 補上 .onChange(of: lifeStore.departments.map(\\.id))，部門 id 集合變動時若 selectedDeptId 已不在其中就重設為 nil（單選情境，對齊 SubordinateView 的 filterDeptRaw = \"\" 寫法）。純篩選狀態清理，people／rosterRows／班表棋盤格計算與 CloudKit 同步邏輯完全未變動。另複查全 App 力度解包／as!／try!／Timer／NotificationCenter retain cycle／CloudKit 30 秒節流／2 秒防抖／O(n²) 迴圈（全樹 grep try!／as!／裸露強制解包在 Changelog.swift 之外均為 0 筆），均未發現其餘新問題。",
         ]),
