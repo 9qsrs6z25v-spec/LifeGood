@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.64", build: 817, date: "2026/08/02", notes: [
+            "【美化 v25.64】MedicalMapView.swift「健康狀況總結」英雄卡 BMI 分類膠囊補齊描邊：本檔案量測趨勢列（.pink 描邊）、過敏嚴重度列（.orange 描邊）、健康里程碑與醫療保障列（既有描邊）等膠囊徽章皆已用 .overlay(Capsule().stroke(...)) 收邊，唯獨 summaryCard 英雄卡內 BMI 數值旁「過輕／正常／過重／肥胖」分類膠囊從 v1 建立以來就只有 .background(.white.opacity(0.22)).clipShape(Capsule()) 純填色，沒有描邊，是全檔案僅剩還平貼、輪廓不明的膠囊，且正好在整頁最顯眼的頭卡位置。補上 .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.6))：因英雄卡本身是彩色漸層底、白字白底半透明配色，與其餘膠囊立於中性卡片背景、各自用主題色描邊的情境不同，故沿用卡片既有的白色 opacity 系列數值而非套用主題青綠色，維持視覺協調。純視覺層調整，health.bmiCategory 等既有健康資料計算完全未變動。",
+        ]),
         ChangelogEntry(version: "25.63", build: 816, date: "2026/08/02", notes: [
             "【美化 v25.63】RealEstateDetailView.swift「可愛風照片瀏覽器」CutePhotoViewer.photoArea 載入狀態補上主題色：本元件依 CutePhotoDraft.Kind（裝潢紀錄／支出照片／水電收據／電梯保養）各自有專屬 accent 色，找不到照片時的圖示已用 draft.kind.accent.opacity(0.6) 上色，緊接在同一個 else 分支裡的載入中 ProgressView() 卻從一開始就是系統預設灰色轉輪，是全檔案「可愛風照片瀏覽器」四種色系裡唯一沒有跟上主題色的狀態、也是本檔案唯一沒有 .tint() 的 ProgressView（姊妹元件 AddRealEstateView.PhotoViewerSheet 已於 v25.23 補上 .tint(.white)）。補上 .tint(draft.kind.accent)，讓「載入中→找不到照片」切換時轉輪與圖示同色系過渡，不會從灰轉彩顯得突兀。純視覺層調整，didLoad／urls 等既有讀取與非同步下載邏輯完全未變動。",
         ]),

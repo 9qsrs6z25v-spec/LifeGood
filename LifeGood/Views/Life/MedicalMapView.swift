@@ -70,6 +70,14 @@ import UIKit
 //  支出等既有資料讀取與計算邏輯完全未變動。
 //  （下次美化本檔案時，可轉往其他仍留有待辦的畫面，本檔案英雄卡與六個清單型 section
 //    進場動畫至此已全數收斂一致，無殘留缺口）
+//
+// [2026-08 v6] 補齊 summaryCard 英雄卡「BMI 分類」膠囊描邊：本檔案量測趨勢／過敏／
+//  醫療里程碑等膠囊徽章皆已有 .overlay(Capsule().stroke(...))，唯獨英雄卡內 BMI 數值
+//  旁的分類膠囊（過輕／正常／過重／肥胖）從 v1 建立以來就只有底色填色，是全檔案唯一
+//  還平貼、輪廓不明的膠囊。補上 .overlay(Capsule().stroke(.white.opacity(0.30),
+//  lineWidth: 0.6))，白色描邊對齊英雄卡本身白字白底半透明的配色（不同於其餘膠囊用各自
+//  主題色描邊，此處底卡是彩色漸層而非中性背景，故沿用 summaryCard 既有的 white
+//  opacity 系列數值）。純視覺層調整，health.bmiCategory 等既有健康資料計算完全未變動。
 
 // MARK: - 就醫地點聚合
 
@@ -181,6 +189,7 @@ struct MedicalMapView: View {
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 8).padding(.vertical, 3)
                                     .background(.white.opacity(0.22)).clipShape(Capsule())
+                                    .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.6))
                             }
                         }
                     } else {
