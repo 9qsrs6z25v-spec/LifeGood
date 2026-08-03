@@ -3478,6 +3478,14 @@ struct CutePhotoViewer: View {
                 Spacer(minLength: 4)
                 photoArea
                 Spacer(minLength: 4)
+                // 目前這張的照片資訊：檔名 / 解析度 / 檔案大小（與 PhotoLightbox 共用 PhotoInfoBar）。
+                // 本視圖（CutePhotoViewer）才是裝潢／支出／水電／電梯保養四類照片實際會開啟的檢視器；
+                // RenovationStackViewer／ExpensePhotoStackViewer 是同語意但從未被任何呼叫端建立的死碼，
+                // v25.65 當時把 PhotoInfoBar 接到了那兩個死碼元件，本體 CutePhotoViewer 反而漏接。
+                if draft.urls.indices.contains(currentIndex) {
+                    PhotoInfoBar(url: draft.urls[currentIndex])
+                        .padding(.bottom, 4)
+                }
                 if draft.urls.count > 1 {
                     pageDots
                         .padding(.bottom, 4)
