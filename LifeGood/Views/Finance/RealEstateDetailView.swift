@@ -139,6 +139,16 @@ import ImageIO
 //      案唯一沒有 .tint() 的 ProgressView（AddRealEstateView.PhotoViewerSheet 已於 v25.23
 //      補上 .tint(.white)）。補上 .tint(draft.kind.accent)，讓「載入中→找不到」轉場時顏色
 //      一致，不會從灰轉彩。純視覺層調整，didLoad／urls 等既有讀取邏輯完全未變動。
+//
+// [2026-08 v13] CutePhotoViewer.topBar 關閉按鈕改回左側，修正全 App 唯一的右側殘留：
+//  28. 全 App「關閉」按鈕統一放在畫面左上角（ToolbarItem(.topBarLeading) 或自訂 HStack 把
+//      Button 放在 Spacer() 之前），例如同檔案 ExpensePhotoStackViewer／MultiPhotoGallery
+//      的 PhotoLightbox 皆是如此。CutePhotoViewer.topBar 卻是「來源膠囊」在前、Spacer()、
+//      關閉按鈕在後，把 xmark 推到右上角，是全 App 唯一一處關閉鈕落在右側的照片檢視器
+//      （CutePhotoViewer 正是裝潢／支出／水電／電梯保養四類照片實際會開啟的檢視器，見上方
+//      v25.65 筆記）。調整 HStack 順序：關閉按鈕移到最前面（左側），來源膠囊移到 Spacer() 之後
+//      （右側），視覺樣式（.ultraThinMaterial 圓底、描邊、陰影等）完全不變，只調換左右位置。
+//      純視覺層調整，dismiss()／draft.kind 等既有邏輯完全未變動。
 
 struct RealEstateDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -3535,6 +3545,22 @@ struct CutePhotoViewer: View {
 
     private var topBar: some View {
         HStack {
+            // 關閉按鈕：改放左側，對齊全 App「關閉／取消」統一放左側的慣例（見 PhotoLightbox）
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(draft.kind.accent)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(.ultraThinMaterial))
+                    .overlay(Circle().stroke(draft.kind.accent.opacity(0.25), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
             // 來源膠囊
             HStack(spacing: 6) {
                 Image(systemName: draft.kind.icon)
@@ -3553,22 +3579,6 @@ struct CutePhotoViewer: View {
                     ))
             )
             .shadow(color: draft.kind.accent.opacity(0.35), radius: 6, y: 3)
-
-            Spacer()
-
-            // 關閉按鈕
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(draft.kind.accent)
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(.ultraThinMaterial))
-                    .overlay(Circle().stroke(draft.kind.accent.opacity(0.25), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
-            }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 18)
         .padding(.top, 14)

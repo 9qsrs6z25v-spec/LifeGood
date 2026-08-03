@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.71", build: 824, date: "2026/08/03", notes: [
+            "【美化 v25.71】RealEstateDetailView.swift「可愛風照片瀏覽器」關閉按鈕改回左側：CutePhotoViewer.topBar 原本把「來源膠囊」放前、Spacer()、關閉按鈕放後，導致 xmark 落在右上角，經全 App 關閉／取消按鈕逐一核對（ExpensePhotoStackViewer／MultiPhotoGallery 的 PhotoLightbox 等皆為左側），是唯一一處落在右側的照片檢視器——而 CutePhotoViewer 正是裝潢／支出／水電／電梯保養四類照片實際會開啟的檢視器，使用頻率不低。調整 HStack 順序：關閉按鈕移到最前面（左側），來源膠囊移到 Spacer() 之後（右側），視覺樣式（.ultraThinMaterial 圓底、描邊、陰影）完全不變。純視覺層調整，dismiss()／draft.kind 等既有邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.70", build: 823, date: "2026/08/03", notes: [
             "【美化 v25.70】AdminConsoleView.swift「使用者人數」同步提示列補齊 ProgressView 主題色：isBusy 時顯示的「正在與 iCloud 同步設定…」提示列，ProgressView() 自 v2 建立以來一直是系統預設灰色轉輪，經全 App 17 處 ProgressView() 呼叫點逐一核對，是唯一沒有 .tint() 的一處——其餘全部都跟隨所在區塊主題色（SettingsView.actionRow 依傳入 color 上色、RealEstateDetailView CutePhotoViewer 用 draft.kind.accent 等）。此提示列緊接在「使用者人數」Section 之後，寫入的正是該 Section 觸發的門檻設定，補上 .tint(.blue) 沿用該 Section 既有的藍色主題（sectionHeader 同色），載入中轉輪不再是唯一一顆脫色的灰色轉輪。純視覺層調整，admin.isBusy 讀取與 CloudKit AppConfig 寫入等既有商業邏輯完全未變動。",
         ]),
