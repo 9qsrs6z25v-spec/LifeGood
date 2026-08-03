@@ -3334,6 +3334,11 @@ struct ExpensePhotoStackViewer: View {
 
                 VStack {
                     Spacer()
+                    // 目前這張的照片資訊：檔名 / 解析度 / 檔案大小（與 PhotoLightbox 共用 PhotoInfoBar）
+                    if expense.photoFileNames.indices.contains(currentIndex) {
+                        PhotoInfoBar(url: Expense.photoURL(for: expense.photoFileNames[currentIndex]))
+                            .padding(.bottom, 8)
+                    }
                     panelContent
                 }
             }

@@ -485,6 +485,11 @@ struct RenovationStackViewer: View {
 
                 VStack {
                     Spacer()
+                    // 目前這張的照片資訊：檔名 / 解析度 / 檔案大小（與 PhotoLightbox 共用 PhotoInfoBar）
+                    if record.photoFileNames.indices.contains(currentIndex) {
+                        PhotoInfoBar(url: RenovationPhoto.photoURL(for: record.photoFileNames[currentIndex]))
+                            .padding(.bottom, 8)
+                    }
                     if !record.title.isEmpty || !record.note.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {

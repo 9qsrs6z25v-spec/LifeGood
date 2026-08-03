@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import ImageIO
 
 // MARK: - 美化紀錄（v1 · 2026-06-11）
 // • Header：標題升級 .bold、數量改為綠色 Capsule 膠囊徽章（fill opacity 0.13），
@@ -413,6 +414,9 @@ struct PhotoLightbox: View {
                     Spacer()
                 }
                 Spacer()
+                // 照片資訊列：檔名 / 解析度 / 檔案大小
+                PhotoInfoBar(url: url, image: image)
+                    .padding(.bottom, 18)
             }
         }
         .task(id: url) {
@@ -426,6 +430,73 @@ struct PhotoLightbox: View {
                 UIImage(contentsOfFile: path)
             }.value
             image = loaded
+        }
+    }
+}
+
+// MARK: - 照片資訊列（檔名 / 解析度 / 檔案大小）
+
+/// 點開大圖時顯示的照片資訊列，PhotoLightbox／PhotoViewerSheet 共用。
+/// 檔案大小以 .task 於背景讀取（避免主執行緒磁碟 IO）；解析度取自已解碼影像的像素尺寸。
+struct PhotoInfoBar: View {
+    let url: URL
+    /// 已載入的影像（由呼叫端傳入，避免重複解碼）；nil 時改由 ImageIO 讀取中繼資料取得解析度
+    var image: UIImage? = nil
+
+    @State private var fileSizeText: String = "…"
+    @State private var loadedResolution: String?
+
+    private var resolutionText: String {
+        if let img = image {
+            let w = Int(img.size.width * img.scale)
+            let h = Int(img.size.height * img.scale)
+            return "\(w) × \(h)"
+        }
+        return loadedResolution ?? "…"
+    }
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Text(url.lastPathComponent)
+                .font(.caption2.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            HStack(spacing: 12) {
+                Label(resolutionText, systemImage: "aspectratio")
+                Label(fileSizeText, systemImage: "internaldrive")
+            }
+            .font(.caption2)
+        }
+        .foregroundStyle(.white.opacity(0.92))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 3)
+        .task(id: url) {
+            fileSizeText = "…"
+            loadedResolution = nil
+            let path = url.path
+            let needResolution = (image == nil)
+            let info = await Task.detached(priority: .utility) { () -> (bytes: Int, resolution: String?) in
+                let bytes = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
+                var resolution: String?
+                if needResolution,
+                   let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+                   let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+                   let w = props[kCGImagePropertyPixelWidth] as? Int,
+                   let h = props[kCGImagePropertyPixelHeight] as? Int {
+                    resolution = "\(w) × \(h)"
+                }
+                return (bytes, resolution)
+            }.value
+            if info.bytes >= 1_048_576 {
+                fileSizeText = String(format: "%.1f MB", Double(info.bytes) / 1_048_576)
+            } else if info.bytes > 0 {
+                fileSizeText = String(format: "%.0f KB", Double(info.bytes) / 1024)
+            } else {
+                fileSizeText = "—"
+            }
+            loadedResolution = info.resolution
         }
     }
 }

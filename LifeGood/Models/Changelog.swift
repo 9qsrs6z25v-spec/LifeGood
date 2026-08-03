@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.65", build: 818, date: "2026/08/03", notes: [
+            "【功能】點開大圖顯示照片資訊（檔名／解析度／檔案大小）：新增共用 PhotoInfoBar（MultiPhotoGallery.swift）——底部半透明毛玻璃資訊列，第一行檔案名稱（過長中段截斷），第二行解析度（寬 × 高 px）與檔案大小（KB／MB 自動換算）。檔案大小以背景執行緒讀取檔案屬性；解析度優先取自呼叫端已解碼的影像，未提供影像時改用 ImageIO 只讀中繼資料（CGImageSourceCopyPropertiesAtIndex）取得像素尺寸、不必解碼整張圖。套用於四個照片檢視器：① PhotoLightbox（MultiPhotoGallery 縮圖點開的全螢幕燈箱，記帳收據/電費收據/裝修照片等共用）；② PhotoViewerSheet（全 App 共用單張照片瀏覽 sheet，載入完成後顯示）；③ RenovationStackViewer（裝潢照片逐張瀏覽，隨換頁顯示目前這張的資訊）；④ ExpensePhotoStackViewer（支出照片逐張瀏覽，同步隨換頁更新）。搭配 v25.03 照片壓縮與 v25.04 一鍵壓縮，可直接在大圖上驗證每張照片壓縮後的實際解析度與檔案大小。純顯示層新增，未變動任何照片儲存/瀏覽既有邏輯。"
+        ]),
         ChangelogEntry(version: "25.64", build: 817, date: "2026/08/02", notes: [
             "【美化 v25.64】MedicalMapView.swift「健康狀況總結」英雄卡 BMI 分類膠囊補齊描邊：本檔案量測趨勢列（.pink 描邊）、過敏嚴重度列（.orange 描邊）、健康里程碑與醫療保障列（既有描邊）等膠囊徽章皆已用 .overlay(Capsule().stroke(...)) 收邊，唯獨 summaryCard 英雄卡內 BMI 數值旁「過輕／正常／過重／肥胖」分類膠囊從 v1 建立以來就只有 .background(.white.opacity(0.22)).clipShape(Capsule()) 純填色，沒有描邊，是全檔案僅剩還平貼、輪廓不明的膠囊，且正好在整頁最顯眼的頭卡位置。補上 .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.6))：因英雄卡本身是彩色漸層底、白字白底半透明配色，與其餘膠囊立於中性卡片背景、各自用主題色描邊的情境不同，故沿用卡片既有的白色 opacity 系列數值而非套用主題青綠色，維持視覺協調。純視覺層調整，health.bmiCategory 等既有健康資料計算完全未變動。",
         ]),

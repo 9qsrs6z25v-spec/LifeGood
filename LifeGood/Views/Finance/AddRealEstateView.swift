@@ -2105,6 +2105,13 @@ struct PhotoViewerSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black)
+            // 照片資訊列：檔名 / 解析度 / 檔案大小（與 PhotoLightbox 共用 PhotoInfoBar）
+            .overlay(alignment: .bottom) {
+                if loadedImage != nil {
+                    PhotoInfoBar(url: url, image: loadedImage)
+                        .padding(.bottom, 14)
+                }
+            }
             .task {
                 let url = url
                 let img = await Task.detached(priority: .userInitiated) { () -> UIImage? in
