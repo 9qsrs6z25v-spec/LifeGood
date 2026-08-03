@@ -190,9 +190,12 @@ struct SpouseResumeView: View {
                         .minimumScaleFactor(0.65)
                         .contentTransition(.numericText())
                     if !s.englishName.isEmpty {
+                        // [v25.74] 補齊 lineLimit/minimumScaleFactor，對齊上方 chineseName 與 ResumeView 姊妹規格
                         Text(s.englishName)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.white.opacity(0.68))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .padding(.top, 1)
                     }
                 }

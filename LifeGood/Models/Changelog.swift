@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.74", build: 827, date: "2026/08/03", notes: [
+            "【美化 v25.74】SpouseResumeView.swift「配偶履歷」英雄卡英文名補齊防截斷：heroCard 中 s.englishName 緊接在 s.chineseName 下方，chineseName 早已補上 .lineLimit(1) + .minimumScaleFactor(0.65)，但同一個 VStack 裡下一行的 englishName 從建立以來完全沒有 lineLimit／minimumScaleFactor，是姊妹畫面 ResumeView.swift 英雄卡（chineseName／englishName 兩行皆已補齊縮放保護）與 v25.73 才剛修過的 FamilyView 列表（英文名／配偶心形膠囊姓名同步補齊）之外，唯一還沒跟上這道防護的「配偶」英文姓名顯示點。使用者自填的配偶英文全名（含中間名）偏長時，在「輔助模式：特大」字級下會換行擠壓，甚至頂到右側 52pt 心形圖示圓。補上 .lineLimit(1) + .minimumScaleFactor(0.75)，對齊 ResumeView.swift 英雄卡英文名相同規格。純視覺層調整，s.chineseName／marriageComp 等既有讀取與計算邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.73", build: 826, date: "2026/08/03", notes: [
             "【美化 v25.73】FamilyView.swift「家庭成員」列表補齊大字級輔助模式防護：memberRow 中文姓名／英文名／配偶姓名皆為使用者自填、長度不可控，經全檔案核對，是唯一 0 處 minimumScaleFactor 的成員列表畫面——重要親戚或配偶英文全名偏長時，在「輔助模式：特大」字級下容易被 lineLimit(1) 硬切甚至擠壓版面，與 ChildVaccineScheduleView／CareerView 等已補齊防截斷保護的畫面不一致。displayName 補 minimumScaleFactor(0.85)（對齊 ChildVaccineScheduleView row 姓名規格）；英文名／配偶心形膠囊姓名補 lineLimit(1) + minimumScaleFactor(0.85)；角色膠囊 displayRoleLabel 補 lineLimit(1) + minimumScaleFactor(0.7)（對齊 CareerView 徽章文字縮放規格）。純顯示層調整，成員資料讀寫、角色配色、配偶連結等既有邏輯完全未變動。",
         ]),
