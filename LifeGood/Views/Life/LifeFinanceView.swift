@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - 美化紀錄（LifeFinanceView · v8 · 2026-08-01）
+// MARK: - 美化紀錄（LifeFinanceView · v9 · 2026-08-03）
 // [2026-06 v1] 本次美化方向：
 //   1. summaryHeader → 升級為藍色漸層英雄卡片（對齊 SavingsInsuranceView summaryHeader 規格）：
 //      銀行總餘額台幣等值大字 + 計數膠囊 + 餘額正負色 + 散景裝飾圓；
@@ -76,6 +76,16 @@ import SwiftUI
 //      同一 struct 內仍有 depositRow／餘額列等其他呼叫端（非本次金額欄位性質，維持原樣），
 //      故保留不動，僅改「保費」這一處呼叫點。純顯示層調整，保費／到期日等既有資料綁定
 //      完全未變動。
+// [2026-08 v9] milestoneRow「銀行帳戶」列表餘額量級補齊：
+//  20. bankBalanceDisplay(_:) 是本檔案 v4～v8 四輪 ntdWanString 一致性修復唯一漏掉的一處：
+//      主列表每一列銀行帳戶餘額原本用私有 formatNumber(_:)（純千分位整數，無萬/億量級），
+//      同一筆帳戶點進 FinanceCardView 詳情頁卻已是 ntdWanString 規格，導致「列表 NT$
+//      1,234,567」點進去變成「詳情頁 NT$123.4萬」，同一數字兩種顯示語言。多幣別（USD／
+//      JPY 等）分支不能直接沿用 ntdWanString（會寫死錯誤的「NT$」字首蓋掉原幣別），
+//      故於 FinanceModels.swift 新增 Double.wanString(symbolPrefix:)，沿用相同萬/億進位
+//      規則、僅符號可自訂；單一幣別分支改呼叫 entry.1.wanString(symbolPrefix: entry.0)，
+//      多幣別台幣等值分支改呼叫既有 ntdWanString。移除已無呼叫端的 formatNumber(_:)／
+//      decimalFormatter 死碼。純顯示層調整，餘額換算、幣別歸戶等既有邏輯完全未變動。
 //      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 // MARK: - 固定支出週期展開（共用）
@@ -768,23 +778,15 @@ struct LifeFinanceView: View {
     private func bankBalanceDisplay(balances: [String: Double]) -> (text: String, amount: Double) {
         if balances.count <= 1 {
             let entry = balances.first ?? ("NT$", 0)
-            return ("\(entry.0) \(formatNumber(entry.1))", entry.1)
+            return (entry.1.wanString(symbolPrefix: entry.0), entry.1)
         }
         let twd = balanceInTWD(balances, expenseStore: expenseStore)
-        return ("≈ NT$ \(formatNumber(twd))", twd)
+        return ("≈ \(twd.ntdWanString)", twd)
     }
 
     /// 所有銀行帳戶的台幣等值總和
     private var allBankBalanceInTWD: Double {
         allBankBalances().values.reduce(0) { $0 + balanceInTWD($1, expenseStore: expenseStore) }
-    }
-
-    private static let decimalFormatter: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
-    }()
-
-    private func formatNumber(_ v: Double) -> String {
-        Self.decimalFormatter.string(from: NSNumber(value: v)) ?? "0"
     }
 
     @ViewBuilder

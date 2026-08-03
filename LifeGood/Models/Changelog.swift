@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.72", build: 825, date: "2026/08/03", notes: [
+            "【美化 v25.72】LifeFinanceView.swift「財富」列表銀行帳戶餘額補齊萬/億量級：milestoneRow 每一列銀行帳戶餘額原本呼叫私有 bankBalanceDisplay(_:) 內的 formatNumber(_:)（純千分位整數，無萬/億量級），同一筆帳戶點進 FinanceCardView 詳情頁卻早已是 ntdWanString「NT$123.4萬」規格，是本檔案 v4～v8 四輪 ntdWanString 一致性修復唯一漏掉的一處——列表顯示「NT$1,234,567」、點進去卻變成「NT$123.4萬」，同一數字兩種顯示語言。多幣別（USD／JPY 等）帳戶不能直接套用 ntdWanString（會寫死錯誤的「NT$」字首蓋掉原幣別），於 FinanceModels.swift 新增 Double.wanString(symbolPrefix:)，沿用與 ntdWanString 相同的萬/億進位規則，僅幣別符號可自訂；單一幣別分支改呼叫 entry.1.wanString(symbolPrefix: entry.0)，多幣別台幣等值分支改呼叫既有 ntdWanString，並移除已無呼叫端的 formatNumber(_:)／decimalFormatter 死碼。ntdWanString 本身完全未變動（全 App 呼叫端眾多，故不直接改寫，另抽獨立方法）。純顯示層調整，餘額換算、幣別歸戶等既有商業邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.71", build: 824, date: "2026/08/03", notes: [
             "【美化 v25.71】RealEstateDetailView.swift「可愛風照片瀏覽器」關閉按鈕改回左側：CutePhotoViewer.topBar 原本把「來源膠囊」放前、Spacer()、關閉按鈕放後，導致 xmark 落在右上角，經全 App 關閉／取消按鈕逐一核對（ExpensePhotoStackViewer／MultiPhotoGallery 的 PhotoLightbox 等皆為左側），是唯一一處落在右側的照片檢視器——而 CutePhotoViewer 正是裝潢／支出／水電／電梯保養四類照片實際會開啟的檢視器，使用頻率不低。調整 HStack 順序：關閉按鈕移到最前面（左側），來源膠囊移到 Spacer() 之後（右側），視覺樣式（.ultraThinMaterial 圓底、描邊、陰影）完全不變。純視覺層調整，dismiss()／draft.kind 等既有邏輯完全未變動。",
         ]),

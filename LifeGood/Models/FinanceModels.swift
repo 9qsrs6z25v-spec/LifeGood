@@ -16,6 +16,9 @@ private func lossyArray<Element: Decodable, Key: CodingKey>(
 //    舊：≥1000萬 → "NT$X千萬"
 //    新：≥1億   → "NT$X億"；≥1萬 → "NT$X萬"；<1萬 → NT$X
 // ② trimmed() 邏輯不變：整數不帶小數、有小數則保留一位，大字不換行、節省空間。
+// ③ [2026-08] 新增 wanString(symbolPrefix:)：ntdWanString 寫死「NT$」字首，多幣別帳戶
+//    （USD／JPY 等）餘額需要萬/億量級但不能套用「NT$」時無處可用；沿用相同進位規則抽出
+//    可帶入自訂符號的版本，ntdWanString 本身完全未變動（呼叫端遍布全 App，故不直接改寫）。
 
 /// 共用靜態實例，避免每次 ntdWanString 呼叫都重新分配 NumberFormatter（昂貴操作）。
 /// SwiftUI body 均在主執行緒執行，此共用實例不存在競態條件。
@@ -25,6 +28,11 @@ private let _ntdCurrencyFormatter: NumberFormatter = {
     f.currencySymbol = "NT$"
     f.maximumFractionDigits = 0
     return f
+}()
+
+/// 供 wanString(symbolPrefix:) 未滿一萬時使用的純數字千分位格式（不含幣別符號，符號由呼叫端拼接）。
+private let _plainGroupedFormatter: NumberFormatter = {
+    let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
 }()
 
 extension Double {
@@ -47,6 +55,25 @@ extension Double {
             return "NT$\(trimmed(wan))萬"
         }
         return _ntdCurrencyFormatter.string(from: NSNumber(value: self)) ?? "NT$0"
+    }
+
+    /// 與 ntdWanString 同一套萬/億進位規則，但幣別符號可自訂：多幣別帳戶（USD／JPY 等
+    /// 非台幣）餘額不可套用寫死的「NT$」字首時使用。
+    /// 例：("USD", 12345) → USD 1.2萬；("JPY", 150_000_000) → JPY 1.5億。
+    func wanString(symbolPrefix: String) -> String {
+        func trimmed(_ x: Double) -> String {
+            (x == x.rounded()) ? String(format: "%.0f", x) : String(format: "%.1f", x)
+        }
+        let a = Swift.abs(self)
+        if a >= 100_000_000 {
+            return "\(symbolPrefix) \(trimmed(self / 100_000_000))億"
+        }
+        if a >= 10_000 {
+            let wan = self / 10_000
+            if Swift.abs(wan) >= 9_999.95 { return "\(symbolPrefix) \(trimmed(self / 100_000_000))億" }
+            return "\(symbolPrefix) \(trimmed(wan))萬"
+        }
+        return "\(symbolPrefix) \(_plainGroupedFormatter.string(from: NSNumber(value: self)) ?? "0")"
     }
 }
 
