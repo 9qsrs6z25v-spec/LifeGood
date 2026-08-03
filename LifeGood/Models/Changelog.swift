@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.69", build: 822, date: "2026/08/03", notes: [
+            "【美化 v25.69】FixedExpenseView.swift「固定支出詳情卡」儲蓄險金額顯示補齊億級量級單位：詳情卡呼叫私有 fmtShort(_:) 顯示「月均換算」與儲蓄險 savingsSection 的「已繳總支出」「預計總支出」「期滿預估領回」，原本只有「未滿 1 萬」「≥ 1 萬」兩段換算，未達 1 億自動進位改顯示「億」，是全 App 同名 fmtShort 家族（VehicleView／FinanceOverviewView／FinanceChartView 三處皆已補齊億級規則）裡唯一遺漏這道分支的一處。儲蓄險「已繳／預計總支出」是保費 × 期數的多年期累計金額，長年期高保費保單很容易跨過億元門檻，屆時只會顯示成 5～6 位數的鉅額「萬」數字，與全 App 其餘英雄卡／明細列早已統一的億級顯示規則不一致。補上與三個姊妹 fmtShort 相同的 `abs(v) >= 100_000_000 → %.1f億` 分支。純顯示層調整，儲蓄險已繳/預計總支出、期滿領回、月均換算等既有試算邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.68", build: 821, date: "2026/08/03", notes: [
             "【美化 v25.68】SettingsView「資料管理」補齊載入狀態缺口：匯出 JSON／CSV／部屬資料三顆按鈕點下後會經 Task.detached 背景寫檔，期間只靠 .disabled(exportBusy) 讓按鈕變暗，同一 Section 緊接在後的「完整備份」「一鍵壓縮」兩列卻各自有標題旁 ProgressView 進度提示，三顆匯出按鈕是本檔案 dataManagementSection 唯一沒有任何進行中回饋的列，容易讓使用者誤以為沒反應而重複點擊、造成分享面板重疊觸發。共用 settingsActionRow 新增 busy 參數（預設 false，其餘 5 個既有呼叫端外觀不受影響），busy 時在標題旁顯示同色 ProgressView，三顆匯出按鈕改傳入 busy: exportBusy；並把「完整備份」「一鍵壓縮」原本未指定色調、沿用系統藍的 ProgressView 補上 .tint(.teal) / .tint(.indigo)，與各自圖示圓主題色對齊，避免五顆進度指示器裡有兩顆跟圖示脫色。純視覺層調整，exportJSON()／exportCSV()／exportSubordinates() 等既有匯出邏輯與 exportBusy 互斥鎖完全未變動。",
         ]),

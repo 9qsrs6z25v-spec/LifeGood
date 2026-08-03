@@ -35,6 +35,16 @@ import SwiftUI
 //      對齊 IncomeView.summaryHeader / Finance/AddStockView / Finance/RealEstateView
 //      等姊妹英雄卡既有的大字防截斷規格；金額位數很多（例如萬元以上）時自動縮小字級，
 //      避免在小螢幕裝置上被裁切，且縮放下限仍維持可辨識大小（同步補齊 VariableExpenseView）。
+// [2026-08 v6] FixedExpenseCard.fmtShort 補齊億級量級單位：
+//  15. fmtShort(_:) 原本只有「< 1 萬」「≥ 1 萬」兩段換算，未達 1 億自動進位顯示「億」，
+//      與姊妹檔案 VehicleView.fmtShort／FinanceOverviewView.fmtShort／FinanceChartView.fmtShort
+//      三處皆已補齊的「≥1億 → %.1f億」量級規則不一致。本函式實際呼叫點集中在儲蓄險明細
+//      （savingsSection「已繳總支出」「預計總支出」「期滿預估領回」，三者皆為 premiumAmount ×
+//      期數的多年期累計金額，長年期高保費保單很容易跨過億元門檻）與「月均換算」，金額一旦
+//      達億元只會顯示成 5～6 位數的鉅額「萬」數字，與全 App 其他英雄卡/明細列早已統一的
+//      億級顯示規則脫節。補上與三個姊妹 fmtShort 相同的 `abs(v) >= 100_000_000 → %.1f億`
+//      分支。純顯示層調整，儲蓄險已繳/預計總支出、期滿領回等既有試算邏輯完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct FixedExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -1193,6 +1203,9 @@ private struct FixedExpenseCard: View {
     }
 
     private func fmtShort(_ v: Double) -> String {
+        if abs(v) >= 100_000_000 {
+            return String(format: "%.1f億", v / 100_000_000)
+        }
         if abs(v) >= 10_000 {
             let s = Self.decimalFmt.string(from: NSNumber(value: v / 10_000)) ?? "0"
             return "\(s)萬"
