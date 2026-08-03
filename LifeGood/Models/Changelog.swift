@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.73", build: 826, date: "2026/08/03", notes: [
+            "【美化 v25.73】FamilyView.swift「家庭成員」列表補齊大字級輔助模式防護：memberRow 中文姓名／英文名／配偶姓名皆為使用者自填、長度不可控，經全檔案核對，是唯一 0 處 minimumScaleFactor 的成員列表畫面——重要親戚或配偶英文全名偏長時，在「輔助模式：特大」字級下容易被 lineLimit(1) 硬切甚至擠壓版面，與 ChildVaccineScheduleView／CareerView 等已補齊防截斷保護的畫面不一致。displayName 補 minimumScaleFactor(0.85)（對齊 ChildVaccineScheduleView row 姓名規格）；英文名／配偶心形膠囊姓名補 lineLimit(1) + minimumScaleFactor(0.85)；角色膠囊 displayRoleLabel 補 lineLimit(1) + minimumScaleFactor(0.7)（對齊 CareerView 徽章文字縮放規格）。純顯示層調整，成員資料讀寫、角色配色、配偶連結等既有邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.72", build: 825, date: "2026/08/03", notes: [
             "【美化 v25.72】LifeFinanceView.swift「財富」列表銀行帳戶餘額補齊萬/億量級：milestoneRow 每一列銀行帳戶餘額原本呼叫私有 bankBalanceDisplay(_:) 內的 formatNumber(_:)（純千分位整數，無萬/億量級），同一筆帳戶點進 FinanceCardView 詳情頁卻早已是 ntdWanString「NT$123.4萬」規格，是本檔案 v4～v8 四輪 ntdWanString 一致性修復唯一漏掉的一處——列表顯示「NT$1,234,567」、點進去卻變成「NT$123.4萬」，同一數字兩種顯示語言。多幣別（USD／JPY 等）帳戶不能直接套用 ntdWanString（會寫死錯誤的「NT$」字首蓋掉原幣別），於 FinanceModels.swift 新增 Double.wanString(symbolPrefix:)，沿用與 ntdWanString 相同的萬/億進位規則，僅幣別符號可自訂；單一幣別分支改呼叫 entry.1.wanString(symbolPrefix: entry.0)，多幣別台幣等值分支改呼叫既有 ntdWanString，並移除已無呼叫端的 formatNumber(_:)／decimalFormatter 死碼。ntdWanString 本身完全未變動（全 App 呼叫端眾多，故不直接改寫，另抽獨立方法）。純顯示層調整，餘額換算、幣別歸戶等既有商業邏輯完全未變動。",
         ]),

@@ -33,6 +33,15 @@ import SwiftUI
 //      按鈕觸發同導覽列「＋」的 showAdd／showPremiumAlert 邏輯，無新增商業邏輯。
 //  16. memberRow 圖示圓陰影：radius 6→8、opacity 0.22→0.28，增強圖示立體感，
 //      對齊 FixedExpenseRow / CareerRow v3 圖示圓陰影強度規格。
+// [2026-08 v4] 本次美化方向：
+//  17. memberRow 補齊大字級輔助模式防護：全檔案原本 0 處 minimumScaleFactor，是唯一
+//      完全沒有防截斷保護的成員列表畫面——中文名／英文名／配偶姓名皆為使用者自填、
+//      長度不可控，重要親戚或配偶英文全名偏長時，在「輔助模式：特大」字級下容易被
+//      lineLimit(1) 硬切甚至擠壓版面。displayName 補 minimumScaleFactor(0.85)（對齊
+//      ChildVaccineScheduleView row 姓名規格）；englishName／配偶心形膠囊姓名補
+//      lineLimit(1) + minimumScaleFactor(0.85)；角色膠囊 displayRoleLabel 補
+//      lineLimit(1) + minimumScaleFactor(0.7)（對齊 CareerView 徽章文字縮放規格）。
+//      純顯示層調整，成員資料讀寫、角色配色、配偶連結等既有邏輯完全未變動。
 
 struct FamilyView: View {
     @EnvironmentObject var store: LifeStore
@@ -422,6 +431,8 @@ struct FamilyView: View {
                     Text(displayName.isEmpty ? "（未命名）" : displayName)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                        // [v4] 中文名為使用者自填、長度不可控，補防截斷保護
+                        .minimumScaleFactor(0.85)
 
                     // 角色膠囊 + 英文名 + 配偶名
                     HStack(spacing: 5) {
@@ -434,11 +445,16 @@ struct FamilyView: View {
                             .clipShape(Capsule())
                             // [v2] 膠囊細邊框，對齊 OverviewView.categoryRow 百分比膠囊規格
                             .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                            // [v4] 補防截斷保護，對齊 CareerView 徽章文字縮放規格
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                         if !member.englishName.isEmpty && !member.chineseName.isEmpty {
                             Text(member.englishName)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                                // [v4] 英文全名長度不可控，補防截斷保護
+                                .minimumScaleFactor(0.85)
                         }
                         if let spouse = spouseDisplayName(for: member, membersById: membersById) {
                             HStack(spacing: 3) {
@@ -446,6 +462,9 @@ struct FamilyView: View {
                                     .font(.system(size: 8))
                                 Text(spouse)
                                     .font(.system(size: 10, weight: .medium))
+                                    .lineLimit(1)
+                                    // [v4] 配偶姓名長度不可控，補防截斷保護
+                                    .minimumScaleFactor(0.85)
                             }
                             .foregroundStyle(Color(red: 1.00, green: 0.35, blue: 0.55))
                             .padding(.horizontal, 6).padding(.vertical, 2)
