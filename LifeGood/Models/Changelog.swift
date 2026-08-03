@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.68", build: 821, date: "2026/08/03", notes: [
+            "【美化 v25.68】SettingsView「資料管理」補齊載入狀態缺口：匯出 JSON／CSV／部屬資料三顆按鈕點下後會經 Task.detached 背景寫檔，期間只靠 .disabled(exportBusy) 讓按鈕變暗，同一 Section 緊接在後的「完整備份」「一鍵壓縮」兩列卻各自有標題旁 ProgressView 進度提示，三顆匯出按鈕是本檔案 dataManagementSection 唯一沒有任何進行中回饋的列，容易讓使用者誤以為沒反應而重複點擊、造成分享面板重疊觸發。共用 settingsActionRow 新增 busy 參數（預設 false，其餘 5 個既有呼叫端外觀不受影響），busy 時在標題旁顯示同色 ProgressView，三顆匯出按鈕改傳入 busy: exportBusy；並把「完整備份」「一鍵壓縮」原本未指定色調、沿用系統藍的 ProgressView 補上 .tint(.teal) / .tint(.indigo)，與各自圖示圓主題色對齊，避免五顆進度指示器裡有兩顆跟圖示脫色。純視覺層調整，exportJSON()／exportCSV()／exportSubordinates() 等既有匯出邏輯與 exportBusy 互斥鎖完全未變動。",
+        ]),
         ChangelogEntry(version: "25.67", build: 820, date: "2026/08/03", notes: [
             "【靜態除錯 v25.67】本次針對「刪除實體後、其他頁面殘留孤兒 UUID 篩選狀態造成假空狀態」這個 v25.55／v25.56 才修過的 bug class，全樹複查是否還有第三個漏網之魚：grep 全部 @AppStorage／@State 篩選狀態，確認持久化的部門篩選只剩 SubordinateView／TalentMatrixView／SubordinateRosterView 三處，三處皆已補上 onChange(of: lifeStore.departments.map(\\.id)) 防護，無遺漏；同時複查 GradeTitleView.deleteDepartment 是否有同類但未處理的關聯欄位——職等/職稱（gradeTitleId）僅供 SubordinateView／SubordinateDetailView／OrganizationView 逐筆 first(where:) 顯示用，刪除後查無對應項目會自然顯示為空白，不是「整批篩不到」的假空狀態，非同一 bug class。另外複查：全樹 TextField 是否有繞過本地防抖、直接雙向綁定 Store 陣列元素造成逐字重存的舊 bug（0 筆）；PhotoInfoBar（MultiPhotoGallery.swift）檔案大小與解析度讀取是否仍在背景執行緒、未阻塞主執行緒（確認正常）；全樹 .animation(...) 是否誤用已棄用的「無 value 全域動畫」寫法造成非預期畫面跟著閃爍（僅 Toggle 搭配 Binding.animation() 的合法場景，無誤用）；force unwrap／try!／as! 是否維持 0 筆（維持 0 筆）。均確認正常、無新增問題，本次未變動任何商業邏輯。",
         ]),

@@ -76,6 +76,19 @@ import UniformTypeIdentifiers
 //      版權宣告（1431 行）字體較小、置中、.tertiary 色，屬刻意的小字版權印刷慣例，
 //      與說明性 footer 是不同類別，不在此次調整範圍。純文字字級調整，
 //      helpText 內容、Provider 選擇、Key 讀寫等既有商業邏輯完全未變動。
+// [2026-08 v11] dataManagementSection「載入狀態」補漏（匯出 JSON／CSV／部屬資料三顆按鈕）：
+//  21. 三顆按鈕點下後都會經 Task.detached 背景寫檔（JSON 序列化＋寫入暫存檔），
+//      期間只靠 .disabled(exportBusy) 讓按鈕變暗，同一 Section 緊接在後的「完整備份」
+//      「一鍵壓縮」兩列卻各自有標題旁 ProgressView 進度提示——三顆匯出按鈕是本檔案
+//      dataManagementSection 唯一沒有任何進行中回饋的列，容易讓使用者誤以為沒反應而
+//      重複點擊，造成分享面板重疊觸發。共用 settingsActionRow 新增 busy 參數（預設
+//      false，其餘 5 個既有呼叫端不受影響），busy 時在標題旁顯示同色 ProgressView，
+//      三顆按鈕改傳入 busy: exportBusy；並把「完整備份」「一鍵壓縮」原本未指定色調、
+//      沿用系統藍的 ProgressView 補上 .tint(.teal) / .tint(.indigo)，與各自圖示圓主題色
+//      對齊，避免五顆進度指示器裡有兩顆跟圖示脫色。純視覺層調整，
+//      exportJSON()／exportCSV()／exportSubordinates() 等既有匯出邏輯與 exportBusy
+//      互斥鎖完全未變動。
+//      （下次美化本檔案時：可轉往其他仍留有待辦的畫面）
 
 // MARK: - Share Sheet (UIKit bridge)
 
@@ -1023,7 +1036,8 @@ struct SettingsView: View {
                     icon: "square.and.arrow.up",
                     color: .green,
                     title: "匯出 JSON",
-                    subtitle: "完整資料備份，可重新匯入"
+                    subtitle: "完整資料備份，可重新匯入",
+                    busy: exportBusy
                 )
             }
             .foregroundStyle(.primary)
@@ -1057,7 +1071,7 @@ struct SettingsView: View {
                             Text("完整備份（含照片）")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.primary)
-                            if backupBusy { ProgressView().scaleEffect(0.7) }
+                            if backupBusy { ProgressView().scaleEffect(0.7).tint(.teal) }
                         }
                         Text("單一檔 .lifegood，含所有照片與文件，可重新匯入")
                             .font(.caption)
@@ -1097,7 +1111,7 @@ struct SettingsView: View {
                             Text("一鍵壓縮既有照片")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.primary)
-                            if compressBusy { ProgressView().scaleEffect(0.7) }
+                            if compressBusy { ProgressView().scaleEffect(0.7).tint(.indigo) }
                         }
                         Text("把過去存的大圖縮到 1080P JPEG 80%，縮小備份檔")
                             .font(.caption)
@@ -1117,7 +1131,8 @@ struct SettingsView: View {
                     icon: "tablecells",
                     color: .mint,
                     title: "匯出 CSV",
-                    subtitle: "可用 Excel 或 Numbers 開啟"
+                    subtitle: "可用 Excel 或 Numbers 開啟",
+                    busy: exportBusy
                 )
             }
             .foregroundStyle(.primary)
@@ -1131,7 +1146,8 @@ struct SettingsView: View {
                     icon: "person.2.fill",
                     color: .indigo,
                     title: "匯出部屬資料",
-                    subtitle: "僅部屬，含班表/任務/會議/請假，可合併匯入"
+                    subtitle: "僅部屬，含班表/任務/會議/請假，可合併匯入",
+                    busy: exportBusy
                 )
             }
             .foregroundStyle(.primary)
@@ -1371,7 +1387,13 @@ struct SettingsView: View {
 
     // MARK: - 行動列輔助（v3：36pt 漸層圖示圓 + 雙行文字）
 
-    private func settingsActionRow(icon: String, color: Color, title: String, subtitle: String) -> some View {
+    // [v11] 新增 busy 參數（預設 false，既有 8 個呼叫端不受影響）：匯出 JSON／CSV／部屬資料
+    // 三顆按鈕先前執行期間僅靠 .disabled(exportBusy) 讓按鈕變暗，同一 Section 緊接在後的
+    // 「完整備份」「一鍵壓縮」兩列卻都有標題旁 ProgressView 進度提示，是本檔案「載入狀態」
+    // 系列裡唯一沒跟上的三處——使用者點下去後看不到任何進行中回饋，容易誤以為沒反應而重複點擊。
+    // 對齊既有 backupBusy／compressBusy 列規格，加上同色 ProgressView，busy 時機到才顯示，
+    // 不影響其餘 5 個呼叫端外觀。
+    private func settingsActionRow(icon: String, color: Color, title: String, subtitle: String, busy: Bool = false) -> some View {
         HStack(spacing: 14) {
             ZStack {
                 Circle()
@@ -1392,9 +1414,12 @@ struct SettingsView: View {
             }
             .shadow(color: color.opacity(0.15), radius: 4, x: 0, y: 2)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    if busy { ProgressView().scaleEffect(0.7).tint(color) }
+                }
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
