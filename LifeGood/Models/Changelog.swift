@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.70", build: 823, date: "2026/08/03", notes: [
+            "【美化 v25.70】AdminConsoleView.swift「使用者人數」同步提示列補齊 ProgressView 主題色：isBusy 時顯示的「正在與 iCloud 同步設定…」提示列，ProgressView() 自 v2 建立以來一直是系統預設灰色轉輪，經全 App 17 處 ProgressView() 呼叫點逐一核對，是唯一沒有 .tint() 的一處——其餘全部都跟隨所在區塊主題色（SettingsView.actionRow 依傳入 color 上色、RealEstateDetailView CutePhotoViewer 用 draft.kind.accent 等）。此提示列緊接在「使用者人數」Section 之後，寫入的正是該 Section 觸發的門檻設定，補上 .tint(.blue) 沿用該 Section 既有的藍色主題（sectionHeader 同色），載入中轉輪不再是唯一一顆脫色的灰色轉輪。純視覺層調整，admin.isBusy 讀取與 CloudKit AppConfig 寫入等既有商業邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.69", build: 822, date: "2026/08/03", notes: [
             "【美化 v25.69】FixedExpenseView.swift「固定支出詳情卡」儲蓄險金額顯示補齊億級量級單位：詳情卡呼叫私有 fmtShort(_:) 顯示「月均換算」與儲蓄險 savingsSection 的「已繳總支出」「預計總支出」「期滿預估領回」，原本只有「未滿 1 萬」「≥ 1 萬」兩段換算，未達 1 億自動進位改顯示「億」，是全 App 同名 fmtShort 家族（VehicleView／FinanceOverviewView／FinanceChartView 三處皆已補齊億級規則）裡唯一遺漏這道分支的一處。儲蓄險「已繳／預計總支出」是保費 × 期數的多年期累計金額，長年期高保費保單很容易跨過億元門檻，屆時只會顯示成 5～6 位數的鉅額「萬」數字，與全 App 其餘英雄卡／明細列早已統一的億級顯示規則不一致。補上與三個姊妹 fmtShort 相同的 `abs(v) >= 100_000_000 → %.1f億` 分支。純顯示層調整，儲蓄險已繳/預計總支出、期滿領回、月均換算等既有試算邏輯完全未變動。",
         ]),

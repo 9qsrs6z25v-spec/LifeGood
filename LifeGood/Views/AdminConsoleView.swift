@@ -43,6 +43,16 @@ import SwiftUI
 //      版本徽章（藍→靛漸層 Capsule）風格脫節；改為迷你版同款漸層 Capsule 徽章 +
 //      build 輔助文字，讓摘要行與詳情頁版本徽章視覺語言一致。
 //   純視覺層調整，人數讀取、版本紀錄資料來源等既有商業邏輯完全未變動。
+// [2026-08 v5] 補齊 isBusy 同步提示列 ProgressView 主題色：
+//   1. 「正在與 iCloud 同步設定…」列的 ProgressView() 從 v2 建立以來就是系統預設灰色
+//      轉輪，經全 App 17 處 ProgressView() 呼叫點逐一核對，是唯一沒有 .tint() 的一處；
+//      其餘全部都跟隨所在區塊主題色（例如 SettingsView.actionRow 依傳入 color 上色、
+//      RealEstateDetailView CutePhotoViewer 用 draft.kind.accent）。本提示列緊接在
+//      「使用者人數」Section 之後、寫入的正是該 Section 觸發的門檻設定，補上
+//      .tint(.blue) 沿用該 Section 的藍色主題（sectionHeader 第 215 行同色），讓載入中
+//      轉輪與上方剛互動的區塊同色系，不再是唯一一顆脫色的灰色轉輪。
+//   純視覺層調整，admin.isBusy 讀取與 CloudKit AppConfig 寫入等既有商業邏輯完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 // ─────────────────────────────────────────────
 
 /// 隱藏管理控制台（關於頁連點版本卡 20 下開啟，需輸入 PIN）。
@@ -219,7 +229,7 @@ struct AdminConsoleView: View {
             if admin.isBusy {
                 Section {
                     HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.small).tint(.blue)
                         Text("正在與 iCloud 同步設定…")
                             .font(.caption)
                             .foregroundStyle(.secondary)
