@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.77", build: 830, date: "2026/08/04", notes: [
+            "【美化 v25.77】SubordinateDetailView.swift「@ 標註」建議清單 MentionTextField.row(_:) 主要姓名補齊防截斷：row(_:) 顯示 p.name（部屬姓名或名片自填姓名，使用者自填、長度不可控）的主要一行，自 v1 版改版補齊圖示/膠囊規格後，緊接在下方的 p.subtitle 早就有 .lineLimit(1)，p.name 本身卻從未有任何截斷保護，與同檔案 headerCard 的 Text(subordinate.name)（已有 .lineLimit(1) + .minimumScaleFactor(0.8)）規格不一致。「輔助模式：特大」字級下，@ 標註建議清單裡較長的姓名會換行，把 trailing 的「部屬」/「名片」膠囊擠出原本的垂直置中位置。補上 .lineLimit(1) + .minimumScaleFactor(0.8)，對齊 headerCard 相同規格。純視覺層調整，updateQuery／insert／suggestions 等既有 @ 標註邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.76", build: 829, date: "2026/08/04", notes: [
             "【靜態除錯 v25.76】三個分頭複查（強制解包/越界/型別、retain cycle/競態、畫面閃爍/效能），修復 3 處效能問題與 2 處背景執行緒競態，強制解包/越界/型別三類複查後確認維持 0 筆：",
             "① 效能：FinanceChartView.financeChartHeroCard 同一次 render 內對 store.stocks／store.realEstates 各自 filter{!isSold} 兩次（總數膠囊一次、KPI 橫列一次），改為 render 開頭各算一次、後續共用；FinanceOverviewView 的 totalAssetsCard／assetCards 兩個函式各自獨立 filter 同一組股票／房地產陣列，比照本檔案既有 insSummary／stockVal 等「body 一次計算、往下傳參數」規格，改由 body 統一算好 activeStockCount／activeRealEstateCount 後傳入；SubordinateEquipmentSection.body 對 subordinate（需線性掃描 lifeStore.subordinates 才能取得）的 .equipments 在同一次 render 內存取五次，改為 body 開頭 let equipments 一次後共用。三處皆為同一 bug class：同一次畫面重繪內重複重算可快取的值，資產/部屬清單越大、重繪越頻繁（主題切換、資料編輯、進場動畫）時越明顯，但不影響顯示結果。",

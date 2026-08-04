@@ -2754,7 +2754,10 @@ struct MentionTextField: View {
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(tint)
             }
             VStack(alignment: .leading, spacing: 1) {
+                // [v25.77] 補齊 lineLimit/minimumScaleFactor，對齊下方 subtitle 與 headerCard subordinate.name 規格
                 Text(p.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 if !p.subtitle.isEmpty {
                     Text(p.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -2800,6 +2803,12 @@ struct MentionTextField: View {
 // + stroke 描邊；trailing 的「部屬」/「名片」標籤改用 Capsule().fill(color.opacity(0.14))
 // 包底色，與 kind.color 標籤慣例一致。Divider 對齊縮排隨圖示加寬同步從 40→50。
 // 純視覺調整，未變動 updateQuery／insert／suggestions 等既有 @ 標註邏輯。
+// [v25.77] row(_:) 主要一行 p.name（部屬姓名或名片自填姓名，長度不可控）自 v1 改版後
+// 只有下方 p.subtitle 補了 lineLimit(1)，p.name 本身反而沒有防截斷，與同檔案 headerCard
+// 的 Text(subordinate.name)（.lineLimit(1) + .minimumScaleFactor(0.8)）規格不一致。
+// 「輔助模式：特大」字級下，@ 標註建議清單較長的姓名會換行，把 trailing 的「部屬」/「名片」
+// 膠囊擠出原本的垂直置中對齊。補上 .lineLimit(1) + .minimumScaleFactor(0.8)，對齊
+// headerCard 相同規格。純視覺調整，未變動任何 @ 標註邏輯。
 
 // MARK: - 部屬事項預覽卡（點開先看卡片，右上角編輯才進入編輯）
 
