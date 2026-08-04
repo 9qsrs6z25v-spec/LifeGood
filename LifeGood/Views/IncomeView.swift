@@ -188,12 +188,15 @@ struct IncomeView: View {
             case .monthly:
                 // 固定薪水設有結束日者，展開至結束日為止（不再累計到今天）
                 let end = income.endDate.map { min($0, now) } ?? now
+                // 起始日晚於截止日（例如剛新增了未來才生效的固定薪水）代表尚未發生任何一個月，計 0
+                guard income.date <= end else { return sum }
                 let months = calendar.dateComponents([.month], from: income.date, to: end).month ?? 0
-                return sum + income.amount * Double(max(1, months + 1))
+                return sum + income.amount * Double(months + 1)
             case .yearly:
                 let end = income.endDate.map { min($0, now) } ?? now
+                guard income.date <= end else { return sum }
                 let years = calendar.dateComponents([.year], from: income.date, to: end).year ?? 0
-                return sum + income.amount * Double(max(1, years + 1))
+                return sum + income.amount * Double(years + 1)
             }
         }
     }

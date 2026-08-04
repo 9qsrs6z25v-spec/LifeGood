@@ -185,12 +185,18 @@ class ExpenseStore: ObservableObject {
         guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: date)),
               let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else { return 0 }
 
+        // 週期收入計入上限：過去月份用該月月底（monthEnd）；若查詢月份含今天（本月），
+        // 上限改收斂到「明天 00:00」，避免把本月尚未到期（起始日晚於今天）的固定薪水提前算入，
+        // 與 currentMonthIncomeTotal 的 startOfDay(date) <= startOfDay(now) 規則保持一致。
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date())) ?? monthEnd
+        let recurringCutoff = min(monthEnd, tomorrow)
+
         let onceTotal = incomes
             .filter { $0.period == .once && calendar.isDate($0.date, equalTo: date, toGranularity: .month) }
             .reduce(0) { $0 + $1.amount }
 
         let recurringTotal = incomes
-            .filter { $0.period != .once && $0.date < monthEnd && $0.isActive(in: date, calendar: calendar) }
+            .filter { $0.period != .once && $0.date < recurringCutoff && $0.isActive(in: date, calendar: calendar) }
             .reduce(0) { $0 + $1.monthlyAmount }
 
         return onceTotal + recurringTotal

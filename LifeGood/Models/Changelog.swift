@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.75", build: 828, date: "2026/08/04", notes: [
+            "【靜態除錯 v25.75】修正「未來才生效的固定薪水」讓收入統計提前多算的 bug class，共兩處：① IncomeView.totalIncomeAll（收入頁「累計收入」）月薪／年薪分支用 max(1, months + 1) 換算已發生月數/年數，只防到「結束日早於起始日」（v24.53 已修），沒防到更常見的觸發方式——使用者新增一筆起始日晚於今天的固定薪水（例如下個月才生效的新職務），此時 dateComponents(from: 未來起始日, to: 今天) 算出負值，被 max(1, ...) 硬墊成 1，尚未領到的第一份薪水就被算進累計收入。② ExpenseStore.incomeTotal(for:)（供「今年累計」逐月加總）週期收入判斷式只有 $0.date < monthEnd（該月月底），查詢月份是「本月」時 monthEnd 落在未來，會把本月內起始日晚於今天的固定薪水也算滿一整月；同一畫面緊鄰的 currentMonthIncomeTotal（本月）已有 startOfDay(date) <= startOfDay(now) 防護，兩個相鄰 KPI 因此互相矛盾（本月顯示無此收入、今年累計卻已算入）。修法：① 起始日晚於截止日時直接計 0（不再 max(1, ...) 硬墊），移除已失去防呆意義的 max。② incomeTotal(for:) 新增 recurringCutoff = min(monthEnd, 明天 00:00)，查詢過去月份時等同原本的 monthEnd（明天必定晚於過去月月底，min 不影響），查詢本月時收斂到「今天」，與 currentMonthIncomeTotal 規則一致。純收入統計計算修正，onceTotal／isActive(結束日)／monthlyAmount 等既有邏輯與 UI 顯示格式完全未變動。",
+        ]),
         ChangelogEntry(version: "25.74", build: 827, date: "2026/08/03", notes: [
             "【美化 v25.74】SpouseResumeView.swift「配偶履歷」英雄卡英文名補齊防截斷：heroCard 中 s.englishName 緊接在 s.chineseName 下方，chineseName 早已補上 .lineLimit(1) + .minimumScaleFactor(0.65)，但同一個 VStack 裡下一行的 englishName 從建立以來完全沒有 lineLimit／minimumScaleFactor，是姊妹畫面 ResumeView.swift 英雄卡（chineseName／englishName 兩行皆已補齊縮放保護）與 v25.73 才剛修過的 FamilyView 列表（英文名／配偶心形膠囊姓名同步補齊）之外，唯一還沒跟上這道防護的「配偶」英文姓名顯示點。使用者自填的配偶英文全名（含中間名）偏長時，在「輔助模式：特大」字級下會換行擠壓，甚至頂到右側 52pt 心形圖示圓。補上 .lineLimit(1) + .minimumScaleFactor(0.75)，對齊 ResumeView.swift 英雄卡英文名相同規格。純視覺層調整，s.chineseName／marriageComp 等既有讀取與計算邏輯完全未變動。",
         ]),
