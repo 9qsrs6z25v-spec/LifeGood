@@ -1899,6 +1899,25 @@ struct RecordEditorSheet: View {
 // （下次美化本檔案時，可留意其餘子頁面是否仍有零星未套用漸層圖示圓／統一 Section 標頭
 //   規格的角落）
 
+// MARK: - 美化紀錄（SubordinateItemCard）
+// [2026-08 v1] 本檔案最後一處從未美化過的畫面：部屬事項預覽卡（點任務/會議/報告/請假/
+//   通用記錄列後彈出的唯讀卡片），titleBlock 圖示圓、field/richBlock 內容區塊皆是本檔案
+//   碩果僅存的裸元件（無邊框/陰影/進場動畫），與同檔案其餘章節早已統一的視覺語言脫節：
+//   1. titleBlock 44pt 圖示圓：補 Circle().stroke(color.opacity(0.22), lineWidth: 0.75) +
+//      .shadow(color: color.opacity(0.18), radius: 5, y: 2)，對齊本檔案 meetingSection 等
+//      章節、以及全 App StockDetailView／VehicleView／IncomeView 既有 44pt 圖示圓描邊＋陰影規格。
+//   2. titleBlock 標題大字：補 .lineLimit(2) + .minimumScaleFactor(0.7)，任務/會議主題字數
+//      不定，避免大字級輔助模式下超長標題被裁切或無限撐高版面。
+//   3. field() / richBlock() 內容區塊：補 overlay(RoundedRectangle stroke separator.opacity(0.12))
+//      細邊框，對齊本檔案卡片型容器（recordRow／meetingSection 等）皆有的邊界描邊規格，
+//      深色模式下不再與背景融為一片。
+//   4. cardBody 整體：新增 cardAppeared 進場動畫旗標（opacity 0+offset 12 → 1/0，
+//      spring 0.46/0.82），對齊本檔案其餘 sheet／卡片一致採用的淡入進場規格，
+//      取代原本無任何動畫、內容瞬間跳出的呈現方式。
+//   純視覺層調整，任務/會議/報告/請假/記錄資料讀取、分享（JPG／文字）、@ 標註開啟連結、
+//   編輯導頁等既有商業邏輯完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+
 /// 可從行事曆 / 部屬總覽的「＋」新增的部屬項目類型
 enum SubAddKind: String, Identifiable, CaseIterable {
     case task, meeting, report
@@ -2844,6 +2863,8 @@ struct SubordinateItemCard: View {
     @State private var openSub: Subordinate?
     @State private var openCard: IDBox?
     @State private var shareItem: CardSharePayload?
+    // [v1] 卡片內容進場動畫旗標，對齊本檔案其餘 sheet／卡片一致採用的淡入進場規格
+    @State private var cardAppeared = false
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
@@ -2965,6 +2986,9 @@ struct SubordinateItemCard: View {
                     cardBody
                 }
                 .padding()
+                // [v1] 淡入 + 向上進場動畫，對齊本檔案其餘卡片規格
+                .opacity(cardAppeared ? 1 : 0)
+                .offset(y: cardAppeared ? 0 : 12)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle(navTitle)
@@ -2988,6 +3012,11 @@ struct SubordinateItemCard: View {
             .sheet(item: $openCard) { box in BusinessCardDetailView(cardId: box.id) }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
             .environment(\.openURL, OpenURLAction { url in handleMention(url) })
+            .onAppear {
+                withAnimation(.spring(response: 0.46, dampingFraction: 0.82)) {
+                    cardAppeared = true
+                }
+            }
         }
     }
 
@@ -3063,6 +3092,8 @@ struct SubordinateItemCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding().background(Color(.secondarySystemGroupedBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
+                // [v1] 補 overlay 細邊框，對齊 field()／richBlock() 同批補齊規格
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
             }
             richBlock("備註", m.note)
         case .report(let subId, let snap):
@@ -3090,18 +3121,25 @@ struct SubordinateItemCard: View {
         }
     }
 
+    // [v1] 補 Circle().stroke + shadow，對齊本檔案 meetingSection 等章節既有 44pt 圖示圓規格；
+    // 標題補 lineLimit + minimumScaleFactor，避免超長主題在大字級輔助模式下裁切或撐高版面。
     private func titleBlock(icon: String, color: Color, title: String) -> some View {
         HStack(spacing: 12) {
             ZStack {
                 Circle().fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0.08)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 44, height: 44)
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 44, height: 44)
+                    .shadow(color: color.opacity(0.18), radius: 5, x: 0, y: 2)
+                Circle().stroke(color.opacity(0.22), lineWidth: 0.75).frame(width: 44, height: 44)
                 Image(systemName: icon).font(.system(size: 18, weight: .semibold)).foregroundStyle(color)
             }
             Text(title).font(.title3.weight(.bold)).foregroundStyle(.primary)
+                .lineLimit(2).minimumScaleFactor(0.7)
             Spacer(minLength: 0)
         }
     }
 
+    // [v1] 補 overlay 細邊框，對齊本檔案其餘卡片型容器（recordRow／meetingSection 等）皆有的邊界描邊規格
     private func field(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label).font(.subheadline).foregroundStyle(.secondary)
@@ -3111,6 +3149,7 @@ struct SubordinateItemCard: View {
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
     }
 
     @ViewBuilder
@@ -3125,6 +3164,7 @@ struct SubordinateItemCard: View {
             }
             .padding().background(Color(.secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
         }
     }
 
