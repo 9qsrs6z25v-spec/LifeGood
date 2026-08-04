@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.81", build: 834, date: "2026/08/04", notes: [
+            "【美化 v25.81】AddSavingsInsuranceView.swift 工具列「儲存／新增」按鈕補齊載入狀態：save() 自 v1 起就有 isSaving 忙碌守衛（disabled(isSaving)）防止快速連點重複建立儲蓄險紀錄，但按鈕本身在存檔期間毫無視覺變化，使用者點下後不確定是否已觸發。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 SettingsView「資料管理」匯出按鈕載入狀態規格（ProgressView + scaleEffect(0.7) + 主題色 tint 全 App 慣例）。純視覺層補強，save() 內部守衛判斷與儲蓄險/固定支出同步寫入邏輯完全未變動。同型 isSaving 守衛也存在於 AddExpenseView / AddIncomeView / AddStockView / AddVehicleView / AddRealEstateView，皆缺少載入視覺提示，已於檔案內美化紀錄註記為下次可比照補齊清單。",
+        ]),
         ChangelogEntry(version: "25.80", build: 833, date: "2026/08/04", notes: [
             "【美化 v25.80】BusinessCardView.swift「名片列表」cardRow 姓名補齊防截斷：cardRow(_:) 顯示 card.name（掃描或自填、長度不可控）僅有 .lineLimit(1)，同檔案 BusinessCardDetailView.heroCard 顯示同一欄位早已用 .lineLimit(2) + .minimumScaleFactor(0.7) 防護，兩處規格不一致。列表 row 被固定 52pt 頭像與 trailing 日期膠囊夾在中間，輔助模式大字級下姓名偏長時會直接被省略號截斷，而非跟 heroCard 一樣先縮小顯示。補上 .minimumScaleFactor(0.7)，對齊 heroCard 相同數值。純視覺層調整，姓名資料讀寫、聯絡方式顯示等既有邏輯完全未變動。",
         ]),

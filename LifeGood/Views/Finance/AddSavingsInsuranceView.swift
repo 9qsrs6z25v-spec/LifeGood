@@ -28,6 +28,15 @@ import SwiftUI
 //  11. 自動計算結果 section 列：目前帳戶價值 / 期滿預估領回 / 預估總報酬率 / 複利增值
 //      的右側數值從純色 Text 升級為彩色 Capsule 徽章（含半透明底 + stroke 0.6pt），
 //      對齊 AddStockView 報酬率膠囊 / FinanceOverviewView.allocationSection 規格。
+// [2026-08 v3] 本次美化方向（儲存按鈕載入狀態）：
+//  12. 工具列「儲存／新增」按鈕：v1 起就有 isSaving 忙碌守衛（disabled(isSaving)）避免快速
+//      連點造成重複紀錄，但按鈕本身在 isSaving 期間沒有任何視覺變化，使用者點下後不確定
+//      是否已觸發存檔。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true
+//      時顯示於按鈕左側，對齊 SettingsView「資料管理」匯出按鈕載入狀態規格（同 App 內
+//      ProgressView + scaleEffect(0.7) + 主題色 tint 慣例）。純視覺層補強，save() 內部的
+//      守衛判斷、儲蓄險與固定支出同步寫入邏輯完全未變動。同型 isSaving 守衛也存在於
+//      AddExpenseView / AddIncomeView / AddStockView / AddVehicleView / AddRealEstateView，
+//      皆缺少載入視覺提示，可作為下次美化時比照本檔案補齊的清單，逐步達成全 App 均值性。
 
 struct AddSavingsInsuranceView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -279,8 +288,14 @@ struct AddSavingsInsuranceView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green).disabled(isSaving)
+                    HStack(spacing: 6) {
+                        // [v3] 存檔中顯示同主題色 ProgressView，取代原本點下後毫無反應的空白等待
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green).disabled(isSaving)
+                    }
                 }
             }
             .onAppear {
