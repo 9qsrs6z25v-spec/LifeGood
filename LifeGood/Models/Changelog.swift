@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.80", build: 833, date: "2026/08/04", notes: [
+            "【美化 v25.80】BusinessCardView.swift「名片列表」cardRow 姓名補齊防截斷：cardRow(_:) 顯示 card.name（掃描或自填、長度不可控）僅有 .lineLimit(1)，同檔案 BusinessCardDetailView.heroCard 顯示同一欄位早已用 .lineLimit(2) + .minimumScaleFactor(0.7) 防護，兩處規格不一致。列表 row 被固定 52pt 頭像與 trailing 日期膠囊夾在中間，輔助模式大字級下姓名偏長時會直接被省略號截斷，而非跟 heroCard 一樣先縮小顯示。補上 .minimumScaleFactor(0.7)，對齊 heroCard 相同數值。純視覺層調整，姓名資料讀寫、聯絡方式顯示等既有邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.78", build: 831, date: "2026/08/04", notes: [
             "【美化 v25.78】ChildDetailView.swift「過敏資訊」嚴重度選擇器分級著色：ChildRecordEditorSheet 的「嚴重度」原本是系統預設 Picker(.segmented)（純文字選單、輕/中/重三個等級視覺完全相同，需點開才看得出目前選了哪一級），與同檔案 recordRow 過敏嚴重度 Capsule 徽章（早已用 severityColor 分級著色：輕＝黃／中＝橘／重＝紅）視覺語意脫節，也是姊妹畫面 HealthProfileEditView.AllergyEditor v4 已修過的同型缺口，本檔案是全 App 唯一還沒跟進的一處。新增共用 severityPicker(selection:) 三色塊按鈕列（選中＝主題色底 + 白字 + 陰影，未選中＝淡底 + 主題色字 + 細邊框，帶 spring 選中動畫），對齊 HealthProfileEditView 既有規格；severityColor(_:) 原為 ChildDetailView 內的 private instance method，僅該 struct 可呼叫，改為檔案層級 private free function 讓 ChildRecordEditorSheet 也能共用，配色本身維持不變。純視覺層調整，draft 儲存、severity 讀寫等既有商業邏輯完全未變動。",
         ]),

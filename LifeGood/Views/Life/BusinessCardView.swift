@@ -1012,6 +1012,10 @@ struct BusinessCardView: View {
         }
     }
 
+    // 【美化方向 v25.80】cardRow 姓名補齊 .minimumScaleFactor 防截斷：
+    // card.name 是使用者掃描/自填、長度不可控的欄位，同檔案 BusinessCardDetailView.heroCard（下方
+    // 約 1500 行）顯示同一欄位早已用 .lineLimit(2) + .minimumScaleFactor(0.7) 防護，本列表 row 卻只有
+    // .lineLimit(1) 沒有縮放保護，輔助模式大字級下姓名偏長時會直接被省略號截斷、而非跟 heroCard 一樣先縮小顯示。
     /// 列表 row：52pt 頭像圓角方形 + 姓名 / Capsule 職稱 / 公司部門 / 聯絡方式 + 日期
     private func cardRow(_ card: BusinessCard) -> some View {
         let accent = Color(red: 1.00, green: 0.55, blue: 0.25)
@@ -1028,6 +1032,7 @@ struct BusinessCardView: View {
                     Text(card.name.isEmpty ? "未命名" : card.name)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     if !card.jobTitle.isEmpty {
                         Text(card.jobTitle)
                             .font(.system(size: 10, weight: .semibold))
