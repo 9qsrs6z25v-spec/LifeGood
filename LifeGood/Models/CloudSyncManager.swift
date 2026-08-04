@@ -43,8 +43,19 @@ final class CloudSyncManager: ObservableObject {
 
     // MARK: - Published State
 
+    // isEnabled 只在主執行緒被寫入（Settings Toggle／init），但 PhotoCloudSync.upload/delete
+    // 會從背景執行緒（Task.detached 的相片壓縮／上傳流程）讀取，@Published 本身不保證跨執行緒讀寫安全。
+    // 比照 CloudKitManager.accountStatus 既有的 NSLock 鏡射寫法，另存一份鎖保護的鏡像值供背景執行緒讀取。
+    private let isEnabledLock = NSLock()
+    private var _isEnabledThreadSafe: Bool = false
+    var isEnabledThreadSafe: Bool {
+        isEnabledLock.lock(); defer { isEnabledLock.unlock() }
+        return _isEnabledThreadSafe
+    }
+
     @Published var isEnabled: Bool {
         didSet {
+            isEnabledLock.lock(); _isEnabledThreadSafe = isEnabled; isEnabledLock.unlock()
             UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
             if isEnabled {
                 beginInitialSync()

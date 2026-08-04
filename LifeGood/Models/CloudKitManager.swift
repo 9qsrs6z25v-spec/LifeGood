@@ -734,7 +734,10 @@ enum ImageCompressor {
                 result.scanned += 1
                 result.bytesBefore += data.count
                 let out = compressForStorage(data)
-                if out.count < data.count, (try? out.write(to: url)) != nil {
+                // 壓縮期間使用者可能已從畫面刪除這張照片（原始檔＋CloudKit 紀錄都已移除），
+                // 寫回前重新確認檔案仍存在，避免把已刪除的照片復活並重新上傳到 iCloud
+                if out.count < data.count, FileManager.default.fileExists(atPath: url.path),
+                   (try? out.write(to: url)) != nil {
                     result.compressed += 1
                     result.bytesAfter += out.count
                     // 覆蓋雲端同名檔，避免下次同步又把大圖拉回來
@@ -749,13 +752,15 @@ enum ImageCompressor {
 }
 
 enum PhotoCloudSync {
+    // 呼叫端含背景執行緒（相片壓縮／上傳走 Task.detached），改讀鎖保護的
+    // isEnabledThreadSafe，避免跨執行緒讀寫 @Published isEnabled 的資料競態。
     static func upload(directory: String, fileName: String) {
-        guard CloudSyncManager.shared.isEnabled else { return }
+        guard CloudSyncManager.shared.isEnabledThreadSafe else { return }
         CloudKitManager.shared.uploadPhoto(directory: directory, fileName: fileName)
     }
 
     static func delete(directory: String, fileName: String) {
-        guard CloudSyncManager.shared.isEnabled else { return }
+        guard CloudSyncManager.shared.isEnabledThreadSafe else { return }
         CloudKitManager.shared.deletePhoto(directory: directory, fileName: fileName)
     }
 }

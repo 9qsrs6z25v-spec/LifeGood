@@ -93,11 +93,15 @@ struct FinanceOverviewView: View {
         let vehicleVal = store.totalVehicleValue
         let reVal = store.totalRealEstateValue
         let allocations = ntdAllocations(insVal: insSummary.value, stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal)
+        // 一次算出未出售股票／房地產筆數，避免 totalAssetsCard／assetCards 各自 filter 一次
+        let activeStockCount = store.stocks.filter { !$0.isSold }.count
+        let activeRealEstateCount = store.realEstates.filter { !$0.isSold }.count
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     totalAssetsCard(allocations, insVal: insSummary.value, insPaid: insSummary.paid,
-                                     stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal)
+                                     stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal,
+                                     activeStockCount: activeStockCount, activeRealEstateCount: activeRealEstateCount)
                         .padding(.horizontal)
                         .opacity(appearedCards.contains("total") ? 1 : 0)
                         .offset(y: appearedCards.contains("total") ? 0 : 20)
@@ -124,7 +128,8 @@ struct FinanceOverviewView: View {
                         }
 
                     assetCards(insVal: insSummary.value, insPaid: insSummary.paid,
-                               stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal)
+                               stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal,
+                               activeStockCount: activeStockCount, activeRealEstateCount: activeRealEstateCount)
                     allocationSection(allocations)
                     cashFlowSection
                         .opacity(cashFlowSectionAppeared ? 1 : 0)
@@ -174,11 +179,6 @@ struct FinanceOverviewView: View {
         insVal + stockVal + vehicleVal + reVal
     }
 
-    private var totalAssetCount: Int {
-        store.insurances.count + store.stocks.filter { !$0.isSold }.count + store.vehicles.count +
-        store.realEstates.filter { !$0.isSold }.count
-    }
-
     // MARK: - 總資產卡片
     // 【美化方向 — totalAssetsCard】
     // ① 右側：取代裝飾圖示，改為「投資損益」KPI 膠囊（股票+儲蓄險合計），
@@ -188,8 +188,10 @@ struct FinanceOverviewView: View {
     //    色彩邏輯與下方 allocationSection 的橫向彩條完全對應。
 
     private func totalAssetsCard(_ allocations: [AssetAllocation], insVal: Double, insPaid: Double,
-                                  stockVal: Double, vehicleVal: Double, reVal: Double) -> some View {
+                                  stockVal: Double, vehicleVal: Double, reVal: Double,
+                                  activeStockCount: Int, activeRealEstateCount: Int) -> some View {
         let pl = (insVal - insPaid) + stockProfitLoss
+        let totalAssetCount = store.insurances.count + activeStockCount + store.vehicles.count + activeRealEstateCount
 
         return VStack(spacing: 0) {
             // 頂部：總資產 + 損益 KPI
@@ -328,7 +330,8 @@ struct FinanceOverviewView: View {
     private var stockProfitLoss: Double { store.totalStockProfitLoss }
 
     private func assetCards(insVal: Double, insPaid: Double,
-                             stockVal: Double, vehicleVal: Double, reVal: Double) -> some View {
+                             stockVal: Double, vehicleVal: Double, reVal: Double,
+                             activeStockCount: Int, activeRealEstateCount: Int) -> some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
                 assetCard(title: "儲蓄險", amount: insVal,
@@ -338,7 +341,7 @@ struct FinanceOverviewView: View {
                 assetCard(title: "股票", amount: stockVal,
                           profitLoss: stockProfitLoss,
                           icon: "chart.line.uptrend.xyaxis", color: .orange,
-                          count: store.stocks.filter { !$0.isSold }.count, key: "stock")
+                          count: activeStockCount, key: "stock")
             }
             HStack(spacing: 12) {
                 assetCard(title: "汽車", amount: vehicleVal,
@@ -348,7 +351,7 @@ struct FinanceOverviewView: View {
                 assetCard(title: "房地產", amount: reVal,
                           profitLoss: nil,
                           icon: "building.2.fill", color: .purple,
-                          count: store.realEstates.filter { !$0.isSold }.count, key: "realEstate")
+                          count: activeRealEstateCount, key: "realEstate")
             }
         }
         .padding(.horizontal)

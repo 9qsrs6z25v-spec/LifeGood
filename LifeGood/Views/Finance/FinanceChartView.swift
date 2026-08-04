@@ -188,7 +188,9 @@ struct FinanceChartView: View {
     }
 
     private var financeChartHeroCard: some View {
-        VStack(spacing: 0) {
+        let activeStockCount = store.stocks.filter { !$0.isSold }.count
+        let activeRealEstateCount = store.realEstates.filter { !$0.isSold }.count
+        return VStack(spacing: 0) {
             // 頂部：總資產 + 計數膠囊
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -206,7 +208,7 @@ struct FinanceChartView: View {
                 }
                 Spacer()
                 // 與下方 KPI 橫列的房地產筆數口徑一致（排除已出售），避免同一張卡片上總數與明細互相矛盾
-                let totalCount = store.stocks.filter { !$0.isSold }.count + store.realEstates.filter { !$0.isSold }.count + store.insurances.count
+                let totalCount = activeStockCount + activeRealEstateCount + store.insurances.count
                 Text("\(totalCount) 項")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 11)
@@ -224,12 +226,12 @@ struct FinanceChartView: View {
 
             // KPI 橫列：股票 / 房地產 / 儲蓄險 筆數
             HStack(spacing: 0) {
-                heroKpiCell(label: "股票", value: "\(store.stocks.filter { !$0.isSold }.count) 檔",
+                heroKpiCell(label: "股票", value: "\(activeStockCount) 檔",
                              icon: "chart.line.uptrend.xyaxis")
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
-                heroKpiCell(label: "房地產", value: "\(store.realEstates.filter { !$0.isSold }.count) 筆",
+                heroKpiCell(label: "房地產", value: "\(activeRealEstateCount) 筆",
                              icon: "building.2.fill")
                 Rectangle()
                     .fill(.white.opacity(0.25))

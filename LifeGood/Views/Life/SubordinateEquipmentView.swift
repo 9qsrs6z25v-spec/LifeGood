@@ -61,7 +61,10 @@ struct SubordinateEquipmentSection: View {
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // subordinate 需線性掃描 lifeStore.subordinates 才能取得，body 內原本各自呼叫
+        // subordinate.equipments 五次，單次 render 重複掃描五次；改為單次取值後共用
+        let equipments = subordinate.equipments
+        return VStack(alignment: .leading, spacing: 0) {
             // 段落標題（對齊本頁其他章節規格：漸層側條 + 圖示 + 標題 + 計數 + 新增鈕）
             HStack(spacing: 10) {
                 Capsule()
@@ -70,8 +73,8 @@ struct SubordinateEquipmentSection: View {
                 Image(systemName: "wrench.and.screwdriver.fill")
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(accent)
                 Text("執掌設備").font(.subheadline.weight(.semibold))
-                if !subordinate.equipments.isEmpty {
-                    Text("\(subordinate.equipments.count) 台")
+                if !equipments.isEmpty {
+                    Text("\(equipments.count) 台")
                         .font(.caption2.weight(.semibold)).foregroundStyle(accent)
                         .padding(.horizontal, 7).padding(.vertical, 2.5)
                         .background(accent.opacity(0.12)).clipShape(Capsule())
@@ -88,15 +91,15 @@ struct SubordinateEquipmentSection: View {
             }
             .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
 
-            if subordinate.equipments.isEmpty {
+            if equipments.isEmpty {
                 emptyState
             } else {
-                ForEach(Array(subordinate.equipments.enumerated()), id: \.element.id) { idx, eq in
+                ForEach(Array(equipments.enumerated()), id: \.element.id) { idx, eq in
                     equipmentRow(eq)
                         .opacity(rowsAppeared ? 1 : 0)
                         .offset(y: rowsAppeared ? 0 : 12)
                         .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04 * Double(idx)), value: rowsAppeared)
-                    if idx < subordinate.equipments.count - 1 {
+                    if idx < equipments.count - 1 {
                         Rectangle().fill(Color(.separator).opacity(0.20))
                             .frame(height: 0.5).padding(.leading, 56)
                     }

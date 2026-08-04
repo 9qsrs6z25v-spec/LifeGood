@@ -13,6 +13,13 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.76", build: 829, date: "2026/08/04", notes: [
+            "【靜態除錯 v25.76】三個分頭複查（強制解包/越界/型別、retain cycle/競態、畫面閃爍/效能），修復 3 處效能問題與 2 處背景執行緒競態，強制解包/越界/型別三類複查後確認維持 0 筆：",
+            "① 效能：FinanceChartView.financeChartHeroCard 同一次 render 內對 store.stocks／store.realEstates 各自 filter{!isSold} 兩次（總數膠囊一次、KPI 橫列一次），改為 render 開頭各算一次、後續共用；FinanceOverviewView 的 totalAssetsCard／assetCards 兩個函式各自獨立 filter 同一組股票／房地產陣列，比照本檔案既有 insSummary／stockVal 等「body 一次計算、往下傳參數」規格，改由 body 統一算好 activeStockCount／activeRealEstateCount 後傳入；SubordinateEquipmentSection.body 對 subordinate（需線性掃描 lifeStore.subordinates 才能取得）的 .equipments 在同一次 render 內存取五次，改為 body 開頭 let equipments 一次後共用。三處皆為同一 bug class：同一次畫面重繪內重複重算可快取的值，資產/部屬清單越大、重繪越頻繁（主題切換、資料編輯、進場動畫）時越明顯，但不影響顯示結果。",
+            "② 背景執行緒競態：PhotoCloudSync.upload/delete 讀取 CloudSyncManager.isEnabled 判斷是否要推送/刪除 iCloud 照片，但呼叫路徑含 Task.detached 背景流程（SettingsView 一鍵壓縮 recompressStoredPhotos、MultiPhotoGallery 相片新增流程），isEnabled 是只在主執行緒寫入的 @Published Bool，背景執行緒直接讀取屬未定義行為，與本檔案 CloudKitManager.accountStatus 先前已用 NSLock 修過的同一 bug class，只是這處未被納入。比照既有寫法在 CloudSyncManager 新增 NSLock 保護的 isEnabledThreadSafe 鏡像值（didSet 同步寫入），PhotoCloudSync 改讀這個執行緒安全版本。",
+            "③ TOCTOU 邊界案例：ImageCompressor.recompressAllStoredPhotos()（一鍵壓縮，背景執行緒批次處理）讀檔→壓縮→寫回這段期間，若使用者同時在畫面上刪除同一張照片（本機檔案＋CloudKit 紀錄皆已移除），背景寫回會讓已刪除的檔案復活並重新上傳回 iCloud，造成無主孤兒檔案。寫回前補上 FileManager.fileExists 檢查，檔案已不存在則視同該筆已處理跳過，縮小復活窗口。",
+            "強制解包/try!/as!/固定 index 越界複查：全樹搜尋 as!／try!／裸露 force-unwrap subscript，維持 0 筆；抽查的固定 index 存取（RealEstateDetailView 照片陣列切片、OverviewView／MyCalendarView／SubordinateRosterView 星期陣列索引、FullBackup 定長位元組讀取）均已有對應防呆，維持既有結論、無新增問題。",
+        ]),
         ChangelogEntry(version: "25.75", build: 828, date: "2026/08/04", notes: [
             "【靜態除錯 v25.75】修正「未來才生效的固定薪水」讓收入統計提前多算的 bug class，共兩處：① IncomeView.totalIncomeAll（收入頁「累計收入」）月薪／年薪分支用 max(1, months + 1) 換算已發生月數/年數，只防到「結束日早於起始日」（v24.53 已修），沒防到更常見的觸發方式——使用者新增一筆起始日晚於今天的固定薪水（例如下個月才生效的新職務），此時 dateComponents(from: 未來起始日, to: 今天) 算出負值，被 max(1, ...) 硬墊成 1，尚未領到的第一份薪水就被算進累計收入。② ExpenseStore.incomeTotal(for:)（供「今年累計」逐月加總）週期收入判斷式只有 $0.date < monthEnd（該月月底），查詢月份是「本月」時 monthEnd 落在未來，會把本月內起始日晚於今天的固定薪水也算滿一整月；同一畫面緊鄰的 currentMonthIncomeTotal（本月）已有 startOfDay(date) <= startOfDay(now) 防護，兩個相鄰 KPI 因此互相矛盾（本月顯示無此收入、今年累計卻已算入）。修法：① 起始日晚於截止日時直接計 0（不再 max(1, ...) 硬墊），移除已失去防呆意義的 max。② incomeTotal(for:) 新增 recurringCutoff = min(monthEnd, 明天 00:00)，查詢過去月份時等同原本的 monthEnd（明天必定晚於過去月月底，min 不影響），查詢本月時收斂到「今天」，與 currentMonthIncomeTotal 規則一致。純收入統計計算修正，onceTotal／isActive(結束日)／monthlyAmount 等既有邏輯與 UI 顯示格式完全未變動。",
         ]),
