@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.78", build: 831, date: "2026/08/04", notes: [
+            "【美化 v25.78】ChildDetailView.swift「過敏資訊」嚴重度選擇器分級著色：ChildRecordEditorSheet 的「嚴重度」原本是系統預設 Picker(.segmented)（純文字選單、輕/中/重三個等級視覺完全相同，需點開才看得出目前選了哪一級），與同檔案 recordRow 過敏嚴重度 Capsule 徽章（早已用 severityColor 分級著色：輕＝黃／中＝橘／重＝紅）視覺語意脫節，也是姊妹畫面 HealthProfileEditView.AllergyEditor v4 已修過的同型缺口，本檔案是全 App 唯一還沒跟進的一處。新增共用 severityPicker(selection:) 三色塊按鈕列（選中＝主題色底 + 白字 + 陰影，未選中＝淡底 + 主題色字 + 細邊框，帶 spring 選中動畫），對齊 HealthProfileEditView 既有規格；severityColor(_:) 原為 ChildDetailView 內的 private instance method，僅該 struct 可呼叫，改為檔案層級 private free function 讓 ChildRecordEditorSheet 也能共用，配色本身維持不變。純視覺層調整，draft 儲存、severity 讀寫等既有商業邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.77", build: 830, date: "2026/08/04", notes: [
             "【美化 v25.77】SubordinateDetailView.swift「@ 標註」建議清單 MentionTextField.row(_:) 主要姓名補齊防截斷：row(_:) 顯示 p.name（部屬姓名或名片自填姓名，使用者自填、長度不可控）的主要一行，自 v1 版改版補齊圖示/膠囊規格後，緊接在下方的 p.subtitle 早就有 .lineLimit(1)，p.name 本身卻從未有任何截斷保護，與同檔案 headerCard 的 Text(subordinate.name)（已有 .lineLimit(1) + .minimumScaleFactor(0.8)）規格不一致。「輔助模式：特大」字級下，@ 標註建議清單裡較長的姓名會換行，把 trailing 的「部屬」/「名片」膠囊擠出原本的垂直置中位置。補上 .lineLimit(1) + .minimumScaleFactor(0.8)，對齊 headerCard 相同規格。純視覺層調整，updateQuery／insert／suggestions 等既有 @ 標註邏輯完全未變動。",
         ]),

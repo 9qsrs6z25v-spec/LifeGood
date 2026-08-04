@@ -57,6 +57,16 @@ import MapKit
 //     （備註類 Section 統一用 .secondary 中性色，對齊 HealthProfileEditView 慣例）。
 //     刪除按鈕獨立 Section 維持無標頭（對齊 HealthProfileEditView 各編輯 Sheet 慣例）。
 //     純視覺層調整，Section 內欄位、canSave／save()／delete() 等既有商業邏輯完全未變動。
+// [2026-08 v9] ChildRecordEditorSheet「過敏資訊」嚴重度選擇器分級著色：
+//   • 「嚴重度」原本是系統預設 Picker(.segmented)（純文字選單、輕/中/重三個等級視覺完全相同，
+//     需點開才看得出目前選了哪一級），與同檔案 recordRow 過敏嚴重度 Capsule 徽章（早已用
+//     severityColor 分級著色）視覺語意脫節，也是 HealthProfileEditView.AllergyEditor v4 已修過、
+//     本檔案唯一還沒跟進的同型缺口。新增 severityPicker(selection:) 三色塊按鈕列（選中＝主題色底
+//     + 白字 + 陰影／未選中＝淡底 + 主題色字 + 細邊框 + spring 選中動畫），對齊 HealthProfileEditView
+//     既有規格。severityColor(_:) 原為 ChildDetailView 內的 private instance method，僅能給同一個
+//     struct 呼叫；改為檔案層級 private free function，讓另一個 struct（ChildRecordEditorSheet）
+//     也能共用，配色（輕＝黃／中＝橘／重＝紅）維持不變，與 recordRow 徽章色彩語意完全一致。
+//     純視覺層調整，draft 儲存、severity 讀寫等既有商業邏輯完全未變動。
 //   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct ChildDetailView: View {
@@ -994,10 +1004,6 @@ struct ChildDetailView: View {
         }
     }
 
-    private func severityColor(_ s: AllergySeverity) -> Color {
-        switch s { case .mild: return .yellow; case .moderate: return .orange; case .severe: return .red }
-    }
-
     // MARK: - 章節空狀態（tray 圖示 + 文字 + 迷你 CTA 按鈕）
     // [2026-07 v4] 對齊 FamilyView v3 emptyMembersPlaceholder 的漸層膠囊 CTA 規格（accent 漸層底 + 陰影），
     // 縮小成適合卡片內單行使用的尺寸，取代原本純文字「尚無記錄」；dailySection / recordSection 共用。
@@ -1074,6 +1080,49 @@ private func childEditorSectionHeader(_ title: String, icon: String, color: Colo
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.primary)
     }
+}
+
+/// 過敏嚴重度對應色：輕度＝黃／中度＝橘／重度＝紅，沿用本檔案原本 recordRow 嚴重度 Capsule
+/// 徽章配色（見 v9 美化紀錄），ChildRecordEditorSheet 的分級選擇器改用同一份，兩處色彩語意統一。
+/// 原為 ChildDetailView 內的 private instance method，改為檔案層級 free function 以便
+/// ChildRecordEditorSheet（另一個 struct）也能呼叫。
+private func severityColor(_ s: AllergySeverity) -> Color {
+    switch s { case .mild: return .yellow; case .moderate: return .orange; case .severe: return .red }
+}
+
+/// 過敏嚴重度分級選擇器：三色塊按鈕列（選中＝主題色底 + 白字 + 陰影／未選中＝淡底 + 主題色字 + 細邊框），
+/// 對齊 HealthProfileEditView.AllergyEditor 既有規格，取代系統預設 Picker(.segmented)（純文字、三個等級
+/// 視覺完全相同，不點開看不出目前選了哪一級）。ChildRecordEditorSheet 專用。
+private func severityPicker(selection: Binding<AllergySeverity>) -> some View {
+    HStack(spacing: 8) {
+        ForEach(AllergySeverity.allCases) { s in
+            let isSelected = selection.wrappedValue == s
+            let tint = severityColor(s)
+            Button {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.75)) {
+                    selection.wrappedValue = s
+                }
+            } label: {
+                Text(s.rawValue)
+                    .font(.subheadline.weight(.semibold))
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .foregroundStyle(isSelected ? .white : tint)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(isSelected ? tint : tint.opacity(0.12))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(tint.opacity(isSelected ? 0 : 0.28), lineWidth: 0.75)
+                    )
+                    .shadow(color: isSelected ? tint.opacity(0.35) : .clear, radius: 5, x: 0, y: 2)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+    .padding(.vertical, 2)
 }
 
 // MARK: - 日常記錄編輯 Sheet
@@ -1484,7 +1533,7 @@ struct ChildRecordEditorSheet: View {
     private var allergyFields: some View {
         Section {
             TextField("過敏原（如：花生、牛奶）", text: $title)
-            Picker("嚴重度", selection: $severity) { ForEach(AllergySeverity.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
+            severityPicker(selection: $severity)
             TextField("反應描述（如：紅疹、氣喘）", text: $detail, axis: .vertical).lineLimit(1...3)
         } header: {
             childEditorSectionHeader("過敏資訊", icon: type.icon, color: accent)
