@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.83", build: 836, date: "2026/08/04", notes: [
+            "【美化 v25.83】AddIncomeView.swift 工具列「儲存／新增」按鈕補齊載入狀態：save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複收入紀錄，但按鈕本身在存檔期間毫無視覺變化。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81/25.82 AddSavingsInsuranceView／AddExpenseView 儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛判斷與收入寫入邏輯完全未變動。同型 isSaving 守衛仍存在於 AddStockView／AddVehicleView／AddRealEstateView，已於檔案內美化紀錄註記為下次可比照補齊清單。",
+        ]),
         ChangelogEntry(version: "25.82", build: 835, date: "2026/08/04", notes: [
             "【美化 v25.82】AddExpenseView.swift 工具列「儲存／新增」按鈕補齊載入狀態：saveExpense() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複支出紀錄，但按鈕本身在存檔期間毫無視覺變化。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81 AddSavingsInsuranceView 儲存按鈕載入狀態規格。純視覺層調整，saveExpense() 內部守衛判斷與支出寫入邏輯完全未變動。同型 isSaving 守衛仍存在於 AddIncomeView / AddStockView / AddVehicleView / AddRealEstateView，已於檔案內美化紀錄註記為下次可比照補齊清單。",
         ]),

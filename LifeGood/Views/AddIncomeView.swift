@@ -38,6 +38,14 @@ import SwiftUI
 //      億以上自動換算＋捨入邊界防呆）不一致，是本檔案唯一未接上共用金額量級格式的地方。
 //      改呼叫既有 ntdWanString，移除已無其他呼叫端的 formatCurrency／currencyFormatter 死碼。
 //      純顯示層調整，未變動月/年等效收入或年薪估計等既有試算邏輯。
+//
+// [2026-08 v5] 本次美化方向（儲存按鈕載入狀態，延續 v25.81/25.82 待辦清單）：
+//  11. 工具列「儲存／新增」按鈕：save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免
+//      快速連點造成重複收入紀錄，但按鈕本身在存檔期間毫無視覺變化。補上
+//      ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，
+//      對齊 AddExpenseView／AddSavingsInsuranceView 儲存按鈕載入狀態規格。純視覺層補強，
+//      save() 內部守衛判斷與收入寫入邏輯完全未變動。同型 isSaving 守衛仍存在於
+//      AddStockView／AddVehicleView／AddRealEstateView，可作為下次美化比照補齊的清單。
 
 struct AddIncomeView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -372,10 +380,16 @@ struct AddIncomeView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(isEditing ? "儲存" : "新增") { save() }
-                        .bold()
-                        .foregroundStyle(.green)
-                        .disabled(isSaving)
+                    HStack(spacing: 6) {
+                        // [美化] 存檔中顯示同主題色 ProgressView，對齊 AddExpenseView／AddSavingsInsuranceView 儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(isEditing ? "儲存" : "新增") { save() }
+                            .bold()
+                            .foregroundStyle(.green)
+                            .disabled(isSaving)
+                    }
                 }
             }
             .onAppear {
