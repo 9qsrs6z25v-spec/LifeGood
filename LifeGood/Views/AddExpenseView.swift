@@ -44,6 +44,14 @@ import MapKit
 //      同行人員用綠色（對齊列內已選 checkmark 綠），收受人用粉色（對齊開啟入口
 //      gift.fill 粉色圖示），操作中不必展開清單也能得知已選人數，純顯示層新增。
 //  以上純視覺／版面調整，未變動人員多選、收受人分組、勾選切換等既有商業邏輯。
+// [2026-08 v5] 本次美化方向（儲存按鈕載入狀態，延續 v25.81 AddSavingsInsuranceView 待辦清單）：
+//  14. 工具列「儲存／新增」按鈕：saveExpense() 自帶 isSaving 忙碌守衛（disabled(isSaving)）
+//      避免快速連點造成重複紀錄，但按鈕本身在存檔期間沒有任何視覺變化。補上
+//      ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，
+//      對齊 AddSavingsInsuranceView 儲存按鈕載入狀態規格（ProgressView + scaleEffect(0.7) +
+//      主題色 tint 全 App 慣例）。純視覺層補強，saveExpense() 內部守衛判斷與支出寫入邏輯
+//      完全未變動。同型 isSaving 守衛仍存在於 AddIncomeView / AddStockView / AddVehicleView /
+//      AddRealEstateView，可作為下次美化比照本檔案補齊的清單。
 
 struct AddExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
@@ -384,9 +392,15 @@ struct AddExpenseView: View {
                     Button("取消") { cancelAddExpense() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(isEditing ? "儲存" : "新增") { saveExpense() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(isSaving)
+                    HStack(spacing: 6) {
+                        // [美化] 存檔中顯示同主題色 ProgressView，對齊 AddSavingsInsuranceView 儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(isEditing ? "儲存" : "新增") { saveExpense() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(isSaving)
+                    }
                 }
             }
             .onAppear {
