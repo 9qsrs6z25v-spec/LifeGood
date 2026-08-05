@@ -1647,12 +1647,55 @@ struct RecordEditorSheet: View {
         !content.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    /// 請假時數 = 總時長 − 與當日班別休息時段重疊的時間
+    /// 請假時數 = 逐日「請假區間 ∩ 當日班別上班時段」加總 − 休息時段重疊。
+    /// 多日請假不再把下班時間與休假日灌進時數（先前用「總經過時間 − 休息」計算，
+    /// 跨多日時會連下班與週末都算進去，主動性扣分失真）。
     private var computedLeaveHours: Double {
-        max(0, endDate.timeIntervalSince(date) / 3600 - restDeductionHours)
+        max(0, workOverlapHours - restDeductionHours)
     }
 
-    /// 依當日班別的休息時段，計算需扣除的休息時數（跨日則逐日累加）
+    /// 當日的有效班別：有排班用排班（休息／時差假等無上班時間者回 nil）；
+    /// 未排班時，平日視為日值班（未使用班表功能時的合理預設）、週末視為休假不計。
+    private func effectiveShiftType(on day: Date, sub: Subordinate, cal: Calendar) -> ShiftType? {
+        if let assigned = sub.shifts.first(where: { cal.isDate($0.date, inSameDayAs: day) })?.type {
+            return assigned.hasWorkTime ? assigned : nil
+        }
+        let wd = cal.component(.weekday, from: day)
+        return (wd == 1 || wd == 7) ? nil : .dayDuty
+    }
+
+    /// 逐日計算請假區間與「當日班別上班時段」的重疊時數（跨夜班別自動延伸到隔日）。
+    private var workOverlapHours: Double {
+        guard type == .leave, endDate > date,
+              let sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { return 0 }
+        let cal = Calendar.current
+        let schedule = ShiftScheduleStore.shared.schedule
+        var total = 0.0
+        var day = cal.startOfDay(for: date)
+        let last = cal.startOfDay(for: endDate)
+        while day <= last {
+            if let shiftType = effectiveShiftType(on: day, sub: sub, cal: cal) {
+                let wd = cal.component(.weekday, from: day)
+                let isHoliday = (wd == 1 || wd == 7)
+                if let r = schedule.range(for: shiftType, isHoliday: isHoliday),
+                   let wStart = cal.date(byAdding: .minute, value: r.startMinutes, to: day),
+                   // 跨夜班別（如小夜 16:00–00:00、假日大夜 20:30–08:30）endMinutes ≤ startMinutes，
+                   // 換算成同日 Date 會比 wStart 早，多加 1440 分鐘（+1 天）延伸到隔日
+                   let wEnd = cal.date(byAdding: .minute,
+                                       value: r.endMinutes + (r.endMinutes <= r.startMinutes ? 1440 : 0),
+                                       to: day), wEnd > wStart {
+                    let s = max(date, wStart), e = min(endDate, wEnd)
+                    if e > s { total += e.timeIntervalSince(s) / 3600 }
+                }
+            }
+            guard let n = cal.date(byAdding: .day, value: 1, to: day) else { break }
+            day = n
+        }
+        return total
+    }
+
+    /// 依當日班別的休息時段，計算需扣除的休息時數（跨日則逐日累加）。
+    /// 班別解析與 workOverlapHours 同一套 effectiveShiftType，兩邊日曆口徑一致。
     private var restDeductionHours: Double {
         guard type == .leave, endDate > date,
               let sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { return 0 }
@@ -1662,7 +1705,7 @@ struct RecordEditorSheet: View {
         var day = cal.startOfDay(for: date)
         let last = cal.startOfDay(for: endDate)
         while day <= last {
-            if let shift = sub.shifts.first(where: { cal.isDate($0.date, inSameDayAs: day) })?.type,
+            if let shift = effectiveShiftType(on: day, sub: sub, cal: cal),
                let rest = schedule.restRange(for: shift),
                let rStart = cal.date(byAdding: .minute, value: rest.startMinutes, to: day),
                // 休息時段可能跨午夜（如晚班 23:00–00:30，startMinutes > endMinutes，見
@@ -1706,7 +1749,7 @@ struct RecordEditorSheet: View {
                     // restDeductionHours），等於一次 render 其實還是重算 2 次。搬到 Section
                     // 外層、與 .animation 同一層級，兩處都能直接讀同一份已算好的值。
                     let deduction = restDeductionHours
-                    let leaveHours = max(0, endDate.timeIntervalSince(date) / 3600 - deduction)
+                    let leaveHours = max(0, workOverlapHours - deduction)
                     Section {
                         HStack {
                             Text("開始時間")
@@ -1746,6 +1789,8 @@ struct RecordEditorSheet: View {
                         }
                     } header: {
                         editorSectionHeader("日期", icon: "calendar")
+                    } footer: {
+                        Text("僅計入上班時段：有排班依班表計，未排班的平日以日值班計，週末與休假日不計入時數。")
                     }
                     .opacity(leaveInfoAppeared ? 1 : 0)
                     .offset(y: leaveInfoAppeared ? 0 : 10)

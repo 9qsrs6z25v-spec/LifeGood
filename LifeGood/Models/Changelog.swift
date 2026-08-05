@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.84", build: 837, date: "2026/08/05", notes: [
+            "【修復】部屬請假時數多日計算失真：先前請假時數＝「結束−開始的總經過時間 − 休息時段」，跨多日請假會把每天的下班時間、甚至週末休假日整段灌進時數（例如週五 08:30 請到下週一 17:30 會算成 81 小時而非 2 個工作天），主動性評分（每 8 小時 −2 分）跟著嚴重失真。改為逐日「請假區間 ∩ 當日班別上班時段」加總（RecordEditorSheet 新增 workOverlapHours）：① 有排班的日子依班表計（平/假日各自的上班時段，跨夜班別如小夜 16:00–00:00、假日大夜 20:30–08:30 自動延伸到隔日）；② 未排班的平日以日值班時段計（未使用班表功能時的合理預設）；③ 週末未排班與休息/時差假日不計入；④ 休息時段扣除（restDeductionHours）改用同一套班別解析（effectiveShiftType），兩邊日曆口徑一致——原本只認已排班日，未排班平日的午休不會被扣除。編輯畫面「日期」區塊補上 footer 說明計算規則。既有請假紀錄儲存的是舊算法時數，重新開啟該筆請假並儲存即以新算法重算。"
+        ]),
         ChangelogEntry(version: "25.83", build: 836, date: "2026/08/04", notes: [
             "【美化 v25.83】AddIncomeView.swift 工具列「儲存／新增」按鈕補齊載入狀態：save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複收入紀錄，但按鈕本身在存檔期間毫無視覺變化。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81/25.82 AddSavingsInsuranceView／AddExpenseView 儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛判斷與收入寫入邏輯完全未變動。同型 isSaving 守衛仍存在於 AddStockView／AddVehicleView／AddRealEstateView，已於檔案內美化紀錄註記為下次可比照補齊清單。",
         ]),
