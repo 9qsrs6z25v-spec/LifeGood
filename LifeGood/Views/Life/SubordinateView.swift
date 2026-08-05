@@ -59,9 +59,9 @@ import SwiftUI
 //      AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView／
 //      FamilyMembersResumeView 儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛
 //      判斷與部屬資料寫入等既有商業邏輯完全未變動。
-//      （下次美化時：同批清單仍剩 GradeTitleView／OrganizationView／SubordinateDetailView／
-//      MyCalendarView／LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，
-//      可挑其一接續）
+//      （下次美化時：同批清單仍剩 OrganizationView／SubordinateDetailView／
+//      MyCalendarView／LifeFinanceView／ResumeView／ChildDetailView 待比照補齊
+//      ——GradeTitleView 已於 v25.95 補齊，可挑剩餘其一接續）
 
 enum SubordinateSortOption: String, CaseIterable, Identifiable {
     case name = "姓名"

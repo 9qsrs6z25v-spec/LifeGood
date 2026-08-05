@@ -38,6 +38,16 @@ import SwiftUI
 //     於 onAppear 延遲 0.3s 觸發、onDisappear 取消並歸零，對齊 OrganizationView.emptyState
 //     規格與寫法，避免動畫洩漏。
 //   • 本次僅調整這兩處空狀態視覺呈現，未變動任何部門/職等資料模型、儲存或驗證邏輯。
+//
+// [2026-08 v25.95] 本次美化方向（DepartmentEditor 工具列儲存按鈕補齊載入狀態）：
+//   • DepartmentEditor.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成
+//     重複部門紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7)
+//     .tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.94 全 App
+//     Add*View／SubordinateView 儲存按鈕載入狀態規格。
+//   • 純視覺層調整，save()／syncReverseLinks() 雙向同步等既有商業邏輯完全未變動。
+//   （下次美化時：同批清單仍剩 OrganizationView／SubordinateDetailView／MyCalendarView／
+//      LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，此清單自 v25.81 起接續，
+//      每完成一檔即從清單移除，找不到待辦清單時可全樹搜尋 "isSaving" 交叉核對。）
 
 struct GradeTitleView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -727,9 +737,17 @@ struct DepartmentEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(isEditing ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    // [美化 v25.95] 存檔中顯示同色 ProgressView，對齊 SubordinateView v25.94／
+                    // FamilyMembersResumeView v25.93／SubordinateEquipmentView v25.92 等
+                    // isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(isEditing ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .alert("確定要刪除這個部門嗎？", isPresented: $showDeleteConfirm) {
