@@ -31,7 +31,15 @@ import SwiftUI
 //      已改呼叫共用 Double.ntdWanString）中，全 App 僅剩尚未跟進的一處。改呼叫
 //      ntdWanString，移除已無呼叫端的 balanceFormatter 死碼。純視覺層調整，
 //      帳戶餘額計算、扣款帳戶選取等既有商業邏輯完全未變動。
-//      （下次美化本檔案時：可轉往其他仍留有待辦的畫面）
+// [2026-08 v4] 本次美化方向（儲存按鈕載入狀態，延續 AddIncomeView／AddExpenseView／
+// AddSavingsInsuranceView／AddVehicleView 待辦清單）：
+//  14. 工具列「儲存／新增」按鈕：save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免
+//      快速連點造成重複股票紀錄，但按鈕本身在存檔期間毫無視覺提示。補上
+//      ProgressView().scaleEffect(0.7).tint(.orange)，isSaving 為 true 時顯示於按鈕左側，
+//      對齊已完成畫面的儲存按鈕載入狀態規格。純視覺層補強，save() 內部守衛判斷與
+//      股票/連結支出/收入寫入邏輯完全未變動。同型 isSaving 守衛仍存在於
+//      AddRealEstateView，可作為下次美化比照補齊的最後一項。
+//      （下次美化本檔案時：儲存按鈕載入狀態已補齊，可轉往其他仍留有待辦的畫面）
 
 // MARK: - 台股報價資料
 
@@ -209,10 +217,17 @@ struct AddStockView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold()
-                        .foregroundStyle(.orange)
-                        .disabled(isSaving)
+                    HStack(spacing: 6) {
+                        // [美化] 存檔中顯示同色 ProgressView，對齊 AddIncomeView／AddExpenseView／
+                        // AddSavingsInsuranceView／AddVehicleView 儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.orange)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold()
+                            .foregroundStyle(.orange)
+                            .disabled(isSaving)
+                    }
                 }
             }
             .onAppear { loadEditing() }
