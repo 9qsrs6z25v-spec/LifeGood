@@ -53,6 +53,15 @@ import PhotosUI
 //      純視覺層調整，Section 內欄位綁定、新增/刪除權狀、儲存等既有商業邏輯完全未變動；
 //      featureToggleList 小型 popover（300×460）的 Section("理財")／Section("房屋資料")
 //      維持系統原生列表樣式不變（純開關清單、非主要內容 Section，套用漸層標頭反而過重）。
+// [2026-08 v5] 工具列「儲存／新增」按鈕補齊載入狀態：
+//  15. save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複房地產紀錄，
+//      但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，
+//      isSaving 為 true 時顯示於按鈕左側，對齊 AddIncomeView／AddExpenseView／
+//      AddSavingsInsuranceView／AddVehicleView／AddStockView 儲存按鈕載入狀態規格
+//      （tint 依各檔案儲存按鈕自身 foregroundStyle 配色，本檔案按鈕為綠色）。
+//      至此全 App 帶 isSaving 忙碌守衛的 Add*View 儲存按鈕載入狀態已全數補齊。
+//      純視覺層調整，save() 內部守衛判斷與房地產/貸款/已支出/變動支出/保險同步寫入
+//      邏輯完全未變動。
 //      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct AddRealEstateView: View {
@@ -330,6 +339,11 @@ struct AddRealEstateView: View {
                         }
                         .popover(isPresented: $showFeaturePicker, arrowEdge: .top) {
                             featureToggleList
+                        }
+                        // [美化] 存檔中顯示同色 ProgressView，對齊 AddIncomeView／AddExpenseView／
+                        // AddSavingsInsuranceView／AddVehicleView／AddStockView 儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
                         }
                         Button((editing != nil || hasAutoSaved) ? "儲存" : "新增") { save() }
                             .bold().foregroundStyle(.green)
