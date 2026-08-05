@@ -992,6 +992,9 @@ enum LeaveType: String, Codable, CaseIterable, Identifiable {
     case workInjury = "公傷假"
 
     var id: String { rawValue }
+
+    /// 不列入主動性扣分的假別（非個人意願的假：喪假／公假）
+    var isScoreExempt: Bool { self == .funeral || self == .official }
 }
 
 // MARK: - 班別（部屬班表）

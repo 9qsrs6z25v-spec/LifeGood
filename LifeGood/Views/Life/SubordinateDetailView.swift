@@ -1740,6 +1740,11 @@ struct RecordEditorSheet: View {
                         }
                     } header: {
                         editorSectionHeader("請假資訊", icon: "calendar.badge.clock")
+                    } footer: {
+                        if leaveType.isScoreExempt {
+                            Label("此假別（喪假／公假）不列入主動性扣分", systemImage: "checkmark.shield")
+                                .foregroundStyle(.teal)
+                        }
                     }
                     // restDeductionHours 會逐日走訪 date...endDate 並對 sub.shifts 做線性掃描，
                     // FiveMinuteDateTimePicker 拖曳/捲動時每一格都觸發 Form body 重新求值。
