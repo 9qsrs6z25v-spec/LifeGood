@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.86", build: 839, date: "2026/08/05", notes: [
+            "【功能】部屬項目預覽卡（SubordinateItemCard）內容加詳：任務卡片過去只有任務日期/截止日期/內容/備註，看不出是誰的任務、哪個部門。① 新增「負責部屬」資訊卡（ownerBlock）：36pt 主題色圖示圓＋部屬姓名＋三顆膠囊（職等職稱／部門／廠區，有值才顯示；職等與部門優先以 id 對照 gradeTitles/departments，沒有再退回文字欄位，與部屬卡片同一套解析），整卡可點擊直接開啟該部屬的完整部屬卡片（沿用既有 openSub sheet）。任務/會議/報告/請假/紀錄五種卡片全部套用，主題色跟隨各類型（任務青/會議靛/報告紫/請假藍綠/紀錄依類型色）。② 任務卡片新增「狀態」列（taskStatusRow）：已完成（綠）／逾期 N 天（紅，依截止日與今天的天數差）／進行中（青），彩色膠囊呈現，不用比對日期就能一眼判斷任務健康度。純顯示層新增，未變動任務/會議等資料模型與編輯邏輯。"
+        ]),
         ChangelogEntry(version: "25.85", build: 838, date: "2026/08/05", notes: [
             "【調整】喪假／公假不列入主動性扣分：承接 v25.84 請假時數修正，部屬評分的請假扣分（每 8 小時 −2）原本不分假別一律計入，但喪假與公假屬非個人意願的假別，扣分並不公平。LeaveType 新增 isScoreExempt（喪假／公假為 true），主動性分數計算（Subordinate.proactivityScore）與評分明細（潛力/主動性 breakdown 的「請假 N 小時」列）兩處的請假時數加總同步排除此類假別——明細列顯示的時數即為實際扣分時數，兩處口徑一致。請假編輯畫面選到喪假或公假時，假別區塊 footer 顯示「此假別不列入主動性扣分」提示。其餘假別（事假/病假/特休/婚假/產假/陪產假/公傷假）扣分邏輯不變；如需再調整豁免清單（例如公傷假）只需修改 isScoreExempt 一處。"
         ]),

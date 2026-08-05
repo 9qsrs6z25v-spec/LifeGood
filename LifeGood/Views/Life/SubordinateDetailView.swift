@@ -3100,6 +3100,8 @@ struct SubordinateItemCard: View {
         case .task(let subId, let snap):
             let t = lifeStore.subordinates.first { $0.id == subId }?.tasks.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "checklist", color: .cyan, title: t.topic.isEmpty ? "未命名任務" : t.topic)
+            ownerBlock(subId: subId, accent: .cyan)
+            taskStatusRow(t)
             field("任務日期", fmt(t.date))
             if let due = t.dueDate { field("截止日期", fmt(due)) }
             if t.isCompleted, let at = t.completedAt { field("完成時間", fmt(at)) }
@@ -3108,6 +3110,7 @@ struct SubordinateItemCard: View {
         case .meeting(let subId, let snap):
             let m = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "person.3.fill", color: .indigo, title: m.topic.isEmpty ? "未命名會議" : m.topic)
+            ownerBlock(subId: subId, accent: .indigo)
             field("會議時間", fmt(m.date))
             field("會議長度", "\(m.durationMinutes) 分鐘")
             if !m.items.isEmpty {
@@ -3149,12 +3152,14 @@ struct SubordinateItemCard: View {
         case .report(let subId, let snap):
             let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic)
+            ownerBlock(subId: subId, accent: .purple)
             field("報告日期", fmt(r.date))
             if r.isCompleted, let at = r.completedAt { field("完成時間", fmt(at)) }
             richBlock("備註", r.note)
         case .leave(let subId, let snap):
             let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "calendar.badge.minus", color: .teal, title: rec.leaveType?.rawValue ?? "請假")
+            ownerBlock(subId: subId, accent: .teal)
             field("開始", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
             if let h = rec.leaveHours { field("請假時數", String(format: "%.1f 小時", h)) }
@@ -3163,12 +3168,121 @@ struct SubordinateItemCard: View {
         case .record(let subId, let snap):
             let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
             titleBlock(icon: rec.type.icon, color: recordColor(rec.type), title: rec.type.rawValue)
+            ownerBlock(subId: subId, accent: recordColor(rec.type))
             field("日期", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
             if let sev = rec.severity { field("嚴重度", sev.rawValue) }
             richBlock("內容", rec.content)
             richBlock("備註", rec.note)
         }
+    }
+
+    // MARK: - 負責部屬資訊卡 / 任務狀態列
+
+    /// 負責部屬資訊卡：姓名＋職等職稱＋部門＋廠區，點擊可開啟該部屬卡片。
+    /// 職等/部門優先用 id 對照（gradeTitles/departments），沒有再退回文字欄位，
+    /// 與 SubordinateDetailView.gradeTitleText/departmentText 同一套解析。
+    @ViewBuilder
+    private func ownerBlock(subId: UUID, accent: Color) -> some View {
+        if let sub = lifeStore.subordinates.first(where: { $0.id == subId }) {
+            let gradeTitle: String = {
+                if let gt = lifeStore.gradeTitles.first(where: { $0.id == sub.gradeTitleId }) {
+                    return "\(gt.grade) — \(gt.title)"
+                }
+                return sub.jobTitle
+            }()
+            let dept: String = {
+                if let d = lifeStore.departments.first(where: { $0.id == sub.departmentId }) {
+                    return d.code.isEmpty ? d.name : "\(d.code) \(d.name)"
+                }
+                return sub.department
+            }()
+            Button {
+                openSub = sub
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle().fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.08)],
+                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 36, height: 36)
+                        Circle().stroke(accent.opacity(0.22), lineWidth: 0.75).frame(width: 36, height: 36)
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(accent)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text("負責部屬").font(.caption2).foregroundStyle(.secondary)
+                            Text(sub.name.isEmpty ? "未命名" : sub.name)
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                        }
+                        // 職稱 / 部門 / 廠區 膠囊列（有值才顯示）
+                        HStack(spacing: 5) {
+                            if !gradeTitle.isEmpty {
+                                Text(gradeTitle)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(accent.opacity(0.10)).foregroundStyle(accent)
+                                    .clipShape(Capsule())
+                            }
+                            if !dept.isEmpty {
+                                Text(dept)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color(.tertiarySystemFill)).foregroundStyle(.secondary)
+                                    .clipShape(Capsule())
+                            }
+                            if !sub.plantArea.isEmpty {
+                                Text("\(sub.plantArea) 廠區")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color(.tertiarySystemFill)).foregroundStyle(.secondary)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// 任務狀態列：已完成（綠）／逾期 N 天（紅）／進行中（青）
+    private func taskStatusRow(_ t: SubordinateTask) -> some View {
+        let (text, color): (String, Color) = {
+            if t.isCompleted { return ("已完成", .green) }
+            if let due = t.dueDate {
+                let days = Calendar.current.dateComponents(
+                    [.day],
+                    from: Calendar.current.startOfDay(for: due),
+                    to: Calendar.current.startOfDay(for: Date())
+                ).day ?? 0
+                if days > 0 { return ("逾期 \(days) 天", .red) }
+            }
+            return ("進行中", .cyan)
+        }()
+        return HStack {
+            Text("狀態").font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            Text(text)
+                .font(.system(size: 13, weight: .bold))
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(color.opacity(0.12)).foregroundStyle(color)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(color.opacity(0.25), lineWidth: 0.6))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
     }
 
     // [v1] 補 Circle().stroke + shadow，對齊本檔案 meetingSection 等章節既有 44pt 圖示圓規格；
