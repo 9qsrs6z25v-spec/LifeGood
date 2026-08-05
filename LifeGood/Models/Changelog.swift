@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.87", build: 840, date: "2026/08/05", notes: [
+            "【靜態除錯】全樹複查：強制解包／Optional 處理／型別錯誤／index 越界、retain cycle、競態條件、畫面閃爍（重繪／防抖／節流）、O(n²) 迴圈與主執行緒重運算，共分三批獨立覆蓋 Models 全部 26 檔＋Views 全部約 60 檔（含先前未逐檔精讀的 TalentMatrixView／TaxOverviewView／CareerView／FoodMapView／StockDetailView／SavingsInsuranceView 等 40 檔）。額外自行複查：全樹強制解包（`)!`／`]!`）0 筆（僅剩編譯期必為合法的靜態 URL！字面量）；Timer.scheduledTimer／.sink 閉包全數已帶 [weak self]；CloudSyncManager 既有 30 秒節流與 NSLock 執行緒保護正常，未見繞過節流的同步呼叫點。均確認正常、無新增問題，本次未變動任何商業邏輯或介面。"
+        ]),
         ChangelogEntry(version: "25.86", build: 839, date: "2026/08/05", notes: [
             "【功能】部屬項目預覽卡（SubordinateItemCard）內容加詳：任務卡片過去只有任務日期/截止日期/內容/備註，看不出是誰的任務、哪個部門。① 新增「負責部屬」資訊卡（ownerBlock）：36pt 主題色圖示圓＋部屬姓名＋三顆膠囊（職等職稱／部門／廠區，有值才顯示；職等與部門優先以 id 對照 gradeTitles/departments，沒有再退回文字欄位，與部屬卡片同一套解析），整卡可點擊直接開啟該部屬的完整部屬卡片（沿用既有 openSub sheet）。任務/會議/報告/請假/紀錄五種卡片全部套用，主題色跟隨各類型（任務青/會議靛/報告紫/請假藍綠/紀錄依類型色）。② 任務卡片新增「狀態」列（taskStatusRow）：已完成（綠）／逾期 N 天（紅，依截止日與今天的天數差）／進行中（青），彩色膠囊呈現，不用比對日期就能一眼判斷任務健康度。純顯示層新增，未變動任務/會議等資料模型與編輯邏輯。"
         ]),
