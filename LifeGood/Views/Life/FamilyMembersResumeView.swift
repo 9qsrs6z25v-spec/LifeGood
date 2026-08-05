@@ -71,7 +71,19 @@ import PhotosUI
 //      內容／備註＝secondary／照片＝teal），刪除紀錄／刪除此筆兩個 Section 維持無標頭
 //      （對齊 ChildDetailView v25.01 慣例：刪除區塊不加標頭）。純視覺層調整，日期/標題/內容/
 //      照片欄位綁定、save()／deleteRecord() 等既有商業邏輯完全未變動。
-//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+// [2026-08 v6] FamilyEventEditor／FamilyAlbumPhotoEditor 工具列「儲存」按鈕補齊載入狀態：
+//      兩個編輯 Sheet 的 save() 皆自帶 isSaving 忙碌守衛（guard !isSaving + disabled(isSaving)）
+//      避免快速連點造成重複紀錄，但按鈕本身在存檔期間毫無視覺提示，是 SubordinateEquipmentView
+//      v25.92 留下的待辦清單（FamilyMembersResumeView／SubordinateView／GradeTitleView／
+//      OrganizationView／SubordinateDetailView／MyCalendarView／LifeFinanceView／ResumeView／
+//      ChildDetailView）中本次比照補齊的第一個檔案。補上 ProgressView().scaleEffect(0.7)
+//      .tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 AddIncomeView／AddExpenseView／
+//      AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView 既有規格。
+//      純視覺層調整，save()／deleteRecord() 內部守衛判斷與家人事件/照片寫回 lifeStore 等
+//      既有商業邏輯完全未變動。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面；同批清單仍剩 SubordinateView／
+//      GradeTitleView／OrganizationView／SubordinateDetailView／MyCalendarView／
+//      LifeFinanceView／ResumeView／ChildDetailView 待比照補齊）
 // ─────────────────────────────────────────────
 
 // MARK: - 家人履歷 列表
@@ -1033,9 +1045,16 @@ struct FamilyEventEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    HStack(spacing: 6) {
+                        // [美化] 存檔中顯示同色 ProgressView，對齊 SubordinateEquipmentView v25.92／
+                        // AddIncomeView／AddExpenseView 等儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button("儲存") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
@@ -1195,9 +1214,16 @@ struct FamilyAlbumPhotoEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving || isPhotoLoading)
+                    HStack(spacing: 6) {
+                        // [美化] 存檔中顯示同色 ProgressView，對齊 SubordinateEquipmentView v25.92／
+                        // AddIncomeView／AddExpenseView 等儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button("儲存") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving || isPhotoLoading)
+                    }
                 }
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
