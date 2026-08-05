@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.89", build: 842, date: "2026/08/05", notes: [
+            "【美化 v25.89】AddVehicleView.swift 工具列「儲存／新增」按鈕補齊載入狀態：save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複車輛紀錄，但按鈕本身在存檔期間毫無視覺變化。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81/25.82/25.83 AddSavingsInsuranceView／AddExpenseView／AddIncomeView 儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛判斷與車輛/支出寫入邏輯完全未變動。同型 isSaving 守衛仍存在於 AddStockView／AddRealEstateView，已於檔案內美化紀錄註記為下次可比照補齊清單。",
+        ]),
         ChangelogEntry(version: "25.88", build: 841, date: "2026/08/05", notes: [
             "【修復】部屬請假時數計算（RecordEditorSheet.workOverlapHours／restDeductionHours）逐日迴圈未設上限：這兩個計算屬性從「請假開始日」逐日走訪到「結束日」，但結束日的 FiveMinuteDateTimePicker 未設 maximumDate，使用者可拖到遠未來（甚至數十年後）。情境重現：部屬詳情頁新增請假紀錄，把結束時間往後拖到遠未來某日，Form body 在選擇器每一格拖曳/捲動都會重新求值，逐日迴圈同步跑出天文數字次數，畫面卡死。修法比照既有的 SubordinateRosterView.buildLeaveLookup／LifeFinanceView 展開迴圈防護：兩個逐日迴圈都把終止日夾在「開始日 + 366 天」內；並在 FiveMinuteDateTimePicker(selection: $endDate) 補上對應的 maximumDate，避免使用者選到會被靜默夾住、與畫面顯示不一致的日期。單一部屬的請假紀錄超過一年本屬異常情境，夾值不影響正常請假時數計算。另複查全樹：強制解包／try!／as! 維持 0 筆；Timer／NotificationCenter 閉包 [weak self] 覆蓋完整；CloudSyncManager 30 秒節流＋NSLock 正常，未發現新增的競態或跳過節流的呼叫點。"
         ]),

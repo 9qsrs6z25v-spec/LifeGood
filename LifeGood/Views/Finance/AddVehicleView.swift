@@ -40,6 +40,13 @@ import SwiftUI
 //      onAppear（而非 ForEach 內每列），避免 Form 捲動時 lazy-load 重複觸發。
 //      （下次美化本檔案時：主要欄位、英雄卡、兩大支出清單、試算區皆已對齊進場動畫規格，
 //      可轉往其他仍留有待辦的畫面）
+// [2026-08 v4] 本次美化方向（儲存按鈕載入狀態，延續 v25.81/25.82/25.83 待辦清單）：
+//  14. 工具列「儲存／新增」按鈕：save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免
+//      快速連點造成重複車輛紀錄，但按鈕本身在存檔期間毫無視覺變化。補上
+//      ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，
+//      對齊 AddIncomeView／AddExpenseView／AddSavingsInsuranceView 儲存按鈕載入狀態規格。
+//      純視覺層補強，save() 內部守衛判斷與車輛寫入邏輯完全未變動。同型 isSaving 守衛仍
+//      存在於 AddStockView／AddRealEstateView，可作為下次美化比照補齊的清單。
 
 struct AddVehicleView: View {
     @EnvironmentObject var financeStore: FinanceStore
@@ -141,8 +148,15 @@ struct AddVehicleView: View {
                     Button("取消") { cancelAndRollback() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil || hasAutoSaved ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green).disabled(isSaving)
+                    HStack(spacing: 6) {
+                        // [美化] 存檔中顯示同色 ProgressView，對齊 AddIncomeView／AddExpenseView／
+                        // AddSavingsInsuranceView 儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil || hasAutoSaved ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green).disabled(isSaving)
+                    }
                 }
             }
             .onAppear { loadEditing() }
