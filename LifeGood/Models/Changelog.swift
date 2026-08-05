@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.88", build: 841, date: "2026/08/05", notes: [
+            "【修復】部屬請假時數計算（RecordEditorSheet.workOverlapHours／restDeductionHours）逐日迴圈未設上限：這兩個計算屬性從「請假開始日」逐日走訪到「結束日」，但結束日的 FiveMinuteDateTimePicker 未設 maximumDate，使用者可拖到遠未來（甚至數十年後）。情境重現：部屬詳情頁新增請假紀錄，把結束時間往後拖到遠未來某日，Form body 在選擇器每一格拖曳/捲動都會重新求值，逐日迴圈同步跑出天文數字次數，畫面卡死。修法比照既有的 SubordinateRosterView.buildLeaveLookup／LifeFinanceView 展開迴圈防護：兩個逐日迴圈都把終止日夾在「開始日 + 366 天」內；並在 FiveMinuteDateTimePicker(selection: $endDate) 補上對應的 maximumDate，避免使用者選到會被靜默夾住、與畫面顯示不一致的日期。單一部屬的請假紀錄超過一年本屬異常情境，夾值不影響正常請假時數計算。另複查全樹：強制解包／try!／as! 維持 0 筆；Timer／NotificationCenter 閉包 [weak self] 覆蓋完整；CloudSyncManager 30 秒節流＋NSLock 正常，未發現新增的競態或跳過節流的呼叫點。"
+        ]),
         ChangelogEntry(version: "25.87", build: 840, date: "2026/08/05", notes: [
             "【靜態除錯】全樹複查：強制解包／Optional 處理／型別錯誤／index 越界、retain cycle、競態條件、畫面閃爍（重繪／防抖／節流）、O(n²) 迴圈與主執行緒重運算，共分三批獨立覆蓋 Models 全部 26 檔＋Views 全部約 60 檔（含先前未逐檔精讀的 TalentMatrixView／TaxOverviewView／CareerView／FoodMapView／StockDetailView／SavingsInsuranceView 等 40 檔）。額外自行複查：全樹強制解包（`)!`／`]!`）0 筆（僅剩編譯期必為合法的靜態 URL！字面量）；Timer.scheduledTimer／.sink 閉包全數已帶 [weak self]；CloudSyncManager 既有 30 秒節流與 NSLock 執行緒保護正常，未見繞過節流的同步呼叫點。均確認正常、無新增問題，本次未變動任何商業邏輯或介面。"
         ]),

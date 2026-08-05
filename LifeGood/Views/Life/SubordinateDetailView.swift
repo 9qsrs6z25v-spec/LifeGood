@@ -1672,7 +1672,12 @@ struct RecordEditorSheet: View {
         let schedule = ShiftScheduleStore.shared.schedule
         var total = 0.0
         var day = cal.startOfDay(for: date)
-        let last = cal.startOfDay(for: endDate)
+        // endDate 的 FiveMinuteDateTimePicker 未設 maximumDate，使用者可拖到遠未來日期；
+        // 逐日迴圈若不設上限，會在 Form body 重新求值（每次拖動選擇器）時同步跑天文數字次數，
+        // 造成主執行緒卡死。夾在「請假開始日 + 366 天」內，與 SubordinateRosterView.buildLeaveLookup
+        // 遠未來日期防護同一套思路。
+        let cappedEnd = cal.date(byAdding: .day, value: 366, to: day) ?? cal.startOfDay(for: endDate)
+        let last = min(cal.startOfDay(for: endDate), cappedEnd)
         while day <= last {
             if let shiftType = effectiveShiftType(on: day, sub: sub, cal: cal) {
                 let wd = cal.component(.weekday, from: day)
@@ -1703,7 +1708,9 @@ struct RecordEditorSheet: View {
         let schedule = ShiftScheduleStore.shared.schedule
         var total = 0.0
         var day = cal.startOfDay(for: date)
-        let last = cal.startOfDay(for: endDate)
+        // 同 workOverlapHours：夾住遠未來 endDate，避免逐日迴圈跑出天文數字次數。
+        let cappedEnd = cal.date(byAdding: .day, value: 366, to: day) ?? cal.startOfDay(for: endDate)
+        let last = min(cal.startOfDay(for: endDate), cappedEnd)
         while day <= last {
             if let shift = effectiveShiftType(on: day, sub: sub, cal: cal),
                let rest = schedule.restRange(for: shift),
@@ -1764,7 +1771,8 @@ struct RecordEditorSheet: View {
                         HStack {
                             Text("結束時間")
                             Spacer()
-                            FiveMinuteDateTimePicker(selection: $endDate, minimumDate: date).fixedSize()
+                            FiveMinuteDateTimePicker(selection: $endDate, minimumDate: date,
+                                                      maximumDate: Calendar.current.date(byAdding: .day, value: 366, to: date)).fixedSize()
                         }
                         if deduction > 0 {
                             HStack {
