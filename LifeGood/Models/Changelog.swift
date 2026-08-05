@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.96", build: 849, date: "2026/08/05", notes: [
+            "【美化 v25.96】OrganizationView.swift「新增/編輯人員」工具列儲存按鈕補齊載入狀態：OrgPersonEditor.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複人員紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.95 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView／FamilyMembersResumeView／SubordinateView／GradeTitleView 儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛判斷、photoFileName 換照片與 relations 過濾等既有商業邏輯完全未變動。同批清單仍剩 SubordinateDetailView／MyCalendarView／LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，已於 OrganizationView.swift 檔案內美化紀錄註記供下次接續。",
+        ]),
         ChangelogEntry(version: "25.95", build: 848, date: "2026/08/05", notes: [
             "【美化 v25.95】GradeTitleView.swift「部門新增/編輯」工具列儲存按鈕補齊載入狀態：DepartmentEditor.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複部門紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.94 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView／FamilyMembersResumeView／SubordinateView 儲存按鈕載入狀態規格。純視覺層調整，save()／syncReverseLinks() 內部守衛判斷與部門雙向關聯寫入等既有商業邏輯完全未變動。同批清單仍剩 OrganizationView／SubordinateDetailView／MyCalendarView／LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，已於 GradeTitleView.swift 檔案內美化紀錄註記供下次接續。",
         ]),

@@ -55,6 +55,17 @@ import UniformTypeIdentifiers
 //      departmentId 連動邏輯、children／relations 新增刪除、save()／delete() 等既有商業邏輯
 //      完全未變動。
 //   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+//
+// [2026-08 v25.96] 本次美化方向（OrgPersonEditor 工具列儲存按鈕補齊載入狀態）：
+//  16. OrgPersonEditor.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成
+//      重複人員紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7)
+//      .tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.95 全 App
+//      Add*View／SubordinateView／GradeTitleView 儲存按鈕載入狀態規格。
+//      純視覺層調整，save() 內部守衛判斷、photoFileName 換照片與 relations 過濾等
+//      既有商業邏輯完全未變動。
+//   （下次美化時：同批清單仍剩 SubordinateDetailView／MyCalendarView／LifeFinanceView／
+//      ResumeView／ChildDetailView 待比照補齊，此清單自 v25.81 起接續，每完成一檔即從
+//      清單移除，找不到待辦清單時可全樹搜尋 "isSaving" 交叉核對。）
 
 // MARK: - 公司組織頁
 
@@ -992,9 +1003,16 @@ struct OrgPersonEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(isEditing ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    // [美化 v25.96] 存檔中顯示同色 ProgressView，對齊 GradeTitleView v25.95／
+                    // SubordinateView v25.94 等 isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(isEditing ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .sheet(isPresented: $showCamera) {
