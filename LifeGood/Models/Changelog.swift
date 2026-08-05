@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.92", build: 845, date: "2026/08/05", notes: [
+            "【美化 v25.92】SubordinateEquipmentView.swift「設備新增/編輯」工具列儲存按鈕補齊載入狀態：EquipmentEditorSheet.save()／deleteEquipment() 皆自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複設備紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.91 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／AddRealEstateView 儲存按鈕載入狀態規格。純視覺層調整，save()／deleteEquipment() 內部守衛判斷與設備／PM／警報寫回 lifeStore 等既有商業邏輯完全未變動。全 App 仍有多處編輯 Sheet 帶 isSaving 忙碌守衛卻同樣缺此載入視覺（FamilyMembersResumeView／SubordinateView／GradeTitleView／OrganizationView／SubordinateDetailView／MyCalendarView／LifeFinanceView／ResumeView／ChildDetailView），已於 SubordinateEquipmentView.swift 檔案內美化紀錄註記為下次可比照補齊的清單。",
+        ]),
         ChangelogEntry(version: "25.91", build: 844, date: "2026/08/05", notes: [
             "【美化 v25.91】AddRealEstateView.swift 工具列「儲存／新增」按鈕補齊載入狀態：save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複房地產紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81/25.82/25.83/25.89/25.90 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／AddVehicleView／AddStockView 儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛判斷與房地產/貸款/已支出/變動支出/保險同步寫入邏輯完全未變動。至此全 App 帶 isSaving 忙碌守衛的 Add*View 儲存按鈕載入狀態已全數補齊。",
         ]),

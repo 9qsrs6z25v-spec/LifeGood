@@ -33,7 +33,19 @@ import SwiftUI
 //   spotRow 44pt 規格而非 equipmentRow 36pt 的 1pt，避免小圓上邊框顯得過粗。
 //   純視覺調整，PM／警報時間軸排序、天數計算等既有商業邏輯完全未變動。
 //   （本檔案設備清單空狀態、equipmentRow、timelineRow 進場動畫、PM／警報膠囊徽章與
-//   節點圖示規格至此已全數收斂一致；下次美化可轉往其他仍留有待辦的畫面）
+//   節點圖示規格至此已全數收斂一致）
+// [2026-08 v5] EquipmentEditorSheet 工具列「儲存／新增」按鈕補齊載入狀態：
+//   • save()／deleteEquipment() 皆自帶 isSaving 忙碌守衛（guard !isSaving + disabled(isSaving)）
+//     避免快速連點造成重複寫入，但按鈕本身在存檔期間毫無視覺提示，與全 App「Add*View 儲存按鈕
+//     載入狀態」系列（AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／
+//     AddRealEstateView／AddSavingsInsuranceView，v25.81～v25.91）已收斂一致的規格脫節。
+//   • 補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，
+//     對齊上述系列既有做法。純視覺層調整，save()／deleteEquipment() 內部守衛判斷與設備／
+//     PM／警報寫回 lifeStore 等既有商業邏輯完全未變動。
+//   （下次美化本檔案時：可轉往其他仍留有待辦的畫面。另全 App 仍有多處編輯 Sheet 帶 isSaving
+//   忙碌守衛卻同樣缺此載入視覺——FamilyMembersResumeView／SubordinateView／GradeTitleView／
+//   OrganizationView／SubordinateDetailView／MyCalendarView／LifeFinanceView／ResumeView／
+//   ChildDetailView，可作為下次美化比照本次補齊的清單，逐步達成全 App 均值性。）
 
 // MARK: 設備清單章節
 
@@ -548,9 +560,16 @@ struct EquipmentEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    HStack(spacing: 6) {
+                        // [美化 v25.92] 存檔中顯示同色 ProgressView，對齊 AddIncomeView／AddExpenseView／
+                        // AddVehicleView／AddStockView／AddRealEstateView 儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .onAppear {
