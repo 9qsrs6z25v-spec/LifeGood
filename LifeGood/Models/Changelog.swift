@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.94", build: 847, date: "2026/08/05", notes: [
+            "【美化 v25.94】SubordinateView.swift「新增/編輯部屬」工具列儲存按鈕補齊載入狀態：AddSubordinateView.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複部屬紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.93 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView／FamilyMembersResumeView 儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛判斷與部屬資料寫入等既有商業邏輯完全未變動。同批清單仍剩 GradeTitleView／OrganizationView／SubordinateDetailView／MyCalendarView／LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，已於 SubordinateView.swift 檔案內美化紀錄註記供下次接續。",
+        ]),
         ChangelogEntry(version: "25.93", build: 846, date: "2026/08/05", notes: [
             "【美化 v25.93】FamilyMembersResumeView.swift「家人事件/相簿照片新增/編輯」工具列儲存按鈕補齊載入狀態：FamilyEventEditor.save()／FamilyAlbumPhotoEditor.save() 皆自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.92 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView 儲存按鈕載入狀態規格。純視覺層調整，save()／deleteRecord() 內部守衛判斷與家人事件/相簿照片寫回 lifeStore 等既有商業邏輯完全未變動。承接 v25.92 留下的待辦清單，全 App 仍有 SubordinateView／GradeTitleView／OrganizationView／SubordinateDetailView／MyCalendarView／LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，已於 FamilyMembersResumeView.swift 檔案內美化紀錄註記供下次接續。",
         ]),

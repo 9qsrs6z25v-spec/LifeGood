@@ -51,6 +51,17 @@ import SwiftUI
 //      excellent／needImprovement 等既有統計計算完全未變動。
 //      （下次美化本檔案時：可留意 subordinateRow 是否仍有其他可與全 App 均值對齊之處，
 //      或轉往其他仍留有待辦的畫面）
+// [2026-08 v6] 補齊「新增/編輯部屬」工具列儲存按鈕載入狀態：
+//   8. AddSubordinateView.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點
+//      造成重複部屬紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView()
+//      .scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊
+//      v25.81～v25.93 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／
+//      AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView／
+//      FamilyMembersResumeView 儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛
+//      判斷與部屬資料寫入等既有商業邏輯完全未變動。
+//      （下次美化時：同批清單仍剩 GradeTitleView／OrganizationView／SubordinateDetailView／
+//      MyCalendarView／LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，
+//      可挑其一接續）
 
 enum SubordinateSortOption: String, CaseIterable, Identifiable {
     case name = "姓名"
@@ -952,9 +963,16 @@ struct AddSubordinateView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(!canSave || isSaving)
+                    // [美化] 存檔中顯示同色 ProgressView，對齊 FamilyMembersResumeView v25.93／
+                    // SubordinateEquipmentView v25.92 等 isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(!canSave || isSaving)
+                    }
                 }
             }
             .onAppear { loadEditing() }
