@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.97", build: 850, date: "2026/08/06", notes: [
+            "【靜態除錯】本輪針對強制解包／Optional 處理／型別錯誤／index 越界、retain cycle、競態條件、畫面閃爍（重繪／防抖／節流）、CloudKit 同步節流、主執行緒重運算與 O(n²) 迴圈，重新複查全樹（Models 全部 26 檔 + Views 全部約 60 檔），並額外自行逐檔精讀 CloudSyncManager／CloudKitManager／ExpenseStore／FinanceStore／LifeStore／LifeGoodApp／MainTabView／MultiPhotoGallery／IncomeView 等核心檔案。確認：① 全樹強制解包（`)!`／`]!`）僅剩編譯期必為合法的靜態 URL 字面量（PaywallView／EInvoiceSetupView），無新增風險點；② 所有陣列下標存取皆有 count／isEmpty 或固定長度保護；③ Timer.scheduledTimer／NotificationCenter 觀察者／CloudKit 完成回呼全數已用 [weak self] 或 selector-based（deinit 配對 removeObserver）避免循環引用；④ CloudSyncManager 既有 30 秒節流（scenePhase 切換）與 2 秒防抖（pushAll）、CloudKitManager 的 isFetching／NSLock 執行緒保護、以及 SubordinateDetailView／SubordinateRosterView 逐日迴圈的 366 天／可見月份上限防護皆正常運作，未發現繞過節流或可能導致主執行緒卡死的無上限迴圈。均確認正常、無新增問題，本次未變動任何商業邏輯或介面。",
+        ]),
         ChangelogEntry(version: "25.96", build: 849, date: "2026/08/05", notes: [
             "【美化 v25.96】OrganizationView.swift「新增/編輯人員」工具列儲存按鈕補齊載入狀態：OrgPersonEditor.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複人員紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.95 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView／FamilyMembersResumeView／SubordinateView／GradeTitleView 儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛判斷、photoFileName 換照片與 relations 過濾等既有商業邏輯完全未變動。同批清單仍剩 SubordinateDetailView／MyCalendarView／LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，已於 OrganizationView.swift 檔案內美化紀錄註記供下次接續。",
         ]),
