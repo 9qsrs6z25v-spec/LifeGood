@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.104", build: 857, date: "2026/08/06", notes: [
+            "【美化 v25.104】FinanceChartView.swift「理財圖表」英雄卡總資產大字補齊自適應防截斷：financeChartHeroCard 頂部 34pt 總資產大字（Text(fmtShort(totalAssetsValue))）原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同系列英雄卡 StockView（v14）／RealEstateView（v10）／VehicleView（v13）皆已修過、本檔案仍缺的同型缺口——本頁是彙總股票/房地產/儲蓄險/車輛四大類資產的總覽視圖，金額量級只會比任一單類更大，達億量級或窄螢幕時字級沒有下修空間，可能被系統裁切成不完整數字。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊 VehicleView.summaryHeader 同尺寸大字規格。純視覺層調整，總資產加總（insuranceSummaryNTD／totalAssetsValue）與各資產分類佔比等既有試算邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.103", build: 856, date: "2026/08/06", notes: [
             "【美化 v25.103】ChildDetailView.swift「育兒記錄/兒女記錄」兩個編輯 Sheet 工具列儲存按鈕補齊載入狀態：DailyRecordEditorSheet（喝奶/食物/睡眠）與 ChildRecordEditorSheet（疫苗/過敏/成長/就醫/教育/興趣/紀念）的 save() 皆自帶 isSaving 忙碌守衛（disabled(!canSave || isSaving)）避免快速連點造成重複記錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.102 全 App 儲存按鈕載入狀態規格。純視覺層調整，save()／delete() 內部守衛判斷、相片刪除與孤兒檔案清理等既有商業邏輯完全未變動。至此 v25.96 起紀錄的全 App「儲存按鈕載入狀態」補齊清單全數完成，已於 ChildDetailView.swift 檔案內美化紀錄註記收尾。",
         ]),

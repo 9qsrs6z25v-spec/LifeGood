@@ -69,6 +69,13 @@ import Charts
 //  24. 移除已無任何呼叫端的私有 currencyFormatter 死碼（金額顯示皆已改用 ntdWanString /
 //      fmtShort，此靜態 NumberFormatter 實例從未被讀取）。
 //      純顯示層調整，總資產／資產配置／房地產與儲蓄險績效等既有試算邏輯完全未變動。
+// [2026-08 v7] financeChartHeroCard 總資產大字補齊自適應防截斷：
+//  25. 頂部「理財資產總覽」34pt 總資產大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，
+//      是同系列英雄卡（StockView v14／RealEstateView v10／VehicleView v13）皆已修過、本檔案
+//      仍缺的同型缺口——本頁是加總股票/房地產/儲蓄險/車輛四大類的彙總視圖，金額量級只會比
+//      任一單類更大，達億量級或窄螢幕時字級沒有下修空間，可能被系統裁切。補上 .lineLimit(1)
+//      + .minimumScaleFactor(0.6)，對齊 VehicleView.summaryHeader 同尺寸大字規格。
+//      純視覺層調整，總資產加總與各資產分類試算邏輯完全未變動。
 
 struct FinanceChartView: View {
     @EnvironmentObject var store: FinanceStore
@@ -200,6 +207,8 @@ struct FinanceChartView: View {
                     Text(fmtShort(totalAssetsValue))
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
                     Text("NT$ 市值估算")
                         .font(.caption2.weight(.medium))
