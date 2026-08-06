@@ -418,6 +418,16 @@ extension BusinessCard {
 //      (quaternarySystemFill 底 + 7/3pt padding)，對齊 FamilyView / SubordinateView 規格
 //   5. avatarView 首字母方塊：補 .white.opacity(0.30) stroke overlay，
 //      讓無照片頭像邊框更明確，對齊設計語言圖示圓邊框規格
+// [2026-08 v3] summaryHeader 頂部總名片數大字補齊自適應防截斷：
+//   1. 「\(totalCards) 張名片」30pt 大字原本沒有 lineLimit／minimumScaleFactor
+//      防截斷保護，是同系列英雄卡 OverviewView／IncomeView／FinanceOverviewView／
+//      FinanceChartView／ChartView／SavingsInsuranceView／FixedExpenseView 皆已
+//      修過、本檔案仍缺的同型缺口——名片數量搭配「張名片」文字在窄螢幕或名片數
+//      達三位數以上時可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，
+//      對齊全 App 英雄卡同尺寸大字規格。純視覺層調整，totalCards／companyCount／
+//      contactCount 統計邏輯完全未變動。
+//      （下次美化本檔案時：可留意 quoteHeroCard 同型大字檔案，或轉往其他仍留有
+//      待辦的畫面，如 AddStockView.quoteHeroCard 即時股價大字）
 
 struct BusinessCardView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -489,6 +499,8 @@ struct BusinessCardView: View {
                     Text("\(totalCards) 張名片")
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
                     if companyCount > 0 {
                         Text("涵蓋 \(companyCount) 家公司")

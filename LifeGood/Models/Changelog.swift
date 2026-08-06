@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.106", build: 859, date: "2026/08/06", notes: [
+            "【美化 v25.106】BusinessCardView.swift「名片」summaryHeader 英雄卡總名片數大字補齊自適應防截斷：頂部 30pt「\\(totalCards) 張名片」大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同系列英雄卡 OverviewView／IncomeView／FinanceOverviewView／FinanceChartView／ChartView／SavingsInsuranceView／FixedExpenseView 皆已修過、本檔案仍缺的同型缺口——名片數量搭配「張名片」文字在窄螢幕或名片數達三位數以上時可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊全 App 英雄卡同尺寸大字規格。純視覺層調整，totalCards／companyCount／contactCount 統計邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.105", build: 858, date: "2026/08/06", notes: [
             "【美化 v25.105】ChartView.swift「消費圖表」趨勢頁英雄卡區間總計大字補齊自適應防截斷：chartHeroCard 頂部 32pt 區間總計大字（Text(formatCurrency(totalForPeriod))）原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同系列英雄卡 OverviewView／IncomeView／FinanceOverviewView／FinanceChartView（v25.104）皆已修過、本檔案仍缺的同型缺口——formatCurrency 走 ntdWanString 萬／億量級縮寫，切換到長期間（如全年/全部）總額達億量級或窄螢幕時，字級沒有下修空間，可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊其餘英雄卡同尺寸大字規格。純視覺層調整，totalForPeriod／formatCurrency 換算邏輯與拖曳選點、期間切換等既有行為完全未變動。",
         ]),
