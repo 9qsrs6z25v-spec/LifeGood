@@ -1847,7 +1847,14 @@ struct RecordEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave || isSaving)
+                    // [美化 v25.99] 存檔中顯示同色 ProgressView，對齊 GradeTitleView v25.95／
+                    // SubordinateView v25.94 等 isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave || isSaving)
+                    }
                 }
             }
             .onAppear {
@@ -2144,6 +2151,16 @@ struct AddSubItemSheet: View {
 // $isCompleted binding／save() 寫回 completedAt 等既有商業邏輯完全未變動。
 // （「本檔案其餘尚未套用漸層圖示圓規格的次要清單列」已於 AddSubItemSheet [2026-07 v1]
 //   處理完成，下次美化本檔案時可轉往其他仍留有待辦的畫面）
+// [2026-08 v25.99] 本次美化方向（RecordEditorSheet／MeetingEditorSheet／TaskEditorSheet／
+// WeeklyReportEditorSheet 工具列儲存按鈕補齊載入狀態）：
+//   • 這四個編輯 Sheet 的 save() 皆自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點
+//     造成重複紀錄，但按鈕本身在存檔期間毫無視覺提示。比照 GradeTitleView v25.95／
+//     SubordinateView v25.94 等全 App 儲存按鈕載入狀態規格，於按鈕左側補上
+//     HStack { if isSaving { ProgressView().scaleEffect(0.7).tint(.green) }；Button(...) }。
+//   • 純視覺層調整，四個 save()／deleteRecord()／deleteMeeting()／deleteTask()／
+//     deleteReport() 內部守衛判斷與請假時數計算、任務換人指派等既有商業邏輯完全未變動。
+//   • 全 App 同型待辦清單（v25.96 OrganizationView 紀錄）已剩 MyCalendarView／
+//     LifeFinanceView／ResumeView／ChildDetailView，下次可依序比照補齊。
 
 struct MeetingEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -2271,9 +2288,16 @@ struct MeetingEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    // [美化 v25.99] 存檔中顯示同色 ProgressView，對齊 RecordEditorSheet／
+                    // GradeTitleView v25.95 等 isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .onAppear {
@@ -2410,9 +2434,16 @@ struct TaskEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    // [美化 v25.99] 存檔中顯示同色 ProgressView，對齊 RecordEditorSheet／
+                    // GradeTitleView v25.95 等 isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .onAppear {
@@ -2533,9 +2564,16 @@ struct WeeklyReportEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    // [美化 v25.99] 存檔中顯示同色 ProgressView，對齊 RecordEditorSheet／
+                    // GradeTitleView v25.95 等 isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(topic.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .onAppear {
