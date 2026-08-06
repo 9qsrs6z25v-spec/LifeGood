@@ -482,7 +482,7 @@ struct ChartView: View {
     private var chartCarousel: some View {
         VStack(spacing: 8) {
             TabView(selection: $chartMode) {
-                trendChart.tag(ChartMode.trend)
+                trendChart().tag(ChartMode.trend)
                 variablePieChart().tag(ChartMode.variablePie)
                 fixedPieChart().tag(ChartMode.fixedPie)
             }
@@ -541,7 +541,7 @@ struct ChartView: View {
     /// 用 fixedSize(vertical:) 讓它忽略容器給的（被裁切的）高度、改用內容本身的高度。
     private var chartHeightMeasuringLayer: some View {
         VStack(spacing: 0) {
-            trendChart.reportChartPageHeight(.trend)
+            trendChart(interactive: false).reportChartPageHeight(.trend)
             variablePieChart(rowsAppeared: .constant(true)).reportChartPageHeight(.variablePie)
             fixedPieChart(rowsAppeared: .constant(true)).reportChartPageHeight(.fixedPie)
         }
@@ -552,7 +552,13 @@ struct ChartView: View {
 
     // MARK: - 趨勢圖
 
-    private var trendChart: some View {
+    /// - Parameter interactive: false 時停用拖曳手勢與選取狀態綁定，供 chartHeightMeasuringLayer
+    ///   的隱形量測副本使用。trendChart 的高度（220 / minHeight 220）與 selectedDataPoint 無關，
+    ///   但量測副本原本仍讀取同一個 @State，導致拖曳圖表選點時，隱形副本跟著視覺副本一起重新
+    ///   建置整個 Chart（含 RuleMark／annotation），對量到的高度沒有任何幫助，純粹是拖曳手勢
+    ///   期間白白多做一份 Charts 框架佈局運算。比照 variablePieChart／fixedPieChart 既有的
+    ///   rowsAppeared 參數化寫法，把「是否互動」拆成參數，量測副本傳 false 即可跳過選取邏輯。
+    private func trendChart(interactive: Bool = true) -> some View {
         let nonZeroCount = chartData.filter { $0.amount > 0 }.count
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
@@ -643,7 +649,7 @@ struct ChartView: View {
                     )
                     .cornerRadius(4)
 
-                    if let selected = selectedDataPoint, selected.label == dataPoint.label {
+                    if interactive, let selected = selectedDataPoint, selected.label == dataPoint.label {
                         RuleMark(x: .value("選取", dataPoint.label))
                             .foregroundStyle(.green.opacity(0.3))
                             .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
@@ -697,25 +703,32 @@ struct ChartView: View {
                     }
                 }
                 .chartOverlay { proxy in
-                    GeometryReader { geometry in
-                        Rectangle().fill(.clear).contentShape(Rectangle())
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { value in
-                                        let plotOrigin = proxy.plotFrame.map { geometry[$0].origin.x } ?? 0
-                                        let x = value.location.x - plotOrigin
-                                        if let label: String = proxy.value(atX: x) {
-                                            let newPoint = chartData.first { $0.label == label }
-                                            // 只在資料點實際改變時才賦值，避免拖曳時持續觸發無效 @State 更新
-                                            if newPoint?.label != selectedDataPoint?.label {
-                                                selectedDataPoint = newPoint
+                    // interactive == false（chartHeightMeasuringLayer 的隱形量測副本）不掛手勢：
+                    // 該副本本來就 .allowsHitTesting(false)，掛了也摸不到，但仍會產生一個獨立的
+                    // GestureRecognizer 與 GeometryReader，白白多一份配置成本。
+                    Group {
+                        if interactive {
+                            GeometryReader { geometry in
+                                Rectangle().fill(.clear).contentShape(Rectangle())
+                                    .gesture(
+                                        DragGesture(minimumDistance: 0)
+                                            .onChanged { value in
+                                                let plotOrigin = proxy.plotFrame.map { geometry[$0].origin.x } ?? 0
+                                                let x = value.location.x - plotOrigin
+                                                if let label: String = proxy.value(atX: x) {
+                                                    let newPoint = chartData.first { $0.label == label }
+                                                    // 只在資料點實際改變時才賦值，避免拖曳時持續觸發無效 @State 更新
+                                                    if newPoint?.label != selectedDataPoint?.label {
+                                                        selectedDataPoint = newPoint
+                                                    }
+                                                }
                                             }
-                                        }
-                                    }
-                                    .onEnded { _ in
-                                        selectedDataPoint = nil
-                                    }
-                            )
+                                            .onEnded { _ in
+                                                selectedDataPoint = nil
+                                            }
+                                    )
+                            }
+                        }
                     }
                 }
                 .frame(height: 220)
