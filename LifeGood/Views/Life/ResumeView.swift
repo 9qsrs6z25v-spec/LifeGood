@@ -1,5 +1,17 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（ResumeView.swift · v1 · 2026-08-06）
+// [2026-08 v25.102] AddMilestoneView「新增/編輯里程碑」工具列儲存按鈕補齊載入狀態：
+//  1. save() 自帶 isSaving 忙碌守衛（disabled(!canSave || isSaving)）避免快速連點造成重複
+//     里程碑紀錄（含家庭成員/職涯/財富卡各分支寫入），但按鈕本身在存檔期間毫無視覺提示。
+//     比照 LifeFinanceView v25.101／MyCalendarView v25.100 等全 App 儲存按鈕載入狀態規格，
+//     於按鈕左側補上 HStack { if isSaving { ProgressView().scaleEffect(0.7).tint(.green) }；
+//     Button(...) }。純視覺層調整，save() 內部各分類（家庭/房地產/職涯/財富卡）寫入邏輯
+//     完全未變動。全 App 同型待辦清單（v25.96 起紀錄）已剩 ChildDetailView，下次可依序
+//     比照補齊。
+//   （下次美化本檔案時，可轉往 ResumeView／EditProfileView 等本檔案內其他畫面，或轉往
+//     其他仍留有待辦的畫面）
+
 // MARK: - 防偽浮水印
 
 struct HolographicWatermark: View {
@@ -1507,9 +1519,16 @@ struct AddMilestoneView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil || editingFamily != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(!canSave || isSaving)
+                    // v25.102 美化：isSaving 忙碌守衛補齊載入視覺，對齊 LifeFinanceView
+                    // v25.101／MyCalendarView v25.100 等全 App 儲存按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil || editingFamily != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(!canSave || isSaving)
+                    }
                 }
             }
             .onAppear { loadEditing() }

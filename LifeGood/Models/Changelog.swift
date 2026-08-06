@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.102", build: 855, date: "2026/08/06", notes: [
+            "【美化 v25.102】ResumeView.swift「新增/編輯里程碑」工具列儲存按鈕補齊載入狀態：AddMilestoneView.save() 自帶 isSaving 忙碌守衛（disabled(!canSave || isSaving)）避免快速連點造成重複里程碑紀錄（含家庭成員/職涯/財富卡各分支寫入），但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.101 全 App 儲存按鈕載入狀態規格。純視覺層調整，save() 內部各分類寫入邏輯完全未變動。同批清單僅剩 ChildDetailView 待比照補齊，已於 ResumeView.swift 檔案內美化紀錄註記供下次接續。",
+        ]),
         ChangelogEntry(version: "25.101", build: 854, date: "2026/08/06", notes: [
             "【美化 v25.101】LifeFinanceView.swift「新增/編輯存款‧提款‧轉帳‧沖正」工具列儲存按鈕補齊載入狀態：DepositEditorSheet 的 save()／saveTransfer()／saveAdjust() 三個存檔入口共用同一顆 isSaving 忙碌守衛（disabled(saveDisabled || isSaving)）避免快速連點造成重複存款／提款／轉帳／沖正紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.100 全 App 儲存按鈕載入狀態規格。純視覺層調整，三個 save 函式內部守衛判斷與帳戶餘額寫入等既有商業邏輯完全未變動。同批清單仍剩 ResumeView／ChildDetailView 待比照補齊，已於 LifeFinanceView.swift 檔案內美化紀錄註記供下次接續。",
         ]),

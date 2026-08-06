@@ -93,8 +93,8 @@ import SwiftUI
 //      v25.100／SubordinateDetailView v25.99 等全 App 儲存按鈕載入狀態規格，於按鈕左側補上
 //      HStack { if isSaving { ProgressView().scaleEffect(0.7).tint(.green) }；Button(...) }。
 //      純視覺層調整，三個 save 函式內部守衛判斷與帳戶餘額寫入等既有商業邏輯完全未變動。
-//      全 App 同型待辦清單（v25.96 起紀錄）已剩 ResumeView／ChildDetailView，下次可依序
-//      比照補齊。
+//      全 App 同型待辦清單（v25.96 起紀錄）已於 v25.102 補齊 ResumeView，僅剩
+//      ChildDetailView，下次可依序比照補齊。
 //   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 // MARK: - 固定支出週期展開（共用）
