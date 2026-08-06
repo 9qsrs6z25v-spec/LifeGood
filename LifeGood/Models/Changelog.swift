@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.100", build: 853, date: "2026/08/06", notes: [
+            "【美化 v25.100】MyCalendarView.swift「新增/編輯個人事件」工具列儲存按鈕補齊載入狀態：PersonalEventEditor.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複事件／重複行事曆項目／重複通知，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.99 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView／FamilyMembersResumeView／SubordinateView／GradeTitleView／OrganizationView／SubordinateDetailView 儲存按鈕載入狀態規格。純視覺層調整，performSave() 內部守衛判斷與 Apple 行事曆同步、通知排程等既有商業邏輯完全未變動。同批清單仍剩 LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，已於 MyCalendarView.swift 檔案內美化紀錄註記供下次接續。",
+        ]),
         ChangelogEntry(version: "25.99", build: 852, date: "2026/08/06", notes: [
             "【美化 v25.99】SubordinateDetailView.swift「記錄／會議／任務／報告」四個編輯 Sheet 工具列儲存按鈕補齊載入狀態：RecordEditorSheet／MeetingEditorSheet／TaskEditorSheet／WeeklyReportEditorSheet 的 save() 皆自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.96 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView／FamilyMembersResumeView／SubordinateView／GradeTitleView／OrganizationView 儲存按鈕載入狀態規格。純視覺層調整，四個 save()／deleteRecord()／deleteMeeting()／deleteTask()／deleteReport() 內部守衛判斷與請假時數計算、任務換人指派等既有商業邏輯完全未變動。同批清單仍剩 MyCalendarView／LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，已於 SubordinateDetailView.swift 檔案內美化紀錄註記供下次接續。",
         ]),

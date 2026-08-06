@@ -1523,6 +1523,15 @@ struct MyCalendarView: View {
 //    （對齊 TravelMapView.statsCard 白色徽章邊框慣例），未選中時 separator.opacity(0.12)
 //    （對齊本檔案 section 卡片既有邊框規格），純視覺層調整，不影響選取／事件點呈現邏輯。
 // ⑭ 純視覺層調整，未變動 weekDates／selectedDate 綁定、weekEventsMap 等既有商業邏輯。
+// [2026-08 v25.100] 本次美化方向（PersonalEventEditor 工具列儲存按鈕補齊載入狀態）：
+//  ⑮ PersonalEventEditor.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成
+//     重複事件／重複行事曆項目／重複通知，但按鈕本身在存檔期間毫無視覺提示。比照
+//     SubordinateDetailView v25.99／OrganizationView v25.96 等全 App 儲存按鈕載入狀態規格，
+//     於按鈕左側補上 HStack { if isSaving { ProgressView().scaleEffect(0.7).tint(.green) }；
+//     Button(...) }。
+//  ⑯ 純視覺層調整，performSave() 內部守衛判斷、Apple 行事曆同步與通知排程等既有商業邏輯
+//     完全未變動。全 App 同型待辦清單（v25.96 OrganizationView 紀錄）已剩 LifeFinanceView／
+//     ResumeView／ChildDetailView，下次可依序比照補齊。
 //   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct PersonalEventEditor: View {
@@ -1699,9 +1708,16 @@ struct PersonalEventEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing == nil ? "新增" : "儲存") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    // [美化 v25.100] 存檔中顯示同色 ProgressView，對齊 SubordinateDetailView v25.99／
+                    // OrganizationView v25.96 等 isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing == nil ? "新增" : "儲存") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
