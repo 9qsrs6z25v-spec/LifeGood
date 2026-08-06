@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.101", build: 854, date: "2026/08/06", notes: [
+            "【美化 v25.101】LifeFinanceView.swift「新增/編輯存款‧提款‧轉帳‧沖正」工具列儲存按鈕補齊載入狀態：DepositEditorSheet 的 save()／saveTransfer()／saveAdjust() 三個存檔入口共用同一顆 isSaving 忙碌守衛（disabled(saveDisabled || isSaving)）避免快速連點造成重複存款／提款／轉帳／沖正紀錄，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.100 全 App 儲存按鈕載入狀態規格。純視覺層調整，三個 save 函式內部守衛判斷與帳戶餘額寫入等既有商業邏輯完全未變動。同批清單仍剩 ResumeView／ChildDetailView 待比照補齊，已於 LifeFinanceView.swift 檔案內美化紀錄註記供下次接續。",
+        ]),
         ChangelogEntry(version: "25.100", build: 853, date: "2026/08/06", notes: [
             "【美化 v25.100】MyCalendarView.swift「新增/編輯個人事件」工具列儲存按鈕補齊載入狀態：PersonalEventEditor.save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免快速連點造成重複事件／重複行事曆項目／重複通知，但按鈕本身在存檔期間毫無視覺提示。補上 ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，對齊 v25.81～v25.99 AddSavingsInsuranceView／AddExpenseView／AddIncomeView／AddVehicleView／AddStockView／AddRealEstateView／SubordinateEquipmentView／FamilyMembersResumeView／SubordinateView／GradeTitleView／OrganizationView／SubordinateDetailView 儲存按鈕載入狀態規格。純視覺層調整，performSave() 內部守衛判斷與 Apple 行事曆同步、通知排程等既有商業邏輯完全未變動。同批清單仍剩 LifeFinanceView／ResumeView／ChildDetailView 待比照補齊，已於 MyCalendarView.swift 檔案內美化紀錄註記供下次接續。",
         ]),

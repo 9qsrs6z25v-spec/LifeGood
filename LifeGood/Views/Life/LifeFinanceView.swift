@@ -86,7 +86,16 @@ import SwiftUI
 //      規則、僅符號可自訂；單一幣別分支改呼叫 entry.1.wanString(symbolPrefix: entry.0)，
 //      多幣別台幣等值分支改呼叫既有 ntdWanString。移除已無呼叫端的 formatNumber(_:)／
 //      decimalFormatter 死碼。純顯示層調整，餘額換算、幣別歸戶等既有邏輯完全未變動。
-//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+// [2026-08 v25.101] 本次美化方向（DepositEditorSheet 工具列儲存按鈕補齊載入狀態）：
+//  21. DepositEditorSheet 的 save()／saveTransfer()／saveAdjust() 三個存檔入口共用同一顆
+//      isSaving 忙碌守衛（disabled(saveDisabled || isSaving)）避免快速連點造成重複存款／
+//      提款／轉帳／沖正紀錄，但按鈕本身在存檔期間毫無視覺提示。比照 MyCalendarView
+//      v25.100／SubordinateDetailView v25.99 等全 App 儲存按鈕載入狀態規格，於按鈕左側補上
+//      HStack { if isSaving { ProgressView().scaleEffect(0.7).tint(.green) }；Button(...) }。
+//      純視覺層調整，三個 save 函式內部守衛判斷與帳戶餘額寫入等既有商業邏輯完全未變動。
+//      全 App 同型待辦清單（v25.96 起紀錄）已剩 ResumeView／ChildDetailView，下次可依序
+//      比照補齊。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 // MARK: - 固定支出週期展開（共用）
 
@@ -2438,15 +2447,22 @@ struct DepositEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") {
-                        switch txType {
-                        case .transfer: saveTransfer()
-                        case .adjust: saveAdjust()
-                        default: save()
+                    // [美化 v25.101] 存檔中顯示同色 ProgressView，對齊 MyCalendarView v25.100／
+                    // SubordinateDetailView v25.99 等 isSaving 忙碌守衛按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
                         }
+                        Button(editing != nil ? "儲存" : "新增") {
+                            switch txType {
+                            case .transfer: saveTransfer()
+                            case .adjust: saveAdjust()
+                            default: save()
+                            }
+                        }
+                        .bold().foregroundStyle(.green)
+                        .disabled(saveDisabled || isSaving)
                     }
-                    .bold().foregroundStyle(.green)
-                    .disabled(saveDisabled || isSaving)
                 }
             }
             .onAppear {
