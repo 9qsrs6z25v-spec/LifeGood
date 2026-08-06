@@ -67,7 +67,14 @@ import MapKit
 //     struct 呼叫；改為檔案層級 private free function，讓另一個 struct（ChildRecordEditorSheet）
 //     也能共用，配色（輕＝黃／中＝橘／重＝紅）維持不變，與 recordRow 徽章色彩語意完全一致。
 //     純視覺層調整，draft 儲存、severity 讀寫等既有商業邏輯完全未變動。
-//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
+// [2026-08 v10] DailyRecordEditorSheet／ChildRecordEditorSheet 工具列儲存按鈕補齊載入狀態：
+//   • 兩者 save() 皆自帶 isSaving 忙碌守衛（disabled(!canSave || isSaving)）避免快速連點造成
+//     重複育兒記錄／兒女記錄，但按鈕本身在存檔期間毫無視覺提示。補上 HStack { if isSaving {
+//     ProgressView().scaleEffect(0.7).tint(.green) }；Button(...) }，對齊 v25.81～v25.102
+//     全 App 儲存按鈕載入狀態規格（AddSavingsInsuranceView 起、ResumeView v25.102 止）。
+//     純視覺層調整，save()／delete() 內部守衛判斷與相片刪除等既有商業邏輯完全未變動。
+//     至此全 App「儲存按鈕載入狀態」補齊清單全數完成。
+//   （下次美化本檔案時，可另尋其他仍留有待辦的角落）
 
 struct ChildDetailView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -1213,8 +1220,14 @@ struct DailyRecordEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green).disabled(!canSave || isSaving)
+                    // v10 美化：isSaving 忙碌守衛補齊載入視覺，對齊全 App 儲存按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green).disabled(!canSave || isSaving)
+                    }
                 }
             }
             .onAppear { loadEditing() }
@@ -1416,7 +1429,13 @@ struct ChildRecordEditorSheet: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave || isSaving)
+                    // v10 美化：isSaving 忙碌守衛補齊載入視覺，對齊全 App 儲存按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }.bold().foregroundStyle(.green).disabled(!canSave || isSaving)
+                    }
                 }
             }
             .onAppear { loadEditing() }
