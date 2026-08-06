@@ -75,6 +75,17 @@ import Charts
 //      旋轉。純視覺層調整，isLoading 判斷邏輯、金額格式化等既有邏輯完全未變動。
 //      （本檔案 isLoading 相關視覺已全數收斂一致；下次美化本檔案時可留意其餘互動
 //      細節，或轉往其他仍留有待辦的畫面）
+// [2026-08 v8] chartHeroCard 頂部區間總計大字補齊自適應防截斷：
+//  20. 頂部「區間總計」32pt 大字（Text(formatCurrency(totalForPeriod))）原本沒有
+//      lineLimit／minimumScaleFactor 防截斷保護，是同系列英雄卡 OverviewView／
+//      IncomeView／FinanceOverviewView／FinanceChartView（v25.104）皆已修過、
+//      本檔案仍缺的同型缺口——formatCurrency 走 ntdWanString 萬／億量級縮寫，
+//      切換到長期間（如全年/全部）總額達億量級或窄螢幕時，字級沒有下修空間，
+//      可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊其餘
+//      英雄卡同尺寸大字規格。純視覺層調整，totalForPeriod／formatCurrency 換算
+//      邏輯與拖曳選點、期間切換等既有行為完全未變動。
+//      （下次美化本檔案時：可留意「最高」膠囊徽章與 periodHeroLabel 標籤在極端
+//      窄螢幕下的排列，或轉往其他仍留有待辦的畫面）
 
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
@@ -361,6 +372,8 @@ struct ChartView: View {
                     Text(isLoading ? "---" : formatCurrency(totalForPeriod))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
                     if !isLoading && averageForPeriod > 0 {
                         Text("期均 " + formatCurrency(averageForPeriod))

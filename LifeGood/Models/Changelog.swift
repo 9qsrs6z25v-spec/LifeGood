@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.105", build: 858, date: "2026/08/06", notes: [
+            "【美化 v25.105】ChartView.swift「消費圖表」趨勢頁英雄卡區間總計大字補齊自適應防截斷：chartHeroCard 頂部 32pt 區間總計大字（Text(formatCurrency(totalForPeriod))）原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同系列英雄卡 OverviewView／IncomeView／FinanceOverviewView／FinanceChartView（v25.104）皆已修過、本檔案仍缺的同型缺口——formatCurrency 走 ntdWanString 萬／億量級縮寫，切換到長期間（如全年/全部）總額達億量級或窄螢幕時，字級沒有下修空間，可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊其餘英雄卡同尺寸大字規格。純視覺層調整，totalForPeriod／formatCurrency 換算邏輯與拖曳選點、期間切換等既有行為完全未變動。",
+        ]),
         ChangelogEntry(version: "25.104", build: 857, date: "2026/08/06", notes: [
             "【美化 v25.104】FinanceChartView.swift「理財圖表」英雄卡總資產大字補齊自適應防截斷：financeChartHeroCard 頂部 34pt 總資產大字（Text(fmtShort(totalAssetsValue))）原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同系列英雄卡 StockView（v14）／RealEstateView（v10）／VehicleView（v13）皆已修過、本檔案仍缺的同型缺口——本頁是彙總股票/房地產/儲蓄險/車輛四大類資產的總覽視圖，金額量級只會比任一單類更大，達億量級或窄螢幕時字級沒有下修空間，可能被系統裁切成不完整數字。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊 VehicleView.summaryHeader 同尺寸大字規格。純視覺層調整，總資產加總（insuranceSummaryNTD／totalAssetsValue）與各資產分類佔比等既有試算邏輯完全未變動。",
         ]),
