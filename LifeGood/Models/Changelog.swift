@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.114", build: 867, date: "2026/08/07", notes: [
+            "【美化 v25.114】StockView.swift「股票」stockCard 名稱列標籤補齊描邊統一：卡片名稱列「已賣出」狀態 Capsule 原本只有 fill、無 stroke，是同一列 symbol 代號膠囊、右側報酬率膠囊皆已有的 stroke(color.opacity(0.22), 0.6pt) 規格之外唯一沒有描邊的標籤，深色模式下與底卡背景對比不足、顯得扁平。補上對應色 overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))，統一同卡三顆標籤「fill + stroke」節奏，對齊 RealEstateView estateCard 明細標籤同型修法。純視覺層調整，isSold／市值／損益／報酬率等既有試算邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.113", build: 866, date: "2026/08/07", notes: [
             "【美化 v25.113】RealEstateView.swift「房地產」estateCard 明細標籤補齊描邊統一：卡片內「貸款/房屋價金/變動支出」三顆 Capsule 標籤原本只有 fill、無 stroke，是卡片中唯一沒有描邊的膠囊元素，與同卡增值率膠囊、Section header 已售出計數膠囊皆已有的 stroke(color.opacity(0.22), 0.6pt) 規格不一致，深色模式下尤其顯得扁平不易辨識。三顆標籤補上對應色 overlay(Capsule().stroke(...))，統一全卡膠囊「fill + stroke」節奏。純視覺層調整，貸款/價金/支出金額計算等既有商業邏輯完全未變動。",
         ]),

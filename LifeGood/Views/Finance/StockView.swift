@@ -45,6 +45,15 @@ import SwiftUI
 //      minimumScaleFactor(0.7)（對齊 summaryHeader 損益 KPI 膠囊既有規格，防止字首變長後
 //      在窄膠囊內截斷）；移除已無呼叫端的私有 fmtShort 死碼。純顯示層調整，未變動市值／
 //      損益／報酬率等既有試算邏輯。
+// [2026-08 v6] stockCard 標籤描邊統一：
+//  17. stockCard 名稱列「已賣出」狀態 Capsule 原本只有 fill、無 stroke，是同一列
+//      symbol 代號膠囊（stroke 0.22, 0.6pt）與右側報酬率膠囊（同規格）之外唯一沒有描邊
+//      的標籤，深色模式下與底卡背景對比不足、顯得扁平。補上 overlay(Capsule().stroke(
+//      Color.orange.opacity(0.22), lineWidth: 0.6))，統一同卡三顆標籤「fill + stroke」
+//      節奏，對齊 RealEstateView estateCard 明細標籤 v5 同型修法。純視覺層調整，
+//      isSold／市值／損益／報酬率等既有試算邏輯完全未變動。
+//   （下次美化本檔案時，可檢視 summaryHeader 頂部「N 檔」計數膠囊是否也要補上 stroke，
+//    或往 allocationMiniBar 圖例色塊補圓角描邊方向對齊全 App 慣例）
 
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
@@ -711,6 +720,7 @@ struct StockView: View {
                                 .padding(.horizontal, 7).padding(.vertical, 2.5)
                                 .background(Color.orange.opacity(0.12))
                                 .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
                         }
                         Text("\(Int(item.shares)) 股 · \(priceStr)")
                             .font(.caption2)
