@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UIKit
 import ImageIO
+import Combine
 
 // MARK: - 美化紀錄（v1 · 2026-06-11）
 // • Header：標題升級 .bold、數量改為綠色 Capsule 膠囊徽章（fill opacity 0.13），
@@ -309,6 +310,20 @@ struct AsyncThumbnailView: View {
             }.value
             image = loaded
         }
+        // CloudSyncManager 拉到照片變更時發送 cloudSyncPhotosDidUpdate：若本畫面此刻仍停在
+        // 「載入中」佔位（image 為 nil，代表 .task(id: url) 觸發時檔案尚未同步到本機），
+        // url 本身不會改變、.task(id:) 也就不會重跑，畫面會卡在佔位圖直到使用者離開再進入
+        // 這個 View 實例。收到通知時補一次重讀，讓已落地的照片不必等重新整個畫面才顯示。
+        .onReceive(NotificationCenter.default.publisher(for: .cloudSyncPhotosDidUpdate)) { _ in
+            guard image == nil else { return }
+            let path = url.path
+            Task {
+                let loaded = await Task.detached(priority: .userInitiated) {
+                    UIImage(contentsOfFile: path)
+                }.value
+                if loaded != nil { image = loaded }
+            }
+        }
     }
 }
 
@@ -340,6 +355,21 @@ struct AsyncLocalImage<Content: View>: View {
                 }.value
                 image = loaded
                 didLoad = true
+            }
+            // 同 AsyncThumbnailView：url 不變時 .task(id:) 不會因照片位元組稍後才從
+            // iCloud 落地而重跑，收到 cloudSyncPhotosDidUpdate 時若仍讀不到檔案就補一次重讀。
+            .onReceive(NotificationCenter.default.publisher(for: .cloudSyncPhotosDidUpdate)) { _ in
+                guard image == nil else { return }
+                let path = url.path
+                Task {
+                    let loaded = await Task.detached(priority: .userInitiated) {
+                        UIImage(contentsOfFile: path)
+                    }.value
+                    if loaded != nil {
+                        image = loaded
+                        didLoad = true
+                    }
+                }
             }
     }
 }

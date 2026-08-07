@@ -92,6 +92,12 @@ struct AddStockView: View {
     @State private var selectedBankCurrency: String = "NT$"
     @State private var selectedSecuritiesMilestoneId: UUID?
 
+    /// 扣款帳戶選單的餘額快取：allAccountBalances() 雖已改為批次建表，但 accountPicker
+    /// 是 Form body 的一部分，任何欄位每次按鍵都會重新求值、重建整批表——改為只在
+    /// expenseStore.expenses／lifeStore.milestones 實際變動時（.task(id:)）才重算一次快取，
+    /// 對齊 AddExpenseView.cachedBankBalances 既有修復規格。
+    @State private var cachedAccountBalances: [UUID: Double] = [:]
+
     @State private var isFetching = false
     @State private var fetchError = ""
     @State private var quote: StockQuote?
@@ -533,8 +539,7 @@ struct AddStockView: View {
     }
 
     private var accountPicker: some View {
-        let balances = allAccountBalances()
-        return HStack {
+        HStack {
             Text("扣款帳戶").foregroundStyle(.secondary)
             Spacer()
             Menu {
@@ -548,7 +553,7 @@ struct AddStockView: View {
                         ForEach(bankMilestones) { ms in
                             let currencies = bankCurrencies(for: ms)
                             let name = ms.bankName ?? ms.title
-                            let label = "\(name)（\(fmtBalance(balances[ms.id] ?? 0))）"
+                            let label = "\(name)（\(fmtBalance(cachedAccountBalances[ms.id] ?? 0))）"
                             if currencies.count > 1 {
                                 Menu(label) {
                                     ForEach(currencies, id: \.self) { code in
@@ -572,7 +577,7 @@ struct AddStockView: View {
                 if !securitiesMilestones.isEmpty {
                     Section("證券") {
                         ForEach(securitiesMilestones) { ms in
-                            let label = "\(ms.title)（\(fmtBalance(balances[ms.id] ?? 0))）"
+                            let label = "\(ms.title)（\(fmtBalance(cachedAccountBalances[ms.id] ?? 0))）"
                             Button(label) {
                                 selectedSecuritiesMilestoneId = ms.id
                                 selectedBankMilestoneId = nil
@@ -588,6 +593,11 @@ struct AddStockView: View {
                     Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
                 }
             }
+        }
+        // 只在 expenses／milestones 實際變動時才重算批次表，避免表單任何欄位每次按鍵
+        // 都重跑一次 O(帳戶數 × expenses) 全量掃描（見 cachedAccountBalances 宣告處說明）。
+        .task(id: "\(expenseStore.modifyID)-\(lifeStore.milestones.count)") {
+            cachedAccountBalances = allAccountBalances()
         }
     }
 

@@ -911,8 +911,9 @@ struct FinanceOverviewView: View {
     }
 
     private func fmtShort(_ v: Double) -> String {
-        if v >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
-        if v >= 10_000 { return String(format: "%.0f萬", v / 10_000) }
+        let a = abs(v)
+        if a >= 100_000_000 { return String(format: "%.1f億", v / 100_000_000) }
+        if a >= 10_000 { return String(format: "%.0f萬", v / 10_000) }
         return fmt(v)
     }
 }
