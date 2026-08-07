@@ -86,10 +86,15 @@ struct RealEstateView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        // 一次算好 active／sold，避免 activeEstates／soldEstates（filter+sort 全量
+        // store.realEstates）在同一次 body 求值中被 summaryHeader、ForEach、計數文字
+        // 等多處各自重複呼叫（同型修復見 StockDetailView sortedTransactions／sortedDividends）。
+        let active = activeEstates
+        let sold = soldEstates
+        return NavigationStack {
             List {
                 Section {
-                    summaryHeader
+                    summaryHeader(active: active, sold: sold)
                         .offset(y: headerAppeared ? 0 : -20)
                         .opacity(headerAppeared ? 1 : 0)
                         .animation(.spring(response: 0.6, dampingFraction: 0.8), value: headerAppeared)
@@ -106,11 +111,8 @@ struct RealEstateView: View {
                             .listRowInsets(EdgeInsets())
                     }
                 } else {
-                    // 已出售清單每列 delay 都要用到「有幾筆持有中」當偏移量，一次算好避免
-                    // activeEstates（filter+sort 全量 store.realEstates）被逐列重複呼叫
-                    // （同型修復見 StockDetailView sortedTransactions／sortedDividends）。
-                    let activeCount = activeEstates.count
-                    ForEach(Array(activeEstates.enumerated()), id: \.element.id) { idx, item in
+                    let activeCount = active.count
+                    ForEach(Array(active.enumerated()), id: \.element.id) { idx, item in
                         estateCard(item)
                             .offset(y: cardsAppeared ? 0 : 30)
                             .opacity(cardsAppeared ? 1 : 0)
@@ -132,9 +134,9 @@ struct RealEstateView: View {
                             }
                     }
 
-                    if !soldEstates.isEmpty {
+                    if !sold.isEmpty {
                         Section {
-                            ForEach(Array(soldEstates.enumerated()), id: \.element.id) { idx, item in
+                            ForEach(Array(sold.enumerated()), id: \.element.id) { idx, item in
                                 estateCard(item)
                                     .offset(y: cardsAppeared ? 0 : 30)
                                     .opacity(cardsAppeared ? 1 : 0)
@@ -171,7 +173,7 @@ struct RealEstateView: View {
                                     .font(.footnote.weight(.semibold))
                                     .foregroundStyle(.primary.opacity(0.75))
                                 Spacer(minLength: 6)
-                                Text("\(soldEstates.count) 筆")
+                                Text("\(sold.count) 筆")
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(.purple)
                                     .padding(.horizontal, 8).padding(.vertical, 3)
@@ -282,13 +284,13 @@ struct RealEstateView: View {
     // 【美化 v2】VStack+.background+.clipShape+.shadow 結構，對齊 SavingsInsuranceView 規格；
     //   散景圓加入 .blur；右側增月現金流 KPI 膠囊；kpiItem 改為統一白色 kpiCell。
 
-    private var summaryHeader: some View {
-        let active = activeEstates.count
-        let sold = soldEstates.count
+    private func summaryHeader(active activeList: [RealEstate], sold soldList: [RealEstate]) -> some View {
+        let active = activeList.count
+        let sold = soldList.count
         let flow = store.monthlyCashFlow
-        let avgRate = activeEstates.isEmpty
+        let avgRate = activeList.isEmpty
             ? 0.0
-            : activeEstates.map(\.appreciationRate).reduce(0, +) / Double(activeEstates.count)
+            : activeList.map(\.appreciationRate).reduce(0, +) / Double(activeList.count)
 
         return VStack(spacing: 0) {
             // 頂部：總估值 + 右側計數膠囊 / 月現金流 KPI

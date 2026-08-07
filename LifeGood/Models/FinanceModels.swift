@@ -45,14 +45,15 @@ extension Double {
             (x == x.rounded()) ? String(format: "%.0f", x) : String(format: "%.1f", x)
         }
         let a = Swift.abs(self)
+        let sign = self < 0 ? "-" : ""
         if a >= 100_000_000 {           // ≥ 1億 → 億
-            return "NT$\(trimmed(self / 100_000_000))億"
+            return "\(sign)NT$\(trimmed(a / 100_000_000))億"
         }
         if a >= 10_000 {                // ≥ 1 萬 → 萬
-            let wan = self / 10_000
+            let wan = a / 10_000
             // %.1f 格式化後若捨入到 10000，改以億顯示，避免「10000.0萬」
-            if Swift.abs(wan) >= 9_999.95 { return "NT$\(trimmed(self / 100_000_000))億" }
-            return "NT$\(trimmed(wan))萬"
+            if wan >= 9_999.95 { return "\(sign)NT$\(trimmed(a / 100_000_000))億" }
+            return "\(sign)NT$\(trimmed(wan))萬"
         }
         return _ntdCurrencyFormatter.string(from: NSNumber(value: self)) ?? "NT$0"
     }
@@ -65,13 +66,14 @@ extension Double {
             (x == x.rounded()) ? String(format: "%.0f", x) : String(format: "%.1f", x)
         }
         let a = Swift.abs(self)
+        let sign = self < 0 ? "-" : ""
         if a >= 100_000_000 {
-            return "\(symbolPrefix) \(trimmed(self / 100_000_000))億"
+            return "\(sign)\(symbolPrefix) \(trimmed(a / 100_000_000))億"
         }
         if a >= 10_000 {
-            let wan = self / 10_000
-            if Swift.abs(wan) >= 9_999.95 { return "\(symbolPrefix) \(trimmed(self / 100_000_000))億" }
-            return "\(symbolPrefix) \(trimmed(wan))萬"
+            let wan = a / 10_000
+            if wan >= 9_999.95 { return "\(sign)\(symbolPrefix) \(trimmed(a / 100_000_000))億" }
+            return "\(sign)\(symbolPrefix) \(trimmed(wan))萬"
         }
         return "\(symbolPrefix) \(_plainGroupedFormatter.string(from: NSNumber(value: self)) ?? "0")"
     }

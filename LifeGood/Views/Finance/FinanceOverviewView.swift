@@ -92,6 +92,7 @@ struct FinanceOverviewView: View {
         let stockVal = store.totalStockValue
         let vehicleVal = store.totalVehicleValue
         let reVal = store.totalRealEstateValue
+        let stockPL = stockProfitLoss
         let allocations = ntdAllocations(insVal: insSummary.value, stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal)
         // 一次算出未出售股票／房地產筆數，避免 totalAssetsCard／assetCards 各自 filter 一次
         let activeStockCount = store.stocks.filter { !$0.isSold }.count
@@ -101,6 +102,7 @@ struct FinanceOverviewView: View {
                 VStack(spacing: 20) {
                     totalAssetsCard(allocations, insVal: insSummary.value, insPaid: insSummary.paid,
                                      stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal,
+                                     stockPL: stockPL,
                                      activeStockCount: activeStockCount, activeRealEstateCount: activeRealEstateCount)
                         .padding(.horizontal)
                         .opacity(appearedCards.contains("total") ? 1 : 0)
@@ -129,6 +131,7 @@ struct FinanceOverviewView: View {
 
                     assetCards(insVal: insSummary.value, insPaid: insSummary.paid,
                                stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal,
+                               stockPL: stockPL,
                                activeStockCount: activeStockCount, activeRealEstateCount: activeRealEstateCount)
                     allocationSection(allocations)
                     cashFlowSection
@@ -189,8 +192,9 @@ struct FinanceOverviewView: View {
 
     private func totalAssetsCard(_ allocations: [AssetAllocation], insVal: Double, insPaid: Double,
                                   stockVal: Double, vehicleVal: Double, reVal: Double,
+                                  stockPL: Double,
                                   activeStockCount: Int, activeRealEstateCount: Int) -> some View {
-        let pl = (insVal - insPaid) + stockProfitLoss
+        let pl = (insVal - insPaid) + stockPL
         let totalAssetCount = store.insurances.count + activeStockCount + store.vehicles.count + activeRealEstateCount
 
         return VStack(spacing: 0) {
@@ -331,6 +335,7 @@ struct FinanceOverviewView: View {
 
     private func assetCards(insVal: Double, insPaid: Double,
                              stockVal: Double, vehicleVal: Double, reVal: Double,
+                             stockPL: Double,
                              activeStockCount: Int, activeRealEstateCount: Int) -> some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
@@ -339,7 +344,7 @@ struct FinanceOverviewView: View {
                           icon: "shield.fill", color: .blue,
                           count: store.insurances.count, key: "insurance")
                 assetCard(title: "股票", amount: stockVal,
-                          profitLoss: stockProfitLoss,
+                          profitLoss: stockPL,
                           icon: "chart.line.uptrend.xyaxis", color: .orange,
                           count: activeStockCount, key: "stock")
             }
