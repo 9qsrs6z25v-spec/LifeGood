@@ -355,12 +355,13 @@ struct LifeFinanceView: View {
     }
 
     var body: some View {
-        // 一次取出，避免 toolbar + summaryHeader 各自重複計算 O(n×1200) 的銀行餘額展開
-        let bankBalanceTWD = allBankBalanceInTWD
+        // 一次取出，避免 toolbar + summaryHeader + milestoneList 各自重複計算 O(n×1200) 的銀行餘額展開
+        let balancesByBank = allBankBalances()
+        let bankBalanceTWD = balancesByBank.values.reduce(0) { $0 + balanceInTWD($1, expenseStore: expenseStore) }
         NavigationStack {
             // [對齊 SavingsInsuranceView 看板規格] 英雄看板與篩選列改為 List 內首個 Section，
             // 隨內容一起捲動，不再固定釘在列表上方。
-            milestoneList(balance: bankBalanceTWD)
+            milestoneList(balance: bankBalanceTWD, balancesByBank: balancesByBank)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("財富")
             .toolbar {
@@ -587,10 +588,9 @@ struct LifeFinanceView: View {
 
     // MARK: - 列表
 
-    private func milestoneList(balance: Double) -> some View {
-        // 一次批次算好所有銀行帳戶餘額，避免每一列各自呼叫 bankBalances(for:)
-        // 對 expenses/incomes 做 O(deposits × expenses) 全量掃描（對齊 AddExpenseView.allBankBalances() 的批次建表作法）
-        let balancesByBank = allBankBalances()
+    private func milestoneList(balance: Double, balancesByBank: [UUID: [String: Double]]) -> some View {
+        // balancesByBank 由呼叫端 body 一次算好傳入，避免與 toolbar/summaryHeader 的
+        // allBankBalanceInTWD 各自重複呼叫 allBankBalances()（O(banks×1200) 全量展開跑兩次）
         // 一次依 linkedBankMilestoneId 分組信用卡，避免每一列銀行帳戶各自對
         // lifeStore.milestones 做一次 O(n) filter（N 家銀行 × M 筆信用卡 = O(n×m)）
         let cardsByBank = Dictionary(grouping: lifeStore.milestones.filter {
@@ -791,11 +791,6 @@ struct LifeFinanceView: View {
         }
         let twd = balanceInTWD(balances, expenseStore: expenseStore)
         return ("≈ \(twd.ntdWanString)", twd)
-    }
-
-    /// 所有銀行帳戶的台幣等值總和
-    private var allBankBalanceInTWD: Double {
-        allBankBalances().values.reduce(0) { $0 + balanceInTWD($1, expenseStore: expenseStore) }
     }
 
     @ViewBuilder
@@ -2399,11 +2394,14 @@ struct DepositEditorSheet: View {
                         depositEditorSectionHeader("轉帳資訊", icon: "arrow.left.arrow.right", color: .blue)
                     }
                 } else if txType == .adjust {
+                    // currentBalance() 內部呼叫 bankBalances() 全量展開，「目前總額」與下方「差額」
+                    // 原本各自呼叫一次，同一次 body 求值中重跑兩次；改為只算一次共用。
+                    let currentBal = currentBalance(expensesById: expensesById, incomesById: incomesById)
                     Section {
                         HStack {
                             Text("目前總額").foregroundStyle(.secondary)
                             Spacer()
-                            Text(fmtBal(currentBalance(expensesById: expensesById, incomesById: incomesById))).foregroundStyle(.blue)
+                            Text(fmtBal(currentBal)).foregroundStyle(.blue)
                         }
                         DatePicker("日期", selection: $date, displayedComponents: .date)
                         HStack {
@@ -2411,7 +2409,7 @@ struct DepositEditorSheet: View {
                             TextField("調整後金額", text: $amountText).keyboardType(.decimalPad)
                         }
                         if let target = Double(amountText) {
-                            let diff = target - currentBalance(expensesById: expensesById, incomesById: incomesById)
+                            let diff = target - currentBal
                             HStack {
                                 Text("差額").foregroundStyle(.secondary)
                                 Spacer()
