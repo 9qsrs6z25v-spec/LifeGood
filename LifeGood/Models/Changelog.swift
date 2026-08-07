@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.107", build: 860, date: "2026/08/07", notes: [
+            "【修復】連拍相機介面按鈕被 Home indicator 切半：使用者截圖回報連拍相機（MultiShotCameraPicker，電費收據/記帳收據/裝修照片等拍照共用）的快門鈕與「完成」只露出上半截。原因：控制列整條釘在畫面最底、高度固定 130pt，快門/完成落在 iPhone 底部 Home indicator 手勢區內被系統截掉。修法（MultiShotOverlayView）：① 快門底部改錨定 safeAreaLayoutGuide.bottom −16pt，控制列高度由內容撐開、黑色半透明背景仍延伸到螢幕最底蓋住手勢區；② 觸控穿透判斷（point(inside:)）改用實際排版後的 bar.frame，不再用固定 130pt 推算，避免控制列長高後上緣點不到；③ overlay 補 autoresizingMask 跟隨父視圖尺寸。另外把 4:3 相機預覽從貼齊頂部改為在「畫面頂部～控制列」之間垂直置中（cameraViewTransform 平移），消除預覽下方到控制列之間的大片黑區，畫面較平衡。連拍流程（拍一張存一張→壓縮→上傳、按完成離開）行為不變。"
+        ]),
         ChangelogEntry(version: "25.106", build: 859, date: "2026/08/06", notes: [
             "【美化 v25.106】BusinessCardView.swift「名片」summaryHeader 英雄卡總名片數大字補齊自適應防截斷：頂部 30pt「\\(totalCards) 張名片」大字原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同系列英雄卡 OverviewView／IncomeView／FinanceOverviewView／FinanceChartView／ChartView／SavingsInsuranceView／FixedExpenseView 皆已修過、本檔案仍缺的同型缺口——名片數量搭配「張名片」文字在窄螢幕或名片數達三位數以上時可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊全 App 英雄卡同尺寸大字規格。純視覺層調整，totalCards／companyCount／contactCount 統計邏輯完全未變動。",
         ]),

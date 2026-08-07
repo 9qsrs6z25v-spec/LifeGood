@@ -61,6 +61,17 @@ struct MultiShotCameraPicker: UIViewControllerRepresentable {
         if UIImagePickerController.isSourceTypeAvailable(.camera) {
             picker.sourceType = .camera
             picker.showsCameraControls = false
+            // 4:3 相機預覽預設貼齊畫面頂部，下方到控制列之間留大片黑區；
+            // 往下平移讓預覽在「畫面頂部～控制列」之間垂直置中，畫面較平衡
+            let screen = UIScreen.main.bounds
+            let previewHeight = screen.width * 4.0 / 3.0
+            let controlsHeight: CGFloat = 130
+            let visibleHeight = screen.height - controlsHeight
+            if previewHeight < visibleHeight {
+                picker.cameraViewTransform = CGAffineTransform(
+                    translationX: 0, y: (visibleHeight - previewHeight) / 2
+                )
+            }
             let overlay = MultiShotOverlayView(frame: UIScreen.main.bounds)
             overlay.onShutter = { [weak picker] in picker?.takePicture() }
             overlay.onDone = { context.coordinator.finish() }
@@ -109,12 +120,14 @@ final class MultiShotOverlayView: UIView {
 
     private let doneButton = UIButton(type: .system)
     private let countLabel = UILabel()
+    private let bar = UIView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
+        // 跟隨父視圖尺寸（旋轉／不同機型），避免固定 UIScreen bounds 與實際畫面不符
+        autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
-        let bar = UIView()
         bar.backgroundColor = UIColor.black.withAlphaComponent(0.55)
         bar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bar)
@@ -147,14 +160,17 @@ final class MultiShotOverlayView: UIView {
         countLabel.translatesAutoresizingMaskIntoConstraints = false
         bar.addSubview(countLabel)
 
+        // 先前把整條控制列釘在 view 最底、高度固定 130，快門/完成鈕落在 Home indicator
+        // 手勢區內被切掉一半。改為「快門底部錨定 safeAreaLayoutGuide.bottom」，控制列
+        // 高度由內容撐開、背景仍延伸到螢幕最底（蓋住 Home indicator 區域的黑底）。
         NSLayoutConstraint.activate([
             bar.leadingAnchor.constraint(equalTo: leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: trailingAnchor),
             bar.bottomAnchor.constraint(equalTo: bottomAnchor),
-            bar.heightAnchor.constraint(equalToConstant: 130),
+            bar.topAnchor.constraint(equalTo: shutter.topAnchor, constant: -14),
 
             shutter.centerXAnchor.constraint(equalTo: bar.centerXAnchor),
-            shutter.topAnchor.constraint(equalTo: bar.topAnchor, constant: 16),
+            shutter.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -16),
             shutter.widthAnchor.constraint(equalToConstant: 68),
             shutter.heightAnchor.constraint(equalToConstant: 68),
             inner.centerXAnchor.constraint(equalTo: shutter.centerXAnchor),
@@ -172,9 +188,10 @@ final class MultiShotOverlayView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// 只讓控制列吃事件，其餘區域穿透給相機預覽（避免蓋住對焦手勢）
+    /// 只讓控制列吃事件，其餘區域穿透給相機預覽（避免蓋住對焦手勢）；
+    /// 以實際排版後的 bar.frame 判斷，不再用固定 130pt 推算。
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        point.y >= bounds.height - 130
+        bar.frame == .zero ? false : bar.frame.contains(point)
     }
 
     func setCount(_ n: Int) {
