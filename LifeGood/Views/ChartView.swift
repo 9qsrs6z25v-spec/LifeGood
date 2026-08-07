@@ -86,6 +86,19 @@ import Charts
 //      邏輯與拖曳選點、期間切換等既有行為完全未變動。
 //      （下次美化本檔案時：可留意「最高」膠囊徽章與 periodHeroLabel 標籤在極端
 //      窄螢幕下的排列，或轉往其他仍留有待辦的畫面）
+// [2026-08 v9] 補齊 v8 留下的待辦：chartHeroCard 頂部列窄螢幕排列防護：
+//  21. periodHeroLabel（「近 N 天/週/月/季/年支出總計」caption 標籤）與「最高」膠囊徽章內的
+//      formatCurrency(maxAmount) 兩處原本都沒有 lineLimit／minimumScaleFactor，是本檔案 v8
+//      已補齊中央 32pt 區間總計大字防截斷後，同一列仍缺同型防護的最後兩處文字——期間標籤
+//      本身固定但在窄螢幕（如 iPhone SE）+ isLoading 迷你旋轉圖示同時出現時可能被右側徽章
+//      擠壓換行，最高值金額在億量級時也可能被固定 Capsule padding 裁切。補上 periodHeroLabel
+//      .lineLimit(1) + .minimumScaleFactor(0.8)（caption 級標籤規格，對齊 OverviewView 同類
+//      標籤慣例）、最高值金額 .lineLimit(1) + .minimumScaleFactor(0.6)（對齊全 App 英雄卡大字
+//      金額規格）；並為徽章補上 .layoutPriority(1)，窄螢幕擠壓時優先保留最高值徽章完整可讀，
+//      改由左側期間標籤與總計大字（本已有 minimumScaleFactor）吸收縮放空間。純視覺層調整，
+//      periodHeroLabel／maxAmount／formatCurrency 等既有資料與期間切換邏輯完全未變動。
+//      （下次美化本檔案時：chartHeroCard 頂部列已全數補齊防截斷與窄螢幕排列防護，
+//      可轉往其他仍留有待辦的畫面）
 
 enum ChartMode: String, CaseIterable, Identifiable {
     case trend = "支出趨勢"
@@ -349,6 +362,8 @@ struct ChartView: View {
                         Text(periodHeroLabel)
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.78))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                         if isLoading {
                             // [v7 美化] 原本是白色系統原生 ProgressView（0.65 倍縮小 spinner），
                             // 與下方大卡「載入圖表資料…」改用的漸層圖示圓＋旋轉圖示語言不一致，
@@ -388,15 +403,19 @@ struct ChartView: View {
                         Text("最高")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.62))
+                            .lineLimit(1)
                         Text(formatCurrency(maxAmount))
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                             .contentTransition(.numericText())
                     }
                     .padding(.horizontal, 11)
                     .padding(.vertical, 6)
                     .background(.white.opacity(0.20))
                     .clipShape(Capsule())
+                    .layoutPriority(1)
                 }
             }
 
