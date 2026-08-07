@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.115", build: 868, date: "2026/08/07", notes: [
+            "【美化 v25.115】StockView.swift「股票」summaryHeader 計數膠囊補齊描邊統一：英雄卡右上角「N 檔」持股計數膠囊原本只有 fill、無 stroke，是緊鄰的損益 KPI 膠囊（已有 stroke(.white.opacity(0.25/0.35), 0.75pt)）之外唯一沒有描邊的膠囊，深色底卡上兩顆膠囊並排時明顯較扁平。補上 overlay(Capsule().stroke(.white.opacity(0.32), lineWidth: 0.75))，統一頂部兩顆膠囊「fill + stroke」節奏，承接 v25.114 遺留缺口。純視覺層調整，active.count 等既有持股數統計邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.114", build: 867, date: "2026/08/07", notes: [
             "【美化 v25.114】StockView.swift「股票」stockCard 名稱列標籤補齊描邊統一：卡片名稱列「已賣出」狀態 Capsule 原本只有 fill、無 stroke，是同一列 symbol 代號膠囊、右側報酬率膠囊皆已有的 stroke(color.opacity(0.22), 0.6pt) 規格之外唯一沒有描邊的標籤，深色模式下與底卡背景對比不足、顯得扁平。補上對應色 overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))，統一同卡三顆標籤「fill + stroke」節奏，對齊 RealEstateView estateCard 明細標籤同型修法。純視覺層調整，isSold／市值／損益／報酬率等既有試算邏輯完全未變動。",
         ]),

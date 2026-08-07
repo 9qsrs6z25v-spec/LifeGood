@@ -52,8 +52,14 @@ import SwiftUI
 //      Color.orange.opacity(0.22), lineWidth: 0.6))，統一同卡三顆標籤「fill + stroke」
 //      節奏，對齊 RealEstateView estateCard 明細標籤 v5 同型修法。純視覺層調整，
 //      isSold／市值／損益／報酬率等既有試算邏輯完全未變動。
-//   （下次美化本檔案時，可檢視 summaryHeader 頂部「N 檔」計數膠囊是否也要補上 stroke，
-//    或往 allocationMiniBar 圖例色塊補圓角描邊方向對齊全 App 慣例）
+// [2026-08 v7] 承接 v6 遺留缺口，summaryHeader 計數膠囊描邊補齊：
+//  18. summaryHeader 頂部「N 檔」持股計數膠囊原本只有 fill、無 stroke，是同一張英雄卡右上角
+//      唯一沒有描邊的膠囊——緊鄰的損益 KPI 膠囊已有 stroke(.white.opacity(0.25/0.35), 0.75pt)，
+//      深色底卡上兩顆膠囊並排時「N 檔」明顯較扁平。補上 overlay(Capsule().stroke(
+//      .white.opacity(0.32), lineWidth: 0.75))，統一頂部兩顆膠囊「fill + stroke」節奏。
+//      純視覺層調整，active.count 等既有持股數統計邏輯完全未變動。
+//   （下次美化本檔案時，可往 allocationMiniBar 圖例色塊補圓角描邊方向對齊全 App 慣例，
+//    或轉往其他仍留有待辦的畫面）
 
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
@@ -439,6 +445,7 @@ struct StockView: View {
                         .padding(.horizontal, 11).padding(.vertical, 5)
                         .background(.white.opacity(0.22))
                         .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.32), lineWidth: 0.75))
                         .foregroundStyle(.white)
                     // 損益 KPI 膠囊（有成本資料才顯示）
                     if store.totalStockCost > 0 {
