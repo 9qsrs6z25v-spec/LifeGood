@@ -655,7 +655,7 @@ class LifeStore: ObservableObject {
     /// 對齊 clearAll() 涵蓋範圍的「本 Store 是否完全沒有資料」判斷，供 SettingsView 危險操作區
     /// 的「清除所有資料」按鈕啟用/停用依據；沿用同一份欄位清單，避免兩處各自列舉而漏算新分類。
     var isEmpty: Bool {
-        familyMembers.isEmpty && milestones.isEmpty && relationships.isEmpty &&
+        profile.isEmpty && familyMembers.isEmpty && milestones.isEmpty && relationships.isEmpty &&
         pets.isEmpty && schedules.isEmpty && subordinates.isEmpty &&
         departments.isEmpty && gradeTitles.isEmpty && businessCards.isEmpty &&
         personalEvents.isEmpty && orgPeople.isEmpty && healthProfile.isEmpty
