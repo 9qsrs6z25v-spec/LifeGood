@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.116", build: 869, date: "2026/08/07", notes: [
+            "【美化 v25.116】StockView.swift「股票」allocationMiniBar 持股分配圖例色塊補齊描邊統一：圖例列（前 3 檔）8x8 色塊原本只有 fill、無 stroke，複查全 App 其餘迷你圖例點陣列均無此規格，故延伸本檔案已確立的「fill + stroke」節奏，補上 overlay(RoundedRectangle(cornerRadius: 2).stroke(.white.opacity(0.35), lineWidth: 0.5))，讓色塊在深色底卡上邊界更清晰，與上方彩條描邊質感一致，承接 v25.115 遺留缺口，本檔案英雄卡膠囊與圖例色塊描邊至此全數收斂一致。純視覺層調整，barColors 配色與市值佔比排序等既有邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.115", build: 868, date: "2026/08/07", notes: [
             "【美化 v25.115】StockView.swift「股票」summaryHeader 計數膠囊補齊描邊統一：英雄卡右上角「N 檔」持股計數膠囊原本只有 fill、無 stroke，是緊鄰的損益 KPI 膠囊（已有 stroke(.white.opacity(0.25/0.35), 0.75pt)）之外唯一沒有描邊的膠囊，深色底卡上兩顆膠囊並排時明顯較扁平。補上 overlay(Capsule().stroke(.white.opacity(0.32), lineWidth: 0.75))，統一頂部兩顆膠囊「fill + stroke」節奏，承接 v25.114 遺留缺口。純視覺層調整，active.count 等既有持股數統計邏輯完全未變動。",
         ]),

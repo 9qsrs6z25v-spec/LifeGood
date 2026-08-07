@@ -58,8 +58,16 @@ import SwiftUI
 //      深色底卡上兩顆膠囊並排時「N 檔」明顯較扁平。補上 overlay(Capsule().stroke(
 //      .white.opacity(0.32), lineWidth: 0.75))，統一頂部兩顆膠囊「fill + stroke」節奏。
 //      純視覺層調整，active.count 等既有持股數統計邏輯完全未變動。
-//   （下次美化本檔案時，可往 allocationMiniBar 圖例色塊補圓角描邊方向對齊全 App 慣例，
-//    或轉往其他仍留有待辦的畫面）
+// [2026-08 v8] 承接 v7 遺留缺口，allocationMiniBar 圖例色塊描邊補齊：
+//  19. allocationMiniBar 圖例列（前 3 檔）8x8 RoundedRectangle 色塊原本只有 fill、無 stroke，
+//      複查全 App 其餘迷你圖例點陣列（FinanceOverviewView / LifeRealEstateView 等）亦均無
+//      stroke，故本次改採本檔案已確立的「fill + stroke」節奏（summaryHeader／stockCard
+//      膠囊皆已補齊）延伸套用：補上 overlay(RoundedRectangle(cornerRadius: 2).stroke(
+//      .white.opacity(0.35), lineWidth: 0.5))，讓迷你色塊在深色底卡上邊界更清晰、與
+//      上方彩條的描邊質感一致。純視覺層調整，barColors 配色與市值佔比排序等既有邏輯
+//      完全未變動。
+//   （本檔案英雄卡膠囊與圖例色塊描邊已全數收斂一致；下次美化本檔案時可轉往其他仍留有
+//    待辦的畫面）
 
 struct StockView: View {
     @EnvironmentObject var store: FinanceStore
@@ -852,6 +860,7 @@ struct StockView: View {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(barColors[i % barColors.count].opacity(0.88))
                             .frame(width: 8, height: 8)
+                            .overlay(RoundedRectangle(cornerRadius: 2).stroke(.white.opacity(0.35), lineWidth: 0.5))
                         Text(stock.symbol.isEmpty ? String(stock.name.prefix(4)) : stock.symbol)
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.white.opacity(0.80))
