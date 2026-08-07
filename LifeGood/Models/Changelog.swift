@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.113", build: 866, date: "2026/08/07", notes: [
+            "【美化 v25.113】RealEstateView.swift「房地產」estateCard 明細標籤補齊描邊統一：卡片內「貸款/房屋價金/變動支出」三顆 Capsule 標籤原本只有 fill、無 stroke，是卡片中唯一沒有描邊的膠囊元素，與同卡增值率膠囊、Section header 已售出計數膠囊皆已有的 stroke(color.opacity(0.22), 0.6pt) 規格不一致，深色模式下尤其顯得扁平不易辨識。三顆標籤補上對應色 overlay(Capsule().stroke(...))，統一全卡膠囊「fill + stroke」節奏。純視覺層調整，貸款/價金/支出金額計算等既有商業邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.112", build: 865, date: "2026/08/07", notes: [
             "【美化 v25.112】ChartView.swift「消費圖表」chartHeroCard 頂部列補齊窄螢幕排列防護：periodHeroLabel（「近 N 天/週/月/季/年支出總計」caption 標籤）與「最高」膠囊徽章內的最高值金額原本都沒有 lineLimit／minimumScaleFactor，是 v25.105 已補齊中央區間總計大字防截斷後，同一列仍缺同型防護的最後兩處文字——期間標籤在窄螢幕搭配載入中迷你旋轉圖示時可能被右側徽章擠壓換行，最高值金額達億量級時也可能被固定 Capsule padding 裁切。補上 periodHeroLabel .lineLimit(1) + .minimumScaleFactor(0.8)（對齊 OverviewView 同類標籤規格）、最高值金額 .lineLimit(1) + .minimumScaleFactor(0.6)（對齊全 App 英雄卡大字金額規格），並為徽章補上 .layoutPriority(1)，窄螢幕擠壓時優先保留最高值徽章完整可讀。純視覺層調整，totalForPeriod／maxAmount／formatCurrency 換算與期間切換等既有商業邏輯完全未變動。",
         ]),

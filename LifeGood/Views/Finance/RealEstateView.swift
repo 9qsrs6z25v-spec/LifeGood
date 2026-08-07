@@ -27,6 +27,14 @@ import SwiftUI
 //      讓年份切換 / 資料更新時 KPI 數字有平滑滾動過渡，對齊 TaxOverviewView v3 taxStatCell 規格。
 //  10. summaryHeader 總估值大字：補入 minimumScaleFactor(0.72)，
 //      防止大數字（如「NT$ 12.5 億元」）在小螢幕截斷，對齊 VehicleView summaryHeader 規格。
+// [2026-08-v5] 本次美化方向（estateCard 明細標籤描邊補齊）：
+//  11. 「貸款/房屋價金/變動支出」三顆 Capsule 標籤原本只有 fill、無 stroke，
+//      是本卡片內唯一沒有描邊的膠囊元素，與同卡增值率膠囊（stroke 0.22）、
+//      Section header 已售出計數膠囊（stroke 0.22）視覺節奏不一致，深色模式下尤其顯扁平；
+//      三者補上對應色 overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))，
+//      統一全卡膠囊「fill + stroke」規格。純視覺層調整，未動貸款/價金/支出金額計算邏輯。
+//   （下次美化本檔案時，可檢視 estateCard 底部月租/月貸/已付列是否也要補上圖示背景圓，
+//    或往 sort menu 圖示風格（.circle → .circle.fill）方向對齊全 App 慣例）
 
 enum RealEstateSortOption: String, CaseIterable, Identifiable {
     case purchasePrice = "購入價格"
@@ -616,6 +624,7 @@ struct RealEstateView: View {
                                             .padding(.horizontal, 7).padding(.vertical, 2.5)
                                             .background(Color.blue.opacity(0.10))
                                             .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
                                         Text("\(m.elapsedPeriods)/\(m.totalPeriods)期")
                                             .font(.caption2)
                                             .foregroundStyle(.tertiary)
@@ -649,6 +658,7 @@ struct RealEstateView: View {
                                 .padding(.horizontal, 7).padding(.vertical, 2.5)
                                 .background(Color.purple.opacity(0.10))
                                 .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.purple.opacity(0.22), lineWidth: 0.6))
                             Text("\(item.paidItems.count) 筆")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
@@ -670,6 +680,7 @@ struct RealEstateView: View {
                                 .padding(.horizontal, 7).padding(.vertical, 2.5)
                                 .background(Color.orange.opacity(0.10))
                                 .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
                             Text("\(item.variableExpenses.count) 筆")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
