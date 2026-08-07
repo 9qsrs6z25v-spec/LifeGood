@@ -27,7 +27,7 @@ enum VariableCategory: String, Codable, Identifiable {
     var id: String { rawValue }
 
     static var allCases: [VariableCategory] {
-        [.food, .vehicle, .stock, .realEstate, .tax, .taxSaving, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
+        [.food, .transportation, .vehicle, .stock, .realEstate, .tax, .taxSaving, .entertainment, .shopping, .dailyNecessities, .medical, .education, .social, .other]
     }
 
     var icon: String {
