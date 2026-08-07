@@ -26,6 +26,15 @@ import MapKit
 // ⑪ upcomingMilestonesSection 里程碑日期：從純 .caption2 tertiary 文字升級為
 //    calendar 圖示 + tertiarySystemFill Capsule 徽章，
 //    對齊 OverviewView.recentRow / CareerView v2 日期膠囊設計語言。
+// [2026-08 v3] 補齊大字防截斷缺口：
+// ⑫ calendarHeroCard 頂部 44pt 今日日期大字（Text("\(day)")）原本沒有 lineLimit／
+//    minimumScaleFactor 防截斷保護，是同系列英雄卡 OverviewView／IncomeView／
+//    FinanceOverviewView／FinanceChartView／ChartView／BusinessCardView／AddStockView
+//    等皆已修過、本檔案仍缺的同型缺口——雖然日期數字固定 1～31（最多 2 位數），實務上不會被
+//    裁切，但比照全 App 英雄卡大字一律加防護的規格補齊，維持視覺一致性。補上 .lineLimit(1) +
+//    .minimumScaleFactor(0.6)，對齊卡片內「未來 30 天」KPI 膠囊已有的同型防護。純視覺層
+//    調整，day／month／weekdayStr 等日期計算與行事曆資料邏輯完全未變動。
+//    （下次美化本檔案時：英雄卡大字防截斷已補齊，可轉往其他仍留有待辦的畫面）
 
 /// 我的行事曆：彙整當日家庭紀念日、工作會議與任務、本週快覽、未來里程碑、Apple 行事曆事件。
 struct MyCalendarView: View {
@@ -851,6 +860,8 @@ struct MyCalendarView: View {
                         Text("\(day)")
                             .font(.system(size: 44, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                         VStack(alignment: .leading, spacing: 1) {
                             Text("\(month) 月")
                                 .font(.system(size: 13, weight: .semibold))

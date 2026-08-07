@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.111", build: 864, date: "2026/08/07", notes: [
+            "【美化 v25.111】MyCalendarView.swift「我的行事曆」calendarHeroCard 英雄摘要卡今日日期大字補齊自適應防截斷：頂部 44pt 今日日期大字（Text(\"\\(day)\")）原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同系列英雄卡 OverviewView／IncomeView／FinanceOverviewView／FinanceChartView／ChartView／BusinessCardView／AddStockView 皆已修過、本檔案仍缺的同型缺口——雖然日期數字固定 1～31（最多 2 位數）實務上不會真的被裁切，但比照全 App 英雄卡大字一律加防護的規格補齊，維持視覺一致性，同時對齊卡片內「未來 30 天」KPI 膠囊已有的同型防護。補上 .lineLimit(1) + .minimumScaleFactor(0.6)。純視覺層調整，day／month／weekdayStr 等日期計算與行事曆事件彙整等既有商業邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.110", build: 863, date: "2026/08/07", notes: [
             "【美化 v25.110】AddStockView.swift「新增/編輯股票」quoteHeroCard 即時行情英雄卡股價大字補齊自適應防截斷：頂部 30pt 股價大字（Text(displayPrice...)）原本沒有 lineLimit／minimumScaleFactor 防截斷保護，是同系列英雄卡 OverviewView／IncomeView／FinanceOverviewView／FinanceChartView／ChartView／BusinessCardView 皆已修過、本檔案 amountPreviewCard 損益大字已有防護但這處即時行情大字仍缺的同型缺口——高價股（四位數以上）或窄螢幕時可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，對齊同卡片內其餘文字與全 App 英雄卡大字規格。純視覺層調整，displayPrice／漲跌幅計算等既有商業邏輯完全未變動。",
         ]),
