@@ -45,6 +45,14 @@ import SwiftUI
 //  15. meetingItemOverviewRow / reportRow 切換按鈕：從裸 circle 圖示
 //      升級為 36pt LinearGradient 漸層圓 ZStack，
 //      對齊 taskRow / SubordinateDetailView.weeklyReportSection 視覺規格
+// [2026-08 v4] 承接 v3 遺留缺口，taskRow 圖示圓補齊陰影統一：
+//  16. taskRow 打勾圖示圓（36pt 漸層 Circle）複查後發現是本檔案四個列元件
+//      （leaveRow / meetingRow / reportRow / meetingItemOverviewRow）中唯一
+//      沒有 .shadow(color: accent.opacity(0.18), radius: 5, x: 0, y: 2) 的一個，
+//      補齊後四列圖示圓陰影節奏完全統一。純視覺層調整，toggleTaskCompletion
+//      等既有邏輯完全未變動。
+//   （本檔案四個列元件圖示圓的 fill + stroke + shadow 節奏已全數收斂一致；
+//    下次美化本檔案時可轉往其他仍留有待辦的畫面）
 
 struct SubordinateOverviewView: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -917,6 +925,7 @@ struct SubordinateOverviewView: View {
                             )
                         )
                         .frame(width: 36, height: 36)
+                        .shadow(color: taskAccent.opacity(0.18), radius: 5, x: 0, y: 2)
                     Circle()
                         .stroke(taskAccent.opacity(0.22), lineWidth: 1)
                         .frame(width: 36, height: 36)

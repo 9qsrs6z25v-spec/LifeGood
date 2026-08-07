@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.117", build: 870, date: "2026/08/07", notes: [
+            "【美化 v25.117】SubordinateOverviewView.swift「部屬總覽」taskRow 圖示圓補齊陰影統一：打勾圖示圓（36pt 漸層 Circle）複查後發現是本檔案四個列元件（leaveRow／meetingRow／reportRow／meetingItemOverviewRow）中唯一沒有 shadow(color: accent.opacity(0.18), radius: 5, x: 0, y: 2) 的一個，補齊後四列圖示圓的 fill + stroke + shadow 節奏全數收斂一致。純視覺層調整，toggleTaskCompletion 等既有邏輯完全未變動。",
+        ]),
         ChangelogEntry(version: "25.116", build: 869, date: "2026/08/07", notes: [
             "【美化 v25.116】StockView.swift「股票」allocationMiniBar 持股分配圖例色塊補齊描邊統一：圖例列（前 3 檔）8x8 色塊原本只有 fill、無 stroke，複查全 App 其餘迷你圖例點陣列均無此規格，故延伸本檔案已確立的「fill + stroke」節奏，補上 overlay(RoundedRectangle(cornerRadius: 2).stroke(.white.opacity(0.35), lineWidth: 0.5))，讓色塊在深色底卡上邊界更清晰，與上方彩條描邊質感一致，承接 v25.115 遺留缺口，本檔案英雄卡膠囊與圖例色塊描邊至此全數收斂一致。純視覺層調整，barColors 配色與市值佔比排序等既有邏輯完全未變動。",
         ]),
