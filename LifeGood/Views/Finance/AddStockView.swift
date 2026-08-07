@@ -39,7 +39,16 @@ import SwiftUI
 //      對齊已完成畫面的儲存按鈕載入狀態規格。純視覺層補強，save() 內部守衛判斷與
 //      股票/連結支出/收入寫入邏輯完全未變動。同型 isSaving 守衛仍存在於
 //      AddRealEstateView，可作為下次美化比照補齊的最後一項。
-//      （下次美化本檔案時：儲存按鈕載入狀態已補齊，可轉往其他仍留有待辦的畫面）
+// [2026-08 v5] 補齊大字防截斷缺口：
+//  15. quoteHeroCard 頂部 30pt 股價大字（Text(displayPrice...)）原本沒有 lineLimit／
+//      minimumScaleFactor 防截斷保護，是同系列英雄卡 OverviewView／IncomeView／
+//      FinanceOverviewView／FinanceChartView／ChartView／BusinessCardView 等皆已修過、
+//      本檔案 amountPreviewCard 損益大字有防護但這處即時行情大字仍缺的同型缺口——高價股
+//      （四位數以上）或窄螢幕時可能被系統裁切。補上 .lineLimit(1) + .minimumScaleFactor(0.6)，
+//      對齊同卡片內其餘文字與全 App 英雄卡大字規格。純視覺層調整，displayPrice／漲跌幅計算
+//      等既有商業邏輯完全未變動。
+//      （下次美化本檔案時：儲存按鈕載入狀態、英雄卡大字防截斷皆已補齊，可轉往其他仍留有
+//      待辦的畫面）
 
 // MARK: - 台股報價資料
 
@@ -736,6 +745,8 @@ struct AddStockView: View {
                     Text(displayPrice > 0 ? String(format: "%.2f", displayPrice) : "—")
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                     Text(q.name.isEmpty ? symbol : q.name)
                         .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 8).padding(.vertical, 3)
