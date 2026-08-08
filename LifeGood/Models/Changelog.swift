@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.126", build: 879, date: "2026/08/08", notes: [
+            "【修復】iCloud 同步「0/N 筆在雲端」根因——zone 快取旗標與環境不符：使用者驗證雲端資料得到 0/20 筆、0/5 張且無錯誤訊息，代表查詢成功但雲端資料區是空的。根因：ensureZoneExists 用 UserDefaults 旗標（ck_zone_created）快取「zone 已建立」，但 Xcode 開發版與 TestFlight/App Store 版分別寫入 Development/Production 兩個獨立的 CloudKit 環境——開發版建過 Development zone 後旗標為 true，正式版讀到同一旗標便跳過 Production zone 建立，導致正式環境的每一次推送都因 zoneNotFound 失敗、資料永遠上不了雲。修法三處：① modifyKV 推送失敗若為 zoneNotFound/userDeletedZone → 清掉 zone/訂閱旗標 → 重建 zone 後自動重推一次；② uploadPhoto 同型修法（帶 retryOnZoneMissing 單次重試守衛防循環）；③ 驗證雲端資料（verifyCloudData）逐筆記錄錯誤碼辨識 zoneNotFound，偵測到即自動重設旗標並明確提示「雲端資料區不存在：同步從未在此環境成功寫入，已自動重設，請按立即同步重建後再驗證」。修復後按一次「立即同步」即可重建 zone 並把全部資料/照片重新推上雲端。"
+        ]),
         ChangelogEntry(version: "25.125", build: 878, date: "2026/08/08", notes: [
             "【美化 v25.125】SettingsView.swift「設定」iCloud 同步「驗證雲端資料」按鈕補齊 ProgressView 主題色：v25.123 新增的這顆按鈕（cyan 主題，向 iCloud 伺服器抽查資料是否真的上雲）因需額外顯示驗證結果文字、未走共用 settingsActionRow 輔助函式，是自行刻的 HStack，複製了圖示圓／陰影樣式，卻漏了 v25.96～v25.102 系列才補齊的「busy 狀態 ProgressView 主題色」規格——是本頁 4 處忙碌指示器（完整備份 .tint(.teal)、一鍵壓縮 .tint(.indigo)、settingsActionRow 共用 busy 參數 .tint(color)）中唯一沿用系統預設灰藍色、與自身 cyan 圖示圓／邊框脫色的一處。補上 .tint(.cyan)，四處進度指示器主題色至此全數收斂一致。並在檔案內美化紀錄新增 v12 段落，記下此次收尾與下次可接續查找的位置。純視覺層調整，verifyCloudData() 驗證邏輯與 verifyBusy 忙碌互斥守衛完全未變動。"
         ]),

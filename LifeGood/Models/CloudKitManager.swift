@@ -227,6 +227,21 @@ final class CloudKitManager {
                         self?.queue.asyncAfter(deadline: .now() + 0.5) {
                             self?.modifyKV(key: key, data: data, retriesLeft: retriesLeft - 1, completion: completion)
                         }
+                    } else if let ck = error as? CKError,
+                              ck.code == .zoneNotFound || ck.code == .userDeletedZone,
+                              retriesLeft > 0 {
+                        // zone 不存在（常見於「zone 已建立」快取旗標與目前環境不符：
+                        // 例如 Xcode 開發版建過 Development zone、TestFlight/App Store 版
+                        // 讀到同一個旗標而跳過 Production zone 建立）→ 清旗標重建後重推一次
+                        guard let self else { completion?(false); return }
+                        self.defaults.removeObject(forKey: self.zoneCreatedKey)
+                        self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
+                        self.queue.async {
+                            self.ensureZoneExists { ok in
+                                guard ok else { completion?(false); return }
+                                self.modifyKV(key: key, data: data, retriesLeft: retriesLeft - 1, completion: completion)
+                            }
+                        }
                     } else {
                         self?.report(error, context: "上傳 \(key)")
                         completion?(false)
@@ -240,7 +255,7 @@ final class CloudKitManager {
     // MARK: - 推送照片
 
     /// 上傳指定本地照片檔到 iCloud；若檔案不存在則跳過。
-    func uploadPhoto(directory: String, fileName: String, completion: ((Bool) -> Void)? = nil) {
+    func uploadPhoto(directory: String, fileName: String, retryOnZoneMissing: Bool = true, completion: ((Bool) -> Void)? = nil) {
         guard isAvailable else { completion?(false); return }
         guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             completion?(false); return
@@ -276,8 +291,24 @@ final class CloudKitManager {
                         switch result {
                         case .success: completion?(true)
                         case .failure(let error):
-                            self?.report(error, context: "上傳照片 \(fileName)")
-                            completion?(false)
+                            if let ck = error as? CKError,
+                               ck.code == .zoneNotFound || ck.code == .userDeletedZone,
+                               retryOnZoneMissing,
+                               let self {
+                                // zone 不存在（快取旗標與目前環境不符）→ 清旗標重建後重傳一次
+                                // （同型修法見 modifyKV zoneNotFound 分支）
+                                self.defaults.removeObject(forKey: self.zoneCreatedKey)
+                                self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
+                                self.queue.async {
+                                    self.ensureZoneExists { ok in
+                                        guard ok else { completion?(false); return }
+                                        self.uploadPhoto(directory: directory, fileName: fileName, retryOnZoneMissing: false, completion: completion)
+                                    }
+                                }
+                            } else {
+                                self?.report(error, context: "上傳照片 \(fileName)")
+                                completion?(false)
+                            }
                         }
                     }
                     self.privateDB.add(op)
@@ -691,29 +722,55 @@ final class CloudKitManager {
         var result = CloudVerifyResult()
         result.kvTotal = localKeys.count
         result.photoChecked = photoPathKeys.count
+        var zoneMissing = false
         let lock = NSLock()
 
         let op = CKFetchRecordsOperation(recordIDs: ids)
         op.desiredKeys = ["updatedAt"]   // 只取中繼資料，不下載照片/JSON 內容
         op.qualityOfService = .userInitiated
         op.perRecordResultBlock = { recID, recResult in
-            guard case .success(let record) = recResult else { return }   // 查無此筆＝尚未上雲
             lock.lock(); defer { lock.unlock() }
-            let mod = record.modificationDate
-            if recID.recordName.hasPrefix("kv_") {
-                result.kvFound += 1
-                if let m = mod, m > (result.latestKVDate ?? .distantPast) { result.latestKVDate = m }
-            } else {
-                result.photoFound += 1
-                if let m = mod, m > (result.latestPhotoDate ?? .distantPast) { result.latestPhotoDate = m }
+            switch recResult {
+            case .success(let record):
+                let mod = record.modificationDate
+                if recID.recordName.hasPrefix("kv_") {
+                    result.kvFound += 1
+                    if let m = mod, m > (result.latestKVDate ?? .distantPast) { result.latestKVDate = m }
+                } else {
+                    result.photoFound += 1
+                    if let m = mod, m > (result.latestPhotoDate ?? .distantPast) { result.latestPhotoDate = m }
+                }
+            case .failure(let error):
+                // unknownItem＝查無此筆（尚未上雲，預期情況）；
+                // zoneNotFound＝整個資料區不存在＝同步從未在此環境成功，需特別診斷
+                if let ck = error as? CKError, ck.code == .zoneNotFound || ck.code == .userDeletedZone {
+                    zoneMissing = true
+                }
             }
         }
-        op.fetchRecordsResultBlock = { opResult in
-            // partialFailure（部分記錄不存在）屬預期情況：以 found/total 呈現，不當整體錯誤
-            if case .failure(let error) = opResult, (error as? CKError)?.code != .partialFailure {
-                lock.lock(); result.errorMessage = error.localizedDescription; lock.unlock()
+        op.fetchRecordsResultBlock = { [weak self] opResult in
+            lock.lock()
+            if case .failure(let error) = opResult {
+                if let ck = error as? CKError, ck.code == .zoneNotFound || ck.code == .userDeletedZone {
+                    zoneMissing = true
+                } else if (error as? CKError)?.code != .partialFailure {
+                    // partialFailure（部分記錄不存在）屬預期情況：以 found/total 呈現，不當整體錯誤
+                    result.errorMessage = error.localizedDescription
+                }
             }
-            DispatchQueue.main.async { completion(result) }
+            if zoneMissing {
+                // 雲端資料區不存在＝「zone 已建立」快取旗標與目前環境不符（例如 Xcode 開發版
+                // 建過 Development zone，TestFlight/App Store 版讀同一旗標而跳過 Production
+                // zone 建立）。清掉旗標讓下一次同步重建 zone 並重新推送全部資料。
+                if let self {
+                    self.defaults.removeObject(forKey: self.zoneCreatedKey)
+                    self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
+                }
+                result.errorMessage = "雲端資料區不存在：同步從未在此環境成功寫入。已自動重設，請按「立即同步」重建後再驗證一次。"
+            }
+            let final = result
+            lock.unlock()
+            DispatchQueue.main.async { completion(final) }
         }
         privateDB.add(op)
     }
