@@ -640,6 +640,84 @@ final class CloudKitManager {
         })
     }
 
+    // MARK: - 雲端驗證（設定頁「驗證雲端資料」）
+
+    /// 雲端抽查結果：結構化資料筆數 + 最近照片抽查 + 伺服器端最後修改時間
+    struct CloudVerifyResult {
+        var kvFound = 0                 // 伺服器上找到的 KVBlob 筆數
+        var kvTotal = 0                 // 本機有資料、應該在雲端的 KVBlob 筆數
+        var latestKVDate: Date?         // 伺服器端最新一筆資料的修改時間
+        var photoFound = 0              // 抽查照片中伺服器上找到的張數
+        var photoChecked = 0            // 抽查張數（本機最近 N 張）
+        var latestPhotoDate: Date?      // 伺服器端最新一張照片的修改時間
+        var errorMessage: String?
+    }
+
+    /// 直接向 iCloud 伺服器抽查驗證：本機有資料的 syncKeys 對應 KVBlob 記錄是否存在、
+    /// 本機最近 N 張照片對應的 Photo 記錄是否存在，並回報伺服器端的最後修改時間。
+    /// 只抓記錄中繼資料（不下載 CKAsset 本體），流量極小；完成後回主執行緒。
+    func verifyCloudData(keys: [String], samplePhotoLimit: Int = 5,
+                         completion: @escaping (CloudVerifyResult) -> Void) {
+        guard isAvailable else {
+            completion(CloudVerifyResult(errorMessage: "iCloud 帳號未登入或不可用"))
+            return
+        }
+        // 只驗證本機真的有資料的 key（沒用過的功能本來就不會有雲端記錄）
+        let localKeys = keys.filter { defaults.data(forKey: $0) != nil }
+        var ids: [CKRecord.ID] = localKeys.map { CKRecord.ID(recordName: "kv_\($0)", zoneID: zoneID) }
+
+        // 本機各照片資料夾中最近修改的 N 張，抽查其雲端 Photo 記錄
+        var photoPathKeys: [String] = []
+        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            var candidates: [(path: String, date: Date)] = []
+            for dir in Self.photoDirectories {
+                let dirURL = docs.appendingPathComponent(dir, isDirectory: true)
+                guard let files = try? FileManager.default.contentsOfDirectory(
+                    at: dirURL, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }
+                for f in files where f.pathExtension.lowercased() == "jpg" {
+                    let d = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                    candidates.append(("\(dir)/\(f.lastPathComponent)", d))
+                }
+            }
+            photoPathKeys = candidates.sorted { $0.date > $1.date }.prefix(samplePhotoLimit).map(\.path)
+        }
+        ids.append(contentsOf: photoPathKeys.map { CKRecord.ID(recordName: "photo_\(sanitize($0))", zoneID: zoneID) })
+
+        guard !ids.isEmpty else {
+            completion(CloudVerifyResult(errorMessage: "本機尚無可驗證的資料"))
+            return
+        }
+
+        var result = CloudVerifyResult()
+        result.kvTotal = localKeys.count
+        result.photoChecked = photoPathKeys.count
+        let lock = NSLock()
+
+        let op = CKFetchRecordsOperation(recordIDs: ids)
+        op.desiredKeys = ["updatedAt"]   // 只取中繼資料，不下載照片/JSON 內容
+        op.qualityOfService = .userInitiated
+        op.perRecordResultBlock = { recID, recResult in
+            guard case .success(let record) = recResult else { return }   // 查無此筆＝尚未上雲
+            lock.lock(); defer { lock.unlock() }
+            let mod = record.modificationDate
+            if recID.recordName.hasPrefix("kv_") {
+                result.kvFound += 1
+                if let m = mod, m > (result.latestKVDate ?? .distantPast) { result.latestKVDate = m }
+            } else {
+                result.photoFound += 1
+                if let m = mod, m > (result.latestPhotoDate ?? .distantPast) { result.latestPhotoDate = m }
+            }
+        }
+        op.fetchRecordsResultBlock = { opResult in
+            // partialFailure（部分記錄不存在）屬預期情況：以 found/total 呈現，不當整體錯誤
+            if case .failure(let error) = opResult, (error as? CKError)?.code != .partialFailure {
+                lock.lock(); result.errorMessage = error.localizedDescription; lock.unlock()
+            }
+            DispatchQueue.main.async { completion(result) }
+        }
+        privateDB.add(op)
+    }
+
     private func saveChangeToken(_ token: CKServerChangeToken) {
         if let data = try? NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true) {
             defaults.set(data, forKey: serverChangeTokenKey)

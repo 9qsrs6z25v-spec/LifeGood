@@ -220,6 +220,10 @@ struct SettingsView: View {
     // 一鍵壓縮既有照片：busy 防連點 + 完成結果訊息
     @State private var compressBusy = false
     @State private var compressResultMessage: String?
+    // 驗證雲端資料：busy 防連點 + 抽查結果
+    @State private var verifyBusy = false
+    @State private var verifyResultText: String?
+    @State private var verifyResultIsError = false
     @State private var showBackupRange = false     // 完整備份的時間範圍選擇
     @State private var importResultMessage = ""
     @State private var showImportResult = false
@@ -833,6 +837,54 @@ struct SettingsView: View {
                 )
             }
             .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled)
+
+            // 驗證雲端資料：直接向 iCloud 伺服器抽查（非本機宣稱），
+            // 回報結構化資料筆數、最近照片抽查結果與伺服器端最後上雲時間
+            Button {
+                verifyCloudData()
+            } label: {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.cyan.opacity(0.22), Color.cyan.opacity(0.09)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 36, height: 36)
+                        Circle()
+                            .stroke(Color.cyan.opacity(0.20), lineWidth: 1)
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "checkmark.icloud")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.cyan)
+                    }
+                    .shadow(color: Color.cyan.opacity(0.15), radius: 4, x: 0, y: 2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("驗證雲端資料")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            if verifyBusy { ProgressView().scaleEffect(0.7) }
+                        }
+                        Text("向 iCloud 伺服器抽查，確認資料真的在雲端")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+            }
+            .foregroundStyle(.primary)
+            .disabled(verifyBusy || !cloudSync.isAccountAvailable || !cloudSync.isEnabled)
+
+            if let text = verifyResultText {
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(verifyResultIsError ? .red : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             Button {
                 cloudSync.repromptInitialSync()
@@ -1564,6 +1616,38 @@ struct SettingsView: View {
     // exportJSON／exportCSV／exportSubordinates：與 exportFullBackup 同一模式——只有讀取
     // @Published 屬性組出純 struct 快照這步留在主執行緒（很快），實際 JSON 編碼／CSV 組字串
     // 這種資料量大時會卡 UI 的重運算搬到背景執行緒，寫完檔再跳回主執行緒更新分享項目。
+
+    /// 驗證雲端資料：向 iCloud 伺服器抽查 KVBlob／Photo 記錄是否存在。
+    private func verifyCloudData() {
+        guard !verifyBusy else { return }
+        verifyBusy = true
+        verifyResultText = nil
+        CloudKitManager.shared.verifyCloudData(keys: CloudSyncManager.syncKeys) { result in
+            verifyBusy = false
+            if let err = result.errorMessage {
+                verifyResultIsError = true
+                verifyResultText = "驗證失敗：\(err)"
+                return
+            }
+            verifyResultIsError = false
+            let fmt = DateFormatter()
+            fmt.locale = Locale(identifier: "zh_Hant_TW")
+            fmt.dateFormat = "M/d HH:mm"
+            var lines: [String] = []
+            lines.append("結構化資料：雲端 \(result.kvFound)/\(result.kvTotal) 筆"
+                         + (result.latestKVDate.map { "（最後上雲 \(fmt.string(from: $0))）" } ?? ""))
+            if result.photoChecked > 0 {
+                lines.append("抽查最近照片：雲端 \(result.photoFound)/\(result.photoChecked) 張"
+                             + (result.latestPhotoDate.map { "（最後上雲 \(fmt.string(from: $0))）" } ?? ""))
+            }
+            if result.kvFound < result.kvTotal || result.photoFound < result.photoChecked {
+                lines.append("有項目尚未上雲：請按「立即同步」後再驗證一次。")
+            } else {
+                lines.append("資料已確認在 iCloud 伺服器上。")
+            }
+            verifyResultText = lines.joined(separator: "\n")
+        }
+    }
 
     /// 一鍵壓縮既有照片：IO 密集，移到背景執行緒跑完再回主執行緒更新結果。
     private func recompressStoredPhotos() {

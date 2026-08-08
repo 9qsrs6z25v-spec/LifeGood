@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.123", build: 876, date: "2026/08/08", notes: [
+            "【功能】設定頁 iCloud 同步新增「驗證雲端資料」：回應使用者「怎麼確認資料真的有上到雲端」——既有的「最近同步」時間只是本機宣稱，這個工具直接向 iCloud 伺服器抽查。CloudKitManager 新增 verifyCloudData：① 取本機有資料的 syncKeys，逐一以 CKFetchRecordsOperation 向私有資料庫查詢對應 KVBlob 記錄是否存在；② 掃描本機各照片資料夾取最近修改的 5 張，抽查其雲端 Photo 記錄；③ 只抓記錄中繼資料（desiredKeys 不含 CKAsset），流量極小；④ 回報「結構化資料 雲端 N/M 筆（最後上雲 時間）」「抽查最近照片 雲端 N/M 張（最後上雲 時間）」，全數命中顯示「資料已確認在 iCloud 伺服器上」，有缺漏則提示先按立即同步再驗證；帳號不可用/查詢失敗顯示紅字錯誤。partialFailure（部分記錄不存在）視為預期情況以 N/M 呈現、不當整體錯誤；busy 旗標防連點。從此不需開 CloudKit Console 即可確認上雲狀態。"
+        ]),
         ChangelogEntry(version: "25.122", build: 875, date: "2026/08/08", notes: [
             "【美化 v25.122】MapAlbumSheet.swift「地圖相簿模板」（v25.121 新拆出、旅遊/美食/醫療地圖共用）sectionHeader 區段筆數膠囊補齊描邊統一：區段標題右側筆數 Capsule 原本只有 fill、無 stroke，是同畫面摘要列「N 個地點」膠囊已有 stroke(accent.opacity(0.22), 0.6) 規格之外唯一沒有描邊的膠囊。補上同規格 overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))，統一本模板膠囊「fill + stroke」節奏；模板為新拆出共用元件，一次補齊即同步套用到旅遊/美食/醫療三張地圖的相簿畫面。另在檔案內新增美化紀錄區塊，供下次接續查找。純視覺層調整，sections 分組排序／照片彙整等既有邏輯完全未變動。"
         ]),
