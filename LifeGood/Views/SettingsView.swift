@@ -88,6 +88,14 @@ import UniformTypeIdentifiers
 //      對齊，避免五顆進度指示器裡有兩顆跟圖示脫色。純視覺層調整，
 //      exportJSON()／exportCSV()／exportSubordinates() 等既有匯出邏輯與 exportBusy
 //      互斥鎖完全未變動。
+// [2026-08 v12] 「驗證雲端資料」按鈕補齊 ProgressView 主題色（承接 v11 busy 指示器規格）：
+//  22. v25.123 新增的「驗證雲端資料」列（cyan 主題，抽查 iCloud 伺服器確認資料真的上雲）
+//      因未走共用 settingsActionRow（需額外顯示 verifyResultText 結果列），是自行刻的
+//      HStack，複製了圖示圓／陰影樣式，卻漏了 v11 才補齊的 ProgressView 主題色規格——
+//      是本檔案 4 處 busy ProgressView（backupBusy/.tint(.teal)、compressBusy/.tint(.indigo)、
+//      settingsActionRow busy 參數/.tint(color)）中唯一沿用系統預設灰藍色、與自身 cyan
+//      圖示圓／邊框脫色的一處。補上 .tint(.cyan)，四處進度指示器主題色至此全數對齊。
+//      純視覺層調整，verifyCloudData()／verifyBusy 忙碌守衛等既有驗證邏輯完全未變動。
 //      （下次美化本檔案時：可轉往其他仍留有待辦的畫面）
 
 // MARK: - Share Sheet (UIKit bridge)
@@ -867,7 +875,7 @@ struct SettingsView: View {
                             Text("驗證雲端資料")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.primary)
-                            if verifyBusy { ProgressView().scaleEffect(0.7) }
+                            if verifyBusy { ProgressView().scaleEffect(0.7).tint(.cyan) }
                         }
                         Text("向 iCloud 伺服器抽查，確認資料真的在雲端")
                             .font(.caption)

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.125", build: 878, date: "2026/08/08", notes: [
+            "【美化 v25.125】SettingsView.swift「設定」iCloud 同步「驗證雲端資料」按鈕補齊 ProgressView 主題色：v25.123 新增的這顆按鈕（cyan 主題，向 iCloud 伺服器抽查資料是否真的上雲）因需額外顯示驗證結果文字、未走共用 settingsActionRow 輔助函式，是自行刻的 HStack，複製了圖示圓／陰影樣式，卻漏了 v25.96～v25.102 系列才補齊的「busy 狀態 ProgressView 主題色」規格——是本頁 4 處忙碌指示器（完整備份 .tint(.teal)、一鍵壓縮 .tint(.indigo)、settingsActionRow 共用 busy 參數 .tint(color)）中唯一沿用系統預設灰藍色、與自身 cyan 圖示圓／邊框脫色的一處。補上 .tint(.cyan)，四處進度指示器主題色至此全數收斂一致。並在檔案內美化紀錄新增 v12 段落，記下此次收尾與下次可接續查找的位置。純視覺層調整，verifyCloudData() 驗證邏輯與 verifyBusy 忙碌互斥守衛完全未變動。"
+        ]),
         ChangelogEntry(version: "25.124", build: 877, date: "2026/08/08", notes: [
             "【美化 v25.124】RealEstateView.swift「房地產」toolbar sort menu 圖示補齊 filled 樣式：頂部工具列 sort menu 圖示「arrow.up.arrow.down.circle」與緊鄰的新增鈕「plus.circle.fill」同為 .title3 + 紫色，卻一個是外框、一個是填色，並排時粗細不一致，是 v25.113 補齊本卡片明細標籤描邊統一後留下的待辦。改為 arrow.up.arrow.down.circle.fill，與新增鈕視覺份量一致，並經複查確認 estateCard 底部月租/月貸/已付列為 10pt caption2 行內小圖示、非清單列大圖示規格，加背景圓反而過重而不採用。純視覺層調整，排序邏輯／新增流程等既有功能完全未變動。"
         ]),
