@@ -197,10 +197,18 @@ struct SubordinateOverviewView: View {
 
 
     var body: some View {
-        // body 單次計算，傳入各子區塊，避免 summaryHeroCard 與各 section 各自重複 flatMap+filter+sort
-        let leaves   = todayLeaves
-        let meetings = todayMeetings
-        let tasks    = incompleteTasks
+        // body 單次計算，傳入各子區塊，避免各 section 各自重複 flatMap+filter+sort
+        // （v25.118 補齊 reports／dayTasks／meetingItems／completedEntries 四項遺漏的同型快取，
+        //  原本 reportSection／taskSection／meetingItemsCard 各自獨立呼叫 displayedReports／
+        //  todayTasks／incompleteMeetingItems／overviewCompletedEntries，每次 body 重繪都各多跑一次
+        //  O(subordinates × records) 全量掃描）
+        let leaves    = todayLeaves
+        let meetings  = todayMeetings
+        let tasks     = incompleteTasks
+        let reports   = displayedReports
+        let dayTasks  = todayTasks
+        let meetingItems = incompleteMeetingItems
+        let completedEntries = overviewCompletedEntries
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
@@ -218,7 +226,7 @@ struct SubordinateOverviewView: View {
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.05), value: sectionAppeared)
 
-                    reportSection
+                    reportSection(reports)
                         .opacity(sectionAppeared ? 1 : 0)
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.11), value: sectionAppeared)
@@ -228,7 +236,8 @@ struct SubordinateOverviewView: View {
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.15), value: sectionAppeared)
 
-                    taskSection(incompleteTasks: tasks)
+                    taskSection(incompleteTasks: tasks, todayTasks: dayTasks,
+                                meetingItems: meetingItems, completedEntries: completedEntries)
                         .opacity(sectionAppeared ? 1 : 0)
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.19), value: sectionAppeared)
@@ -436,9 +445,9 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 報告彙整
 
-    private var reportSection: some View {
+    private func reportSection(_ reports: [(sub: Subordinate, report: WeeklyReport, status: ReportStatus)]) -> some View {
         // 已完成移至底部「已完成」收合區，這裡只顯示未完成（逾期/本週/待辦）
-        let rows = displayedReports.filter { $0.status != .done }
+        let rows = reports.filter { $0.status != .done }
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("報告（本週 / 待辦）", icon: "doc.text.fill", color: .purple, count: rows.count)
 
@@ -589,21 +598,24 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 任務
 
-    private func taskSection(incompleteTasks tasks: [(sub: Subordinate, task: SubordinateTask)]) -> some View {
+    private func taskSection(incompleteTasks tasks: [(sub: Subordinate, task: SubordinateTask)],
+                              todayTasks: [(sub: Subordinate, task: SubordinateTask)],
+                              meetingItems: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)],
+                              completedEntries: [CompletedEntry]) -> some View {
         VStack(spacing: 16) {
             // 當日任務（選取日期、未完成）
             taskGroupCard(title: "當日任務", icon: "checklist", color: .cyan,
                           items: todayTasks, emptyText: "當日無任務")
 
             // 未完成會議條目（跨所有部屬 / 會議的未完成議程項目）
-            meetingItemsCard
+            meetingItemsCard(meetingItems)
 
             // 未完成任務（跨所有日期 / 部屬的待辦總清單，逾期排最前）
             taskGroupCard(title: "未完成任務", icon: "tray.full.fill", color: .orange,
                           items: tasks, emptyText: "沒有未完成任務")
 
             // 已完成（報告 / 會議項目 / 任務，可收合；無已完成時不顯示）
-            CompletedCollapsibleCard(entries: overviewCompletedEntries, expanded: $showCompleted)
+            CompletedCollapsibleCard(entries: completedEntries, expanded: $showCompleted)
         }
         .padding(.horizontal)
     }
@@ -636,9 +648,8 @@ struct SubordinateOverviewView: View {
     }
 
     /// 未完成會議條目卡
-    private var meetingItemsCard: some View {
-        let items = incompleteMeetingItems
-        return cardWrap {
+    private func meetingItemsCard(_ items: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)]) -> some View {
+        cardWrap {
             VStack(alignment: .leading, spacing: 0) {
                 sectionHeader("未完成會議條目", icon: "person.3.sequence.fill", color: .indigo,
                               count: items.count)

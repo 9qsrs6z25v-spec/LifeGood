@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.118", build: 871, date: "2026/08/08", notes: [
+            "【靜態除錯 v25.118】派 3 個 Explore agent 分工複查全部 86 個 Swift 檔（強制解包／Optional／型別錯誤、index 越界、retain cycle、競態條件、畫面閃爍、CloudKit 節流、O(n²)／重複 I/O 效能瓶頸），實際修復 1 處問題：SubordinateOverviewView.body 頂層原本只把 leaves／meetings／tasks 算一次傳給各 section（註解宣稱避免重複 flatMap+filter+sort），但 reportSection／taskSection 內的 meetingItemsCard／CompletedCollapsibleCard 仍各自獨立呼叫 displayedReports／todayTasks／incompleteMeetingItems／overviewCompletedEntries 四個未納入快取的計算屬性，導致切換日期、展開「已完成」、hero 進場動畫等任何觸發 body 重繪的操作，都會多跑 4 次 O(subordinates×報告/會議/任務筆數) 全量 flatMap+sort 掃描與已完成清單的三層巢狀迴圈。修法：在 body 頂層比照既有規格補算 reports／dayTasks／meetingItems／completedEntries 四個值，reportSection／taskSection／meetingItemsCard 改為接收參數而非各自呼叫計算屬性，body 每次求值全程各只跑一次。其餘已複查確認正常，未變動：強制解包／try!／as!／未防護陣列越界維持 0 筆；CloudSyncManager 30 秒節流＋2 秒防抖＋isSyncing 並行守衛、CloudKitManager NSLock／isFetching 重入守衛、Timer／NotificationCenter／CloudKit 完成回呼 [weak self] 覆蓋（含巢狀 completion 重新弱引用）、EInvoiceSyncManager／AppleCalendarBridge／SpeechRecognizer 的 @MainActor 隔離等既有防護機制均正常運作。",
+        ]),
         ChangelogEntry(version: "25.117", build: 870, date: "2026/08/07", notes: [
             "【美化 v25.117】SubordinateOverviewView.swift「部屬總覽」taskRow 圖示圓補齊陰影統一：打勾圖示圓（36pt 漸層 Circle）複查後發現是本檔案四個列元件（leaveRow／meetingRow／reportRow／meetingItemOverviewRow）中唯一沒有 shadow(color: accent.opacity(0.18), radius: 5, x: 0, y: 2) 的一個，補齊後四列圖示圓的 fill + stroke + shadow 節奏全數收斂一致。純視覺層調整，toggleTaskCompletion 等既有邏輯完全未變動。",
         ]),
