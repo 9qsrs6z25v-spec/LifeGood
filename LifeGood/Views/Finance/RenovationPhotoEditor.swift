@@ -84,7 +84,12 @@ struct MultiShotCameraPicker: UIViewControllerRepresentable {
         return picker
     }
 
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
+        // 保險：overlay 尺寸跟緊 picker 實際邊界（不同機型/呈現方式下與 UIScreen bounds 可能有落差）
+        if let overlay = uiViewController.cameraOverlayView, overlay.frame != uiViewController.view.bounds {
+            overlay.frame = uiViewController.view.bounds
+        }
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 

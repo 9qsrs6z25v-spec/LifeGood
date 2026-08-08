@@ -109,7 +109,10 @@ struct MultiPhotoGallery: View {
                 }
             }
         }
-        .sheet(isPresented: $showCamera) {
+        // 連拍相機改用 .fullScreenCover：先前用 .sheet 在 iPhone 上是「卡片式」呈現，
+        // 實際可視高度比整個螢幕矮一截，但 overlay 以全螢幕高度排版，快門/完成鈕
+        // 底部超出卡片可視範圍被切掉一半（使用者截圖回報）。相機介面本應全螢幕。
+        .fullScreenCover(isPresented: $showCamera) {
             // 連拍相機：拍一張存一張（onSaveImage → 各模型 savePhoto → ImageCompressor 壓縮
             // → PhotoCloudSync 上傳），按「完成」才離開，可一次連拍多張收據/照片。
             // JPEG 編碼＋ImageCompressor 二次解碼壓縮＋磁碟寫入原本直接同步跑在
