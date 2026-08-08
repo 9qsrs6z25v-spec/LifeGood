@@ -33,8 +33,15 @@ import SwiftUI
 //      Section header 已售出計數膠囊（stroke 0.22）視覺節奏不一致，深色模式下尤其顯扁平；
 //      三者補上對應色 overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))，
 //      統一全卡膠囊「fill + stroke」規格。純視覺層調整，未動貸款/價金/支出金額計算邏輯。
-//   （下次美化本檔案時，可檢視 estateCard 底部月租/月貸/已付列是否也要補上圖示背景圓，
-//    或往 sort menu 圖示風格（.circle → .circle.fill）方向對齊全 App 慣例）
+// [2026-08-v6] 承接 v5 遺留缺口，toolbar sort menu 圖示補齊 filled 樣式：
+//  12. toolbar HStack 內 sort menu「arrow.up.arrow.down.circle」與緊鄰的新增鈕
+//      「plus.circle.fill」同為 .title3 + .purple，卻一個是外框、一個是填色，並排時
+//      粗細不一致；全 App 其餘同類主要工具列按鈕（VehicleView／StockView 的
+//      plus.circle.fill 等）一律使用 filled 樣式。改為 arrow.up.arrow.down.circle.fill，
+//      與新增鈕視覺份量一致。（估 estateCard 底部月租/月貸/已付列圖示為 10pt caption2
+//      行內小圖示，非清單列大圖示規格，加背景圓反而過重，評估後不採用，維持現狀。）
+//      純視覺層調整，排序邏輯／新增流程等既有功能完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 enum RealEstateSortOption: String, CaseIterable, Identifiable {
     case purchasePrice = "購入價格"
@@ -224,7 +231,7 @@ struct RealEstateView: View {
                                 }
                             }
                         } label: {
-                            Image(systemName: "arrow.up.arrow.down.circle")
+                            Image(systemName: "arrow.up.arrow.down.circle.fill")
                                 .font(.title3).foregroundStyle(.purple)
                         }
 

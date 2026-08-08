@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.124", build: 877, date: "2026/08/08", notes: [
+            "【美化 v25.124】RealEstateView.swift「房地產」toolbar sort menu 圖示補齊 filled 樣式：頂部工具列 sort menu 圖示「arrow.up.arrow.down.circle」與緊鄰的新增鈕「plus.circle.fill」同為 .title3 + 紫色，卻一個是外框、一個是填色，並排時粗細不一致，是 v25.113 補齊本卡片明細標籤描邊統一後留下的待辦。改為 arrow.up.arrow.down.circle.fill，與新增鈕視覺份量一致，並經複查確認 estateCard 底部月租/月貸/已付列為 10pt caption2 行內小圖示、非清單列大圖示規格，加背景圓反而過重而不採用。純視覺層調整，排序邏輯／新增流程等既有功能完全未變動。"
+        ]),
         ChangelogEntry(version: "25.123", build: 876, date: "2026/08/08", notes: [
             "【功能】設定頁 iCloud 同步新增「驗證雲端資料」：回應使用者「怎麼確認資料真的有上到雲端」——既有的「最近同步」時間只是本機宣稱，這個工具直接向 iCloud 伺服器抽查。CloudKitManager 新增 verifyCloudData：① 取本機有資料的 syncKeys，逐一以 CKFetchRecordsOperation 向私有資料庫查詢對應 KVBlob 記錄是否存在；② 掃描本機各照片資料夾取最近修改的 5 張，抽查其雲端 Photo 記錄；③ 只抓記錄中繼資料（desiredKeys 不含 CKAsset），流量極小；④ 回報「結構化資料 雲端 N/M 筆（最後上雲 時間）」「抽查最近照片 雲端 N/M 張（最後上雲 時間）」，全數命中顯示「資料已確認在 iCloud 伺服器上」，有缺漏則提示先按立即同步再驗證；帳號不可用/查詢失敗顯示紅字錯誤。partialFailure（部分記錄不存在）視為預期情況以 N/M 呈現、不當整體錯誤；busy 旗標防連點。從此不需開 CloudKit Console 即可確認上雲狀態。"
         ]),
