@@ -82,7 +82,9 @@ final class CloudSyncManager: ObservableObject {
     // 防抖：2 秒內多次 pushAll() 合併為一次
     private var pushDebounceTimer: Timer?
     // 防止並行 sync：syncNow + onChange(scenePhase) 同時觸發時只執行一次
-    private var isSyncing = false
+    // 改為 @Published：讓設定頁「立即同步」按鈕能顯示同步中轉圈（先前是私有變數，
+    // 按下去毫無視覺回饋，使用者回報「不太有按鈕感覺」）
+    @Published private(set) var isSyncing = false
 
     @Published private(set) var isAccountAvailable: Bool = false
     @Published private(set) var lastSyncDate: Date?
@@ -361,6 +363,9 @@ final class CloudSyncManager: ObservableObject {
             self.updateAccountStatus(status)
             guard status == .available, self.isEnabled else {
                 // refreshAccountStatus 已確保回到主執行緒
+                if self.isEnabled {
+                    self.setSyncError("iCloud 帳號不可用，同步中止。請到 設定 → Apple ID → iCloud 確認已登入並開啟 LifeGood。")
+                }
                 self.isSyncing = false
                 return
             }
@@ -370,6 +375,7 @@ final class CloudSyncManager: ObservableObject {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     guard ok else {
+                        self.setSyncError("iCloud 初始化失敗（建立資料區/拉取變更），請稍後再試。")
                         self.isSyncing = false
                         return
                     }
@@ -377,6 +383,7 @@ final class CloudSyncManager: ObservableObject {
                         // fetchChanges completion 已保證在主執行緒執行，直接重置旗標
                         // 拉取失敗時不推送：避免以過期本地資料覆蓋雲端（潛在資料遺失）
                         guard ok else {
+                            self?.setSyncError("拉取雲端變更失敗，本次未推送（避免以過期資料覆蓋雲端）。")
                             self?.isSyncing = false
                             return
                         }
@@ -386,6 +393,7 @@ final class CloudSyncManager: ObservableObject {
                             CloudKitManager.shared.uploadAllLocalPhotos {
                                 self?.isSyncing = false
                                 if pushOK { self?.markSynced() }
+                                else { self?.setSyncError("部分資料推送失敗，請稍後再按一次「立即同步」。") }
                             }
                         }
                     }
@@ -428,6 +436,13 @@ final class CloudSyncManager: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    /// 同步中止/失敗時把原因寫進 lastErrorMessage（設定頁「同步錯誤」列會顯示），
+    /// 取代先前 guard 直接 return 的靜默失敗——按了立即同步卻毫無動靜、無從診斷。
+    private func setSyncError(_ message: String) {
+        if Thread.isMainThread { lastErrorMessage = message }
+        else { DispatchQueue.main.async { self.lastErrorMessage = message } }
+    }
 
     private func markSynced() {
         let now = Date()

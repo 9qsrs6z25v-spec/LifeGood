@@ -837,14 +837,41 @@ struct SettingsView: View {
             Button {
                 cloudSync.syncNow()
             } label: {
-                settingsActionRow(
-                    icon: "arrow.clockwise.icloud",
-                    color: cloudSync.isAccountAvailable && cloudSync.isEnabled ? .blue : .secondary,
-                    title: "立即同步",
-                    subtitle: "手動觸發 iCloud 資料同步"
-                )
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.blue.opacity(0.22), Color.blue.opacity(0.09)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 36, height: 36)
+                        Circle()
+                            .stroke(Color.blue.opacity(0.20), lineWidth: 1)
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "arrow.clockwise.icloud")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(cloudSync.isAccountAvailable && cloudSync.isEnabled ? Color.blue : Color.secondary)
+                    }
+                    .shadow(color: Color.blue.opacity(0.15), radius: 4, x: 0, y: 2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(cloudSync.isSyncing ? "同步中…" : "立即同步")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            if cloudSync.isSyncing { ProgressView().scaleEffect(0.7) }
+                        }
+                        Text(cloudSync.isSyncing ? "正在推送資料與照片到 iCloud" : "手動觸發 iCloud 資料同步")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
             }
-            .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled)
+            .foregroundStyle(.primary)
+            .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled || cloudSync.isSyncing)
 
             // 驗證雲端資料：直接向 iCloud 伺服器抽查（非本機宣稱），
             // 回報結構化資料筆數、最近照片抽查結果與伺服器端最後上雲時間

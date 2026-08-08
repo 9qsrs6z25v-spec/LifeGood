@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.127", build: 880, date: "2026/08/08", notes: [
+            "【修復＋美化】「立即同步」看得見、失敗說得出（承接 v25.126 雲端 0/N 診斷）：使用者回報按立即同步「不太有按鈕感覺」且驗證結果依舊 0/N、最近同步時間停在前一天——根因是同步流程的多條失敗路徑都是 guard 直接 return 的靜默失敗（帳號狀態不可用/初始化失敗/拉取失敗/推送失敗都不留任何訊息），isSyncing 又是私有變數 UI 看不到，按了毫無動靜也無從診斷。修法：① CloudSyncManager.isSyncing 改為 @Published，設定頁「立即同步」按鈕同步中顯示「同步中…」＋轉圈、副標改「正在推送資料與照片到 iCloud」、期間停用防連點；② 新增 setSyncError：四條靜默失敗路徑（帳號不可用/初始化失敗/拉取失敗不推送/部分推送失敗）都寫入 lastErrorMessage，設定頁「同步錯誤」列即時顯示中止原因與建議動作；③ 立即同步列升級為 36pt 漸層圖示圓卡片列（對齊驗證雲端資料/一鍵壓縮列規格）。從此按下立即同步：有轉圈＝在跑、最近同步更新＝成功、同步錯誤列＝失敗原因，三種結果都看得見。"
+        ]),
         ChangelogEntry(version: "25.126", build: 879, date: "2026/08/08", notes: [
             "【修復】iCloud 同步「0/N 筆在雲端」根因——zone 快取旗標與環境不符：使用者驗證雲端資料得到 0/20 筆、0/5 張且無錯誤訊息，代表查詢成功但雲端資料區是空的。根因：ensureZoneExists 用 UserDefaults 旗標（ck_zone_created）快取「zone 已建立」，但 Xcode 開發版與 TestFlight/App Store 版分別寫入 Development/Production 兩個獨立的 CloudKit 環境——開發版建過 Development zone 後旗標為 true，正式版讀到同一旗標便跳過 Production zone 建立，導致正式環境的每一次推送都因 zoneNotFound 失敗、資料永遠上不了雲。修法三處：① modifyKV 推送失敗若為 zoneNotFound/userDeletedZone → 清掉 zone/訂閱旗標 → 重建 zone 後自動重推一次；② uploadPhoto 同型修法（帶 retryOnZoneMissing 單次重試守衛防循環）；③ 驗證雲端資料（verifyCloudData）逐筆記錄錯誤碼辨識 zoneNotFound，偵測到即自動重設旗標並明確提示「雲端資料區不存在：同步從未在此環境成功寫入，已自動重設，請按立即同步重建後再驗證」。修復後按一次「立即同步」即可重建 zone 並把全部資料/照片重新推上雲端。"
         ]),
