@@ -177,6 +177,7 @@ struct FoodMapView: View {
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var hasCenteredInitially = false
     @State private var showListSheet = false
+    @State private var showAlbumSheet = false
     @State private var photoOnly = false
     @State private var emptyIconPulse = false
     @State private var emptyIconPulseTask: Task<Void, Never>?
@@ -218,6 +219,24 @@ struct FoodMapView: View {
             }
             .sheet(isPresented: $showListSheet) {
                 listSheet(aggs)
+            }
+            .sheet(isPresented: $showAlbumSheet) {
+                // [模板化] 共用 MapAlbumSheet（與旅遊/醫療地圖同款）：彙整所有餐廳照片，
+                // 支援依地點/依月份分組切換
+                MapAlbumSheet(
+                    title: "美食相簿",
+                    accent: Color(red: 1.00, green: 0.55, blue: 0.18),
+                    emptyTitle: "還沒有美食照片",
+                    emptyHint: "在「飲食」變動支出記錄時附上照片，\n這裡就會集結成相簿。",
+                    items: aggs.flatMap { agg in
+                        agg.visits.flatMap { v in
+                            v.photoFileNames.map {
+                                AlbumPhotoItem(id: $0, url: Expense.photoURL(for: $0),
+                                               group: agg.name, date: v.date)
+                            }
+                        }
+                    }
+                )
             }
         }
     }
@@ -314,6 +333,23 @@ struct FoodMapView: View {
                 .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
             }
             .buttonStyle(.plain)
+
+            // 美食相簿（對齊 TravelMapView.bottomOverlay 旅遊相簿按鈕）
+            Button {
+                showAlbumSheet = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "photo.stack")
+                    Text("美食相簿")
+                        .font(.caption.weight(.semibold))
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 8)
 
             Spacer()
 

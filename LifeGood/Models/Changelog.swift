@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.121", build: 874, date: "2026/08/08", notes: [
+            "【功能】相簿模板化＋美食/醫療地圖比照旅遊相簿：把旅遊地圖的旅遊相簿重新規劃為共用模板 MapAlbumSheet（新檔案 MapAlbumSheet.swift），三張地圖共用同一套相簿介面，並在模板層強化功能——① 摘要列：共 N 張照片・M 個地點；② 分組切換（segmented）：依地點（地點依最新照片日期排序、區段標題帶主題色側條與張數膠囊）／依月份（yyyy 年 M 月，新到舊）／全部（時間新到舊）；③ 格狀縮圖（adaptive 104pt）點開進 PhotoLightbox 全螢幕檢視（含 v25.65 檔名/解析度/檔案大小資訊列）；④ 空狀態：主題色雙層脈衝光環＋各頁自訂文案；主題色/標題/文案由呼叫端配置。接入：旅遊地圖改用模板（娛樂紫，照片彙整邏輯不變，移除舊 TravelAlbumSheet 約 130 行重複程式碼）；美食地圖底部新增「美食相簿」按鈕（橘，彙整所有餐廳照片）；醫療地圖工具列新增「醫療相簿」按鈕（藍綠，彙整就醫地點照片如收據/診斷單）。之後任何頁面要加相簿只需組出 [AlbumPhotoItem]（照片 URL＋地點＋日期）呼叫模板即可。"
+        ]),
         ChangelogEntry(version: "25.120", build: 873, date: "2026/08/08", notes: [
             "【修復】連拍相機按鈕被切半的真正根因（承接 v25.107）：上一版把控制列錨定 safe area 後使用者回報依舊被切。從截圖頂部的圓角卡片邊找到真正原因——連拍相機是用 .sheet 開啟，iPhone 上 sheet 以「卡片式」呈現，實際可視高度比整個螢幕矮一截，但相機 overlay 以 UIScreen 全螢幕高度排版，底部控制列（快門/完成）整段落在卡片可視範圍之外，safe area 錨定也救不回來。修法：① MultiPhotoGallery 的連拍相機改用 .fullScreenCover 全螢幕呈現（相機介面本應全螢幕，Apple 慣例亦同），overlay 高度與實際畫面一致，快門/已拍張數/完成鈕完整可見；② MultiShotCameraPicker.updateUIViewController 補上保險——overlay frame 若與 picker.view.bounds 不一致即同步修正，杜絕未來任何呈現方式下的尺寸落差。v25.107 的 safe area 錨定與預覽置中調整保留（全螢幕下正確發揮作用）。連拍流程行為不變。"
         ]),

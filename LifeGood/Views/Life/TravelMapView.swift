@@ -168,7 +168,24 @@ struct TravelMapView: View {
                     .environmentObject(expenseStore)
             }
             .sheet(isPresented: $showListSheet) { listSheet(spots) }
-            .sheet(isPresented: $showAlbumSheet) { TravelAlbumSheet(spots: spots) }
+            .sheet(isPresented: $showAlbumSheet) {
+                // [模板化] 改用共用 MapAlbumSheet（旅遊/美食/醫療三地圖共用），
+                // 新增依地點/依月份分組切換與摘要列；照片彙整邏輯不變
+                MapAlbumSheet(
+                    title: "旅遊相簿",
+                    accent: accent,
+                    emptyTitle: "還沒有旅遊照片",
+                    emptyHint: "在「娛樂」變動支出記錄時附上照片，\n這裡就會集結成相簿。",
+                    items: spots.flatMap { spot in
+                        spot.visits.flatMap { v in
+                            v.photoFileNames.map {
+                                AlbumPhotoItem(id: $0, url: Expense.photoURL(for: $0),
+                                               group: spot.name, date: v.date)
+                            }
+                        }
+                    }
+                )
+            }
         }
     }
 
@@ -966,111 +983,7 @@ struct TravelSpotDetailSheet: View {
     }
 }
 
-// MARK: - 旅遊相簿 Sheet（彙整所有地點照片）
-
-struct TravelAlbumSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let spots: [TravelSpotAggregate]
-
-    @State private var viewingPhotoURL: IdentifiableURL?
-    @State private var emptyIconPulse = false
-    @State private var emptyIconPulseTask: Task<Void, Never>?
-    private let accent = Color(red: 0.68, green: 0.40, blue: 1.00)   // 娛樂紫，對齊本頁地圖 accent
-
-    /// (地點名稱, 照片檔名) 依地點展開
-    private var entries: [(spot: String, name: String)] {
-        spots.flatMap { spot in spot.photoNames.map { (spot: spot.name, name: $0) } }
-    }
-
-    private let columns = [GridItem(.adaptive(minimum: 104), spacing: 8)]
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if entries.isEmpty {
-                    albumEmptyState
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: 8) {
-                            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-                                let url = Expense.photoURL(for: entry.name)
-                                Button { viewingPhotoURL = IdentifiableURL(url: url) } label: {
-                                    photoThumb(url: url, width: 104, height: 104)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(12)
-                    }
-                }
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("旅遊相簿")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
-            }
-            .sheet(item: $viewingPhotoURL) { wrapper in PhotoLightbox(url: wrapper.url) }
-        }
-    }
-
-    // MARK: - 空狀態（雙層脈衝光環 + 漸層底圓，對齊 emptyOverlay／FoodMapView 既有規格）
-
-    private var albumEmptyState: some View {
-        VStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.25), lineWidth: 1.5)
-                    .frame(width: 100, height: 100)
-                    .scaleEffect(emptyIconPulse ? 1.35 : 1.0)
-                    .animation(.easeOut(duration: 2.0).repeatForever(autoreverses: false), value: emptyIconPulse)
-                Circle()
-                    .stroke(accent.opacity(emptyIconPulse ? 0 : 0.13), lineWidth: 1)
-                    .frame(width: 100, height: 100)
-                    .scaleEffect(emptyIconPulse ? 1.60 : 1.0)
-                    .animation(.easeOut(duration: 2.0).delay(0.3).repeatForever(autoreverses: false), value: emptyIconPulse)
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [accent.opacity(0.85), accent.opacity(0.50)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 60, height: 60)
-                    .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.75))
-                Image(systemName: "photo.on.rectangle.angled")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .onAppear {
-                emptyIconPulseTask?.cancel()
-                emptyIconPulse = false
-                emptyIconPulseTask = Task {
-                    try? await Task.sleep(nanoseconds: 300_000_000)
-                    guard !Task.isCancelled else { return }
-                    emptyIconPulse = true
-                }
-            }
-            .onDisappear {
-                emptyIconPulseTask?.cancel()
-                emptyIconPulse = false
-            }
-
-            Text("還沒有旅遊照片")
-                .font(.headline)
-            Text("在「娛樂」變動支出記錄時附上照片，\n這裡就會集結成相簿。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(.vertical, 28)
-        .padding(.horizontal, 24)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.14), radius: 14, y: 4)
-        .padding(.horizontal, 40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
+// MARK: -（旅遊相簿已模板化為共用 MapAlbumSheet，見 MapAlbumSheet.swift）
 
 // MARK: - 共用縮圖
 

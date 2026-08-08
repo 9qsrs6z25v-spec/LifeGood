@@ -102,6 +102,7 @@ struct MedicalMapView: View {
     private let accent = Color.teal
 
     @State private var showEditProfile = false
+    @State private var showAlbumSheet = false
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var selectedPlace: MedicalPlaceAggregate?
 
@@ -154,10 +155,32 @@ struct MedicalMapView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showEditProfile = true } label: {
-                        Label("健康檔案", systemImage: "square.and.pencil")
+                    HStack(spacing: 12) {
+                        // 醫療相簿（共用 MapAlbumSheet 模板，與旅遊/美食地圖同款）
+                        Button { showAlbumSheet = true } label: {
+                            Label("醫療相簿", systemImage: "photo.stack")
+                        }
+                        Button { showEditProfile = true } label: {
+                            Label("健康檔案", systemImage: "square.and.pencil")
+                        }
                     }
                 }
+            }
+            .sheet(isPresented: $showAlbumSheet) {
+                MapAlbumSheet(
+                    title: "醫療相簿",
+                    accent: accent,
+                    emptyTitle: "還沒有醫療照片",
+                    emptyHint: "在「醫療」變動支出記錄時附上照片（如收據、診斷單），\n這裡就會集結成相簿。",
+                    items: places.flatMap { place in
+                        place.visits.flatMap { v in
+                            v.photoFileNames.map {
+                                AlbumPhotoItem(id: $0, url: Expense.photoURL(for: $0),
+                                               group: place.name, date: v.date)
+                            }
+                        }
+                    }
+                )
             }
             .sheet(isPresented: $showEditProfile) {
                 HealthProfileEditView(profile: health).environmentObject(lifeStore)
