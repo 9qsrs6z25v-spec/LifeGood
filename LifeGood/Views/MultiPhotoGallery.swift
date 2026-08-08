@@ -304,11 +304,7 @@ struct AsyncThumbnailView: View {
             // （上一張圖已快取）時會誤判為已載入而直接 return，導致换照片後畫面
             // 停留在舊圖；改成每次 url 改變都清空重讀。
             image = nil
-            let path = url.path
-            let loaded = await Task.detached(priority: .userInitiated) {
-                UIImage(contentsOfFile: path)
-            }.value
-            image = loaded
+            image = await ThumbnailCache.shared.thumbnail(for: url, maxPixel: thumbnailMaxPixel)
         }
         // CloudSyncManager 拉到照片變更時發送 cloudSyncPhotosDidUpdate：若本畫面此刻仍停在
         // 「載入中」佔位（image 為 nil，代表 .task(id: url) 觸發時檔案尚未同步到本機），
@@ -316,14 +312,17 @@ struct AsyncThumbnailView: View {
         // 這個 View 實例。收到通知時補一次重讀，讓已落地的照片不必等重新整個畫面才顯示。
         .onReceive(NotificationCenter.default.publisher(for: .cloudSyncPhotosDidUpdate)) { _ in
             guard image == nil else { return }
-            let path = url.path
             Task {
-                let loaded = await Task.detached(priority: .userInitiated) {
-                    UIImage(contentsOfFile: path)
-                }.value
+                let loaded = await ThumbnailCache.shared.thumbnail(for: url, maxPixel: thumbnailMaxPixel)
                 if loaded != nil { image = loaded }
             }
         }
+    }
+
+    // 縮圖只會以 size（點）大小顯示，用 ImageIO 降採樣到「顯示尺寸 × 螢幕縮放係數」即可，
+    // 不必解碼 ImageCompressor 儲存的原始全解析度（最長邊可達 1920px）大圖，減少記憶體與 CPU。
+    private var thumbnailMaxPixel: CGFloat {
+        max(size.width, size.height) * UIScreen.main.scale
     }
 }
 
