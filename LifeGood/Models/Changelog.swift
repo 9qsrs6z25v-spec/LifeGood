@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.122", build: 875, date: "2026/08/08", notes: [
+            "【美化 v25.122】MapAlbumSheet.swift「地圖相簿模板」（v25.121 新拆出、旅遊/美食/醫療地圖共用）sectionHeader 區段筆數膠囊補齊描邊統一：區段標題右側筆數 Capsule 原本只有 fill、無 stroke，是同畫面摘要列「N 個地點」膠囊已有 stroke(accent.opacity(0.22), 0.6) 規格之外唯一沒有描邊的膠囊。補上同規格 overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))，統一本模板膠囊「fill + stroke」節奏；模板為新拆出共用元件，一次補齊即同步套用到旅遊/美食/醫療三張地圖的相簿畫面。另在檔案內新增美化紀錄區塊，供下次接續查找。純視覺層調整，sections 分組排序／照片彙整等既有邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.121", build: 874, date: "2026/08/08", notes: [
             "【功能】相簿模板化＋美食/醫療地圖比照旅遊相簿：把旅遊地圖的旅遊相簿重新規劃為共用模板 MapAlbumSheet（新檔案 MapAlbumSheet.swift），三張地圖共用同一套相簿介面，並在模板層強化功能——① 摘要列：共 N 張照片・M 個地點；② 分組切換（segmented）：依地點（地點依最新照片日期排序、區段標題帶主題色側條與張數膠囊）／依月份（yyyy 年 M 月，新到舊）／全部（時間新到舊）；③ 格狀縮圖（adaptive 104pt）點開進 PhotoLightbox 全螢幕檢視（含 v25.65 檔名/解析度/檔案大小資訊列）；④ 空狀態：主題色雙層脈衝光環＋各頁自訂文案；主題色/標題/文案由呼叫端配置。接入：旅遊地圖改用模板（娛樂紫，照片彙整邏輯不變，移除舊 TravelAlbumSheet 約 130 行重複程式碼）；美食地圖底部新增「美食相簿」按鈕（橘，彙整所有餐廳照片）；醫療地圖工具列新增「醫療相簿」按鈕（藍綠，彙整就醫地點照片如收據/診斷單）。之後任何頁面要加相簿只需組出 [AlbumPhotoItem]（照片 URL＋地點＋日期）呼叫模板即可。"
         ]),

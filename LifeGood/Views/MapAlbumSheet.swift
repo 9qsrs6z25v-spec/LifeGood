@@ -11,6 +11,19 @@ import SwiftUI
 //   • 空狀態：主題色雙層脈衝光環＋自訂提示文案
 // 主題色（accent）、標題與空狀態文案由呼叫端配置，視覺自動跟隨各地圖主題。
 
+// MARK: - 美化紀錄（MapAlbumSheet）
+// [2026-08 v1] 本檔案由 v25.121 拆出即補齊初版視覺規格：
+//   • 關閉鈕固定 .topBarLeading（對齊全 App「關閉鈕一律在左」規格）
+//   • summaryBar「N 個地點」膠囊已是 fill + stroke(accent.opacity(0.22), 0.6)
+//   • sectionHeader 區段筆數膠囊原本只有 fill、無 stroke，是同列摘要列
+//     「N 個地點」膠囊之外唯一沒有描邊的膠囊，補上同規格 stroke 統一節奏
+//   • 空狀態沿用雙層脈衝光環＋漸層圖示圓（對齊 TravelMapView／FoodMapView／
+//     MedicalMapView 拆分前既有規格）
+//   純視覺層調整，sections 分組排序／彙整邏輯完全未變動。
+//   （本檔案膠囊 fill + stroke 節奏已收斂一致；summaryBar 大字目前為
+//    subheadline 非英雄卡大字級，暫不需要 lineLimit／minimumScaleFactor 防截斷；
+//    下次美化本檔案時可留意日後若新增英雄卡大字金額/數字時比照全 App 規格補防截斷）
+
 /// 相簿中的一張照片：檔案 URL＋所屬地點＋拍攝（消費）日期
 struct AlbumPhotoItem: Identifiable {
     let id: String          // photoFileName（穩定、不重複）
@@ -151,6 +164,7 @@ struct MapAlbumSheet: View {
                 .font(.caption2.weight(.semibold)).foregroundStyle(accent)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(accent.opacity(0.12)).clipShape(Capsule())
+                .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
             Spacer()
         }
         .padding(.top, 4)
