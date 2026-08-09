@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.145", build: 898, date: "2026/08/09", notes: [
+            "【美化】名片（BusinessCardView）新增／編輯名片表單 BusinessCardEditor 儲存按鈕補齊載入狀態：save() 自帶 isSaving 忙碌守衛（disabled(...||isSaving)）避免快速連點造成重複名片紀錄，但按鈕本身在存檔期間毫無視覺提示——v25.103（ChildDetailView）曾記錄「v25.96 起全 App 儲存按鈕載入狀態補齊清單全數完成」，複查後發現本檔案的 BusinessCardEditor 其實不在當時清單內，是唯一仍缺這道規格的新增／編輯表單儲存按鈕。補上 HStack { if isSaving { ProgressView().scaleEffect(0.7).tint(.green) }；Button(...) }，對齊 ResumeView／ChildDetailView／MyCalendarView／LifeFinanceView 等既有儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛判斷與電話/Email 陣列寫入、聯絡人建立等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.144", build: 897, date: "2026/08/09", notes: [
             "【美化】家庭總覽街道圖（FamilyOverviewMap）補齊兩處收尾：① HouseView 屋頂 overlay stroke 的 lineWidth 自 v1 起就寫死 1pt，與同一輪 v1 同步調整、對齊全 App「0.75pt 邊框」規格的屋身 overlay stroke 始終沒對齊，是整棟房子屋頂與屋身接合處唯一粗細不一致的邊框，改為 0.75pt；② v4 新增的「尚無其他成員」虛線佔位符原本是靜態顯示，與同排實際房子的 houseRowsAppeared 交錯進場動畫脫節，切換時視覺不連貫，補上同款 opacity/scale spring 進場動畫（不額外 stagger，與上排房子同時觸發）。純視覺層調整，房子分組、成員歸類等既有商業邏輯完全未變動。"
         ]),

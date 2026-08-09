@@ -2098,7 +2098,14 @@ struct IdentifiableUUID: Identifiable {
 //      （基本資訊＝indigo／電話＝blue／Email＝purple／傳真＝orange／地址＝teal／其他＝secondary）；
 //      刪除名片 Section 維持無標頭，對齊全 App 編輯表單「刪除區塊不加標頭」慣例。
 //   純視覺層調整，欄位資料綁定、OCR 預填／編輯載入、新增刪除電話與 Email／save() 等既有商業
-//   邏輯完全未變動。（下次美化本檔案時，可從這裡接著找其他可統一之處）
+//   邏輯完全未變動。
+// [2026-08 v2] save() 自帶 isSaving 忙碌守衛（disabled(...||isSaving)）避免快速連點造成重複
+//   名片紀錄，但按鈕本身在存檔期間毫無視覺提示——v25.103 曾記錄「v25.96 起儲存按鈕載入狀態
+//   補齊清單全數完成」，複查後發現本檔案的 BusinessCardEditor 其實不在當時清單內，是唯一仍
+//   缺這道規格的新增／編輯表單儲存按鈕。補上 HStack { if isSaving { ProgressView()
+//   .scaleEffect(0.7).tint(.green) }；Button(...) }，對齊 ResumeView／ChildDetailView／
+//   MyCalendarView／LifeFinanceView 等既有儲存按鈕載入狀態規格。純視覺層調整，save() 內部
+//   守衛判斷與電話/Email 陣列寫入、聯絡人建立等既有商業邏輯完全未變動。
 
 struct BusinessCardEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
@@ -2264,9 +2271,15 @@ struct BusinessCardEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(editing != nil ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    // v25.145 美化：isSaving 忙碌守衛補齊載入視覺，對齊全 App 儲存按鈕載入狀態規格。
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(editing != nil ? "儲存" : "新增") { save() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
                 }
             }
             .onAppear {
