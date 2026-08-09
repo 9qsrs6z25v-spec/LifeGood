@@ -870,7 +870,9 @@ struct SettingsView: View {
                                 .foregroundStyle(.primary)
                             if cloudSync.isSyncing { ProgressView().scaleEffect(0.7) }
                         }
-                        Text(cloudSync.isSyncing ? "正在推送資料與照片到 iCloud" : "手動觸發 iCloud 資料同步")
+                        Text(cloudSync.isSyncing
+                             ? (cloudSync.syncProgressText ?? "正在推送資料與照片到 iCloud")
+                             : "手動觸發 iCloud 資料同步")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

@@ -90,9 +90,14 @@ final class CloudSyncManager: ObservableObject {
     @Published private(set) var isSyncing = false {
         didSet {
             if isSyncing { armSyncWatchdog() }
-            else { syncWatchdogTimer?.invalidate(); syncWatchdogTimer = nil }
+            else {
+                syncWatchdogTimer?.invalidate(); syncWatchdogTimer = nil
+                syncProgressText = nil
+            }
         }
     }
+    /// 上傳進度文字（例「上傳照片 12/87」）；供設定頁「同步中…」列顯示即時進度
+    @Published private(set) var syncProgressText: String?
     private var syncWatchdogTimer: Timer?
 
     /// isSyncing 升起後 3 分鐘未落下即強制重置（等待「覆蓋/合併」使用者選擇屬合法長等待，
@@ -160,6 +165,12 @@ final class CloudSyncManager: ObservableObject {
             name: CloudKitManager.didEncounterErrorNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSyncProgress(_:)),
+            name: CloudKitManager.syncProgressNotification,
+            object: nil
+        )
 
         // 啟動時取一次帳號狀態
         CloudKitManager.shared.refreshAccountStatus { [weak self] status in
@@ -179,6 +190,16 @@ final class CloudSyncManager: ObservableObject {
         let avail = (status == .available)
         DispatchQueue.main.async { [weak self] in
             self?.isAccountAvailable = avail
+        }
+    }
+
+    /// 上傳進度：更新顯示文字，並「餵看門狗」——首次全量上傳幾百張照片
+    /// 合法地超過 3 分鐘，只要進度仍在推進就不該被看門狗誤判為卡死強制重置。
+    @objc private func handleSyncProgress(_ note: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.syncProgressText = note.userInfo?["text"] as? String
+            if self.isSyncing, self.syncProgressText != nil { self.armSyncWatchdog() }
         }
     }
 

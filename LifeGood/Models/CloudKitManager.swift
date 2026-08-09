@@ -27,6 +27,8 @@ final class CloudKitManager {
     static let accountStatusDidChangeNotification = Notification.Name("CloudKitManager.accountStatusDidChange")
     /// 任何 CloudKit 操作失敗時發送，userInfo["message"] 為可讀錯誤字串（給 SettingsView 顯示）
     static let didEncounterErrorNotification = Notification.Name("CloudKitManager.didEncounterError")
+    /// 同步進度文字（例「上傳照片 12/87」）；userInfo["text"] 為 nil 代表進度結束
+    static let syncProgressNotification = Notification.Name("CloudKitManager.syncProgress")
 
     /// 已知的本地照片資料夾（與 LifeModels / FinanceModels / Expense 中 photosDirectory 對應）
     static let photoDirectories: [String] = [
@@ -62,6 +64,10 @@ final class CloudKitManager {
     private let subscriptionCreatedKey = "ck_zone_sub_created"
     private let serverChangeTokenKey = "ck_server_change_token"
     private let initialPullDoneKey = "ck_initial_pull_done"
+    /// 照片上傳帳本：pathKey → 「大小-修改時間」簽章。簽章相同＝檔案沒變且已上傳過，
+    /// 下輪同步直接跳過——沒有這本帳，每次同步都會把數百張照片重新上傳一遍
+    ///（也是行動數據暴增與「同步中」轉不完的主因）。
+    private let uploadLedgerKey = "ck_uploaded_photo_ledger"
 
     // accountStatus 由 accountChanged/refreshAccountStatus 在主執行緒寫入，
     // 但 isAvailable 被 queue（背景 utility 佇列）上的 push/pull 大量讀取，
@@ -247,6 +253,7 @@ final class CloudKitManager {
                         guard let self else { completion?(false); return }
                         self.defaults.removeObject(forKey: self.zoneCreatedKey)
                         self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
+                        self.defaults.removeObject(forKey: self.uploadLedgerKey)   // zone 重建＝雲端照片全沒了，帳本作廢
                         self.queue.async {
                             self.ensureZoneExists { ok in
                                 guard ok else { completion?(false); return }
@@ -281,11 +288,27 @@ final class CloudKitManager {
                 let pathKey = "\(directory)/\(fileName)"
                 let recID = CKRecord.ID(recordName: "photo_\(self.sanitize(pathKey))", zoneID: self.zoneID)
 
-                self.privateDB.fetch(withRecordID: recID) { [weak self] existing, fetchError in
+                // 只取中繼資料（desiredKeys）確認記錄是否存在：先前用便利 fetch
+                // 會連舊照片的 CKAsset 檔案一起下載回來——數百張照片每輪同步
+                // 都「先下載一遍再上傳一遍」，流量直接翻倍
+                let fetchOp = CKFetchRecordsOperation(recordIDs: [recID])
+                fetchOp.desiredKeys = ["updatedAt"]
+                fetchOp.qualityOfService = .userInitiated
+                var existing: CKRecord?
+                var fetchError: Error?
+                fetchOp.perRecordResultBlock = { _, res in
+                    switch res {
+                    case .success(let r): existing = r
+                    case .failure(let e): fetchError = e
+                    }
+                }
+                fetchOp.fetchRecordsResultBlock = { [weak self] overall in
                     guard let self else { completion?(false); return }
+                    if case .failure(let e) = overall, fetchError == nil { fetchError = e }
                     // fetch 失敗但「不是查無此筆」→ 真錯誤；若仍繼續存空 CKRecord 會因
                     // 缺少 recordChangeTag 而觸發不必要的 .serverRecordChanged 衝突
-                    if existing == nil, let fe = fetchError as? CKError, fe.code != .unknownItem {
+                    if existing == nil, let fe = fetchError,
+                       (fe as? CKError)?.code != .unknownItem {
                         self.report(fe, context: "上傳照片 \(fileName)")
                         completion?(false); return
                     }
@@ -311,6 +334,7 @@ final class CloudKitManager {
                                 // （同型修法見 modifyKV zoneNotFound 分支）
                                 self.defaults.removeObject(forKey: self.zoneCreatedKey)
                                 self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
+                                self.defaults.removeObject(forKey: self.uploadLedgerKey)   // zone 重建＝雲端照片全沒了，帳本作廢
                                 self.queue.async {
                                     self.ensureZoneExists { ok in
                                         guard ok else { completion?(false); return }
@@ -324,8 +348,10 @@ final class CloudKitManager {
                         }
                     }
                     self.applyTimeouts(op)
-            self.privateDB.add(op)
+                    self.privateDB.add(op)
                 }
+                self.applyTimeouts(fetchOp)
+                self.privateDB.add(fetchOp)
             }
         }
     }
@@ -531,21 +557,87 @@ final class CloudKitManager {
             guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
                 completion?(); return
             }
-            // 等每張照片實際上傳完成才回呼，而非僅等排隊迴圈跑完；
-            // 否則呼叫端會誤以為「上傳全部完成」而提早重置同步中旗標。
-            let group = DispatchGroup()
+            // 先用帳本掃出「真正需要上傳」的清單：簽章（大小-修改時間）相同＝已上傳且沒變，
+            // 直接跳過不打任何網路——沒帳本前每輪同步都重傳全部照片，是流量與時間爆炸的主因
+            let ledger = self.uploadLedger()
+            var pending: [(dir: String, file: String, pathKey: String, signature: String)] = []
             for dir in Self.photoDirectories {
                 let url = docs.appendingPathComponent(dir, isDirectory: true)
                 guard let files = try? FileManager.default.contentsOfDirectory(atPath: url.path) else { continue }
                 for f in files where !f.hasPrefix(".") {
-                    // 斷網短路：前面的照片已因網路無法連線失敗，剩餘照片不再逐張嘗試
-                    //（每張都要枯等逾時，數百張會讓「同步中」轉非常久）；待網路恢復下輪再傳
-                    if self.isNetworkLikelyBlocked { continue }
-                    group.enter()
-                    self.uploadPhoto(directory: dir, fileName: f) { _ in group.leave() }
+                    let pathKey = "\(dir)/\(f)"
+                    guard let sig = self.fileSignature(url.appendingPathComponent(f)) else { continue }
+                    if ledger[pathKey] == sig { continue }
+                    pending.append((dir, f, pathKey, sig))
                 }
             }
-            group.notify(queue: .main) { completion?() }
+            guard !pending.isEmpty else {
+                DispatchQueue.main.async { completion?() }
+                return
+            }
+            let total = pending.count
+            self.postSyncProgress("上傳照片 0/\(total)")
+
+            // 4 張一批依序上傳：先前是全部照片同時排隊（數百個並發作業），
+            // 既塞爆佇列也讓進度無從掌握；批次化後可回報「上傳照片 X/Y」即時進度
+            func runBatch(_ index: Int) {
+                guard index < pending.count else {
+                    self.postSyncProgress(nil)
+                    DispatchQueue.main.async { completion?() }
+                    return
+                }
+                let batch = pending[index..<min(index + 4, pending.count)]
+                let group = DispatchGroup()
+                for item in batch {
+                    // 斷網短路：前面的照片已因網路無法連線失敗，剩餘照片不再逐張嘗試
+                    //（每張都要枯等逾時）；待網路恢復下輪再傳
+                    if self.isNetworkLikelyBlocked { continue }
+                    group.enter()
+                    self.uploadPhoto(directory: item.dir, fileName: item.file) { ok in
+                        // 成功才記帳；失敗的下輪同步會再嘗試
+                        if ok { self.markUploaded(pathKey: item.pathKey, signature: item.signature) }
+                        group.leave()
+                    }
+                }
+                group.notify(queue: self.queue) {
+                    self.postSyncProgress("上傳照片 \(min(index + 4, total))/\(total)")
+                    runBatch(index + 4)
+                }
+            }
+            runBatch(0)
+        }
+    }
+
+    // MARK: - 照片上傳帳本
+
+    /// 檔案簽章：大小-修改時間。任一變動（重拍、壓縮、覆寫）簽章就不同 → 會重新上傳。
+    private func fileSignature(_ url: URL) -> String? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? Int64 else { return nil }
+        let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(size)-\(Int(mtime))"
+    }
+
+    private func uploadLedger() -> [String: String] {
+        (defaults.dictionary(forKey: uploadLedgerKey) as? [String: String]) ?? [:]
+    }
+
+    /// 記帳一律排到 queue 上做讀改寫，避免多張照片同時完成時互相蓋掉彼此的紀錄
+    private func markUploaded(pathKey: String, signature: String) {
+        queue.async {
+            var ledger = self.uploadLedger()
+            ledger[pathKey] = signature
+            self.defaults.set(ledger, forKey: self.uploadLedgerKey)
+        }
+    }
+
+    /// 廣播同步進度文字（nil＝進度結束），主執行緒送出供 UI 顯示
+    private func postSyncProgress(_ text: String?) {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: Self.syncProgressNotification, object: nil,
+                userInfo: text.map { ["text": $0] } ?? [:]
+            )
         }
     }
 
@@ -623,6 +715,7 @@ final class CloudKitManager {
         defaults.removeObject(forKey: subscriptionCreatedKey)
         defaults.removeObject(forKey: serverChangeTokenKey)
         defaults.removeObject(forKey: initialPullDoneKey)
+        defaults.removeObject(forKey: uploadLedgerKey)
     }
 
     // MARK: - 同步診斷（逐層測試，顯示原始錯誤碼）
@@ -962,6 +1055,7 @@ final class CloudKitManager {
                 if let self {
                     self.defaults.removeObject(forKey: self.zoneCreatedKey)
                     self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
+                    self.defaults.removeObject(forKey: self.uploadLedgerKey)   // zone 不存在＝雲端照片不存在，帳本作廢
                 }
                 result.errorMessage = "雲端資料區不存在：同步從未在此環境成功寫入。已自動重設，請按「立即同步」重建後再驗證一次。"
             }

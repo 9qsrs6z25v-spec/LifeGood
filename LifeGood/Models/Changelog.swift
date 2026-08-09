@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.135", build: 888, date: "2026/08/09", notes: [
+            "【修正】同步流量爆炸與「同步中」轉不完的真正病根：同步診斷五層全過（網路、帳號、讀寫、zone 都正常）證明問題不在連線，檢查程式碼發現 uploadAllLocalPhotos 每輪同步都把「所有」本地照片重新處理一遍——先逐張便利 fetch（會連舊照片檔案一起下載回來）再重新上傳 asset，數百張照片×每輪同步＝行動數據 432MB 的來源。三管齊下：(a) 照片上傳帳本——上傳成功記下 pathKey→「大小-修改時間」簽章，簽章沒變的照片下輪直接跳過、零網路請求（檔案重拍/重壓縮會改變簽章而自動重傳；zone 重建或重設時帳本自動作廢全量重傳）；(b) 上傳前檢查改 CKFetchRecordsOperation + desiredKeys 只取中繼資料，不再把舊照片檔案下載回來；(c) 全部並發改為 4 張一批依序上傳，並廣播「上傳照片 X/Y」即時進度——設定頁「同步中…」列會顯示目前進度，進度有推進就餵看門狗（首次全量上傳合法超過 3 分鐘不再被誤判逾時重置）。"
+        ]),
         ChangelogEntry(version: "25.134", build: 887, date: "2026/08/09", notes: [
             "【修正】「同步診斷」自己也卡住轉圈圈（實測放幾分鐘沒結果）：原版第 3、4 步用 CloudKit 便利 API，而 CloudKit 在系統層判定「無網路」時不會回報錯誤，是把作業無限排隊等網路恢復——這正是「同步中」轉好幾天的元凶，診斷工具踩進了同一個坑。重寫為逐步守門架構：(a) 每一步都有獨立逾時計時器（一般網路 12 秒／帳號 10 秒／讀寫各 25 秒／zone 22 秒，全程上限約 1.5 分鐘），逾時的那一步標成「✗ 逾時 → 作業被系統排隊＝系統層判定無網路」後自動跳下一步——哪一步逾時本身就是診斷結論；(b) CloudKit 呼叫全部改用 Operation API 並套 fastFail 設定（timeoutIntervalForRequest 15 秒／Resource 20 秒、QoS userInitiated）；(c) 寫入測試改 savePolicy .allKeys 直接覆寫測試筆，避免版本衝突干擾判讀；(d) 錯誤顯示追加 partialFailure 個別錯誤展開。NSLock 防守門與正常回呼重複觸發。"
         ]),
