@@ -83,7 +83,13 @@ class FinanceStore: ObservableObject {
     func update(_ item: Vehicle) {
         if let i = vehicles.firstIndex(where: { $0.id == item.id }) { vehicles[i] = item }
     }
-    func deleteVehicle(_ item: Vehicle) { vehicles.removeAll { $0.id == item.id } }
+    func deleteVehicle(_ item: Vehicle) {
+        // 連同照片紀錄的實體檔案與雲端記錄一併刪除（同型寫法見 deleteRealEstate 裝潢照片清理）
+        for pr in item.photoRecords {
+            for name in pr.photoFileNames { VehiclePhotoRecord.deletePhoto(name) }
+        }
+        vehicles.removeAll { $0.id == item.id }
+    }
 
     // MARK: - 房地產 CRUD
 

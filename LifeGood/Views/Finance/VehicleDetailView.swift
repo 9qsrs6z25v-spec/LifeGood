@@ -203,6 +203,10 @@ struct VehicleDetailView: View {
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
     @State private var showPremiumAlert = false
+    // 照片紀錄（保養/稅費收據等，比照房地產裝潢照片）
+    @State private var addingPhotoRecord = false
+    @State private var editingPhotoRecord: VehiclePhotoRecord?
+    @State private var cutePhotoDraft: CutePhotoDraft?
     // 美化：進場動畫旗標（對齊 StockDetailView / RealEstateDetailView 規格）
     @State private var cardAppeared = false
     @State private var kpiStripAppeared = false
@@ -232,6 +236,7 @@ struct VehicleDetailView: View {
                             }
                         }
                     infoSection
+                    photoSection
                 }
                 .padding(.vertical)
             }
@@ -261,6 +266,15 @@ struct VehicleDetailView: View {
             }
             .sheet(isPresented: $showEdit) {
                 AddVehicleView(editing: vehicle)
+            }
+            .sheet(isPresented: $addingPhotoRecord) {
+                VehiclePhotoEditor(vehicleId: vehicleId, editing: nil)
+            }
+            .sheet(item: $editingPhotoRecord) { rec in
+                VehiclePhotoEditor(vehicleId: vehicleId, editing: rec)
+            }
+            .sheet(item: $cutePhotoDraft) { draft in
+                CutePhotoViewer(draft: draft)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .alert("確定要刪除這輛車嗎？", isPresented: $showDeleteConfirm) {
@@ -458,6 +472,158 @@ struct VehicleDetailView: View {
                 infoRowsAppeared = true
             }
         }
+    }
+
+    // MARK: - 照片紀錄（保養/稅費收據/保險文件等，比照房地產裝潢照片章節）
+
+    private var photoSection: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                sectionHeader("照片紀錄", color: .teal, count: vehicle.photoRecords.count)
+                Button {
+                    if subscription.isPremium { addingPhotoRecord = true }
+                    else { showPremiumAlert = true }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.subheadline).foregroundStyle(.green)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 6)
+            }
+
+            if vehicle.photoRecords.isEmpty {
+                VStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [Color.teal.opacity(0.15), Color.teal.opacity(0.06)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ))
+                            .frame(width: 40, height: 40)
+                        Circle()
+                            .stroke(Color.teal.opacity(0.18), lineWidth: 0.75)
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "camera.on.rectangle")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.teal.opacity(0.65))
+                    }
+                    Text("尚無照片紀錄")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("點右上「+」新增保養、稅費收據、保險文件等照片")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 14) {
+                        ForEach(vehicle.photoRecords.sorted { $0.date > $1.date }) { rec in
+                            Button {
+                                handlePhotoRecordTap(rec)
+                            } label: {
+                                vehiclePhotoCard(rec)
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button {
+                                    editingPhotoRecord = rec
+                                } label: {
+                                    Label("編輯資訊", systemImage: "pencil")
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+    }
+
+    private func handlePhotoRecordTap(_ rec: VehiclePhotoRecord) {
+        guard !rec.photoFileNames.isEmpty else {
+            editingPhotoRecord = rec
+            return
+        }
+        let urls = rec.photoFileNames.map { VehiclePhotoRecord.photoURL(for: $0) }
+        cutePhotoDraft = CutePhotoDraft(
+            urls: urls,
+            title: rec.title.isEmpty ? rec.category.rawValue : rec.title,
+            note: rec.note,
+            date: rec.date,
+            kind: .vehicle(rec.category)
+        )
+    }
+
+    /// 單筆照片紀錄卡：縮圖（單張或堆疊）＋類別徽章＋標題＋日期
+    private func vehiclePhotoCard(_ rec: VehiclePhotoRecord) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topTrailing) {
+                if rec.photoFileNames.count >= 2 {
+                    // 多張：後兩張斜角堆疊在底、首張在上（簡化版堆疊視覺）
+                    ZStack {
+                        ForEach(Array(rec.photoFileNames.prefix(3).enumerated()).reversed(), id: \.offset) { idx, name in
+                            ThumbnailImageView(url: VehiclePhotoRecord.photoURL(for: name))
+                                .frame(width: 108, height: 108)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .rotationEffect(.degrees(Double(idx) * 3.5))
+                                .offset(x: CGFloat(idx) * 3, y: CGFloat(idx) * -3)
+                        }
+                    }
+                    .frame(width: 116, height: 116)
+                } else if let url = rec.photoURL {
+                    ThumbnailImageView(url: url)
+                        .frame(width: 116, height: 116)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                // 張數膠囊（多張才顯示）
+                if rec.photoFileNames.count >= 2 {
+                    Text("\(rec.photoFileNames.count)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.black.opacity(0.55))
+                        .clipShape(Capsule())
+                        .padding(5)
+                }
+            }
+
+            HStack(spacing: 4) {
+                Image(systemName: rec.category.icon)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(rec.category.color)
+                Text(rec.category.rawValue)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(rec.category.color)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(rec.category.color.opacity(0.10))
+            .clipShape(Capsule())
+
+            Text(rec.title.isEmpty
+                 ? (rec.photoFileNames.count >= 2 ? "\(rec.photoFileNames.count) 張照片" : rec.category.rawValue)
+                 : rec.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Text(formatRowDate(rec.date))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: 120)
     }
 
     // MARK: - 定期支出列（38pt 藍色漸層圖示圓 + 月均輔助）
@@ -754,5 +920,181 @@ struct VehicleDetailView: View {
     private func splitWanLabel(_ v: Double) -> String {
         let parts = splitWan(v)
         return parts.unit.isEmpty ? parts.number : "\(parts.number) \(parts.unit)"
+    }
+}
+
+// MARK: - 車輛照片紀錄編輯器（支援多張照片，結構比照 RenovationPhotoEditor）
+
+struct VehiclePhotoEditor: View {
+    @EnvironmentObject var store: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    let vehicleId: UUID
+    let editing: VehiclePhotoRecord?
+
+    @State private var date: Date = Date()
+    @State private var category: VehiclePhotoCategory = .maintenance
+    @State private var title: String = ""
+    @State private var note: String = ""
+    @State private var photoFileNames: [String] = []
+    @State private var showDeleteConfirm: Bool = false
+    // 防止「儲存」連點：save() 把寫回 store 延後到下個 runloop，連點兩下會讀到同一份
+    // vehicle 快照、各自 append，後寫者蓋掉前者（同型防護見 RenovationPhotoEditor.isSaving）
+    @State private var isSaving: Bool = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    DatePicker("日期", selection: $date, displayedComponents: .date)
+                    Picker("類別", selection: $category) {
+                        ForEach(VehiclePhotoCategory.allCases) { c in
+                            Label(c.rawValue, systemImage: c.icon).tag(c)
+                        }
+                    }
+                    TextField("標題（例：五萬公里保養、牌照稅）", text: $title)
+                } header: {
+                    vehSectionHeader("基本資訊", icon: "calendar.circle.fill",
+                                     gradient: [Color.teal, Color.teal.opacity(0.55)])
+                }
+
+                Section {
+                    MultiPhotoGallery(
+                        fileNames: $photoFileNames,
+                        urlFor: { VehiclePhotoRecord.photoURL(for: $0) },
+                        onSaveImage: { data in
+                            VehiclePhotoRecord.savePhoto(data, id: UUID())
+                        },
+                        onDeleteFile: { name in
+                            VehiclePhotoRecord.deletePhoto(name)
+                        },
+                        title: "照片"
+                    )
+                    .padding(.vertical, 4)
+                } header: {
+                    // 純文字標題：裝飾（標題／計數）由 MultiPhotoGallery 內建 header 負責，
+                    // 這裡疊加會重複顯示（同型取捨見 RenovationPhotoEditor 照片 Section 註解）
+                    Text("照片")
+                } footer: {
+                    Text("可拍照或從相簿一次選多張：保養單據、稅費收據、保險文件、事故照片等。")
+                }
+
+                Section {
+                    TextField("選填備註（例：保養廠、金額、里程數）", text: $note, axis: .vertical).lineLimit(3)
+                } header: {
+                    vehSectionHeader("備註", icon: "note.text",
+                                     gradient: [Color(.systemGray2), Color(.systemGray3)])
+                }
+
+                if editing != nil {
+                    Section {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("刪除此筆", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .navigationTitle(editing == nil ? "新增照片紀錄" : "編輯照片紀錄")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("取消") { cancel() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("儲存") { save() }
+                        .bold().foregroundStyle(.green)
+                        .disabled(photoFileNames.isEmpty || isSaving)
+                }
+            }
+            .alert("確定刪除？", isPresented: $showDeleteConfirm) {
+                Button("刪除", role: .destructive) { deleteRecord() }
+                Button("取消", role: .cancel) {}
+            }
+            .onAppear { setupInitial() }
+        }
+    }
+
+    /// 統一 Section header（4pt Capsule 漸層色條 + 彩色圖示 + .subheadline.bold）
+    private func vehSectionHeader(_ title: String, icon: String, gradient: [Color]) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: gradient, startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(gradient.first ?? Color(.systemGray))
+            Text(title)
+                .font(.subheadline.weight(.bold))
+        }
+    }
+
+    private func setupInitial() {
+        if let e = editing {
+            date = e.date
+            category = e.category
+            title = e.title
+            note = e.note
+            photoFileNames = e.photoFileNames
+        }
+    }
+
+    private func save() {
+        guard !isSaving else { return }
+        guard var vehicle = store.vehicles.first(where: { $0.id == vehicleId }) else { return }
+        isSaving = true
+        let recordId = editing?.id ?? UUID()
+
+        let record = VehiclePhotoRecord(
+            id: recordId,
+            date: date,
+            category: category,
+            title: title.trimmingCharacters(in: .whitespaces),
+            photoFileNames: photoFileNames,
+            note: note.trimmingCharacters(in: .whitespaces)
+        )
+        if let idx = vehicle.photoRecords.firstIndex(where: { $0.id == recordId }) {
+            vehicle.photoRecords[idx] = record
+        } else {
+            vehicle.photoRecords.append(record)
+        }
+        // 先關 sheet、下個 runloop 才改 @Published store：避免在關閉 sheet 的
+        // view-update 交易裡同步改 observed state 造成真機閃退（同型見 RenovationPhotoEditor.save）
+        let financeStore = store
+        dismiss()
+        DispatchQueue.main.async { financeStore.update(vehicle) }
+    }
+
+    /// 取消：清掉本次 session 新增、尚未存檔的照片檔；編輯模式下若刪了原有照片，
+    /// 回寫 store 收斂檔名，避免孤兒引用（完整理由見 RenovationPhotoEditor.cancel 註解）
+    private func cancel() {
+        let original = Set(editing?.photoFileNames ?? [])
+        for name in photoFileNames where !original.contains(name) {
+            VehiclePhotoRecord.deletePhoto(name)
+        }
+        let remaining = photoFileNames.filter { original.contains($0) }
+        if let e = editing, Set(remaining) != original,
+           var vehicle = store.vehicles.first(where: { $0.id == vehicleId }),
+           let idx = vehicle.photoRecords.firstIndex(where: { $0.id == e.id }) {
+            vehicle.photoRecords[idx].photoFileNames = remaining
+            let financeStore = store
+            dismiss()
+            DispatchQueue.main.async { financeStore.update(vehicle) }
+            return
+        }
+        dismiss()
+    }
+
+    private func deleteRecord() {
+        guard var vehicle = store.vehicles.first(where: { $0.id == vehicleId }),
+              let e = editing else { return }
+        // 刪畫面上即時的 photoFileNames 而非進場快照，避免漏刪編輯中新增的照片
+        //（同型理由見 RenovationPhotoEditor.deleteRecord 註解）
+        for name in photoFileNames {
+            VehiclePhotoRecord.deletePhoto(name)
+        }
+        vehicle.photoRecords.removeAll { $0.id == e.id }
+        let financeStore = store
+        dismiss()
+        DispatchQueue.main.async { financeStore.update(vehicle) }
     }
 }

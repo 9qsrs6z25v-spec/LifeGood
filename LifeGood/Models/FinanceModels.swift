@@ -1708,6 +1708,113 @@ struct VehicleVariableExpense: Identifiable, Codable {
 
 // MARK: - 汽車
 
+// MARK: - 車輛照片紀錄（保養/稅費收據/保險文件等，比照房地產裝潢照片規格）
+
+enum VehiclePhotoCategory: String, Codable, CaseIterable, Identifiable {
+    case maintenance = "保養維修"
+    case tax = "稅費單據"
+    case insurance = "保險文件"
+    case fuel = "加油充電"
+    case accident = "事故紀錄"
+    case appearance = "車輛照片"
+    case other = "其他"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .maintenance: return "wrench.and.screwdriver.fill"
+        case .tax: return "doc.text.fill"
+        case .insurance: return "shield.lefthalf.filled"
+        case .fuel: return "fuelpump.fill"
+        case .accident: return "exclamationmark.triangle.fill"
+        case .appearance: return "car.fill"
+        case .other: return "square.grid.2x2.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .maintenance: return .blue
+        case .tax: return .orange
+        case .insurance: return .green
+        case .fuel: return .purple
+        case .accident: return .red
+        case .appearance: return .teal
+        case .other: return .gray
+        }
+    }
+}
+
+/// 一筆車輛照片紀錄：可承載多張照片（堆疊呈現），依類別分色標示。
+/// 結構與存取模式完全比照 RenovationPhoto（房地產裝潢照片）。
+struct VehiclePhotoRecord: Identifiable, Codable {
+    let id: UUID
+    var date: Date
+    var category: VehiclePhotoCategory
+    var title: String
+    var photoFileNames: [String]
+    var note: String
+
+    init(id: UUID = UUID(), date: Date = Date(),
+         category: VehiclePhotoCategory = .maintenance,
+         title: String = "", photoFileNames: [String] = [], note: String = "") {
+        self.id = id
+        self.date = date
+        self.category = category
+        self.title = title
+        self.photoFileNames = photoFileNames
+        self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        category = (try? c.decode(VehiclePhotoCategory.self, forKey: .category)) ?? .other
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        photoFileNames = (try? c.decode([String].self, forKey: .photoFileNames)) ?? []
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, category, title, photoFileNames, note
+    }
+
+    /// 第一張照片的 URL（縮圖封面用）
+    var photoURL: URL? {
+        guard let name = photoFileNames.first else { return nil }
+        return Self.photosDirectory.appendingPathComponent(name)
+    }
+
+    static var photosDirectory: URL {
+        let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
+            .appendingPathComponent("VehiclePhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func savePhoto(_ data: Data, id: UUID = UUID()) -> String? {
+        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
+        let name = "\(id.uuidString).jpg"
+        let url = photosDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url)) != nil else { return nil }
+        PhotoCloudSync.upload(directory: "VehiclePhotos", fileName: name)
+        return name
+    }
+
+    static func deletePhoto(_ fileName: String) {
+        let url = photosDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+        PhotoCloudSync.delete(directory: "VehiclePhotos", fileName: fileName)
+    }
+
+    static func photoURL(for fileName: String) -> URL {
+        photosDirectory.appendingPathComponent(fileName)
+    }
+}
+
 struct Vehicle: Identifiable, Codable {
     let id: UUID
     var name: String
@@ -1720,6 +1827,7 @@ struct Vehicle: Identifiable, Codable {
     var currentValue: Double
     var fixedExpenses: [VehicleFixedExpense]       // 定期支出（車貸/稅費/訂閱）
     var variableExpenses: [VehicleVariableExpense]  // 變動支出（依動力類型：油錢或電費等）
+    var photoRecords: [VehiclePhotoRecord]          // 照片紀錄（保養/稅費收據/保險文件等）
     var note: String
 
     init(
@@ -1734,6 +1842,7 @@ struct Vehicle: Identifiable, Codable {
         currentValue: Double = 0,
         fixedExpenses: [VehicleFixedExpense] = [],
         variableExpenses: [VehicleVariableExpense] = [],
+        photoRecords: [VehiclePhotoRecord] = [],
         note: String = ""
     ) {
         self.id = id
@@ -1747,6 +1856,7 @@ struct Vehicle: Identifiable, Codable {
         self.currentValue = currentValue
         self.fixedExpenses = fixedExpenses
         self.variableExpenses = variableExpenses
+        self.photoRecords = photoRecords
         self.note = note
     }
 
@@ -1764,6 +1874,7 @@ struct Vehicle: Identifiable, Codable {
         currentValue = (try? c.decode(Double.self, forKey: .currentValue)) ?? 0
         fixedExpenses = lossyArray(c, forKey: .fixedExpenses)
         variableExpenses = lossyArray(c, forKey: .variableExpenses)
+        photoRecords = lossyArray(c, forKey: .photoRecords)
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
     }
 
@@ -1780,12 +1891,13 @@ struct Vehicle: Identifiable, Codable {
         try c.encode(currentValue, forKey: .currentValue)
         try c.encode(fixedExpenses, forKey: .fixedExpenses)
         try c.encode(variableExpenses, forKey: .variableExpenses)
+        try c.encode(photoRecords, forKey: .photoRecords)
         try c.encode(note, forKey: .note)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, brand, ownerName, powerType, purchaseDate, soldDate, purchasePrice, currentValue
-        case fixedExpenses, variableExpenses, note
+        case fixedExpenses, variableExpenses, photoRecords, note
     }
 
     /// 是否已售出

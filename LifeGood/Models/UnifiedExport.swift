@@ -728,6 +728,7 @@ enum UnifiedImporter {
                     var v = vehicleArr[idx]
                     appendNewByID(&v.fixedExpenses, inc.fixedExpenses)
                     appendNewByID(&v.variableExpenses, inc.variableExpenses)
+                    appendNewByID(&v.photoRecords, inc.photoRecords)
                     vehicleArr[idx] = v
                 } else {
                     vehicleArr.append(inc)

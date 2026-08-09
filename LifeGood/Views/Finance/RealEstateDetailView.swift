@@ -3431,6 +3431,7 @@ struct CutePhotoDraft: Identifiable {
         case expense
         case utility(UtilityType)
         case elevator
+        case vehicle(VehiclePhotoCategory)   // 車輛照片紀錄（VehicleDetailView 共用本瀏覽器）
 
         var label: String {
             switch self {
@@ -3438,6 +3439,7 @@ struct CutePhotoDraft: Identifiable {
             case .expense: return "支出照片"
             case .utility(let t): return "\(t.rawValue) 收據"
             case .elevator: return "電梯保養"
+            case .vehicle(let c): return c.rawValue
             }
         }
         var icon: String {
@@ -3446,6 +3448,7 @@ struct CutePhotoDraft: Identifiable {
             case .expense: return "tag.fill"
             case .utility(let t): return t.icon
             case .elevator: return "arrow.up.arrow.down.square.fill"
+            case .vehicle(let c): return c.icon
             }
         }
         var accent: Color {
@@ -3459,6 +3462,7 @@ struct CutePhotoDraft: Identifiable {
                 case .gas:         return Color(red: 0.96, green: 0.55, blue: 0.35)   // 蜜橘
                 }
             case .elevator: return Color(red: 0.45, green: 0.78, blue: 0.70)   // 薄荷綠
+            case .vehicle(let c): return c.color
             }
         }
     }

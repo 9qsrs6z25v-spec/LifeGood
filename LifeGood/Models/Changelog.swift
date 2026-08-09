@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.138", build: 891, date: "2026/08/09", notes: [
+            "【新增】車輛卡片「照片紀錄」章節：比照房地產裝潢照片規格，可上傳保養維修、稅費單據、保險文件、加油充電、事故紀錄、車輛照片、其他共七類照片（VehiclePhotoCategory 各有專屬圖示與色系）。車輛卡片詳情頁在變動支出下方新增「照片紀錄」卡：右上「+」新增（訂閱守衛同其他編輯功能），橫向捲動卡片列（單張縮圖／多張斜角堆疊＋張數膠囊、類別彩色徽章、標題、日期），點卡片開啟可愛風照片瀏覽器（CutePhotoViewer 擴充 vehicle 類型、accent 跟隨類別色），長按可編輯資訊。編輯器 VehiclePhotoEditor 完整比照 RenovationPhotoEditor：日期／類別／標題／多照片（拍照・連拍・相簿多選、存檔自動壓縮 1080P）／備註、取消時清孤兒檔案與收斂已刪照片引用、防連點守衛。資料層：Vehicle.photoRecords 容錯解碼、照片存 VehiclePhotos 資料夾並納入 iCloud 同步／完整備份／一鍵壓縮範圍、刪車連同照片檔案與雲端記錄一併清除、合併匯入補進既有車輛的新照片紀錄。"
+        ]),
         ChangelogEntry(version: "25.137", build: 890, date: "2026/08/09", notes: [
             "【新增】雲端普查＋寫入讀回測試：同步已完整跑完且回報成功（最近同步有更新、無錯誤列），但「驗證雲端資料」仍是 0/20、0/5——推送端與驗證端的 record ID 構造經比對完全一致（kv_<key>／photo_<sanitize>、同 zone 同資料庫），矛盾無法再靠讀碼分辨，需要更強的觀測工具。兩項強化：(1) 驗證加入第二階段「雲端普查」——不猜 ID，以 nil change token 全量掃描 LifeGoodZone（只取 updatedAt 中繼資料、不下載 asset），回報 KVBlob／Photo 實際總數與前 4 筆記錄 ID 樣本；抽查 0 筆時可一刀分辨「雲端真的空（推送回報與實際不符）」vs「記錄在但 ID 對不上（顯示樣本供比對）」，結果並加 [HH:mm] 時間戳分辨新舊。(2) 同步診斷加第 6 層「LifeGoodZone 寫入讀回」——在 App 實際同步用的 zone 存測試筆並立即讀回，寫得進讀得回＝鏈路正常；寫入成功但讀不回＝重大異常直指病灶。"
         ]),
