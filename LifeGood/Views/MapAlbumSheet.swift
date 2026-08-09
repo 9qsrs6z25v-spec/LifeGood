@@ -23,6 +23,18 @@ import SwiftUI
 //   （本檔案膠囊 fill + stroke 節奏已收斂一致；summaryBar 大字目前為
 //    subheadline 非英雄卡大字級，暫不需要 lineLimit／minimumScaleFactor 防截斷；
 //    下次美化本檔案時可留意日後若新增英雄卡大字金額/數字時比照全 App 規格補防截斷）
+// [2026-08 v2] 進場動畫 + 縮圖卡片立體感（聚焦這兩個元件）：
+//   • 開啟 Sheet 時 summaryBar／分組 Picker／各 sectionHeader 原本一開就整批瞬間出現，
+//     與全 App 其他清單頁（SubordinateOverviewView／FoodMapView 等）的
+//     contentAppeared 交錯進場規格不一致。補上 albumAppeared 旗標：
+//     summaryBar 與 Picker 先出（opacity + offset y:10，spring 0.46/0.80），
+//     各 section（header + 該區網格整體）依 index 交錯 0.05s 進場，
+//     只在 Sheet 首次開啟播放一次；groupMode 切換分組時 sections 陣列改變但
+//     albumAppeared 本身不重置，不會重播動畫（避免每次切換分組都閃爍）。
+//   • 縮圖 Button 補 shadow(.black.opacity(0.10), radius 5, y 2)，讓格狀縮圖
+//     從純平貼底色浮起一層，對齊全 App 卡片陰影規格（AsyncThumbnailView 本身
+//     是跨頁共用元件不動，陰影加在本檔案的外層 Button 上，不影響其他呼叫端）。
+//   純視覺層調整，分組／排序／照片資料完全未變動。
 
 /// 相簿中的一張照片：檔案 URL＋所屬地點＋拍攝（消費）日期
 struct AlbumPhotoItem: Identifiable {
@@ -52,6 +64,8 @@ struct MapAlbumSheet: View {
     @State private var viewingPhotoURL: IdentifiableURL?
     @State private var emptyIconPulse = false
     @State private var emptyIconPulseTask: Task<Void, Never>?
+    /// Sheet 首次開啟的交錯進場旗標（切換分組不重播，見 v2 美化紀錄）
+    @State private var albumAppeared = false
 
     private let columns = [GridItem(.adaptive(minimum: 104), spacing: 8)]
 
@@ -102,23 +116,40 @@ struct MapAlbumSheet: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
                             summaryBar
+                                .opacity(albumAppeared ? 1 : 0)
+                                .offset(y: albumAppeared ? 0 : 10)
+                                .animation(.spring(response: 0.46, dampingFraction: 0.80), value: albumAppeared)
+
                             Picker("分組", selection: $groupMode) {
                                 ForEach(GroupMode.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .pickerStyle(.segmented)
+                            .opacity(albumAppeared ? 1 : 0)
+                            .offset(y: albumAppeared ? 0 : 10)
+                            .animation(.spring(response: 0.46, dampingFraction: 0.80).delay(0.04), value: albumAppeared)
 
-                            ForEach(sections, id: \.title) { section in
-                                sectionHeader(section.title, count: section.photos.count)
-                                LazyVGrid(columns: columns, spacing: 8) {
-                                    ForEach(section.photos) { photo in
-                                        Button {
-                                            viewingPhotoURL = IdentifiableURL(url: photo.url)
-                                        } label: {
-                                            AsyncThumbnailView(url: photo.url, size: CGSize(width: 104, height: 104))
+                            ForEach(Array(sections.enumerated()), id: \.element.title) { idx, section in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    sectionHeader(section.title, count: section.photos.count)
+                                    LazyVGrid(columns: columns, spacing: 8) {
+                                        ForEach(section.photos) { photo in
+                                            Button {
+                                                viewingPhotoURL = IdentifiableURL(url: photo.url)
+                                            } label: {
+                                                AsyncThumbnailView(url: photo.url, size: CGSize(width: 104, height: 104))
+                                                    .shadow(color: .black.opacity(0.10), radius: 5, x: 0, y: 2)
+                                            }
+                                            .buttonStyle(.plain)
                                         }
-                                        .buttonStyle(.plain)
                                     }
                                 }
+                                .opacity(albumAppeared ? 1 : 0)
+                                .offset(y: albumAppeared ? 0 : 14)
+                                .animation(
+                                    .spring(response: 0.48, dampingFraction: 0.82)
+                                        .delay(0.08 + 0.05 * Double(idx)),
+                                    value: albumAppeared
+                                )
                             }
                         }
                         .padding(12)
@@ -132,6 +163,11 @@ struct MapAlbumSheet: View {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
             }
             .sheet(item: $viewingPhotoURL) { wrapper in PhotoLightbox(url: wrapper.url) }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    albumAppeared = true
+                }
+            }
         }
     }
 

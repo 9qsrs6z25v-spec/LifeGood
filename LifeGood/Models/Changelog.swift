@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.140", build: 893, date: "2026/08/09", notes: [
+            "【美化】地圖相簿（旅遊／美食／醫療共用 MapAlbumSheet）：開啟相簿時摘要列、分組切換與各區段（含格狀縮圖）補上交錯進場動畫，對齊全 App 清單頁進場節奏；格狀縮圖加淡陰影提升立體感。純視覺調整，分組排序與照片資料未變動。"
+        ]),
         ChangelogEntry(version: "25.139", build: 892, date: "2026/08/10", notes: [
             "【新增】全域滑動手勢：MainTabView 內容區掛單一 DragGesture（simultaneousGesture，不攔截頁面既有捲動/點擊），依起點與甩速分流兩種操作——(1) 邊緣滑動切大功能：起點在螢幕左/右緣 28pt 內的水平滑動，左緣右滑上一個、右緣左滑下一個，順序同底部導覽列（收支→理財→人生→設定）循環；(2) 快速甩動切子功能：非邊緣起點、以 predictedEndTranslation 與實際位移差值判定放手速度（慣性預測差 >160pt 且位移 >110pt 才觸發，慢速拖曳的一般捲動與地圖平移不達標），在目前大功能的子功能列表內前後移動（到頭即停）。兩種切換皆帶輕震動回饋與底部導覽列同款 spring 動畫；人生模式只切頂層子功能，職涯/家庭第二層膠囊維持點選。",
             "【診斷】寫入自我驗證哨兵＋第 7 層真實路徑測試：上輪結果把矛盾逼到牆角——診斷第 6 層純欄位寫入 LifeGoodZone 能寫能讀回，但雲端普查 0 筆、App 推送卻回報成功，嫌疑鎖定「帶 CKAsset 附件」的真實推送路徑。兩項instrumentation：(1) modifyKV 成功回報後立刻以中繼資料 fetch 讀回同一筆，讀不回即視為失敗並在「同步錯誤」列顯示「伺服器回報寫入成功，但立即讀回查無此筆」——把假成功當場抓出來，也讓 markSynced 不再被假成功騙過；(2) 同步診斷加第 7 層「真實推送路徑」：直接呼叫生產環境同一條 pushKV（fetch→CKAsset→.changedKeys 寫入）推一筆測試 KVBlob 再讀回，第 6 層過、第 7 層不過＝問題百分之百在附件上傳。"
