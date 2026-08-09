@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.144", build: 897, date: "2026/08/09", notes: [
+            "【美化】家庭總覽街道圖（FamilyOverviewMap）補齊兩處收尾：① HouseView 屋頂 overlay stroke 的 lineWidth 自 v1 起就寫死 1pt，與同一輪 v1 同步調整、對齊全 App「0.75pt 邊框」規格的屋身 overlay stroke 始終沒對齊，是整棟房子屋頂與屋身接合處唯一粗細不一致的邊框，改為 0.75pt；② v4 新增的「尚無其他成員」虛線佔位符原本是靜態顯示，與同排實際房子的 houseRowsAppeared 交錯進場動畫脫節，切換時視覺不連貫，補上同款 opacity/scale spring 進場動畫（不額外 stagger，與上排房子同時觸發）。純視覺層調整，房子分組、成員歸類等既有商業邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.143", build: 896, date: "2026/08/09", notes: [
             "【美化】設定頁（SettingsView）iCloud 同步「立即同步」列：同步中顯示的 ProgressView 補上 .tint(.blue)，對齊該列圖示圓既有藍色主題——v25.125 曾統計「4 處 busy ProgressView 主題色已全數對齊」，複查後發現這顆因未走共用 settingsActionRow（多一顆「重置」逃生按鈕）而被漏算，其實是唯一仍沿用系統預設灰藍色的第 5 處。純視覺調整，立即同步／重置等既有同步邏輯完全未變動。"
         ]),

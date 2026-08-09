@@ -44,6 +44,16 @@ import SwiftUI
 //      顯得像版面錯誤的空白破洞；改為淡化的虛線房屋外框佔位符（house.fill 圖示 +
 //      「尚無其他成員」提示文字，透明度 0.35），讓「這裡本來就沒有房子」與「資料還在
 //      載入」在視覺上有明確區隔，對齊全 App 其餘頁面「空狀態需有明確提示」規格。
+// [2026-08 v5] 邊框粗細一致性 + 空狀態進場動畫收尾：
+//  17. RoofShape overlay stroke 的 lineWidth 從本檔案 v1 起就寫死 1pt，與同一輪 v1
+//      同步調整的屋身 overlay stroke（0.75pt，對齊全 App「0.75pt 邊框」規格）始終沒對齊，
+//      是這棟房子屋頂與屋身接合處唯一粗細不一致的邊框；改為 0.75pt，讓整棟房子的邊框
+//      規格前後一致。
+//  18. topHousesEmptyPlaceholder（v4 新增的空狀態佔位符）原本是靜態顯示，與同排其餘
+//      實際房子的 houseRowsAppeared 交錯進場動畫脫節——有資料的房子會淡入+縮放進場，
+//      沒資料的佔位符卻是瞬間出現，兩者切換時視覺不連貫；補上同款 opacity/scale spring
+//      動畫（不額外 stagger，與上排房子同時觸發），讓「有房子」與「沒房子」兩種狀態
+//      共用一致的進場節奏。純視覺層調整，房子分組、成員歸類等既有商業邏輯完全未變動。
 
 // MARK: - 家庭總覽（街道式）
 
@@ -262,6 +272,7 @@ struct FamilyOverviewMap: View {
     }
 
     /// [v4] 上排無房子時的淡化空狀態提示，取代原本的純空白佔位
+    /// [v5] 補上與同排實際房子一致的 opacity/scale 進場動畫，避免瞬間出現的不連貫感
     private var topHousesEmptyPlaceholder: some View {
         VStack(spacing: 4) {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -281,6 +292,10 @@ struct FamilyOverviewMap: View {
                 )
             Color.clear.frame(height: 34)
         }
+        // [v5] 與上排房子共用同一組進場動畫，不額外 stagger
+        .opacity(houseRowsAppeared ? 1 : 0)
+        .scaleEffect(houseRowsAppeared ? 1 : 0.85, anchor: .bottom)
+        .animation(.spring(response: 0.50, dampingFraction: 0.80), value: houseRowsAppeared)
     }
 
     // MARK: - 街道
@@ -388,7 +403,8 @@ struct HouseView: View {
                 .frame(height: 32)
                 .overlay(
                     RoofShape()
-                        .stroke(house.kind.roofColor.opacity(0.80), lineWidth: 1)
+                        // [v5] 1 → 0.75，對齊屋身 overlay stroke 與全 App 0.75pt 邊框規格
+                        .stroke(house.kind.roofColor.opacity(0.80), lineWidth: 0.75)
                 )
 
             // 屋身
