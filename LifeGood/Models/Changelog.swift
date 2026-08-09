@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.131", build: 884, date: "2026/08/09", notes: [
+            "【修復】同步卡住真兇現形——「上傳照片：網路無法連線」：v25.127-130 的可視化工程奏效，同步錯誤列終於顯示出根因：CloudKit 回報 networkUnavailable（App 層級連不上網，常見原因是 iPhone 設定 → 行動網路 中 LifeGood 的行動數據權限被關閉，只剩 Wi-Fi 可用）。兩項對策：① 批次上傳斷網短路：CloudKitManager 新增 lastNetworkErrorAt／isNetworkLikelyBlocked（10 秒窗口，NSLock 保護），report() 偵測到 networkUnavailable/networkFailure 即記錄；uploadAllLocalPhotos 迴圈每張照片前檢查，一張因斷網失敗後其餘數百張直接跳過不再逐張嘗試——先前每張都要枯等逾時，正是斷網下「同步中…」轉極久的主因，待網路恢復下輪同步自然補傳。② 錯誤訊息給出可行動指引：networkUnavailable 的描述由「網路無法連線」擴充為完整指引（檢查 設定 → 行動網路 → LifeGood 是否允許行動數據，或連 Wi-Fi 後再按立即同步）。"
+        ]),
         ChangelogEntry(version: "25.130", build: 883, date: "2026/08/09", notes: [
             "【功能】「同步中」列新增「重置」逃生按鈕：承接 v25.128 看門狗（3 分鐘自動解鎖），再加一道即時手動解鎖——同步中時「立即同步」列右側顯示紅色「重置」膠囊按鈕，點擊立即呼叫 CloudSyncManager.forceResetSyncState()（清除 pendingInitialSync＋isSyncing 落下＋顯示「已手動重置同步狀態，請再按一次立即同步」），不用等看門狗、也不怕任何未知路徑漏網。實作細節：外層「立即同步」按鈕原本以 .disabled(isSyncing) 停用，會連帶封鎖內層巢狀按鈕，改為動作內 guard 守衛＋內層 .borderless 按鈕獨立可點。搭配 v25.129 開場動畫版本號，可先確認裝置上跑的 build 再判讀同步狀態。"
         ]),

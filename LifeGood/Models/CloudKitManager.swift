@@ -538,6 +538,9 @@ final class CloudKitManager {
                 let url = docs.appendingPathComponent(dir, isDirectory: true)
                 guard let files = try? FileManager.default.contentsOfDirectory(atPath: url.path) else { continue }
                 for f in files where !f.hasPrefix(".") {
+                    // 斷網短路：前面的照片已因網路無法連線失敗，剩餘照片不再逐張嘗試
+                    //（每張都要枯等逾時，數百張會讓「同步中」轉非常久）；待網路恢復下輪再傳
+                    if self.isNetworkLikelyBlocked { continue }
                     group.enter()
                     self.uploadPhoto(directory: dir, fileName: f) { _ in group.leave() }
                 }
@@ -624,9 +627,26 @@ final class CloudKitManager {
 
     // MARK: - 錯誤回報（把過去被吞掉的 CloudKit 失敗變成可見訊息）
 
+    /// 最近一次網路無法連線錯誤的時間：供批次上傳短路——一張照片因斷網失敗後，
+    /// 其餘數百張不再逐張嘗試（每張都要枯等逾時，是「同步中」轉很久的主因之一）。
+    private let networkErrorLock = NSLock()
+    private var _lastNetworkErrorAt: Date?
+    private(set) var lastNetworkErrorAt: Date? {
+        get { networkErrorLock.lock(); defer { networkErrorLock.unlock() }; return _lastNetworkErrorAt }
+        set { networkErrorLock.lock(); _lastNetworkErrorAt = newValue; networkErrorLock.unlock() }
+    }
+    /// 10 秒內發生過網路錯誤 → 視為目前斷網，批次作業直接跳過剩餘項目
+    var isNetworkLikelyBlocked: Bool {
+        guard let at = lastNetworkErrorAt else { return false }
+        return Date().timeIntervalSince(at) < 10
+    }
+
     /// 把錯誤翻成可讀中文並廣播 + DEBUG console 印出。nil 代表沒有錯誤。
     func report(_ error: Error?, context: String) {
         guard let error = error else { return }
+        if let ck = error as? CKError, ck.code == .networkUnavailable || ck.code == .networkFailure {
+            lastNetworkErrorAt = Date()
+        }
         let msg = Self.describe(error)
         #if DEBUG
         print("☁️ CloudKit 錯誤[\(context)]：\(msg)　原始：\(error)")
@@ -643,7 +663,8 @@ final class CloudKitManager {
     static func describe(_ error: Error) -> String {
         guard let ck = error as? CKError else { return error.localizedDescription }
         switch ck.code {
-        case .networkUnavailable, .networkFailure:        return "網路無法連線"
+        case .networkUnavailable, .networkFailure:
+            return "網路無法連線。若正在使用行動數據，請到 iPhone 設定 → 行動網路 → 確認 LifeGood 已允許使用行動數據；或連上 Wi-Fi 後再按「立即同步」。"
         case .notAuthenticated:                           return "未登入 iCloud，或 iCloud Drive 未開啟"
         case .quotaExceeded:                              return "iCloud 儲存空間不足"
         case .zoneNotFound, .userDeletedZone:             return "iCloud 資料區不存在（將重建）"
