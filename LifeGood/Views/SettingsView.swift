@@ -1741,15 +1741,32 @@ struct SettingsView: View {
             let fmt = DateFormatter()
             fmt.locale = Locale(identifier: "zh_Hant_TW")
             fmt.dateFormat = "M/d HH:mm"
+            let stampFmt = DateFormatter()
+            stampFmt.dateFormat = "HH:mm"
             var lines: [String] = []
-            lines.append("結構化資料：雲端 \(result.kvFound)/\(result.kvTotal) 筆"
+            // 帶時間戳：分辨顯示的是剛跑的結果還是舊殘留
+            lines.append("[\(stampFmt.string(from: Date()))] 結構化資料：雲端 \(result.kvFound)/\(result.kvTotal) 筆"
                          + (result.latestKVDate.map { "（最後上雲 \(fmt.string(from: $0))）" } ?? ""))
             if result.photoChecked > 0 {
                 lines.append("抽查最近照片：雲端 \(result.photoFound)/\(result.photoChecked) 張"
                              + (result.latestPhotoDate.map { "（最後上雲 \(fmt.string(from: $0))）" } ?? ""))
             }
+            // 雲端普查：不猜 ID、直接數 zone 裡實際的記錄，切開「雲端真的空」vs「ID 對不上」
+            if result.censusKV >= 0 {
+                lines.append("雲端普查：資料 \(result.censusKV) 筆、照片 \(result.censusPhoto) 張")
+            }
+            let idMismatch = result.censusKV > 0 && result.kvFound == 0
+                || (result.photoChecked > 0 && result.censusPhoto > 0 && result.photoFound == 0)
+            if idMismatch, !result.censusSamples.isEmpty {
+                lines.append("記錄ID樣本：\n" + result.censusSamples.joined(separator: "\n"))
+                lines.append("雲端有記錄但與本機抽查的 ID 對不上，請截圖回報。")
+            }
             if result.kvFound < result.kvTotal || result.photoFound < result.photoChecked {
-                lines.append("有項目尚未上雲：請按「立即同步」後再驗證一次。")
+                if result.censusKV == 0, result.censusPhoto == 0 {
+                    lines.append("資料區存在但完全是空的——「推送成功」與實際不符，請截圖回報。")
+                } else if !idMismatch {
+                    lines.append("有項目尚未上雲：請按「立即同步」後再驗證一次。")
+                }
             } else {
                 lines.append("資料已確認在 iCloud 伺服器上。")
             }
@@ -1762,7 +1779,7 @@ struct SettingsView: View {
     private func runSyncDiagnostics() {
         guard !diagBusy else { return }
         diagBusy = true
-        diagResultText = "診斷中…（每層最多等 25 秒、全程最多約 1.5 分鐘；卡住的那一層會標「逾時」後自動跳下一層）"
+        diagResultText = "診斷中…（每層最多等 30 秒、全程最多約 2 分鐘；卡住的那一層會標「逾時」後自動跳下一層）"
         CloudKitManager.shared.runDiagnostics { report in
             diagBusy = false
             diagResultText = report

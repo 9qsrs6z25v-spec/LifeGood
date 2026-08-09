@@ -889,6 +889,35 @@ final class CloudKitManager {
                     }
                 }
                 self.privateDB.add(op)
+            }),
+            ("6. LifeGoodZone 寫入讀回", 30, { done in
+                // 關鍵測試：App 實際同步用的就是這個 zone——寫一筆測試記錄再「立刻讀回」。
+                // 寫入成功＋讀回成功＝整條鏈路正常；寫入成功但讀不回＝重大異常，直指病灶
+                let recID = CKRecord.ID(recordName: "diag_zone_test", zoneID: self.zoneID)
+                let rec = CKRecord(recordType: "DiagTest", recordID: recID)
+                rec["note"] = "zone diagnostics" as NSString
+                let save = CKModifyRecordsOperation(recordsToSave: [rec])
+                save.savePolicy = .allKeys
+                fastFail(save)
+                save.modifyRecordsResultBlock = { result in
+                    switch result {
+                    case .failure(let e):
+                        done("✗ 6. LifeGoodZone 寫入讀回：寫入失敗 \(raw(e))")
+                    case .success:
+                        let fetch = CKFetchRecordsOperation(recordIDs: [recID])
+                        fastFail(fetch)
+                        fetch.fetchRecordsResultBlock = { r in
+                            switch r {
+                            case .success:
+                                done("✓ 6. LifeGoodZone 寫入讀回：寫入後立即讀回成功")
+                            case .failure(let e):
+                                done("✗ 6. LifeGoodZone 寫入讀回：寫入成功但讀不回！\(raw(e))")
+                            }
+                        }
+                        self.privateDB.add(fetch)
+                    }
+                }
+                self.privateDB.add(save)
             })
         ]
 
@@ -1009,6 +1038,11 @@ final class CloudKitManager {
         var photoChecked = 0            // 抽查張數（本機最近 N 張）
         var latestPhotoDate: Date?      // 伺服器端最新一張照片的修改時間
         var errorMessage: String?
+        // 雲端普查（第二階段）：不猜 record ID，直接列出 zone 裡實際的記錄總數。
+        // 抽查 0 筆時可分辨「雲端真的空（推送回報與實際不符）」vs「記錄在但 ID 對不上」。
+        var censusKV = -1               // zone 內實際 KVBlob 總數（-1＝普查失敗）
+        var censusPhoto = -1            // zone 內實際 Photo 總數（-1＝普查失敗）
+        var censusSamples: [String] = []// 實際記錄 ID 樣本（供與預期 ID 比對）
     }
 
     /// 直接向 iCloud 伺服器抽查驗證：本機有資料的 syncKeys 對應 KVBlob 記錄是否存在、
@@ -1096,9 +1130,54 @@ final class CloudKitManager {
                 }
                 result.errorMessage = "雲端資料區不存在：同步從未在此環境成功寫入。已自動重設，請按「立即同步」重建後再驗證一次。"
             }
-            let final = result
+            var final = result
             lock.unlock()
-            DispatchQueue.main.async { completion(final) }
+            // 第二階段「雲端普查」：直接掃 zone 裡實際存在的記錄（不經由預測的 ID），
+            // 讓「抽查 0 筆」能進一步分辨是雲端真的空、還是 ID 對不上
+            guard let self, final.errorMessage == nil else {
+                DispatchQueue.main.async { completion(final) }
+                return
+            }
+            self.censusZone { kvCount, photoCount, samples, censusErr in
+                if censusErr == nil {
+                    final.censusKV = kvCount
+                    final.censusPhoto = photoCount
+                    final.censusSamples = samples
+                }
+                completion(final)   // censusZone 已回主執行緒
+            }
+        }
+        applyTimeouts(op)
+        privateDB.add(op)
+    }
+
+    /// 雲端普查：以 nil change token 全量掃描 LifeGoodZone，只取 updatedAt 中繼資料，
+    /// 統計 KVBlob／Photo 實際總數並取前幾筆記錄 ID 樣本。流量極小（不下載 asset）。
+    private func censusZone(completion: @escaping (Int, Int, [String], String?) -> Void) {
+        let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration(
+            previousServerChangeToken: nil, resultsLimit: nil, desiredKeys: ["updatedAt"])
+        let op = CKFetchRecordZoneChangesOperation(
+            recordZoneIDs: [zoneID], configurationsByRecordZoneID: [zoneID: config])
+        op.fetchAllChanges = true
+        op.qualityOfService = .userInitiated
+        var kv = 0, photo = 0
+        var samples: [String] = []
+        let lock = NSLock()
+        op.recordWasChangedBlock = { id, res in
+            guard case .success(let rec) = res else { return }
+            lock.lock()
+            if rec.recordType == Self.kvBlobRecordType { kv += 1 }
+            else if rec.recordType == Self.photoRecordType { photo += 1 }
+            if samples.count < 4 { samples.append(id.recordName) }
+            lock.unlock()
+        }
+        op.fetchRecordZoneChangesResultBlock = { result in
+            lock.lock()
+            let kvFinal = kv, photoFinal = photo, samplesFinal = samples
+            lock.unlock()
+            var err: String?
+            if case .failure(let e) = result { err = e.localizedDescription }
+            DispatchQueue.main.async { completion(kvFinal, photoFinal, samplesFinal, err) }
         }
         applyTimeouts(op)
         privateDB.add(op)
