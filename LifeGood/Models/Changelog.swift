@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.133", build: 886, date: "2026/08/09", notes: [
+            "【新增】設定 →「同步診斷」逐層測試工具：同步在 Wi-Fi 與行動數據下都回報「網路無法連線」、但一般上網明明正常（App 行動數據用量 432MB），猜測式排查（權限、低數據模式…）已無法收斂，需要看到失敗層的原始錯誤碼。CloudKitManager.runDiagnostics 依序測五層：(1) 一般網路（HTTPS 到 apple.com，10 秒逾時）→ (2) iCloud 帳號狀態（accountStatus 原始值）→ (3) 私有資料庫讀取（探測不存在的記錄，回 unknownItem＝連線正常）→ (4) 私有資料庫寫入（DiagTest 測試筆，serverRecordChanged 也算正常）→ (5) 自訂資料區 LifeGoodZone 是否存在。每層顯示 ✓/✗ 與原始錯誤（domain#code＋底層 NSError），設定頁 iCloud 同步區新增橙色「同步診斷」列，結果以等寬字型顯示、可長按選取複製，方便截圖回報。第一層通、後面斷＝iCloud 專屬通道問題；第一層就斷＝整體網路問題——一眼分辨。"
+        ]),
         ChangelogEntry(version: "25.132", build: 885, date: "2026/08/09", notes: [
             "【調整】「同步錯誤」訊息帶上發生時間：使用者查到 LifeGood 的行動數據權限本來就是開的，「網路無法連線」的來源需要進一步分辨——但錯誤列沒有時間戳，無法判斷顯示的是剛剛的錯誤還是數小時前的殘留，容易誤導診斷方向。handleSyncError（CloudKit 錯誤廣播）與 setSyncError（同步中止原因）兩條寫入路徑統一在訊息前加 [HH:mm] 時間戳；成功同步（markSynced）仍會清空錯誤列。搭配使用方式：按「立即同步」後看錯誤列時間——時間是剛剛＝問題現在仍在發生；時間是舊的＝那輪早已過去、目前狀態要看「最近同步」是否更新。"
         ]),

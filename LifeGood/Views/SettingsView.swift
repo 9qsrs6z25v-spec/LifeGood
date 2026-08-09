@@ -231,6 +231,10 @@ struct SettingsView: View {
     // 驗證雲端資料：busy 防連點 + 抽查結果
     @State private var verifyBusy = false
     @State private var verifyResultText: String?
+
+    // 同步診斷：逐層測試（一般網路→帳號→讀→寫→zone），顯示每層原始錯誤碼
+    @State private var diagBusy = false
+    @State private var diagResultText: String?
     @State private var verifyResultIsError = false
     @State private var showBackupRange = false     // 完整備份的時間範圍選擇
     @State private var importResultMessage = ""
@@ -937,6 +941,55 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(verifyResultIsError ? .red : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // 同步診斷：逐層測試（一般網路 → iCloud 帳號 → 資料庫讀 → 資料庫寫 → 自訂 zone），
+            // 顯示每層的原始錯誤網域/代碼，一次看清楚同步到底斷在哪一層
+            Button {
+                runSyncDiagnostics()
+            } label: {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.orange.opacity(0.22), Color.orange.opacity(0.09)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 36, height: 36)
+                        Circle()
+                            .stroke(Color.orange.opacity(0.20), lineWidth: 1)
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "stethoscope")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.orange)
+                    }
+                    .shadow(color: Color.orange.opacity(0.15), radius: 4, x: 0, y: 2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("同步診斷")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            if diagBusy { ProgressView().scaleEffect(0.7).tint(.orange) }
+                        }
+                        Text("逐層測試網路與 iCloud，找出同步斷在哪一層")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+            }
+            .foregroundStyle(.primary)
+            .disabled(diagBusy || !cloudSync.isEnabled)
+
+            if let text = diagResultText {
+                Text(text)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
             }
 
             Button {
@@ -1699,6 +1752,18 @@ struct SettingsView: View {
                 lines.append("資料已確認在 iCloud 伺服器上。")
             }
             verifyResultText = lines.joined(separator: "\n")
+        }
+    }
+
+    /// 同步診斷：呼叫 CloudKitManager 的逐層測試，把每層的 ✓/✗ 與原始錯誤碼顯示出來。
+    /// 不受帳號狀態限制（診斷本身就是要查帳號哪裡有問題），只擋重複點擊。
+    private func runSyncDiagnostics() {
+        guard !diagBusy else { return }
+        diagBusy = true
+        diagResultText = "診斷中…（最多約 40 秒）"
+        CloudKitManager.shared.runDiagnostics { report in
+            diagBusy = false
+            diagResultText = report
         }
     }
 

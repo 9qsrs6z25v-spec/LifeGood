@@ -625,6 +625,87 @@ final class CloudKitManager {
         defaults.removeObject(forKey: initialPullDoneKey)
     }
 
+    // MARK: - 同步診斷（逐層測試，顯示原始錯誤碼）
+
+    /// 逐層診斷同步鏈路：一般網路 → iCloud 帳號 → 私有資料庫讀 → 寫 → 自訂 zone。
+    /// 每層回報 ✓/✗ 與原始錯誤（domain#code＋底層 NSError），供精準定位斷點。
+    func runDiagnostics(completion: @escaping (String) -> Void) {
+        var lines: [String] = []
+
+        func raw(_ error: Error?) -> String {
+            guard let e = error as NSError? else { return "無錯誤" }
+            var out = "\(e.domain)#\(e.code)：\(e.localizedDescription)"
+            if let u = e.userInfo[NSUnderlyingErrorKey] as? NSError {
+                out += "\n    底層：\(u.domain)#\(u.code)：\(u.localizedDescription)"
+            }
+            return out
+        }
+
+        // 1. 一般網路（蘋果網域，避免被內容過濾干擾判讀）
+        var req = URLRequest(url: URL(string: "https://www.apple.com/library/test/success.html")!)
+        req.timeoutInterval = 10
+        URLSession.shared.dataTask(with: req) { _, resp, err in
+            if let err {
+                lines.append("✗ 1. 一般網路：\(raw(err))")
+            } else {
+                lines.append("✓ 1. 一般網路：HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
+            }
+            // 2. iCloud 帳號狀態（原始值）
+            self.container.accountStatus { status, acctErr in
+                let statusName: String = {
+                    switch status {
+                    case .available: return "available（正常）"
+                    case .noAccount: return "noAccount（未登入）"
+                    case .restricted: return "restricted（受限制）"
+                    case .couldNotDetermine: return "couldNotDetermine（無法判定）"
+                    case .temporarilyUnavailable: return "temporarilyUnavailable（暫時不可用）"
+                    @unknown default: return "未知(\(status.rawValue))"
+                    }
+                }()
+                if let acctErr {
+                    lines.append("✗ 2. iCloud 帳號：\(statusName)\n    \(raw(acctErr))")
+                } else {
+                    lines.append("\(status == .available ? "✓" : "✗") 2. iCloud 帳號：\(statusName)")
+                }
+                // 3. 私有資料庫「讀取」（default zone 探測；查無此筆＝連線正常）
+                let probeID = CKRecord.ID(recordName: "diag_probe_\(Int(Date().timeIntervalSince1970))")
+                self.privateDB.fetch(withRecordID: probeID) { _, readErr in
+                    if let ck = readErr as? CKError, ck.code == .unknownItem {
+                        lines.append("✓ 3. 資料庫讀取：連線正常（查無測試筆，符合預期）")
+                    } else if let readErr {
+                        lines.append("✗ 3. 資料庫讀取：\(raw(readErr))")
+                    } else {
+                        lines.append("✓ 3. 資料庫讀取：連線正常")
+                    }
+                    // 4. 私有資料庫「寫入」（default zone 小型測試記錄，成功後即刪除）
+                    let testRec = CKRecord(recordType: "DiagTest",
+                                           recordID: CKRecord.ID(recordName: "diag_write_test"))
+                    testRec["note"] = "sync diagnostics" as NSString
+                    self.privateDB.save(testRec) { _, writeErr in
+                        if let ck = writeErr as? CKError, ck.code == .serverRecordChanged {
+                            lines.append("✓ 4. 資料庫寫入：連線正常（測試筆已存在）")
+                        } else if let writeErr {
+                            lines.append("✗ 4. 資料庫寫入：\(raw(writeErr))")
+                        } else {
+                            lines.append("✓ 4. 資料庫寫入：成功")
+                        }
+                        // 5. 自訂 zone（LifeGoodZone）是否存在
+                        self.privateDB.fetch(withRecordZoneID: self.zoneID) { _, zoneErr in
+                            if let ck = zoneErr as? CKError, ck.code == .zoneNotFound {
+                                lines.append("✗ 5. 資料區 LifeGoodZone：不存在（按「立即同步」會重建）")
+                            } else if let zoneErr {
+                                lines.append("✗ 5. 資料區 LifeGoodZone：\(raw(zoneErr))")
+                            } else {
+                                lines.append("✓ 5. 資料區 LifeGoodZone：存在")
+                            }
+                            DispatchQueue.main.async { completion(lines.joined(separator: "\n")) }
+                        }
+                    }
+                }
+            }
+        }.resume()
+    }
+
     // MARK: - 錯誤回報（把過去被吞掉的 CloudKit 失敗變成可見訊息）
 
     /// 最近一次網路無法連線錯誤的時間：供批次上傳短路——一張照片因斷網失敗後，
