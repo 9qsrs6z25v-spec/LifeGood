@@ -629,8 +629,14 @@ final class CloudKitManager {
 
     /// 逐層診斷同步鏈路：一般網路 → iCloud 帳號 → 私有資料庫讀 → 寫 → 自訂 zone。
     /// 每層回報 ✓/✗ 與原始錯誤（domain#code＋底層 NSError），供精準定位斷點。
+    ///
+    /// 關鍵設計：CloudKit 在系統層判定「無網路」時不會回錯誤，而是把作業**無限排隊**
+    /// 等網路恢復（這正是「同步中」轉不停的元凶）。因此每一步都有獨立的逾時守門——
+    /// 卡住的那一步會標成「逾時＝被系統排隊」然後繼續跑下一步，
+    /// 「哪一步逾時」本身就是最重要的診斷結果。
     func runDiagnostics(completion: @escaping (String) -> Void) {
         var lines: [String] = []
+        let lock = NSLock()
 
         func raw(_ error: Error?) -> String {
             guard let e = error as NSError? else { return "無錯誤" }
@@ -638,72 +644,146 @@ final class CloudKitManager {
             if let u = e.userInfo[NSUnderlyingErrorKey] as? NSError {
                 out += "\n    底層：\(u.domain)#\(u.code)：\(u.localizedDescription)"
             }
+            if let partials = e.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: NSError],
+               let p = partials.values.first {
+                out += "\n    個別：\(p.domain)#\(p.code)：\(p.localizedDescription)"
+            }
             return out
         }
 
-        // 1. 一般網路（蘋果網域，避免被內容過濾干擾判讀）
-        var req = URLRequest(url: URL(string: "https://www.apple.com/library/test/success.html")!)
-        req.timeoutInterval = 10
-        URLSession.shared.dataTask(with: req) { _, resp, err in
-            if let err {
-                lines.append("✗ 1. 一般網路：\(raw(err))")
-            } else {
-                lines.append("✓ 1. 一般網路：HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
-            }
-            // 2. iCloud 帳號狀態（原始值）
-            self.container.accountStatus { status, acctErr in
-                let statusName: String = {
-                    switch status {
-                    case .available: return "available（正常）"
-                    case .noAccount: return "noAccount（未登入）"
-                    case .restricted: return "restricted（受限制）"
-                    case .couldNotDetermine: return "couldNotDetermine（無法判定）"
-                    case .temporarilyUnavailable: return "temporarilyUnavailable（暫時不可用）"
-                    @unknown default: return "未知(\(status.rawValue))"
-                    }
-                }()
-                if let acctErr {
-                    lines.append("✗ 2. iCloud 帳號：\(statusName)\n    \(raw(acctErr))")
-                } else {
-                    lines.append("\(status == .available ? "✓" : "✗") 2. iCloud 帳號：\(statusName)")
-                }
-                // 3. 私有資料庫「讀取」（default zone 探測；查無此筆＝連線正常）
-                let probeID = CKRecord.ID(recordName: "diag_probe_\(Int(Date().timeIntervalSince1970))")
-                self.privateDB.fetch(withRecordID: probeID) { _, readErr in
-                    if let ck = readErr as? CKError, ck.code == .unknownItem {
-                        lines.append("✓ 3. 資料庫讀取：連線正常（查無測試筆，符合預期）")
-                    } else if let readErr {
-                        lines.append("✗ 3. 資料庫讀取：\(raw(readErr))")
+        /// 為 CloudKit 作業套上「快速失敗」設定：診斷要的是立即答案，不是排隊等網路
+        func fastFail(_ op: CKOperation) {
+            op.configuration.timeoutIntervalForRequest = 15
+            op.configuration.timeoutIntervalForResource = 20
+            op.configuration.qualityOfService = .userInitiated
+        }
+
+        let steps: [(title: String, timeout: TimeInterval, body: (@escaping (String) -> Void) -> Void)] = [
+            ("1. 一般網路", 12, { done in
+                var req = URLRequest(url: URL(string: "https://www.apple.com/library/test/success.html")!)
+                req.timeoutInterval = 10
+                URLSession.shared.dataTask(with: req) { _, resp, err in
+                    if let err {
+                        done("✗ 1. 一般網路：\(raw(err))")
                     } else {
-                        lines.append("✓ 3. 資料庫讀取：連線正常")
+                        done("✓ 1. 一般網路：HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
                     }
-                    // 4. 私有資料庫「寫入」（default zone 小型測試記錄，成功後即刪除）
-                    let testRec = CKRecord(recordType: "DiagTest",
-                                           recordID: CKRecord.ID(recordName: "diag_write_test"))
-                    testRec["note"] = "sync diagnostics" as NSString
-                    self.privateDB.save(testRec) { _, writeErr in
-                        if let ck = writeErr as? CKError, ck.code == .serverRecordChanged {
-                            lines.append("✓ 4. 資料庫寫入：連線正常（測試筆已存在）")
-                        } else if let writeErr {
-                            lines.append("✗ 4. 資料庫寫入：\(raw(writeErr))")
-                        } else {
-                            lines.append("✓ 4. 資料庫寫入：成功")
+                }.resume()
+            }),
+            ("2. iCloud 帳號", 10, { done in
+                self.container.accountStatus { status, acctErr in
+                    let statusName: String = {
+                        switch status {
+                        case .available: return "available（正常）"
+                        case .noAccount: return "noAccount（未登入）"
+                        case .restricted: return "restricted（受限制）"
+                        case .couldNotDetermine: return "couldNotDetermine（無法判定）"
+                        case .temporarilyUnavailable: return "temporarilyUnavailable（暫時不可用）"
+                        @unknown default: return "未知(\(status.rawValue))"
                         }
-                        // 5. 自訂 zone（LifeGoodZone）是否存在
-                        self.privateDB.fetch(withRecordZoneID: self.zoneID) { _, zoneErr in
-                            if let ck = zoneErr as? CKError, ck.code == .zoneNotFound {
-                                lines.append("✗ 5. 資料區 LifeGoodZone：不存在（按「立即同步」會重建）")
-                            } else if let zoneErr {
-                                lines.append("✗ 5. 資料區 LifeGoodZone：\(raw(zoneErr))")
-                            } else {
-                                lines.append("✓ 5. 資料區 LifeGoodZone：存在")
-                            }
-                            DispatchQueue.main.async { completion(lines.joined(separator: "\n")) }
+                    }()
+                    if let acctErr {
+                        done("✗ 2. iCloud 帳號：\(statusName)\n    \(raw(acctErr))")
+                    } else {
+                        done("\(status == .available ? "✓" : "✗") 2. iCloud 帳號：\(statusName)")
+                    }
+                }
+            }),
+            ("3. 資料庫讀取", 25, { done in
+                // default zone 探測：查無此筆（unknownItem）＝連線正常
+                let probeID = CKRecord.ID(recordName: "diag_probe")
+                let op = CKFetchRecordsOperation(recordIDs: [probeID])
+                fastFail(op)
+                op.fetchRecordsResultBlock = { result in
+                    switch result {
+                    case .success:
+                        done("✓ 3. 資料庫讀取：連線正常")
+                    case .failure(let error):
+                        let codes: [CKError.Code?] = [
+                            (error as? CKError)?.code,
+                            ((error as? CKError)?.partialErrorsByItemID?.values.first as? CKError)?.code
+                        ]
+                        if codes.contains(.unknownItem) {
+                            done("✓ 3. 資料庫讀取：連線正常（查無測試筆，符合預期）")
+                        } else {
+                            done("✗ 3. 資料庫讀取：\(raw(error))")
                         }
                     }
                 }
+                self.privateDB.add(op)
+            }),
+            ("4. 資料庫寫入", 25, { done in
+                let testRec = CKRecord(recordType: "DiagTest",
+                                       recordID: CKRecord.ID(recordName: "diag_write_test"))
+                testRec["note"] = "sync diagnostics" as NSString
+                let op = CKModifyRecordsOperation(recordsToSave: [testRec])
+                op.savePolicy = .allKeys   // 直接覆寫既有測試筆，避免版本衝突干擾判讀
+                fastFail(op)
+                op.modifyRecordsResultBlock = { result in
+                    switch result {
+                    case .success:
+                        done("✓ 4. 資料庫寫入：成功")
+                    case .failure(let error):
+                        if let ck = error as? CKError, ck.code == .serverRecordChanged {
+                            done("✓ 4. 資料庫寫入：連線正常（測試筆已存在）")
+                        } else {
+                            done("✗ 4. 資料庫寫入：\(raw(error))")
+                        }
+                    }
+                }
+                self.privateDB.add(op)
+            }),
+            ("5. 資料區 LifeGoodZone", 22, { done in
+                let op = CKFetchRecordZonesOperation(recordZoneIDs: [self.zoneID])
+                fastFail(op)
+                var zoneLine: String?
+                op.perRecordZoneResultBlock = { _, result in
+                    switch result {
+                    case .success:
+                        zoneLine = "✓ 5. 資料區 LifeGoodZone：存在"
+                    case .failure(let error):
+                        if let ck = error as? CKError, ck.code == .zoneNotFound {
+                            zoneLine = "✗ 5. 資料區 LifeGoodZone：不存在（按「立即同步」會重建）"
+                        } else {
+                            zoneLine = "✗ 5. 資料區 LifeGoodZone：\(raw(error))"
+                        }
+                    }
+                }
+                op.fetchRecordZonesResultBlock = { result in
+                    if let zoneLine {
+                        done(zoneLine)
+                    } else if case .failure(let error) = result {
+                        done("✗ 5. 資料區 LifeGoodZone：\(raw(error))")
+                    } else {
+                        done("✗ 5. 資料區 LifeGoodZone：無回應")
+                    }
+                }
+                self.privateDB.add(op)
+            })
+        ]
+
+        func runStep(_ i: Int) {
+            guard i < steps.count else {
+                DispatchQueue.main.async { completion(lines.joined(separator: "\n")) }
+                return
             }
-        }.resume()
+            let step = steps[i]
+            var finished = false
+            func finish(_ line: String) {
+                lock.lock()
+                guard !finished else { lock.unlock(); return }
+                finished = true
+                lock.unlock()
+                lines.append(line)
+                runStep(i + 1)
+            }
+            // 守門計時器：逾時＝作業被系統排隊（CloudKit 判定無網路時的典型行為）
+            DispatchQueue.global().asyncAfter(deadline: .now() + step.timeout) {
+                finish("✗ \(step.title)：逾時（\(Int(step.timeout)) 秒無回應）→ 作業被系統排隊＝系統層判定「無網路」，這就是同步卡住的原因")
+            }
+            step.body { finish($0) }
+        }
+        runStep(0)
     }
 
     // MARK: - 錯誤回報（把過去被吞掉的 CloudKit 失敗變成可見訊息）

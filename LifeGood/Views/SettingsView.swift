@@ -1760,7 +1760,7 @@ struct SettingsView: View {
     private func runSyncDiagnostics() {
         guard !diagBusy else { return }
         diagBusy = true
-        diagResultText = "診斷中…（最多約 40 秒）"
+        diagResultText = "診斷中…（每層最多等 25 秒、全程最多約 1.5 分鐘；卡住的那一層會標「逾時」後自動跳下一層）"
         CloudKitManager.shared.runDiagnostics { report in
             diagBusy = false
             diagResultText = report

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.134", build: 887, date: "2026/08/09", notes: [
+            "【修正】「同步診斷」自己也卡住轉圈圈（實測放幾分鐘沒結果）：原版第 3、4 步用 CloudKit 便利 API，而 CloudKit 在系統層判定「無網路」時不會回報錯誤，是把作業無限排隊等網路恢復——這正是「同步中」轉好幾天的元凶，診斷工具踩進了同一個坑。重寫為逐步守門架構：(a) 每一步都有獨立逾時計時器（一般網路 12 秒／帳號 10 秒／讀寫各 25 秒／zone 22 秒，全程上限約 1.5 分鐘），逾時的那一步標成「✗ 逾時 → 作業被系統排隊＝系統層判定無網路」後自動跳下一步——哪一步逾時本身就是診斷結論；(b) CloudKit 呼叫全部改用 Operation API 並套 fastFail 設定（timeoutIntervalForRequest 15 秒／Resource 20 秒、QoS userInitiated）；(c) 寫入測試改 savePolicy .allKeys 直接覆寫測試筆，避免版本衝突干擾判讀；(d) 錯誤顯示追加 partialFailure 個別錯誤展開。NSLock 防守門與正常回呼重複觸發。"
+        ]),
         ChangelogEntry(version: "25.133", build: 886, date: "2026/08/09", notes: [
             "【新增】設定 →「同步診斷」逐層測試工具：同步在 Wi-Fi 與行動數據下都回報「網路無法連線」、但一般上網明明正常（App 行動數據用量 432MB），猜測式排查（權限、低數據模式…）已無法收斂，需要看到失敗層的原始錯誤碼。CloudKitManager.runDiagnostics 依序測五層：(1) 一般網路（HTTPS 到 apple.com，10 秒逾時）→ (2) iCloud 帳號狀態（accountStatus 原始值）→ (3) 私有資料庫讀取（探測不存在的記錄，回 unknownItem＝連線正常）→ (4) 私有資料庫寫入（DiagTest 測試筆，serverRecordChanged 也算正常）→ (5) 自訂資料區 LifeGoodZone 是否存在。每層顯示 ✓/✗ 與原始錯誤（domain#code＋底層 NSError），設定頁 iCloud 同步區新增橙色「同步診斷」列，結果以等寬字型顯示、可長按選取複製，方便截圖回報。第一層通、後面斷＝iCloud 專屬通道問題；第一層就斷＝整體網路問題——一眼分辨。"
         ]),
