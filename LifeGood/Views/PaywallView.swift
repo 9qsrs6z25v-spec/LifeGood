@@ -42,6 +42,14 @@ import StoreKit
 //       .lineLimit(1) + .minimumScaleFactor(0.7)，避免 Dynamic Type 開到最大級距或
 //       高單位金額（例如日後改參考幣別／較長貨幣符號）時文字被裁切或撐破 Capsule 邊框，
 //       對齊「大字自適應但不可小到無法辨識」的下限規格。
+// [2026-08 v4] 本次美化方向（fallbackProductRow 載入狀態，聚焦這一個元件）：
+//   12. fallbackProductRow「商品載入中…」文字先前是完全靜態的一行字，App Store 商品尚未
+//       回傳期間畫面看起來像是卡住、與 MultiPhotoGallery 載入佔位（漸層+文字）、
+//       PremiumBanner 升級膠囊 shimmer 等既有「進行中」回饋規格不一致。
+//       補上 loadingPulse 呼吸動畫（疊加 opacity 1.0 ↔ 0.45，easeInOut 1.1s repeatForever），
+//       只在 productList onAppear 時啟動，讓使用者一眼看出「商品資訊仍在向 App Store 讀取」
+//       而非畫面卡死；products 真正載入完成後 fallbackProductRow 不再顯示，動畫自然停止。
+//       純視覺回饋層調整，商品載入／購買流程完全未變動。
 
 // MARK: - 升級訂閱頁
 
@@ -62,6 +70,8 @@ struct PaywallView: View {
     @State private var productsAppeared = false
     /// 限時免費通知卡進場旗標
     @State private var giftAppeared = false
+    /// fallbackProductRow「商品載入中…」呼吸動畫旗標
+    @State private var loadingPulse = false
 
     var body: some View {
         NavigationStack {
@@ -388,6 +398,9 @@ struct PaywallView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
                 productsAppeared = true
             }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                loadingPulse = true
+            }
         }
     }
 
@@ -472,6 +485,8 @@ struct PaywallView: View {
                 Text("商品載入中…")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.78))
+                    // [v4] 呼吸動畫回饋「仍在讀取中」，避免看起來像卡住
+                    .opacity(loadingPulse ? 0.45 : 1.0)
             }
             Spacer()
             Text(product.fallbackPriceText)
