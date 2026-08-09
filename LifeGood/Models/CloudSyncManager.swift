@@ -448,10 +448,15 @@ final class CloudSyncManager: ObservableObject {
         }
     }
 
+    private static let errorTimeFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    }()
+
     @objc private func handleSyncError(_ note: Notification) {
         let msg = note.userInfo?["message"] as? String
         DispatchQueue.main.async { [weak self] in
-            self?.lastErrorMessage = msg
+            // 帶上發生時間：讓使用者能分辨「同步錯誤」列顯示的是剛剛的錯誤還是舊殘留
+            self?.lastErrorMessage = msg.map { "[\(Self.errorTimeFmt.string(from: Date()))] \($0)" }
         }
     }
 
@@ -476,8 +481,9 @@ final class CloudSyncManager: ObservableObject {
     /// 同步中止/失敗時把原因寫進 lastErrorMessage（設定頁「同步錯誤」列會顯示），
     /// 取代先前 guard 直接 return 的靜默失敗——按了立即同步卻毫無動靜、無從診斷。
     private func setSyncError(_ message: String) {
-        if Thread.isMainThread { lastErrorMessage = message }
-        else { DispatchQueue.main.async { self.lastErrorMessage = message } }
+        let stamped = "[\(Self.errorTimeFmt.string(from: Date()))] \(message)"
+        if Thread.isMainThread { lastErrorMessage = stamped }
+        else { DispatchQueue.main.async { self.lastErrorMessage = stamped } }
     }
 
     private func markSynced() {

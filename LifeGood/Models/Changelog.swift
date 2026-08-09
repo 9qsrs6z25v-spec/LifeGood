@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.132", build: 885, date: "2026/08/09", notes: [
+            "【調整】「同步錯誤」訊息帶上發生時間：使用者查到 LifeGood 的行動數據權限本來就是開的，「網路無法連線」的來源需要進一步分辨——但錯誤列沒有時間戳，無法判斷顯示的是剛剛的錯誤還是數小時前的殘留，容易誤導診斷方向。handleSyncError（CloudKit 錯誤廣播）與 setSyncError（同步中止原因）兩條寫入路徑統一在訊息前加 [HH:mm] 時間戳；成功同步（markSynced）仍會清空錯誤列。搭配使用方式：按「立即同步」後看錯誤列時間——時間是剛剛＝問題現在仍在發生；時間是舊的＝那輪早已過去、目前狀態要看「最近同步」是否更新。"
+        ]),
         ChangelogEntry(version: "25.131", build: 884, date: "2026/08/09", notes: [
             "【修復】同步卡住真兇現形——「上傳照片：網路無法連線」：v25.127-130 的可視化工程奏效，同步錯誤列終於顯示出根因：CloudKit 回報 networkUnavailable（App 層級連不上網，常見原因是 iPhone 設定 → 行動網路 中 LifeGood 的行動數據權限被關閉，只剩 Wi-Fi 可用）。兩項對策：① 批次上傳斷網短路：CloudKitManager 新增 lastNetworkErrorAt／isNetworkLikelyBlocked（10 秒窗口，NSLock 保護），report() 偵測到 networkUnavailable/networkFailure 即記錄；uploadAllLocalPhotos 迴圈每張照片前檢查，一張因斷網失敗後其餘數百張直接跳過不再逐張嘗試——先前每張都要枯等逾時，正是斷網下「同步中…」轉極久的主因，待網路恢復下輪同步自然補傳。② 錯誤訊息給出可行動指引：networkUnavailable 的描述由「網路無法連線」擴充為完整指引（檢查 設定 → 行動網路 → LifeGood 是否允許行動數據，或連 Wi-Fi 後再按立即同步）。"
         ]),
