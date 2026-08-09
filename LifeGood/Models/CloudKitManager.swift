@@ -551,12 +551,43 @@ final class CloudKitManager {
 
     // MARK: - 一次性：把所有本地照片掃描後上傳（確保歷史檔案不漏）
 
+    /// 掃描上傳的併發守衛（都只在 queue 上讀寫）：同一時間只允許一輪掃描上傳。
+    /// 使用者按「重置」再按「立即同步」時，舊迴圈仍在背景跑，第二輪疊上去會
+    /// 兩組進度數字交錯跳動（例 16/375、52/403）且同批照片重複上傳。
+    private var uploadSweepActive = false
+    private var uploadSweepCompletions: [() -> Void] = []
+    private var uploadSweepGeneration = 0
+
+    /// 使用者按「重置」時呼叫：進行中的照片掃描上傳會在下一個批次邊界中止
+    func cancelPhotoSweep() {
+        queue.async { self.uploadSweepGeneration += 1 }
+    }
+
     func uploadAllLocalPhotos(completion: (() -> Void)? = nil) {
         guard isAvailable else { completion?(); return }
         queue.async {
+            // 已有一輪在跑 → 不疊加第二輪，把回呼併入進行中那輪、結束時一起通知
+            if self.uploadSweepActive {
+                if let completion { self.uploadSweepCompletions.append(completion) }
+                return
+            }
             guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
                 completion?(); return
             }
+            self.uploadSweepActive = true
+            let generation = self.uploadSweepGeneration
+
+            /// 收尾（在 queue 上呼叫）：放下守衛旗標、通知本輪與併入的所有回呼
+            func finishSweep() {
+                self.uploadSweepActive = false
+                let merged = self.uploadSweepCompletions
+                self.uploadSweepCompletions = []
+                DispatchQueue.main.async {
+                    completion?()
+                    merged.forEach { $0() }
+                }
+            }
+
             // 先用帳本掃出「真正需要上傳」的清單：簽章（大小-修改時間）相同＝已上傳且沒變，
             // 直接跳過不打任何網路——沒帳本前每輪同步都重傳全部照片，是流量與時間爆炸的主因
             let ledger = self.uploadLedger()
@@ -572,7 +603,7 @@ final class CloudKitManager {
                 }
             }
             guard !pending.isEmpty else {
-                DispatchQueue.main.async { completion?() }
+                finishSweep()
                 return
             }
             let total = pending.count
@@ -581,9 +612,15 @@ final class CloudKitManager {
             // 4 張一批依序上傳：先前是全部照片同時排隊（數百個並發作業），
             // 既塞爆佇列也讓進度無從掌握；批次化後可回報「上傳照片 X/Y」即時進度
             func runBatch(_ index: Int) {
+                // 被取消（重置）→ 中止剩餘批次；已傳成功的照片留在帳本，下輪不會重傳
+                guard generation == self.uploadSweepGeneration else {
+                    self.postSyncProgress(nil)
+                    finishSweep()
+                    return
+                }
                 guard index < pending.count else {
                     self.postSyncProgress(nil)
-                    DispatchQueue.main.async { completion?() }
+                    finishSweep()
                     return
                 }
                 let batch = pending[index..<min(index + 4, pending.count)]

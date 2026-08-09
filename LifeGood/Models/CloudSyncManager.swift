@@ -115,6 +115,8 @@ final class CloudSyncManager: ObservableObject {
                 return
             }
             self.isSyncing = false
+            // 同步取消進行中的照片上傳迴圈，避免下一輪「立即同步」與殘留迴圈疊加
+            CloudKitManager.shared.cancelPhotoSweep()
             self.setSyncError("同步逾時（超過 3 分鐘無回應），已自動重置。請再按一次「立即同步」。")
         }
     }
@@ -496,6 +498,9 @@ final class CloudSyncManager: ObservableObject {
     func forceResetSyncState() {
         pendingInitialSync = nil
         isSyncing = false
+        // 真正取消進行中的照片上傳迴圈：先前重置只放下旗標、舊迴圈仍在背景跑，
+        // 再按「立即同步」會疊上第二輪，兩組進度數字交錯跳動且照片重複上傳
+        CloudKitManager.shared.cancelPhotoSweep()
         setSyncError("已手動重置同步狀態，請再按一次「立即同步」。")
     }
 
