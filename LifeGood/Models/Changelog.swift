@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.130", build: 883, date: "2026/08/09", notes: [
+            "【功能】「同步中」列新增「重置」逃生按鈕：承接 v25.128 看門狗（3 分鐘自動解鎖），再加一道即時手動解鎖——同步中時「立即同步」列右側顯示紅色「重置」膠囊按鈕，點擊立即呼叫 CloudSyncManager.forceResetSyncState()（清除 pendingInitialSync＋isSyncing 落下＋顯示「已手動重置同步狀態，請再按一次立即同步」），不用等看門狗、也不怕任何未知路徑漏網。實作細節：外層「立即同步」按鈕原本以 .disabled(isSyncing) 停用，會連帶封鎖內層巢狀按鈕，改為動作內 guard 守衛＋內層 .borderless 按鈕獨立可點。搭配 v25.129 開場動畫版本號，可先確認裝置上跑的 build 再判讀同步狀態。"
+        ]),
         ChangelogEntry(version: "25.129", build: 882, date: "2026/08/09", notes: [
             "【功能】App 開場動畫（僅冷啟動顯示）＝「App 曾被殺」目視指標：新增 LaunchSplashView 品牌開場——藍綠漸層底＋雙散景圓、110pt 圖示圓 spring 進場、「美好人生／LifeGood」標題淡入上移，1.4 秒後自動淡出（0.35s），底部顯示目前版本與建置號。關鍵設計：showSplash 是 App 結構的 @State，只在「程序重新建立（冷啟動）」時重置——從背景喚醒不會重播，因此看到開場動畫＝App 曾被系統終止後重新啟動，可直接目視判斷 App 是否在後台被殺（配合 v25.128 同步看門狗，冷啟動也會重置同步旗標；底部版本號同時可確認跑的是不是剛安裝的 build）。動畫只擋視覺不擋啟動流程，MainTabView 的初始化/同步/備份照常並行執行。"
         ]),

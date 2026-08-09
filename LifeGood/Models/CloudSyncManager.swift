@@ -465,6 +465,14 @@ final class CloudSyncManager: ObservableObject {
 
     // MARK: - Helpers
 
+    /// 手動強制重置同步狀態：給設定頁「同步中」列的「重置」按鈕使用。
+    /// 看門狗（3 分鐘）之外的即時逃生口——任何未知路徑卡住 isSyncing 都能立即解鎖。
+    func forceResetSyncState() {
+        pendingInitialSync = nil
+        isSyncing = false
+        setSyncError("已手動重置同步狀態，請再按一次「立即同步」。")
+    }
+
     /// 同步中止/失敗時把原因寫進 lastErrorMessage（設定頁「同步錯誤」列會顯示），
     /// 取代先前 guard 直接 return 的靜默失敗——按了立即同步卻毫無動靜、無從診斷。
     private func setSyncError(_ message: String) {

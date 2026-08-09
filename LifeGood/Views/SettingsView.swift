@@ -835,6 +835,9 @@ struct SettingsView: View {
             }
 
             Button {
+                // 同步中不重複觸發（改在動作內守衛而非 .disabled：
+                // 讓同一列右側的「重置」逃生按鈕在同步卡住時仍可點擊）
+                guard !cloudSync.isSyncing else { return }
                 cloudSync.syncNow()
             } label: {
                 HStack(spacing: 14) {
@@ -868,10 +871,25 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    // 同步中卡住的即時逃生口：不用等 3 分鐘看門狗，點「重置」立即解鎖
+                    if cloudSync.isSyncing {
+                        Button {
+                            cloudSync.forceResetSyncState()
+                        } label: {
+                            Text("重置")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Color.red.opacity(0.10))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
+                        }
+                        .buttonStyle(.borderless)
+                    }
                 }
             }
             .foregroundStyle(.primary)
-            .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled || cloudSync.isSyncing)
+            .disabled(!cloudSync.isAccountAvailable || !cloudSync.isEnabled)
 
             // 驗證雲端資料：直接向 iCloud 伺服器抽查（非本機宣稱），
             // 回報結構化資料筆數、最近照片抽查結果與伺服器端最後上雲時間
