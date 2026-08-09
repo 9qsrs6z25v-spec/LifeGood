@@ -390,6 +390,11 @@ struct MainTabView: View {
                 }
                 contentView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // 全域滑動手勢：邊緣滑動切大功能、快速甩動切子功能（詳見 handleSwipe）
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 30, coordinateSpace: .global)
+                            .onEnded { handleSwipe($0) }
+                    )
                 // 佔位用：與底部 tab bar 同高，保證內容區不會被 tab bar 蓋住。
                 // 用獨立的 hiddenTabBarNamespace，避免跟下方真正顯示的副本共用同一個
                 // matchedGeometryEffect namespace（見上方 hiddenTabBarNamespace 宣告註解）。
@@ -1299,6 +1304,82 @@ struct MainTabView: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .animation(.spring(response: 0.3, dampingFraction: 0.72), value: isActive)
+    }
+
+    // MARK: - 全域滑動手勢（邊緣滑動切大功能 / 快速甩動切子功能）
+
+    /// 邊緣判定寬度：起點距螢幕左右緣此距離內視為「邊緣滑動」
+    private static let edgeSwipeWidth: CGFloat = 28
+
+    /// 單一 DragGesture 同時支援兩種手勢，依「起點位置」與「甩動速度」分流：
+    /// 1. 起點在螢幕左/右緣 + 水平滑動 → 切換大功能（收支/理財/人生/設定，循環）
+    /// 2. 非邊緣起點 + 快速甩動（慣性預測位移遠大於實際位移）→ 切換目前大功能內的子功能
+    /// 用 simultaneousGesture 掛在內容區：不攔截頁面內既有的捲動/點擊；
+    /// 子功能切換門檻刻意訂高（快速甩動才觸發），避免與橫向捲動列/地圖平移誤觸。
+    private func handleSwipe(_ value: DragGesture.Value) {
+        let dx = value.translation.width
+        let dy = value.translation.height
+        guard abs(dx) > abs(dy) * 1.5 else { return }   // 必須以水平為主，斜向/垂直不觸發
+        let screenW = UIScreen.main.bounds.width
+        let startX = value.startLocation.x
+
+        if startX <= Self.edgeSwipeWidth, dx > 60 {
+            switchMainTab(-1)   // 左緣往右滑 → 上一個大功能
+            return
+        }
+        if startX >= screenW - Self.edgeSwipeWidth, dx < -60 {
+            switchMainTab(1)    // 右緣往左滑 → 下一個大功能
+            return
+        }
+        // 快速甩動判定：predictedEndTranslation 是系統依放手瞬間速度推算的慣性終點，
+        // 與實際位移的差值大＝放手時速度快。慢速拖曳（一般捲動）不會達標。
+        let flingExtra = abs(value.predictedEndTranslation.width - dx)
+        if abs(dx) > 110, flingExtra > 160 {
+            switchSubFeature(dx < 0 ? 1 : -1)   // 往左甩 → 下一個子功能
+        }
+    }
+
+    /// 大功能循環切換：收支 → 理財 → 人生 → 設定 → 收支…（順序同底部導覽列）
+    private func switchMainTab(_ delta: Int) {
+        let order: [AppMode] = [.expense, .finance, .life]
+        let current = isSettingsActive ? 3 : (order.firstIndex(of: currentMode) ?? 0)
+        let next = (current + delta + 4) % 4
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+            if next == 3 {
+                isSettingsActive = true
+            } else {
+                appMode = order[next].rawValue
+                isSettingsActive = false
+            }
+        }
+    }
+
+    /// 子功能切換：在目前大功能的子功能列表內前後移動（到頭/到尾即停，不循環）。
+    /// 人生模式只切換頂層子功能（職涯/家庭的第二層膠囊維持點選操作，
+    /// 切走時既有 onChange 會自動清除第二層選擇）。
+    private func switchSubFeature(_ delta: Int) {
+        guard !isSettingsActive else { return }
+
+        func advance<F: CaseIterable & Equatable>(_ current: F, write: (F) -> Void) {
+            let all = Array(F.allCases)
+            guard let i = all.firstIndex(of: current) else { return }
+            let n = min(max(i + delta, 0), all.count - 1)
+            guard n != i else { return }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.70)) {
+                write(all[n])
+            }
+        }
+
+        switch currentMode {
+        case .expense:
+            advance(expenseFeature) { expenseFeatureRaw = $0.rawValue }
+        case .finance:
+            advance(financeFeature) { financeFeatureRaw = $0.rawValue }
+        case .life:
+            advance(lifeFeature) { lifeFeatureRaw = $0.rawValue }
+        }
     }
 
     // MARK: - 浮動新增按鈕

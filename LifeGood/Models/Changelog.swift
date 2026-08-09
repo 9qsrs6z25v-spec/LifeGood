@@ -13,6 +13,10 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.139", build: 892, date: "2026/08/10", notes: [
+            "【新增】全域滑動手勢：MainTabView 內容區掛單一 DragGesture（simultaneousGesture，不攔截頁面既有捲動/點擊），依起點與甩速分流兩種操作——(1) 邊緣滑動切大功能：起點在螢幕左/右緣 28pt 內的水平滑動，左緣右滑上一個、右緣左滑下一個，順序同底部導覽列（收支→理財→人生→設定）循環；(2) 快速甩動切子功能：非邊緣起點、以 predictedEndTranslation 與實際位移差值判定放手速度（慣性預測差 >160pt 且位移 >110pt 才觸發，慢速拖曳的一般捲動與地圖平移不達標），在目前大功能的子功能列表內前後移動（到頭即停）。兩種切換皆帶輕震動回饋與底部導覽列同款 spring 動畫；人生模式只切頂層子功能，職涯/家庭第二層膠囊維持點選。",
+            "【診斷】寫入自我驗證哨兵＋第 7 層真實路徑測試：上輪結果把矛盾逼到牆角——診斷第 6 層純欄位寫入 LifeGoodZone 能寫能讀回，但雲端普查 0 筆、App 推送卻回報成功，嫌疑鎖定「帶 CKAsset 附件」的真實推送路徑。兩項instrumentation：(1) modifyKV 成功回報後立刻以中繼資料 fetch 讀回同一筆，讀不回即視為失敗並在「同步錯誤」列顯示「伺服器回報寫入成功，但立即讀回查無此筆」——把假成功當場抓出來，也讓 markSynced 不再被假成功騙過；(2) 同步診斷加第 7 層「真實推送路徑」：直接呼叫生產環境同一條 pushKV（fetch→CKAsset→.changedKeys 寫入）推一筆測試 KVBlob 再讀回，第 6 層過、第 7 層不過＝問題百分之百在附件上傳。"
+        ]),
         ChangelogEntry(version: "25.138", build: 891, date: "2026/08/09", notes: [
             "【新增】車輛卡片「照片紀錄」章節：比照房地產裝潢照片規格，可上傳保養維修、稅費單據、保險文件、加油充電、事故紀錄、車輛照片、其他共七類照片（VehiclePhotoCategory 各有專屬圖示與色系）。車輛卡片詳情頁在變動支出下方新增「照片紀錄」卡：右上「+」新增（訂閱守衛同其他編輯功能），橫向捲動卡片列（單張縮圖／多張斜角堆疊＋張數膠囊、類別彩色徽章、標題、日期），點卡片開啟可愛風照片瀏覽器（CutePhotoViewer 擴充 vehicle 類型、accent 跟隨類別色），長按可編輯資訊。編輯器 VehiclePhotoEditor 完整比照 RenovationPhotoEditor：日期／類別／標題／多照片（拍照・連拍・相簿多選、存檔自動壓縮 1080P）／備註、取消時清孤兒檔案與收斂已刪照片引用、防連點守衛。資料層：Vehicle.photoRecords 容錯解碼、照片存 VehiclePhotos 資料夾並納入 iCloud 同步／完整備份／一鍵壓縮範圍、刪車連同照片檔案與雲端記錄一併清除、合併匯入補進既有車輛的新照片紀錄。"
         ]),

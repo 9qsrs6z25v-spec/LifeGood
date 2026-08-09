@@ -237,7 +237,32 @@ final class CloudKitManager {
                 try? FileManager.default.removeItem(at: tmp)
                 switch result {
                 case .success:
-                    completion?(true)
+                    // 寫入自我驗證哨兵：v25.137 雲端普查揭露「推送回報成功但 zone 完全是空的」
+                    // 矛盾（診斷第 6 層純欄位寫入卻能讀回），在真實路徑上加裝哨兵——
+                    // 成功回報後立刻以中繼資料 fetch 讀回同一筆，讀不回就視為失敗並回報可見錯誤，
+                    // 把「假成功」當場抓出來
+                    guard let self else { completion?(true); return }
+                    let verifyOp = CKFetchRecordsOperation(recordIDs: [recID])
+                    verifyOp.desiredKeys = ["updatedAt"]
+                    verifyOp.qualityOfService = .userInitiated
+                    var readBack = false
+                    verifyOp.perRecordResultBlock = { _, res in
+                        if case .success = res { readBack = true }
+                    }
+                    verifyOp.fetchRecordsResultBlock = { [weak self] _ in
+                        if readBack {
+                            completion?(true)
+                        } else {
+                            self?.report(NSError(
+                                domain: "LifeGoodSync", code: -99,
+                                userInfo: [NSLocalizedDescriptionKey:
+                                    "伺服器回報寫入成功，但立即讀回查無此筆——請截圖回報"]
+                            ), context: "上傳 \(key)")
+                            completion?(false)
+                        }
+                    }
+                    self.applyTimeouts(verifyOp)
+                    self.privateDB.add(verifyOp)
                 case .failure(let error):
                     // 兩台同時改同一筆 → 重新抓最新版本再覆蓋一次（整份快照，last-writer-wins）
                     // 延遲 0.5s 再重試，避免立即重打造成 CloudKit rate-limit
@@ -919,6 +944,36 @@ final class CloudKitManager {
                     }
                 }
                 self.privateDB.add(save)
+            }),
+            ("7. 真實推送路徑（含附件）", 40, { done in
+                // 決定性測試：第 6 層寫的是純欄位測試筆，真正同步推的是「帶 CKAsset 附件」的
+                // KVBlob——嫌疑鎖定在附件路徑上。這裡直接呼叫生產環境同一條 pushKV
+                //（fetch→組 CKAsset→.changedKeys 寫入），成功後再讀回驗證
+                let payload = Data("{\"diag\":true}".utf8)
+                self.pushKV(key: "diag_pipeline_test", data: payload) { ok in
+                    guard ok else {
+                        done("✗ 7. 真實推送路徑：pushKV 回報失敗（原始錯誤見「同步錯誤」列）")
+                        return
+                    }
+                    let recID = CKRecord.ID(recordName: "kv_diag_pipeline_test", zoneID: self.zoneID)
+                    let fetch = CKFetchRecordsOperation(recordIDs: [recID])
+                    fetch.desiredKeys = ["updatedAt"]
+                    fastFail(fetch)
+                    var found = false
+                    fetch.perRecordResultBlock = { _, res in
+                        if case .success = res { found = true }
+                    }
+                    fetch.fetchRecordsResultBlock = { r in
+                        if found {
+                            done("✓ 7. 真實推送路徑（KVBlob＋附件）：寫入並讀回成功")
+                        } else if case .failure(let e) = r {
+                            done("✗ 7. 真實推送路徑：寫入回報成功但讀不回！\(raw(e))")
+                        } else {
+                            done("✗ 7. 真實推送路徑：寫入回報成功但讀不回（查無此筆）")
+                        }
+                    }
+                    self.privateDB.add(fetch)
+                }
             })
         ]
 
