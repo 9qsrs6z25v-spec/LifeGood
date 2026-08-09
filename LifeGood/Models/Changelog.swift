@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.128", build: 881, date: "2026/08/09", notes: [
+            "【修復】「同步中…」跨日卡死——同步死鎖的真正根因：使用者回報同步中轉圈從昨天卡到今天。診斷：isSyncing 旗標升起後，只要任何一條 CloudKit 操作的 completion 沒回來，旗標就永遠是 true，而 performSync／flushPushAll／beginInitialSync 全都以 guard !isSyncing 開頭——旗標卡死後每一次手動「立即同步」都被靜默跳過，整個同步系統死鎖（這也解釋了驗證持續 0/N 與最近同步時間停在前一天）。兩個卡死來源：① 所有同步關鍵 CloudKit 操作的 QoS 是 .utility——系統可將其視為可延後的背景流量無限期掛起（省電模式/弱網路下尤甚）；② 「iCloud 已有資料，覆蓋或合併？」等待使用者選擇期間刻意持有 isSyncing，但若選擇對話框未能呈現（收合的區塊/切走畫面），同樣永久卡死。修法三層：① 同步關鍵操作 QoS 全面改 .userInitiated（5 處），不再被系統延後；② 新增 applyTimeouts：所有 7 個 CloudKit 操作設單一請求 30 秒／整體資源 5 分鐘逾時，逾時即回錯誤而非無限等待；③ isSyncing didSet 看門狗——旗標升起自動起 3 分鐘計時，逾時強制重置並顯示「同步逾時已自動重置」；等待覆蓋/合併選擇另給 10 分鐘，仍未選擇則視為放棄、關回同步開關並提示重新開啟即可再選。從此同步不可能再永久卡死，最壞情況 3 分鐘自動解鎖並說明原因。"
+        ]),
         ChangelogEntry(version: "25.127", build: 880, date: "2026/08/08", notes: [
             "【修復＋美化】「立即同步」看得見、失敗說得出（承接 v25.126 雲端 0/N 診斷）：使用者回報按立即同步「不太有按鈕感覺」且驗證結果依舊 0/N、最近同步時間停在前一天——根因是同步流程的多條失敗路徑都是 guard 直接 return 的靜默失敗（帳號狀態不可用/初始化失敗/拉取失敗/推送失敗都不留任何訊息），isSyncing 又是私有變數 UI 看不到，按了毫無動靜也無從診斷。修法：① CloudSyncManager.isSyncing 改為 @Published，設定頁「立即同步」按鈕同步中顯示「同步中…」＋轉圈、副標改「正在推送資料與照片到 iCloud」、期間停用防連點；② 新增 setSyncError：四條靜默失敗路徑（帳號不可用/初始化失敗/拉取失敗不推送/部分推送失敗）都寫入 lastErrorMessage，設定頁「同步錯誤」列即時顯示中止原因與建議動作；③ 立即同步列升級為 36pt 漸層圖示圓卡片列（對齊驗證雲端資料/一鍵壓縮列規格）。從此按下立即同步：有轉圈＝在跑、最近同步更新＝成功、同步錯誤列＝失敗原因，三種結果都看得見。"
         ]),

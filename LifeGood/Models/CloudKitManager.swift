@@ -124,13 +124,22 @@ final class CloudKitManager {
         }
     }
 
+
+    /// 為 CloudKit 操作加上明確逾時：預設設定下操作可能被系統長時間掛起，
+    /// 卡住呼叫端的 isSyncing 旗標（使用者回報「同步中…」跨日不結束）。
+    /// 單一請求 30 秒、整體資源（含 CKAsset 上傳/下載）5 分鐘內須完成，逾時即回錯誤。
+    private func applyTimeouts(_ op: CKOperation) {
+        op.configuration.timeoutIntervalForRequest = 30
+        op.configuration.timeoutIntervalForResource = 300
+    }
+
     // MARK: - Zone
 
     private func ensureZoneExists(completion: @escaping (Bool) -> Void) {
         if defaults.bool(forKey: zoneCreatedKey) { completion(true); return }
         let zone = CKRecordZone(zoneID: zoneID)
         let op = CKModifyRecordZonesOperation(recordZonesToSave: [zone], recordZoneIDsToDelete: nil)
-        op.qualityOfService = .utility
+        op.qualityOfService = .userInitiated
         op.modifyRecordZonesResultBlock = { [weak self] result in
             switch result {
             case .success:
@@ -143,6 +152,7 @@ final class CloudKitManager {
                 completion(false)
             }
         }
+        applyTimeouts(op)
         privateDB.add(op)
     }
 
@@ -156,7 +166,7 @@ final class CloudKitManager {
         sub.notificationInfo = info
 
         let op = CKModifySubscriptionsOperation(subscriptionsToSave: [sub], subscriptionIDsToDelete: nil)
-        op.qualityOfService = .utility
+        op.qualityOfService = .userInitiated
         op.modifySubscriptionsResultBlock = { [weak self] result in
             switch result {
             case .success:
@@ -169,6 +179,7 @@ final class CloudKitManager {
                 completion(false)
             }
         }
+        applyTimeouts(op)
         privateDB.add(op)
     }
 
@@ -214,7 +225,7 @@ final class CloudKitManager {
 
             let op = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
             op.savePolicy = .changedKeys
-            op.qualityOfService = .utility
+            op.qualityOfService = .userInitiated
             op.modifyRecordsResultBlock = { [weak self] result in
                 try? FileManager.default.removeItem(at: tmp)
                 switch result {
@@ -248,6 +259,7 @@ final class CloudKitManager {
                     }
                 }
             }
+            self.applyTimeouts(op)
             self.privateDB.add(op)
         }
     }
@@ -286,7 +298,7 @@ final class CloudKitManager {
 
                     let op = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
                     op.savePolicy = .changedKeys
-                    op.qualityOfService = .utility
+                    op.qualityOfService = .userInitiated
                     op.modifyRecordsResultBlock = { [weak self] result in
                         switch result {
                         case .success: completion?(true)
@@ -311,7 +323,8 @@ final class CloudKitManager {
                             }
                         }
                     }
-                    self.privateDB.add(op)
+                    self.applyTimeouts(op)
+            self.privateDB.add(op)
                 }
             }
         }
@@ -358,7 +371,7 @@ final class CloudKitManager {
             recordZoneIDs: [zoneID],
             configurationsByRecordZoneID: [zoneID: configuration]
         )
-        op.qualityOfService = .utility
+        op.qualityOfService = .userInitiated
         op.fetchAllChanges = true
 
         var pulledKVKeys = Set<String>()
@@ -506,6 +519,7 @@ final class CloudKitManager {
             }
         }
 
+        applyTimeouts(op)
         privateDB.add(op)
     }
 
@@ -585,7 +599,8 @@ final class CloudKitManager {
                 op.fetchRecordZoneChangesResultBlock = { _ in
                     DispatchQueue.main.async { completion(result) }
                 }
-                self.privateDB.add(op)
+                self.applyTimeouts(op)
+            self.privateDB.add(op)
             }
         }
     }
@@ -772,6 +787,7 @@ final class CloudKitManager {
             lock.unlock()
             DispatchQueue.main.async { completion(final) }
         }
+        applyTimeouts(op)
         privateDB.add(op)
     }
 

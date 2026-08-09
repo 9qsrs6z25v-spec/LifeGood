@@ -83,8 +83,36 @@ final class CloudSyncManager: ObservableObject {
     private var pushDebounceTimer: Timer?
     // 防止並行 sync：syncNow + onChange(scenePhase) 同時觸發時只執行一次
     // 改為 @Published：讓設定頁「立即同步」按鈕能顯示同步中轉圈（先前是私有變數，
-    // 按下去毫無視覺回饋，使用者回報「不太有按鈕感覺」）
-    @Published private(set) var isSyncing = false
+    // 按下去毫無視覺回饋，使用者回報「不太有按鈕感覺」）。
+    // didSet 看門狗：使用者回報「同步中…」跨日不結束——任何一條路徑的 completion 沒回來
+    // （網路中斷、系統掛起操作），isSyncing 就永遠卡 true，之後所有同步（含手動立即同步）
+    // 都被 guard 跳過，整個同步系統死鎖。改為旗標升起自動起 3 分鐘看門狗，逾時強制重置。
+    @Published private(set) var isSyncing = false {
+        didSet {
+            if isSyncing { armSyncWatchdog() }
+            else { syncWatchdogTimer?.invalidate(); syncWatchdogTimer = nil }
+        }
+    }
+    private var syncWatchdogTimer: Timer?
+
+    /// isSyncing 升起後 3 分鐘未落下即強制重置（等待「覆蓋/合併」使用者選擇屬合法長等待，
+    /// 另給 10 分鐘，仍未選擇視為放棄、關回同步開關避免永久卡死）。
+    private func armSyncWatchdog() {
+        syncWatchdogTimer?.invalidate()
+        syncWatchdogTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
+            guard let self, self.isSyncing else { return }
+            if self.pendingInitialSync != nil {
+                self.syncWatchdogTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: false) { [weak self] _ in
+                    guard let self, self.isSyncing, self.pendingInitialSync != nil else { return }
+                    self.cancelInitialSync()
+                    self.setSyncError("雲端整合選擇逾時未完成，同步已暫停。重新開啟「啟用 iCloud 同步」即可再次選擇。")
+                }
+                return
+            }
+            self.isSyncing = false
+            self.setSyncError("同步逾時（超過 3 分鐘無回應），已自動重置。請再按一次「立即同步」。")
+        }
+    }
 
     @Published private(set) var isAccountAvailable: Bool = false
     @Published private(set) var lastSyncDate: Date?
