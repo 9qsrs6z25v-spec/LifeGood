@@ -38,8 +38,14 @@ struct LifeGoodApp: App {
     @StateObject private var einvoiceSync = EInvoiceSyncManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
+    // 開場動畫旗標：屬於 App 結構的 @State，只在「程序重新建立（冷啟動）」時重置為 true，
+    // 從背景喚醒不會重播。因此「看到開場動畫＝App 曾被系統終止後重新啟動」，
+    // 可直接目視判斷 App 是否在後台被殺（也可順帶確認畫面上顯示的版本號是不是剛裝的 build）。
+    @State private var showSplash = true
+
     var body: some Scene {
         WindowGroup {
+            ZStack {
             MainTabView()
                 .environmentObject(expenseStore)
                 .environmentObject(financeStore)
@@ -77,6 +83,83 @@ struct LifeGoodApp: App {
                         }
                     }
                 }
+
+            if showSplash {
+                LaunchSplashView()
+                    .transition(.opacity)
+                    .zIndex(10)
+                    .task {
+                        // 動畫播 1.4 秒後淡出移除；只擋視覺不擋啟動流程
+                        //（上方 MainTabView 的 task/onAppear 同步照常執行）
+                        try? await Task.sleep(nanoseconds: 1_400_000_000)
+                        withAnimation(.easeOut(duration: 0.35)) { showSplash = false }
+                    }
+            }
+            }
+        }
+    }
+}
+
+// MARK: - 開場動畫（僅冷啟動顯示）
+//
+// 品牌開場：漸層底 + 圖示圓 spring 進場 + 標題淡入上移，底部顯示目前版本/建置號。
+// 只在冷啟動出現（見 LifeGoodApp.showSplash 註解），可作為「App 曾被殺」的目視指標。
+
+private struct LaunchSplashView: View {
+    @State private var iconAppeared = false
+    @State private var textAppeared = false
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.16, green: 0.45, blue: 0.94),
+                         Color(red: 0.10, green: 0.68, blue: 0.62)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+            // 散景裝飾圓（對齊全 App 英雄卡視覺語言）
+            Circle().fill(.white.opacity(0.10)).frame(width: 220, height: 220)
+                .offset(x: 130, y: -260).blur(radius: 18)
+            Circle().fill(.white.opacity(0.07)).frame(width: 160, height: 160)
+                .offset(x: -120, y: 240).blur(radius: 14)
+
+            VStack(spacing: 18) {
+                ZStack {
+                    Circle().fill(.white.opacity(0.16)).frame(width: 110, height: 110)
+                    Circle().stroke(.white.opacity(0.35), lineWidth: 1).frame(width: 110, height: 110)
+                    Image(systemName: "heart.text.square.fill")
+                        .font(.system(size: 52, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .scaleEffect(iconAppeared ? 1.0 : 0.72)
+                .opacity(iconAppeared ? 1 : 0)
+
+                VStack(spacing: 6) {
+                    Text("美好人生")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text("LifeGood")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+                .opacity(textAppeared ? 1 : 0)
+                .offset(y: textAppeared ? 0 : 12)
+            }
+
+            // 版本號：目視確認目前跑的 build（冷啟動指標的附加價值）
+            VStack {
+                Spacer()
+                if let entry = Changelog.entries.first {
+                    Text("v\(entry.version)（\(entry.build)）")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .padding(.bottom, 18)
+                }
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.72)) { iconAppeared = true }
+            withAnimation(.easeOut(duration: 0.4).delay(0.25)) { textAppeared = true }
         }
     }
 }

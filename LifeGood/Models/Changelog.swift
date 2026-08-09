@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.129", build: 882, date: "2026/08/09", notes: [
+            "【功能】App 開場動畫（僅冷啟動顯示）＝「App 曾被殺」目視指標：新增 LaunchSplashView 品牌開場——藍綠漸層底＋雙散景圓、110pt 圖示圓 spring 進場、「美好人生／LifeGood」標題淡入上移，1.4 秒後自動淡出（0.35s），底部顯示目前版本與建置號。關鍵設計：showSplash 是 App 結構的 @State，只在「程序重新建立（冷啟動）」時重置——從背景喚醒不會重播，因此看到開場動畫＝App 曾被系統終止後重新啟動，可直接目視判斷 App 是否在後台被殺（配合 v25.128 同步看門狗，冷啟動也會重置同步旗標；底部版本號同時可確認跑的是不是剛安裝的 build）。動畫只擋視覺不擋啟動流程，MainTabView 的初始化/同步/備份照常並行執行。"
+        ]),
         ChangelogEntry(version: "25.128", build: 881, date: "2026/08/09", notes: [
             "【修復】「同步中…」跨日卡死——同步死鎖的真正根因：使用者回報同步中轉圈從昨天卡到今天。診斷：isSyncing 旗標升起後，只要任何一條 CloudKit 操作的 completion 沒回來，旗標就永遠是 true，而 performSync／flushPushAll／beginInitialSync 全都以 guard !isSyncing 開頭——旗標卡死後每一次手動「立即同步」都被靜默跳過，整個同步系統死鎖（這也解釋了驗證持續 0/N 與最近同步時間停在前一天）。兩個卡死來源：① 所有同步關鍵 CloudKit 操作的 QoS 是 .utility——系統可將其視為可延後的背景流量無限期掛起（省電模式/弱網路下尤甚）；② 「iCloud 已有資料，覆蓋或合併？」等待使用者選擇期間刻意持有 isSyncing，但若選擇對話框未能呈現（收合的區塊/切走畫面），同樣永久卡死。修法三層：① 同步關鍵操作 QoS 全面改 .userInitiated（5 處），不再被系統延後；② 新增 applyTimeouts：所有 7 個 CloudKit 操作設單一請求 30 秒／整體資源 5 分鐘逾時，逾時即回錯誤而非無限等待；③ isSyncing didSet 看門狗——旗標升起自動起 3 分鐘計時，逾時強制重置並顯示「同步逾時已自動重置」；等待覆蓋/合併選擇另給 10 分鐘，仍未選擇則視為放棄、關回同步開關並提示重新開啟即可再選。從此同步不可能再永久卡死，最壞情況 3 分鐘自動解鎖並說明原因。"
         ]),
