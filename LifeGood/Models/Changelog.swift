@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.143", build: 896, date: "2026/08/09", notes: [
+            "【美化】設定頁（SettingsView）iCloud 同步「立即同步」列：同步中顯示的 ProgressView 補上 .tint(.blue)，對齊該列圖示圓既有藍色主題——v25.125 曾統計「4 處 busy ProgressView 主題色已全數對齊」，複查後發現這顆因未走共用 settingsActionRow（多一顆「重置」逃生按鈕）而被漏算，其實是唯一仍沿用系統預設灰藍色的第 5 處。純視覺調整，立即同步／重置等既有同步邏輯完全未變動。"
+        ]),
         ChangelogEntry(version: "25.142", build: 895, date: "2026/08/09", notes: [
             "【美化】App 開場動畫（LaunchSplashView）品牌圖示圓：補上白色光暈陰影，對齊全 App 圖示圓皆有光暈陰影的既有規格（先前是唯一沒有陰影的圖示圓）。純視覺調整，開場動畫時序與冷啟動判斷邏輯未變動。"
         ]),

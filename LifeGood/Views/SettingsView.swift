@@ -96,6 +96,16 @@ import UniformTypeIdentifiers
 //      settingsActionRow busy 參數/.tint(color)）中唯一沿用系統預設灰藍色、與自身 cyan
 //      圖示圓／邊框脫色的一處。補上 .tint(.cyan)，四處進度指示器主題色至此全數對齊。
 //      純視覺層調整，verifyCloudData()／verifyBusy 忙碌守衛等既有驗證邏輯完全未變動。
+// [2026-08 v13] iCloudSyncSection「立即同步」列 ProgressView 補齊主題色（v12 複查遺漏的第 5 處）：
+//  23. v12 筆記統計「4 處 busy ProgressView」並宣稱主題色已全數對齊，但複查發現「立即同步」
+//      （cloudSync.isSyncing 期間顯示於「同步中…」文字旁）其實是本檔案第 5 處、也是唯一
+//      仍沿用系統預設灰藍色的 ProgressView——因該列同樣未走共用 settingsActionRow（右側
+//      多一顆「重置」逃生按鈕，需自行手刻 HStack），與 verifyBusy／diagBusy／backupBusy／
+//      compressBusy 一樣容易被複查漏掉。補上 .tint(.blue)，對齊該列圖示圓（arrow.clockwise.
+//      icloud，blue 主題）既有配色，SettingsView 全檔案 ProgressView 主題色至此才真正全數對齊
+//      （共 6 處：diagBusy/.orange、verifyBusy/.cyan、backupBusy/.teal、compressBusy/.indigo、
+//      settingsActionRow busy/依傳入 color、立即同步/.blue）。純視覺層調整，syncNow()／
+//      forceResetSyncState() 等既有同步邏輯完全未變動。
 //      （下次美化本檔案時：可轉往其他仍留有待辦的畫面）
 
 // MARK: - Share Sheet (UIKit bridge)
@@ -868,7 +878,7 @@ struct SettingsView: View {
                             Text(cloudSync.isSyncing ? "同步中…" : "立即同步")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.primary)
-                            if cloudSync.isSyncing { ProgressView().scaleEffect(0.7) }
+                            if cloudSync.isSyncing { ProgressView().scaleEffect(0.7).tint(.blue) }
                         }
                         Text(cloudSync.isSyncing
                              ? (cloudSync.syncProgressText ?? "正在推送資料與照片到 iCloud")
