@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.142", build: 895, date: "2026/08/09", notes: [
+            "【美化】App 開場動畫（LaunchSplashView）品牌圖示圓：補上白色光暈陰影，對齊全 App 圖示圓皆有光暈陰影的既有規格（先前是唯一沒有陰影的圖示圓）。純視覺調整，開場動畫時序與冷啟動判斷邏輯未變動。"
+        ]),
         ChangelogEntry(version: "25.141", build: 894, date: "2026/08/09", notes: [
             "【美化】升級訂閱頁（PaywallView）fallbackProductRow「商品載入中…」文字：補上呼吸動畫（opacity 呼吸 1.1 秒 repeatForever），對齊 MultiPhotoGallery 載入佔位與 PremiumBanner shimmer 的「進行中」回饋規格，讓 App Store 商品資訊仍在讀取時不再看起來像卡住。純視覺調整，商品載入與購買流程未變動。"
         ]),

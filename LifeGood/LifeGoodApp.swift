@@ -100,7 +100,15 @@ struct LifeGoodApp: App {
     }
 }
 
-// MARK: - 開場動畫（僅冷啟動顯示）
+// MARK: - 美化紀錄（LaunchSplashView）
+// [2026-08 v1] 本次美化方向（聚焦這一個元件）：
+//   1. 品牌圖示圓原本只有 fill + stroke，是全 App 唯一一個「圖示圓」規格完全沒有陰影的
+//      地方（TravelMapView／ExpenseRow 等圖示圓皆搭配 accent.opacity 光暈陰影，見
+//      TravelMapView.spotRow shadow(color: accent.opacity(0.22), radius: 6) 慣例）。
+//      補上白色光暈陰影 shadow(color: .white.opacity(0.30), radius: 22)，在漸層底色上
+//      呈現向外擴散的品牌光暈，強化開場第一眼的質感與立體感，對齊全 App 圖示圓陰影規格。
+//      純視覺調整，開場動畫時序（1.4 秒後淡出）與冷啟動判斷邏輯完全未變動。
+//   （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 //
 // 品牌開場：漸層底 + 圖示圓 spring 進場 + 標題淡入上移，底部顯示目前版本/建置號。
 // 只在冷啟動出現（見 LifeGoodApp.showSplash 註解），可作為「App 曾被殺」的目視指標。
@@ -131,6 +139,8 @@ private struct LaunchSplashView: View {
                         .font(.system(size: 52, weight: .semibold))
                         .foregroundStyle(.white)
                 }
+                // v1 美化：白色光暈陰影，對齊全 App 圖示圓陰影規格
+                .shadow(color: .white.opacity(0.30), radius: 22)
                 .scaleEffect(iconAppeared ? 1.0 : 0.72)
                 .opacity(iconAppeared ? 1 : 0)
 
