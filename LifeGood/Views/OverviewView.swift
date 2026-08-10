@@ -108,10 +108,16 @@ struct OverviewView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        // [效能] displayedIncome／isEstimated 各自都會掃描 incomes 陣列（isEstimated 內部
+        // 還會呼叫 estimatedMonthlyIncome 逐月重算），原本 monthlyBalanceCard 與下方
+        // summaryCard 各自獨立存取，同一次 body render 會重複觸發 4~6 次相同掃描；
+        // 在此一次性計算後以參數傳入，兩處共用同一份結果。
+        let income = displayedIncome
+        let estimated = isEstimated
+        return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    monthlyBalanceCard
+                    monthlyBalanceCard(income: income, isEstimated: estimated)
                         .padding(.horizontal)
                         .opacity(appearedCards.contains("header") ? 1 : 0)
                         .offset(y: appearedCards.contains("header") ? 0 : 20)
@@ -126,8 +132,8 @@ struct OverviewView: View {
 
                     HStack(alignment: .top, spacing: 12) {
                         summaryCard(
-                            title: isEstimated ? "收入 (預估)" : "收入",
-                            amount: displayedIncome,
+                            title: estimated ? "收入 (預估)" : "收入",
+                            amount: income,
                             icon: "banknote.fill",
                             color: .green,
                             key: "income"
@@ -236,8 +242,7 @@ struct OverviewView: View {
 
     // MARK: - 本月收支摘要卡片
 
-    private var monthlyBalanceCard: some View {
-        let income = displayedIncome
+    private func monthlyBalanceCard(income: Double, isEstimated: Bool) -> some View {
         // 一次計算 currentMonthTotal（含兩次 O(n) 掃描），避免透過原先 spendingRatio /
         // spendingBarColor 兩個 struct-level computed property 在 body 內重複呼叫 10+ 次
         let total = store.currentMonthTotal

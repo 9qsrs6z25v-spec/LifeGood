@@ -1592,6 +1592,7 @@ struct PersonalEventEditor: View {
     @State private var locationSuppressNextUpdate: Bool = false
     @State private var locationExpandedSuggestions: Bool = false
     @State private var locationDebounceTask: Task<Void, Never>?
+    @State private var locationDebouncedQuery: String = ""
 
     /// 常用長度選項（分鐘），0 = 全日
     private let durationOptions: [(label: String, minutes: Int)] = [
@@ -1866,11 +1867,14 @@ struct PersonalEventEditor: View {
         .onAppear {
             LocationProvider.shared.requestIfNeeded()
             locationCompleter.setRegion(LocationProvider.shared.searchRegion)
+            locationDebouncedQuery = location
             if !location.isEmpty { locationCompleter.queryFragment = location }
         }
         .onChange(of: location) { _, newValue in
             if locationSuppressNextUpdate {
                 locationSuppressNextUpdate = false
+                // 選取建議項目屬於使用者明確動作，非逐字輸入，立即同步不必等防抖
+                locationDebouncedQuery = newValue
                 return
             }
             locationExpandedSuggestions = false
@@ -1879,6 +1883,10 @@ struct PersonalEventEditor: View {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 guard !Task.isCancelled else { return }
                 locationCompleter.queryFragment = newValue
+                // [效能] allLocationSuggestions 原本直接讀取 location（每個按鍵字元都觸發一次
+                // 對 lifeStore.personalEvents 的全量掃描），比照本檔案其餘搜尋欄位（電子發票／
+                // 診所地點自動完成）既有的 300ms 防抖規格，本地歷史地點比對也改讀防抖後的值。
+                locationDebouncedQuery = newValue
             }
         }
         .onChange(of: locationProvider.lastLocation) { _, _ in
@@ -1972,7 +1980,7 @@ struct PersonalEventEditor: View {
 
     /// 合併過去 PersonalEvent 用過的地點 + Apple Maps 結果
     private var allLocationSuggestions: [CalendarLocationSuggestion] {
-        let q = location.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = locationDebouncedQuery.trimmingCharacters(in: .whitespaces).lowercased()
         var seen: Set<String> = []
         var output: [CalendarLocationSuggestion] = []
 

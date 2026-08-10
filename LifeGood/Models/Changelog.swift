@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.148", build: 901, date: "2026/08/10", notes: [
+            "【效能修復】四路並行複查（強制解包／Optional／index 越界、retain cycle／競態條件、畫面閃爍、O(n²) 效能瓶頸）找到並修復 2 處真實問題：① OverviewView.body：monthlyBalanceCard（收支餘額卡）與 summaryCard（收入摘要小卡）原本各自獨立存取 displayedIncome／isEstimated 兩個 computed property，而 isEstimated 內部會呼叫 estimatedMonthlyIncome（過去 6 個月逐月呼叫 incomeTotal(for:) 各跑 2 次陣列過濾），單次 body render 因此對 incomes 陣列重複觸發 4～6 次相同掃描；改為 body 頂端一次計算 income／estimated 後以參數傳入 monthlyBalanceCard(income:isEstimated:)，summaryCard 亦改讀同一份結果，語意完全不變、純消除重複計算。② MyCalendarView 新增行程「地點」欄位自動完成（allLocationSuggestions）：本地歷史地點比對（掃描 lifeStore.personalEvents）原本直接讀取未防抖的 location（每個按鍵字元都觸發一次全量掃描），是全 App 同類自動完成欄位中唯一沒有防抖的一處——同檔案 Apple Maps 地點查詢（locationCompleter.queryFragment）、ChildDetailView 診所地點、BusinessCardView 名片搜尋都已有 300ms 防抖規格；改為新增 locationDebouncedQuery 狀態，在既有 300ms 防抖 Task 完成後才同步寫入，allLocationSuggestions 改讀防抖後的值，選取建議項目（applyLocationSuggestion）等使用者明確動作則立即同步不必等待。強制解包／Optional／index 越界複查已完成，全部維持 0 筆問題；retain cycle／競態條件與畫面閃爍兩路複查仍在進行中，待完成後如另有發現將於下一版補上。"
+        ]),
         ChangelogEntry(version: "25.147", build: 900, date: "2026/08/10", notes: [
             "【診斷】哨兵抓到現行犯後的下一刀——per-record 結果檢查＋變因切割：v25.139 哨兵實測回報所有 KV 推送（life_org_people／life_schedules／lifegood_vehicles…）一律「伺服器回報寫入成功，但立即讀回查無此筆」，而第 6 層純欄位測試筆卻能寫能讀回。鎖定嫌疑：CKModifyRecordsOperation 的整體成功「不代表」個別記錄成功——個別失敗（最典型：iCloud 儲存空間不足 quotaExceeded）由 perRecordSaveBlock 回報，程式從未掛此回呼，個別失敗被靜默吞掉。三項補強：(1) modifyKV／uploadPhoto 全部掛上 perRecordSaveBlock，整體成功但個別失敗時以原始錯誤（domain#code）回報並判定該筆失敗；(2) 讀回哨兵失敗訊息附上讀回階段的原始錯誤碼，區分「查無此筆」與「讀回請求本身失敗」；(3) 同步診斷加第 8、9 層變因切割——第 8 層寫 KVBlob 純欄位（無附件）、第 9 層寫 DiagTest＋CKAsset 附件，各自完整回報整體／個別／讀回三段結果：8✓9✗＝毒在附件（最可能 iCloud 空間不足），8✗9✓＝毒在 KVBlob 記錄型別（Production 環境 schema 問題）。"
         ]),
