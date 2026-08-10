@@ -233,33 +233,47 @@ final class CloudKitManager {
             let op = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
             op.savePolicy = .changedKeys
             op.qualityOfService = .userInitiated
+            // 個別記錄結果：整體 modifyRecordsResultBlock 成功「不代表」個別記錄成功——
+            // 個別失敗（最典型：iCloud 空間不足 quotaExceeded）走 perRecordSaveBlock 回報，
+            // 過去沒掛這個回呼，個別失敗被靜默吞掉、整輪同步被誤標成功
+            var perRecordError: Error?
+            op.perRecordSaveBlock = { _, res in
+                if case .failure(let e) = res { perRecordError = e }
+            }
             op.modifyRecordsResultBlock = { [weak self] result in
                 try? FileManager.default.removeItem(at: tmp)
                 switch result {
                 case .success:
+                    if let pe = perRecordError {
+                        self?.report(pe, context: "上傳 \(key)（個別記錄失敗）")
+                        completion?(false)
+                        return
+                    }
                     // 寫入自我驗證哨兵：v25.137 雲端普查揭露「推送回報成功但 zone 完全是空的」
                     // 矛盾（診斷第 6 層純欄位寫入卻能讀回），在真實路徑上加裝哨兵——
-                    // 成功回報後立刻以中繼資料 fetch 讀回同一筆，讀不回就視為失敗並回報可見錯誤，
-                    // 把「假成功」當場抓出來
+                    // 成功回報後立刻以中繼資料 fetch 讀回同一筆，讀不回就視為失敗並回報可見錯誤
                     guard let self else { completion?(true); return }
                     let verifyOp = CKFetchRecordsOperation(recordIDs: [recID])
                     verifyOp.desiredKeys = ["updatedAt"]
                     verifyOp.qualityOfService = .userInitiated
                     var readBack = false
+                    var readBackError: Error?
                     verifyOp.perRecordResultBlock = { _, res in
-                        if case .success = res { readBack = true }
-                    }
-                    verifyOp.fetchRecordsResultBlock = { [weak self] _ in
-                        if readBack {
-                            completion?(true)
-                        } else {
-                            self?.report(NSError(
-                                domain: "LifeGoodSync", code: -99,
-                                userInfo: [NSLocalizedDescriptionKey:
-                                    "伺服器回報寫入成功，但立即讀回查無此筆——請截圖回報"]
-                            ), context: "上傳 \(key)")
-                            completion?(false)
+                        switch res {
+                        case .success: readBack = true
+                        case .failure(let e): readBackError = e
                         }
+                    }
+                    verifyOp.fetchRecordsResultBlock = { [weak self] overall in
+                        if readBack { completion?(true); return }
+                        if case .failure(let e) = overall, readBackError == nil { readBackError = e }
+                        let detail = (readBackError as NSError?).map { "\($0.domain)#\($0.code)" } ?? "查無此筆"
+                        self?.report(NSError(
+                            domain: "LifeGoodSync", code: -99,
+                            userInfo: [NSLocalizedDescriptionKey:
+                                "伺服器回報寫入成功，但立即讀回失敗（\(detail)）——請截圖回報"]
+                        ), context: "上傳 \(key)")
+                        completion?(false)
                     }
                     self.applyTimeouts(verifyOp)
                     self.privateDB.add(verifyOp)
@@ -348,9 +362,20 @@ final class CloudKitManager {
                     let op = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
                     op.savePolicy = .changedKeys
                     op.qualityOfService = .userInitiated
+                    // 個別記錄失敗（如 iCloud 空間不足）不一定捲入整體結果，必須另掛回呼檢查
+                    var perRecordError: Error?
+                    op.perRecordSaveBlock = { _, res in
+                        if case .failure(let e) = res { perRecordError = e }
+                    }
                     op.modifyRecordsResultBlock = { [weak self] result in
                         switch result {
-                        case .success: completion?(true)
+                        case .success:
+                            if let pe = perRecordError {
+                                self?.report(pe, context: "上傳照片 \(fileName)（個別記錄失敗）")
+                                completion?(false)
+                            } else {
+                                completion?(true)
+                            }
                         case .failure(let error):
                             if let ck = error as? CKError,
                                ck.code == .zoneNotFound || ck.code == .userDeletedZone,
@@ -974,6 +999,61 @@ final class CloudKitManager {
                     }
                     self.privateDB.add(fetch)
                 }
+            }),
+            // 第 8、9 層：變因切割。第 6 層（DiagTest 無附件）能過、第 7 層（KVBlob＋附件）
+            // 不過——到底毒在「KVBlob 記錄型別」還是「CKAsset 附件」？各測一半
+            ("8. KVBlob 純欄位（無附件）", 30, { done in
+                let recID = CKRecord.ID(recordName: "diag_kvblob_noasset", zoneID: self.zoneID)
+                let rec = CKRecord(recordType: Self.kvBlobRecordType, recordID: recID)
+                rec["keyName"] = "diag_kvblob_noasset" as NSString
+                rec["updatedAt"] = Date() as NSDate
+                let op = CKModifyRecordsOperation(recordsToSave: [rec])
+                op.savePolicy = .allKeys
+                fastFail(op)
+                var perErr: Error?
+                op.perRecordSaveBlock = { _, r in if case .failure(let e) = r { perErr = e } }
+                op.modifyRecordsResultBlock = { result in
+                    if case .failure(let e) = result { done("✗ 8. KVBlob 純欄位：寫入失敗 \(raw(e))"); return }
+                    if let perErr { done("✗ 8. KVBlob 純欄位：整體成功但個別記錄失敗 \(raw(perErr))"); return }
+                    let f = CKFetchRecordsOperation(recordIDs: [recID])
+                    fastFail(f)
+                    var found = false
+                    f.perRecordResultBlock = { _, r in if case .success = r { found = true } }
+                    f.fetchRecordsResultBlock = { _ in
+                        done(found ? "✓ 8. KVBlob 純欄位（無附件）：寫入並讀回成功"
+                                   : "✗ 8. KVBlob 純欄位：寫入回報成功但讀不回")
+                    }
+                    self.privateDB.add(f)
+                }
+                self.privateDB.add(op)
+            }),
+            ("9. 附件（CKAsset）寫入", 35, { done in
+                let tmp = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("diag_asset_test.json")
+                try? Data("{\"diag\":1}".utf8).write(to: tmp)
+                let recID = CKRecord.ID(recordName: "diag_asset_test", zoneID: self.zoneID)
+                let rec = CKRecord(recordType: "DiagTest", recordID: recID)
+                rec["payload"] = CKAsset(fileURL: tmp)
+                let op = CKModifyRecordsOperation(recordsToSave: [rec])
+                op.savePolicy = .allKeys
+                fastFail(op)
+                var perErr: Error?
+                op.perRecordSaveBlock = { _, r in if case .failure(let e) = r { perErr = e } }
+                op.modifyRecordsResultBlock = { result in
+                    try? FileManager.default.removeItem(at: tmp)
+                    if case .failure(let e) = result { done("✗ 9. 附件寫入：失敗 \(raw(e))"); return }
+                    if let perErr { done("✗ 9. 附件寫入：整體成功但個別記錄失敗 \(raw(perErr))"); return }
+                    let f = CKFetchRecordsOperation(recordIDs: [recID])
+                    fastFail(f)
+                    var found = false
+                    f.perRecordResultBlock = { _, r in if case .success = r { found = true } }
+                    f.fetchRecordsResultBlock = { _ in
+                        done(found ? "✓ 9. 附件（CKAsset）寫入：寫入並讀回成功"
+                                   : "✗ 9. 附件寫入：寫入回報成功但讀不回")
+                    }
+                    self.privateDB.add(f)
+                }
+                self.privateDB.add(op)
             })
         ]
 

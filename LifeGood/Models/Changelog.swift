@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.147", build: 900, date: "2026/08/10", notes: [
+            "【診斷】哨兵抓到現行犯後的下一刀——per-record 結果檢查＋變因切割：v25.139 哨兵實測回報所有 KV 推送（life_org_people／life_schedules／lifegood_vehicles…）一律「伺服器回報寫入成功，但立即讀回查無此筆」，而第 6 層純欄位測試筆卻能寫能讀回。鎖定嫌疑：CKModifyRecordsOperation 的整體成功「不代表」個別記錄成功——個別失敗（最典型：iCloud 儲存空間不足 quotaExceeded）由 perRecordSaveBlock 回報，程式從未掛此回呼，個別失敗被靜默吞掉。三項補強：(1) modifyKV／uploadPhoto 全部掛上 perRecordSaveBlock，整體成功但個別失敗時以原始錯誤（domain#code）回報並判定該筆失敗；(2) 讀回哨兵失敗訊息附上讀回階段的原始錯誤碼，區分「查無此筆」與「讀回請求本身失敗」；(3) 同步診斷加第 8、9 層變因切割——第 8 層寫 KVBlob 純欄位（無附件）、第 9 層寫 DiagTest＋CKAsset 附件，各自完整回報整體／個別／讀回三段結果：8✓9✗＝毒在附件（最可能 iCloud 空間不足），8✗9✓＝毒在 KVBlob 記錄型別（Production 環境 schema 問題）。"
+        ]),
         ChangelogEntry(version: "25.146", build: 899, date: "2026/08/10", notes: [
             "【修正】合併匯入後股票卡片內買賣變多、外層清單股數卻沒更新：UnifiedImporter 的股票深度合併只把對方的交易/股利用 appendNewByID 補進 transactions/dividends，從未呼叫 recomputeFromTransactions()——而外層清單與閃卡顯示的 shares（股數）/purchasePrice（均價）/isSold（已售出）都是儲存欄位，全部停留在合併前舊值，與卡片內已增加的交易列表互相矛盾。修正呼叫序完整比照 StockDetailView 既有模式：(1) 併入前先 seedTransactionsFromLegacyIfNeeded()——「僅有彙總欄位、無逐筆交易」的舊資料先補種原始買入，避免重算把本機既有持股當成 0 蓋掉；(2) appendNewByID 併入對方交易/股利；(3) 交易或股利計數有實際成長才 recomputeFromTransactions() 重算股數/均價/已售出狀態（計數成長保證非空，不會觸發全清空分支；沒併入新項目則完全不動，保留既有行為）。"
         ]),
