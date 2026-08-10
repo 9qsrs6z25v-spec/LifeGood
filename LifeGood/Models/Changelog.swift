@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.153", build: 906, date: "2026/08/10", notes: [
+            "【修正】Schema 部署成功後照片仍 0 張上雲：使用者實測結構化資料 20/20、雲端普查 20 筆、診斷九層全綠——KV 鏈路正式打通，但照片抽查與普查仍為 0。原因是照片上傳帳本被「假成功」污染：Production schema 未部署期間，403 張照片的上傳整體回報成功（個別拒收被吞），帳本當時就把每張都記成已上傳；schema 部署後每輪同步帳本比對簽章相同、全部直接跳過，連一次上傳都不會嘗試。修正：帳本鑰匙換版（ck_uploaded_photo_ledger→_v2），舊帳本作廢並於下次掃描時清除殘留，照片全量重傳一次——這次 uploadPhoto 已有 perRecordSaveBlock 個別查驗（v25.147），真的成功才記帳，不會再被假成功污染。"
+        ]),
         ChangelogEntry(version: "25.152", build: 905, date: "2026/08/10", notes: [
             "【診斷】修正第 4／6 層假 ✓：九層診斷實測第 8／9 層以原始錯誤證實 Production schema 完全是空的（連 DiagTest 也「Cannot create new type in production schema」被拒），但第 4／6 層同型寫入卻顯示 ✓——因為這兩層只看整體結果、沒掛 perRecordSaveBlock，且第 6 層讀回只看整體 fetch 結果沒逐筆查驗，個別記錄被拒收時整體仍回報成功，形成假陽性（也正是先前誤導推理方向「純欄位能過、附件不過」的來源——實際上全部都進不去）。第 4／6 層補上 perRecordSaveBlock 個別結果查驗、第 6 層讀回改逐筆 perRecordResultBlock 判定，九層口徑至此一致；schema 部署到 Production 後跑診斷應九層全綠。"
         ]),

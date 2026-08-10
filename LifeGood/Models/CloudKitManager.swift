@@ -80,7 +80,11 @@ final class CloudKitManager {
     /// 照片上傳帳本：pathKey → 「大小-修改時間」簽章。簽章相同＝檔案沒變且已上傳過，
     /// 下輪同步直接跳過——沒有這本帳，每次同步都會把數百張照片重新上傳一遍
     ///（也是行動數據暴增與「同步中」轉不完的主因）。
-    private let uploadLedgerKey = "ck_uploaded_photo_ledger"
+    /// _v2：v1 帳本在「Production schema 未部署」期間被假成功污染（整體回報成功、
+    /// 個別記錄被拒收，仍記成已上傳），schema 部署後照片全被帳本跳過而永遠 0 張上雲；
+    /// 換鑰匙讓舊帳本作廢、全量重傳一次（這次個別結果有查驗，成功才記帳）。
+    private let uploadLedgerKey = "ck_uploaded_photo_ledger_v2"
+    private let legacyUploadLedgerKey = "ck_uploaded_photo_ledger"
 
     // accountStatus 由 accountChanged/refreshAccountStatus 在主執行緒寫入，
     // 但 isAvailable 被 queue（背景 utility 佇列）上的 push/pull 大量讀取，
@@ -656,6 +660,8 @@ final class CloudKitManager {
             }
             self.uploadSweepActive = true
             let generation = self.uploadSweepGeneration
+            // 清掉被污染的 v1 帳本殘留（見 uploadLedgerKey 註解）
+            self.defaults.removeObject(forKey: self.legacyUploadLedgerKey)
 
             /// 收尾（在 queue 上呼叫）：放下守衛旗標、通知本輪與併入的所有回呼
             func finishSweep() {
