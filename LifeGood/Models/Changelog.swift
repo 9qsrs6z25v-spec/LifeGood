@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.159", build: 912, date: "2026/08/10", notes: [
+            "【新增】兒女履歷「疫苗」獨立分頁＋日常趨勢圖表：(1) 分頁從「日常/生涯」擴為「日常/生涯/疫苗」——疫苗接種時程規劃（依生日排程、逾期標示）從生涯頁抽出獨立成第三分頁（teal 主題、syringe 圖示），生涯頁不再內嵌疫苗章節，捲動更聚焦。(2) 日常頁最上方新增趨勢圖表卡：喝奶量/食物量/睡眠量三張折線圖以 TabView 左右滑動切換（自訂頁點、目前頁套該圖主題色），各圖統計近 14 天逐日彙總（喝奶/食物加總 ml、睡眠依入睡→起床時長加總小時，無紀錄日補 0 維持折線連續但不畫資料點避免誤導）；Swift Charts 漸層面積＋圓角折線＋資料點，chartXSelection 點選線上任一點顯示當日細節卡（日期、總量、筆數/段數，material 底＋主題色描邊），全部 14 天皆無紀錄的圖表顯示空狀態提示。"
+        ]),
         ChangelogEntry(version: "25.158", build: 911, date: "2026/08/10", notes: [
             "【修正】固定支出等主頁清單仍可整列滑到底直接刪除：v25.154 掃的是 swipeActions 寫法，但固定支出／部屬／履歷里程碑（分組與篩選兩清單）／家庭成員／部門職等六處用的是系統 .onDelete——編輯模式滑動刪除天生支援全滑直刪、無法關閉，與邊緣切頁手勢同樣衝突。六處全數改寫為 allowsFullSwipe: false 的滑出刪除按鈕：行為（含訂閱守衛、連結清理如 deleteWithSync／deleteMilestoneCleaningLinks、部屬清單僅人員列可刪）與原 .onDelete 完全等價，僅去掉全滑直刪。表單編輯器內的小型清單（車輛/房地產編輯、健康檔案、公司組織等 sheet 內）不受邊緣手勢影響，維持系統原生行為。"
         ]),

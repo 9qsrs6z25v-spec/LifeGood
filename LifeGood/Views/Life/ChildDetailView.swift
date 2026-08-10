@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import MapKit
+import Charts
 
 // MARK: - 美化紀錄（ChildDetailView）
 // [2026-06 v1] 基礎美化：漸層英雄卡 / matchedGeometryEffect Tab / Capsule 側條段落標題 /
@@ -112,6 +113,7 @@ struct ChildDetailView: View {
     enum DetailTab: String, CaseIterable {
         case daily = "日常"
         case life = "生涯"
+        case vaccine = "疫苗"
     }
     @State private var detailTab: DetailTab = .life
 
@@ -159,7 +161,7 @@ struct ChildDetailView: View {
                                 }
                             } label: {
                                 HStack(spacing: 5) {
-                                    Image(systemName: tab == .daily ? "sun.max.fill" : "star.fill")
+                                    Image(systemName: tabIcon(tab))
                                         .font(.caption2)
                                     Text(tab.rawValue)
                                         .font(.subheadline.weight(.semibold))
@@ -184,10 +186,10 @@ struct ChildDetailView: View {
                     .overlay(Capsule().stroke(Color(.separator).opacity(0.15), lineWidth: 0.5))
                     .padding(.horizontal)
 
-                    if detailTab == .daily {
-                        dailyContent
-                    } else {
-                        lifeContent
+                    switch detailTab {
+                    case .daily: dailyContent
+                    case .life: lifeContent
+                    case .vaccine: vaccineContent
                     }
                 }
                 .padding(.vertical)
@@ -231,6 +233,15 @@ struct ChildDetailView: View {
         switch tab {
         case .daily: return .blue
         case .life: return .orange
+        case .vaccine: return .teal
+        }
+    }
+
+    private func tabIcon(_ tab: DetailTab) -> String {
+        switch tab {
+        case .daily: return "sun.max.fill"
+        case .life: return "star.fill"
+        case .vaccine: return "syringe"
         }
     }
 
@@ -355,6 +366,11 @@ struct ChildDetailView: View {
         // childGifts（雙重 filter + sort 全支出）一次捕捉後共用，
         // 避免 isEmpty 判斷與 childGiftsSection 內部各自再算一次（原本 2 次 → 1 次）
         let gifts = childGifts
+        // 日常趨勢圖表：喝奶量/食物量/睡眠量三張折線圖左右滑動切換，點線上資料點顯示細節
+        DailyChartsPager(records: child.dailyRecords)
+            .opacity(contentAppeared ? 1 : 0)
+            .offset(y: contentAppeared ? 0 : 14)
+            .animation(.spring(response: 0.45, dampingFraction: 0.82), value: contentAppeared)
         ForEach(Array(DailyRecordType.allCases.enumerated()), id: \.element) { idx, type in
             dailySection(type)
                 .opacity(contentAppeared ? 1 : 0)
@@ -824,23 +840,28 @@ struct ChildDetailView: View {
 
     @ViewBuilder
     private var lifeContent: some View {
-        ForEach(Array(ChildRecordType.allCases.enumerated()), id: \.element) { idx, type in
-            Group {
-                // 疫苗章節改為「接種時程規劃」：依生日列出所有應施打疫苗，填入施打日期即完成，逾期自動標示
-                if type == .vaccination {
-                    ChildVaccineScheduleView(childId: childId)
-                } else {
-                    recordSection(type)
-                }
-            }
+        // 疫苗已獨立成第三個分頁（vaccineContent），生涯頁不再內嵌接種時程
+        ForEach(Array(ChildRecordType.allCases.filter { $0 != .vaccination }.enumerated()), id: \.element) { idx, type in
+            recordSection(type)
+                .opacity(contentAppeared ? 1 : 0)
+                .offset(y: contentAppeared ? 0 : 14)
+                .animation(
+                    .spring(response: 0.45, dampingFraction: 0.82)
+                        .delay(0.05 * Double(idx)),
+                    value: contentAppeared
+                )
+        }
+    }
+
+    // MARK: - 疫苗頁面（接種時程規劃獨立分頁）
+
+    @ViewBuilder
+    private var vaccineContent: some View {
+        // 依生日列出所有應施打疫苗，填入施打日期即完成，逾期自動標示
+        ChildVaccineScheduleView(childId: childId)
             .opacity(contentAppeared ? 1 : 0)
             .offset(y: contentAppeared ? 0 : 14)
-            .animation(
-                .spring(response: 0.45, dampingFraction: 0.82)
-                    .delay(0.05 * Double(idx)),
-                value: contentAppeared
-            )
-        }
+            .animation(.spring(response: 0.45, dampingFraction: 0.82), value: contentAppeared)
     }
 
     // MARK: - 章節（生涯）
@@ -1853,5 +1874,241 @@ fileprivate struct ClinicSuggestion: Identifiable {
     }
     var iconColor: Color {
         source == .past ? .green : .red
+    }
+}
+
+// MARK: - 日常趨勢圖表（喝奶量/食物量/睡眠量三張折線圖，左右滑動切換）
+
+private struct DailyTrendPoint: Identifiable {
+    let day: Date
+    let total: Double
+    let count: Int
+    var id: Date { day }
+}
+
+struct DailyChartsPager: View {
+    let records: [DailyRecord]
+    @State private var page: Int = 0
+
+    private static let types: [DailyRecordType] = [.milk, .food, .sleep]
+
+    var body: some View {
+        VStack(spacing: 10) {
+            TabView(selection: $page) {
+                ForEach(Array(Self.types.enumerated()), id: \.offset) { idx, type in
+                    DailyTrendChart(type: type, points: Self.trendPoints(for: type, records: records))
+                        .padding(.horizontal, 16)
+                        .tag(idx)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: 262)
+
+            // 自訂頁點：目前頁拉長成膠囊並套用該圖表主題色
+            HStack(spacing: 6) {
+                ForEach(0..<Self.types.count, id: \.self) { i in
+                    Capsule()
+                        .fill(i == page ? Self.accent(Self.types[i]) : Color(.systemGray4))
+                        .frame(width: i == page ? 16 : 6, height: 6)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: page)
+                }
+            }
+            .padding(.bottom, 12)
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+    }
+
+    static fileprivate func accent(_ t: DailyRecordType) -> Color {
+        switch t {
+        case .milk: return .blue
+        case .food: return .green
+        case .sleep: return .indigo
+        }
+    }
+
+    /// 近 14 天逐日彙總：喝奶/食物加總 ml、睡眠加總小時；無紀錄的日子補 0 讓折線連續
+    static fileprivate func trendPoints(for type: DailyRecordType, records: [DailyRecord]) -> [DailyTrendPoint] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let start = cal.date(byAdding: .day, value: -13, to: today) else { return [] }
+        var byDay: [Date: (total: Double, count: Int)] = [:]
+        for r in records where r.type == type {
+            let day = cal.startOfDay(for: r.date)
+            guard day >= start, day <= today else { continue }
+            let value: Double
+            switch type {
+            case .milk, .food:
+                value = r.mlAmount ?? 0
+            case .sleep:
+                guard let end = r.sleepEnd, end > r.date else { continue }
+                value = end.timeIntervalSince(r.date) / 3600
+            }
+            var cur = byDay[day] ?? (0, 0)
+            cur.total += value
+            cur.count += 1
+            byDay[day] = cur
+        }
+        return (0...13).compactMap { off in
+            guard let day = cal.date(byAdding: .day, value: off, to: start) else { return nil }
+            let v = byDay[day] ?? (0, 0)
+            return DailyTrendPoint(day: day, total: v.total, count: v.count)
+        }
+    }
+}
+
+/// 單張趨勢折線圖：漸層面積 + 資料點 + chartXSelection 點選顯示該日細節
+private struct DailyTrendChart: View {
+    let type: DailyRecordType
+    let points: [DailyTrendPoint]
+    @State private var rawSelectedDay: Date?
+
+    private var accent: Color { DailyChartsPager.accent(type) }
+    private var unitLabel: String { type == .sleep ? "小時" : "ml" }
+
+    /// 點選的原始 X 值（連續日期）就近吸附到當日資料點
+    private var selectedPoint: DailyTrendPoint? {
+        guard let raw = rawSelectedDay else { return nil }
+        let day = Calendar.current.startOfDay(for: raw)
+        return points.first { $0.day == day }
+    }
+
+    private static let mdFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 30, height: 30)
+                    Circle()
+                        .stroke(accent.opacity(0.20), lineWidth: 0.75)
+                        .frame(width: 30, height: 30)
+                    Image(systemName: type.icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(type.rawValue)量趨勢")
+                        .font(.subheadline.weight(.bold))
+                    Text("近 14 天・單位 \(unitLabel)・點線上可看當日細節")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.top, 14)
+
+            if points.allSatisfy({ $0.count == 0 }) {
+                VStack(spacing: 6) {
+                    Image(systemName: type.icon)
+                        .font(.title3)
+                        .foregroundStyle(accent.opacity(0.45))
+                    Text("近 14 天尚無\(type.rawValue)紀錄")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 170)
+            } else {
+                chartBody
+            }
+        }
+    }
+
+    private var chartBody: some View {
+        Chart {
+            ForEach(points) { p in
+                AreaMark(
+                    x: .value("日期", p.day, unit: .day),
+                    y: .value(unitLabel, p.total)
+                )
+                .foregroundStyle(LinearGradient(
+                    colors: [accent.opacity(0.18), accent.opacity(0.02)],
+                    startPoint: .top, endPoint: .bottom
+                ))
+                .interpolationMethod(.catmullRom)
+
+                LineMark(
+                    x: .value("日期", p.day, unit: .day),
+                    y: .value(unitLabel, p.total)
+                )
+                .foregroundStyle(accent)
+                .interpolationMethod(.catmullRom)
+                .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round))
+
+                // 有紀錄的日子畫資料點；補 0 的空日不畫，避免誤導成「當天記了 0」
+                if p.count > 0 {
+                    PointMark(
+                        x: .value("日期", p.day, unit: .day),
+                        y: .value(unitLabel, p.total)
+                    )
+                    .foregroundStyle(accent)
+                    .symbolSize(28)
+                }
+            }
+            if let sel = selectedPoint {
+                RuleMark(x: .value("選取", sel.day, unit: .day))
+                    .foregroundStyle(accent.opacity(0.35))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    .annotation(position: .top,
+                                overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                        selectionCard(sel)
+                    }
+                PointMark(
+                    x: .value("選取", sel.day, unit: .day),
+                    y: .value(unitLabel, sel.total)
+                )
+                .foregroundStyle(accent)
+                .symbolSize(80)
+            }
+        }
+        .chartXSelection(value: $rawSelectedDay)
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .day, count: 3)) { _ in
+                AxisGridLine()
+                AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading)
+        }
+        .frame(height: 170)
+        .padding(.bottom, 6)
+    }
+
+    /// 點選資料點的細節卡：日期、當日總量、筆數/段數
+    private func selectionCard(_ p: DailyTrendPoint) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(Self.mdFmt.string(from: p.day))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if p.count == 0 {
+                Text("當日無紀錄")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(type == .sleep
+                     ? String(format: "共 %.1f 小時", p.total)
+                     : "共 \(Int(p.total)) ml")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(accent)
+                Text(type == .sleep ? "\(p.count) 段睡眠" : "\(p.count) 筆紀錄")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(accent.opacity(0.25), lineWidth: 0.75))
     }
 }
