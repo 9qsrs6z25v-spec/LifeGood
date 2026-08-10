@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.152", build: 905, date: "2026/08/10", notes: [
+            "【診斷】修正第 4／6 層假 ✓：九層診斷實測第 8／9 層以原始錯誤證實 Production schema 完全是空的（連 DiagTest 也「Cannot create new type in production schema」被拒），但第 4／6 層同型寫入卻顯示 ✓——因為這兩層只看整體結果、沒掛 perRecordSaveBlock，且第 6 層讀回只看整體 fetch 結果沒逐筆查驗，個別記錄被拒收時整體仍回報成功，形成假陽性（也正是先前誤導推理方向「純欄位能過、附件不過」的來源——實際上全部都進不去）。第 4／6 層補上 perRecordSaveBlock 個別結果查驗、第 6 層讀回改逐筆 perRecordResultBlock 判定，九層口徑至此一致；schema 部署到 Production 後跑診斷應九層全綠。"
+        ]),
         ChangelogEntry(version: "25.151", build: 904, date: "2026/08/10", notes: [
             "【破案】iCloud 同步數週謎團的總根源找到了——「Cannot create new type KVBlob in production schema」：v25.147 掛上 perRecordSaveBlock 後，個別記錄錯誤終於現形，原文直指 CloudKit 正式環境（Production）缺少 KVBlob 資料表定義。完整因果：Xcode 開發版寫 Development 環境（允許 App 邊寫邊自動建表，開發期一切正常）；TestFlight/App Store 版寫 Production 環境（禁止自動建表），schema 從未部署過去，所以每筆 KVBlob/Photo 寫入都被伺服器拒收——而此個別錯誤過去藏在整體成功回報之下，App 誤標「已同步」。這也解釋了 Dashboard 只見 Default zone（看的是空的 Development）、zone 建得起來但記錄進不去（zone 是資料非 schema）。解法為 Dashboard 操作：icloud.developer.apple.com → 容器 → Development → Deploy Schema Changes to Production。程式側配套：describe() 偵測「in production schema」錯誤原文，直接顯示中文部署指引，不再讓使用者對著英文原文猜。"
         ]),

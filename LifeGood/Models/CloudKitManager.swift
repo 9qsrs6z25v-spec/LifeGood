@@ -929,10 +929,18 @@ final class CloudKitManager {
                 let op = CKModifyRecordsOperation(recordsToSave: [testRec])
                 op.savePolicy = .allKeys   // 直接覆寫既有測試筆，避免版本衝突干擾判讀
                 fastFail(op)
+                // 個別記錄結果必查：整體成功不代表個別成功（v25.151 實測第 4/6 層因漏查
+                // 個別結果而顯示假 ✓，第 8/9 層同型寫入其實一直被 production schema 拒收）
+                var perErr: Error?
+                op.perRecordSaveBlock = { _, r in if case .failure(let e) = r { perErr = e } }
                 op.modifyRecordsResultBlock = { result in
                     switch result {
                     case .success:
-                        done("✓ 4. 資料庫寫入：成功")
+                        if let perErr {
+                            done("✗ 4. 資料庫寫入：整體成功但個別記錄失敗 \(raw(perErr))")
+                        } else {
+                            done("✓ 4. 資料庫寫入：成功")
+                        }
                     case .failure(let error):
                         if let ck = error as? CKError, ck.code == .serverRecordChanged {
                             done("✓ 4. 資料庫寫入：連線正常（測試筆已存在）")
@@ -979,19 +987,29 @@ final class CloudKitManager {
                 let save = CKModifyRecordsOperation(recordsToSave: [rec])
                 save.savePolicy = .allKeys
                 fastFail(save)
+                // 同第 4 層：個別記錄結果與讀回都必須逐筆查驗，避免假 ✓（v25.151 教訓）
+                var perErr: Error?
+                save.perRecordSaveBlock = { _, r in if case .failure(let e) = r { perErr = e } }
                 save.modifyRecordsResultBlock = { result in
                     switch result {
                     case .failure(let e):
                         done("✗ 6. LifeGoodZone 寫入讀回：寫入失敗 \(raw(e))")
                     case .success:
+                        if let perErr {
+                            done("✗ 6. LifeGoodZone 寫入讀回：整體成功但個別記錄失敗 \(raw(perErr))")
+                            return
+                        }
                         let fetch = CKFetchRecordsOperation(recordIDs: [recID])
                         fastFail(fetch)
+                        var found = false
+                        fetch.perRecordResultBlock = { _, r in if case .success = r { found = true } }
                         fetch.fetchRecordsResultBlock = { r in
-                            switch r {
-                            case .success:
+                            if found {
                                 done("✓ 6. LifeGoodZone 寫入讀回：寫入後立即讀回成功")
-                            case .failure(let e):
+                            } else if case .failure(let e) = r {
                                 done("✗ 6. LifeGoodZone 寫入讀回：寫入成功但讀不回！\(raw(e))")
+                            } else {
+                                done("✗ 6. LifeGoodZone 寫入讀回：寫入成功但讀不回（查無此筆）")
                             }
                         }
                         self.privateDB.add(fetch)
