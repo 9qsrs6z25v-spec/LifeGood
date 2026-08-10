@@ -2429,8 +2429,17 @@ struct DepositEditorSheet: View {
                             Text(currency).foregroundStyle(.secondary)
                             TextField("金額", text: $amountText).keyboardType(.decimalPad)
                         }
+                        // 編輯既有沖正紀錄時（此畫面以存/提款型式呈現沖正的差額），
+                        // 補上備註欄位——過去這裡沒有欄位，備註看不到也改不了
+                        if editing?.isAdjust == true {
+                            TextField("備註（如：對帳調整）", text: $adjustNote, axis: .vertical).lineLimit(2...3)
+                        }
                     } header: {
-                        depositEditorSectionHeader("\(currency) \(txType.rawValue)", icon: "banknote.fill", color: .green)
+                        depositEditorSectionHeader(
+                            editing?.isAdjust == true ? "沖正" : "\(currency) \(txType.rawValue)",
+                            icon: editing?.isAdjust == true ? "arrow.triangle.2.circlepath" : "banknote.fill",
+                            color: editing?.isAdjust == true ? .orange : .green
+                        )
                     }
                 }
 
@@ -2468,6 +2477,9 @@ struct DepositEditorSheet: View {
                     txType = e.isWithdrawal ? .withdrawal : .deposit
                     date = e.date
                     amountText = String(format: "%.0f", e.amount)
+                    // 編輯沖正紀錄：把既有備註回填到欄位（過去漏了這步，備註欄位永遠空白，
+                    // 使用者輸入的備註也因 save() 沿用舊值而「存不起來」）
+                    if e.isAdjust { adjustNote = e.note ?? "" }
                 }
             }
         }
@@ -2488,10 +2500,13 @@ struct DepositEditorSheet: View {
         // 「沖正」紀錄的 txType 在 onAppear 只會回填成 .deposit/.withdrawal（此表單沒有「編輯沖正」的重算 UI），
         // 若直接用預設值重建 BankDeposit 會把 isAdjust／note 清掉，等於使用者只是打開又存檔就把「沖正」
         // 紀錄靜默改成普通存提款、遺失對帳備註。這裡保留原始 isAdjust／note，避免資料被改型別。
+        // 沖正紀錄的備註採用畫面欄位的即時內容（onAppear 已回填舊值、UI 有備註欄位可改）；
+        // 先前寫死沿用 editing?.note，使用者改了備註也存不起來
+        let trimmedAdjustNote = adjustNote.trimmingCharacters(in: .whitespaces)
         let dep = BankDeposit(id: editing?.id ?? UUID(), date: date, amount: Double(amountText) ?? 0,
                               currencyCode: currency, isWithdrawal: txType == .withdrawal,
                               isAdjust: editing?.isAdjust ?? false,
-                              note: (editing?.isAdjust == true) ? editing?.note : nil)
+                              note: (editing?.isAdjust == true) ? (trimmedAdjustNote.isEmpty ? nil : trimmedAdjustNote) : nil)
         var list = ms.bankDeposits ?? []
         if let idx = list.firstIndex(where: { $0.id == dep.id }) { list[idx] = dep }
         else { list.append(dep) }

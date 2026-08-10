@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.155", build: 908, date: "2026/08/10", notes: [
+            "【修正】銀行沖正紀錄的備註存不起來：編輯既有沖正紀錄時，DepositEditorSheet 走「存款/提款」版 UI——(1) onAppear 沒把既有備註回填到欄位、(2) 畫面上根本沒有備註欄位、(3) save() 寫死沿用舊 note——備註看不到、改不了、也存不進去。三處修正：onAppear 對沖正紀錄回填 adjustNote；編輯沖正時在表單補上備註欄位（Section header 同步換成橙色「沖正」樣式，與新增沖正時一致）；save() 改採畫面欄位的即時內容（去空白、空字串存 nil）。新增沖正的備註儲存（saveAdjust）原本就正常，未變動。"
+        ]),
         ChangelogEntry(version: "25.154", build: 907, date: "2026/08/10", notes: [
             "【修正】關閉清單「整列滑到底直接刪除」：使用者在載具頁從螢幕邊緣滑動切換大功能（v25.139 新手勢）時，滑動被 List 的 swipeActions 攔走、差點整列滑到底直接觸發刪除——SwiftUI swipeActions 預設 allowsFullSwipe: true，第一顆按鈕是紅色刪除時，全滑＝直接執行刪除，與邊緣切頁手勢天然衝突且誤觸代價極高。全 App 8 處帶刪除鈕的 swipeActions（載具/儲蓄險/房地產×2/變動支出/收入/名片/電子發票還原）統一補上 allowsFullSwipe: false：滑動只會滑出操作按鈕，刪除一律需要再點一下紅色按鈕確認，滑到底不再直接執行；滑出按鈕的既有操作（刪除/編輯等）完全保留。"
         ]),
