@@ -764,7 +764,7 @@ struct IncomeView: View {
                     incomeRow(income)
                         .contentShape(Rectangle())
                         .onTapGesture { editingItem = income }
-                        .swipeActions(edge: .trailing) {
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
                                 if let idx = incomes.firstIndex(where: { $0.id == income.id }) {
                                     deleteIncomes(at: IndexSet(integer: idx), from: incomes)

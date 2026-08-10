@@ -139,7 +139,7 @@ struct RealEstateView: View {
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                             .onTapGesture { viewingItem = item }
-                            .swipeActions(edge: .trailing) {
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     if subscription.isPremium { deleteEstate(item) }
                                     else { showPremiumAlert = true }
@@ -164,7 +164,7 @@ struct RealEstateView: View {
                                     .listRowSeparator(.hidden)
                                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                     .onTapGesture { viewingItem = item }
-                                    .swipeActions(edge: .trailing) {
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                         Button(role: .destructive) {
                                             if subscription.isPremium { deleteEstate(item) }
                                             else { showPremiumAlert = true }

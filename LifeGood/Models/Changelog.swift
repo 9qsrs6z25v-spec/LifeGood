@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.154", build: 907, date: "2026/08/10", notes: [
+            "【修正】關閉清單「整列滑到底直接刪除」：使用者在載具頁從螢幕邊緣滑動切換大功能（v25.139 新手勢）時，滑動被 List 的 swipeActions 攔走、差點整列滑到底直接觸發刪除——SwiftUI swipeActions 預設 allowsFullSwipe: true，第一顆按鈕是紅色刪除時，全滑＝直接執行刪除，與邊緣切頁手勢天然衝突且誤觸代價極高。全 App 8 處帶刪除鈕的 swipeActions（載具/儲蓄險/房地產×2/變動支出/收入/名片/電子發票還原）統一補上 allowsFullSwipe: false：滑動只會滑出操作按鈕，刪除一律需要再點一下紅色按鈕確認，滑到底不再直接執行；滑出按鈕的既有操作（刪除/編輯等）完全保留。"
+        ]),
         ChangelogEntry(version: "25.153", build: 906, date: "2026/08/10", notes: [
             "【修正】Schema 部署成功後照片仍 0 張上雲：使用者實測結構化資料 20/20、雲端普查 20 筆、診斷九層全綠——KV 鏈路正式打通，但照片抽查與普查仍為 0。原因是照片上傳帳本被「假成功」污染：Production schema 未部署期間，403 張照片的上傳整體回報成功（個別拒收被吞），帳本當時就把每張都記成已上傳；schema 部署後每輪同步帳本比對簽章相同、全部直接跳過，連一次上傳都不會嘗試。修正：帳本鑰匙換版（ck_uploaded_photo_ledger→_v2），舊帳本作廢並於下次掃描時清除殘留，照片全量重傳一次——這次 uploadPhoto 已有 perRecordSaveBlock 個別查驗（v25.147），真的成功才記帳，不會再被假成功污染。"
         ]),

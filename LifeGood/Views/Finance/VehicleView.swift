@@ -154,7 +154,7 @@ struct VehicleView: View {
                                     value: cardsAppeared
                                 )
                                 .onTapGesture { viewingItem = item }
-                                .swipeActions(edge: .trailing) {
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button(role: .destructive) {
                                         guard subscription.isPremium else {
                                             showPremiumAlert = true

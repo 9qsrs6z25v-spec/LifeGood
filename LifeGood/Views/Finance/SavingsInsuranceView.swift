@@ -133,7 +133,7 @@ struct SavingsInsuranceView: View {
                                     if subscription.isPremium { editingItem = item }
                                     else { showPremiumAlert = true }
                                 }
-                                .swipeActions(edge: .trailing) {
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button(role: .destructive) {
                                         if subscription.isPremium {
                                             // 改用 expenseStore.delete(_:) 而非直接 removeAll，

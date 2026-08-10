@@ -919,7 +919,7 @@ struct EInvoiceHistoryView: View {
                                     .spring(response: 0.50, dampingFraction: 0.78).delay(0.04 * Double(min(idx, 12))),
                                     value: historyAppeared
                                 )
-                                .swipeActions(edge: .trailing) {
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button(role: .destructive) {
                                         sync.revert(record, expenseStore: expenseStore)
                                     } label: {

@@ -826,7 +826,7 @@ struct BusinessCardView: View {
                                         withAnimation { isMultiSelect = true }
                                         selectedIds = [card.id]
                                     }
-                                    .swipeActions(edge: .trailing) {
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                         if !isMultiSelect {
                                             Button(role: .destructive) {
                                                 if subscription.isPremium { lifeStore.deleteBusinessCard(card) }

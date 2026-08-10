@@ -650,7 +650,7 @@ struct VariableExpenseView: View {
                     ExpenseRow(expense: expense)
                         .contentShape(Rectangle())
                         .onTapGesture { expenseToEdit = expense }
-                        .swipeActions(edge: .trailing) {
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
                                 if let idx = expenses.firstIndex(where: { $0.id == expense.id }) {
                                     deleteWithSync(offsets: IndexSet(integer: idx), from: expenses)
