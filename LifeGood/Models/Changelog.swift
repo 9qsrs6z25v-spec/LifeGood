@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.156", build: 909, date: "2026/08/10", notes: [
+            "【美化】理財圖表頁（FinanceChartView）：資產配置圖例金額、股票加總損益／明細損益、房地產與儲蓄險明細列市值，共 5 處金額大字補上防截斷（lineLimit + minimumScaleFactor），對齊同頁英雄卡與 KPI 格既有規格，避免同行姓名或膠囊標籤擠壓、系統輔助大字體或億級金額時被裁切。純視覺調整，未變動任何金額計算與資料邏輯。"
+        ]),
         ChangelogEntry(version: "25.155", build: 908, date: "2026/08/10", notes: [
             "【修正】銀行沖正紀錄的備註存不起來：編輯既有沖正紀錄時，DepositEditorSheet 走「存款/提款」版 UI——(1) onAppear 沒把既有備註回填到欄位、(2) 畫面上根本沒有備註欄位、(3) save() 寫死沿用舊 note——備註看不到、改不了、也存不進去。三處修正：onAppear 對沖正紀錄回填 adjustNote；編輯沖正時在表單補上備註欄位（Section header 同步換成橙色「沖正」樣式，與新增沖正時一致）；save() 改採畫面欄位的即時內容（去空白、空字串存 nil）。新增沖正的備註儲存（saveAdjust）原本就正常，未變動。"
         ]),

@@ -76,6 +76,15 @@ import Charts
 //      任一單類更大，達億量級或窄螢幕時字級沒有下修空間，可能被系統裁切。補上 .lineLimit(1)
 //      + .minimumScaleFactor(0.6)，對齊 VehicleView.summaryHeader 同尺寸大字規格。
 //      純視覺層調整，總資產加總與各資產分類試算邏輯完全未變動。
+// [2026-08 v8] 明細金額大字補齊自適應防截斷收尾：
+//  26. 英雄卡與甜甜圈中心大字（v7 前已補）之外，本檔案另有 5 處金額大字仍缺
+//      lineLimit／minimumScaleFactor：allocationChart 圖例列金額、stockPerformanceSection
+//      加總損益摘要卡、股票明細列損益、realEstatePerformanceSection／insuranceSummarySection
+//      明細列市值——皆是同排還有姓名／膠囊標籤共享水平空間、系統輔助大字體或金額達億量級時
+//      最容易被裁切的位置，卻是本檔案唯一還沒補防護的金額文字。5 處統一補上
+//      .lineLimit(1) + .minimumScaleFactor(0.7)，對齊同檔案 heroKpiCell 既有規格。
+//      純視覺層調整，未變動任何金額計算或資料邏輯。
+//      （下次美化本檔案時，可轉往其他仍留有待辦的畫面）
 
 struct FinanceChartView: View {
     @EnvironmentObject var store: FinanceStore
@@ -396,6 +405,8 @@ struct FinanceChartView: View {
                                 VStack(alignment: .trailing, spacing: 1) {
                                     Text(fmtShort(a.value))
                                         .font(.system(size: 14, weight: .bold, design: .rounded))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.7)
                                         .contentTransition(.numericText())
                                     Text(String(format: "%.1f%%", pct * 100))
                                         .font(.caption2.weight(.semibold))
@@ -499,6 +510,8 @@ struct FinanceChartView: View {
                         Text((totalPL >= 0 ? "+" : "") + fmt(totalPL))
                             .font(.system(size: 17, weight: .bold, design: .rounded))
                             .foregroundStyle(plColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                             .contentTransition(.numericText())
                     }
                     Spacer()
@@ -591,6 +604,8 @@ struct FinanceChartView: View {
                                 Text((pl >= 0 ? "+" : "") + fmt(pl))
                                     .font(.subheadline.bold())
                                     .foregroundStyle(plC)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
                                     .contentTransition(.numericText())
                                 Text(String(format: "%@%.1f%%", stock.returnRate >= 0 ? "+" : "", stock.returnRate))
                                     .font(.caption2.weight(.semibold))
@@ -698,6 +713,8 @@ struct FinanceChartView: View {
                             Text(fmtShort(item.currentValue))
                                 .font(.system(size: 15, weight: .bold, design: .rounded))
                                 .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                                 .contentTransition(.numericText())
                         }
                         .padding(.horizontal)
@@ -787,6 +804,8 @@ struct FinanceChartView: View {
                                 Text(fmtShort(item.currentValue))
                                     .font(.system(size: 15, weight: .bold, design: .rounded))
                                     .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
                                     .contentTransition(.numericText())
                                 if item.currencyCode != "NT$" {
                                     Text(item.currencyCode)
