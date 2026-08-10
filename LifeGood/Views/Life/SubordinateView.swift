@@ -244,14 +244,18 @@ struct SubordinateView: View {
         } else {
             ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
                 listRow(row, idx: idx, mentionCounts: mentionCounts)
-            }
-            .onDelete { offsets in
-                guard subscription.isPremium else { showPremiumAlert = true; return }
-                let items = offsets.compactMap { off -> Subordinate? in
-                    guard off < rows.count, case .person(let s) = rows[off] else { return nil }
-                    return s
-                }
-                items.forEach { lifeStore.deleteSubordinate($0) }
+                    // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete：
+                    // 避免整列滑到底直接刪除（與邊緣切頁手勢衝突，同型修正見 v25.154）
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if case .person(let s) = row {
+                            Button(role: .destructive) {
+                                guard subscription.isPremium else { showPremiumAlert = true; return }
+                                lifeStore.deleteSubordinate(s)
+                            } label: {
+                                Label("刪除", systemImage: "trash")
+                            }
+                        }
+                    }
             }
             .onMove { from, to in
                 guard subscription.isPremium else { showPremiumAlert = true; return }

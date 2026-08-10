@@ -86,11 +86,15 @@ struct GradeTitleView: View {
                                 .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04 * Double(idx)), value: rowsAppeared)
                         }
                         .buttonStyle(.plain)
-                    }
-                    .onDelete { offsets in
-                        let snapshot = lifeStore.departments
-                        let items = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
-                        for item in items { deleteDepartment(item) }
+                        // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete：
+                        // 避免整列滑到底直接刪除（與邊緣切頁手勢衝突，同型修正見 v25.154）
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteDepartment(dept)
+                            } label: {
+                                Label("刪除", systemImage: "trash")
+                            }
+                        }
                     }
 
                     if lifeStore.departments.isEmpty {

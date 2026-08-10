@@ -107,12 +107,16 @@ struct FamilyView: View {
                                         .delay(0.05 * Double(idx)),
                                     value: membersAppeared
                                 )
-                        }
-                        .onDelete { offsets in
-                            guard subscription.isPremium else { showPremiumAlert = true; return }
-                            let snapshot = store.familyMembers
-                            let items = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
-                            items.forEach { store.deleteFamilyMember($0) }
+                                // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete：
+                                // 避免整列滑到底直接刪除（與邊緣切頁手勢衝突，同型修正見 v25.154）
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        guard subscription.isPremium else { showPremiumAlert = true; return }
+                                        store.deleteFamilyMember(member)
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
                         }
                     }
                 }

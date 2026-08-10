@@ -496,6 +496,16 @@ struct FixedExpenseView: View {
                         .onTapGesture {
                             previewExpense = expense
                         }
+                        // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete：
+                        // 系統 .onDelete 天生支援整列滑到底直接刪除，與邊緣切頁手勢衝突且誤觸代價高
+                        //（同型修正見 v25.154 全 App swipeActions 掃蕩）
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteWithSync(offsets: IndexSet(integer: rowIdx), from: expenses)
+                            } label: {
+                                Label("刪除", systemImage: "trash")
+                            }
+                        }
                         // 交錯進場：群組序 × 4 + 列序，確保每列入場稍有延遲
                         .opacity(categoryListAppeared ? 1 : 0)
                         .offset(y: categoryListAppeared ? 0 : 14)
@@ -504,9 +514,6 @@ struct FixedExpenseView: View {
                                 .delay(0.05 * Double(groupIdx * 4 + rowIdx)),
                             value: categoryListAppeared
                         )
-                }
-                .onDelete { offsets in
-                    deleteWithSync(offsets: offsets, from: expenses)
                 }
             }
         }

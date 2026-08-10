@@ -575,13 +575,18 @@ struct ResumeView: View {
                                     .delay(0.05 * Double(sectionIdx * 4 + rowIdx)),
                                 value: rowsAppeared
                             )
-                    }
-                    .onDelete { offsets in
-                        guard subscription.isPremium else { showPremiumAlert = true; return }
-                        let snapshot = section.items
-                        let items = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
-                            .filter { realMilestoneIDs.contains($0.id) }
-                        items.forEach { deleteMilestoneCleaningLinks($0) }
+                            // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete：
+                            // 避免整列滑到底直接刪除（與邊緣切頁手勢衝突，同型修正見 v25.154）
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if realMilestoneIDs.contains(item.id) {
+                                    Button(role: .destructive) {
+                                        guard subscription.isPremium else { showPremiumAlert = true; return }
+                                        deleteMilestoneCleaningLinks(item)
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
+                            }
                     }
                 } header: {
                     sectionHeader(section.category, count: section.items.count)
@@ -631,13 +636,17 @@ struct ResumeView: View {
                                     .delay(0.05 * Double(rowIdx)),
                                 value: rowsAppeared
                             )
-                    }
-                    .onDelete { offsets in
-                        guard subscription.isPremium else { showPremiumAlert = true; return }
-                        let snapshot = items
-                        let toDelete = offsets.compactMap { $0 < snapshot.count ? snapshot[$0] : nil }
-                            .filter { realMilestoneIDs.contains($0.id) }
-                        toDelete.forEach { deleteMilestoneCleaningLinks($0) }
+                            // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete（同 groupedList）
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if realMilestoneIDs.contains(item.id) {
+                                    Button(role: .destructive) {
+                                        guard subscription.isPremium else { showPremiumAlert = true; return }
+                                        deleteMilestoneCleaningLinks(item)
+                                    } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
+                                }
+                            }
                     }
                 } header: {
                     sectionHeader(category, count: items.count)
