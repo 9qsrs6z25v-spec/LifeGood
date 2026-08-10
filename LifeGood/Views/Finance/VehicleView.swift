@@ -808,8 +808,9 @@ struct VehicleView: View {
         .shadow(color: CardRarity(price: item.purchasePrice).shadowColor, radius: 6, y: 2)
         .overlay(alignment: .topLeading) {
             if item.isSold {
+                // 貼齊卡片內緣：先前 -8 偏移讓印章凸出卡片外，凸出部分被 List 列邊界裁切遮擋
                 SoldStamp(size: 16)
-                    .offset(x: -8, y: -8)
+                    .offset(x: 4, y: 4)
             }
         }
     }
