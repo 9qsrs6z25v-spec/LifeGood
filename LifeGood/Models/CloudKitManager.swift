@@ -61,6 +61,18 @@ final class CloudKitManager {
     /// 各自獨立存檔 change token 並各自觸發 Store reload。這裡補上旗標，讓後到的呼叫直接
     /// 視為失敗跳過，只保留最先開始的那一輪。
     private var isFetching = false
+    /// ensureZoneExists 併發守衛（同 uploadSweepActive／uploadSweepCompletions 模式，
+    /// 只在 queue 上讀寫）：CKModifyRecordZonesOperation 的完成回呼落在 CloudKit 自己的
+    /// 佇列，`queue.async { ensureZoneExists {...} }` 呼叫本身送出操作後就立即返回，
+    /// 在 zoneCreatedKey 被寫成 true 之前，序列佇列上排隊的下一次呼叫仍會讀到「尚未建立」
+    /// 而各自對同一個 zone 再送出一個 CKModifyRecordZonesOperation（例如 pushAllKV 對
+    /// ~19 個 key 逐一呼叫、uploadAllLocalPhotos 對數百張照片逐一呼叫，都會在首次同步時
+    /// 一次觸發多個並行呼叫）。CloudKit 對同一 zone 的並行建立可能被節流失敗
+    /// （.requestRateLimited／.zoneBusy），單一呼叫失敗就讓整輪 push 誤判為失敗，
+    /// 即使 zone 其實已被另一個並行呼叫建立成功。改為只讓第一個呼叫真正送出操作，
+    /// 其餘呼叫排隊等待同一輪結果一起收到通知。
+    private var zoneCreationInFlight = false
+    private var zoneCreationCompletions: [(Bool) -> Void] = []
     private let zoneCreatedKey = "ck_zone_created"
     private let subscriptionCreatedKey = "ck_zone_sub_created"
     private let serverChangeTokenKey = "ck_server_change_token"
@@ -144,19 +156,36 @@ final class CloudKitManager {
 
     private func ensureZoneExists(completion: @escaping (Bool) -> Void) {
         if defaults.bool(forKey: zoneCreatedKey) { completion(true); return }
+        // 已有一輪建立在跑 → 不再送出第二個 CKModifyRecordZonesOperation，併入本輪結果
+        if zoneCreationInFlight {
+            zoneCreationCompletions.append(completion)
+            return
+        }
+        zoneCreationInFlight = true
+
         let zone = CKRecordZone(zoneID: zoneID)
         let op = CKModifyRecordZonesOperation(recordZonesToSave: [zone], recordZoneIDsToDelete: nil)
         op.qualityOfService = .userInitiated
         op.modifyRecordZonesResultBlock = { [weak self] result in
+            let finish: (Bool) -> Void = { ok in
+                completion(ok)
+                guard let self = self else { return }
+                self.queue.async {
+                    let pending = self.zoneCreationCompletions
+                    self.zoneCreationCompletions = []
+                    self.zoneCreationInFlight = false
+                    pending.forEach { $0(ok) }
+                }
+            }
             switch result {
             case .success:
                 if let self = self {
                     self.defaults.set(true, forKey: self.zoneCreatedKey)
                 }
-                completion(true)
+                finish(true)
             case .failure(let error):
                 self?.report(error, context: "建立 iCloud 資料區")
-                completion(false)
+                finish(false)
             }
         }
         applyTimeouts(op)

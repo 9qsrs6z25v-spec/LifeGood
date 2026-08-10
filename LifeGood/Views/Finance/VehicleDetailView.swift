@@ -575,7 +575,10 @@ struct VehicleDetailView: View {
                 if rec.photoFileNames.count >= 2 {
                     // 多張：後兩張斜角堆疊在底、首張在上（簡化版堆疊視覺）
                     ZStack {
-                        ForEach(Array(rec.photoFileNames.prefix(3).enumerated()).reversed(), id: \.offset) { idx, name in
+                        // id 用檔名（.element）而非陣列 offset：比照 MultiPhotoGallery 既有規格，
+                        // 避免新增/刪除照片時因 offset 相同、內容不同，被誤判為同一個 view slot
+                        // 重用舊縮圖造成堆疊縮圖短暫閃爍成錯誤照片後才刷新。
+                        ForEach(Array(rec.photoFileNames.prefix(3).enumerated()).reversed(), id: \.element) { idx, name in
                             ThumbnailImageView(url: VehiclePhotoRecord.photoURL(for: name))
                                 .frame(width: 108, height: 108)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))

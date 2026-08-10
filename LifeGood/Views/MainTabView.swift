@@ -328,7 +328,6 @@ struct MainTabView: View {
     // MARK: - 語音 AI 記帳
     @StateObject private var aiSettings = AISettingsStore.shared
     @StateObject private var speechRecognizer = SpeechRecognizer()
-    @StateObject private var exportProgress = ExportProgressModel.shared
     @State private var aiToast: AIToastInfo?
     @State private var toastDismissTask: Task<Void, Never>?
     @State private var aiBusy = false
@@ -420,9 +419,12 @@ struct MainTabView: View {
             // 真正顯示用的 tab bar：壓在麥克風上層，誤觸時也能看清楚分頁
             VStack(spacing: 0) {
                 Spacer()
-                if exportProgress.isExporting {
-                    exportProgressBar
-                }
+                // [效能] 改用獨立子 View 自行 @ObservedObject 觀察 ExportProgressModel.shared：
+                // 原本 MainTabView 直接持有 @StateObject exportProgress，匯出備份時 fraction
+                // 每個檔案都會更新一次（大量照片可達數百次），任何一次 @Published 變化都會
+                // 讓整個 MainTabView.body（分頁切換、全域手勢等）重新求值一次，不只是這條細
+                // 進度條；改由子 View 自己訂閱，變化只會讓這一小塊重繪。
+                ExportProgressBarView()
                 bottomTabBar(namespace: tabBarNamespace)
             }
 
@@ -1164,56 +1166,65 @@ struct MainTabView: View {
 
     // MARK: - 匯出進度條（細，壓在底部導覽上方，不影響介面）
 
-    private var exportProgressBar: some View {
-        VStack(spacing: 1) {
-            HStack(spacing: 5) {
-                Spacer()
-                // [v4] 16pt 漸層圖示圓錨點，取代裸文字，對齊全 App「圖示圓 + 文字」標籤語言
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(
-                            colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                    Image(systemName: "arrow.up.doc.fill")
-                        .font(.system(size: 7.5, weight: .bold))
-                        .foregroundStyle(.white)
+    /// 獨立持有 @ObservedObject，避免 fraction 高頻更新牽動整個 MainTabView.body 重繪
+    /// （見上方呼叫處註解）。isExporting 為 false 時不畫任何東西，語意與原本
+    /// `if exportProgress.isExporting { exportProgressBar }` 完全相同。
+    private struct ExportProgressBarView: View {
+        @ObservedObject private var exportProgress = ExportProgressModel.shared
+
+        var body: some View {
+            if exportProgress.isExporting {
+                VStack(spacing: 1) {
+                    HStack(spacing: 5) {
+                        Spacer()
+                        // [v4] 16pt 漸層圖示圓錨點，取代裸文字，對齊全 App「圖示圓 + 文字」標籤語言
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                            Image(systemName: "arrow.up.doc.fill")
+                                .font(.system(size: 7.5, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 14, height: 14)
+                        Text("匯出 \(Int(exportProgress.fraction * 100))%")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
+                            .animation(.easeInOut(duration: 0.2), value: exportProgress.fraction)
+                            .padding(.trailing, 14)
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.green.opacity(0.14))
+                                .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
+                            Capsule()
+                                .fill(LinearGradient(
+                                    colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)],
+                                    startPoint: .leading, endPoint: .trailing
+                                ))
+                                .frame(width: max(0, geo.size.width * exportProgress.fraction))
+                                .shadow(color: Color.green.opacity(0.40), radius: 3, x: 0, y: 0)
+                                .animation(.linear(duration: 0.2), value: exportProgress.fraction)
+                        }
+                    }
+                    .frame(height: 3.5)
                 }
-                .frame(width: 14, height: 14)
-                Text("匯出 \(Int(exportProgress.fraction * 100))%")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .contentTransition(.numericText())
-                    .animation(.easeInOut(duration: 0.2), value: exportProgress.fraction)
-                    .padding(.trailing, 14)
+                .padding(.bottom, 1)
+                .background(.ultraThinMaterial)
+                // [v4] 頂部 0.5pt 分隔線，對齊 bottomTabBar 上緣分隔線規格，與下方導覽列劃出清楚交界
+                .overlay(
+                    Rectangle()
+                        .fill(Color(.separator).opacity(0.18))
+                        .frame(height: 0.5),
+                    alignment: .top
+                )
+                .transition(.opacity)
             }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.green.opacity(0.14))
-                        .overlay(Capsule().stroke(Color.green.opacity(0.22), lineWidth: 0.6))
-                    Capsule()
-                        .fill(LinearGradient(
-                            colors: [Color(red: 0.16, green: 0.74, blue: 0.50), Color(red: 0.07, green: 0.50, blue: 0.38)],
-                            startPoint: .leading, endPoint: .trailing
-                        ))
-                        .frame(width: max(0, geo.size.width * exportProgress.fraction))
-                        .shadow(color: Color.green.opacity(0.40), radius: 3, x: 0, y: 0)
-                        .animation(.linear(duration: 0.2), value: exportProgress.fraction)
-                }
-            }
-            .frame(height: 3.5)
         }
-        .padding(.bottom, 1)
-        .background(.ultraThinMaterial)
-        // [v4] 頂部 0.5pt 分隔線，對齊 bottomTabBar 上緣分隔線規格，與下方導覽列劃出清楚交界
-        .overlay(
-            Rectangle()
-                .fill(Color(.separator).opacity(0.18))
-                .frame(height: 0.5),
-            alignment: .top
-        )
-        .transition(.opacity)
     }
 
     // MARK: - 底部四按鈕
