@@ -1146,6 +1146,12 @@ final class CloudKitManager {
 
     /// 把 CKError 轉成使用者看得懂的描述
     static func describe(_ error: Error) -> String {
+        // 正式環境缺 schema：TestFlight/App Store 版寫入 Production，但資料表定義只存在
+        // Development（Xcode 開發時自動建立）。這是 v25.147 perRecordSaveBlock 抓到的
+        // 真正病根，給出直接可執行的指引，不再顯示英文原文讓使用者猜
+        if error.localizedDescription.contains("in production schema") {
+            return "CloudKit 正式環境缺少資料表定義：請到 icloud.developer.apple.com/dashboard → 選擇本 App 容器 → Development 環境 → 按「Deploy Schema Changes to Production」把 Schema 部署到正式環境，部署後再按「立即同步」即可。"
+        }
         guard let ck = error as? CKError else { return error.localizedDescription }
         switch ck.code {
         case .networkUnavailable, .networkFailure:
