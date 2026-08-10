@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.146", build: 899, date: "2026/08/10", notes: [
+            "【修正】合併匯入後股票卡片內買賣變多、外層清單股數卻沒更新：UnifiedImporter 的股票深度合併只把對方的交易/股利用 appendNewByID 補進 transactions/dividends，從未呼叫 recomputeFromTransactions()——而外層清單與閃卡顯示的 shares（股數）/purchasePrice（均價）/isSold（已售出）都是儲存欄位，全部停留在合併前舊值，與卡片內已增加的交易列表互相矛盾。修正呼叫序完整比照 StockDetailView 既有模式：(1) 併入前先 seedTransactionsFromLegacyIfNeeded()——「僅有彙總欄位、無逐筆交易」的舊資料先補種原始買入，避免重算把本機既有持股當成 0 蓋掉；(2) appendNewByID 併入對方交易/股利；(3) 交易或股利計數有實際成長才 recomputeFromTransactions() 重算股數/均價/已售出狀態（計數成長保證非空，不會觸發全清空分支；沒併入新項目則完全不動，保留既有行為）。"
+        ]),
         ChangelogEntry(version: "25.145", build: 898, date: "2026/08/09", notes: [
             "【美化】名片（BusinessCardView）新增／編輯名片表單 BusinessCardEditor 儲存按鈕補齊載入狀態：save() 自帶 isSaving 忙碌守衛（disabled(...||isSaving)）避免快速連點造成重複名片紀錄，但按鈕本身在存檔期間毫無視覺提示——v25.103（ChildDetailView）曾記錄「v25.96 起全 App 儲存按鈕載入狀態補齊清單全數完成」，複查後發現本檔案的 BusinessCardEditor 其實不在當時清單內，是唯一仍缺這道規格的新增／編輯表單儲存按鈕。補上 HStack { if isSaving { ProgressView().scaleEffect(0.7).tint(.green) }；Button(...) }，對齊 ResumeView／ChildDetailView／MyCalendarView／LifeFinanceView 等既有儲存按鈕載入狀態規格。純視覺層調整，save() 內部守衛判斷與電話/Email 陣列寫入、聯絡人建立等既有商業邏輯完全未變動。"
         ]),

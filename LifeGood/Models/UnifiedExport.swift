@@ -709,8 +709,19 @@ enum UnifiedImporter {
             for inc in payload.finance.stocks {
                 if let idx = stockArr.firstIndex(where: { $0.id == inc.id }) {
                     var s = stockArr[idx]
+                    // 併入前先把「僅有彙總欄位、無逐筆交易」的舊資料補種成原始買入，
+                    // 否則下方重算會把本機既有持股當成 0 蓋掉（同型呼叫序見 StockDetailView）
+                    s.seedTransactionsFromLegacyIfNeeded()
+                    let beforeTx = s.transactions.count
+                    let beforeDiv = s.dividends.count
                     appendNewByID(&s.transactions, inc.transactions)
                     appendNewByID(&s.dividends, inc.dividends)
+                    if s.transactions.count != beforeTx || s.dividends.count != beforeDiv {
+                        // 有實際併入新交易/股利才重算 shares/均價/已售出狀態——
+                        // 過去漏了這步，卡片內交易變多、外層清單股數卻停在合併前舊值。
+                        // 計數有成長保證 transactions/dividends 非空，重算不會誤清舊欄位。
+                        s.recomputeFromTransactions()
+                    }
                     stockArr[idx] = s
                 } else {
                     stockArr.append(inc)
