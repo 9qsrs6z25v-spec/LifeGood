@@ -356,13 +356,6 @@ struct ChildRecord: Identifiable, Codable {
         return Self.photosDirectory.appendingPathComponent(name)
     }
 
-    var sketchURL: URL? {
-        guard let name = photoFileName else { return nil }
-        let sketchName = name.replacingOccurrences(of: ".jpg", with: "_sketch.jpg")
-        let url = Self.photosDirectory.appendingPathComponent(sketchName)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
-    }
-
     static var photosDirectory: URL {
         let dir = (FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory)
@@ -379,66 +372,30 @@ struct ChildRecord: Identifiable, Codable {
         return name
     }
 
-    static func saveSketch(_ data: Data, id: UUID) -> String? {
-        let data = ImageCompressor.compressForStorage(data)   // 存檔前統一壓縮：1080P 長邊 + JPEG 80%
-        let name = "\(id.uuidString)_sketch.jpg"
-        guard (try? data.write(to: photosDirectory.appendingPathComponent(name))) != nil else { return nil }
-        PhotoCloudSync.upload(directory: "ChildRecordPhotos", fileName: name)
-        return name
-    }
-
     static func deletePhoto(_ fileName: String) {
         try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(fileName))
         PhotoCloudSync.delete(directory: "ChildRecordPhotos", fileName: fileName)
+        // 素描功能已移除（v25.167），但舊版可能留有 *_sketch.jpg 伴生檔：刪照片時一併清掉
         let sketchName = fileName.replacingOccurrences(of: ".jpg", with: "_sketch.jpg")
         try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(sketchName))
         PhotoCloudSync.delete(directory: "ChildRecordPhotos", fileName: sketchName)
     }
 
-    /// 將照片轉為素描風格（鉛筆畫效果 + 四周高斯模糊暈散）
-    static func applySketchEffect(_ image: UIImage) -> UIImage? {
-        guard let ciImage = CIImage(image: image) else { return nil }
-        let context = CIContext()
-        let extent = ciImage.extent
-
-        // 素描效果
-        let gray = ciImage.applyingFilter("CIColorControls", parameters: [
-            kCIInputSaturationKey: 0
-        ])
-        let inverted = gray.applyingFilter("CIColorInvert")
-        let blurred = inverted.applyingFilter("CIGaussianBlur", parameters: [
-            kCIInputRadiusKey: 15
-        ])
-        let sketch = blurred.applyingFilter("CIColorDodgeBlendMode", parameters: [
-            kCIInputBackgroundImageKey: gray
-        ])
-
-        // 四周高斯模糊的素描版
-        let edgeBlurred = sketch.applyingFilter("CIGaussianBlur", parameters: [
-            kCIInputRadiusKey: 25
-        ])
-
-        // 橢圓漸層遮罩：中心清晰、四周漸層到模糊
-        let cx = extent.midX, cy = extent.midY
-        let rx = extent.width * 0.38, ry = extent.height * 0.38
-        guard let gradientOutput = CIFilter(name: "CIRadialGradient", parameters: [
-            "inputCenter": CIVector(x: cx, y: cy),
-            "inputRadius0": min(rx, ry),
-            "inputRadius1": max(extent.width, extent.height) * 0.55,
-            "inputColor0": CIColor.white,
-            "inputColor1": CIColor.black
-        ])?.outputImage else { return nil }
-        let gradientMask = gradientOutput.cropped(to: extent)
-
-        // 混合：遮罩白色區域顯示清晰素描，黑色區域顯示模糊素描
-        let blended = sketch.applyingFilter("CIBlendWithMask", parameters: [
-            kCIInputBackgroundImageKey: edgeBlurred,
-            kCIInputMaskImageKey: gradientMask
-        ])
-
-        guard let cgImage = context.createCGImage(blended, from: extent) else { return nil }
-        return UIImage(cgImage: cgImage)
+    /// 一次性清除既有素描伴生檔（素描功能移除後的善後）：本機 *_sketch.jpg 連同雲端記錄一併刪除，
+    /// 釋放本機空間並停止這些檔案繼續佔用 iCloud 同步流量。旗標守衛，僅執行一次。
+    static func purgeLegacySketchFiles() {
+        let flag = "child_sketch_purged_v1"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        UserDefaults.standard.set(true, forKey: flag)
+        DispatchQueue.global(qos: .utility).async {
+            guard let files = try? FileManager.default.contentsOfDirectory(atPath: photosDirectory.path) else { return }
+            for f in files where f.hasSuffix("_sketch.jpg") {
+                try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(f))
+                PhotoCloudSync.delete(directory: "ChildRecordPhotos", fileName: f)
+            }
+        }
     }
+
 }
 
 // MARK: - 里程碑分類

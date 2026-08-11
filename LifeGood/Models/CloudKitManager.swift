@@ -1608,7 +1608,7 @@ final class CloudKitManager {
 // MARK: - 照片儲存壓縮
 
 /// 照片存檔前的統一壓縮：長邊縮到 1920pt 內（1080P）+ JPEG 80%。
-/// 各模型的 savePhoto/saveSketch 寫檔前呼叫，縮小本機占用、iCloud 上傳量與匯出備份檔大小。
+/// 各模型的 savePhoto 寫檔前呼叫，縮小本機占用、iCloud 上傳量與匯出備份檔大小。
 enum ImageCompressor {
     /// 長邊上限（1080P 規格的長邊 1920）。
     static let maxDimension: CGFloat = 1920

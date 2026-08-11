@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.167", build: 920, date: "2026/08/11", notes: [
+            "【移除】兒女記錄「轉為素描畫」功能（使用者回饋不好用）：拿掉編輯表單的素描 Toggle、照片匯入管線的素描版產生（CoreImage 濾鏡鏈 applySketchEffect／saveSketch／sketchURL 全數移除）、清單縮圖改一律顯示原圖。善後：(1) deletePhoto 保留 *_sketch.jpg 伴生檔清理（刪照片時一併清舊素描檔）；(2) 新增 purgeLegacySketchFiles 一次性清除（旗標守衛、背景執行）——掃描 ChildRecordPhotos 把既有素描伴生檔連同雲端記錄一併刪除，釋放本機空間並停止佔用 iCloud 同步流量。附帶效益：照片匯入不再做 GPU 濾鏡運算，選照片/拍照後預覽即時顯示。"
+        ]),
         ChangelogEntry(version: "25.166", build: 919, date: "2026/08/11", notes: [
             "【新增】兒女記錄拍照＋兒女相簿廊：(1) 紀念時刻／成長／教育等所有兒女記錄的「插入圖片」區新增「拍照」按鈕（原本只能從相簿選）——CameraPicker 以 fullScreenCover 呈現（沿用 v25.128 相機不可用 sheet 的教訓），拍照與相簿選取共用抽出的 storePickedPhoto 匯入管線：UUID 新檔名、壓縮存檔、背景產生素描版、世代守衛防連拍競態、取消防孤兒檔案等既有保護全部沿用。(2) 兒女卡片右上新增相簿鈕（photo.stack）：彙整該孩子所有記錄附的照片，重用 MapAlbumSheet 相簿模板開啟「<名字> 相簿」（兒子藍／女兒粉主題色），依記錄類型或月份分組、點縮圖看大圖；模板為此新增 groupNoun 參數（預設「地點」，兒女相簿傳「類型」），分組 Picker／摘要列／空分組 key 文案跟隨名詞，旅遊/美食/醫療三個既有呼叫端零改動。"
         ]),

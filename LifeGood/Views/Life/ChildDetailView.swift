@@ -246,6 +246,8 @@ struct ChildDetailView: View {
                 withAnimation(.spring(response: 0.5, dampingFraction: 0.82).delay(0.12)) {
                     contentAppeared = true
                 }
+                // 素描功能移除後的善後：一次性清除舊素描伴生檔（旗標守衛、背景執行）
+                ChildRecord.purgeLegacySketchFiles()
             }
             .onChange(of: detailTab) { _, _ in
                 contentAppeared = false
@@ -1031,7 +1033,7 @@ struct ChildDetailView: View {
                 }
 
                 // 照片放在 row 右側，依原比例顯示（最大 80×80）
-                if rec.photoFileName != nil, let url = rec.sketchURL ?? rec.photoURL {
+                if rec.photoFileName != nil, let url = rec.photoURL {
                     // 用既有的 AsyncLocalImage 背景讀檔快取，避免清單捲動／其他列狀態
                     // 變化造成整個 body 重新求值時，同步在主執行緒重讀＋重解碼每一列的照片。
                     AsyncLocalImage(url: url) { img, _ in
@@ -1364,7 +1366,6 @@ struct ChildRecordEditorSheet: View {
     @State private var photoItem: PhotosPickerItem?
     // 拍照（相機必須用 fullScreenCover：sheet 卡片式呈現會讓快門列被裁切，見 v25.128 修復）
     @State private var showCamera = false
-    @State private var sketchMode = true
     @State private var previewImage: UIImage?
     /// 進入編輯畫面時的原始照片檔名，用來判斷儲存/取消時該刪哪個檔案（見 save()/取消按鈕註解）。
     @State private var originalPhotoFileName: String?
@@ -1429,7 +1430,7 @@ struct ChildRecordEditorSheet: View {
                         }
                     }
 
-                    // 拍照：與相簿選取共用 storePickedPhoto 匯入管線（壓縮存檔＋素描版＋世代守衛）
+                    // 拍照：與相簿選取共用 storePickedPhoto 匯入管線（壓縮存檔＋世代守衛）
                     Button {
                         showCamera = true
                     } label: {
@@ -1438,11 +1439,6 @@ struct ChildRecordEditorSheet: View {
                             Text("拍照")
                             Spacer()
                         }
-                    }
-
-                    if photoFileName != nil {
-                        Toggle("轉為素描畫", isOn: $sketchMode)
-                            .onChange(of: sketchMode) { _, _ in regeneratePreview() }
                     }
 
                     if let img = previewImage {
@@ -1534,23 +1530,14 @@ struct ChildRecordEditorSheet: View {
     /// 編輯既有記錄時 editing.id 不變，若沿用它當檔名，換照片會同路徑覆寫、photoFileName
     /// 字串不變，清單縮圖用的 AsyncLocalImage 依 url 判斷是否重讀，url 沒變就不會重讀，
     /// 換照片後清單頭像停留在舊圖（同類 bug 已在 BusinessCard/OrgPerson/FamilyAlbumPhoto
-    /// 修復，改用全新 UUID 檔名）。素描檔名一律跟著同一個新 photoId 走，兩者仍保持配對。
+    /// 修復，改用全新 UUID 檔名）。
     private func storePickedPhoto(data: Data, generation: Int) async {
         let photoId = UUID()
         let savedName = ChildRecord.savePhoto(data, id: photoId)
         let origImage = UIImage(data: data)
-        // 素描版：CIContext 建立與 GPU 渲染移到背景執行緒，避免阻塞主執行緒
-        if let orig = origImage {
-            let sketched = await Task.detached(priority: .userInitiated) {
-                ChildRecord.applySketchEffect(orig)
-            }.value
-            if let sketched, let sketchData = sketched.jpegData(compressionQuality: 0.85) {
-                _ = ChildRecord.saveSketch(sketchData, id: photoId)
-            }
-        }
         await MainActor.run {
             guard generation == photoLoadGeneration else {
-                // 已被更新的選取取代：這次白存的照片/素描檔沒有任何欄位會再引用到，
+                // 已被更新的選取取代：這次白存的照片檔沒有任何欄位會再引用到，
                 // 立刻清掉避免孤兒檔案；不動任何已顯示的狀態。
                 if let savedName { ChildRecord.deletePhoto(savedName) }
                 return
@@ -1564,56 +1551,6 @@ struct ChildRecordEditorSheet: View {
                 ChildRecord.deletePhoto(previous)
             }
             photoFileName = savedName
-            previewImage = sketchMode ? loadSketchOrOrig() : origImage
-        }
-    }
-
-    /// 素描檔名一律由 photoFileName 推導（與 ChildRecord.sketchURL 邏輯一致），
-    /// 不可用另外亂數的 UUID，否則新增記錄時三處各自產生的 id 對不上，存的素描永遠找不到。
-    private func sketchFileName(for photoName: String) -> String {
-        photoName.replacingOccurrences(of: ".jpg", with: "_sketch.jpg")
-    }
-
-    private func loadSketchOrOrig() -> UIImage? {
-        guard let name = photoFileName else { return nil }
-        let sketchPath = ChildRecord.photosDirectory.appendingPathComponent(sketchFileName(for: name))
-        if let data = try? Data(contentsOf: sketchPath), let img = UIImage(data: data) { return img }
-        guard let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)),
-              let img = UIImage(data: data) else { return nil }
-        return img
-    }
-
-    private func regeneratePreview() {
-        guard let name = photoFileName else { return }
-        let sketchName = sketchFileName(for: name)
-
-        if sketchMode {
-            let sketchPath = ChildRecord.photosDirectory.appendingPathComponent(sketchName)
-            if !FileManager.default.fileExists(atPath: sketchPath.path) {
-                // 素描版不存在才需要讀原圖：避免每次切換 Toggle 都做一次不必要的主執行緒磁碟讀取 + JPEG 解碼
-                let origPath = ChildRecord.photosDirectory.appendingPathComponent(name)
-                guard let data = try? Data(contentsOf: origPath), let origImage = UIImage(data: data) else { return }
-                // GPU 運算移到背景執行緒，完成後再更新預覽
-                Task {
-                    let sketched = await Task.detached(priority: .userInitiated) {
-                        ChildRecord.applySketchEffect(origImage)
-                    }.value
-                    if let sketched, let sketchData = sketched.jpegData(compressionQuality: 0.85) {
-                        // 唯一繞過 ChildRecord.saveSketch 的直接寫檔路徑，補上同一套存檔壓縮
-                        try? ImageCompressor.compressForStorage(sketchData).write(to: sketchPath)
-                        PhotoCloudSync.upload(directory: "ChildRecordPhotos", fileName: sketchName)
-                    }
-                    // 運算期間使用者可能已把 Toggle 切回原圖：不檢查會讓這裡把已經正確顯示的
-                    // 原圖預覽，事後又覆蓋回素描版，畫面與目前 Toggle 狀態不一致。
-                    guard sketchMode, photoFileName == name else { return }
-                    previewImage = loadSketchOrOrig()
-                }
-            } else {
-                previewImage = loadSketchOrOrig()
-            }
-        } else {
-            let origPath = ChildRecord.photosDirectory.appendingPathComponent(name)
-            guard let data = try? Data(contentsOf: origPath), let origImage = UIImage(data: data) else { return }
             previewImage = origImage
         }
     }
@@ -1875,12 +1812,9 @@ struct ChildRecordEditorSheet: View {
         dose = e.dose ?? ""; severity = e.severity ?? .mild
         photoFileName = e.photoFileName
         originalPhotoFileName = e.photoFileName
-        if e.photoFileName != nil {
-            previewImage = sketchMode ? loadSketchOrOrig() : {
-                guard let name = e.photoFileName,
-                      let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)) else { return nil }
-                return UIImage(data: data)
-            }()
+        if let name = e.photoFileName,
+           let data = try? Data(contentsOf: ChildRecord.photosDirectory.appendingPathComponent(name)) {
+            previewImage = UIImage(data: data)
         }
     }
 
