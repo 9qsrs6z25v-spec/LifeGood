@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.169", build: 922, date: "2026/08/11", notes: [
+            "【調整】兒女履歷項目點開改為詳情卡（使用者回饋：點開直接進編輯不符其他頁面慣例）：生涯頁所有記錄（成長/就醫/疫苗/過敏/教育/興趣/紀念時刻）與日常頁（喝奶/食物/睡眠）點列改開詳情卡——44pt 類別圖示圓＋標題＋類型/日期膠囊、依類型顯示對應欄位（身高體重/體溫（≥38°C 紅字）/劑次/嚴重度/院所/品牌奶量/入睡起床時長/備註）、照片大圖（點開全螢幕 PhotoLightbox）；右上「編輯」按鈕開啟既有編輯表單（訂閱守衛移到此處，看卡免訂閱），存檔回來詳情即時反映、編輯器內刪除記錄則詳情卡自動關閉。同型模式對齊 VehicleItemDetailSheet。"
+        ]),
         ChangelogEntry(version: "25.168", build: 921, date: "2026/08/11", notes: [
             "【新增】就醫記錄體溫欄位＋體溫趨勢曲線：(1) ChildRecord 新增 temperatureC 選填欄位（合成 Codable，舊資料缺 key 自動 nil 相容），就醫記錄表單在症狀/診斷下新增「體溫（°C）」輸入；(2) 生涯頁就醫記錄列新增體溫膠囊——≥38°C 發燒紅、其餘橙色，一眼看出當次是否發燒；(3) 日常趨勢圖表從五頁擴為六頁：新增「體溫」曲線（紅色主題、temperature 圖示），資料取就醫記錄的體溫、同日多筆取當日最高（發燒追蹤最有意義），Y 軸不鎖 0 起點（35~40°C 區間才看得出起伏），點資料點顯示日期/體溫/當日筆數；DailyChartsPager 參數從 growthRecords 改傳完整 childRecords，身高/體重/體溫各自於內部過濾。"
         ]),

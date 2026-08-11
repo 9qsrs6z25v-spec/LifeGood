@@ -86,6 +86,9 @@ struct ChildDetailView: View {
     let childId: UUID
     @State private var addingType: ChildRecordType?
     @State private var editingRecord: ChildRecord?
+    // 點列先看詳情卡（編輯移到卡片右上角）
+    @State private var viewingRecord: ChildRecord?
+    @State private var viewingDaily: DailyRecord?
     @State private var addingDailyType: DailyRecordType?
     @State private var editingDaily: DailyRecord?
     @State private var showPremiumAlert = false
@@ -240,6 +243,12 @@ struct ChildDetailView: View {
             }
             .sheet(item: $editingDaily) { rec in
                 DailyRecordEditorSheet(childId: childId, type: rec.type, editing: rec)
+            }
+            .sheet(item: $viewingRecord) { rec in
+                ChildRecordDetailSheet(childId: childId, record: rec)
+            }
+            .sheet(item: $viewingDaily) { rec in
+                DailyRecordDetailSheet(childId: childId, record: rec)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .onAppear {
@@ -592,8 +601,7 @@ struct ChildDetailView: View {
             } else {
                 ForEach(Array(items.prefix(20).enumerated()), id: \.element.id) { idx, rec in
                     Button {
-                        if subscription.isPremium { editingDaily = rec }
-                        else { showPremiumAlert = true }
+                        viewingDaily = rec
                     } label: {
                         dailyRow(rec)
                     }
@@ -971,8 +979,8 @@ struct ChildDetailView: View {
     private func recordRow(_ rec: ChildRecord) -> some View {
         let accent = colorFor(rec.type)
         Button {
-            if subscription.isPremium { editingRecord = rec }
-            else { showPremiumAlert = true }
+            // 點列先開詳情卡（免訂閱可看），編輯移到詳情卡右上角（該處才做訂閱守衛）
+            viewingRecord = rec
         } label: {
             HStack(alignment: .center, spacing: 12) {
                 // 36pt 漸層圖示圓 + stroke（v2 升級）
@@ -2206,6 +2214,289 @@ private struct DailyTrendChart: View {
         case .sleep: return "\(p.count) 段睡眠"
         case .height, .weight: return "成長紀錄"
         case .temperature: return p.count > 1 ? "當日最高（\(p.count) 筆）" : "就醫紀錄"
+        }
+    }
+}
+
+
+// MARK: - 兒女記錄詳情卡（點列先看卡片，右上「編輯」；同型模式見 VehicleItemDetailSheet）
+
+fileprivate struct ChildRecordDetailSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @Environment(\.dismiss) private var dismiss
+
+    let childId: UUID
+    let record: ChildRecord
+
+    @State private var editingRecord: ChildRecord?
+    @State private var showPremiumAlert = false
+    @State private var viewingPhotoURL: IdentifiableURL?
+
+    /// 每次 body 都取最新版本：右上「編輯」存檔回來畫面即時反映
+    private var current: ChildRecord {
+        lifeStore.familyMembers.first(where: { $0.id == childId })?
+            .childRecords.first(where: { $0.id == record.id }) ?? record
+    }
+
+    /// 記錄是否已被刪除（編輯器內刪除後自動關閉詳情卡）
+    private var isDeleted: Bool {
+        lifeStore.familyMembers.first(where: { $0.id == childId })?
+            .childRecords.contains(where: { $0.id == record.id }) == false
+    }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    private var accent: Color {
+        switch current.type {
+        case .vaccination: return .blue; case .allergy: return .red; case .growth: return .green
+        case .medical: return .orange; case .education: return .purple
+        case .hobby: return .pink; case .memorable: return .yellow
+        }
+    }
+
+    /// detail 欄位在各類型的語意標籤（對齊編輯表單的欄位名稱）
+    private var detailLabel: String {
+        switch current.type {
+        case .medical, .vaccination: return "院所"
+        case .allergy: return "反應描述"
+        case .education: return "學校或單位"
+        default: return "描述"
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                let rec = current
+                Section {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 44, height: 44)
+                            Circle()
+                                .stroke(accent.opacity(0.22), lineWidth: 1)
+                                .frame(width: 44, height: 44)
+                            Image(systemName: rec.type.icon)
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(accent)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(rec.title.isEmpty ? rec.type.rawValue : rec.title)
+                                .font(.headline)
+                            HStack(spacing: 6) {
+                                Text(rec.type.rawValue)
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 7).padding(.vertical, 2)
+                                    .background(accent.opacity(0.12))
+                                    .foregroundStyle(accent)
+                                    .clipShape(Capsule())
+                                Text(Self.dateFmt.string(from: rec.date))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                Section("記錄資訊") {
+                    if !rec.detail.isEmpty { infoRow(detailLabel, rec.detail) }
+                    if rec.type == .growth {
+                        if let h = rec.heightCm, h > 0 { infoRow("身高", String(format: "%.1f cm", h)) }
+                        if let w = rec.weightKg, w > 0 { infoRow("體重", String(format: "%.1f kg", w)) }
+                    }
+                    if rec.type == .medical, let t = rec.temperatureC, t > 0 {
+                        HStack {
+                            Text("體溫").foregroundStyle(.secondary)
+                            Spacer()
+                            Text(String(format: "%.1f °C", t))
+                                .foregroundStyle(t >= 38 ? Color.red : Color.primary)
+                                .fontWeight(t >= 38 ? .semibold : .regular)
+                        }
+                    }
+                    if rec.type == .vaccination, let dose = rec.dose, !dose.isEmpty {
+                        infoRow("劑次", dose)
+                    }
+                    if rec.type == .allergy, let sev = rec.severity {
+                        infoRow("嚴重度", sev.rawValue)
+                    }
+                    if !rec.note.isEmpty { infoRow("備註", rec.note) }
+                }
+
+                if let url = rec.photoURL, rec.photoFileName != nil {
+                    Section("照片") {
+                        Button {
+                            viewingPhotoURL = IdentifiableURL(url: url)
+                        } label: {
+                            AsyncLocalImage(url: url) { img, _ in
+                                if let img {
+                                    Image(uiImage: img)
+                                        .resizable().scaledToFit()
+                                        .frame(maxHeight: 260)
+                                        .frame(maxWidth: .infinity)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                } else {
+                                    ProgressView().frame(maxWidth: .infinity, minHeight: 120)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .navigationTitle(current.type.rawValue)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("編輯") {
+                        if subscription.isPremium { editingRecord = current }
+                        else { showPremiumAlert = true }
+                    }
+                    .bold().foregroundStyle(.green)
+                }
+            }
+            .sheet(item: $editingRecord) { rec in
+                ChildRecordEditorSheet(childId: childId, type: rec.type, editing: rec)
+            }
+            .sheet(item: $viewingPhotoURL) { wrapper in
+                PhotoLightbox(url: wrapper.url)
+            }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+            .onChange(of: isDeleted) { _, gone in
+                if gone { dismiss() }
+            }
+        }
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+// MARK: - 日常記錄詳情卡（喝奶/食物/睡眠）
+
+fileprivate struct DailyRecordDetailSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @Environment(\.dismiss) private var dismiss
+
+    let childId: UUID
+    let record: DailyRecord
+
+    @State private var editingDaily: DailyRecord?
+    @State private var showPremiumAlert = false
+
+    private var current: DailyRecord {
+        lifeStore.familyMembers.first(where: { $0.id == childId })?
+            .dailyRecords.first(where: { $0.id == record.id }) ?? record
+    }
+
+    private var isDeleted: Bool {
+        lifeStore.familyMembers.first(where: { $0.id == childId })?
+            .dailyRecords.contains(where: { $0.id == record.id }) == false
+    }
+
+    private static let dateTimeFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
+
+    private var accent: Color {
+        switch current.type {
+        case .milk: return .blue
+        case .food: return .green
+        case .sleep: return .indigo
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                let rec = current
+                Section {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(LinearGradient(
+                                    colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .frame(width: 44, height: 44)
+                            Circle()
+                                .stroke(accent.opacity(0.22), lineWidth: 1)
+                                .frame(width: 44, height: 44)
+                            Image(systemName: rec.type.icon)
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(accent)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(rec.type.rawValue).font(.headline)
+                            Text(Self.dateTimeFmt.string(from: rec.date))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                Section("記錄資訊") {
+                    switch rec.type {
+                    case .milk:
+                        if let brand = rec.milkBrand, !brand.isEmpty { infoRow("奶粉品牌", brand) }
+                        if let ml = rec.mlAmount, ml > 0 { infoRow("奶量", "\(Int(ml)) ml") }
+                    case .food:
+                        if let name = rec.foodName, !name.isEmpty { infoRow("食物", name) }
+                        if let ml = rec.mlAmount, ml > 0 { infoRow("份量", "\(Int(ml)) ml") }
+                    case .sleep:
+                        infoRow("入睡", Self.dateTimeFmt.string(from: rec.date))
+                        if let end = rec.sleepEnd {
+                            infoRow("起床", Self.dateTimeFmt.string(from: end))
+                            if end > rec.date {
+                                infoRow("時長", String(format: "%.1f 小時", end.timeIntervalSince(rec.date) / 3600))
+                            }
+                        }
+                    }
+                    if !rec.note.isEmpty { infoRow("備註", rec.note) }
+                }
+            }
+            .navigationTitle(current.type.rawValue)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("編輯") {
+                        if subscription.isPremium { editingDaily = current }
+                        else { showPremiumAlert = true }
+                    }
+                    .bold().foregroundStyle(.green)
+                }
+            }
+            .sheet(item: $editingDaily) { rec in
+                DailyRecordEditorSheet(childId: childId, type: rec.type, editing: rec)
+            }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+            .onChange(of: isDeleted) { _, gone in
+                if gone { dismiss() }
+            }
+        }
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).multilineTextAlignment(.trailing)
         }
     }
 }
