@@ -235,6 +235,17 @@ struct AddExpenseView: View {
             .contains(selectedVariableCategory)
     }
 
+    /// 同分類最近用過的品名（快速選取膠囊模板選項）：常去的餐廳/診所/娛樂點一下帶入
+    private var recentCategoryTitles: [String] {
+        guard expenseType == .variable else { return [] }
+        let cat = selectedVariableCategory
+        return QuickPickOptions.recent(
+            store.expenses
+                .filter { $0.expenseType == .variable && $0.variableCategory == cat }
+                .map { (value: $0.title, date: $0.date) }
+        )
+    }
+
     // MARK: - 儲蓄險自動計算
 
     private var insPremium: Double { Double(amountText) ?? 0 }
@@ -587,6 +598,11 @@ struct AddExpenseView: View {
                     placeNameAutocomplete
                 } else {
                     TextField(expenseType == .variable ? "名稱（留空自動以分類為名）" : "名稱", text: $title)
+                }
+                // 快速選取膠囊模板：同分類最近用過的品名（用餐/醫療/娛樂等全分類適用），
+                // 點一下帶入名稱欄；放在 if/else 之外讓地點選擇器分支（用餐/娛樂）也吃得到
+                if expenseType == .variable {
+                    QuickPickCapsuleRow(options: recentCategoryTitles, selection: $title, accent: .green)
                 }
             }
 

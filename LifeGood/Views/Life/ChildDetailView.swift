@@ -1227,20 +1227,20 @@ struct DailyRecordEditorSheet: View {
         }
     }
 
-    /// 用過的奶粉品牌（去重、最近使用優先，最多 8 個）：供品牌欄快速選取
+    /// 用過的奶粉品牌（快速選取膠囊模板選項）
     private var previousBrands: [String] {
         guard let member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { return [] }
-        var seen = Set<String>()
-        var out: [String] = []
-        for rec in member.dailyRecords
-            .filter({ $0.type == .milk })
-            .sorted(by: { $0.date > $1.date }) {
-            guard let b = rec.milkBrand?.trimmingCharacters(in: .whitespaces),
-                  !b.isEmpty, !seen.contains(b) else { continue }
-            seen.insert(b)
-            out.append(b)
-        }
-        return Array(out.prefix(8))
+        return QuickPickOptions.recent(
+            member.dailyRecords.filter { $0.type == .milk }.map { (value: $0.milkBrand, date: $0.date) }
+        )
+    }
+
+    /// 吃過的食物名稱（快速選取膠囊模板選項）
+    private var previousFoods: [String] {
+        guard let member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { return [] }
+        return QuickPickOptions.recent(
+            member.dailyRecords.filter { $0.type == .food }.map { (value: $0.foodName, date: $0.date) }
+        )
     }
 
     // 對齊 ChildDetailView.dailyColor 規格，讓編輯表單 Section header 與清單列圖示圓同色
@@ -1260,28 +1260,8 @@ struct DailyRecordEditorSheet: View {
                     Section {
                         HStack { Text("時間"); Spacer(); FiveMinuteDateTimePicker(selection: $date).fixedSize() }
                         TextField("奶粉品牌（選填）", text: $milkBrand)
-                        // 用過的品牌變成快速選取膠囊（最近使用優先），點一下帶入
-                        if !previousBrands.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 6) {
-                                    ForEach(previousBrands, id: \.self) { brand in
-                                        Button {
-                                            milkBrand = brand
-                                        } label: {
-                                            Text(brand)
-                                                .font(.caption.weight(.semibold))
-                                                .foregroundStyle(milkBrand == brand ? .white : .blue)
-                                                .padding(.horizontal, 10).padding(.vertical, 5)
-                                                .background(milkBrand == brand ? Color.blue : Color.blue.opacity(0.10))
-                                                .clipShape(Capsule())
-                                                .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
-                                        }
-                                        .buttonStyle(.borderless)
-                                    }
-                                }
-                                .padding(.vertical, 2)
-                            }
-                        }
+                        // 快速選取膠囊模板：用過的品牌，點一下帶入
+                        QuickPickCapsuleRow(options: previousBrands, selection: $milkBrand, accent: .blue)
                         HStack { TextField("ml 數", text: $mlText).keyboardType(.numberPad); Text("ml").foregroundStyle(.secondary) }
                     } header: {
                         childEditorSectionHeader("喝奶記錄", icon: type.icon, color: accent)
@@ -1290,6 +1270,8 @@ struct DailyRecordEditorSheet: View {
                     Section {
                         HStack { Text("時間"); Spacer(); FiveMinuteDateTimePicker(selection: $date).fixedSize() }
                         TextField("食物名稱", text: $foodName)
+                        // 快速選取膠囊模板：吃過的食物，點一下帶入
+                        QuickPickCapsuleRow(options: previousFoods, selection: $foodName, accent: .green)
                         HStack { TextField("ml 數（選填）", text: $mlText).keyboardType(.numberPad); Text("ml").foregroundStyle(.secondary) }
                     } header: {
                         childEditorSectionHeader("食物記錄", icon: type.icon, color: accent)
@@ -1615,6 +1597,8 @@ struct ChildRecordEditorSheet: View {
             TextField("疫苗名稱（如：五合一）", text: $title)
             TextField("劑次（如：第 1 劑、追加）", text: $dose)
             clinicAutocompleteField(label: "接種院所（選填）")
+            // 快速選取膠囊模板：去過的院所，點一下帶入
+            QuickPickCapsuleRow(options: previousClinics, selection: $detail, accent: .blue)
         } header: {
             childEditorSectionHeader("疫苗資訊", icon: type.icon, color: accent)
         }
@@ -1644,6 +1628,8 @@ struct ChildRecordEditorSheet: View {
                 Text("°C").foregroundStyle(.secondary)
             }
             clinicAutocompleteField(label: "院所（選填）")
+            // 快速選取膠囊模板：去過的院所，點一下帶入
+            QuickPickCapsuleRow(options: previousClinics, selection: $detail, accent: .orange)
         } header: {
             childEditorSectionHeader("就醫資訊", icon: type.icon, color: accent)
         }
@@ -1861,6 +1847,16 @@ struct ChildRecordEditorSheet: View {
         } header: {
             childEditorSectionHeader("紀念時刻", icon: type.icon, color: accent)
         }
+    }
+
+    /// 去過的院所（就醫＋疫苗記錄的 detail 欄位，快速選取膠囊模板選項）
+    private var previousClinics: [String] {
+        guard let member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { return [] }
+        return QuickPickOptions.recent(
+            member.childRecords
+                .filter { $0.type == .medical || $0.type == .vaccination }
+                .map { (value: $0.detail, date: $0.date) }
+        )
     }
 
     private func loadEditing() {
