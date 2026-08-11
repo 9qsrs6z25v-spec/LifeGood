@@ -45,8 +45,31 @@ final class CloudKitManager {
     ]
 
     private let container: CKContainer
-    private let privateDB: CKDatabase
-    private let zoneID: CKRecordZone.ID
+    /// 自己的私有資料庫（擁有者模式實體；共享管理等擁有者專屬操作固定走這裡）
+    private let ownedPrivateDB: CKDatabase
+
+    // MARK: 雙人共享狀態（CKShare zone 級共享）
+    /// 參與者模式旗標：儲存「共享 zone 擁有者的 ownerName」；非空＝已接受他人共享，
+    /// 所有資料讀寫改走 sharedCloudDatabase ＋ 擁有者的 LifeGoodZone。
+    private let shareOwnerKey = "ck_share_zone_owner"
+    var isShareParticipant: Bool { defaults.string(forKey: shareOwnerKey) != nil }
+
+    /// 目前生效的資料庫：參與者走共享資料庫，否則走自己的私有庫。
+    /// 既有 push/pull/驗證/診斷全部經由這裡自動路由，共享模式下不需改任何呼叫端。
+    private var db: CKDatabase {
+        isShareParticipant ? container.sharedCloudDatabase : ownedPrivateDB
+    }
+
+    /// 目前生效的 zone：參與者用「擁有者的」zone ID（同名 zone、不同 owner）。
+    private var zoneID: CKRecordZone.ID {
+        if let owner = defaults.string(forKey: shareOwnerKey) {
+            return CKRecordZone.ID(zoneName: Self.zoneName, ownerName: owner)
+        }
+        return CKRecordZone.ID(zoneName: Self.zoneName, ownerName: CKCurrentUserDefaultName)
+    }
+
+    /// 給 UICloudSharingController 用的容器存取
+    var ckContainer: CKContainer { container }
 
     /// 為避免並行衝突，所有 push/pull 用同一序列佇列。
     private let queue = DispatchQueue(label: "CloudKitManager.queue", qos: .utility)
@@ -98,8 +121,7 @@ final class CloudKitManager {
 
     private init() {
         self.container = CKContainer(identifier: Self.containerID)
-        self.privateDB = container.privateCloudDatabase
-        self.zoneID = CKRecordZone.ID(zoneName: Self.zoneName, ownerName: CKCurrentUserDefaultName)
+        self.ownedPrivateDB = container.privateCloudDatabase
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(accountChanged),
@@ -159,6 +181,8 @@ final class CloudKitManager {
     // MARK: - Zone
 
     private func ensureZoneExists(completion: @escaping (Bool) -> Void) {
+        // 參與者模式：zone 屬於擁有者，參與者無法（也不需）建立，直接視為存在
+        if isShareParticipant { completion(true); return }
         if defaults.bool(forKey: zoneCreatedKey) { completion(true); return }
         // 已有一輪建立在跑 → 不再送出第二個 CKModifyRecordZonesOperation，併入本輪結果
         if zoneCreationInFlight {
@@ -193,12 +217,15 @@ final class CloudKitManager {
             }
         }
         applyTimeouts(op)
-        privateDB.add(op)
+        db.add(op)
     }
 
     // MARK: - Subscription（zone 變更靜默推播）
 
     private func ensureSubscriptionExists(completion: @escaping (Bool) -> Void) {
+        // 參與者模式 MVP：不建 zone 訂閱（共享庫需 CKDatabaseSubscription，另案），
+        // 依靠 App 進前景/手動「立即同步」拉取即可
+        if isShareParticipant { completion(true); return }
         if defaults.bool(forKey: subscriptionCreatedKey) { completion(true); return }
         let sub = CKRecordZoneSubscription(zoneID: zoneID, subscriptionID: Self.zoneSubscriptionID)
         let info = CKSubscription.NotificationInfo()
@@ -220,7 +247,7 @@ final class CloudKitManager {
             }
         }
         applyTimeouts(op)
-        privateDB.add(op)
+        db.add(op)
     }
 
     // MARK: - 推送結構化 KV blob
@@ -239,7 +266,7 @@ final class CloudKitManager {
     private func modifyKV(key: String, data: Data, retriesLeft: Int = 1, completion: ((Bool) -> Void)?) {
         let recID = CKRecord.ID(recordName: "kv_\(key)", zoneID: zoneID)
         // 先抓既有 record（為了拿 recordChangeTag 避免 conflict），再覆蓋
-        privateDB.fetch(withRecordID: recID) { [weak self] existing, fetchError in
+        db.fetch(withRecordID: recID) { [weak self] existing, fetchError in
             guard let self = self else { return }
             // fetch 失敗但「不是查無此筆」→ 真錯誤，回報後結束
             if existing == nil, let fe = fetchError as? CKError, fe.code != .unknownItem {
@@ -309,7 +336,7 @@ final class CloudKitManager {
                         completion?(false)
                     }
                     self.applyTimeouts(verifyOp)
-                    self.privateDB.add(verifyOp)
+                    self.db.add(verifyOp)
                 case .failure(let error):
                     // 兩台同時改同一筆 → 重新抓最新版本再覆蓋一次（整份快照，last-writer-wins）
                     // 延遲 0.5s 再重試，避免立即重打造成 CloudKit rate-limit
@@ -340,7 +367,7 @@ final class CloudKitManager {
                 }
             }
             self.applyTimeouts(op)
-            self.privateDB.add(op)
+            self.db.add(op)
         }
     }
 
@@ -432,10 +459,10 @@ final class CloudKitManager {
                         }
                     }
                     self.applyTimeouts(op)
-                    self.privateDB.add(op)
+                    self.db.add(op)
                 }
                 self.applyTimeouts(fetchOp)
-                self.privateDB.add(fetchOp)
+                self.db.add(fetchOp)
             }
         }
     }
@@ -446,7 +473,7 @@ final class CloudKitManager {
         queue.async {
             let pathKey = "\(directory)/\(fileName)"
             let recID = CKRecord.ID(recordName: "photo_\(self.sanitize(pathKey))", zoneID: self.zoneID)
-            self.privateDB.delete(withRecordID: recID) { _, error in
+            self.db.delete(withRecordID: recID) { _, error in
                 completion?(error == nil)
             }
         }
@@ -630,7 +657,7 @@ final class CloudKitManager {
         }
 
         applyTimeouts(op)
-        privateDB.add(op)
+        db.add(op)
     }
 
     // MARK: - 一次性：把所有本地照片掃描後上傳（確保歷史檔案不漏）
@@ -818,7 +845,7 @@ final class CloudKitManager {
                     DispatchQueue.main.async { completion(result) }
                 }
                 self.applyTimeouts(op)
-            self.privateDB.add(op)
+            self.db.add(op)
             }
         }
     }
@@ -828,6 +855,123 @@ final class CloudKitManager {
         guard CKNotification(fromRemoteNotificationDictionary: userInfo) != nil else { completion(.noData); return }
         fetchChanges { ok in
             completion(ok ? .newData : .failed)
+        }
+    }
+
+    // MARK: - 雙人共享（CKShare zone 級共享）
+
+    /// 共享狀態變更（接受邀請／退出共享）通知；CloudSyncManager 監聽後重跑覆蓋/合併初始流程
+    static let sharingStateDidChangeNotification = Notification.Name("CloudKitManager.sharingStateDidChange")
+
+    /// 擁有者：取得（或建立）整個 LifeGoodZone 的 zone 級共享，回傳 CKShare 供
+    /// UICloudSharingController 顯示邀請/成員管理介面。
+    func fetchOrCreateZoneShare(completion: @escaping (Result<CKShare, Error>) -> Void) {
+        guard !isShareParticipant else {
+            completion(.failure(NSError(
+                domain: "LifeGoodSync", code: -80,
+                userInfo: [NSLocalizedDescriptionKey: "你目前是共享參與者，無法再對外分享；請先退出共享。"]
+            )))
+            return
+        }
+        queue.async {
+            self.ensureZoneExists { ok in
+                guard ok else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(
+                            domain: "LifeGoodSync", code: -81,
+                            userInfo: [NSLocalizedDescriptionKey: "iCloud 資料區初始化失敗，請先按「立即同步」再試。"]
+                        )))
+                    }
+                    return
+                }
+                // zone 級共享的 share 記錄固定 ID：已存在就直接用（重複建立會失敗）
+                let shareID = CKRecord.ID(recordName: CKRecordNameZoneWideShare, zoneID: self.zoneID)
+                self.ownedPrivateDB.fetch(withRecordID: shareID) { rec, _ in
+                    if let existing = rec as? CKShare {
+                        DispatchQueue.main.async { completion(.success(existing)) }
+                        return
+                    }
+                    let share = CKShare(recordZoneID: self.zoneID)
+                    share[CKShare.SystemFieldKey.title] = "LifeGood 家庭共享資料" as CKRecordValue
+                    share.publicPermission = .none   // 僅受邀者可加入
+                    let op = CKModifyRecordsOperation(recordsToSave: [share])
+                    op.qualityOfService = .userInitiated
+                    var saved: CKShare?
+                    op.perRecordSaveBlock = { _, res in
+                        if case .success(let r) = res, let s = r as? CKShare { saved = s }
+                    }
+                    op.modifyRecordsResultBlock = { result in
+                        DispatchQueue.main.async {
+                            switch result {
+                            case .success:
+                                if let saved {
+                                    completion(.success(saved))
+                                } else {
+                                    completion(.failure(NSError(
+                                        domain: "LifeGoodSync", code: -82,
+                                        userInfo: [NSLocalizedDescriptionKey: "共享建立回報成功但未取得 share 記錄，請再試一次。"]
+                                    )))
+                                }
+                            case .failure(let e):
+                                completion(.failure(e))
+                            }
+                        }
+                    }
+                    self.applyTimeouts(op)
+                    self.ownedPrivateDB.add(op)
+                }
+            }
+        }
+    }
+
+    /// 參與者：接受共享邀請（由 SceneDelegate 的 userDidAcceptCloudKitShareWith 呼叫）。
+    /// 成功後切換為參與者模式：清空 change token/旗標/照片帳本，廣播通知讓
+    /// CloudSyncManager 重跑「覆蓋/合併」初始流程，把本機資料整合進共享 zone。
+    func acceptShare(_ metadata: CKShare.Metadata) {
+        let op = CKAcceptSharesOperation(shareMetadatas: [metadata])
+        op.qualityOfService = .userInitiated
+        op.acceptSharesResultBlock = { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .failure(let e):
+                    self.report(e, context: "接受共享邀請")
+                case .success:
+                    let ownerName = metadata.share.recordID.zoneID.ownerName
+                    self.defaults.set(ownerName, forKey: self.shareOwnerKey)
+                    self.resetLocalState()   // 切 zone：token/旗標/帳本全部重來
+                    NotificationCenter.default.post(
+                        name: Self.sharingStateDidChangeNotification, object: nil,
+                        userInfo: ["joined": true]
+                    )
+                }
+            }
+        }
+        self.applyTimeouts(op)
+        container.add(op)
+    }
+
+    /// 參與者：退出共享（從共享資料庫移除整個 zone＝Apple 定義的參與者退出方式）。
+    /// 退出後切回自己的私有庫；目前本機資料保留，下輪同步會推進自己的 zone。
+    func leaveShare(completion: ((Bool) -> Void)? = nil) {
+        guard isShareParticipant else { completion?(true); return }
+        let zid = zoneID
+        container.sharedCloudDatabase.delete(withRecordZoneID: zid) { [weak self] _, error in
+            DispatchQueue.main.async {
+                guard let self else { completion?(false); return }
+                if let error, (error as? CKError)?.code != .zoneNotFound {
+                    self.report(error, context: "退出共享")
+                    completion?(false)
+                    return
+                }
+                self.defaults.removeObject(forKey: self.shareOwnerKey)
+                self.resetLocalState()
+                NotificationCenter.default.post(
+                    name: Self.sharingStateDidChangeNotification, object: nil,
+                    userInfo: ["joined": false]
+                )
+                completion?(true)
+            }
         }
     }
 
@@ -926,7 +1070,7 @@ final class CloudKitManager {
                         }
                     }
                 }
-                self.privateDB.add(op)
+                self.db.add(op)
             }),
             ("4. 資料庫寫入", 25, { done in
                 let testRec = CKRecord(recordType: "DiagTest",
@@ -955,7 +1099,7 @@ final class CloudKitManager {
                         }
                     }
                 }
-                self.privateDB.add(op)
+                self.db.add(op)
             }),
             ("5. 資料區 LifeGoodZone", 22, { done in
                 let op = CKFetchRecordZonesOperation(recordZoneIDs: [self.zoneID])
@@ -982,7 +1126,7 @@ final class CloudKitManager {
                         done("✗ 5. 資料區 LifeGoodZone：無回應")
                     }
                 }
-                self.privateDB.add(op)
+                self.db.add(op)
             }),
             ("6. LifeGoodZone 寫入讀回", 30, { done in
                 // 關鍵測試：App 實際同步用的就是這個 zone——寫一筆測試記錄再「立刻讀回」。
@@ -1018,10 +1162,10 @@ final class CloudKitManager {
                                 done("✗ 6. LifeGoodZone 寫入讀回：寫入成功但讀不回（查無此筆）")
                             }
                         }
-                        self.privateDB.add(fetch)
+                        self.db.add(fetch)
                     }
                 }
-                self.privateDB.add(save)
+                self.db.add(save)
             }),
             ("7. 真實推送路徑（含附件）", 40, { done in
                 // 決定性測試：第 6 層寫的是純欄位測試筆，真正同步推的是「帶 CKAsset 附件」的
@@ -1050,7 +1194,7 @@ final class CloudKitManager {
                             done("✗ 7. 真實推送路徑：寫入回報成功但讀不回（查無此筆）")
                         }
                     }
-                    self.privateDB.add(fetch)
+                    self.db.add(fetch)
                 }
             }),
             // 第 8、9 層：變因切割。第 6 層（DiagTest 無附件）能過、第 7 層（KVBlob＋附件）
@@ -1076,9 +1220,9 @@ final class CloudKitManager {
                         done(found ? "✓ 8. KVBlob 純欄位（無附件）：寫入並讀回成功"
                                    : "✗ 8. KVBlob 純欄位：寫入回報成功但讀不回")
                     }
-                    self.privateDB.add(f)
+                    self.db.add(f)
                 }
-                self.privateDB.add(op)
+                self.db.add(op)
             }),
             ("9. 附件（CKAsset）寫入", 35, { done in
                 let tmp = FileManager.default.temporaryDirectory
@@ -1104,9 +1248,9 @@ final class CloudKitManager {
                         done(found ? "✓ 9. 附件（CKAsset）寫入：寫入並讀回成功"
                                    : "✗ 9. 附件寫入：寫入回報成功但讀不回")
                     }
-                    self.privateDB.add(f)
+                    self.db.add(f)
                 }
-                self.privateDB.add(op)
+                self.db.add(op)
             })
         ]
 
@@ -1343,7 +1487,7 @@ final class CloudKitManager {
             }
         }
         applyTimeouts(op)
-        privateDB.add(op)
+        db.add(op)
     }
 
     /// 雲端普查：以 nil change token 全量掃描 LifeGoodZone，只取 updatedAt 中繼資料，
@@ -1375,7 +1519,7 @@ final class CloudKitManager {
             DispatchQueue.main.async { completion(kvFinal, photoFinal, samplesFinal, err) }
         }
         applyTimeouts(op)
-        privateDB.add(op)
+        db.add(op)
     }
 
     private func saveChangeToken(_ token: CKServerChangeToken) {

@@ -173,6 +173,12 @@ final class CloudSyncManager: ObservableObject {
             name: CloudKitManager.syncProgressNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSharingStateChanged(_:)),
+            name: CloudKitManager.sharingStateDidChangeNotification,
+            object: nil
+        )
 
         // 啟動時取一次帳號狀態
         CloudKitManager.shared.refreshAccountStatus { [weak self] status in
@@ -202,6 +208,21 @@ final class CloudSyncManager: ObservableObject {
             guard let self else { return }
             self.syncProgressText = note.userInfo?["text"] as? String
             if self.isSyncing, self.syncProgressText != nil { self.armSyncWatchdog() }
+        }
+    }
+
+    /// 共享狀態變更（接受邀請／退出共享）：資料區已切換（共享 zone ↔ 自己的 zone），
+    /// 重跑「覆蓋/合併」初始流程，讓使用者決定本機資料與新資料區的整合方式。
+    @objc private func handleSharingStateChanged(_ note: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let joined = (note.userInfo?["joined"] as? Bool) ?? false
+            // 未開同步的裝置：接受邀請視同想要同步，自動開啟開關再走初始流程
+            if joined, !self.isEnabled { self.isEnabled = true }
+            guard self.isEnabled, self.isAccountAvailable else { return }
+            self.forceResetSyncState()
+            self.lastErrorMessage = nil
+            self.repromptInitialSync()
         }
     }
 

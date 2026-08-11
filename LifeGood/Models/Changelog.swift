@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.162", build: 915, date: "2026/08/10", notes: [
+            "【新增】雙人共享（CKShare zone 級共享）MVP——夫妻兩個 Apple ID 共同編輯同一份資料、雙向即時同步：(1) 架構：CloudKitManager 的資料庫與 zone 改為執行期路由——擁有者走自己的私有庫＋自己的 LifeGoodZone；接受共享後進入「參與者模式」（UserDefaults 存擁有者 ownerName），全部 push/pull/驗證/普查自動改走 sharedCloudDatabase＋擁有者的 zone，既有呼叫端零修改；參與者模式跳過 zone/訂閱建立（zone 屬擁有者；推播訂閱另案，靠前景/手動同步拉取）。(2) 邀請流程：設定 → iCloud 同步新增紫色「與家人共享資料」列，fetchOrCreateZoneShare 以固定 CKRecordNameZoneWideShare 取得或建立 zone 級 CKShare（publicPermission .none 僅受邀者、可讀寫），UICloudSharingController 系統介面負責發送邀請連結（訊息/AirDrop）、成員管理與停止共享。(3) 接受流程：SwiftUI 生命週期下共享連結回呼走 UIWindowSceneDelegate——AppDelegate 以 configurationForConnecting 指定 ShareSceneDelegate 承接 userDidAcceptCloudKitShareWith（冷啟動走 willConnectTo 的 cloudKitShareMetadata），CKAcceptSharesOperation 成功後寫入參與者旗標、resetLocalState 清 token/旗標/照片帳本，廣播 sharingStateDidChange；CloudSyncManager 監聽後自動開啟同步並重跑「覆蓋/合併」初始流程，讓使用者決定本機資料與共享資料的整合方式。(4) 退出：參與者列顯示「已加入家人共享」＋紅色退出鈕（確認對話框），以 sharedCloudDatabase.delete(withRecordZoneID:) 退出後切回自己的私有 zone，本機資料保留並於下輪同步推回自己的雲端。(5) 基建：Info.plist 新增 CKSharingSupported（GENERATE_INFOPLIST_FILE 與 INFOPLIST_FILE 併用合成），共享連結才會導向 App。"
+        ]),
         ChangelogEntry(version: "25.161", build: 914, date: "2026/08/10", notes: [
             "【調整】兒女履歷日常趨勢圖表升級（使用者指定規格）：(1) 頁面從三張擴為五張——喝奶量/食物量/睡眠量之外新增「身高」（teal）與「體重」（pink）曲線，資料來自成長紀錄的 heightCm/weightKg（同日多筆取較晚一筆、取當日值非加總），左右滑動切換、頁點同步五顆。(2) X 軸從固定近 14 天改為「第一筆到最後一筆」全期間，有紀錄的日子才成為資料點（不再補 0）；超過 40 點時等距取樣至最多 40 點（首尾必取），多年歷史也能一眼看完整趨勢。(3) 點選吸附從「同日」改為「最近取樣點」（取樣後點距可能相隔多天），細節卡日期改 yyyy/M/d 完整年份，身高/體重顯示 cm/kg 值；身高/體重圖 Y 軸不鎖 0 起點（避免曲線被壓扁），量類指標維持 0 起點便於比對。"
         ]),

@@ -527,10 +527,11 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 914;
+				CURRENT_PROJECT_VERSION = 915;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGood/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
@@ -551,7 +552,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.161;
+				MARKETING_VERSION = 25.162;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -567,10 +568,11 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 914;
+				CURRENT_PROJECT_VERSION = 915;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LifeGood/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
@@ -591,7 +593,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.161;
+				MARKETING_VERSION = 25.162;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

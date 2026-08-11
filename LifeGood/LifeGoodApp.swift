@@ -11,6 +11,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         return true
     }
 
+    /// SwiftUI 生命週期下，CKShare 邀請連結的接受回呼走 UIWindowSceneDelegate 而非
+    /// UIApplicationDelegate；指定自訂 SceneDelegate 承接（不實作視窗建立，SwiftUI 照常管理視窗）。
+    func application(_ application: UIApplication,
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let config = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
+        config.delegateClass = ShareSceneDelegate.self
+        return config
+    }
+
     func application(_ application: UIApplication,
                      didReceiveRemoteNotification userInfo: [AnyHashable: Any],
                      fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
@@ -24,6 +34,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
         // CloudKit 仍可使用 foreground polling，這裡僅靜默忽略
+    }
+}
+
+/// 承接 CKShare 邀請連結：使用者點擊「加入共享」後系統喚起 App 並呼叫這裡。
+/// App 未執行時的冷啟動接受走 willConnectTo 的 connectionOptions。
+final class ShareSceneDelegate: NSObject, UIWindowSceneDelegate {
+    func windowScene(_ windowScene: UIWindowScene,
+                     userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata) {
+        CloudKitManager.shared.acceptShare(cloudKitShareMetadata)
+    }
+
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession,
+               options connectionOptions: UIScene.ConnectionOptions) {
+        if let meta = connectionOptions.cloudKitShareMetadata {
+            CloudKitManager.shared.acceptShare(meta)
+        }
     }
 }
 
