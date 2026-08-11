@@ -427,27 +427,34 @@ struct StockView: View {
     /// 英雄卡背景折線資料（每週總市值快照，最多 40 點）；onAppear 與報價更新後刷新
     @State private var heroTrend: [StockValueSnapshot] = []
 
-    /// 英雄卡背景趨勢線單層（平滑曲線＋漸層面積、線 2pt 半透明 50%）。
-    /// 抽成共用是因為景深效果需要同一條線畫兩層（模糊層＋清晰層）疊加。
-    private func heroTrendLine(xDomain: ClosedRange<Date>, yDomain: ClosedRange<Double>) -> some View {
+    /// 英雄卡背景趨勢線單層（平滑曲線、預設帶漸層面積、線 2pt 半透明 50%）。
+    /// 抽成共用是因為：(1) 景深效果需要同一條線畫兩層（模糊層＋清晰層）疊加；
+    /// (2) 左右各偏移 5% 的回聲側線（xShift、細一點、更透明、不帶面積）也共用同一畫法。
+    private func heroTrendLine(xDomain: ClosedRange<Date>, yDomain: ClosedRange<Double>,
+                               xShift: TimeInterval = 0,
+                               lineWidth: CGFloat = 2,
+                               lineOpacity: Double = 0.50,
+                               showArea: Bool = true) -> some View {
         Chart(heroTrend) { p in
-            AreaMark(
-                x: .value("週", p.weekStart),
-                y: .value("市值", p.value)
-            )
-            .interpolationMethod(.catmullRom)
-            .foregroundStyle(LinearGradient(
-                colors: [.white.opacity(0.22), .white.opacity(0.02)],
-                startPoint: .top, endPoint: .bottom
-            ))
+            if showArea {
+                AreaMark(
+                    x: .value("週", p.weekStart.addingTimeInterval(xShift)),
+                    y: .value("市值", p.value)
+                )
+                .interpolationMethod(.catmullRom)
+                .foregroundStyle(LinearGradient(
+                    colors: [.white.opacity(0.22), .white.opacity(0.02)],
+                    startPoint: .top, endPoint: .bottom
+                ))
+            }
             // 平滑曲線（catmullRom）：使用者看過直線段版後選擇曲線較好看
             LineMark(
-                x: .value("週", p.weekStart),
+                x: .value("週", p.weekStart.addingTimeInterval(xShift)),
                 y: .value("市值", p.value)
             )
             .interpolationMethod(.catmullRom)
-            .foregroundStyle(.white.opacity(0.50))
-            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .foregroundStyle(.white.opacity(lineOpacity))
+            .lineStyle(StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
         }
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
@@ -586,17 +593,29 @@ struct StockView: View {
                     let xHigh = xLast.addingTimeInterval(xSpan * 0.25)
                     let xDomain = xFirst...xHigh
                     let yDomain = domainLow...domainHigh
-                    // 景深效果（左模糊→右漸清晰）：同一條折線畫兩層——
-                    // 底層整條高斯模糊、頂層清晰，各用互補的左右漸層遮罩交叉淡化，
+                    // 三線組合：主線＋左右各偏移「5% 卡片寬」的回聲側線（線條感）。
+                    // 側線細一點、更透明、不帶漸層面積，只當造型陪襯。
+                    let echoShift = xSpan * 1.25 * 0.05   // domain 全寬（含右延 25%）的 5%
+                    let trendGroup = ZStack {
+                        heroTrendLine(xDomain: xDomain, yDomain: yDomain,
+                                      xShift: -echoShift, lineWidth: 1.5,
+                                      lineOpacity: 0.22, showArea: false)
+                        heroTrendLine(xDomain: xDomain, yDomain: yDomain,
+                                      xShift: echoShift, lineWidth: 1.5,
+                                      lineOpacity: 0.22, showArea: false)
+                        heroTrendLine(xDomain: xDomain, yDomain: yDomain)
+                    }
+                    // 景深效果（左模糊→右漸清晰）：整組三線畫兩層——
+                    // 底層整組高斯模糊、頂層清晰，各用互補的左右漸層遮罩交叉淡化，
                     // 左邊只看到模糊層、往右模糊淡出/清晰淡入，像相機失焦漸變到合焦。
-                    heroTrendLine(xDomain: xDomain, yDomain: yDomain)
+                    trendGroup
                         .blur(radius: 2.2)
                         .mask(LinearGradient(stops: [
                             .init(color: .white, location: 0.00),
                             .init(color: .white, location: 0.20),
                             .init(color: .clear, location: 0.75)
                         ], startPoint: .leading, endPoint: .trailing))
-                    heroTrendLine(xDomain: xDomain, yDomain: yDomain)
+                    trendGroup
                         .mask(LinearGradient(stops: [
                             .init(color: .clear, location: 0.20),
                             .init(color: .white, location: 0.75)

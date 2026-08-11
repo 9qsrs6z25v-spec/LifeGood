@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.179", build: 932, date: "2026/08/11", notes: [
+            "【調整】股票英雄卡背景趨勢線加回聲側線（使用者指定「加兩條線增加線條感」）：主曲線左右各加一條偏移 5% 卡片寬的回聲側線——同一組週市值資料沿 X 軸平移繪製，側線較細（1.5pt）、更透明（22%）、不帶漸層面積，只當造型陪襯不搶主線。三線包成一組一起吃景深雙層處理（模糊層＋清晰層互補遮罩），左右側線與主線的模糊→清晰漸變完全同步。heroTrendLine 共用函式增加 xShift／lineWidth／lineOpacity／showArea 參數支援。"
+        ]),
         ChangelogEntry(version: "25.178", build: 931, date: "2026/08/11", notes: [
             "【調整】股票英雄卡背景趨勢線微調（使用者看過 v25.177 實機效果後）：線條從 3pt 調細回 2pt；折線改回平滑曲線（catmullRom 內插，線與漸層面積同步套用）——比較過直線段版本後覺得曲線比較好看。其餘維持第三版規格：左模糊右漸清晰景深、末點落在右邊往回 20%、線／圓點／數字皆半透明 50%。"
         ]),
