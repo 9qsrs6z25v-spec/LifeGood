@@ -1257,6 +1257,8 @@ struct StockDividendEditor: View {
     @State private var lotsText: String = ""
     @State private var perShareText: String = ""
     @State private var sharesAtEventText: String = ""
+    /// 總配息輸入欄：與每股配息雙向換算（輸入任一方，依基準股數自動算出另一方）
+    @State private var totalText: String = ""
     @State private var note: String = ""
     @State private var showDeleteConfirm = false
     /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複股利／收入／存款紀錄
@@ -1264,12 +1266,6 @@ struct StockDividendEditor: View {
 
     private var isEditing: Bool { editing != nil }
     private var stock: Stock? { store.stocks.first(where: { $0.id == stockId }) }
-
-    private var cashTotalPreview: Double {
-        let p = Double(perShareText) ?? 0
-        let s = Double(sharesAtEventText) ?? 0
-        return p * s
-    }
 
     private var canSave: Bool {
         switch kind {
@@ -1318,26 +1314,25 @@ struct StockDividendEditor: View {
                 } else {
                     Section {
                         HStack {
-                            Text("NT$").foregroundStyle(.secondary)
-                            TextField("每股配息", text: $perShareText)
-                                .keyboardType(.decimalPad)
-                        }
-                        HStack {
                             TextField("基準股數", text: $sharesAtEventText)
                                 .keyboardType(.decimalPad)
                             Text("股").foregroundStyle(.secondary)
                         }
-                        if cashTotalPreview > 0 {
-                            HStack {
-                                Text("總配息").font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                Text(cashTotalPreview.ntdWanString)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.pink)
-                            }
+                        HStack {
+                            Text("每股 NT$").foregroundStyle(.secondary)
+                            TextField("每股配息", text: $perShareText)
+                                .keyboardType(.decimalPad)
+                        }
+                        HStack {
+                            Text("總計 NT$").foregroundStyle(.secondary)
+                            TextField("總配息", text: $totalText)
+                                .keyboardType(.decimalPad)
                         }
                     } header: {
                         stockEditorSectionHeader("配息計算", icon: "dollarsign.circle.fill", color: .pink)
+                    } footer: {
+                        Text("每股配息與總配息擇一輸入即可，另一欄會依基準股數自動換算。")
+                            .font(.caption2)
                     }
                 }
 
@@ -1405,6 +1400,37 @@ struct StockDividendEditor: View {
                     sharesAtEventText = "\(Int(currentHeldShares))"
                 }
             }
+            // 雙向換算：每股 ↔ 總配息（以基準股數為橋）。以「數值差過小就不回寫」
+            // 作為回饋循環的終止條件——兩個 onChange 互相觸發時，第二輪算出的值與
+            // 既有值幾乎相同（只剩捨入誤差），即停止回寫，不需額外旗標。
+            .onChange(of: perShareText) { _, _ in
+                let p = Double(perShareText) ?? 0
+                let s = Double(sharesAtEventText) ?? 0
+                guard s > 0 else { return }
+                let newTotal = p * s
+                if abs((Double(totalText) ?? 0) - newTotal) > 0.5 {
+                    totalText = p > 0 ? String(format: "%g", newTotal.rounded()) : ""
+                }
+            }
+            .onChange(of: totalText) { _, _ in
+                let t = Double(totalText) ?? 0
+                let s = Double(sharesAtEventText) ?? 0
+                guard s > 0 else { return }
+                let newPer = (t / s * 10000).rounded() / 10000   // 每股保留到 4 位小數
+                if abs((Double(perShareText) ?? 0) - newPer) > 0.0001 {
+                    perShareText = t > 0 ? String(format: "%g", newPer) : ""
+                }
+            }
+            .onChange(of: sharesAtEventText) { _, _ in
+                // 股數變動：以每股為準重算總額（每股是實際存檔欄位）
+                let p = Double(perShareText) ?? 0
+                let s = Double(sharesAtEventText) ?? 0
+                guard p > 0, s > 0 else { return }
+                let newTotal = p * s
+                if abs((Double(totalText) ?? 0) - newTotal) > 0.5 {
+                    totalText = String(format: "%g", newTotal.rounded())
+                }
+            }
         }
     }
 
@@ -1448,6 +1474,9 @@ struct StockDividendEditor: View {
             lotsText = e.lots > 0 ? String(format: "%g", e.lots) : ""
             perShareText = e.perShare > 0 ? String(format: "%g", e.perShare) : ""
             sharesAtEventText = e.sharesAtEvent > 0 ? "\(Int(e.sharesAtEvent))" : ""
+            if e.perShare > 0, e.sharesAtEvent > 0 {
+                totalText = String(format: "%g", (e.perShare * e.sharesAtEvent).rounded())
+            }
             note = e.note
         } else {
             // 新增時，配息預設帶入當下持股股數
