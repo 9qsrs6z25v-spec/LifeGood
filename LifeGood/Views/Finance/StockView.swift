@@ -538,45 +538,70 @@ struct StockView: View {
                 // 淡漸層週市值折線背景：每週總市值快照（最多 40 點、頭尾必留），
                 // Y 軸自動範圍不鎖 0（避免趨勢被壓扁）；至少 2 點才畫、不吃觸控
                 if heroTrend.count >= 2 {
+                    // 垂直帶映射（使用者指定）：把數值範圍映射到卡片高度的 20%~60% 帶——
+                    // 最低點落在卡片下緣起 20% 高、最高點 60% 高，上方 40% 留白給市值大字。
+                    // 作法：把 Y 軸 domain 反推放大——實際值域佔 domain 的 0.4，下方預留 0.2。
+                    let values = heroTrend.map(\.value)
+                    let minV = values.min() ?? 0
+                    let maxV = values.max() ?? 1
+                    let spread = max(maxV - minV, max(maxV * 0.05, 1))   // 平盤保底，避免除以零
+                    let span = spread / 0.4
+                    let domainLow = minV - 0.2 * span
+                    let domainHigh = domainLow + span
+                    let xFirst = heroTrend.first?.weekStart ?? Date()
+                    let xLast = heroTrend.last?.weekStart ?? Date()
+                    // 雙層畫法：底層折線帶一些些高斯模糊、半透明 50%；
+                    // 上層只畫末端實心圓點＋大字市值（保持清晰不被模糊吃掉）。
+                    // 兩層鎖定相同 X/Y domain 確保完全對齊。
                     Chart(heroTrend) { p in
                         AreaMark(
                             x: .value("週", p.weekStart),
                             y: .value("市值", p.value)
                         )
                         .foregroundStyle(LinearGradient(
-                            colors: [.white.opacity(0.20), .white.opacity(0.02)],
+                            colors: [.white.opacity(0.22), .white.opacity(0.02)],
                             startPoint: .top, endPoint: .bottom
                         ))
-                        .interpolationMethod(.catmullRom)
+                        // 折線（直線段）而非平滑曲線：不加 interpolationMethod，維持預設 linear
                         LineMark(
                             x: .value("週", p.weekStart),
                             y: .value("市值", p.value)
                         )
-                        .foregroundStyle(.white.opacity(0.35))
-                        .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                        .interpolationMethod(.catmullRom)
-                        // 最後一個（真實）點：實心亮點＋市值標籤
+                        .foregroundStyle(.white.opacity(0.50))
+                        .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                    }
+                    .chartXAxis(.hidden)
+                    .chartYAxis(.hidden)
+                    .chartLegend(.hidden)
+                    .chartXScale(domain: xFirst...xLast)
+                    .chartYScale(domain: domainLow...domainHigh)
+                    .blur(radius: 1.6)
+                    .allowsHitTesting(false)
+                    // 上層：最後一個（真實）點——圓形實心、半透明 50%＋大字市值標籤
+                    Chart(heroTrend) { p in
                         if p.id == heroTrend.last?.id {
                             PointMark(
                                 x: .value("週", p.weekStart),
                                 y: .value("市值", p.value)
                             )
-                            .foregroundStyle(.white.opacity(0.85))
-                            .symbolSize(28)
+                            .foregroundStyle(.white.opacity(0.50))
+                            .symbol(.circle)
+                            .symbolSize(90)
                             .annotation(position: .top,
                                         overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
                                 Text(p.value.ntdWanString)
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.90))
+                                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.95))
+                                    .shadow(color: .black.opacity(0.25), radius: 2, x: 0, y: 1)
                             }
                         }
                     }
                     .chartXAxis(.hidden)
                     .chartYAxis(.hidden)
                     .chartLegend(.hidden)
-                    .chartYScale(domain: .automatic(includesZero: false))
+                    .chartXScale(domain: xFirst...xLast)
+                    .chartYScale(domain: domainLow...domainHigh)
                     .allowsHitTesting(false)
-                    .padding(.top, 34)   // 曲線落在卡片下半部，不干擾上方市值大字
                 }
                 // 裝飾性散景圓（增加卡片層次感）
                 Circle()
