@@ -1227,6 +1227,22 @@ struct DailyRecordEditorSheet: View {
         }
     }
 
+    /// 用過的奶粉品牌（去重、最近使用優先，最多 8 個）：供品牌欄快速選取
+    private var previousBrands: [String] {
+        guard let member = lifeStore.familyMembers.first(where: { $0.id == childId }) else { return [] }
+        var seen = Set<String>()
+        var out: [String] = []
+        for rec in member.dailyRecords
+            .filter({ $0.type == .milk })
+            .sorted(by: { $0.date > $1.date }) {
+            guard let b = rec.milkBrand?.trimmingCharacters(in: .whitespaces),
+                  !b.isEmpty, !seen.contains(b) else { continue }
+            seen.insert(b)
+            out.append(b)
+        }
+        return Array(out.prefix(8))
+    }
+
     // 對齊 ChildDetailView.dailyColor 規格，讓編輯表單 Section header 與清單列圖示圓同色
     private var accent: Color {
         switch type {
@@ -1244,6 +1260,28 @@ struct DailyRecordEditorSheet: View {
                     Section {
                         HStack { Text("時間"); Spacer(); FiveMinuteDateTimePicker(selection: $date).fixedSize() }
                         TextField("奶粉品牌（選填）", text: $milkBrand)
+                        // 用過的品牌變成快速選取膠囊（最近使用優先），點一下帶入
+                        if !previousBrands.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(previousBrands, id: \.self) { brand in
+                                        Button {
+                                            milkBrand = brand
+                                        } label: {
+                                            Text(brand)
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(milkBrand == brand ? .white : .blue)
+                                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                                .background(milkBrand == brand ? Color.blue : Color.blue.opacity(0.10))
+                                                .clipShape(Capsule())
+                                                .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
                         HStack { TextField("ml 數", text: $mlText).keyboardType(.numberPad); Text("ml").foregroundStyle(.secondary) }
                     } header: {
                         childEditorSectionHeader("喝奶記錄", icon: type.icon, color: accent)
