@@ -427,6 +427,34 @@ struct StockView: View {
     /// 英雄卡背景折線資料（每週總市值快照，最多 40 點）；onAppear 與報價更新後刷新
     @State private var heroTrend: [StockValueSnapshot] = []
 
+    /// 英雄卡背景折線單層（直線段＋漸層面積、線 3pt 半透明 50%）。
+    /// 抽成共用是因為景深效果需要同一條線畫兩層（模糊層＋清晰層）疊加。
+    private func heroTrendLine(xDomain: ClosedRange<Date>, yDomain: ClosedRange<Double>) -> some View {
+        Chart(heroTrend) { p in
+            AreaMark(
+                x: .value("週", p.weekStart),
+                y: .value("市值", p.value)
+            )
+            .foregroundStyle(LinearGradient(
+                colors: [.white.opacity(0.22), .white.opacity(0.02)],
+                startPoint: .top, endPoint: .bottom
+            ))
+            // 折線（直線段）而非平滑曲線：不加 interpolationMethod，維持預設 linear
+            LineMark(
+                x: .value("週", p.weekStart),
+                y: .value("市值", p.value)
+            )
+            .foregroundStyle(.white.opacity(0.50))
+            .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+        }
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
+        .chartLegend(.hidden)
+        .chartXScale(domain: xDomain)
+        .chartYScale(domain: yDomain)
+        .allowsHitTesting(false)
+    }
+
     private func summaryHeader(active: [Stock]) -> some View {
         let pl = store.totalStockProfitLoss
         let isPositive = pl >= 0
@@ -550,34 +578,28 @@ struct StockView: View {
                     let domainHigh = domainLow + span
                     let xFirst = heroTrend.first?.weekStart ?? Date()
                     let xLast = heroTrend.last?.weekStart ?? Date()
-                    // 雙層畫法：底層折線帶一些些高斯模糊、半透明 50%；
-                    // 上層只畫末端實心圓點＋大字市值（保持清晰不被模糊吃掉）。
-                    // 兩層鎖定相同 X/Y domain 確保完全對齊。
-                    Chart(heroTrend) { p in
-                        AreaMark(
-                            x: .value("週", p.weekStart),
-                            y: .value("市值", p.value)
-                        )
-                        .foregroundStyle(LinearGradient(
-                            colors: [.white.opacity(0.22), .white.opacity(0.02)],
-                            startPoint: .top, endPoint: .bottom
-                        ))
-                        // 折線（直線段）而非平滑曲線：不加 interpolationMethod，維持預設 linear
-                        LineMark(
-                            x: .value("週", p.weekStart),
-                            y: .value("市值", p.value)
-                        )
-                        .foregroundStyle(.white.opacity(0.50))
-                        .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                    }
-                    .chartXAxis(.hidden)
-                    .chartYAxis(.hidden)
-                    .chartLegend(.hidden)
-                    .chartXScale(domain: xFirst...xLast)
-                    .chartYScale(domain: domainLow...domainHigh)
-                    .blur(radius: 1.6)
-                    .allowsHitTesting(false)
-                    // 上層：最後一個（真實）點——圓形實心、半透明 50%＋大字市值標籤
+                    // X 軸右側延伸 25% 資料跨距：資料只佔左邊 80% 寬，
+                    // 最後一個點落在「右邊往回 20%」的位置（使用者指定，類 3D 景深構圖）。
+                    let xSpan = max(xLast.timeIntervalSince(xFirst), 1)
+                    let xHigh = xLast.addingTimeInterval(xSpan * 0.25)
+                    let xDomain = xFirst...xHigh
+                    let yDomain = domainLow...domainHigh
+                    // 景深效果（左模糊→右漸清晰）：同一條折線畫兩層——
+                    // 底層整條高斯模糊、頂層清晰，各用互補的左右漸層遮罩交叉淡化，
+                    // 左邊只看到模糊層、往右模糊淡出/清晰淡入，像相機失焦漸變到合焦。
+                    heroTrendLine(xDomain: xDomain, yDomain: yDomain)
+                        .blur(radius: 2.2)
+                        .mask(LinearGradient(stops: [
+                            .init(color: .white, location: 0.00),
+                            .init(color: .white, location: 0.20),
+                            .init(color: .clear, location: 0.75)
+                        ], startPoint: .leading, endPoint: .trailing))
+                    heroTrendLine(xDomain: xDomain, yDomain: yDomain)
+                        .mask(LinearGradient(stops: [
+                            .init(color: .clear, location: 0.20),
+                            .init(color: .white, location: 0.75)
+                        ], startPoint: .leading, endPoint: .trailing))
+                    // 上層：最後一個（真實）點——圓形實心、半透明 50%＋市值大字（同樣半透明）
                     Chart(heroTrend) { p in
                         if p.id == heroTrend.last?.id {
                             PointMark(
@@ -591,16 +613,16 @@ struct StockView: View {
                                         overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
                                 Text(p.value.ntdWanString)
                                     .font(.system(size: 19, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.95))
-                                    .shadow(color: .black.opacity(0.25), radius: 2, x: 0, y: 1)
+                                    .foregroundStyle(.white.opacity(0.50))
+                                    .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
                             }
                         }
                     }
                     .chartXAxis(.hidden)
                     .chartYAxis(.hidden)
                     .chartLegend(.hidden)
-                    .chartXScale(domain: xFirst...xLast)
-                    .chartYScale(domain: domainLow...domainHigh)
+                    .chartXScale(domain: xDomain)
+                    .chartYScale(domain: yDomain)
                     .allowsHitTesting(false)
                 }
                 // 裝飾性散景圓（增加卡片層次感）
