@@ -926,7 +926,8 @@ struct StockView: View {
 //
 // App 沒有歷史股價，市值歷史無從回推——改以「使用時記帳」累積：每次打開股票頁或
 // 報價更新完成，就把當下總市值記到「本週」的快照（同週覆寫最新值），資料隨使用
-// 自然累積成週線。僅存本機（各裝置報價時點不同，不納入 iCloud 同步）。
+// 自然累積成週線。v25.174 起納入 iCloud 同步（syncKeys）：同步流程先拉後推，
+// 少用的裝置先拉到完整歷史再加點推回，歷史只增不減，多裝置共用同一條曲線。
 
 struct StockValueSnapshot: Codable, Identifiable {
     let weekStart: Date

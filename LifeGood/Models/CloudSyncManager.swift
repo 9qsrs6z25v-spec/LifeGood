@@ -35,7 +35,11 @@ final class CloudSyncManager: ObservableObject {
         "life_business_cards",
         "life_personal_events",
         "life_org_people",
-        "life_health_profile"
+        "life_health_profile",
+        // 股票每週市值快照（英雄卡背景折線）：同步安全性依賴「先拉後推」順序——
+        // 少用的裝置會先拉到主力機的完整歷史，記錄本週快照時是在完整清單上加點再推回，
+        // 歷史只增不減；不需自訂合併邏輯
+        "stock_value_weekly_history"
     ]
 
     private static let enabledKey = "icloud_sync_enabled"
