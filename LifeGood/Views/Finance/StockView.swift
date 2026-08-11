@@ -249,7 +249,7 @@ struct StockView: View {
         store.batchUpdateStockPrices(priceUpdates)
         // 報價更新後刷新本週市值快照與英雄卡背景折線
         StockValueHistory.record(totalValue: store.totalStockValue)
-        heroTrend = StockValueHistory.sampled()
+        heroTrend = StockValueHistory.displayPoints()
 
         withAnimation { isUpdating = false }
 
@@ -555,6 +555,21 @@ struct StockView: View {
                         .foregroundStyle(.white.opacity(0.35))
                         .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round))
                         .interpolationMethod(.catmullRom)
+                        // 最後一個（真實）點：實心亮點＋市值標籤
+                        if p.id == heroTrend.last?.id {
+                            PointMark(
+                                x: .value("週", p.weekStart),
+                                y: .value("市值", p.value)
+                            )
+                            .foregroundStyle(.white.opacity(0.85))
+                            .symbolSize(28)
+                            .annotation(position: .top,
+                                        overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
+                                Text(p.value.ntdWanString)
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.90))
+                            }
+                        }
                     }
                     .chartXAxis(.hidden)
                     .chartYAxis(.hidden)
@@ -602,7 +617,7 @@ struct StockView: View {
             }
             // 記錄本週總市值快照並刷新背景折線（帳本會隨每週使用自動累積）
             StockValueHistory.record(totalValue: store.totalStockValue)
-            heroTrend = StockValueHistory.sampled()
+            heroTrend = StockValueHistory.displayPoints()
         }
     }
 
@@ -962,6 +977,34 @@ enum StockValueHistory {
         guard let data = UserDefaults.standard.data(forKey: key),
               let list = try? JSONDecoder().decode([StockValueSnapshot].self, from: data) else { return [] }
         return list
+    }
+
+    /// 顯示用資料點：真實快照不足 6 點時，在最前面補合成引導點湊滿 6 點——
+    /// 新使用者第一週只有 1 個點畫不出像樣的曲線，補點讓背景視覺舒服；
+    /// 合成點用「確定性偽隨機漫步」（種子＝首個真實點的週次＋市值）：同一週同市值
+    /// 形狀固定，不會每次重繪亂跳；每步 ±5% 波動、往回各推一週。
+    /// 合成點只在顯示時生成，不落地、不同步。
+    static func displayPoints(maxCount: Int = 40) -> [StockValueSnapshot] {
+        let real = sampled(maxCount: maxCount)
+        guard let first = real.first, real.count < 6 else { return real }
+        let padCount = 6 - real.count
+        var seed = UInt64(abs(first.weekStart.timeIntervalSince1970))
+            &+ UInt64(abs(first.value) + 1)
+        func nextUnit() -> Double {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return Double((seed >> 33) % 1000) / 1000.0   // 0..<1
+        }
+        let cal = Calendar.current
+        var value = first.value
+        var synthetic: [StockValueSnapshot] = []
+        for i in 1...padCount {
+            let delta = (nextUnit() - 0.5) * 0.10   // 每步 ±5%
+            value = max(value * (1 + delta), 1)
+            let week = cal.date(byAdding: .weekOfYear, value: -i, to: first.weekStart)
+                ?? first.weekStart.addingTimeInterval(Double(-i) * 604_800)
+            synthetic.append(StockValueSnapshot(weekStart: week, value: value))
+        }
+        return synthetic.reversed() + real
     }
 
     /// 等距取樣至最多 maxCount 點（頭尾必留；同 ChildDetailView 趨勢圖取樣規則）
