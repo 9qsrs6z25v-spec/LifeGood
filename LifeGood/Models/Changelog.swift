@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.165", build: 918, date: "2026/08/11", notes: [
+            "【效能】KV 推送指紋帳本——內容沒變的 key 零請求跳過：使用者點出「股票頁每次報價更新是不是都觸發同步」，查證屬實且規模更大——任一 key 變動（最典型：開盤時間逛股票頁、報價寫回）都讓 pushAll 把全部 ~20 個 key 重推一輪，每 key 為 fetch＋寫入＋讀回驗證三個請求，一次報價更新 ≈ 60 個 CloudKit 請求，其中 19 個 key 根本沒變。仿照片上傳帳本：pushAllKV 推送前以 SHA256 指紋（CryptoKit 硬體加速、跨啟動穩定；不可用每次啟動隨機種子的 hashValue）比對上次成功推送的內容，相同即跳過；成功推送才記帳、失敗下輪重推；指紋計算搬到序列佇列避免大 JSON 卡主執行緒。配套：(1) 拉取路徑寫入本機後同步更新指紋，避免下輪把剛拉回的資料原樣回推（回音推送）；(2) zone 重建／重置／驗證偵測 zone 不存在時與照片帳本一起作廢，確保新 zone 全量重推。效益全域：股價更新只推股票 1 個 key、記一筆帳只推記帳 key，請求數與流量降一個數量級。"
+        ]),
         ChangelogEntry(version: "25.164", build: 917, date: "2026/08/11", notes: [
             "【修正】「與家人共享」按下顯示「共享建立回報成功但未取得 share 記錄」（v25.163 設定頁閃退修復後實測的下一關）：CKShare 建立作業整體回報成功，但 perRecordSaveBlock 沒交出 CKShare——可能個別記錄失敗（如 share 已存在的版本衝突）或回呼未含 share 型別，share 實際上多半已建立成功卻被判為失敗。兩項修正：(1) fetchOrCreateZoneShare 在「整體成功但沒拿到 share」時，一律用固定 ID（CKRecordNameZoneWideShare）直接讀回既有 share，讀得到就照常進入邀請面板；讀不到才回報個別錯誤或讀回錯誤。(2) 設定頁共享失敗訊息附上原始錯誤網域#代碼，後續若再有失敗可直接從畫面定位原因。"
         ]),

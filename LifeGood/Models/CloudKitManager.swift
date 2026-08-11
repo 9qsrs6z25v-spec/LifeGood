@@ -2,6 +2,7 @@ import Foundation
 import CloudKit
 import Combine
 import UIKit
+import CryptoKit
 
 /// 把 LifeGood 全部資料（結構化資料 + 使用者上傳照片）放到 iCloud Private Database。
 ///
@@ -354,6 +355,8 @@ final class CloudKitManager {
                         self.defaults.removeObject(forKey: self.zoneCreatedKey)
                         self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
                         self.defaults.removeObject(forKey: self.uploadLedgerKey)   // zone 重建＝雲端照片全沒了，帳本作廢
+                                self.defaults.removeObject(forKey: self.kvPushLedgerKey)
+                        self.defaults.removeObject(forKey: self.kvPushLedgerKey)
                         self.queue.async {
                             self.ensureZoneExists { ok in
                                 guard ok else { completion?(false); return }
@@ -533,6 +536,9 @@ final class CloudKitManager {
                             self.defaults.set(data, forKey: key)
                             lock.lock(); pulledKVKeys.insert(key); lock.unlock()
                         }
+                        // 拉下來的內容＝雲端現況：更新推送指紋帳本，避免下輪 pushAll
+                        // 把剛拉回的資料又原樣回推一次（回音推送）
+                        self.markKVPushed(key: key, signature: Self.kvSignature(data))
                     }
                 } else if record.recordType == Self.photoRecordType {
                     if let dir = record["directory"] as? String,
@@ -797,21 +803,58 @@ final class CloudKitManager {
     ///   呼叫端可用此結果判斷是否要標記「已同步」，避免把失敗的一輪誤標成功。
     func pushAllKV(keys: [String], completion: ((Bool) -> Void)? = nil) {
         guard isAvailable else { completion?(false); return }
-        let group = DispatchGroup()
-        let lock = NSLock()
-        var allOK = true
-        for key in keys {
-            if let data = defaults.data(forKey: key) {
-                group.enter()
-                pushKV(key: key, data: data) { ok in
-                    if !ok {
-                        lock.lock(); allOK = false; lock.unlock()
+        // 指紋比對與雜湊計算搬到序列佇列：資料量大（數 MB JSON）時避免卡主執行緒
+        queue.async {
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var allOK = true
+            let ledger = self.kvPushLedger()
+            for key in keys {
+                if let data = self.defaults.data(forKey: key) {
+                    // 髒 key 指紋帳本：內容與上次成功推送完全相同 → 零請求跳過。
+                    // 沒有這步時任何一個 key 的變動（最典型：股價更新）都會讓
+                    // 全部 ~20 個 key 重推一輪（每 key 為 fetch＋寫入＋讀回驗證三個請求）。
+                    let sig = Self.kvSignature(data)
+                    if ledger[key] == sig { continue }
+                    group.enter()
+                    self.pushKV(key: key, data: data) { ok in
+                        if ok {
+                            // 成功才記指紋；失敗的 key 下輪仍會重推
+                            self.markKVPushed(key: key, signature: sig)
+                        } else {
+                            lock.lock(); allOK = false; lock.unlock()
+                        }
+                        group.leave()
                     }
-                    group.leave()
                 }
             }
+            group.notify(queue: .main) { completion?(allOK) }
         }
-        group.notify(queue: .main) { completion?(allOK) }
+    }
+
+    // MARK: - KV 推送指紋帳本（跳過內容未變的 key）
+
+    /// key → SHA256 指紋。與照片上傳帳本同精神：只在「成功推送」後記帳，
+    /// zone 重建／重置／共享切換時作廢（與 uploadLedgerKey 同步清除）。
+    private let kvPushLedgerKey = "ck_kv_push_ledger_v1"
+
+    private func kvPushLedger() -> [String: String] {
+        (defaults.dictionary(forKey: kvPushLedgerKey) as? [String: String]) ?? [:]
+    }
+
+    /// 記帳一律排到 queue 上做讀改寫，避免並發互相蓋掉（同 markUploaded 模式）
+    private func markKVPushed(key: String, signature: String) {
+        queue.async {
+            var ledger = self.kvPushLedger()
+            ledger[key] = signature
+            self.defaults.set(ledger, forKey: self.kvPushLedgerKey)
+        }
+    }
+
+    /// 內容指紋：SHA256（CryptoKit 硬體加速，數 MB 資料毫秒級）。
+    /// 必須跨啟動穩定，不能用 Swift hashValue（每次啟動隨機種子）。
+    static func kvSignature(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     /// 非破壞性地把雲端所有 KVBlob 讀進記憶體：不寫入本機 UserDefaults、也不更新 change token。
@@ -996,6 +1039,7 @@ final class CloudKitManager {
         defaults.removeObject(forKey: serverChangeTokenKey)
         defaults.removeObject(forKey: initialPullDoneKey)
         defaults.removeObject(forKey: uploadLedgerKey)
+        defaults.removeObject(forKey: kvPushLedgerKey)
     }
 
     // MARK: - 同步診斷（逐層測試，顯示原始錯誤碼）
@@ -1479,6 +1523,7 @@ final class CloudKitManager {
                     self.defaults.removeObject(forKey: self.zoneCreatedKey)
                     self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
                     self.defaults.removeObject(forKey: self.uploadLedgerKey)   // zone 不存在＝雲端照片不存在，帳本作廢
+                    self.defaults.removeObject(forKey: self.kvPushLedgerKey)
                 }
                 result.errorMessage = "雲端資料區不存在：同步從未在此環境成功寫入。已自動重設，請按「立即同步」重建後再驗證一次。"
             }
