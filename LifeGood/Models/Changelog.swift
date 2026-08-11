@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.166", build: 919, date: "2026/08/11", notes: [
+            "【新增】兒女記錄拍照＋兒女相簿廊：(1) 紀念時刻／成長／教育等所有兒女記錄的「插入圖片」區新增「拍照」按鈕（原本只能從相簿選）——CameraPicker 以 fullScreenCover 呈現（沿用 v25.128 相機不可用 sheet 的教訓），拍照與相簿選取共用抽出的 storePickedPhoto 匯入管線：UUID 新檔名、壓縮存檔、背景產生素描版、世代守衛防連拍競態、取消防孤兒檔案等既有保護全部沿用。(2) 兒女卡片右上新增相簿鈕（photo.stack）：彙整該孩子所有記錄附的照片，重用 MapAlbumSheet 相簿模板開啟「<名字> 相簿」（兒子藍／女兒粉主題色），依記錄類型或月份分組、點縮圖看大圖；模板為此新增 groupNoun 參數（預設「地點」，兒女相簿傳「類型」），分組 Picker／摘要列／空分組 key 文案跟隨名詞，旅遊/美食/醫療三個既有呼叫端零改動。"
+        ]),
         ChangelogEntry(version: "25.165", build: 918, date: "2026/08/11", notes: [
             "【效能】KV 推送指紋帳本——內容沒變的 key 零請求跳過：使用者點出「股票頁每次報價更新是不是都觸發同步」，查證屬實且規模更大——任一 key 變動（最典型：開盤時間逛股票頁、報價寫回）都讓 pushAll 把全部 ~20 個 key 重推一輪，每 key 為 fetch＋寫入＋讀回驗證三個請求，一次報價更新 ≈ 60 個 CloudKit 請求，其中 19 個 key 根本沒變。仿照片上傳帳本：pushAllKV 推送前以 SHA256 指紋（CryptoKit 硬體加速、跨啟動穩定；不可用每次啟動隨機種子的 hashValue）比對上次成功推送的內容，相同即跳過；成功推送才記帳、失敗下輪重推；指紋計算搬到序列佇列避免大 JSON 卡主執行緒。配套：(1) 拉取路徑寫入本機後同步更新指紋，避免下輪把剛拉回的資料原樣回推（回音推送）；(2) zone 重建／重置／驗證偵測 zone 不存在時與照片帳本一起作廢，確保新 zone 全量重推。效益全域：股價更新只推股票 1 個 key、記一筆帳只推記帳 key，請求數與流量降一個數量級。"
         ]),

@@ -51,6 +51,9 @@ struct MapAlbumSheet: View {
     let accent: Color               // 各地圖主題色
     let emptyTitle: String          // 例：「還沒有旅遊照片」
     let emptyHint: String           // 例：「在娛樂支出記錄時附上照片…」
+    /// 分組名詞（預設「地點」）：分組 Picker 第一項「依<名詞>」、摘要列「N 個<名詞>」、
+    /// 空分組 key「未命名<名詞>」。兒女相簿以記錄「類型」分組時傳入 "類型"。
+    var groupNoun: String = "地點"
     let items: [AlbumPhotoItem]
 
     private enum GroupMode: String, CaseIterable, Identifiable {
@@ -85,7 +88,7 @@ struct MapAlbumSheet: View {
             var map: [String: [AlbumPhotoItem]] = [:]
             // 地點順序依該地點最新照片日期排（最常去/最近去的排前面）
             for item in items.sorted(by: { $0.date > $1.date }) {
-                let key = item.group.isEmpty ? "未命名地點" : item.group
+                let key = item.group.isEmpty ? "未命名\(groupNoun)" : item.group
                 if map[key] == nil { order.append(key) }
                 map[key, default: []].append(item)
             }
@@ -105,7 +108,7 @@ struct MapAlbumSheet: View {
         }
     }
 
-    private var groupCount: Int { Set(items.map { $0.group.isEmpty ? "未命名地點" : $0.group }).count }
+    private var groupCount: Int { Set(items.map { $0.group.isEmpty ? "未命名\(groupNoun)" : $0.group }).count }
 
     var body: some View {
         NavigationStack {
@@ -121,7 +124,9 @@ struct MapAlbumSheet: View {
                                 .animation(.spring(response: 0.46, dampingFraction: 0.80), value: albumAppeared)
 
                             Picker("分組", selection: $groupMode) {
-                                ForEach(GroupMode.allCases) { Text($0.rawValue).tag($0) }
+                                ForEach(GroupMode.allCases) {
+                                    Text($0 == .place ? "依\(groupNoun)" : $0.rawValue).tag($0)
+                                }
                             }
                             .pickerStyle(.segmented)
                             .opacity(albumAppeared ? 1 : 0)
@@ -179,7 +184,7 @@ struct MapAlbumSheet: View {
                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(accent)
             Text("共 \(items.count) 張照片")
                 .font(.subheadline.weight(.semibold))
-            Text("\(groupCount) 個地點")
+            Text("\(groupCount) 個\(groupNoun)")
                 .font(.caption.weight(.semibold)).foregroundStyle(accent)
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(accent.opacity(0.12)).clipShape(Capsule())
