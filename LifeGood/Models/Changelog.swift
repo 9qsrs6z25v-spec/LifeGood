@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.163", build: 916, date: "2026/08/11", notes: [
+            "【修正】v25.162 進設定頁即閃退：崩潰報告（.ips）確診為主執行緒堆疊溢位——EXC_BAD_ACCESS 落在 Stack Guard 區，堆疊是 Swift runtime decodeMangledType/decodeGenericArgs 十餘層遞迴，觸發點 Section<>.init → DisclosureGroup → List。根因：雙人共享 UI 直接內聯進 iCloudSyncSection（該 Section 子視圖本已眾多），SwiftUI 複合泛型型別深度爆表，執行期展開型別中繼資料的遞迴把 1MB 主執行緒堆疊撐爆。修法：共享 UI 抽成獨立具名 View（FamilySharingRow，自含 shareBusy/邀請/退出/錯誤狀態與 sheet/alert/onReceive），Section 型別樹從巨大內聯泛型降為單一簡單型別名；共享功能行為完全不變。教訓已記錄：往後為多子視圖的 Section 添加複雜區塊，一律抽成具名子 View。"
+        ]),
         ChangelogEntry(version: "25.162", build: 915, date: "2026/08/10", notes: [
             "【新增】雙人共享（CKShare zone 級共享）MVP——夫妻兩個 Apple ID 共同編輯同一份資料、雙向即時同步：(1) 架構：CloudKitManager 的資料庫與 zone 改為執行期路由——擁有者走自己的私有庫＋自己的 LifeGoodZone；接受共享後進入「參與者模式」（UserDefaults 存擁有者 ownerName），全部 push/pull/驗證/普查自動改走 sharedCloudDatabase＋擁有者的 zone，既有呼叫端零修改；參與者模式跳過 zone/訂閱建立（zone 屬擁有者；推播訂閱另案，靠前景/手動同步拉取）。(2) 邀請流程：設定 → iCloud 同步新增紫色「與家人共享資料」列，fetchOrCreateZoneShare 以固定 CKRecordNameZoneWideShare 取得或建立 zone 級 CKShare（publicPermission .none 僅受邀者、可讀寫），UICloudSharingController 系統介面負責發送邀請連結（訊息/AirDrop）、成員管理與停止共享。(3) 接受流程：SwiftUI 生命週期下共享連結回呼走 UIWindowSceneDelegate——AppDelegate 以 configurationForConnecting 指定 ShareSceneDelegate 承接 userDidAcceptCloudKitShareWith（冷啟動走 willConnectTo 的 cloudKitShareMetadata），CKAcceptSharesOperation 成功後寫入參與者旗標、resetLocalState 清 token/旗標/照片帳本，廣播 sharingStateDidChange；CloudSyncManager 監聽後自動開啟同步並重跑「覆蓋/合併」初始流程，讓使用者決定本機資料與共享資料的整合方式。(4) 退出：參與者列顯示「已加入家人共享」＋紅色退出鈕（確認對話框），以 sharedCloudDatabase.delete(withRecordZoneID:) 退出後切回自己的私有 zone，本機資料保留並於下輪同步推回自己的雲端。(5) 基建：Info.plist 新增 CKSharingSupported（GENERATE_INFOPLIST_FILE 與 INFOPLIST_FILE 併用合成），共享連結才會導向 App。"
         ]),

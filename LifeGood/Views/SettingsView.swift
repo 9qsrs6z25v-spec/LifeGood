@@ -244,14 +244,6 @@ struct SettingsView: View {
     @State private var verifyResultText: String?
 
     // 同步診斷：逐層測試（一般網路→帳號→讀→寫→zone），顯示每層原始錯誤碼
-    // 雙人共享（CKShare）：邀請/退出狀態
-    @State private var shareBusy = false
-    @State private var sharePayload: SharePayload?
-    @State private var shareErrorText: String?
-    @State private var isShareParticipant = CloudKitManager.shared.isShareParticipant
-    @State private var showLeaveShareConfirm = false
-    @State private var leaveShareBusy = false
-
     @State private var diagBusy = false
     @State private var diagResultText: String?
     @State private var verifyResultIsError = false
@@ -1013,90 +1005,10 @@ struct SettingsView: View {
                     .textSelection(.enabled)
             }
 
-            // 雙人共享：擁有者顯示「與家人共享」邀請入口；參與者顯示狀態＋退出
-            if isShareParticipant {
-                HStack(spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(
-                                colors: [Color.purple.opacity(0.22), Color.purple.opacity(0.09)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            ))
-                            .frame(width: 36, height: 36)
-                        Circle()
-                            .stroke(Color.purple.opacity(0.20), lineWidth: 1)
-                            .frame(width: 36, height: 36)
-                        Image(systemName: "person.2.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.purple)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("已加入家人共享")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.primary)
-                        Text("資料與共享成員即時互通（共享資料庫）")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button {
-                        showLeaveShareConfirm = true
-                    } label: {
-                        Text(leaveShareBusy ? "退出中…" : "退出")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.red)
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(Color.red.opacity(0.10))
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(leaveShareBusy)
-                }
-            } else {
-                Button {
-                    startSharing()
-                } label: {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            Circle()
-                                .fill(LinearGradient(
-                                    colors: [Color.purple.opacity(0.22), Color.purple.opacity(0.09)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing
-                                ))
-                                .frame(width: 36, height: 36)
-                            Circle()
-                                .stroke(Color.purple.opacity(0.20), lineWidth: 1)
-                                .frame(width: 36, height: 36)
-                            Image(systemName: "person.2.badge.plus")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Color.purple)
-                        }
-                        .shadow(color: Color.purple.opacity(0.15), radius: 4, x: 0, y: 2)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text("與家人共享資料")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.primary)
-                                if shareBusy { ProgressView().scaleEffect(0.7).tint(.purple) }
-                            }
-                            Text("邀請配偶共同編輯同一份資料，雙向即時同步")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                }
-                .foregroundStyle(.primary)
-                .disabled(shareBusy || !cloudSync.isAccountAvailable || !cloudSync.isEnabled)
-            }
-
-            if let err = shareErrorText {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            // 雙人共享：抽成獨立具名 View（v25.163 修復）——內聯寫法讓本 Section 的
+            // SwiftUI 複合泛型型別深度爆表，執行期 decodeMangledType 遞迴展開型別
+            // 中繼資料時主執行緒堆疊溢位（進設定頁即 EXC_BAD_ACCESS 於 Stack Guard）
+            FamilySharingRow()
 
             Button {
                 cloudSync.repromptInitialSync()
@@ -1133,46 +1045,6 @@ struct SettingsView: View {
             Button("取消", role: .cancel) { cloudSync.cancelInitialSync() }
         } message: { info in
             Text("iCloud 目前約有 \(info.cloudItemCount) 筆資料。要如何與這台裝置的資料整合？\n\n・覆蓋會清掉其中一邊\n・合併會保留兩邊，重複的依你選的為準")
-        }
-        .sheet(item: $sharePayload) { payload in
-            CloudSharingSheet(share: payload.share, container: CloudKitManager.shared.ckContainer)
-        }
-        .alert("退出家人共享？", isPresented: $showLeaveShareConfirm) {
-            Button("退出", role: .destructive) { leaveShare() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("退出後這台裝置改用自己的 iCloud 資料區，目前手機上的資料會保留並推送到你自己的雲端；不再與共享成員互通。")
-        }
-        .onReceive(NotificationCenter.default.publisher(for: CloudKitManager.sharingStateDidChangeNotification)) { _ in
-            isShareParticipant = CloudKitManager.shared.isShareParticipant
-        }
-    }
-
-    // MARK: - 雙人共享動作
-
-    private func startSharing() {
-        guard !shareBusy else { return }
-        shareBusy = true
-        shareErrorText = nil
-        CloudKitManager.shared.fetchOrCreateZoneShare { result in
-            shareBusy = false
-            switch result {
-            case .success(let share):
-                sharePayload = SharePayload(share: share)
-            case .failure(let e):
-                shareErrorText = "共享設定失敗：\(e.localizedDescription)"
-            }
-        }
-    }
-
-    private func leaveShare() {
-        guard !leaveShareBusy else { return }
-        leaveShareBusy = true
-        shareErrorText = nil
-        CloudKitManager.shared.leaveShare { ok in
-            leaveShareBusy = false
-            if !ok { shareErrorText = "退出共享失敗，請稍後再試。" }
-            isShareParticipant = CloudKitManager.shared.isShareParticipant
         }
     }
 
@@ -2280,6 +2152,146 @@ private struct CurrencyRateRow: View {
         .environmentObject(CloudSyncManager.shared)
         .environmentObject(SubscriptionManager.shared)
         .environmentObject(EInvoiceSyncManager.shared)
+}
+
+// MARK: - 雙人共享列（獨立具名 View）
+//
+// 必須是獨立 struct 而非內聯在 iCloudSyncSection：該 Section 子視圖眾多，內聯會讓
+// SwiftUI 複合泛型型別深度爆表，執行期展開型別中繼資料（decodeMangledType 遞迴）
+// 直接把主執行緒堆疊撐爆（v25.162 進設定頁即閃退的根因，見 v25.163 changelog）。
+
+private struct FamilySharingRow: View {
+    @EnvironmentObject var cloudSync: CloudSyncManager
+
+    @State private var shareBusy = false
+    @State private var sharePayload: SharePayload?
+    @State private var shareErrorText: String?
+    @State private var isParticipant = CloudKitManager.shared.isShareParticipant
+    @State private var showLeaveConfirm = false
+    @State private var leaveBusy = false
+
+    var body: some View {
+        Group {
+            if isParticipant {
+                participantRow
+            } else {
+                inviteButton
+            }
+            if let err = shareErrorText {
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .sheet(item: $sharePayload) { payload in
+            CloudSharingSheet(share: payload.share, container: CloudKitManager.shared.ckContainer)
+        }
+        .alert("退出家人共享？", isPresented: $showLeaveConfirm) {
+            Button("退出", role: .destructive) { leaveShare() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("退出後這台裝置改用自己的 iCloud 資料區，目前手機上的資料會保留並推送到你自己的雲端；不再與共享成員互通。")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CloudKitManager.sharingStateDidChangeNotification)) { _ in
+            isParticipant = CloudKitManager.shared.isShareParticipant
+        }
+    }
+
+    private var participantRow: some View {
+        HStack(spacing: 14) {
+            sharingIconCircle("person.2.fill")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("已加入家人共享")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                Text("資料與共享成員即時互通（共享資料庫）")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                showLeaveConfirm = true
+            } label: {
+                Text(leaveBusy ? "退出中…" : "退出")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Color.red.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
+            }
+            .buttonStyle(.borderless)
+            .disabled(leaveBusy)
+        }
+    }
+
+    private var inviteButton: some View {
+        Button {
+            startSharing()
+        } label: {
+            HStack(spacing: 14) {
+                sharingIconCircle("person.2.badge.plus")
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("與家人共享資料")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                        if shareBusy { ProgressView().scaleEffect(0.7).tint(.purple) }
+                    }
+                    Text("邀請配偶共同編輯同一份資料，雙向即時同步")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+        }
+        .foregroundStyle(.primary)
+        .disabled(shareBusy || !cloudSync.isAccountAvailable || !cloudSync.isEnabled)
+    }
+
+    private func sharingIconCircle(_ systemName: String) -> some View {
+        ZStack {
+            Circle()
+                .fill(LinearGradient(
+                    colors: [Color.purple.opacity(0.22), Color.purple.opacity(0.09)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+                .frame(width: 36, height: 36)
+            Circle()
+                .stroke(Color.purple.opacity(0.20), lineWidth: 1)
+                .frame(width: 36, height: 36)
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.purple)
+        }
+    }
+
+    private func startSharing() {
+        guard !shareBusy else { return }
+        shareBusy = true
+        shareErrorText = nil
+        CloudKitManager.shared.fetchOrCreateZoneShare { result in
+            shareBusy = false
+            switch result {
+            case .success(let share):
+                sharePayload = SharePayload(share: share)
+            case .failure(let e):
+                shareErrorText = "共享設定失敗：\(e.localizedDescription)"
+            }
+        }
+    }
+
+    private func leaveShare() {
+        guard !leaveBusy else { return }
+        leaveBusy = true
+        shareErrorText = nil
+        CloudKitManager.shared.leaveShare { ok in
+            leaveBusy = false
+            if !ok { shareErrorText = "退出共享失敗，請稍後再試。" }
+            isParticipant = CloudKitManager.shared.isShareParticipant
+        }
+    }
 }
 
 // MARK: - 雙人共享：CKShare 的 Identifiable 包裝與 UICloudSharingController 橋接
