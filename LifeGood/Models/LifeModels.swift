@@ -338,17 +338,20 @@ struct ChildRecord: Identifiable, Codable {
     var dose: String?
     var severity: AllergySeverity?
     var photoFileName: String?
+    /// 就醫記錄體溫（°C，選填）：合成 Codable 的 Optional 欄位缺 key 時自動為 nil，舊資料相容
+    var temperatureC: Double?
 
     init(id: UUID = UUID(), type: ChildRecordType = .memorable,
          date: Date = Date(), title: String = "", detail: String = "", note: String = "",
          heightCm: Double? = nil, weightKg: Double? = nil,
          dose: String? = nil, severity: AllergySeverity? = nil,
-         photoFileName: String? = nil) {
+         photoFileName: String? = nil, temperatureC: Double? = nil) {
         self.id = id; self.type = type; self.date = date
         self.title = title; self.detail = detail; self.note = note
         self.heightCm = heightCm; self.weightKg = weightKg
         self.dose = dose; self.severity = severity
         self.photoFileName = photoFileName
+        self.temperatureC = temperatureC
     }
 
     var photoURL: URL? {

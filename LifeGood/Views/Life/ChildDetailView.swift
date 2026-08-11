@@ -398,7 +398,7 @@ struct ChildDetailView: View {
         // 日常趨勢圖表：喝奶/食物/睡眠/身高/體重五張折線圖左右滑動切換，點線上資料點顯示細節
         DailyChartsPager(
             records: child.dailyRecords,
-            growthRecords: child.childRecords.filter { $0.type == .growth }
+            childRecords: child.childRecords
         )
             .opacity(contentAppeared ? 1 : 0)
             .offset(y: contentAppeared ? 0 : 14)
@@ -1010,6 +1010,14 @@ struct ChildDetailView: View {
                                 .background(Color.blue.opacity(0.12)).foregroundStyle(.blue)
                                 .clipShape(Capsule())
                         }
+                        // 就醫體溫膠囊：≥38°C 發燒紅、其餘橙，一眼看出當次是否發燒
+                        if rec.type == .medical, let t = rec.temperatureC, t > 0 {
+                            Text(String(format: "%.1f°C", t)).font(.caption2.weight(.medium))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background((t >= 38 ? Color.red : Color.orange).opacity(0.12))
+                                .foregroundStyle(t >= 38 ? Color.red : Color.orange)
+                                .clipShape(Capsule())
+                        }
                         Spacer()
                     }
                     if rec.type == .growth {
@@ -1349,6 +1357,7 @@ struct ChildRecordEditorSheet: View {
     @State private var note = ""
     @State private var heightText = ""
     @State private var weightText = ""
+    @State private var tempText = ""   // 就醫體溫（°C，選填）
     @State private var dose = ""
     @State private var severity: AllergySeverity = .mild
 
@@ -1584,6 +1593,10 @@ struct ChildRecordEditorSheet: View {
     private var medicalFields: some View {
         Section {
             TextField("症狀/診斷", text: $title)
+            HStack {
+                TextField("體溫（選填）", text: $tempText).keyboardType(.decimalPad)
+                Text("°C").foregroundStyle(.secondary)
+            }
             clinicAutocompleteField(label: "院所（選填）")
         } header: {
             childEditorSectionHeader("就醫資訊", icon: type.icon, color: accent)
@@ -1810,6 +1823,7 @@ struct ChildRecordEditorSheet: View {
         if let h = e.heightCm, h > 0 { heightText = String(format: "%g", h) }
         if let w = e.weightKg, w > 0 { weightText = String(format: "%g", w) }
         dose = e.dose ?? ""; severity = e.severity ?? .mild
+        if let t = e.temperatureC, t > 0 { tempText = String(format: "%g", t) }
         photoFileName = e.photoFileName
         originalPhotoFileName = e.photoFileName
         if let name = e.photoFileName,
@@ -1834,7 +1848,8 @@ struct ChildRecordEditorSheet: View {
             heightCm: type == .growth ? Double(heightText) : nil, weightKg: type == .growth ? Double(weightText) : nil,
             dose: type == .vaccination ? dose.trimmingCharacters(in: .whitespaces) : nil,
             severity: type == .allergy ? severity : nil,
-            photoFileName: photoFileName
+            photoFileName: photoFileName,
+            temperatureC: type == .medical ? Double(tempText) : nil
         )
         if let idx = member.childRecords.firstIndex(where: { $0.id == rec.id }) { member.childRecords[idx] = rec }
         else { member.childRecords.append(rec) }
@@ -1888,6 +1903,7 @@ enum ChildTrendMetric: String, CaseIterable {
     case sleep = "睡眠量"
     case height = "身高"
     case weight = "體重"
+    case temperature = "體溫"
 
     var icon: String {
         switch self {
@@ -1896,6 +1912,7 @@ enum ChildTrendMetric: String, CaseIterable {
         case .sleep: return "moon.zzz.fill"
         case .height: return "ruler.fill"
         case .weight: return "scalemass.fill"
+        case .temperature: return "medical.thermometer.fill"
         }
     }
 
@@ -1906,6 +1923,7 @@ enum ChildTrendMetric: String, CaseIterable {
         case .sleep: return .indigo
         case .height: return .teal
         case .weight: return .pink
+        case .temperature: return .red
         }
     }
 
@@ -1915,13 +1933,14 @@ enum ChildTrendMetric: String, CaseIterable {
         case .sleep: return "小時"
         case .height: return "cm"
         case .weight: return "kg"
+        case .temperature: return "°C"
         }
     }
 }
 
 struct DailyChartsPager: View {
     let records: [DailyRecord]
-    let growthRecords: [ChildRecord]
+    let childRecords: [ChildRecord]
     @State private var page: Int = 0
 
     private static let metrics = ChildTrendMetric.allCases
@@ -1932,7 +1951,7 @@ struct DailyChartsPager: View {
                 ForEach(Array(Self.metrics.enumerated()), id: \.offset) { idx, metric in
                     DailyTrendChart(
                         metric: metric,
-                        points: Self.trendPoints(for: metric, daily: records, growth: growthRecords)
+                        points: Self.trendPoints(for: metric, daily: records, childRecords: childRecords)
                     )
                     .padding(.horizontal, 16)
                     .tag(idx)
@@ -1959,11 +1978,11 @@ struct DailyChartsPager: View {
         .padding(.horizontal)
     }
 
-    /// 逐日彙總（喝奶/食物加總 ml、睡眠加總小時、身高/體重取當日值）後依日期排序，
-    /// 超過 40 點時等距取樣至 40 點
+    /// 逐日彙總（喝奶/食物加總 ml、睡眠加總小時、身高/體重取當日值、體溫取當日最高）
+    /// 後依日期排序，超過 40 點時等距取樣至 40 點
     static fileprivate func trendPoints(for metric: ChildTrendMetric,
                                         daily: [DailyRecord],
-                                        growth: [ChildRecord]) -> [DailyTrendPoint] {
+                                        childRecords: [ChildRecord]) -> [DailyTrendPoint] {
         let cal = Calendar.current
         var byDay: [Date: (total: Double, count: Int)] = [:]
 
@@ -1987,11 +2006,19 @@ struct DailyChartsPager: View {
             }
         case .height, .weight:
             // 成長紀錄的當日值（同日多筆取較晚一筆），非加總
-            for r in growth.sorted(by: { $0.date < $1.date }) {
+            for r in childRecords.sorted(by: { $0.date < $1.date }) where r.type == .growth {
                 let v = (metric == .height) ? r.heightCm : r.weightKg
                 guard let v, v > 0 else { continue }
                 let day = cal.startOfDay(for: r.date)
                 byDay[day] = (v, (byDay[day]?.count ?? 0) + 1)
+            }
+        case .temperature:
+            // 就醫記錄體溫：同日多筆取「最高」（發燒追蹤最有意義），非加總
+            for r in childRecords where r.type == .medical {
+                guard let t = r.temperatureC, t > 0 else { continue }
+                let day = cal.startOfDay(for: r.date)
+                let cur = byDay[day] ?? (0, 0)
+                byDay[day] = (max(cur.total, t), cur.count + 1)
             }
         }
 
@@ -2128,8 +2155,8 @@ private struct DailyTrendChart: View {
             }
         }
         .chartXSelection(value: $rawSelectedDay)
-        // 身高/體重的曲線集中在高值區間，鎖 0 起點會被壓扁；量類指標維持 0 起點好比對
-        .chartYScale(domain: (metric == .height || metric == .weight)
+        // 身高/體重/體溫的曲線集中在高值區間，鎖 0 起點會被壓扁；量類指標維持 0 起點好比對
+        .chartYScale(domain: (metric == .height || metric == .weight || metric == .temperature)
                      ? .automatic(includesZero: false)
                      : .automatic(includesZero: true))
         .chartXAxis {
@@ -2169,6 +2196,7 @@ private struct DailyTrendChart: View {
         case .sleep: return String(format: "共 %.1f 小時", p.total)
         case .height: return String(format: "%.1f cm", p.total)
         case .weight: return String(format: "%.1f kg", p.total)
+        case .temperature: return String(format: "%.1f °C", p.total)
         }
     }
 
@@ -2177,6 +2205,7 @@ private struct DailyTrendChart: View {
         case .milk, .food: return "\(p.count) 筆紀錄"
         case .sleep: return "\(p.count) 段睡眠"
         case .height, .weight: return "成長紀錄"
+        case .temperature: return p.count > 1 ? "當日最高（\(p.count) 筆）" : "就醫紀錄"
         }
     }
 }

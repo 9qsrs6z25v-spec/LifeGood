@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.168", build: 921, date: "2026/08/11", notes: [
+            "【新增】就醫記錄體溫欄位＋體溫趨勢曲線：(1) ChildRecord 新增 temperatureC 選填欄位（合成 Codable，舊資料缺 key 自動 nil 相容），就醫記錄表單在症狀/診斷下新增「體溫（°C）」輸入；(2) 生涯頁就醫記錄列新增體溫膠囊——≥38°C 發燒紅、其餘橙色，一眼看出當次是否發燒；(3) 日常趨勢圖表從五頁擴為六頁：新增「體溫」曲線（紅色主題、temperature 圖示），資料取就醫記錄的體溫、同日多筆取當日最高（發燒追蹤最有意義），Y 軸不鎖 0 起點（35~40°C 區間才看得出起伏），點資料點顯示日期/體溫/當日筆數；DailyChartsPager 參數從 growthRecords 改傳完整 childRecords，身高/體重/體溫各自於內部過濾。"
+        ]),
         ChangelogEntry(version: "25.167", build: 920, date: "2026/08/11", notes: [
             "【移除】兒女記錄「轉為素描畫」功能（使用者回饋不好用）：拿掉編輯表單的素描 Toggle、照片匯入管線的素描版產生（CoreImage 濾鏡鏈 applySketchEffect／saveSketch／sketchURL 全數移除）、清單縮圖改一律顯示原圖。善後：(1) deletePhoto 保留 *_sketch.jpg 伴生檔清理（刪照片時一併清舊素描檔）；(2) 新增 purgeLegacySketchFiles 一次性清除（旗標守衛、背景執行）——掃描 ChildRecordPhotos 把既有素描伴生檔連同雲端記錄一併刪除，釋放本機空間並停止佔用 iCloud 同步流量。附帶效益：照片匯入不再做 GPU 濾鏡運算，選照片/拍照後預覽即時顯示。"
         ]),
