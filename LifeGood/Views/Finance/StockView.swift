@@ -429,7 +429,7 @@ struct StockView: View {
 
     /// 英雄卡背景趨勢線單層（平滑曲線、預設帶漸層面積、線 2pt 半透明 50%）。
     /// 抽成共用是因為：(1) 景深效果需要同一條線畫兩層（模糊層＋清晰層）疊加；
-    /// (2) 左右各偏移 5% 的回聲側線（xShift、細一點、更透明、不帶面積）也共用同一畫法。
+    /// (2) 左右各偏移 1% 的回聲側線（xShift、細一點、更透明、不帶面積）也共用同一畫法。
     private func heroTrendLine(xDomain: ClosedRange<Date>, yDomain: ClosedRange<Double>,
                                xShift: TimeInterval = 0,
                                lineWidth: CGFloat = 2,
@@ -593,16 +593,25 @@ struct StockView: View {
                     let xHigh = xLast.addingTimeInterval(xSpan * 0.25)
                     let xDomain = xFirst...xHigh
                     let yDomain = domainLow...domainHigh
-                    // 三線組合：主線＋左右各偏移「5% 卡片寬」的回聲側線（線條感）。
-                    // 側線細一點、更透明、不帶漸層面積，只當造型陪襯。
-                    let echoShift = xSpan * 1.25 * 0.05   // domain 全寬（含右延 25%）的 5%
+                    // 三線組合：主線＋左右各偏移「1% 卡片寬」的回聲側線（線條感）。
+                    // 側線 1pt、更透明、不帶漸層面積，只當造型陪襯；
+                    // 尾端收細尾：Charts 無法沿路徑變線寬，改用尾端漸層遮罩淡出模擬
+                    //（1pt 半透明細線淡出，視覺上即是收細收掉）。
+                    let echoShift = xSpan * 1.25 * 0.01   // domain 全寬（含右延 25%）的 1%
+                    let echoTailTaper = LinearGradient(stops: [
+                        .init(color: .white, location: 0.00),
+                        .init(color: .white, location: 0.45),
+                        .init(color: .clear, location: 0.80)   // 資料終點約在 80% 寬，尾段漸淡收掉
+                    ], startPoint: .leading, endPoint: .trailing)
                     let trendGroup = ZStack {
                         heroTrendLine(xDomain: xDomain, yDomain: yDomain,
-                                      xShift: -echoShift, lineWidth: 1.5,
+                                      xShift: -echoShift, lineWidth: 1,
                                       lineOpacity: 0.22, showArea: false)
+                            .mask(echoTailTaper)
                         heroTrendLine(xDomain: xDomain, yDomain: yDomain,
-                                      xShift: echoShift, lineWidth: 1.5,
+                                      xShift: echoShift, lineWidth: 1,
                                       lineOpacity: 0.22, showArea: false)
+                            .mask(echoTailTaper)
                         heroTrendLine(xDomain: xDomain, yDomain: yDomain)
                     }
                     // 景深效果（左模糊→右漸清晰）：整組三線畫兩層——

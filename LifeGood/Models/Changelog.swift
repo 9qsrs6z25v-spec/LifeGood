@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.181", build: 934, date: "2026/08/11", notes: [
+            "【調整】股票英雄卡回聲側線微調（使用者看過 v25.179 後）：左右偏移從 5% 卡片寬縮到 1%（原本間距太開）；側線線寬 1.5pt 降為 1pt；尾端收細尾——Swift Charts 無法沿路徑變線寬，改用尾端漸層遮罩實作（45% 寬起漸淡、至資料終點約 80% 寬處完全收掉），1pt 半透明細線漸淡視覺上即為收細。主線不變。"
+        ]),
         ChangelogEntry(version: "25.180", build: 933, date: "2026/08/11", notes: [
             "【調整】股票英雄卡市值數字立體微傾（使用者指定）：末端市值標籤加 3D 旋轉——X 軸傾 5 度、Y 軸傾 5 度（rotation3DEffect）、Z 軸再轉 2 度（rotationEffect），數字帶一點透視斜度，呼應背景趨勢線的景深構圖。"
         ]),
