@@ -897,23 +897,36 @@ final class CloudKitManager {
                     let op = CKModifyRecordsOperation(recordsToSave: [share])
                     op.qualityOfService = .userInitiated
                     var saved: CKShare?
+                    var perErr: Error?
                     op.perRecordSaveBlock = { _, res in
-                        if case .success(let r) = res, let s = r as? CKShare { saved = s }
+                        switch res {
+                        case .success(let r): if let s = r as? CKShare { saved = s }
+                        case .failure(let e): perErr = e
+                        }
                     }
                     op.modifyRecordsResultBlock = { result in
-                        DispatchQueue.main.async {
-                            switch result {
-                            case .success:
-                                if let saved {
-                                    completion(.success(saved))
+                        let finish: (Result<CKShare, Error>) -> Void = { r in
+                            DispatchQueue.main.async { completion(r) }
+                        }
+                        switch result {
+                        case .failure(let e):
+                            finish(.failure(e))
+                        case .success:
+                            if let saved { finish(.success(saved)); return }
+                            // 個別回呼沒交出 CKShare（可能個別失敗如版本衝突＝share 其實已存在，
+                            // 或回呼型別未含 share）→ 一律用固定 ID 直接讀回既有 share，
+                            // 讀得到就照常進入邀請流程
+                            self.ownedPrivateDB.fetch(withRecordID: shareID) { rec, fetchErr in
+                                if let existing = rec as? CKShare {
+                                    finish(.success(existing))
+                                } else if let perErr {
+                                    finish(.failure(perErr))
                                 } else {
-                                    completion(.failure(NSError(
+                                    finish(.failure(fetchErr ?? NSError(
                                         domain: "LifeGoodSync", code: -82,
-                                        userInfo: [NSLocalizedDescriptionKey: "共享建立回報成功但未取得 share 記錄，請再試一次。"]
+                                        userInfo: [NSLocalizedDescriptionKey: "無法建立或讀回共享記錄，請稍後再試。"]
                                     )))
                                 }
-                            case .failure(let e):
-                                completion(.failure(e))
                             }
                         }
                     }

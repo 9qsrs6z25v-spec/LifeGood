@@ -2277,7 +2277,9 @@ private struct FamilySharingRow: View {
             case .success(let share):
                 sharePayload = SharePayload(share: share)
             case .failure(let e):
-                shareErrorText = "共享設定失敗：\(e.localizedDescription)"
+                // 附上原始錯誤網域/代碼：共享失敗原因多樣（已存在/權限/網路），可讀碼直接定位
+                let ns = e as NSError
+                shareErrorText = "共享設定失敗：\(ns.domain)#\(ns.code)：\(e.localizedDescription)"
             }
         }
     }

@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.164", build: 917, date: "2026/08/11", notes: [
+            "【修正】「與家人共享」按下顯示「共享建立回報成功但未取得 share 記錄」（v25.163 設定頁閃退修復後實測的下一關）：CKShare 建立作業整體回報成功，但 perRecordSaveBlock 沒交出 CKShare——可能個別記錄失敗（如 share 已存在的版本衝突）或回呼未含 share 型別，share 實際上多半已建立成功卻被判為失敗。兩項修正：(1) fetchOrCreateZoneShare 在「整體成功但沒拿到 share」時，一律用固定 ID（CKRecordNameZoneWideShare）直接讀回既有 share，讀得到就照常進入邀請面板；讀不到才回報個別錯誤或讀回錯誤。(2) 設定頁共享失敗訊息附上原始錯誤網域#代碼，後續若再有失敗可直接從畫面定位原因。"
+        ]),
         ChangelogEntry(version: "25.163", build: 916, date: "2026/08/11", notes: [
             "【修正】v25.162 進設定頁即閃退：崩潰報告（.ips）確診為主執行緒堆疊溢位——EXC_BAD_ACCESS 落在 Stack Guard 區，堆疊是 Swift runtime decodeMangledType/decodeGenericArgs 十餘層遞迴，觸發點 Section<>.init → DisclosureGroup → List。根因：雙人共享 UI 直接內聯進 iCloudSyncSection（該 Section 子視圖本已眾多），SwiftUI 複合泛型型別深度爆表，執行期展開型別中繼資料的遞迴把 1MB 主執行緒堆疊撐爆。修法：共享 UI 抽成獨立具名 View（FamilySharingRow，自含 shareBusy/邀請/退出/錯誤狀態與 sheet/alert/onReceive），Section 型別樹從巨大內聯泛型降為單一簡單型別名；共享功能行為完全不變。教訓已記錄：往後為多子視圖的 Section 添加複雜區塊，一律抽成具名子 View。"
         ]),
