@@ -366,8 +366,11 @@ struct ChildDetailView: View {
         // childGifts（雙重 filter + sort 全支出）一次捕捉後共用，
         // 避免 isEmpty 判斷與 childGiftsSection 內部各自再算一次（原本 2 次 → 1 次）
         let gifts = childGifts
-        // 日常趨勢圖表：喝奶量/食物量/睡眠量三張折線圖左右滑動切換，點線上資料點顯示細節
-        DailyChartsPager(records: child.dailyRecords)
+        // 日常趨勢圖表：喝奶/食物/睡眠/身高/體重五張折線圖左右滑動切換，點線上資料點顯示細節
+        DailyChartsPager(
+            records: child.dailyRecords,
+            growthRecords: child.childRecords.filter { $0.type == .growth }
+        )
             .opacity(contentAppeared ? 1 : 0)
             .offset(y: contentAppeared ? 0 : 14)
             .animation(.spring(response: 0.45, dampingFraction: 0.82), value: contentAppeared)
@@ -1877,7 +1880,11 @@ fileprivate struct ClinicSuggestion: Identifiable {
     }
 }
 
-// MARK: - 日常趨勢圖表（喝奶量/食物量/睡眠量三張折線圖，左右滑動切換）
+// MARK: - 日常趨勢圖表（喝奶/食物/睡眠/身高/體重五張折線圖，左右滑動切換）
+//
+// 取樣規則（使用者指定）：X 軸涵蓋「第一筆到最後一筆」全期間；有資料的日子才成為資料點
+// （喝奶/食物加總 ml、睡眠加總小時、身高/體重取當日值），超過 40 點時等距取樣至 40 點
+// （首尾必取），兼顧多年歷史的可讀性與繪圖效能。
 
 private struct DailyTrendPoint: Identifiable {
     let day: Date
@@ -1886,19 +1893,61 @@ private struct DailyTrendPoint: Identifiable {
     var id: Date { day }
 }
 
+/// 五個趨勢指標：前三個來自日常紀錄（逐日彙總），身高/體重來自成長紀錄（當日值）
+enum ChildTrendMetric: String, CaseIterable {
+    case milk = "喝奶量"
+    case food = "食物量"
+    case sleep = "睡眠量"
+    case height = "身高"
+    case weight = "體重"
+
+    var icon: String {
+        switch self {
+        case .milk: return "cup.and.saucer.fill"
+        case .food: return "carrot.fill"
+        case .sleep: return "moon.zzz.fill"
+        case .height: return "ruler.fill"
+        case .weight: return "scalemass.fill"
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .milk: return .blue
+        case .food: return .green
+        case .sleep: return .indigo
+        case .height: return .teal
+        case .weight: return .pink
+        }
+    }
+
+    var unit: String {
+        switch self {
+        case .milk, .food: return "ml"
+        case .sleep: return "小時"
+        case .height: return "cm"
+        case .weight: return "kg"
+        }
+    }
+}
+
 struct DailyChartsPager: View {
     let records: [DailyRecord]
+    let growthRecords: [ChildRecord]
     @State private var page: Int = 0
 
-    private static let types: [DailyRecordType] = [.milk, .food, .sleep]
+    private static let metrics = ChildTrendMetric.allCases
 
     var body: some View {
         VStack(spacing: 10) {
             TabView(selection: $page) {
-                ForEach(Array(Self.types.enumerated()), id: \.offset) { idx, type in
-                    DailyTrendChart(type: type, points: Self.trendPoints(for: type, records: records))
-                        .padding(.horizontal, 16)
-                        .tag(idx)
+                ForEach(Array(Self.metrics.enumerated()), id: \.offset) { idx, metric in
+                    DailyTrendChart(
+                        metric: metric,
+                        points: Self.trendPoints(for: metric, daily: records, growth: growthRecords)
+                    )
+                    .padding(.horizontal, 16)
+                    .tag(idx)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -1906,9 +1955,9 @@ struct DailyChartsPager: View {
 
             // 自訂頁點：目前頁拉長成膠囊並套用該圖表主題色
             HStack(spacing: 6) {
-                ForEach(0..<Self.types.count, id: \.self) { i in
+                ForEach(0..<Self.metrics.count, id: \.self) { i in
                     Capsule()
-                        .fill(i == page ? Self.accent(Self.types[i]) : Color(.systemGray4))
+                        .fill(i == page ? Self.metrics[i].accent : Color(.systemGray4))
                         .frame(width: i == page ? 16 : 6, height: 6)
                         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: page)
                 }
@@ -1922,62 +1971,84 @@ struct DailyChartsPager: View {
         .padding(.horizontal)
     }
 
-    static fileprivate func accent(_ t: DailyRecordType) -> Color {
-        switch t {
-        case .milk: return .blue
-        case .food: return .green
-        case .sleep: return .indigo
+    /// 逐日彙總（喝奶/食物加總 ml、睡眠加總小時、身高/體重取當日值）後依日期排序，
+    /// 超過 40 點時等距取樣至 40 點
+    static fileprivate func trendPoints(for metric: ChildTrendMetric,
+                                        daily: [DailyRecord],
+                                        growth: [ChildRecord]) -> [DailyTrendPoint] {
+        let cal = Calendar.current
+        var byDay: [Date: (total: Double, count: Int)] = [:]
+
+        switch metric {
+        case .milk, .food, .sleep:
+            let type: DailyRecordType = (metric == .milk) ? .milk : (metric == .food ? .food : .sleep)
+            for r in daily where r.type == type {
+                let day = cal.startOfDay(for: r.date)
+                let value: Double
+                switch type {
+                case .milk, .food:
+                    value = r.mlAmount ?? 0
+                case .sleep:
+                    guard let end = r.sleepEnd, end > r.date else { continue }
+                    value = end.timeIntervalSince(r.date) / 3600
+                }
+                var cur = byDay[day] ?? (0, 0)
+                cur.total += value
+                cur.count += 1
+                byDay[day] = cur
+            }
+        case .height, .weight:
+            // 成長紀錄的當日值（同日多筆取較晚一筆），非加總
+            for r in growth.sorted(by: { $0.date < $1.date }) {
+                let v = (metric == .height) ? r.heightCm : r.weightKg
+                guard let v, v > 0 else { continue }
+                let day = cal.startOfDay(for: r.date)
+                byDay[day] = (v, (byDay[day]?.count ?? 0) + 1)
+            }
         }
+
+        let sorted = byDay
+            .map { DailyTrendPoint(day: $0.key, total: $0.value.total, count: $0.value.count) }
+            .sorted { $0.day < $1.day }
+        return downsample(sorted, maxCount: 40)
     }
 
-    /// 近 14 天逐日彙總：喝奶/食物加總 ml、睡眠加總小時；無紀錄的日子補 0 讓折線連續
-    static fileprivate func trendPoints(for type: DailyRecordType, records: [DailyRecord]) -> [DailyTrendPoint] {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        guard let start = cal.date(byAdding: .day, value: -13, to: today) else { return [] }
-        var byDay: [Date: (total: Double, count: Int)] = [:]
-        for r in records where r.type == type {
-            let day = cal.startOfDay(for: r.date)
-            guard day >= start, day <= today else { continue }
-            let value: Double
-            switch type {
-            case .milk, .food:
-                value = r.mlAmount ?? 0
-            case .sleep:
-                guard let end = r.sleepEnd, end > r.date else { continue }
-                value = end.timeIntervalSince(r.date) / 3600
+    /// 等距取樣至 maxCount 點（首尾必取）：index 依比例映射、去重
+    static fileprivate func downsample(_ pts: [DailyTrendPoint], maxCount: Int) -> [DailyTrendPoint] {
+        guard pts.count > maxCount, maxCount >= 2 else { return pts }
+        let step = Double(pts.count - 1) / Double(maxCount - 1)
+        var out: [DailyTrendPoint] = []
+        var lastIdx = -1
+        for i in 0..<maxCount {
+            let idx = Int((Double(i) * step).rounded())
+            if idx != lastIdx {
+                out.append(pts[idx])
+                lastIdx = idx
             }
-            var cur = byDay[day] ?? (0, 0)
-            cur.total += value
-            cur.count += 1
-            byDay[day] = cur
         }
-        return (0...13).compactMap { off in
-            guard let day = cal.date(byAdding: .day, value: off, to: start) else { return nil }
-            let v = byDay[day] ?? (0, 0)
-            return DailyTrendPoint(day: day, total: v.total, count: v.count)
-        }
+        return out
     }
 }
 
 /// 單張趨勢折線圖：漸層面積 + 資料點 + chartXSelection 點選顯示該日細節
 private struct DailyTrendChart: View {
-    let type: DailyRecordType
+    let metric: ChildTrendMetric
     let points: [DailyTrendPoint]
     @State private var rawSelectedDay: Date?
 
-    private var accent: Color { DailyChartsPager.accent(type) }
-    private var unitLabel: String { type == .sleep ? "小時" : "ml" }
+    private var accent: Color { metric.accent }
+    private var unitLabel: String { metric.unit }
 
-    /// 點選的原始 X 值（連續日期）就近吸附到當日資料點
+    /// 點選的原始 X 值吸附到「最近」的取樣點（取樣後點與點之間可能相隔多天）
     private var selectedPoint: DailyTrendPoint? {
-        guard let raw = rawSelectedDay else { return nil }
-        let day = Calendar.current.startOfDay(for: raw)
-        return points.first { $0.day == day }
+        guard let raw = rawSelectedDay, !points.isEmpty else { return nil }
+        return points.min(by: {
+            abs($0.day.timeIntervalSince(raw)) < abs($1.day.timeIntervalSince(raw))
+        })
     }
 
-    private static let mdFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    private static let ymdFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
     }()
 
     var body: some View {
@@ -1993,14 +2064,14 @@ private struct DailyTrendChart: View {
                     Circle()
                         .stroke(accent.opacity(0.20), lineWidth: 0.75)
                         .frame(width: 30, height: 30)
-                    Image(systemName: type.icon)
+                    Image(systemName: metric.icon)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(accent)
                 }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("\(type.rawValue)量趨勢")
+                    Text("\(metric.rawValue)趨勢")
                         .font(.subheadline.weight(.bold))
-                    Text("近 14 天・單位 \(unitLabel)・點線上可看當日細節")
+                    Text("全期間・最多取樣 40 點・單位 \(unitLabel)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -2008,12 +2079,12 @@ private struct DailyTrendChart: View {
             }
             .padding(.top, 14)
 
-            if points.allSatisfy({ $0.count == 0 }) {
+            if points.isEmpty {
                 VStack(spacing: 6) {
-                    Image(systemName: type.icon)
+                    Image(systemName: metric.icon)
                         .font(.title3)
                         .foregroundStyle(accent.opacity(0.45))
-                    Text("近 14 天尚無\(type.rawValue)紀錄")
+                    Text("尚無\(metric.rawValue)紀錄")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -2045,15 +2116,12 @@ private struct DailyTrendChart: View {
                 .interpolationMethod(.catmullRom)
                 .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round))
 
-                // 有紀錄的日子畫資料點；補 0 的空日不畫，避免誤導成「當天記了 0」
-                if p.count > 0 {
-                    PointMark(
-                        x: .value("日期", p.day, unit: .day),
-                        y: .value(unitLabel, p.total)
-                    )
-                    .foregroundStyle(accent)
-                    .symbolSize(28)
-                }
+                PointMark(
+                    x: .value("日期", p.day, unit: .day),
+                    y: .value(unitLabel, p.total)
+                )
+                .foregroundStyle(accent)
+                .symbolSize(26)
             }
             if let sel = selectedPoint {
                 RuleMark(x: .value("選取", sel.day, unit: .day))
@@ -2072,11 +2140,12 @@ private struct DailyTrendChart: View {
             }
         }
         .chartXSelection(value: $rawSelectedDay)
+        // 身高/體重的曲線集中在高值區間，鎖 0 起點會被壓扁；量類指標維持 0 起點好比對
+        .chartYScale(domain: (metric == .height || metric == .weight)
+                     ? .automatic(includesZero: false)
+                     : .automatic(includesZero: true))
         .chartXAxis {
-            AxisMarks(values: .stride(by: .day, count: 3)) { _ in
-                AxisGridLine()
-                AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
-            }
+            AxisMarks(values: .automatic(desiredCount: 5))
         }
         .chartYAxis {
             AxisMarks(position: .leading)
@@ -2085,23 +2154,17 @@ private struct DailyTrendChart: View {
         .padding(.bottom, 6)
     }
 
-    /// 點選資料點的細節卡：日期、當日總量、筆數/段數
+    /// 點選資料點的細節卡：日期、當日數值、筆數/段數
     private func selectionCard(_ p: DailyTrendPoint) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(Self.mdFmt.string(from: p.day))
+            Text(Self.ymdFmt.string(from: p.day))
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
-            if p.count == 0 {
-                Text("當日無紀錄")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(type == .sleep
-                     ? String(format: "共 %.1f 小時", p.total)
-                     : "共 \(Int(p.total)) ml")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(accent)
-                Text(type == .sleep ? "\(p.count) 段睡眠" : "\(p.count) 筆紀錄")
+            Text(valueText(p))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(accent)
+            if let sub = subText(p) {
+                Text(sub)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -2110,5 +2173,22 @@ private struct DailyTrendChart: View {
         .padding(.vertical, 6)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(accent.opacity(0.25), lineWidth: 0.75))
+    }
+
+    private func valueText(_ p: DailyTrendPoint) -> String {
+        switch metric {
+        case .milk, .food: return "共 \(Int(p.total)) ml"
+        case .sleep: return String(format: "共 %.1f 小時", p.total)
+        case .height: return String(format: "%.1f cm", p.total)
+        case .weight: return String(format: "%.1f kg", p.total)
+        }
+    }
+
+    private func subText(_ p: DailyTrendPoint) -> String? {
+        switch metric {
+        case .milk, .food: return "\(p.count) 筆紀錄"
+        case .sleep: return "\(p.count) 段睡眠"
+        case .height, .weight: return "成長紀錄"
+        }
     }
 }
