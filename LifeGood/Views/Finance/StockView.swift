@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 // MARK: - 美化紀錄（StockView）
 // [2026-06 v1] 本次美化方向：
@@ -246,6 +247,9 @@ struct StockView: View {
         // 避免逐筆 stocks[idx] 賦值造成 N 次連鎖重繪與 N 次 UserDefaults 寫入。
         // 僅修改 currentPrice，其餘欄位保留最新值，不影響並行 CloudKit 同步其他欄位。
         store.batchUpdateStockPrices(priceUpdates)
+        // 報價更新後刷新本週市值快照與英雄卡背景折線
+        StockValueHistory.record(totalValue: store.totalStockValue)
+        heroTrend = StockValueHistory.sampled()
 
         withAnimation { isUpdating = false }
 
@@ -420,6 +424,9 @@ struct StockView: View {
 
     // MARK: - 摘要（橙色漸層英雄卡片）
 
+    /// 英雄卡背景折線資料（每週總市值快照，最多 40 點）；onAppear 與報價更新後刷新
+    @State private var heroTrend: [StockValueSnapshot] = []
+
     private func summaryHeader(active: [Stock]) -> some View {
         let pl = store.totalStockProfitLoss
         let isPositive = pl >= 0
@@ -528,6 +535,34 @@ struct StockView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // 淡漸層週市值折線背景：每週總市值快照（最多 40 點、頭尾必留），
+                // Y 軸自動範圍不鎖 0（避免趨勢被壓扁）；至少 2 點才畫、不吃觸控
+                if heroTrend.count >= 2 {
+                    Chart(heroTrend) { p in
+                        AreaMark(
+                            x: .value("週", p.weekStart),
+                            y: .value("市值", p.value)
+                        )
+                        .foregroundStyle(LinearGradient(
+                            colors: [.white.opacity(0.20), .white.opacity(0.02)],
+                            startPoint: .top, endPoint: .bottom
+                        ))
+                        .interpolationMethod(.catmullRom)
+                        LineMark(
+                            x: .value("週", p.weekStart),
+                            y: .value("市值", p.value)
+                        )
+                        .foregroundStyle(.white.opacity(0.35))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                        .interpolationMethod(.catmullRom)
+                    }
+                    .chartXAxis(.hidden)
+                    .chartYAxis(.hidden)
+                    .chartLegend(.hidden)
+                    .chartYScale(domain: .automatic(includesZero: false))
+                    .allowsHitTesting(false)
+                    .padding(.top, 34)   // 曲線落在卡片下半部，不干擾上方市值大字
+                }
                 // 裝飾性散景圓（增加卡片層次感）
                 Circle()
                     .fill(.white.opacity(0.12))
@@ -565,6 +600,9 @@ struct StockView: View {
             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                 headerAppeared = true
             }
+            // 記錄本週總市值快照並刷新背景折線（帳本會隨每週使用自動累積）
+            StockValueHistory.record(totalValue: store.totalStockValue)
+            heroTrend = StockValueHistory.sampled()
         }
     }
 
@@ -882,3 +920,63 @@ struct StockView: View {
     }
 }
 
+
+
+// MARK: - 每週總市值快照（股票英雄卡背景折線圖資料）
+//
+// App 沒有歷史股價，市值歷史無從回推——改以「使用時記帳」累積：每次打開股票頁或
+// 報價更新完成，就把當下總市值記到「本週」的快照（同週覆寫最新值），資料隨使用
+// 自然累積成週線。僅存本機（各裝置報價時點不同，不納入 iCloud 同步）。
+
+struct StockValueSnapshot: Codable, Identifiable {
+    let weekStart: Date
+    let value: Double
+    var id: Date { weekStart }
+}
+
+enum StockValueHistory {
+    private static let key = "stock_value_weekly_history"
+
+    /// 記錄本週快照：同週覆寫最新值；值幾乎沒變（<0.5 元）不重寫，避免無謂 IO
+    static func record(totalValue: Double) {
+        guard totalValue > 0 else { return }
+        let cal = Calendar.current
+        let weekStart = cal.dateInterval(of: .weekOfYear, for: Date())?.start
+            ?? cal.startOfDay(for: Date())
+        var list = load()
+        if let idx = list.firstIndex(where: { $0.weekStart == weekStart }) {
+            guard abs(list[idx].value - totalValue) > 0.5 else { return }
+            list[idx] = StockValueSnapshot(weekStart: weekStart, value: totalValue)
+        } else {
+            list.append(StockValueSnapshot(weekStart: weekStart, value: totalValue))
+        }
+        list.sort { $0.weekStart < $1.weekStart }
+        if list.count > 200 { list.removeFirst(list.count - 200) }   // 約 4 年上限
+        if let data = try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    static func load() -> [StockValueSnapshot] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let list = try? JSONDecoder().decode([StockValueSnapshot].self, from: data) else { return [] }
+        return list
+    }
+
+    /// 等距取樣至最多 maxCount 點（頭尾必留；同 ChildDetailView 趨勢圖取樣規則）
+    static func sampled(maxCount: Int = 40) -> [StockValueSnapshot] {
+        let pts = load()
+        guard pts.count > maxCount, maxCount >= 2 else { return pts }
+        let step = Double(pts.count - 1) / Double(maxCount - 1)
+        var out: [StockValueSnapshot] = []
+        var lastIdx = -1
+        for i in 0..<maxCount {
+            let idx = Int((Double(i) * step).rounded())
+            if idx != lastIdx {
+                out.append(pts[idx])
+                lastIdx = idx
+            }
+        }
+        return out
+    }
+}
