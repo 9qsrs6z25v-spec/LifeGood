@@ -427,7 +427,7 @@ struct StockView: View {
     /// 英雄卡背景折線資料（每週總市值快照，最多 40 點）；onAppear 與報價更新後刷新
     @State private var heroTrend: [StockValueSnapshot] = []
 
-    /// 英雄卡背景折線單層（直線段＋漸層面積、線 3pt 半透明 50%）。
+    /// 英雄卡背景趨勢線單層（平滑曲線＋漸層面積、線 2pt 半透明 50%）。
     /// 抽成共用是因為景深效果需要同一條線畫兩層（模糊層＋清晰層）疊加。
     private func heroTrendLine(xDomain: ClosedRange<Date>, yDomain: ClosedRange<Double>) -> some View {
         Chart(heroTrend) { p in
@@ -435,17 +435,19 @@ struct StockView: View {
                 x: .value("週", p.weekStart),
                 y: .value("市值", p.value)
             )
+            .interpolationMethod(.catmullRom)
             .foregroundStyle(LinearGradient(
                 colors: [.white.opacity(0.22), .white.opacity(0.02)],
                 startPoint: .top, endPoint: .bottom
             ))
-            // 折線（直線段）而非平滑曲線：不加 interpolationMethod，維持預設 linear
+            // 平滑曲線（catmullRom）：使用者看過直線段版後選擇曲線較好看
             LineMark(
                 x: .value("週", p.weekStart),
                 y: .value("市值", p.value)
             )
+            .interpolationMethod(.catmullRom)
             .foregroundStyle(.white.opacity(0.50))
-            .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
         }
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
