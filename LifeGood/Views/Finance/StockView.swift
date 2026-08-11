@@ -636,6 +636,11 @@ struct StockView: View {
                                     .font(.system(size: 19, weight: .bold, design: .rounded))
                                     .foregroundStyle(.white.opacity(0.50))
                                     .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
+                                    // 立體微傾（使用者指定）：X/Y 軸各轉 5 度、Z 軸轉 2 度，
+                                    // 讓數字有一點 3D 透視感、呼應景深構圖
+                                    .rotation3DEffect(.degrees(5), axis: (x: 1, y: 0, z: 0))
+                                    .rotation3DEffect(.degrees(5), axis: (x: 0, y: 1, z: 0))
+                                    .rotationEffect(.degrees(2))
                             }
                         }
                     }

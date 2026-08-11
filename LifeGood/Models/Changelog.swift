@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.180", build: 933, date: "2026/08/11", notes: [
+            "【調整】股票英雄卡市值數字立體微傾（使用者指定）：末端市值標籤加 3D 旋轉——X 軸傾 5 度、Y 軸傾 5 度（rotation3DEffect）、Z 軸再轉 2 度（rotationEffect），數字帶一點透視斜度，呼應背景趨勢線的景深構圖。"
+        ]),
         ChangelogEntry(version: "25.179", build: 932, date: "2026/08/11", notes: [
             "【調整】股票英雄卡背景趨勢線加回聲側線（使用者指定「加兩條線增加線條感」）：主曲線左右各加一條偏移 5% 卡片寬的回聲側線——同一組週市值資料沿 X 軸平移繪製，側線較細（1.5pt）、更透明（22%）、不帶漸層面積，只當造型陪襯不搶主線。三線包成一組一起吃景深雙層處理（模糊層＋清晰層互補遮罩），左右側線與主線的模糊→清晰漸變完全同步。heroTrendLine 共用函式增加 xShift／lineWidth／lineOpacity／showArea 參數支援。"
         ]),
