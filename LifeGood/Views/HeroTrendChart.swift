@@ -20,14 +20,14 @@ struct HeroTrendPoint: Identifiable, Equatable {
 }
 
 enum HeroTrendSeries {
-    /// 顯示用資料點：等距取樣至最多 maxCount 點（頭尾必留），
+    /// 顯示用資料點：等距取樣至最多 maxCount 點（預設 10 點，頭尾必留），
     /// 真實點不足 minCount 時在最前面補合成引導點湊滿——新使用者第一期只有
     /// 1 個點畫不出像樣的曲線，補點讓背景視覺舒服。合成點用「確定性偽隨機漫步」
     /// （種子＝首個真實點的時間＋數值）：同資料形狀固定，不會每次重繪亂跳；
     /// 每步 ±5% 波動、往回各推一個 stepBack 間隔（週資料傳一週、月資料傳一個月）。
     /// 合成點只在顯示時生成，不落地、不進同步。
     static func displayPoints(from raw: [HeroTrendPoint],
-                              maxCount: Int = 40,
+                              maxCount: Int = 10,
                               minCount: Int = 6,
                               stepBack: TimeInterval = 604_800) -> [HeroTrendPoint] {
         let real = sampled(raw.sorted { $0.date < $1.date }, maxCount: maxCount)
@@ -53,7 +53,7 @@ enum HeroTrendSeries {
     }
 
     /// 等距取樣至最多 maxCount 點（頭尾必留；同 ChildDetailView 趨勢圖取樣規則）
-    static func sampled(_ pts: [HeroTrendPoint], maxCount: Int = 40) -> [HeroTrendPoint] {
+    static func sampled(_ pts: [HeroTrendPoint], maxCount: Int = 10) -> [HeroTrendPoint] {
         guard pts.count > maxCount, maxCount >= 2 else { return pts }
         let step = Double(pts.count - 1) / Double(maxCount - 1)
         var out: [HeroTrendPoint] = []
