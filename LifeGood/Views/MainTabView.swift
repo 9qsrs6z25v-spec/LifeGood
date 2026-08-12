@@ -401,6 +401,13 @@ struct MainTabView: View {
                     .hidden()
             }
             .tint(.green)
+            // 每天開 App 自動背景收集三大法人買賣超（同一天只跑一輪，內部節流；
+            // 逐日累積供股票頁「法人連續買超」篩選與個股買賣超柱狀圖使用）
+            .task {
+                await Task.detached(priority: .utility) {
+                    await InstitutionalHistory.collectIfNeeded()
+                }.value
+            }
             .onChange(of: appMode) { _, _ in
                 isSettingsActive = false
             }

@@ -94,6 +94,7 @@
 		A01B000001000045 /* MyCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000045 /* MyCalendarView.swift */; };
 		A01B000001000046 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000046 /* NotificationManager.swift */; };
 		A01B000001000047 /* StockDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000047 /* StockDetailView.swift */; };
+		A01B000001000212 /* InstitutionalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000212 /* InstitutionalView.swift */; };
 		A01B000001000048 /* RenovationPhotoEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000048 /* RenovationPhotoEditor.swift */; };
 		A01B000001000049 /* HolographicBuildingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000049 /* HolographicBuildingView.swift */; };
 		A01B00000100004A /* FamilyOverviewMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100004A /* FamilyOverviewMap.swift */; };
@@ -191,6 +192,7 @@
 		A01A000001000045 /* MyCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyCalendarView.swift; sourceTree = "<group>"; };
 		A01A000001000046 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		A01A000001000047 /* StockDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockDetailView.swift; sourceTree = "<group>"; };
+		A01A000001000212 /* InstitutionalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstitutionalView.swift; sourceTree = "<group>"; };
 		A01A000001000048 /* RenovationPhotoEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenovationPhotoEditor.swift; sourceTree = "<group>"; };
 		A01A000001000049 /* HolographicBuildingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HolographicBuildingView.swift; sourceTree = "<group>"; };
 		A01A00000100004A /* FamilyOverviewMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyOverviewMap.swift; sourceTree = "<group>"; };
@@ -305,6 +307,7 @@
 				A01A000001000016 /* AddSavingsInsuranceView.swift */,
 				A01A000001000017 /* AddStockView.swift */,
 				A01A000001000047 /* StockDetailView.swift */,
+				A01A000001000212 /* InstitutionalView.swift */,
 				A01A000001000019 /* VehicleView.swift */,
 				A01A00000100001A /* AddVehicleView.swift */,
 				A01A00000100001E /* VehicleDetailView.swift */,
@@ -526,6 +529,7 @@
 				A01B000001000045 /* MyCalendarView.swift in Sources */,
 				A01B000001000046 /* NotificationManager.swift in Sources */,
 				A01B000001000047 /* StockDetailView.swift in Sources */,
+				A01B000001000212 /* InstitutionalView.swift in Sources */,
 				A01B000001000048 /* RenovationPhotoEditor.swift in Sources */,
 				A01B000001000049 /* HolographicBuildingView.swift in Sources */,
 				A01B00000100004A /* FamilyOverviewMap.swift in Sources */,
@@ -543,7 +547,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 952;
+				CURRENT_PROJECT_VERSION = 953;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -568,7 +572,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.199;
+				MARKETING_VERSION = 25.200;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -584,7 +588,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 952;
+				CURRENT_PROJECT_VERSION = 953;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -609,7 +613,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.199;
+				MARKETING_VERSION = 25.200;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

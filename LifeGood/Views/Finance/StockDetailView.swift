@@ -131,6 +131,9 @@ struct StockDetailView: View {
                         CandleChartCard(candles: candlePoints)
                             .padding(.horizontal, 24)
                     }
+                    // 法人買賣超柱狀圖（每日收集的快照；未收集到該股資料時整卡隱藏）
+                    InstNetBarCard(symbol: stock.symbol)
+                        .padding(.horizontal, 24)
                     infoSection
                     transactionsSection
                     dividendsSection

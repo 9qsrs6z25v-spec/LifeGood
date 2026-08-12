@@ -85,6 +85,8 @@ struct StockView: View {
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
     @State private var emptyPulseTask: Task<Void, Never>?
+    /// 法人連續買超篩選頁
+    @State private var showInstitutional = false
     /// 股票卡背景序列（symbol → 已轉好的價/量 HeroTrendPoint）。
     /// 存「轉換完成」的最終形態而非原始 StockDailyPoint，
     /// 避免每次 render 每張卡都重複 map 兩個 60 點陣列。
@@ -163,14 +165,23 @@ struct StockView: View {
             .background(Color(.systemGroupedBackground))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    HStack(spacing: 16) {
+                        // 法人連續買超篩選頁（使用者指定放在＋號旁）
+                        Button { showInstitutional = true } label: {
+                            Image(systemName: "building.columns.fill")
+                                .font(.title3)
+                                .foregroundStyle(.orange)
+                        }
+                        Button { showAdd = true } label: {
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
             }
             .navigationTitle("股票")
             .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $showAdd) { AddStockView() }
+            .sheet(isPresented: $showInstitutional) { InstitutionalBuyView() }
             .sheet(item: $editingItem) { item in AddStockView(editing: item) }
             .sheet(item: $viewingItem) { item in StockDetailView(stock: item) }
             .overlay(alignment: .top) {
@@ -199,6 +210,10 @@ struct StockView: View {
             .onAppear {
                 Task { await refreshAllPrices() }
                 Task { await refreshDailyHistories() }
+                // 每天自動背景收集三大法人買賣超（同一天只跑一輪，內部節流）
+                Task.detached(priority: .utility) {
+                    await InstitutionalHistory.collectIfNeeded()
+                }
             }
             .onDisappear {
                 headerAppeared = false
