@@ -73,7 +73,8 @@ struct FixedExpenseView: View {
             expense.fixedCategory ?? .other
         }
         let sums = grouped.mapValues { exps in
-            exps.filter { $0.date <= now }.reduce(0) { $0 + $1.amount }
+            // 排序用 NT$ 等值（外幣儲蓄險換算後比較才公平）
+            exps.filter { $0.date <= now }.reduce(0) { $0 + store.ntdValue(of: $1) }
         }
         return grouped.sorted { sums[$0.key, default: 0] > sums[$1.key, default: 0] }
     }
@@ -181,14 +182,15 @@ struct FixedExpenseView: View {
     private var fixedSummaryHeader: some View {
         // 先計算一次，避免 store.fixedExpenses（每次都 filter+sort 全部支出）被呼叫 3 次
         let fixed = store.fixedExpenses
+        // 外幣儲蓄險以 NT$ 等值加總（store.ntdValue；修正 USD 原幣金額被當 NT$ 低估）
         let yearlyEstimate = fixed.reduce(0.0) { total, expense in
-            total + expense.amount * Double(occurrencesThisYear(for: expense))
+            total + store.ntdValue(of: expense) * Double(occurrencesThisYear(for: expense))
         }
         let count = fixed.count
         let monthlyTotal = store.currentMonthFixedTotal
         let taxTotal = fixed
             .filter { $0.effectivelyTaxDeductible }
-            .reduce(0.0) { $0 + monthlyEquivalent($1) }
+            .reduce(0.0) { $0 + monthlyEquivalentNTD($1) }
         let dailyFixed = monthlyTotal / max(1, Double(Calendar.current.component(.day, from: Date())))
 
         // 雙軌進度條計算（v3 升級）
@@ -622,6 +624,18 @@ struct FixedExpenseView: View {
         }
     }
 
+    /// 月均（NT$ 等值）：外幣儲蓄險先經 store.ntdValue 換算再攤月。
+    /// 注意 insuranceHeaderAmount 的分幣別小計要用「原幣」monthlyEquivalent，不可改用本函式。
+    private func monthlyEquivalentNTD(_ expense: Expense) -> Double {
+        let ntd = store.ntdValue(of: expense)
+        switch expense.recurrence {
+        case .monthly: return ntd
+        case .quarterly: return ntd / 3
+        case .yearly: return ntd / 12
+        case .none: return ntd
+        }
+    }
+
     private static let currencyFormatterCache = NSCache<NSString, NumberFormatter>()
     private func formatCurrencyWithCode(_ value: Double, code: String) -> String {
         if let f = Self.currencyFormatterCache.object(forKey: code as NSString) {
@@ -835,7 +849,7 @@ struct FixedExpenseRow: View {
             HStack(spacing: 2) {
                 Image(systemName: "arrow.down.to.line")
                     .font(.system(size: 8, weight: .medium))
-                Text("月均 \(formatCurrencyCompact(monthly))")
+                Text("月均 \(monthlyAverageText(monthly))")
                     .font(.system(size: 10, weight: .semibold))
             }
             .foregroundStyle(Color(red: 0.92, green: 0.28, blue: 0.28).opacity(0.65))
@@ -904,6 +918,19 @@ struct FixedExpenseRow: View {
 
     private func formatCurrency(_ value: Double) -> String {
         value.ntdWanString
+    }
+
+    /// 月均膠囊文字：儲蓄險 amount 是原幣別存值，外幣要標原幣別
+    /// （修正：USD 5,000 年繳曾顯示成「月均 NT$417」——數字是美元卻掛 NT$ 字頭）
+    private func monthlyAverageText(_ monthly: Double) -> String {
+        let code = expense.currencyCode
+        let isSavingsIns = expense.fixedCategory == .insurance
+            && expense.insuranceSubCategory == .savings
+        if isSavingsIns && code != "NT$" && code != "TWD" && !code.isEmpty {
+            let str = Self.decimalFormatter.string(from: NSNumber(value: monthly)) ?? "0"
+            return "\(code) \(str)"
+        }
+        return formatCurrencyCompact(monthly)
     }
 
     /// 依週期換算月均金額（與 FixedExpenseView.monthlyEquivalent 邏輯一致）
@@ -1027,7 +1054,7 @@ private struct FixedExpenseCard: View {
                 let monthly = monthlyEquivalent
                 if recurrence != .monthly, monthly > 0 {
                     Divider().padding(.leading, 14)
-                    field("月均換算", "NT$ " + fmtShort(monthly))
+                    field("月均換算", monthlyEquivalentDisplay(monthly))
                 }
             }
             Divider().padding(.leading, 14)
@@ -1193,6 +1220,21 @@ private struct FixedExpenseCard: View {
         case .yearly:    return current.amount / 12
         case .none:      return 0
         }
+    }
+
+    /// 月均換算顯示：外幣儲蓄險以原幣別標示，有匯率時附 NT$ 等值
+    /// （修正：USD 儲蓄險的月均曾直接掛「NT$」字頭）
+    private func monthlyEquivalentDisplay(_ monthly: Double) -> String {
+        let code = current.currencyCode
+        let isSavingsIns = current.fixedCategory == .insurance && current.insuranceSubCategory == .savings
+        guard isSavingsIns, code != "NT$", code != "TWD", !code.isEmpty else {
+            return "NT$ " + fmtShort(monthly)
+        }
+        let str = Self.decimalFmt.string(from: NSNumber(value: monthly)) ?? "0"
+        if let rate = store.currencyRates.first(where: { $0.code == code }), rate.rate > 0 {
+            return "\(code) \(str) ≈ NT$ " + fmtShort(monthly * rate.rate)
+        }
+        return "\(code) \(str)"
     }
 
     private var deductionTargetLabel: String? {

@@ -288,30 +288,46 @@ class ExpenseStore: ObservableObject {
     ///   - expense: 固定支出
     ///   - period: 目標時間區間
     /// - Returns: 換算後的金額
+    /// 支出的 NT$ 等值金額。儲蓄險的 amount 以「原幣別」存值（未乘匯率，
+    /// 見 AddExpenseView.saveExpense），其餘支出（含外幣保費）存的已是換算後 NT$；
+    /// 所有 NT$ 加總統計一律經此換算，否則 USD 5,000 會被當成 NT$5,000 加總而嚴重低估。
+    /// 找不到對應匯率時退回原值（使用者未設定匯率的舊行為）。
+    func ntdValue(of expense: Expense) -> Double {
+        let code = expense.currencyCode
+        guard expense.fixedCategory == .insurance,
+              expense.insuranceSubCategory == .savings,
+              code != "NT$", code != "TWD", !code.isEmpty,
+              let rate = currencyRates.first(where: { $0.code == code }), rate.rate > 0
+        else { return expense.amount }
+        return expense.amount * rate.rate
+    }
+
     private func projectedAmount(for expense: Expense, in period: TimePeriod) -> Double {
         guard expense.expenseType == .fixed, let recurrence = expense.recurrence else {
             return expense.amount
         }
 
+        // 外幣儲蓄險先換算 NT$ 再投射（修正：原本 USD 原幣金額被直接當 NT$）
+        let amount = ntdValue(of: expense)
         switch (recurrence, period) {
         // 每月 → 各區間
-        case (.monthly, .daily):    return expense.amount / 30.0
-        case (.monthly, .weekly):   return expense.amount / 4.33
-        case (.monthly, .monthly):  return expense.amount
-        case (.monthly, .quarterly): return expense.amount * 3.0
-        case (.monthly, .yearly):   return expense.amount * 12.0
+        case (.monthly, .daily):    return amount / 30.0
+        case (.monthly, .weekly):   return amount / 4.33
+        case (.monthly, .monthly):  return amount
+        case (.monthly, .quarterly): return amount * 3.0
+        case (.monthly, .yearly):   return amount * 12.0
         // 每季 → 各區間
-        case (.quarterly, .daily):    return expense.amount / 91.0
-        case (.quarterly, .weekly):   return expense.amount / 13.0
-        case (.quarterly, .monthly):  return expense.amount / 3.0
-        case (.quarterly, .quarterly): return expense.amount
-        case (.quarterly, .yearly):   return expense.amount * 4.0
+        case (.quarterly, .daily):    return amount / 91.0
+        case (.quarterly, .weekly):   return amount / 13.0
+        case (.quarterly, .monthly):  return amount / 3.0
+        case (.quarterly, .quarterly): return amount
+        case (.quarterly, .yearly):   return amount * 4.0
         // 每年 → 各區間
-        case (.yearly, .daily):    return expense.amount / 365.0
-        case (.yearly, .weekly):   return expense.amount / 52.0
-        case (.yearly, .monthly):  return expense.amount / 12.0
-        case (.yearly, .quarterly): return expense.amount / 4.0
-        case (.yearly, .yearly):   return expense.amount
+        case (.yearly, .daily):    return amount / 365.0
+        case (.yearly, .weekly):   return amount / 52.0
+        case (.yearly, .monthly):  return amount / 12.0
+        case (.yearly, .quarterly): return amount / 4.0
+        case (.yearly, .yearly):   return amount
         }
     }
 
