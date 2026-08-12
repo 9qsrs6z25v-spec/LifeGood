@@ -2360,14 +2360,85 @@ struct CloudSharingSheet: UIViewControllerRepresentable {
     }
 }
 
-// MARK: - 進階設定（模板參數）
+// MARK: - 進階設定（樹狀目錄）
 
-/// 設定 > 進階設定：把 App 內建模板的可調參數拉出來給使用者滑桿微調。
-/// 目前開放「英雄卡背景趨勢曲線」（HeroTrendChart 模板）四個參數，
-/// @AppStorage 直寫 UserDefaults，四張英雄卡（股票／收入／變動／固定支出）即時生效；
-/// 之後其他模板要開放的參數也集中收在這一頁。
-/// （注意：依 FamilySharingRow 教訓，子區塊抽成獨立方法／小視圖，避免型別深度爆棧。）
+/// 設定 > 進階設定：模板可調參數的樹狀目錄入口——
+///   1. 圖表設定
+///      1.1 趨勢曲線模板（股票／收入／變動／固定支出看板共用）
+///      1.2 股票（項目卡成交量柱）
+/// 之後其他模板要開放的參數，依同樣的樹狀分類往下掛新頁。
+/// （注意：依 FamilySharingRow 教訓，子頁抽成獨立 struct，避免型別深度爆棧。）
 struct AdvancedSettingsView: View {
+    var body: some View {
+        Form {
+            Section {
+                NavigationLink {
+                    TrendCurveSettingsView()
+                } label: {
+                    advancedRow(icon: "waveform.path", color: .blue,
+                                title: "趨勢曲線模板",
+                                note: "股票／收入／變動／固定支出看板背景共用")
+                }
+                NavigationLink {
+                    StockChartSettingsView()
+                } label: {
+                    advancedRow(icon: "chart.bar.fill", color: .orange,
+                                title: "股票",
+                                note: "項目卡成交量柱狀圖")
+                }
+            } header: {
+                Text("圖表設定")
+            } footer: {
+                Text("之後開放的模板參數也會依分類收在這裡。")
+            }
+        }
+        .navigationTitle("進階設定")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func advancedRow(icon: String, color: Color,
+                             title: String, note: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(color.gradient)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// 進階設定共用滑桿列（標題 + 目前值 + bar 條）
+private func advancedSliderRow(title: String, display: String,
+                               value: Binding<Double>,
+                               range: ClosedRange<Double>, step: Double) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+        HStack {
+            Text(title)
+                .font(.subheadline)
+            Spacer()
+            Text(display)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        Slider(value: value, in: range, step: step)
+            .tint(.blue)
+    }
+    .padding(.vertical, 2)
+}
+
+// MARK: 1.1 趨勢曲線模板（四張看板共用）
+
+struct TrendCurveSettingsView: View {
     @AppStorage("hero_trend_point_count") private var pointCount: Int = 10
     @AppStorage("hero_trend_opacity") private var mainOpacity: Double = 0.30
     @AppStorage("hero_trend_line_width") private var mainLineWidth: Double = 2.0
@@ -2376,15 +2447,14 @@ struct AdvancedSettingsView: View {
     var body: some View {
         Form {
             previewSection
-            trendParamsSection
+            paramsSection
             resetSection
         }
-        .navigationTitle("進階設定")
+        .navigationTitle("趨勢曲線模板")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    // MARK: 即時預覽（示範資料 + 真的 HeroTrendBackground，所見即所得）
-
+    // 即時預覽（示範資料 + 真的 HeroTrendBackground，所見即所得）
     private var previewSection: some View {
         Section {
             ZStack {
@@ -2418,11 +2488,9 @@ struct AdvancedSettingsView: View {
         }
     }
 
-    // MARK: 曲線模板參數
-
-    private var trendParamsSection: some View {
+    private var paramsSection: some View {
         Section {
-            sliderRow(
+            advancedSliderRow(
                 title: "資料點數",
                 display: "\(pointCount) 點",
                 value: Binding(
@@ -2431,26 +2499,26 @@ struct AdvancedSettingsView: View {
                 ),
                 range: 4...20, step: 1
             )
-            sliderRow(
+            advancedSliderRow(
                 title: "透明度",
                 display: "\(Int((mainOpacity * 100).rounded()))%",
                 value: $mainOpacity,
                 range: 0.10...0.80, step: 0.05
             )
-            sliderRow(
+            advancedSliderRow(
                 title: "線條粗細",
                 display: String(format: "%.1f pt", mainLineWidth),
                 value: $mainLineWidth,
                 range: 1.0...4.0, step: 0.5
             )
-            sliderRow(
+            advancedSliderRow(
                 title: "景深模糊",
                 display: String(format: "%.1f", blurRadius),
                 value: $blurRadius,
                 range: 0.0...6.0, step: 0.2
             )
         } header: {
-            Text("英雄卡背景趨勢曲線")
+            Text("曲線參數")
         } footer: {
             Text("套用於股票、收入、變動支出、固定支出四張看板的背景曲線，調整立即生效。回聲側線的粗細與透明度會隨主線等比例連動。")
         }
@@ -2470,25 +2538,92 @@ struct AdvancedSettingsView: View {
             .foregroundStyle(.blue)
         }
     }
+}
 
-    // MARK: 滑桿列（標題 + 目前值 + bar 條）
+// MARK: 1.2 股票（項目卡成交量柱）
 
-    private func sliderRow(title: String, display: String,
-                           value: Binding<Double>,
-                           range: ClosedRange<Double>, step: Double) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(title)
-                    .font(.subheadline)
-                Spacer()
-                Text(display)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            Slider(value: value, in: range, step: step)
-                .tint(.blue)
+struct StockChartSettingsView: View {
+    @AppStorage("hero_volume_bar_opacity") private var volumeBarOpacity: Double = 0.45
+
+    var body: some View {
+        Form {
+            previewSection
+            paramsSection
+            resetSection
         }
-        .padding(.vertical, 2)
+        .navigationTitle("股票")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // 即時預覽：白卡 + 橙色日線曲線與量柱，模擬實際股票項目卡
+    private var previewSection: some View {
+        Section {
+            ZStack {
+                Color(.systemBackground)
+                HeroPriceVolumeBackground(
+                    prices: demoPrices,
+                    volumes: demoVolumes,
+                    tint: Color(red: 1.00, green: 0.62, blue: 0.22)
+                )
+            }
+            .frame(height: 110)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(.separator).opacity(0.25), lineWidth: 0.75)
+            )
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            .listRowBackground(Color.clear)
+        } header: {
+            Text("即時預覽")
+        }
+    }
+
+    /// 示範日線（30 天、形狀固定：緩漲＋正弦波動），只給預覽卡用
+    private var demoPrices: [HeroTrendPoint] {
+        let cal = Calendar.current
+        let base = cal.date(byAdding: .day, value: -29, to: Date()) ?? Date()
+        return (0..<30).map { i in
+            let v = 100.0 + Double(i) * 0.8 + 6.0 * sin(Double(i) / 3.5)
+            return HeroTrendPoint(date: cal.date(byAdding: .day, value: i, to: base) ?? base,
+                                  value: v)
+        }
+    }
+
+    private var demoVolumes: [HeroTrendPoint] {
+        let cal = Calendar.current
+        let base = cal.date(byAdding: .day, value: -29, to: Date()) ?? Date()
+        return (0..<30).map { i in
+            let v = 800.0 + 600.0 * abs(sin(Double(i) * 1.3)) + 250.0 * abs(sin(Double(i) * 0.7))
+            return HeroTrendPoint(date: cal.date(byAdding: .day, value: i, to: base) ?? base,
+                                  value: v)
+        }
+    }
+
+    private var paramsSection: some View {
+        Section {
+            advancedSliderRow(
+                title: "成交量柱透明度",
+                display: "\(Int((volumeBarOpacity * 100).rounded()))%",
+                value: $volumeBarOpacity,
+                range: 0.05...0.90, step: 0.05
+            )
+        } header: {
+            Text("成交量柱狀圖")
+        } footer: {
+            Text("股票項目卡底部的每日成交量柱；與曲線透明度各自獨立，調整立即生效。")
+        }
+    }
+
+    private var resetSection: some View {
+        Section {
+            Button {
+                volumeBarOpacity = 0.45
+            } label: {
+                Label("恢復預設值", systemImage: "arrow.counterclockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .foregroundStyle(.blue)
+        }
     }
 }

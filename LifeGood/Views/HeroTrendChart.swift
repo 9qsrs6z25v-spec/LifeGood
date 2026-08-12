@@ -240,7 +240,8 @@ struct HeroTrendBackground: View {
 /// 股票項目卡背景：上方每日收盤價曲線（沿用 HeroTrendBackground 完整模板、
 /// 每日一點不壓縮、不顯示末端大字——卡片右側已有現價），下方每日成交量
 /// 柱狀圖（最高量柱只到卡片約 20% 高，當作曲線的底座）。
-/// 白卡上用強調色 tint 繪製；透明度沿用進階設定、量柱再打 0.55 折更收斂。
+/// 白卡上用強調色 tint 繪製；量柱透明度獨立於曲線透明度，
+/// 由「進階設定 > 圖表設定 > 股票」單獨調整（使用者反映量柱不明顯）。
 struct HeroPriceVolumeBackground: View {
     /// 每日收盤價（原始序列）
     let prices: [HeroTrendPoint]
@@ -248,7 +249,7 @@ struct HeroPriceVolumeBackground: View {
     let volumes: [HeroTrendPoint]
     var tint: Color = .white
 
-    @AppStorage("hero_trend_opacity") private var mainOpacity: Double = 0.30
+    @AppStorage("hero_volume_bar_opacity") private var volumeBarOpacity: Double = 0.45
 
     var body: some View {
         ZStack {
@@ -264,7 +265,7 @@ struct HeroPriceVolumeBackground: View {
                         y: .value("量", v.value),
                         width: .fixed(1.5)
                     )
-                    .foregroundStyle(tint.opacity(mainOpacity * 0.55))
+                    .foregroundStyle(tint.opacity(volumeBarOpacity))
                 }
                 .chartXAxis(.hidden)
                 .chartYAxis(.hidden)
