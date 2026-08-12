@@ -761,6 +761,13 @@ struct FixedExpenseRow: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            mainRow
+            loanProgressSection
+        }
+    }
+
+    private var mainRow: some View {
         HStack(spacing: 0) {
             // 左側分類色彩強調條（加粗至 4pt，圓角加大增加視覺重量）
             RoundedRectangle(cornerRadius: 3)
@@ -844,6 +851,68 @@ struct FixedExpenseRow: View {
             }
             .padding(.vertical, 7)
         }
+    }
+
+    /// 貸款繳費進度條（使用者指定：比照儲蓄險卡進度條，一目了然離繳清終點多遠）。
+    /// 4pt 膠囊軌＋分類色漸層＋glow，右側標「已繳/總期」；繳清顯示「已繳清」。
+    @ViewBuilder
+    private var loanProgressSection: some View {
+        if let lp = loanProgress {
+            HStack(spacing: 8) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color(.systemFill))
+                            .frame(height: 4)
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [categoryAccent, categoryAccent.opacity(0.60)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: geo.size.width * lp.ratio, height: 4)
+                        // glow overlay 對齊 SavingsInsuranceView 進度條規格
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.28), .clear, .black.opacity(0.08)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(width: geo.size.width * lp.ratio, height: 4)
+                    }
+                }
+                .frame(height: 4)
+                Text(lp.text)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize()
+            }
+            .padding(.leading, 18)   // 對齊左側 4pt 強調條後的內容起點
+            .padding(.trailing, 2)
+            .padding(.bottom, 9)
+        }
+    }
+
+    /// 貸款進度：優先用「貸款年期」推總期數；沒填年期時用「貸款總額 ÷ 月付」推估。
+    /// 起始日即繳第一期（比照儲蓄險 elapsedPeriods 規則）；資料不足不顯示。
+    private var loanProgress: (ratio: Double, text: String)? {
+        guard expense.fixedCategory == .loan else { return nil }
+        let monthly = monthlyEquivalentAmount(expense)
+        var totalMonths = 0
+        if let years = expense.loanYears, years > 0 {
+            totalMonths = Int((years * 12).rounded())
+        } else if let total = expense.loanTotalAmount, total > 0, monthly > 0 {
+            totalMonths = Int((total / monthly).rounded())
+        }
+        guard totalMonths > 0 else { return nil }
+        let months = Calendar.current.dateComponents([.month], from: expense.date, to: Date()).month ?? 0
+        let elapsed = max(0, min(months + 1, totalMonths))
+        return (Double(elapsed) / Double(totalMonths),
+                elapsed >= totalMonths ? "已繳清" : "\(elapsed)/\(totalMonths) 期")
     }
 
     /// 季繳 / 年繳的「月均」膠囊（抽出以降低主 body 型別檢查複雜度）

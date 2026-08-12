@@ -210,6 +210,27 @@ struct SavingsInsuranceView: View {
 
     // MARK: - 摘要英雄卡片
 
+    /// 英雄卡背景趨勢序列：全部保單「NT$ 估值合計」逐月回算（從最早保單起始月到本月，
+    /// 上限 480 個月）；外幣經 ntEquivalent 換算，與看板大字同一口徑，末點＝目前估值
+    private var heroTrendSeries: [HeroTrendPoint] {
+        let items = store.insurances
+        guard let firstDate = items.map(\.startDate).min() else { return [] }
+        let cal = Calendar.current
+        guard let currentMonth = cal.date(from: cal.dateComponents([.year, .month], from: Date())),
+              let firstMonth = cal.date(from: cal.dateComponents([.year, .month], from: firstDate)) else {
+            return []
+        }
+        let count = min((cal.dateComponents([.month], from: firstMonth, to: currentMonth).month ?? 0) + 1, 480)
+        guard count >= 1 else { return [] }
+        var out: [HeroTrendPoint] = []
+        for back in stride(from: count - 1, through: 0, by: -1) {
+            guard let m = cal.date(byAdding: .month, value: -back, to: currentMonth) else { continue }
+            let total = items.reduce(0.0) { $0 + ntEquivalent($1.value(at: m), code: $1.currencyCode) }
+            out.append(HeroTrendPoint(date: m, value: total))
+        }
+        return out
+    }
+
     private var summaryHeader: some View {
         // 把所有保單（含外幣）換算成 NT$ 後加總；否則只有外幣保單時看板會顯示 NT$0
         let otherItems = store.insurances.filter { $0.currencyCode != "NT$" }
@@ -369,6 +390,9 @@ struct SavingsInsuranceView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // 保單估值趨勢曲線背景（HeroTrendBackground 標準模板）：
+                // 複利估值可對任何過去月份確定性回算，逐月生成、免存快照
+                HeroTrendBackground(points: heroTrendSeries, stepBack: 2_592_000)
                 Circle()
                     .fill(.white.opacity(0.13))
                     .frame(width: 130, height: 130)

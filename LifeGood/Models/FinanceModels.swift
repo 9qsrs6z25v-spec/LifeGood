@@ -251,6 +251,24 @@ struct SavingsInsurance: Identifiable, Codable {
         return Self.futureValue(payment: premiumAmount, ratePerPeriod: r, periods: elapsedPeriods)
     }
 
+    /// 指定日期當下的已繳期數（歷史回算用；同 elapsedPeriods 規則）
+    func elapsedPeriods(at date: Date) -> Int {
+        let calendar = Calendar.current
+        guard date >= startDate else { return 0 }
+        let elapsedMonths = calendar.dateComponents([.month], from: startDate,
+                                                    to: min(date, maturityDate)).month ?? 0
+        let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
+        return max(0, min(elapsedMonths / monthsPerPeriod + 1, totalPeriods))
+    }
+
+    /// 指定日期當下的估值（歷史回算用；英雄卡背景趨勢曲線）——
+    /// 複利公式對過去任一時點都可確定性回算，不需要另存歷史快照
+    func value(at date: Date) -> Double {
+        let r = annualRate / 100.0 / periodsPerYear
+        return Self.futureValue(payment: premiumAmount, ratePerPeriod: r,
+                                periods: elapsedPeriods(at: date))
+    }
+
     /// 已繳總額
     var totalPaid: Double {
         premiumAmount * Double(elapsedPeriods)
