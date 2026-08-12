@@ -85,8 +85,14 @@ struct StockView: View {
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
     @State private var emptyPulseTask: Task<Void, Never>?
-    /// 個股日線（收盤價＋成交量，symbol → 3 個月每日資料）；項目卡背景用
-    @State private var dailyHistory: [String: [StockDailyPoint]] = [:]
+    /// 股票卡背景序列（symbol → 已轉好的價/量 HeroTrendPoint）。
+    /// 存「轉換完成」的最終形態而非原始 StockDailyPoint，
+    /// 避免每次 render 每張卡都重複 map 兩個 60 點陣列。
+    struct StockCardSeries {
+        let prices: [HeroTrendPoint]
+        let volumes: [HeroTrendPoint]
+    }
+    @State private var dailyHistory: [String: StockCardSeries] = [:]
 
     private var activeStocks: [Stock] { store.stocks.filter { !$0.isSold } }
     private var soldStocks: [Stock] { store.stocks.filter { $0.isSold } }
@@ -257,23 +263,42 @@ struct StockView: View {
         withAnimation { updateBanner = nil }
     }
 
-    /// 個股日線刷新：先立即載入快取（畫面秒有曲線），再背景補抓過期的
+    /// 個股日線刷新：先載快取（畫面很快有曲線）、再背景補抓過期的。
+    /// 效能要點（進頁頓挫修正）：(1) 快取 JSON 解碼移到背景執行緒，不佔主執行緒；
+    /// (2) 網路結果全部到齊後「一次」合併寫回 @State，避免逐檔觸發整頁重繪。
     private func refreshDailyHistories() async {
-        let symbols = store.stocks.filter { !$0.isSold && !$0.symbol.isEmpty }.map(\.symbol)
-        var map: [String: [StockDailyPoint]] = [:]
-        for sym in symbols {
-            let cachedPts = StockDailyHistory.cached(symbol: sym)
-            if !cachedPts.isEmpty { map[sym] = cachedPts }
-        }
-        dailyHistory = map
+        let symbols = Array(Set(store.stocks.filter { !$0.isSold && !$0.symbol.isEmpty }
+            .map(\.symbol)))
+        guard !symbols.isEmpty else { return }
+        let cachedMap = await Task.detached(priority: .userInitiated) {
+            () -> [String: StockCardSeries] in
+            var map: [String: StockCardSeries] = [:]
+            for sym in symbols {
+                let pts = StockDailyHistory.cached(symbol: sym)
+                if pts.count >= 2 { map[sym] = Self.makeSeries(pts) }
+            }
+            return map
+        }.value
+        dailyHistory = cachedMap
+        var fetched: [String: StockCardSeries] = [:]
         await withTaskGroup(of: (String, [StockDailyPoint]).self) { group in
-            for sym in Set(symbols) where !StockDailyHistory.isFresh(symbol: sym) {
+            for sym in symbols where !StockDailyHistory.isFresh(symbol: sym) {
                 group.addTask { (sym, await StockDailyHistory.fetch(symbol: sym)) }
             }
-            for await (sym, pts) in group where !pts.isEmpty {
-                dailyHistory[sym] = pts
+            for await (sym, pts) in group where pts.count >= 2 {
+                fetched[sym] = Self.makeSeries(pts)
             }
         }
+        if !fetched.isEmpty {
+            dailyHistory.merge(fetched) { _, new in new }
+        }
+    }
+
+    private static func makeSeries(_ pts: [StockDailyPoint]) -> StockCardSeries {
+        StockCardSeries(
+            prices: pts.map { HeroTrendPoint(date: $0.date, value: $0.close) },
+            volumes: pts.map { HeroTrendPoint(date: $0.date, value: $0.volume) }
+        )
     }
 
     /// symbol → 已知市場別（tse/otc）快取：從批次回應的 ex 欄位學會後存起來，
@@ -846,10 +871,10 @@ struct StockView: View {
     private func stockCardBackground(_ item: Stock, accent: Color) -> some View {
         ZStack {
             Color(.systemBackground)
-            if !item.isSold, let daily = dailyHistory[item.symbol], daily.count >= 2 {
+            if !item.isSold, let series = dailyHistory[item.symbol], series.prices.count >= 2 {
                 HeroPriceVolumeBackground(
-                    prices: daily.map { HeroTrendPoint(date: $0.date, value: $0.close) },
-                    volumes: daily.map { HeroTrendPoint(date: $0.date, value: $0.volume) },
+                    prices: series.prices,
+                    volumes: series.volumes,
                     tint: accent
                 )
             }

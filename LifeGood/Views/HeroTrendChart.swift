@@ -195,6 +195,10 @@ struct HeroTrendBackground: View {
                 .chartYScale(domain: yDomain)
                 .allowsHitTesting(false)
             }
+            // 整組壓成單一 Metal 圖層：背景實際疊了 7 個 Chart（三線×模糊/清晰
+            // 兩層＋末端點），即時合成 blur+mask 在列表捲動/進場動畫時會頓挫；
+            // drawingGroup 讓它先離屏渲染成一張圖再參與動畫，GPU 負擔大幅下降。
+            .drawingGroup()
         }
     }
 
