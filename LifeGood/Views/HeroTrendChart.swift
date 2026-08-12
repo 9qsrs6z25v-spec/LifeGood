@@ -4,12 +4,12 @@ import Charts
 // MARK: - 英雄卡背景趨勢曲線標準模板
 // 從 StockView 英雄卡抽出（v25.173~25.181 逐版與使用者打磨定案的視覺規格），
 // 供股票／收入／變動支出／固定支出等英雄卡共用。規格：
-//  1. 平滑曲線（catmullRom）＋漸層面積；主線 2pt、半透明 50%
+//  1. 平滑曲線（catmullRom）＋漸層面積；主線 2pt、半透明 30%
 //  2. 垂直帶映射：數值範圍映射到卡片高度 20%~60% 帶，上方 40% 留白給大字
 //  3. X 軸右延 25% 資料跨距：末點落在「右邊往回 20%」位置（類 3D 縱深構圖）
-//  4. 回聲側線：主線左右各偏移 1% 卡片寬（1pt、22% 透明、無面積、尾端漸淡收細）
+//  4. 回聲側線：主線左右各偏移 1% 卡片寬（1pt、13% 透明、無面積、尾端漸淡收細）
 //  5. 景深：左高斯模糊→右漸清晰（同組線畫兩層、互補左右漸層遮罩交叉淡化）
-//  6. 末端實心圓點＋大字數值標籤（皆半透明 50%；X/Y 軸各傾 5°、Z 軸 2° 立體微傾）
+//  6. 末端實心圓點＋大字數值標籤（皆半透明 30%；X/Y 軸各傾 5°、Z 軸 2° 立體微傾）
 // 背景用法：放進英雄卡 .background 的 ZStack、緊接在底色 LinearGradient 之後。
 
 /// 英雄卡背景趨勢資料點
@@ -105,11 +105,11 @@ struct HeroTrendBackground: View {
             let trendGroup = ZStack {
                 trendLine(xDomain: xDomain, yDomain: yDomain,
                           xShift: -echoShift, lineWidth: 1,
-                          lineOpacity: 0.22, showArea: false)
+                          lineOpacity: 0.13, showArea: false)
                     .mask(echoTailTaper)
                 trendLine(xDomain: xDomain, yDomain: yDomain,
                           xShift: echoShift, lineWidth: 1,
-                          lineOpacity: 0.22, showArea: false)
+                          lineOpacity: 0.13, showArea: false)
                     .mask(echoTailTaper)
                 trendLine(xDomain: xDomain, yDomain: yDomain)
             }
@@ -128,21 +128,21 @@ struct HeroTrendBackground: View {
                         .init(color: .clear, location: 0.20),
                         .init(color: .white, location: 0.75)
                     ], startPoint: .leading, endPoint: .trailing))
-                // 上層：最後一個（真實）點——圓形實心、半透明 50%＋大字數值（同樣半透明）
+                // 上層：最後一個（真實）點——圓形實心、半透明 30%＋大字數值（同樣半透明）
                 Chart(points) { p in
                     if p.id == points.last?.id {
                         PointMark(
                             x: .value("時間", p.date),
                             y: .value("數值", p.value)
                         )
-                        .foregroundStyle(.white.opacity(0.50))
+                        .foregroundStyle(.white.opacity(0.30))
                         .symbol(.circle)
                         .symbolSize(90)
                         .annotation(position: .top,
                                     overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
                             Text(valueText(p.value))
                                 .font(.system(size: 19, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.50))
+                                .foregroundStyle(.white.opacity(0.30))
                                 .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
                                 // 立體微傾：X/Y 軸各轉 5 度、Z 軸轉 2 度，呼應景深構圖
                                 .rotation3DEffect(.degrees(5), axis: (x: 1, y: 0, z: 0))
@@ -166,7 +166,7 @@ struct HeroTrendBackground: View {
     private func trendLine(xDomain: ClosedRange<Date>, yDomain: ClosedRange<Double>,
                            xShift: TimeInterval = 0,
                            lineWidth: CGFloat = 2,
-                           lineOpacity: Double = 0.50,
+                           lineOpacity: Double = 0.30,
                            showArea: Bool = true) -> some View {
         Chart(points) { p in
             if showArea {
