@@ -186,10 +186,7 @@ struct VariableExpenseView: View {
                 cachedTodayVariableTotal = store.variableExpenses
                     .filter { Calendar.current.isDateInToday($0.date) }
                     .reduce(0) { $0 + $1.amount }
-                heroSeries = HeroTrendSeries.displayPoints(
-                    from: store.heroVariableSeries(),
-                    stepBack: 2_592_000   // 月資料：合成點往回各推一個月
-                )
+                heroSeries = store.heroVariableSeries()   // 壓縮/補點交給模板依進階設定即時處理
             }
             .task(id: "\(store.modifyID)-\(selectedCategory?.rawValue ?? "")-\(debouncedSearchText)") {
                 cachedFilteredExpenses = buildFilteredExpenses()
@@ -397,7 +394,7 @@ struct VariableExpenseView: View {
                     endPoint: .bottomTrailing
                 )
                 // 單月變動支出趨勢曲線背景（HeroTrendBackground 標準模板，與股票英雄卡同規格）
-                HeroTrendBackground(points: heroSeries)
+                HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
                 // 右上主散景圓
                 Circle()
                     .fill(.white.opacity(0.12))

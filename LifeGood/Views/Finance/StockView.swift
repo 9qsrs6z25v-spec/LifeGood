@@ -424,8 +424,9 @@ struct StockView: View {
 
     // MARK: - 摘要（橙色漸層英雄卡片）
 
-    /// 英雄卡背景趨勢資料（每週總市值快照，取樣至最多 10 點）；onAppear 與報價更新後刷新。
-    /// 繪製已抽成 HeroTrendBackground 標準模板（HeroTrendChart.swift），四張英雄卡共用。
+    /// 英雄卡背景趨勢資料（每週總市值快照原始序列）；onAppear 與報價更新後刷新。
+    /// 繪製已抽成 HeroTrendBackground 標準模板（HeroTrendChart.swift），四張英雄卡共用；
+    /// 點數／透明度等參數由「設定 > 進階設定」控制。
     @State private var heroTrend: [HeroTrendPoint] = []
 
     private func summaryHeader(active: [Stock]) -> some View {
@@ -940,13 +941,9 @@ enum StockValueHistory {
         return list
     }
 
-    /// 顯示用資料點：取樣／合成引導點邏輯已移入 HeroTrendSeries 標準模板
-    /// （HeroTrendChart.swift），此處只負責把週快照轉成 HeroTrendPoint。
-    static func displayPoints(maxCount: Int = 10) -> [HeroTrendPoint] {
-        HeroTrendSeries.displayPoints(
-            from: load().map { HeroTrendPoint(date: $0.weekStart, value: $0.value) },
-            maxCount: maxCount,
-            stepBack: 604_800   // 週資料：合成點往回各推一週
-        )
+    /// 顯示用原始資料點：壓縮（分桶移動平均）與合成引導點交給 HeroTrendBackground
+    /// 依「設定 > 進階設定」的參數即時處理，此處只負責把週快照轉成 HeroTrendPoint。
+    static func displayPoints() -> [HeroTrendPoint] {
+        load().map { HeroTrendPoint(date: $0.weekStart, value: $0.value) }
     }
 }

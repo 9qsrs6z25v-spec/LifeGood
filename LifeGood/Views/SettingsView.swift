@@ -327,6 +327,23 @@ struct SettingsView: View {
                 disclosureBlock("關於", icon: "info.circle.fill", color: .gray, isExpanded: $aboutExpanded) {
                     aboutSection
                 }
+                // 進階設定：內建模板的可調參數（曲線點數／透明度等）集中在獨立頁
+                Section {
+                    NavigationLink {
+                        AdvancedSettingsView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                                .background(Color.gray.gradient)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            Text("進階設定")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                }
             }
             .navigationTitle("設定")
             .sheet(isPresented: $showPaywall) {
@@ -2340,5 +2357,138 @@ struct CloudSharingSheet: UIViewControllerRepresentable {
             // 擁有者停止共享：自己的資料本來就在私有庫，模式不變；
             // 參與者端下次同步會收到 zoneNotFound，可自行退出共享
         }
+    }
+}
+
+// MARK: - 進階設定（模板參數）
+
+/// 設定 > 進階設定：把 App 內建模板的可調參數拉出來給使用者滑桿微調。
+/// 目前開放「英雄卡背景趨勢曲線」（HeroTrendChart 模板）四個參數，
+/// @AppStorage 直寫 UserDefaults，四張英雄卡（股票／收入／變動／固定支出）即時生效；
+/// 之後其他模板要開放的參數也集中收在這一頁。
+/// （注意：依 FamilySharingRow 教訓，子區塊抽成獨立方法／小視圖，避免型別深度爆棧。）
+struct AdvancedSettingsView: View {
+    @AppStorage("hero_trend_point_count") private var pointCount: Int = 10
+    @AppStorage("hero_trend_opacity") private var mainOpacity: Double = 0.30
+    @AppStorage("hero_trend_line_width") private var mainLineWidth: Double = 2.0
+    @AppStorage("hero_trend_blur") private var blurRadius: Double = 2.2
+
+    var body: some View {
+        Form {
+            previewSection
+            trendParamsSection
+            resetSection
+        }
+        .navigationTitle("進階設定")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: 即時預覽（示範資料 + 真的 HeroTrendBackground，所見即所得）
+
+    private var previewSection: some View {
+        Section {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 1.00, green: 0.62, blue: 0.22),
+                        Color(red: 0.86, green: 0.36, blue: 0.06)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                HeroTrendBackground(points: demoPoints, stepBack: 2_592_000)
+            }
+            .frame(height: 130)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            .listRowBackground(Color.clear)
+        } header: {
+            Text("即時預覽")
+        }
+    }
+
+    /// 示範序列（12 個月、形狀固定），只給預覽卡用
+    private var demoPoints: [HeroTrendPoint] {
+        let cal = Calendar.current
+        let base = cal.date(byAdding: .month, value: -11, to: Date()) ?? Date()
+        let vals: [Double] = [46, 52, 49, 58, 66, 61, 72, 69, 78, 86, 90, 97]
+        return vals.enumerated().map { i, v in
+            HeroTrendPoint(date: cal.date(byAdding: .month, value: i, to: base) ?? base,
+                           value: v * 10_000)
+        }
+    }
+
+    // MARK: 曲線模板參數
+
+    private var trendParamsSection: some View {
+        Section {
+            sliderRow(
+                title: "資料點數",
+                display: "\(pointCount) 點",
+                value: Binding(
+                    get: { Double(pointCount) },
+                    set: { pointCount = Int($0.rounded()) }
+                ),
+                range: 4...20, step: 1
+            )
+            sliderRow(
+                title: "透明度",
+                display: "\(Int((mainOpacity * 100).rounded()))%",
+                value: $mainOpacity,
+                range: 0.10...0.80, step: 0.05
+            )
+            sliderRow(
+                title: "線條粗細",
+                display: String(format: "%.1f pt", mainLineWidth),
+                value: $mainLineWidth,
+                range: 1.0...4.0, step: 0.5
+            )
+            sliderRow(
+                title: "景深模糊",
+                display: String(format: "%.1f", blurRadius),
+                value: $blurRadius,
+                range: 0.0...6.0, step: 0.2
+            )
+        } header: {
+            Text("英雄卡背景趨勢曲線")
+        } footer: {
+            Text("套用於股票、收入、變動支出、固定支出四張看板的背景曲線，調整立即生效。回聲側線的粗細與透明度會隨主線等比例連動。")
+        }
+    }
+
+    private var resetSection: some View {
+        Section {
+            Button {
+                pointCount = 10
+                mainOpacity = 0.30
+                mainLineWidth = 2.0
+                blurRadius = 2.2
+            } label: {
+                Label("恢復預設值", systemImage: "arrow.counterclockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .foregroundStyle(.blue)
+        }
+    }
+
+    // MARK: 滑桿列（標題 + 目前值 + bar 條）
+
+    private func sliderRow(title: String, display: String,
+                           value: Binding<Double>,
+                           range: ClosedRange<Double>, step: Double) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.subheadline)
+                Spacer()
+                Text(display)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: value, in: range, step: step)
+                .tint(.blue)
+        }
+        .padding(.vertical, 2)
     }
 }

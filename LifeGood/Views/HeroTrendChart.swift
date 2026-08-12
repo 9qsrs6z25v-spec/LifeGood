@@ -31,8 +31,10 @@ enum HeroTrendSeries {
                               minCount: Int = 6,
                               stepBack: TimeInterval = 604_800) -> [HeroTrendPoint] {
         let real = averaged(raw.sorted { $0.date < $1.date }, maxCount: maxCount)
-        guard let first = real.first, real.count < minCount else { return real }
-        let padCount = minCount - real.count
+        // 補點目標不能超過壓縮上限（進階設定把點數調到 6 以下時，以點數上限為準）
+        let padTarget = min(minCount, maxCount)
+        guard let first = real.first, real.count < padTarget else { return real }
+        let padCount = padTarget - real.count
         var seed = UInt64(abs(first.date.timeIntervalSince1970))
             &+ UInt64(abs(first.value) + 1)
         func nextUnit() -> Double {
@@ -80,30 +82,47 @@ enum HeroTrendSeries {
 
 /// 英雄卡背景趨勢曲線（白色半透明，適用任何深色漸層底卡）。
 /// 至少 2 點才畫、完全不吃觸控；不足 2 點時什麼都不畫（EmptyView）。
+/// 傳入「原始序列」即可：壓縮（分桶移動平均）與補點在顯示時依進階設定即時處理，
+/// 使用者在「設定 > 進階設定」拉滑桿時（@AppStorage）四張英雄卡立即生效。
 struct HeroTrendBackground: View {
+    /// 原始序列（未壓縮）
     let points: [HeroTrendPoint]
+    /// 合成引導點的回推間隔（週資料傳一週、月資料傳一個月）
+    var stepBack: TimeInterval = 604_800
     /// 末端大字數值格式（預設 NT$ 萬元格式）
     var valueText: (Double) -> String = { $0.ntdWanString }
 
+    // 進階設定可調參數（設定 > 進階設定；預設值＝與使用者逐版打磨定案的規格）
+    @AppStorage("hero_trend_point_count") private var pointCount: Int = 10
+    @AppStorage("hero_trend_opacity") private var mainOpacity: Double = 0.30
+    @AppStorage("hero_trend_line_width") private var mainLineWidth: Double = 2.0
+    @AppStorage("hero_trend_blur") private var blurRadius: Double = 2.2
+
     var body: some View {
-        if points.count >= 2 {
+        let pts = HeroTrendSeries.displayPoints(from: points,
+                                                maxCount: max(pointCount, 2),
+                                                stepBack: stepBack)
+        if pts.count >= 2 {
             // 垂直帶映射：把數值範圍映射到卡片高度的 20%~60% 帶——
             // 最低點落在卡片下緣起 20% 高、最高點 60% 高，上方 40% 留白給大字。
             // 作法：把 Y 軸 domain 反推放大——實際值域佔 domain 的 0.4，下方預留 0.2。
-            let values = points.map(\.value)
+            let values = pts.map(\.value)
             let minV = values.min() ?? 0
             let maxV = values.max() ?? 1
             let spread = max(maxV - minV, max(maxV * 0.05, 1))   // 平盤保底，避免除以零
             let span = spread / 0.4
             let domainLow = minV - 0.2 * span
             let domainHigh = domainLow + span
-            let xFirst = points.first?.date ?? Date()
-            let xLast = points.last?.date ?? Date()
+            let xFirst = pts.first?.date ?? Date()
+            let xLast = pts.last?.date ?? Date()
             // X 軸右側延伸 25% 資料跨距：資料只佔左邊 80% 寬
             let xSpan = max(xLast.timeIntervalSince(xFirst), 1)
             let xHigh = xLast.addingTimeInterval(xSpan * 0.25)
             let xDomain = xFirst...xHigh
             let yDomain = domainLow...domainHigh
+            // 回聲側線：透明度／線寬與主線連動（維持既定比例 0.44 / 0.5）
+            let echoOpacity = mainOpacity * 0.44
+            let echoWidth = max(mainLineWidth * 0.5, 0.5)
             // 回聲側線尾端收細：Charts 無法沿路徑變線寬，用尾端漸層遮罩淡出模擬
             let echoShift = xSpan * 1.25 * 0.01   // domain 全寬（含右延 25%）的 1%
             let echoTailTaper = LinearGradient(stops: [
@@ -112,21 +131,22 @@ struct HeroTrendBackground: View {
                 .init(color: .clear, location: 0.80)   // 資料終點約在 80% 寬，尾段漸淡收掉
             ], startPoint: .leading, endPoint: .trailing)
             let trendGroup = ZStack {
-                trendLine(xDomain: xDomain, yDomain: yDomain,
-                          xShift: -echoShift, lineWidth: 1,
-                          lineOpacity: 0.13, showArea: false)
+                trendLine(pts, xDomain: xDomain, yDomain: yDomain,
+                          xShift: -echoShift, lineWidth: echoWidth,
+                          lineOpacity: echoOpacity, showArea: false)
                     .mask(echoTailTaper)
-                trendLine(xDomain: xDomain, yDomain: yDomain,
-                          xShift: echoShift, lineWidth: 1,
-                          lineOpacity: 0.13, showArea: false)
+                trendLine(pts, xDomain: xDomain, yDomain: yDomain,
+                          xShift: echoShift, lineWidth: echoWidth,
+                          lineOpacity: echoOpacity, showArea: false)
                     .mask(echoTailTaper)
-                trendLine(xDomain: xDomain, yDomain: yDomain)
+                trendLine(pts, xDomain: xDomain, yDomain: yDomain,
+                          lineWidth: mainLineWidth, lineOpacity: mainOpacity)
             }
             ZStack {
                 // 景深（左模糊→右漸清晰）：整組三線畫兩層——底層整組高斯模糊、
                 // 頂層清晰，各用互補的左右漸層遮罩交叉淡化，像相機失焦漸變到合焦。
                 trendGroup
-                    .blur(radius: 2.2)
+                    .blur(radius: blurRadius)
                     .mask(LinearGradient(stops: [
                         .init(color: .white, location: 0.00),
                         .init(color: .white, location: 0.20),
@@ -137,21 +157,21 @@ struct HeroTrendBackground: View {
                         .init(color: .clear, location: 0.20),
                         .init(color: .white, location: 0.75)
                     ], startPoint: .leading, endPoint: .trailing))
-                // 上層：最後一個（真實）點——圓形實心、半透明 30%＋大字數值（同樣半透明）
-                Chart(points) { p in
-                    if p.id == points.last?.id {
+                // 上層：最後一個（真實）點——圓形實心＋大字數值（透明度隨進階設定）
+                Chart(pts) { p in
+                    if p.id == pts.last?.id {
                         PointMark(
                             x: .value("時間", p.date),
                             y: .value("數值", p.value)
                         )
-                        .foregroundStyle(.white.opacity(0.30))
+                        .foregroundStyle(.white.opacity(mainOpacity))
                         .symbol(.circle)
                         .symbolSize(90)
                         .annotation(position: .top,
                                     overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
                             Text(valueText(p.value))
                                 .font(.system(size: 19, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.30))
+                                .foregroundStyle(.white.opacity(mainOpacity))
                                 .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
                                 // 立體微傾：X/Y 軸各轉 5 度、Z 軸轉 2 度，呼應景深構圖
                                 .rotation3DEffect(.degrees(5), axis: (x: 1, y: 0, z: 0))
@@ -172,12 +192,13 @@ struct HeroTrendBackground: View {
 
     /// 趨勢線單層（平滑曲線、預設帶漸層面積）。景深需要同一組線畫兩層
     /// （模糊層＋清晰層）疊加；回聲側線（xShift、細、更透明、無面積）也共用此畫法。
-    private func trendLine(xDomain: ClosedRange<Date>, yDomain: ClosedRange<Double>,
+    private func trendLine(_ data: [HeroTrendPoint],
+                           xDomain: ClosedRange<Date>, yDomain: ClosedRange<Double>,
                            xShift: TimeInterval = 0,
                            lineWidth: CGFloat = 2,
                            lineOpacity: Double = 0.30,
                            showArea: Bool = true) -> some View {
-        Chart(points) { p in
+        Chart(data) { p in
             if showArea {
                 AreaMark(
                     x: .value("時間", p.date.addingTimeInterval(xShift)),

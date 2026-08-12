@@ -147,10 +147,7 @@ struct IncomeView: View {
                 listRowsAppeared = false
             }
             .task(id: store.modifyID) {
-                heroSeries = HeroTrendSeries.displayPoints(
-                    from: store.heroIncomeSeries(),
-                    stepBack: 2_592_000   // 月資料：合成點往回各推一個月
-                )
+                heroSeries = store.heroIncomeSeries()   // 壓縮/補點交給模板依進階設定即時處理
             }
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
@@ -521,7 +518,7 @@ struct IncomeView: View {
                     endPoint: .bottomTrailing
                 )
                 // 單月收入趨勢曲線背景（HeroTrendBackground 標準模板，與股票英雄卡同規格）
-                HeroTrendBackground(points: heroSeries)
+                HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
                 // 右上主散景圓
                 Circle()
                     .fill(.white.opacity(0.13))
