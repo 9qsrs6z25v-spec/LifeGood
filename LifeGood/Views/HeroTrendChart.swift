@@ -20,7 +20,7 @@ struct HeroTrendPoint: Identifiable, Equatable {
 }
 
 enum HeroTrendSeries {
-    /// 顯示用資料點：等距取樣至最多 maxCount 點（預設 10 點，頭尾必留），
+    /// 顯示用資料點：超過 maxCount（預設 10）點時「分桶移動平均」壓縮至 maxCount 點，
     /// 真實點不足 minCount 時在最前面補合成引導點湊滿——新使用者第一期只有
     /// 1 個點畫不出像樣的曲線，補點讓背景視覺舒服。合成點用「確定性偽隨機漫步」
     /// （種子＝首個真實點的時間＋數值）：同資料形狀固定，不會每次重繪亂跳；
@@ -30,7 +30,7 @@ enum HeroTrendSeries {
                               maxCount: Int = 10,
                               minCount: Int = 6,
                               stepBack: TimeInterval = 604_800) -> [HeroTrendPoint] {
-        let real = sampled(raw.sorted { $0.date < $1.date }, maxCount: maxCount)
+        let real = averaged(raw.sorted { $0.date < $1.date }, maxCount: maxCount)
         guard let first = real.first, real.count < minCount else { return real }
         let padCount = minCount - real.count
         var seed = UInt64(abs(first.date.timeIntervalSince1970))
@@ -52,19 +52,28 @@ enum HeroTrendSeries {
         return synthetic.reversed() + real
     }
 
-    /// 等距取樣至最多 maxCount 點（頭尾必留；同 ChildDetailView 趨勢圖取樣規則）
-    static func sampled(_ pts: [HeroTrendPoint], maxCount: Int = 10) -> [HeroTrendPoint] {
+    /// 分桶移動平均壓縮至最多 maxCount 點（使用者指定，取代原本的等距丟點取樣）：
+    /// 超過 maxCount 點時，最後一點保留「真實最新值」（末端大字要對應目前數字，
+    /// 不能被平均稀釋），其餘歷史點均分成 maxCount-1 桶、各取桶內平均值——
+    /// 每一筆歷史都貢獻到曲線而不是被丟掉；點的時間取桶內平均時間。
+    /// 傳入需已依時間排序。
+    static func averaged(_ pts: [HeroTrendPoint], maxCount: Int = 10) -> [HeroTrendPoint] {
         guard pts.count > maxCount, maxCount >= 2 else { return pts }
-        let step = Double(pts.count - 1) / Double(maxCount - 1)
+        let last = pts[pts.count - 1]
+        let rest = Array(pts[0..<(pts.count - 1)])
+        let bucketCount = maxCount - 1
         var out: [HeroTrendPoint] = []
-        var lastIdx = -1
-        for i in 0..<maxCount {
-            let idx = Int((Double(i) * step).rounded())
-            if idx != lastIdx {
-                out.append(pts[idx])
-                lastIdx = idx
-            }
+        let n = rest.count
+        for b in 0..<bucketCount {
+            let lo = n * b / bucketCount
+            let hi = n * (b + 1) / bucketCount
+            guard hi > lo else { continue }
+            let slice = rest[lo..<hi]
+            let avgValue = slice.reduce(0.0) { $0 + $1.value } / Double(slice.count)
+            let avgTime = slice.reduce(0.0) { $0 + $1.date.timeIntervalSince1970 } / Double(slice.count)
+            out.append(HeroTrendPoint(date: Date(timeIntervalSince1970: avgTime), value: avgValue))
         }
+        out.append(last)
         return out
     }
 }
