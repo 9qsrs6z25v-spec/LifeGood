@@ -85,6 +85,8 @@ struct StockView: View {
     @State private var cardsAppeared = false
     @State private var emptyIconPulse = false
     @State private var emptyPulseTask: Task<Void, Never>?
+    /// 個股日線（收盤價＋成交量，symbol → 3 個月每日資料）；項目卡背景用
+    @State private var dailyHistory: [String: [StockDailyPoint]] = [:]
 
     private var activeStocks: [Stock] { store.stocks.filter { !$0.isSold } }
     private var soldStocks: [Stock] { store.stocks.filter { $0.isSold } }
@@ -188,7 +190,10 @@ struct StockView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .onAppear { Task { await refreshAllPrices() } }
+            .onAppear {
+                Task { await refreshAllPrices() }
+                Task { await refreshDailyHistories() }
+            }
             .onDisappear {
                 headerAppeared = false
                 cardsAppeared = false
@@ -259,6 +264,25 @@ struct StockView: View {
         withAnimation { updateBanner = msg }
         try? await Task.sleep(nanoseconds: 2_500_000_000)
         withAnimation { updateBanner = nil }
+    }
+
+    /// 個股日線刷新：先立即載入快取（畫面秒有曲線），再背景補抓過期的
+    private func refreshDailyHistories() async {
+        let symbols = store.stocks.filter { !$0.isSold && !$0.symbol.isEmpty }.map(\.symbol)
+        var map: [String: [StockDailyPoint]] = [:]
+        for sym in symbols {
+            let cachedPts = StockDailyHistory.cached(symbol: sym)
+            if !cachedPts.isEmpty { map[sym] = cachedPts }
+        }
+        dailyHistory = map
+        await withTaskGroup(of: (String, [StockDailyPoint]).self) { group in
+            for sym in Set(symbols) where !StockDailyHistory.isFresh(symbol: sym) {
+                group.addTask { (sym, await StockDailyHistory.fetch(symbol: sym)) }
+            }
+            for await (sym, pts) in group where !pts.isEmpty {
+                dailyHistory[sym] = pts
+            }
+        }
     }
 
     private func fetchPrice(symbol: String) async -> Double? {
@@ -783,13 +807,29 @@ struct StockView: View {
             .padding(.vertical, 8)
             .padding(.trailing, 16)
         }
-        .background(Color(.systemBackground))
+        .background(stockCardBackground(item, accent: accent))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
         )
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
+
+    /// 項目卡背景：白底＋個股 3 個月日線（上：收盤價曲線／下：成交量柱，
+    /// HeroPriceVolumeBackground 模板、橙色 tint）；已賣出或無日線資料時維持純白底
+    @ViewBuilder
+    private func stockCardBackground(_ item: Stock, accent: Color) -> some View {
+        ZStack {
+            Color(.systemBackground)
+            if !item.isSold, let daily = dailyHistory[item.symbol], daily.count >= 2 {
+                HeroPriceVolumeBackground(
+                    prices: daily.map { HeroTrendPoint(date: $0.date, value: $0.close) },
+                    volumes: daily.map { HeroTrendPoint(date: $0.date, value: $0.volume) },
+                    tint: accent
+                )
+            }
+        }
     }
 
     // MARK: - 持有中 Section Header（Capsule 側條 + 計數膠囊）
@@ -945,5 +985,75 @@ enum StockValueHistory {
     /// 依「設定 > 進階設定」的參數即時處理，此處只負責把週快照轉成 HeroTrendPoint。
     static func displayPoints() -> [HeroTrendPoint] {
         load().map { HeroTrendPoint(date: $0.weekStart, value: $0.value) }
+    }
+}
+
+// MARK: - 個股每日日線（收盤價＋成交量）
+
+/// 個股單日日線資料（收盤價＋成交量）
+struct StockDailyPoint: Codable {
+    let date: Date
+    let close: Double
+    let volume: Double
+}
+
+/// 個股日線抓取＋快取。既有 TWSE MIS API（getStockInfo.jsp）只有即時價、
+/// 沒有歷史，改用 Yahoo Finance v8 chart API 一次拿 3 個月每日收盤價＋成交量
+///（免金鑰；台股上市 .TW、上櫃 .TWO 依序嘗試）。非官方 API、僅作項目卡
+/// 背景裝飾用途；失敗時回退快取，快取 6 小時內視為新鮮不重抓。
+enum StockDailyHistory {
+    private static let keyPrefix = "stock_daily_history_"
+
+    private struct CacheEntry: Codable {
+        let fetchedAt: Date
+        let points: [StockDailyPoint]
+    }
+
+    static func cached(symbol: String) -> [StockDailyPoint] {
+        guard let data = UserDefaults.standard.data(forKey: keyPrefix + symbol),
+              let entry = try? JSONDecoder().decode(CacheEntry.self, from: data) else { return [] }
+        return entry.points
+    }
+
+    static func isFresh(symbol: String, maxAge: TimeInterval = 6 * 3600) -> Bool {
+        guard let data = UserDefaults.standard.data(forKey: keyPrefix + symbol),
+              let entry = try? JSONDecoder().decode(CacheEntry.self, from: data) else { return false }
+        return Date().timeIntervalSince(entry.fetchedAt) < maxAge
+    }
+
+    static func fetch(symbol: String) async -> [StockDailyPoint] {
+        for suffix in [".TW", ".TWO"] {
+            let urlString = "https://query1.finance.yahoo.com/v8/finance/chart/\(symbol)\(suffix)?range=3mo&interval=1d"
+            guard let url = URL(string: urlString) else { continue }
+            do {
+                var req = URLRequest(url: url)
+                req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+                let (data, _) = try await URLSession.shared.data(for: req)
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let chart = json["chart"] as? [String: Any],
+                      let result = (chart["result"] as? [[String: Any]])?.first,
+                      let timestamps = result["timestamp"] as? [Double],
+                      let quote = ((result["indicators"] as? [String: Any])?["quote"]
+                                   as? [[String: Any]])?.first else { continue }
+                let closes = quote["close"] as? [Any] ?? []
+                let volumes = quote["volume"] as? [Any] ?? []
+                var out: [StockDailyPoint] = []
+                for (i, ts) in timestamps.enumerated() {
+                    // 停牌日 close 為 null（NSNull），cast 失敗自動略過
+                    guard i < closes.count, let close = closes[i] as? Double, close > 0 else { continue }
+                    let vol = (i < volumes.count ? volumes[i] as? Double : nil) ?? 0
+                    out.append(StockDailyPoint(date: Date(timeIntervalSince1970: ts),
+                                               close: close, volume: vol))
+                }
+                if out.count >= 2 {
+                    let entry = CacheEntry(fetchedAt: Date(), points: out)
+                    if let d = try? JSONEncoder().encode(entry) {
+                        UserDefaults.standard.set(d, forKey: keyPrefix + symbol)
+                    }
+                    return out
+                }
+            } catch { continue }
+        }
+        return cached(symbol: symbol)
     }
 }

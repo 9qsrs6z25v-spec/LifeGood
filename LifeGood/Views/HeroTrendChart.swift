@@ -91,6 +91,12 @@ struct HeroTrendBackground: View {
     var stepBack: TimeInterval = 604_800
     /// 末端大字數值格式（預設 NT$ 萬元格式）
     var valueText: (Double) -> String = { $0.ntdWanString }
+    /// 線條/圓點/數字主色（預設白，適用深色漸層卡；淺色卡傳強調色）
+    var tint: Color = .white
+    /// 覆寫壓縮點數（nil＝依進階設定；股票項目卡「每日一點」傳原始點數不壓縮）
+    var pointLimitOverride: Int? = nil
+    /// 是否顯示末端大字數值（項目卡上現價已另有顯示時可關閉、只留實心圓點）
+    var showEndLabel: Bool = true
 
     // 進階設定可調參數（設定 > 進階設定；預設值＝與使用者逐版打磨定案的規格）
     @AppStorage("hero_trend_point_count") private var pointCount: Int = 10
@@ -100,7 +106,7 @@ struct HeroTrendBackground: View {
 
     var body: some View {
         let pts = HeroTrendSeries.displayPoints(from: points,
-                                                maxCount: max(pointCount, 2),
+                                                maxCount: max(pointLimitOverride ?? pointCount, 2),
                                                 stepBack: stepBack)
         if pts.count >= 2 {
             // 垂直帶映射：把數值範圍映射到卡片高度的 20%~60% 帶——
@@ -164,19 +170,21 @@ struct HeroTrendBackground: View {
                             x: .value("時間", p.date),
                             y: .value("數值", p.value)
                         )
-                        .foregroundStyle(.white.opacity(mainOpacity))
+                        .foregroundStyle(tint.opacity(mainOpacity))
                         .symbol(.circle)
                         .symbolSize(90)
                         .annotation(position: .top,
                                     overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
-                            Text(valueText(p.value))
-                                .font(.system(size: 19, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white.opacity(mainOpacity))
-                                .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
-                                // 立體微傾：X/Y 軸各轉 5 度、Z 軸轉 2 度，呼應景深構圖
-                                .rotation3DEffect(.degrees(5), axis: (x: 1, y: 0, z: 0))
-                                .rotation3DEffect(.degrees(5), axis: (x: 0, y: 1, z: 0))
-                                .rotationEffect(.degrees(2))
+                            if showEndLabel {
+                                Text(valueText(p.value))
+                                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                                    .foregroundStyle(tint.opacity(mainOpacity))
+                                    .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
+                                    // 立體微傾：X/Y 軸各轉 5 度、Z 軸轉 2 度，呼應景深構圖
+                                    .rotation3DEffect(.degrees(5), axis: (x: 1, y: 0, z: 0))
+                                    .rotation3DEffect(.degrees(5), axis: (x: 0, y: 1, z: 0))
+                                    .rotationEffect(.degrees(2))
+                            }
                         }
                     }
                 }
@@ -206,7 +214,7 @@ struct HeroTrendBackground: View {
                 )
                 .interpolationMethod(.catmullRom)
                 .foregroundStyle(LinearGradient(
-                    colors: [.white.opacity(0.22), .white.opacity(0.02)],
+                    colors: [tint.opacity(0.22), tint.opacity(0.02)],
                     startPoint: .top, endPoint: .bottom
                 ))
             }
@@ -215,7 +223,7 @@ struct HeroTrendBackground: View {
                 y: .value("數值", p.value)
             )
             .interpolationMethod(.catmullRom)
-            .foregroundStyle(.white.opacity(lineOpacity))
+            .foregroundStyle(tint.opacity(lineOpacity))
             .lineStyle(StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
         }
         .chartXAxis(.hidden)
@@ -224,5 +232,55 @@ struct HeroTrendBackground: View {
         .chartXScale(domain: xDomain)
         .chartYScale(domain: yDomain)
         .allowsHitTesting(false)
+    }
+}
+
+// MARK: - 股價＋成交量複合背景（股票項目卡用）
+
+/// 股票項目卡背景：上方每日收盤價曲線（沿用 HeroTrendBackground 完整模板、
+/// 每日一點不壓縮、不顯示末端大字——卡片右側已有現價），下方每日成交量
+/// 柱狀圖（最高量柱只到卡片約 20% 高，當作曲線的底座）。
+/// 白卡上用強調色 tint 繪製；透明度沿用進階設定、量柱再打 0.55 折更收斂。
+struct HeroPriceVolumeBackground: View {
+    /// 每日收盤價（原始序列）
+    let prices: [HeroTrendPoint]
+    /// 每日成交量（原始序列，與 prices 同日期範圍）
+    let volumes: [HeroTrendPoint]
+    var tint: Color = .white
+
+    @AppStorage("hero_trend_opacity") private var mainOpacity: Double = 0.30
+
+    var body: some View {
+        ZStack {
+            // 底層：成交量柱狀圖（X domain 與價格曲線同樣右延 25%，柱與曲線點對齊）
+            if volumes.count >= 2, let maxVol = volumes.map(\.value).max(), maxVol > 0 {
+                let xFirst = volumes.first?.date ?? Date()
+                let xLast = volumes.last?.date ?? Date()
+                let xSpan = max(xLast.timeIntervalSince(xFirst), 1)
+                let xHigh = xLast.addingTimeInterval(xSpan * 0.25)
+                Chart(volumes) { v in
+                    BarMark(
+                        x: .value("日", v.date),
+                        y: .value("量", v.value),
+                        width: .fixed(1.5)
+                    )
+                    .foregroundStyle(tint.opacity(mainOpacity * 0.55))
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .chartLegend(.hidden)
+                .chartXScale(domain: xFirst...xHigh)
+                .chartYScale(domain: 0...(maxVol / 0.20))   // 最高量柱佔卡片 20% 高
+                .allowsHitTesting(false)
+            }
+            // 上層：收盤價曲線（每日一點、關閉末端大字）
+            HeroTrendBackground(
+                points: prices,
+                stepBack: 86_400,
+                tint: tint,
+                pointLimitOverride: max(prices.count, 2),
+                showEndLabel: false
+            )
+        }
     }
 }
