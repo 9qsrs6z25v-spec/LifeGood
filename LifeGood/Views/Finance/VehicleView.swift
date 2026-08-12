@@ -388,15 +388,15 @@ struct VehicleView: View {
 
             // KPI 橫列：購入成本 / 月養車費
             HStack(spacing: 0) {
-                kpiCell(label: "折舊估損", value: depreciationLoss > 0 ? "-\(fmtShort(depreciationLoss))" : "—")
+                HeroKpiCell(label: "折舊估損", value: depreciationLoss > 0 ? "-\(fmtShort(depreciationLoss))" : "—")
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
-                kpiCell(label: "月養車費", value: monthly > 0 ? fmt(monthly) : "—")
+                HeroKpiCell(label: "月養車費", value: monthly > 0 ? fmt(monthly) : "—")
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
-                kpiCell(label: "持有輛數", value: "\(count) 輛")
+                HeroKpiCell(label: "持有輛數", value: "\(count) 輛")
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -499,20 +499,6 @@ struct VehicleView: View {
         .padding(.bottom, 4)
     }
 
-    private func kpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - 空狀態
 

@@ -193,20 +193,6 @@ struct SavingsInsuranceView: View {
 
     // MARK: - KPI Cell（共用於 summaryHeader）
 
-    private func kpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - 摘要英雄卡片
 
@@ -300,16 +286,16 @@ struct SavingsInsuranceView: View {
                     .padding(.vertical, 12)
 
                 HStack(spacing: 0) {
-                    kpiCell(label: "已繳總額", value: fmtSmart(totalPaidNT, code: "NT$"))
+                    HeroKpiCell(label: "已繳總額", value: fmtSmart(totalPaidNT, code: "NT$"))
                     Rectangle()
                         .fill(.white.opacity(0.25))
                         .frame(width: 0.5, height: 28)
-                    kpiCell(label: "帳面損益", value: (isPositive ? "+" : "") + fmtSmart(totalGainNT, code: "NT$"))
+                    HeroKpiCell(label: "帳面損益", value: (isPositive ? "+" : "") + fmtSmart(totalGainNT, code: "NT$"))
                     if !otherItems.isEmpty {
                         Rectangle()
                             .fill(.white.opacity(0.25))
                             .frame(width: 0.5, height: 28)
-                        kpiCell(label: "其他幣別", value: "\(otherItems.count) 張")
+                        HeroKpiCell(label: "其他幣別", value: "\(otherItems.count) 張")
                     }
                 }
                 .padding(.vertical, 10)
@@ -383,41 +369,10 @@ struct SavingsInsuranceView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [heroAccent, heroAccentDark],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 保單估值趨勢曲線背景（HeroTrendBackground 標準模板）：
-                // 複利估值可對任何過去月份確定性回算，逐月生成、免存快照
-                HeroTrendBackground(points: heroTrendSeries, stepBack: 2_592_000)
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 85, y: -50)
-                    .blur(radius: 14)
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 75, height: 75)
-                    .offset(x: -65, y: 45)
-                    .blur(radius: 9)
-                Circle()
-                    .fill(.white.opacity(0.05))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 95, y: 40)
-                    .blur(radius: 10)
-                // 玻璃反光覆蓋層，對齊全 App 英雄卡 glass shine 統一規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: heroAccentDark.opacity(0.42), radius: 16, x: 0, y: 8)
+        .heroCardShell(colors: [heroAccent, heroAccentDark]) {
+            // 保單估值趨勢曲線背景（HeroTrendBackground 標準模板，逐月複利回算）
+            HeroTrendBackground(points: heroTrendSeries, stepBack: 2_592_000)
+        }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)

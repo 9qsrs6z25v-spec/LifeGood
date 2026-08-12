@@ -600,49 +600,11 @@ struct StockView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 1.00, green: 0.62, blue: 0.22),
-                        Color(red: 0.86, green: 0.36, blue: 0.06)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 週市值趨勢曲線背景（HeroTrendBackground 標準模板：
-                // 20~60% 垂直帶、景深模糊、回聲側線、末端實心點＋大字）
-                HeroTrendBackground(points: heroTrend)
-                // 裝飾性散景圓（增加卡片層次感）
-                Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 80, height: 80)
-                    .offset(x: -70, y: 50)
-                    .blur(radius: 10)
-                // [v3] 中右微光（提升色彩層次，對齊 IncomeView / VariableExpenseView 三圓規格）
-                Circle()
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 30, y: 28)
-                    .blur(radius: 8)
-                // [v3] 頂部玻璃光澤：LinearGradient white→clear top→center，
-                // 對齊全 App 英雄卡片 glass shine 統一規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        // [對齊 SavingsInsuranceView 看板規格] 圓角 20 卡片 + 主色光暈陰影 + 16pt 水平內縮，
-        // 取代原本滿版無圓角橫幅（原 padding(.top, 44) 為 stickyTitle 補償、已隨其移除）
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.86, green: 0.36, blue: 0.06).opacity(0.42), radius: 16, x: 0, y: 8)
+        .heroCardShell(colors: [Color(red: 1.00, green: 0.62, blue: 0.22),
+                                Color(red: 0.86, green: 0.36, blue: 0.06)]) {
+            // 週市值趨勢曲線背景（HeroTrendBackground 標準模板）
+            HeroTrendBackground(points: heroTrend)
+        }
         .padding(.horizontal, 16)
         .opacity(headerAppeared ? 1 : 0)
         .offset(y: headerAppeared ? 0 : 22)

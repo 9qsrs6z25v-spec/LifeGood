@@ -225,20 +225,6 @@ struct OverviewView: View {
 
     // MARK: - KPI 格（對齊 IncomeView / VariableExpenseView / FixedExpenseView kpiCell 規格）
 
-    private func kpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - 本月收支摘要卡片
 
@@ -302,15 +288,15 @@ struct OverviewView: View {
             // [v4] KPI 橫列：今日花費 / 日均支出 / 本月固定，
             // 對齊 IncomeView / VariableExpenseView / FixedExpenseView summaryHeader KPI 三格規格
             HStack(spacing: 0) {
-                kpiCell(label: "今日花費", value: smartCurrency(todayTotalKPI))
+                HeroKpiCell(label: "今日花費", value: smartCurrency(todayTotalKPI))
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
-                kpiCell(label: "日均支出", value: smartCurrency(total / Double(max(day, 1))))
+                HeroKpiCell(label: "日均支出", value: smartCurrency(total / Double(max(day, 1))))
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
-                kpiCell(label: "本月固定", value: smartCurrency(fixedTotalKPI))
+                HeroKpiCell(label: "本月固定", value: smartCurrency(fixedTotalKPI))
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))

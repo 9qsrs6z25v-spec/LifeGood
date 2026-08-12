@@ -2393,6 +2393,13 @@ struct AdvancedSettingsView: View {
             }
             Section {
                 NavigationLink {
+                    HeroCardSettingsView()
+                } label: {
+                    advancedRow(icon: "rectangle.fill.on.rectangle.angled.fill", color: .teal,
+                                title: "英雄卡樣式",
+                                note: "收入／支出／股票／儲蓄險等看板共用")
+                }
+                NavigationLink {
                     FlashCardSettingsView()
                 } label: {
                     advancedRow(icon: "rectangle.portrait.on.rectangle.portrait.fill", color: .purple,
@@ -2724,7 +2731,7 @@ struct StockChartSettingsView: View {
     }
 }
 
-// MARK: 2.1 閃卡樣式（股票／汽車／房地產詳情閃卡共用）
+// MARK: 2.2 閃卡樣式（股票／汽車／房地產詳情閃卡共用）
 
 struct FlashCardSettingsView: View {
     @AppStorage("flash_card_corner_radius") private var cornerRadius: Double = 16
@@ -2855,6 +2862,139 @@ struct FlashCardSettingsView: View {
                 shineIntensity = 0.18
                 shadowScale = 1.0
                 appearAnimation = true
+            } label: {
+                Label("恢復預設值", systemImage: "arrow.counterclockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .foregroundStyle(.blue)
+        }
+    }
+}
+
+// MARK: 2.1 英雄卡樣式（收入／變動支出／固定支出／股票／儲蓄險看板共用殼層）
+
+struct HeroCardSettingsView: View {
+    @AppStorage("hero_card_corner_radius") private var cornerRadius: Double = 20
+    @AppStorage("hero_card_bokeh") private var bokehScale: Double = 1.0
+    @AppStorage("hero_card_shine") private var shineIntensity: Double = 0.18
+    @AppStorage("hero_card_shadow") private var shadowScale: Double = 1.0
+    @AppStorage("hero_card_kpi_value_size") private var kpiValueSize: Double = 12
+
+    var body: some View {
+        // 預覽卡固定在頂端不隨表單捲動
+        VStack(spacing: 0) {
+            pinnedPreview
+            Form {
+                paramsSection
+                resetSection
+            }
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("英雄卡樣式")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // 置頂即時預覽：示範資料跑真的 heroCardShell + HeroKpiCell + 趨勢曲線
+    private var pinnedPreview: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("示範看板")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                    Text("NT$12.8萬")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+                Spacer()
+                Text("6 筆")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 11).padding(.vertical, 5)
+                    .background(.white.opacity(0.22))
+                    .clipShape(Capsule())
+                    .foregroundStyle(.white)
+            }
+            HStack(spacing: 0) {
+                HeroKpiCell(label: "年度預估", value: "NT$154萬")
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                HeroKpiCell(label: "日均", value: "NT$4,265")
+                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                HeroKpiCell(label: "月均", value: "NT$12.8萬")
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 12)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .heroCardShell(colors: [Color(red: 0.16, green: 0.74, blue: 0.50),
+                                Color(red: 0.07, green: 0.50, blue: 0.38)]) {
+            HeroTrendBackground(points: heroDemoPoints, stepBack: 2_592_000)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+    }
+
+    /// 示範序列（12 個月、形狀固定），只給預覽卡用
+    private var heroDemoPoints: [HeroTrendPoint] {
+        let cal = Calendar.current
+        let base = cal.date(byAdding: .month, value: -11, to: Date()) ?? Date()
+        let vals: [Double] = [52, 61, 55, 68, 74, 70, 82, 78, 88, 95, 102, 128]
+        return vals.enumerated().map { i, v in
+            HeroTrendPoint(date: cal.date(byAdding: .month, value: i, to: base) ?? base,
+                           value: v * 1_000)
+        }
+    }
+
+    private var paramsSection: some View {
+        Section {
+            advancedSliderRow(
+                title: "卡片圓角",
+                display: String(format: "%.0f pt", cornerRadius),
+                value: $cornerRadius,
+                range: 12...28, step: 1
+            )
+            advancedSliderRow(
+                title: "散景亮度",
+                display: String(format: "%.1f 倍", bokehScale),
+                value: $bokehScale,
+                range: 0.0...2.0, step: 0.1
+            )
+            advancedSliderRow(
+                title: "玻璃光澤",
+                display: "\(Int((shineIntensity * 100).rounded()))%",
+                value: $shineIntensity,
+                range: 0.0...0.40, step: 0.02
+            )
+            advancedSliderRow(
+                title: "陰影強度",
+                display: String(format: "%.1f 倍", shadowScale),
+                value: $shadowScale,
+                range: 0.0...2.0, step: 0.1
+            )
+            advancedSliderRow(
+                title: "KPI 數值字級",
+                display: String(format: "%.0f pt", kpiValueSize),
+                value: $kpiValueSize,
+                range: 10...16, step: 1
+            )
+        } header: {
+            Text("看板參數")
+        } footer: {
+            Text("套用於收入、變動支出、固定支出、股票、儲蓄險五張看板的殼層（背景散景、光澤、圓角、陰影）與 KPI 橫列，調整立即生效。")
+        }
+    }
+
+    private var resetSection: some View {
+        Section {
+            Button {
+                cornerRadius = 20
+                bokehScale = 1.0
+                shineIntensity = 0.18
+                shadowScale = 1.0
+                kpiValueSize = 12
             } label: {
                 Label("恢復預設值", systemImage: "arrow.counterclockwise")
                     .frame(maxWidth: .infinity)

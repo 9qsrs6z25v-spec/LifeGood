@@ -166,21 +166,6 @@ struct FixedExpenseView: View {
         return min(day / total, 1.0)
     }
 
-    // KPI 橫列格（對齊 VariableExpenseView / IncomeView kpiCell 規格）
-    private func kpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     private var fixedSummaryHeader: some View {
         // 先計算一次，避免 store.fixedExpenses（每次都 filter+sort 全部支出）被呼叫 3 次
@@ -245,15 +230,15 @@ struct FixedExpenseView: View {
 
             // KPI 橫列：年度預估 / 日均負擔 / 月節稅（對齊 VariableExpenseView / IncomeView 三格規格）
             HStack(spacing: 0) {
-                kpiCell(label: "年度預估", value: formatCurrency(yearlyEstimate))
+                HeroKpiCell(label: "年度預估", value: formatCurrency(yearlyEstimate))
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
-                kpiCell(label: "日均負擔", value: formatCurrency(dailyFixed))
+                HeroKpiCell(label: "日均負擔", value: formatCurrency(dailyFixed))
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
-                kpiCell(label: "月節稅", value: taxTotal > 0 ? formatCurrency(taxTotal) : "NT$0")
+                HeroKpiCell(label: "月節稅", value: taxTotal > 0 ? formatCurrency(taxTotal) : "NT$0")
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -350,48 +335,11 @@ struct FixedExpenseView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.22, green: 0.53, blue: 0.98),
-                        Color(red: 0.10, green: 0.35, blue: 0.82)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 月固定支出趨勢曲線背景（HeroTrendBackground 標準模板，與股票英雄卡同規格）
-                HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 85, y: -50)
-                    .blur(radius: 14)
-                // 左下次散景圓
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 75, height: 75)
-                    .offset(x: -65, y: 45)
-                    .blur(radius: 9)
-                // 右下微光（提升色彩層次）
-                Circle()
-                    .fill(.white.opacity(0.05))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 95, y: 40)
-                    .blur(radius: 10)
-                // [v4] 頂部玻璃光澤：LinearGradient white→clear top→center，
-                // 對齊 OverviewView.monthlyBalanceCard v3 / IncomeView.summaryHeader v4 /
-                // FinanceOverviewView.totalAssetsCard v3 英雄卡玻璃反光規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.42), radius: 16, x: 0, y: 8)
+        .heroCardShell(colors: [Color(red: 0.22, green: 0.53, blue: 0.98),
+                                Color(red: 0.10, green: 0.35, blue: 0.82)]) {
+            // 月固定支出趨勢曲線背景（HeroTrendBackground 標準模板）
+            HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
+        }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)

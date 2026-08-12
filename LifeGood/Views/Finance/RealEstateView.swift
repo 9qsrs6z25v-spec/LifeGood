@@ -361,11 +361,11 @@ struct RealEstateView: View {
 
             // KPI 橫列：月租金 / 月現金流 / 平均增值率（統一白色，對齊 kpiCell 規格）
             HStack(spacing: 0) {
-                kpiCell(label: "月租金", value: fmt(store.monthlyRentalIncome))
+                HeroKpiCell(label: "月租金", value: fmt(store.monthlyRentalIncome))
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                kpiCell(label: "月現金流", value: (flow >= 0 ? "+" : "") + fmt(flow))
+                HeroKpiCell(label: "月現金流", value: (flow >= 0 ? "+" : "") + fmt(flow))
                 Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                kpiCell(label: "平均增值", value: String(format: "%@%.1f%%", avgRate >= 0 ? "+" : "", avgRate))
+                HeroKpiCell(label: "平均增值", value: String(format: "%@%.1f%%", avgRate >= 0 ? "+" : "", avgRate))
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -416,22 +416,6 @@ struct RealEstateView: View {
     }
 
     // kpiCell：統一白色 KPI 格（對齊 IncomeView / VehicleView / SavingsInsuranceView 規格）
-    // [v4] 數值加入 contentTransition(.numericText())，切換年份/更新資料時有平滑滾動過渡
-    private func kpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .contentTransition(.numericText())
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - 空狀態
     // 【美化 v2】scaleEffect + easeOut.repeatForever(autoreverses:false) 雙層脈衝環，

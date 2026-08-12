@@ -217,20 +217,6 @@ struct VariableExpenseView: View {
     private var trailingMonthlyAverageVariable: Double { cachedTrailingMonthlyAvg }
 
 
-    private func kpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - 月摘要
 
@@ -277,15 +263,15 @@ struct VariableExpenseView: View {
 
             // KPI 橫列：今日花費 / 日均支出 / 近3月均值
             HStack(spacing: 0) {
-                kpiCell(label: "今日花費", value: formatCurrency(todayVariableTotal))
+                HeroKpiCell(label: "今日花費", value: formatCurrency(todayVariableTotal))
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
-                kpiCell(label: "日均支出", value: formatCurrency(dailyAvg))
+                HeroKpiCell(label: "日均支出", value: formatCurrency(dailyAvg))
                 Rectangle()
                     .fill(.white.opacity(0.25))
                     .frame(width: 0.5, height: 28)
-                kpiCell(label: "近3月均值", value: formatCurrency(trailingMonthlyAverageVariable))
+                HeroKpiCell(label: "近3月均值", value: formatCurrency(trailingMonthlyAverageVariable))
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -383,48 +369,11 @@ struct VariableExpenseView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 1.00, green: 0.62, blue: 0.22),
-                        Color(red: 0.86, green: 0.36, blue: 0.06)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 單月變動支出趨勢曲線背景（HeroTrendBackground 標準模板，與股票英雄卡同規格）
-                HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 120, height: 120)
-                    .offset(x: 80, y: -45)
-                    .blur(radius: 12)
-                // 左下次散景圓
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 70, height: 70)
-                    .offset(x: -60, y: 40)
-                    .blur(radius: 8)
-                // [v4] 中右微光（提升色彩層次，對齊 IncomeView.summaryHeader 三圓規格）
-                Circle()
-                    .fill(.white.opacity(0.05))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 60, y: 40)
-                    .blur(radius: 8)
-                // [v4] 頂部玻璃光澤：LinearGradient white→clear top→center，
-                // 對齊 OverviewView.monthlyBalanceCard v3 / IncomeView.summaryHeader v4 /
-                // FinanceOverviewView.totalAssetsCard v3 英雄卡玻璃反光規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.86, green: 0.36, blue: 0.06).opacity(0.38), radius: 14, x: 0, y: 7)
+        .heroCardShell(colors: [Color(red: 1.00, green: 0.62, blue: 0.22),
+                                Color(red: 0.86, green: 0.36, blue: 0.06)]) {
+            // 單月變動支出趨勢曲線背景（HeroTrendBackground 標準模板）
+            HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
+        }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)

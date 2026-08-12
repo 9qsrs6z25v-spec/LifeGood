@@ -297,20 +297,6 @@ struct AddStockView: View {
 
     // MARK: - KPI 格（白底英雄卡片內使用，白字白輔助文）
 
-    private func kpiCell(_ label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - 頂部即時預覽英雄卡
 
@@ -407,12 +393,12 @@ struct AddStockView: View {
                     .padding(.vertical, 12)
 
                 HStack(spacing: 0) {
-                    kpiCell("張數", value: "\(lotsText) 張")
+                    HeroKpiCell(label: "張數", value: "\(lotsText) 張")
                     Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                    kpiCell("買入均價", value: "NT$\(purchasePriceText)")
+                    HeroKpiCell(label: "買入均價", value: "NT$\(purchasePriceText)")
                     if hasCurrentPrice && totalCost > 0 {
                         Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                        kpiCell("報酬率", value: String(format: "%@%.1f%%",
+                        HeroKpiCell(label: "報酬率", value: String(format: "%@%.1f%%",
                                                         returnRate >= 0 ? "+" : "", returnRate))
                     }
                 }
@@ -792,21 +778,21 @@ struct AddStockView: View {
 
                 HStack(spacing: 0) {
                     if q.openPrice > 0 {
-                        kpiCell("開盤", value: String(format: "%.2f", q.openPrice))
+                        HeroKpiCell(label: "開盤", value: String(format: "%.2f", q.openPrice))
                     }
                     if q.highPrice > 0 {
                         if q.openPrice > 0 {
                             Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
                         }
-                        kpiCell("最高", value: String(format: "%.2f", q.highPrice))
+                        HeroKpiCell(label: "最高", value: String(format: "%.2f", q.highPrice))
                     }
                     if q.lowPrice > 0 {
                         Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                        kpiCell("最低", value: String(format: "%.2f", q.lowPrice))
+                        HeroKpiCell(label: "最低", value: String(format: "%.2f", q.lowPrice))
                     }
                     if q.yesterdayClose > 0 {
                         Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                        kpiCell("昨收", value: String(format: "%.2f", q.yesterdayClose))
+                        HeroKpiCell(label: "昨收", value: String(format: "%.2f", q.yesterdayClose))
                     }
                 }
                 .padding(.vertical, 8)
