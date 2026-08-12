@@ -1001,11 +1001,16 @@ enum StockValueHistory {
 
 // MARK: - 個股每日日線（收盤價＋成交量）
 
-/// 個股單日日線資料（收盤價＋成交量）
+/// 個股單日日線資料（收盤價＋成交量＋K 棒用的開高低）。
+/// 開高低為 optional：v25.199 起才解析，舊快取沒有這三個欄位仍可解碼（decodeIfPresent），
+/// 缺 OHLC 的快取由明細頁判斷後強制重抓一次。
 struct StockDailyPoint: Codable {
     let date: Date
     let close: Double
     let volume: Double
+    var open: Double?
+    var high: Double?
+    var low: Double?
 }
 
 /// 個股日線抓取＋快取。既有 TWSE MIS API（getStockInfo.jsp）只有即時價、
@@ -1048,13 +1053,21 @@ enum StockDailyHistory {
                                    as? [[String: Any]])?.first else { continue }
                 let closes = quote["close"] as? [Any] ?? []
                 let volumes = quote["volume"] as? [Any] ?? []
+                let opens = quote["open"] as? [Any] ?? []
+                let highs = quote["high"] as? [Any] ?? []
+                let lows = quote["low"] as? [Any] ?? []
                 var out: [StockDailyPoint] = []
                 for (i, ts) in timestamps.enumerated() {
                     // 停牌日 close 為 null（NSNull），cast 失敗自動略過
                     guard i < closes.count, let close = closes[i] as? Double, close > 0 else { continue }
                     let vol = (i < volumes.count ? volumes[i] as? Double : nil) ?? 0
-                    out.append(StockDailyPoint(date: Date(timeIntervalSince1970: ts),
-                                               close: close, volume: vol))
+                    out.append(StockDailyPoint(
+                        date: Date(timeIntervalSince1970: ts),
+                        close: close, volume: vol,
+                        open: i < opens.count ? opens[i] as? Double : nil,
+                        high: i < highs.count ? highs[i] as? Double : nil,
+                        low: i < lows.count ? lows[i] as? Double : nil
+                    ))
                 }
                 if out.count >= 2 {
                     let entry = CacheEntry(fetchedAt: Date(), points: out)

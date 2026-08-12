@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 // MARK: - 美化紀錄（StockDetailView）
 // [2026-06] 本次美化方向：
@@ -104,6 +105,8 @@ struct StockDetailView: View {
     // 閃卡背景日線（收盤價曲線＋成交量柱；與股票列表卡同一套資料快取）
     @State private var heroPrices: [HeroTrendPoint] = []
     @State private var heroVolumes: [HeroTrendPoint] = []
+    // 完整日線（含開高低；技術線圖 K 棒＋均線用）
+    @State private var dailyPoints: [StockDailyPoint] = []
 
     init(stock: Stock) {
         self.stockId = stock.id
@@ -123,6 +126,11 @@ struct StockDetailView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     flashCard
+                    // 技術線圖：日 K 棒＋MA5/MA20（Yahoo 日線含開高低，本地算均線）
+                    if !candlePoints.isEmpty {
+                        CandleChartCard(candles: candlePoints)
+                            .padding(.horizontal, 24)
+                    }
                     infoSection
                     transactionsSection
                     dividendsSection
@@ -265,7 +273,8 @@ struct StockDetailView: View {
     // MARK: - 閃卡背景日線載入
 
     /// 與股票列表卡共用 StockDailyHistory 快取：先載快取、過期才網路補抓；
-    /// 解碼在背景執行緒，轉換完成的最終形態才寫回 @State
+    /// 解碼在背景執行緒，轉換完成的最終形態才寫回 @State。
+    /// v25.199 起 K 棒需要開高低：舊快取（缺 OHLC 欄位）視同過期強制重抓一次。
     private func loadDailySeries() async {
         let symbol = stock.symbol
         guard !symbol.isEmpty else { return }
@@ -273,7 +282,8 @@ struct StockDetailView: View {
             StockDailyHistory.cached(symbol: symbol)
         }.value
         applyDailySeries(cached)
-        if !StockDailyHistory.isFresh(symbol: symbol) {
+        let lacksOHLC = cached.isEmpty || cached.allSatisfy { $0.open == nil }
+        if lacksOHLC || !StockDailyHistory.isFresh(symbol: symbol) {
             let fresh = await StockDailyHistory.fetch(symbol: symbol)
             applyDailySeries(fresh)
         }
@@ -283,6 +293,16 @@ struct StockDetailView: View {
         guard pts.count >= 2 else { return }
         heroPrices = pts.map { HeroTrendPoint(date: $0.date, value: $0.close) }
         heroVolumes = pts.map { HeroTrendPoint(date: $0.date, value: $0.volume) }
+        dailyPoints = pts
+    }
+
+    /// K 棒資料：只取開高低齊全的日子（舊快取或部分停牌日可能缺）
+    private var candlePoints: [CandlePoint] {
+        dailyPoints.compactMap { p in
+            guard let o = p.open, let h = p.high, let l = p.low,
+                  o > 0, h > 0, l > 0 else { return nil }
+            return CandlePoint(date: p.date, open: o, high: h, low: l, close: p.close)
+        }
     }
 
     // MARK: - 資訊清單
@@ -1577,5 +1597,151 @@ struct StockDividendEditor: View {
                           bytes[4], bytes[5], bytes[6], bytes[7],
                           bytes[8], bytes[9], bytes[10], bytes[11],
                           bytes[12], bytes[13], bytes[14], bytes[15]))
+    }
+}
+
+// MARK: - 技術線圖（日 K 棒＋均線）
+
+/// 單日 K 棒
+private struct CandlePoint: Identifiable {
+    let date: Date
+    let open: Double
+    let high: Double
+    let low: Double
+    let close: Double
+    var id: Date { date }
+    var isUp: Bool { close >= open }
+}
+
+/// 技術線圖卡：日 K 棒（台股慣例紅漲綠跌）＋ MA5／MA20 均線。
+/// 資料來自 Yahoo 日線快取（含開高低），均線本地滾動計算；
+/// 抽成獨立 struct 降低 StockDetailView body 型別深度（FamilySharingRow 教訓）。
+private struct CandleChartCard: View {
+    let candles: [CandlePoint]
+
+    // 台股慣例：紅漲綠跌
+    private let upColor = Color(red: 0.92, green: 0.26, blue: 0.21)
+    private let downColor = Color(red: 0.13, green: 0.65, blue: 0.37)
+    private let ma5Color = Color.orange
+    private let ma20Color = Color.blue
+
+    private var ma5: [HeroTrendPoint] { movingAverage(5) }
+    private var ma20: [HeroTrendPoint] { movingAverage(20) }
+
+    /// 滾動視窗均線：前 window-1 天視窗未滿不出點
+    private func movingAverage(_ window: Int) -> [HeroTrendPoint] {
+        guard candles.count >= window else { return [] }
+        var out: [HeroTrendPoint] = []
+        var sum = 0.0
+        for (i, c) in candles.enumerated() {
+            sum += c.close
+            if i >= window { sum -= candles[i - window].close }
+            if i >= window - 1 {
+                out.append(HeroTrendPoint(date: c.date, value: sum / Double(window)))
+            }
+        }
+        return out
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // 標題列（Capsule 側條規格對齊全 App section header）
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(
+                        LinearGradient(colors: [.orange, .orange.opacity(0.55)],
+                                       startPoint: .top, endPoint: .bottom)
+                    )
+                    .frame(width: 4, height: 14)
+                Text("技術線圖")
+                    .font(.subheadline.weight(.bold))
+                Text("日K · 近 3 個月")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            legendRow
+            chartView
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+    }
+
+    private var legendRow: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 4) {
+                RoundedRectangle(cornerRadius: 1.5).fill(upColor).frame(width: 8, height: 8)
+                Text("漲").font(.caption2).foregroundStyle(.secondary)
+                RoundedRectangle(cornerRadius: 1.5).fill(downColor).frame(width: 8, height: 8)
+                Text("跌").font(.caption2).foregroundStyle(.secondary)
+            }
+            if let v = ma5.last?.value {
+                HStack(spacing: 4) {
+                    Capsule().fill(ma5Color).frame(width: 12, height: 2.5)
+                    Text(String(format: "MA5 %.2f", v))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            if let v = ma20.last?.value {
+                HStack(spacing: 4) {
+                    Capsule().fill(ma20Color).frame(width: 12, height: 2.5)
+                    Text(String(format: "MA20 %.2f", v))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+        }
+    }
+
+    private var chartView: some View {
+        let minLow = candles.map(\.low).min() ?? 0
+        let maxHigh = candles.map(\.high).max() ?? 1
+        return Chart {
+            ForEach(candles) { c in
+                // 影線（高–低）
+                RuleMark(x: .value("日", c.date),
+                         yStart: .value("低", c.low),
+                         yEnd: .value("高", c.high))
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+                    .foregroundStyle((c.isUp ? upColor : downColor).opacity(0.85))
+                // 實體（開–收）
+                RectangleMark(x: .value("日", c.date),
+                              yStart: .value("開", min(c.open, c.close)),
+                              yEnd: .value("收", candleBodyTop(c)),
+                              width: .fixed(3.5))
+                    .foregroundStyle(c.isUp ? upColor : downColor)
+            }
+            ForEach(ma5) { p in
+                LineMark(x: .value("日", p.date), y: .value("均價", p.value),
+                         series: .value("均線", "MA5"))
+                    .foregroundStyle(ma5Color)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+            }
+            ForEach(ma20) { p in
+                LineMark(x: .value("日", p.date), y: .value("均價", p.value),
+                         series: .value("均線", "MA20"))
+                    .foregroundStyle(ma20Color)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+            }
+        }
+        .chartYScale(domain: (minLow * 0.985)...(maxHigh * 1.015))
+        .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+        .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) }
+        .chartLegend(.hidden)
+        .frame(height: 200)
+    }
+
+    /// 平盤日（開＝收）實體高度為零會看不見，給 0.1% 最小高度
+    private func candleBodyTop(_ c: CandlePoint) -> Double {
+        let top = max(c.open, c.close)
+        let bot = min(c.open, c.close)
+        return top == bot ? top + max(top * 0.001, 0.01) : top
     }
 }
