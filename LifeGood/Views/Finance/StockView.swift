@@ -210,10 +210,9 @@ struct StockView: View {
             .onAppear {
                 Task { await refreshAllPrices() }
                 Task { await refreshDailyHistories() }
-                // 每天自動背景收集三大法人買賣超（同一天只跑一輪，內部節流）
-                Task.detached(priority: .utility) {
-                    await InstitutionalHistory.collectIfNeeded()
-                }
+                // 每天自動背景收集三大法人買賣超（同一天只跑一輪，內部節流；
+                // nonisolated async 實際執行在背景執行緒不佔主線）
+                Task { await InstitutionalHistory.collectIfNeeded() }
             }
             .onDisappear {
                 headerAppeared = false

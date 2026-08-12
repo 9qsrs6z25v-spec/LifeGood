@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.201", build: 954, date: "2026/08/12", notes: [
+            "【修正】v25.200 編譯錯誤（Xcode Cloud 回報）：MainTabView 的法人資料收集用了 Task.detached 包一層再 await .value，新 SDK 的 detached 多載（含 name 參數）造成型別推斷模稜兩可（Ambiguous use of detached）。其實不需要 detached——collectIfNeeded 是 nonisolated async 函式，本來就在背景執行緒跑、不佔主線，改為直接 await 呼叫（股票頁的同型呼叫一併簡化）。"
+        ]),
         ChangelogEntry(version: "25.200", build: 953, date: "2026/08/12", notes: [
             "【新增】三大法人買賣超：連續買超篩選＋個股柱狀圖（使用者指定）：(1) 資料收集——每天開 App 自動背景抓「上市（證交所 T86）＋上櫃（櫃買 3itrade）」全市場三大法人買賣超快照，逐日累積、最多保留 30 個交易日（檔案儲存不塞 UserDefaults；回看 7 天自動補洞、假日存空標記、當天 16:30 資料未公布會於下次開 App 重試、請求間隔 1.2 秒）。(2) 股票頁＋號旁新增「法人連續買超」按鈕：滑桿設定連續 1~30 天（上限隨已收集天數）、表格列出符合的股票（代號／名稱／連買天數／累計買超張數，依連買天數與累計排序、前 200 檔）、附收集狀態說明與手動更新。(3) 股票明細技術線圖下方新增「法人買賣超」柱狀圖卡：近 N 個交易日買賣超（買超紅／賣超綠、單位張、今日買賣超膠囊），未收集到該股資料時整卡隱藏。剛開始使用時只有 1 天資料就只能篩 1 天，之後每天自動長高。"
         ]),

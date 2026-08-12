@@ -402,11 +402,10 @@ struct MainTabView: View {
             }
             .tint(.green)
             // 每天開 App 自動背景收集三大法人買賣超（同一天只跑一輪，內部節流；
-            // 逐日累積供股票頁「法人連續買超」篩選與個股買賣超柱狀圖使用）
+            // 逐日累積供股票頁「法人連續買超」篩選與個股買賣超柱狀圖使用）。
+            // collectIfNeeded 為 nonisolated async，實際執行在背景執行緒不佔主線。
             .task {
-                await Task.detached(priority: .utility) {
-                    await InstitutionalHistory.collectIfNeeded()
-                }.value
+                await InstitutionalHistory.collectIfNeeded()
             }
             .onChange(of: appMode) { _, _ in
                 isSettingsActive = false
