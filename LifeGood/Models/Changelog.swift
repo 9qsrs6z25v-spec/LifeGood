@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.189", build: 942, date: "2026/08/12", notes: [
+            "【修正】上櫃（OTC）股票報價幾乎必失敗（使用者回報「TWO 每次都取不到」）：原本更新報價是逐檔並發、每檔先猜上市（tse_）失敗再打第二發上櫃（otc_），一口氣連發 2N 個請求觸發證交所 MIS API 的 IP 限流——上市股第一發就命中，上櫃股的第二發永遠落在超額流量裡被拒。改為「整批單一請求」：MIS 的 ex_ch 參數支援 | 串接多檔一次查（每 20 檔分一批），並從回應的 ex 欄位記住每檔的市場別（UserDefaults 快取），之後查價已知代號只帶一個候選、未知才帶 tse/otc 兩個。請求數從 2N 降到 1，速度更快也不再觸發限流。"
+        ]),
         ChangelogEntry(version: "25.188", build: 941, date: "2026/08/12", notes: [
             "【新增】股票項目卡背景：個股 3 個月日線（使用者提議）：既有 TWSE MIS API 只有即時價，新接 Yahoo Finance chart API（免金鑰，上市 .TW／上櫃 .TWO 自動嘗試）一次抓 3 個月「每日收盤價＋成交量」。每張持有中的股票卡背景疊上：上方每日收盤價曲線（沿用 HeroTrendBackground 線圖模板完整規格——景深、回聲側線、末端實心點；每日一點不壓縮、不顯示末端大字因卡上已有現價）、下方每日成交量柱狀圖（最高量柱佔卡片約 20% 高當底座），白卡上以橙色強調色繪製、透明度沿用進階設定。日線快取 6 小時（UserDefaults），開頁先秒載快取再背景補抓過期的；已賣出或抓不到日線（如非台股代號）維持純白卡。模板新增 HeroPriceVolumeBackground 複合元件與 tint／pointLimitOverride／showEndLabel 參數。"
         ]),

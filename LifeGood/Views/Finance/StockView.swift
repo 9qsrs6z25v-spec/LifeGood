@@ -223,29 +223,20 @@ struct StockView: View {
         var success = 0
         var fail = 0
 
-        // 平行送出每檔股票的報價請求：原本 for-in + await 逐檔序列等待，N 檔股票要等 N 次
-        // 網路往返（fetchPrice 內部 tse 抓不到還會再打一次 otc），使用者常要等上好幾秒才會看到
-        // 「更新報價中」結束。改用 TaskGroup 平行發送，總耗時趨近最慢的單一檔位；
-        // for await 消費結果的迴圈仍在呼叫端（@MainActor）執行，逐筆寫入 fetchStatus 保留
-        // 原本「即時角標回饋」的行為，也不需要額外跨 actor 的 MainActor.run。
+        // 整批單一請求：原本逐檔並發、每檔先猜 tse 再猜 otc（上櫃股必打兩發），
+        // 一口氣連發 2N 個請求會觸發 MIS 的 IP 限流——上市股第一發就命中，
+        // 上櫃股的第二發永遠落在超額流量裡被拒，造成「上櫃每次都取不到」。
+        // MIS API 支援 ex_ch 用 | 串接多檔，改為整批一個請求＋記住每檔市場別。
+        let symbolPrices = await fetchPricesBatch(symbols: targets.map(\.symbol))
         var priceUpdates: [UUID: Double] = [:]
-        await withTaskGroup(of: (UUID, Double?).self) { group in
-            for stock in targets {
-                let id = stock.id
-                let symbol = stock.symbol
-                group.addTask {
-                    (id, await self.fetchPrice(symbol: symbol))
-                }
-            }
-            for await (id, price) in group {
-                if let price {
-                    priceUpdates[id] = price
-                    fetchStatus[id] = true
-                    success += 1
-                } else {
-                    fetchStatus[id] = false
-                    fail += 1
-                }
+        for stock in targets {
+            if let price = symbolPrices[stock.symbol] {
+                priceUpdates[stock.id] = price
+                fetchStatus[stock.id] = true
+                success += 1
+            } else {
+                fetchStatus[stock.id] = false
+                fail += 1
             }
         }
         // 批次套用全部現價：單次 @Published → 單次重繪 + 單次 JSON 序列化 + 單次 CloudKit push，
@@ -285,20 +276,53 @@ struct StockView: View {
         }
     }
 
-    private func fetchPrice(symbol: String) async -> Double? {
-        for exchange in ["tse", "otc"] {
-            let urlString = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=\(exchange)_\(symbol).tw"
+    /// symbol → 已知市場別（tse/otc）快取：從批次回應的 ex 欄位學會後存起來，
+    /// 之後查價未知代號才需要 tse/otc 兩個候選都帶
+    private static let exchangeMapKey = "stock_symbol_exchange_map"
+
+    /// 整批查多檔即時報價（MIS API 的 ex_ch 支援 | 串接）：回傳 symbol → 現價。
+    /// 單一請求取代逐檔並發，避免 MIS IP 限流；每 20 個查詢項分一批保險 URL 長度。
+    private func fetchPricesBatch(symbols: [String]) async -> [String: Double] {
+        var exchangeMap = (UserDefaults.standard.dictionary(forKey: Self.exchangeMapKey)
+                           as? [String: String]) ?? [:]
+        var entries: [String] = []
+        for sym in Array(Set(symbols)).sorted() {
+            if let ex = exchangeMap[sym] {
+                entries.append("\(ex)_\(sym).tw")
+            } else {
+                entries.append("tse_\(sym).tw")
+                entries.append("otc_\(sym).tw")
+            }
+        }
+        var result: [String: Double] = [:]
+        var idx = 0
+        while idx < entries.count {
+            let chunk = Array(entries[idx..<min(idx + 20, entries.count)])
+            idx += 20
+            let exCh = chunk.joined(separator: "|")
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+            let urlString = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=\(exCh)&json=1&delay=0"
             guard let url = URL(string: urlString) else { continue }
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
                 guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let arr = json["msgArray"] as? [[String: Any]],
-                      let m = arr.first else { continue }
-                if let z = m["z"] as? String, let p = Double(z), p > 0 { return p }
-                if let y = m["y"] as? String, let p = Double(y), p > 0 { return p }
+                      let arr = json["msgArray"] as? [[String: Any]] else { continue }
+                for m in arr {
+                    guard let sym = (m["c"] as? String)?.trimmingCharacters(in: .whitespaces),
+                          !sym.isEmpty else { continue }
+                    // 記住市場別：下次批次查價這檔只帶一個候選
+                    if let ex = m["ex"] as? String, !ex.isEmpty { exchangeMap[sym] = ex }
+                    if let z = m["z"] as? String, let p = Double(z), p > 0 {
+                        result[sym] = p
+                    } else if let y = m["y"] as? String, let p = Double(y), p > 0,
+                              result[sym] == nil {
+                        result[sym] = p
+                    }
+                }
             } catch { continue }
         }
-        return nil
+        UserDefaults.standard.set(exchangeMap, forKey: Self.exchangeMapKey)
+        return result
     }
 
     // MARK: - 黏著標題
