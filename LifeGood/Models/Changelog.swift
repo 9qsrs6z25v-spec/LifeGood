@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.192", build: 945, date: "2026/08/12", notes: [
+            "【新增】股票明細閃卡日線背景＋曲線水平位置/數字旋轉開放進階設定（使用者指定）：(1) 股票項目點開的英雄閃卡背景疊上個股 3 個月日線（收盤價曲線＋成交量柱，HeroPriceVolumeBackground 模板；與列表卡共用快取、先載快取過期才補抓）——傳說卡深色底用白色、其他淺色底用橙色強調色。(2) 進階設定 > 趨勢曲線模板新增兩組參數：「水平位置」（最左位置 0~30%、最右位置 50~95%，預設 0%/80%；曲線與成交量柱同步套用）與「末端數字立體旋轉」（X/Y/Z 各 -15°~15°，預設 5°/5°/2°）；恢復預設值一併涵蓋。實作：X 軸 domain 反推放大改為由 leftPos/rightPos 參數驅動，回聲側線收細遮罩的收尾位置跟隨最右位置。"
+        ]),
         ChangelogEntry(version: "25.191", build: 944, date: "2026/08/12", notes: [
             "【效能】股票頁進頁頓挫修正（使用者回報）：(1) HeroTrendBackground 整組加 drawingGroup——曲線背景實際疊 7 個 Chart（三線×模糊/清晰兩層＋末端點），原本即時合成 blur+mask，多張卡同時進場動畫時 GPU 吃緊；改離屏渲染成單一 Metal 圖層再參與動畫，四張英雄卡與每張股票卡同時受惠。(2) 日線快取 JSON 解碼從主執行緒移到背景（原本進頁時逐檔在 MainActor 解 60 點×N 檔）。(3) 網路補抓的日線改「全部到齊後一次合併寫回」，原本逐檔寫 @State、每檔都觸發整頁重繪。(4) 股票卡背景序列改存「已轉換完成」的最終形態，避免每次 render 每張卡重複 map 兩個 60 點陣列。"
         ]),

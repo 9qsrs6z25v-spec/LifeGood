@@ -2443,11 +2443,18 @@ struct TrendCurveSettingsView: View {
     @AppStorage("hero_trend_opacity") private var mainOpacity: Double = 0.30
     @AppStorage("hero_trend_line_width") private var mainLineWidth: Double = 2.0
     @AppStorage("hero_trend_blur") private var blurRadius: Double = 2.2
+    @AppStorage("hero_trend_left_pos") private var leftPos: Double = 0.0
+    @AppStorage("hero_trend_right_pos") private var rightPos: Double = 0.80
+    @AppStorage("hero_trend_rot_x") private var rotX: Double = 5
+    @AppStorage("hero_trend_rot_y") private var rotY: Double = 5
+    @AppStorage("hero_trend_rot_z") private var rotZ: Double = 2
 
     var body: some View {
         Form {
             previewSection
             paramsSection
+            positionSection
+            rotationSection
             resetSection
         }
         .navigationTitle("趨勢曲線模板")
@@ -2524,6 +2531,54 @@ struct TrendCurveSettingsView: View {
         }
     }
 
+    private var positionSection: some View {
+        Section {
+            advancedSliderRow(
+                title: "最左位置",
+                display: "\(Int((leftPos * 100).rounded()))%",
+                value: $leftPos,
+                range: 0.00...0.30, step: 0.02
+            )
+            advancedSliderRow(
+                title: "最右位置",
+                display: "\(Int((rightPos * 100).rounded()))%",
+                value: $rightPos,
+                range: 0.50...0.95, step: 0.05
+            )
+        } header: {
+            Text("水平位置")
+        } footer: {
+            Text("曲線起點與末點落在卡片寬度的百分比位置（預設 0% 與 80%——貼左緣起、末點在右邊往回 20%）。成交量柱同步套用相同位置。")
+        }
+    }
+
+    private var rotationSection: some View {
+        Section {
+            advancedSliderRow(
+                title: "X 軸旋轉",
+                display: String(format: "%.0f°", rotX),
+                value: $rotX,
+                range: -15...15, step: 1
+            )
+            advancedSliderRow(
+                title: "Y 軸旋轉",
+                display: String(format: "%.0f°", rotY),
+                value: $rotY,
+                range: -15...15, step: 1
+            )
+            advancedSliderRow(
+                title: "Z 軸旋轉",
+                display: String(format: "%.0f°", rotZ),
+                value: $rotZ,
+                range: -15...15, step: 1
+            )
+        } header: {
+            Text("末端數字立體旋轉")
+        } footer: {
+            Text("末端數值標籤的 3D 傾斜角度（預設 X 5°、Y 5°、Z 2°），營造透視感。")
+        }
+    }
+
     private var resetSection: some View {
         Section {
             Button {
@@ -2531,6 +2586,11 @@ struct TrendCurveSettingsView: View {
                 mainOpacity = 0.30
                 mainLineWidth = 2.0
                 blurRadius = 2.2
+                leftPos = 0.0
+                rightPos = 0.80
+                rotX = 5
+                rotY = 5
+                rotZ = 2
             } label: {
                 Label("恢復預設值", systemImage: "arrow.counterclockwise")
                     .frame(maxWidth: .infinity)

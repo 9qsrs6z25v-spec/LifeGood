@@ -103,6 +103,14 @@ struct HeroTrendBackground: View {
     @AppStorage("hero_trend_opacity") private var mainOpacity: Double = 0.30
     @AppStorage("hero_trend_line_width") private var mainLineWidth: Double = 2.0
     @AppStorage("hero_trend_blur") private var blurRadius: Double = 2.2
+    /// 曲線起點的水平位置（0＝貼齊卡片左緣；0.1＝從 10% 寬處開始）
+    @AppStorage("hero_trend_left_pos") private var leftPos: Double = 0.0
+    /// 曲線末點的水平位置（0.8＝落在 80% 寬、右邊往回 20%）
+    @AppStorage("hero_trend_right_pos") private var rightPos: Double = 0.80
+    /// 末端數字的 3D 旋轉角度（度）
+    @AppStorage("hero_trend_rot_x") private var rotX: Double = 5
+    @AppStorage("hero_trend_rot_y") private var rotY: Double = 5
+    @AppStorage("hero_trend_rot_z") private var rotZ: Double = 2
 
     var body: some View {
         let pts = HeroTrendSeries.displayPoints(from: points,
@@ -121,20 +129,24 @@ struct HeroTrendBackground: View {
             let domainHigh = domainLow + span
             let xFirst = pts.first?.date ?? Date()
             let xLast = pts.last?.date ?? Date()
-            // X 軸右側延伸 25% 資料跨距：資料只佔左邊 80% 寬
+            // 水平位置映射（左右端點可由進階設定調整）：資料起點放在 leftPos、
+            // 末點放在 rightPos（預設 0 → 0.8：貼左緣起、落在右邊往回 20%）。
+            // 作法：把 X 軸 domain 反推放大——資料跨距佔 domain 的 (rightPos-leftPos)。
             let xSpan = max(xLast.timeIntervalSince(xFirst), 1)
-            let xHigh = xLast.addingTimeInterval(xSpan * 0.25)
-            let xDomain = xFirst...xHigh
+            let posFrac = max(rightPos - leftPos, 0.05)
+            let domainWidth = xSpan / posFrac
+            let domainStart = xFirst.addingTimeInterval(-leftPos * domainWidth)
+            let xDomain = domainStart...domainStart.addingTimeInterval(domainWidth)
             let yDomain = domainLow...domainHigh
             // 回聲側線：透明度／線寬與主線連動（維持既定比例 0.44 / 0.5）
             let echoOpacity = mainOpacity * 0.44
             let echoWidth = max(mainLineWidth * 0.5, 0.5)
             // 回聲側線尾端收細：Charts 無法沿路徑變線寬，用尾端漸層遮罩淡出模擬
-            let echoShift = xSpan * 1.25 * 0.01   // domain 全寬（含右延 25%）的 1%
+            let echoShift = domainWidth * 0.01   // domain 全寬的 1%
             let echoTailTaper = LinearGradient(stops: [
                 .init(color: .white, location: 0.00),
-                .init(color: .white, location: 0.45),
-                .init(color: .clear, location: 0.80)   // 資料終點約在 80% 寬，尾段漸淡收掉
+                .init(color: .white, location: rightPos * 0.56),
+                .init(color: .clear, location: rightPos)   // 至資料終點漸淡收掉
             ], startPoint: .leading, endPoint: .trailing)
             let trendGroup = ZStack {
                 trendLine(pts, xDomain: xDomain, yDomain: yDomain,
@@ -180,10 +192,10 @@ struct HeroTrendBackground: View {
                                     .font(.system(size: 19, weight: .bold, design: .rounded))
                                     .foregroundStyle(tint.opacity(mainOpacity))
                                     .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
-                                    // 立體微傾：X/Y 軸各轉 5 度、Z 軸轉 2 度，呼應景深構圖
-                                    .rotation3DEffect(.degrees(5), axis: (x: 1, y: 0, z: 0))
-                                    .rotation3DEffect(.degrees(5), axis: (x: 0, y: 1, z: 0))
-                                    .rotationEffect(.degrees(2))
+                                    // 立體微傾（角度由進階設定調整；預設 X/Y 5°、Z 2°）
+                                    .rotation3DEffect(.degrees(rotX), axis: (x: 1, y: 0, z: 0))
+                                    .rotation3DEffect(.degrees(rotY), axis: (x: 0, y: 1, z: 0))
+                                    .rotationEffect(.degrees(rotZ))
                             }
                         }
                     }
@@ -254,15 +266,20 @@ struct HeroPriceVolumeBackground: View {
     var tint: Color = .white
 
     @AppStorage("hero_volume_bar_opacity") private var volumeBarOpacity: Double = 0.45
+    // 與 HeroTrendBackground 相同的水平位置設定（柱與曲線點必須對齊）
+    @AppStorage("hero_trend_left_pos") private var leftPos: Double = 0.0
+    @AppStorage("hero_trend_right_pos") private var rightPos: Double = 0.80
 
     var body: some View {
         ZStack {
-            // 底層：成交量柱狀圖（X domain 與價格曲線同樣右延 25%，柱與曲線點對齊）
+            // 底層：成交量柱狀圖（X domain 與價格曲線同一套左右位置映射）
             if volumes.count >= 2, let maxVol = volumes.map(\.value).max(), maxVol > 0 {
                 let xFirst = volumes.first?.date ?? Date()
                 let xLast = volumes.last?.date ?? Date()
                 let xSpan = max(xLast.timeIntervalSince(xFirst), 1)
-                let xHigh = xLast.addingTimeInterval(xSpan * 0.25)
+                let posFrac = max(rightPos - leftPos, 0.05)
+                let domainWidth = xSpan / posFrac
+                let domainStart = xFirst.addingTimeInterval(-leftPos * domainWidth)
                 Chart(volumes) { v in
                     BarMark(
                         x: .value("日", v.date),
@@ -274,7 +291,7 @@ struct HeroPriceVolumeBackground: View {
                 .chartXAxis(.hidden)
                 .chartYAxis(.hidden)
                 .chartLegend(.hidden)
-                .chartXScale(domain: xFirst...xHigh)
+                .chartXScale(domain: domainStart...domainStart.addingTimeInterval(domainWidth))
                 .chartYScale(domain: 0...(maxVol / 0.20))   // 最高量柱佔卡片 20% 高
                 .allowsHitTesting(false)
             }

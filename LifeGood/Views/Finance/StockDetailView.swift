@@ -102,6 +102,9 @@ struct StockDetailView: View {
     @State private var cardAppeared = false          // [v3] 閃卡進場動畫旗標
     @State private var transactionsAppeared = false
     @State private var dividendsAppeared = false
+    // 閃卡背景日線（收盤價曲線＋成交量柱；與股票列表卡同一套資料快取）
+    @State private var heroPrices: [HeroTrendPoint] = []
+    @State private var heroVolumes: [HeroTrendPoint] = []
 
     init(stock: Stock) {
         self.stockId = stock.id
@@ -141,6 +144,7 @@ struct StockDetailView: View {
                 .padding(.vertical)
             }
             .background(Color(.systemGroupedBackground))
+            .task { await loadDailySeries() }
             .navigationTitle("股票卡片")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -310,6 +314,18 @@ struct StockDetailView: View {
             ZStack {
                 LinearGradient(colors: rarity.bgGradient,
                                startPoint: .topLeading, endPoint: .bottomTrailing)
+                // 個股 3 個月日線背景（收盤價曲線＋成交量柱，HeroPriceVolumeBackground
+                // 標準模板）：傳說卡深色底用白色、其他淺色底用橙色強調色
+                if heroPrices.count >= 2 {
+                    HeroPriceVolumeBackground(
+                        prices: heroPrices,
+                        volumes: heroVolumes,
+                        tint: rarity == .legendary
+                            ? .white
+                            : Color(red: 1.00, green: 0.62, blue: 0.22)
+                    )
+                    .allowsHitTesting(false)
+                }
                 Circle()
                     .fill(Color.white.opacity(0.07))
                     .frame(width: 95, height: 95)
@@ -358,6 +374,29 @@ struct StockDetailView: View {
         .onAppear { cardAppeared = true }
         .padding(.horizontal, 24)
         .padding(.top, 16)
+    }
+
+    // MARK: - 閃卡背景日線載入
+
+    /// 與股票列表卡共用 StockDailyHistory 快取：先載快取、過期才網路補抓；
+    /// 解碼在背景執行緒，轉換完成的最終形態才寫回 @State
+    private func loadDailySeries() async {
+        let symbol = stock.symbol
+        guard !symbol.isEmpty else { return }
+        let cached = await Task.detached(priority: .userInitiated) {
+            StockDailyHistory.cached(symbol: symbol)
+        }.value
+        applyDailySeries(cached)
+        if !StockDailyHistory.isFresh(symbol: symbol) {
+            let fresh = await StockDailyHistory.fetch(symbol: symbol)
+            applyDailySeries(fresh)
+        }
+    }
+
+    private func applyDailySeries(_ pts: [StockDailyPoint]) {
+        guard pts.count >= 2 else { return }
+        heroPrices = pts.map { HeroTrendPoint(date: $0.date, value: $0.close) }
+        heroVolumes = pts.map { HeroTrendPoint(date: $0.date, value: $0.volume) }
     }
 
     // MARK: - 資訊清單
