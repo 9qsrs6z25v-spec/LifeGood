@@ -729,6 +729,7 @@ struct FixedExpenseView: View {
 struct FixedExpenseRow: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var store: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore   // 儲蓄險進度條需查連結保單
     let expense: Expense
 
     private static let currencyFormatter: NumberFormatter = {
@@ -853,11 +854,11 @@ struct FixedExpenseRow: View {
         }
     }
 
-    /// 貸款繳費進度條（使用者指定：比照儲蓄險卡進度條，一目了然離繳清終點多遠）。
-    /// 4pt 膠囊軌＋分類色漸層＋glow，右側標「已繳/總期」；繳清顯示「已繳清」。
+    /// 繳費進度條（貸款＋儲蓄險共用；使用者指定兩者顯示方式對齊）。
+    /// 4pt 膠囊軌＋分類色漸層＋glow，右側標「已繳/總期」；繳清顯示「已繳清/已繳滿」。
     @ViewBuilder
     private var loanProgressSection: some View {
-        if let lp = loanProgress {
+        if let lp = rowProgress {
             HStack(spacing: 8) {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -897,22 +898,42 @@ struct FixedExpenseRow: View {
         }
     }
 
-    /// 貸款進度：優先用「貸款年期」推總期數；沒填年期時用「貸款總額 ÷ 月付」推估。
-    /// 起始日即繳第一期（比照儲蓄險 elapsedPeriods 規則）；資料不足不顯示。
-    private var loanProgress: (ratio: Double, text: String)? {
-        guard expense.fixedCategory == .loan else { return nil }
-        let monthly = monthlyEquivalentAmount(expense)
-        var totalMonths = 0
-        if let years = expense.loanYears, years > 0 {
-            totalMonths = Int((years * 12).rounded())
-        } else if let total = expense.loanTotalAmount, total > 0, monthly > 0 {
-            totalMonths = Int((total / monthly).rounded())
+    /// 列表進度（貸款＋儲蓄險）：
+    /// - 貸款：優先用「貸款年期」推總期數，沒填年期時用「貸款總額 ÷ 月付」推估；
+    ///   起始日即繳第一期（比照儲蓄險 elapsedPeriods 規則）
+    /// - 儲蓄險：查連結保單的已繳/總期數（正向 linkedInsuranceId、反向 linkedExpenseId 都試）
+    /// 資料不足不顯示。
+    private var rowProgress: (ratio: Double, text: String)? {
+        if expense.fixedCategory == .loan {
+            let monthly = monthlyEquivalentAmount(expense)
+            var totalMonths = 0
+            if let years = expense.loanYears, years > 0 {
+                totalMonths = Int((years * 12).rounded())
+            } else if let total = expense.loanTotalAmount, total > 0, monthly > 0 {
+                totalMonths = Int((total / monthly).rounded())
+            }
+            guard totalMonths > 0 else { return nil }
+            let months = Calendar.current.dateComponents([.month], from: expense.date, to: Date()).month ?? 0
+            let elapsed = max(0, min(months + 1, totalMonths))
+            return (Double(elapsed) / Double(totalMonths),
+                    elapsed >= totalMonths ? "已繳清" : "\(elapsed)/\(totalMonths) 期")
         }
-        guard totalMonths > 0 else { return nil }
-        let months = Calendar.current.dateComponents([.month], from: expense.date, to: Date()).month ?? 0
-        let elapsed = max(0, min(months + 1, totalMonths))
-        return (Double(elapsed) / Double(totalMonths),
-                elapsed >= totalMonths ? "已繳清" : "\(elapsed)/\(totalMonths) 期")
+        if expense.fixedCategory == .insurance, expense.insuranceSubCategory == .savings,
+           let ins = linkedSavingsForRow, ins.totalPeriods > 0 {
+            let elapsed = ins.elapsedPeriods
+            let total = ins.totalPeriods
+            return (min(1, Double(elapsed) / Double(total)),
+                    elapsed >= total ? "已繳滿" : "\(elapsed)/\(total) 期")
+        }
+        return nil
+    }
+
+    private var linkedSavingsForRow: SavingsInsurance? {
+        if let id = expense.linkedInsuranceId,
+           let ins = financeStore.insurances.first(where: { $0.id == id }) {
+            return ins
+        }
+        return financeStore.insurances.first { $0.linkedExpenseId == expense.id }
     }
 
     /// 季繳 / 年繳的「月均」膠囊（抽出以降低主 body 型別檢查複雜度）
@@ -1080,6 +1101,7 @@ private struct FixedExpenseCard: View {
                     titleBlock
                     infoCard
                     if linkedSavings != nil { savingsSection }
+                    loanSection
                     if !current.note.isEmpty { noteBlock }
                     photoSection
                 }
@@ -1201,7 +1223,8 @@ private struct FixedExpenseCard: View {
     }
 
     /// 甘特圖風格的繳費進度條：整條代表起始日→到期日，填色為已繳進度，白圓點標示目前位置
-    private func ganttBar(progress: Double, start: Date, end: Date) -> some View {
+    /// （accent 可配色：儲蓄險綠、貸款紅）
+    private func ganttBar(progress: Double, start: Date, end: Date, accent: Color = .green) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             GeometryReader { geo in
                 let w = geo.size.width
@@ -1209,11 +1232,11 @@ private struct FixedExpenseCard: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color(.tertiarySystemFill)).frame(height: 10)
                     Capsule()
-                        .fill(LinearGradient(colors: [.green, .green.opacity(0.55)],
+                        .fill(LinearGradient(colors: [accent, accent.opacity(0.55)],
                                              startPoint: .leading, endPoint: .trailing))
                         .frame(width: fill, height: 10)
                     Circle().fill(.white).frame(width: 15, height: 15)
-                        .overlay(Circle().stroke(Color.green, lineWidth: 3))
+                        .overlay(Circle().stroke(accent, lineWidth: 3))
                         .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
                         .offset(x: min(w - 15, max(0, w * progress - 7.5)))
                 }
@@ -1224,12 +1247,72 @@ private struct FixedExpenseCard: View {
                 Text(Self.dateFmt.string(from: start)).font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Text("\(Int((progress * 100).rounded()))%")
-                    .font(.caption2.weight(.bold)).foregroundStyle(.green)
+                    .font(.caption2.weight(.bold)).foregroundStyle(accent)
                 Spacer()
                 Text(Self.dateFmt.string(from: end)).font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 6)
+    }
+
+    /// 貸款區塊（使用者指定：比照儲蓄險區塊式樣升級——甘特圖進度條＋明細欄）。
+    /// 總期數優先用貸款年期、否則用總額÷月付推估；資料不足不顯示。
+    @ViewBuilder
+    private var loanSection: some View {
+        if let lp = loanCardInfo {
+            let loanAccent = Color(red: 0.90, green: 0.25, blue: 0.30)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("貸款").font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 14).padding(.top, 10)
+
+                // 甘特圖：起始日 → 預計繳清日，填色代表已繳進度
+                ganttBar(progress: lp.ratio, start: current.date, end: lp.endDate, accent: loanAccent)
+
+                VStack(spacing: 0) {
+                    if let rate = current.loanRate, rate > 0 {
+                        field("貸款利率", String(format: "%.2f%%", rate))
+                        Divider().padding(.leading, 14)
+                    }
+                    field("已繳 / 總期數", lp.periodText)
+                    Divider().padding(.leading, 14)
+                    field("已繳金額", "NT$ " + fmtShort(lp.paid))
+                    Divider().padding(.leading, 14)
+                    field("貸款總額", "NT$ " + fmtShort(lp.totalAmount))
+                    Divider().padding(.leading, 14)
+                    field("剩餘金額", "NT$ " + fmtShort(max(lp.totalAmount - lp.paid, 0)))
+                    Divider().padding(.leading, 14)
+                    field("起始日", Self.dateFmt.string(from: current.date))
+                    Divider().padding(.leading, 14)
+                    field("預計繳清", Self.dateFmt.string(from: lp.endDate))
+                }
+            }
+            .padding(.bottom, 6)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    /// 貸款進度試算（與 FixedExpenseRow.loanProgress 同規則）：
+    /// 起始日即繳第一期；總額沒填時以月付×總期數推估
+    private var loanCardInfo: (ratio: Double, periodText: String, paid: Double,
+                               totalAmount: Double, endDate: Date)? {
+        guard current.fixedCategory == .loan else { return nil }
+        let monthly = monthlyEquivalent
+        var totalMonths = 0
+        if let years = current.loanYears, years > 0 {
+            totalMonths = Int((years * 12).rounded())
+        } else if let total = current.loanTotalAmount, total > 0, monthly > 0 {
+            totalMonths = Int((total / monthly).rounded())
+        }
+        guard totalMonths > 0 else { return nil }
+        let cal = Calendar.current
+        let months = cal.dateComponents([.month], from: current.date, to: Date()).month ?? 0
+        let elapsed = max(0, min(months + 1, totalMonths))
+        let totalAmount = current.loanTotalAmount ?? monthly * Double(totalMonths)
+        let paid = min(monthly * Double(elapsed), totalAmount)
+        let endDate = cal.date(byAdding: .month, value: totalMonths, to: current.date) ?? current.date
+        let text = elapsed >= totalMonths ? "已繳清（共 \(totalMonths) 期）" : "\(elapsed) / \(totalMonths) 期"
+        return (Double(elapsed) / Double(totalMonths), text, paid, totalAmount, endDate)
     }
 
     /// 帳單照片：可拍照 / 從相簿新增，直接寫回此筆固定支出並持久化（含 iCloud 同步）
