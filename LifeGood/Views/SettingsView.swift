@@ -2448,11 +2448,14 @@ struct TrendCurveSettingsView: View {
     @AppStorage("hero_trend_rot_x") private var rotX: Double = 5
     @AppStorage("hero_trend_rot_y") private var rotY: Double = 5
     @AppStorage("hero_trend_rot_z") private var rotZ: Double = 2
+    @AppStorage("hero_trend_end_opacity") private var endOpacity: Double = 0.30
+    @AppStorage("hero_trend_show_end_label") private var showEndNumber: Bool = true
 
     var body: some View {
         Form {
             previewSection
             paramsSection
+            endPointSection
             positionSection
             rotationSection
             resetSection
@@ -2507,7 +2510,7 @@ struct TrendCurveSettingsView: View {
                 range: 4...20, step: 1
             )
             advancedSliderRow(
-                title: "透明度",
+                title: "曲線透明度",
                 display: "\(Int((mainOpacity * 100).rounded()))%",
                 value: $mainOpacity,
                 range: 0.10...0.80, step: 0.05
@@ -2528,6 +2531,24 @@ struct TrendCurveSettingsView: View {
             Text("曲線參數")
         } footer: {
             Text("套用於股票、收入、變動支出、固定支出四張看板的背景曲線，調整立即生效。回聲側線的粗細與透明度會隨主線等比例連動。")
+        }
+    }
+
+    private var endPointSection: some View {
+        Section {
+            advancedSliderRow(
+                title: "最終點透明度",
+                display: "\(Int((endOpacity * 100).rounded()))%",
+                value: $endOpacity,
+                range: 0.10...1.00, step: 0.05
+            )
+            Toggle("顯示最終點數字", isOn: $showEndNumber)
+                .font(.subheadline)
+                .tint(.blue)
+        } header: {
+            Text("最終點")
+        } footer: {
+            Text("最終點（實心圓與數字）的透明度與曲線分開調整；關閉數字後只保留實心圓點。")
         }
     }
 
@@ -2591,6 +2612,8 @@ struct TrendCurveSettingsView: View {
                 rotX = 5
                 rotY = 5
                 rotZ = 2
+                endOpacity = 0.30
+                showEndNumber = true
             } label: {
                 Label("恢復預設值", systemImage: "arrow.counterclockwise")
                     .frame(maxWidth: .infinity)

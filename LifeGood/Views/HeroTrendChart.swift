@@ -111,6 +111,10 @@ struct HeroTrendBackground: View {
     @AppStorage("hero_trend_rot_x") private var rotX: Double = 5
     @AppStorage("hero_trend_rot_y") private var rotY: Double = 5
     @AppStorage("hero_trend_rot_z") private var rotZ: Double = 2
+    /// 最終點（實心圓＋數字）透明度——與曲線透明度分開調整
+    @AppStorage("hero_trend_end_opacity") private var endOpacity: Double = 0.30
+    /// 是否顯示最終點數字（關閉後只留實心圓點）
+    @AppStorage("hero_trend_show_end_label") private var showEndNumber: Bool = true
 
     var body: some View {
         let pts = HeroTrendSeries.displayPoints(from: points,
@@ -175,22 +179,24 @@ struct HeroTrendBackground: View {
                         .init(color: .clear, location: 0.20),
                         .init(color: .white, location: 0.75)
                     ], startPoint: .leading, endPoint: .trailing))
-                // 上層：最後一個（真實）點——圓形實心＋大字數值（透明度隨進階設定）
+                // 上層：最後一個（真實）點——圓形實心＋大字數值
+                //（透明度用獨立的 endOpacity，與曲線透明度分開調整）
                 Chart(pts) { p in
                     if p.id == pts.last?.id {
                         PointMark(
                             x: .value("時間", p.date),
                             y: .value("數值", p.value)
                         )
-                        .foregroundStyle(tint.opacity(mainOpacity))
+                        .foregroundStyle(tint.opacity(endOpacity))
                         .symbol(.circle)
                         .symbolSize(90)
                         .annotation(position: .top,
                                     overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
-                            if showEndLabel {
+                            // showEndLabel＝呼叫端覆寫（股票卡關閉）；showEndNumber＝進階設定開關
+                            if showEndLabel && showEndNumber {
                                 Text(valueText(p.value))
                                     .font(.system(size: 19, weight: .bold, design: .rounded))
-                                    .foregroundStyle(tint.opacity(mainOpacity))
+                                    .foregroundStyle(tint.opacity(endOpacity))
                                     .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
                                     // 立體微傾（角度由進階設定調整；預設 X/Y 5°、Z 2°）
                                     .rotation3DEffect(.degrees(rotX), axis: (x: 1, y: 0, z: 0))
