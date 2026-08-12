@@ -2463,39 +2463,40 @@ struct TrendCurveSettingsView: View {
     @AppStorage("hero_trend_show_end_label") private var showEndNumber: Bool = true
 
     var body: some View {
-        Form {
-            previewSection
-            paramsSection
-            endPointSection
-            positionSection
-            rotationSection
-            resetSection
+        // 預覽卡固定在頂端不隨表單捲動（使用者反映調下方參數時預覽被捲出畫面外）
+        VStack(spacing: 0) {
+            pinnedPreview
+            Form {
+                paramsSection
+                endPointSection
+                positionSection
+                rotationSection
+                resetSection
+            }
         }
+        .background(Color(.systemGroupedBackground))
         .navigationTitle("趨勢曲線模板")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    // 即時預覽（示範資料 + 真的 HeroTrendBackground，所見即所得）
-    private var previewSection: some View {
-        Section {
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 1.00, green: 0.62, blue: 0.22),
-                        Color(red: 0.86, green: 0.36, blue: 0.06)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                HeroTrendBackground(points: demoPoints, stepBack: 2_592_000)
-            }
-            .frame(height: 130)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-            .listRowBackground(Color.clear)
-        } header: {
-            Text("即時預覽")
+    // 置頂即時預覽（示範資料 + 真的 HeroTrendBackground，所見即所得）
+    private var pinnedPreview: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 1.00, green: 0.62, blue: 0.22),
+                    Color(red: 0.86, green: 0.36, blue: 0.06)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            HeroTrendBackground(points: demoPoints, stepBack: 2_592_000)
         }
+        .frame(height: 120)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
     }
 
     /// 示範序列（12 個月、形狀固定），只給預覽卡用
@@ -2640,37 +2641,38 @@ struct StockChartSettingsView: View {
     @AppStorage("hero_volume_bar_opacity") private var volumeBarOpacity: Double = 0.45
 
     var body: some View {
-        Form {
-            previewSection
-            paramsSection
-            resetSection
+        // 預覽卡固定在頂端不隨表單捲動
+        VStack(spacing: 0) {
+            pinnedPreview
+            Form {
+                paramsSection
+                resetSection
+            }
         }
+        .background(Color(.systemGroupedBackground))
         .navigationTitle("股票")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    // 即時預覽：白卡 + 橙色日線曲線與量柱，模擬實際股票項目卡
-    private var previewSection: some View {
-        Section {
-            ZStack {
-                Color(.systemBackground)
-                HeroPriceVolumeBackground(
-                    prices: demoPrices,
-                    volumes: demoVolumes,
-                    tint: Color(red: 1.00, green: 0.62, blue: 0.22)
-                )
-            }
-            .frame(height: 110)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color(.separator).opacity(0.25), lineWidth: 0.75)
+    // 置頂即時預覽：白卡 + 橙色日線曲線與量柱，模擬實際股票項目卡
+    private var pinnedPreview: some View {
+        ZStack {
+            Color(.systemBackground)
+            HeroPriceVolumeBackground(
+                prices: demoPrices,
+                volumes: demoVolumes,
+                tint: Color(red: 1.00, green: 0.62, blue: 0.22)
             )
-            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-            .listRowBackground(Color.clear)
-        } header: {
-            Text("即時預覽")
         }
+        .frame(height: 110)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.25), lineWidth: 0.75)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
     }
 
     /// 示範日線（30 天、形狀固定：緩漲＋正弦波動），只給預覽卡用
@@ -2736,61 +2738,63 @@ struct FlashCardSettingsView: View {
     @State private var previewRarity: CardRarity = .epic
 
     var body: some View {
-        Form {
-            previewSection
-            paramsSection
-            resetSection
+        // 預覽卡固定在頂端不隨表單捲動（使用者反映調下方參數時預覽被捲出畫面外）
+        VStack(spacing: 0) {
+            pinnedPreview
+            Form {
+                paramsSection
+                resetSection
+            }
         }
+        .background(Color(.systemGroupedBackground))
         .navigationTitle("閃卡樣式")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    // 即時預覽：示範資料跑真的 FlashCardView 模板，可切換稀有度看各級效果
-    private var previewSection: some View {
-        Section {
-            VStack(spacing: 12) {
-                Picker("預覽稀有度", selection: $previewRarity) {
-                    Text("普通").tag(CardRarity.common)
-                    Text("稀有").tag(CardRarity.rare)
-                    Text("史詩").tag(CardRarity.epic)
-                    Text("傳說").tag(CardRarity.legendary)
-                }
-                .pickerStyle(.segmented)
-
-                FlashCardView(
-                    rarity: previewRarity,
-                    categoryLabel: "股票",
-                    categoryIcon: "chart.line.uptrend.xyaxis",
-                    title: "示範資產",
-                    bigNumber: "128.5",
-                    bigCaption: "目前市值（萬元）",
-                    columns: [
-                        FlashCardInfoColumn("股數", "2,000"),
-                        FlashCardInfoColumn("目前價", "642.50"),
-                        FlashCardInfoColumn("成本價", "518.00")
-                    ]
-                ) {
-                    Text("DEMO")
-                        .font(.subheadline.weight(.medium))
-                        .padding(.horizontal, 11).padding(.vertical, 4)
-                        .background((previewRarity == .legendary ? Color.white.opacity(0.18) : Color(.systemGray5)),
-                                    in: Capsule())
-                        .foregroundStyle(previewRarity.primaryTextColor)
-                } middleExtra: {
-                    EmptyView()
-                } extraBackground: {
-                    EmptyView()
-                }
-                // 預覽卡縮小一點以塞進設定頁
-                .scaleEffect(0.9)
+    // 置頂即時預覽：示範資料跑真的 FlashCardView 模板，可切換稀有度看各級效果
+    //（稀有度切換只影響預覽；實際卡片由資產價值自動分級）
+    private var pinnedPreview: some View {
+        VStack(spacing: 8) {
+            Picker("預覽稀有度", selection: $previewRarity) {
+                Text("普通").tag(CardRarity.common)
+                Text("稀有").tag(CardRarity.rare)
+                Text("史詩").tag(CardRarity.epic)
+                Text("傳說").tag(CardRarity.legendary)
             }
-            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-            .listRowBackground(Color.clear)
-        } header: {
-            Text("即時預覽")
-        } footer: {
-            Text("稀有度切換只影響預覽；實際卡片的稀有度由資產價值自動分級。")
+            .pickerStyle(.segmented)
+
+            FlashCardView(
+                rarity: previewRarity,
+                categoryLabel: "股票",
+                categoryIcon: "chart.line.uptrend.xyaxis",
+                title: "示範資產",
+                bigNumber: "128.5",
+                bigCaption: "目前市值（萬元）",
+                columns: [
+                    FlashCardInfoColumn("股數", "2,000"),
+                    FlashCardInfoColumn("目前價", "642.50"),
+                    FlashCardInfoColumn("成本價", "518.00")
+                ]
+            ) {
+                Text("DEMO")
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 11).padding(.vertical, 4)
+                    .background((previewRarity == .legendary ? Color.white.opacity(0.18) : Color(.systemGray5)),
+                                in: Capsule())
+                    .foregroundStyle(previewRarity.primaryTextColor)
+            } middleExtra: {
+                EmptyView()
+            } extraBackground: {
+                EmptyView()
+            }
+            // 縮小以固定在頂端仍留足夠空間給下方表單；scaleEffect 不改版面
+            // 尺寸，故外加 frame 高度收斂實際佔位
+            .scaleEffect(0.72)
+            .frame(height: 230)
         }
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
     }
 
     private var paramsSection: some View {

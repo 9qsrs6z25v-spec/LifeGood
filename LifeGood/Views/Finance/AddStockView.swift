@@ -134,8 +134,12 @@ struct AddStockView: View {
 
                 Section {
                     HStack {
-                        TextField("股票代號（如 2330）", text: $symbol)
-                            .keyboardType(.numberPad)
+                        // 代號可含英文字母（如主動式 ETF 00981A），改用一般鍵盤；
+                        // 儲存時已自動 uppercased，小寫輸入也沒問題
+                        TextField("股票代號（如 2330、00981A）", text: $symbol)
+                            .keyboardType(.asciiCapable)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
                         fetchButton
                     }
                     TextField("股票名稱", text: $name)
