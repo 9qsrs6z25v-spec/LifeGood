@@ -49,6 +49,8 @@ struct IncomeView: View {
     @State private var selectedCategory: IncomeCategory?
     @State private var searchText: String = ""
     @State private var headerAppeared = false
+    /// 英雄卡背景趨勢（單月收入逐月序列；HeroTrendBackground 標準模板）
+    @State private var heroSeries: [HeroTrendPoint] = []
     @State private var listRowsAppeared = false
     @State private var visibleMonths = 3
     @State private var debouncedSearchText: String = ""
@@ -143,6 +145,12 @@ struct IncomeView: View {
             .onDisappear {
                 headerAppeared = false
                 listRowsAppeared = false
+            }
+            .task(id: store.modifyID) {
+                heroSeries = HeroTrendSeries.displayPoints(
+                    from: store.heroIncomeSeries(),
+                    stepBack: 2_592_000   // 月資料：合成點往回各推一個月
+                )
             }
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
@@ -512,6 +520,8 @@ struct IncomeView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // 單月收入趨勢曲線背景（HeroTrendBackground 標準模板，與股票英雄卡同規格）
+                HeroTrendBackground(points: heroSeries)
                 // 右上主散景圓
                 Circle()
                     .fill(.white.opacity(0.13))

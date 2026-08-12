@@ -57,6 +57,8 @@ struct FixedExpenseView: View {
     @State private var emptyPulseTask: Task<Void, Never>?
     @State private var categoryListAppeared = false
     @State private var cachedGroupedByCategory: [(key: FixedCategory, value: [Expense])] = []
+    /// 英雄卡背景趨勢（月固定支出逐月序列；HeroTrendBackground 標準模板）
+    @State private var heroSeries: [HeroTrendPoint] = []
 
     private static let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -142,6 +144,10 @@ struct FixedExpenseView: View {
             }
             .task(id: store.modifyID) {
                 cachedGroupedByCategory = buildGroupedByCategory()
+                heroSeries = HeroTrendSeries.displayPoints(
+                    from: store.heroFixedSeries(),
+                    stepBack: 2_592_000   // 月資料：合成點往回各推一個月
+                )
             }
             .sheet(isPresented: $showingAddSheet) {
                 AddExpenseView(expenseType: .fixed)
@@ -357,6 +363,8 @@ struct FixedExpenseView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // 月固定支出趨勢曲線背景（HeroTrendBackground 標準模板，與股票英雄卡同規格）
+                HeroTrendBackground(points: heroSeries)
                 // 右上主散景圓
                 Circle()
                     .fill(.white.opacity(0.13))

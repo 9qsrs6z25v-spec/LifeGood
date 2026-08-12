@@ -424,45 +424,9 @@ struct StockView: View {
 
     // MARK: - 摘要（橙色漸層英雄卡片）
 
-    /// 英雄卡背景折線資料（每週總市值快照，最多 40 點）；onAppear 與報價更新後刷新
-    @State private var heroTrend: [StockValueSnapshot] = []
-
-    /// 英雄卡背景趨勢線單層（平滑曲線、預設帶漸層面積、線 2pt 半透明 50%）。
-    /// 抽成共用是因為：(1) 景深效果需要同一條線畫兩層（模糊層＋清晰層）疊加；
-    /// (2) 左右各偏移 1% 的回聲側線（xShift、細一點、更透明、不帶面積）也共用同一畫法。
-    private func heroTrendLine(xDomain: ClosedRange<Date>, yDomain: ClosedRange<Double>,
-                               xShift: TimeInterval = 0,
-                               lineWidth: CGFloat = 2,
-                               lineOpacity: Double = 0.50,
-                               showArea: Bool = true) -> some View {
-        Chart(heroTrend) { p in
-            if showArea {
-                AreaMark(
-                    x: .value("週", p.weekStart.addingTimeInterval(xShift)),
-                    y: .value("市值", p.value)
-                )
-                .interpolationMethod(.catmullRom)
-                .foregroundStyle(LinearGradient(
-                    colors: [.white.opacity(0.22), .white.opacity(0.02)],
-                    startPoint: .top, endPoint: .bottom
-                ))
-            }
-            // 平滑曲線（catmullRom）：使用者看過直線段版後選擇曲線較好看
-            LineMark(
-                x: .value("週", p.weekStart.addingTimeInterval(xShift)),
-                y: .value("市值", p.value)
-            )
-            .interpolationMethod(.catmullRom)
-            .foregroundStyle(.white.opacity(lineOpacity))
-            .lineStyle(StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
-        }
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
-        .chartLegend(.hidden)
-        .chartXScale(domain: xDomain)
-        .chartYScale(domain: yDomain)
-        .allowsHitTesting(false)
-    }
+    /// 英雄卡背景趨勢資料（每週總市值快照，最多 40 點）；onAppear 與報價更新後刷新。
+    /// 繪製已抽成 HeroTrendBackground 標準模板（HeroTrendChart.swift），四張英雄卡共用。
+    @State private var heroTrend: [HeroTrendPoint] = []
 
     private func summaryHeader(active: [Stock]) -> some View {
         let pl = store.totalStockProfitLoss
@@ -572,94 +536,9 @@ struct StockView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                // 淡漸層週市值折線背景：每週總市值快照（最多 40 點、頭尾必留），
-                // Y 軸自動範圍不鎖 0（避免趨勢被壓扁）；至少 2 點才畫、不吃觸控
-                if heroTrend.count >= 2 {
-                    // 垂直帶映射（使用者指定）：把數值範圍映射到卡片高度的 20%~60% 帶——
-                    // 最低點落在卡片下緣起 20% 高、最高點 60% 高，上方 40% 留白給市值大字。
-                    // 作法：把 Y 軸 domain 反推放大——實際值域佔 domain 的 0.4，下方預留 0.2。
-                    let values = heroTrend.map(\.value)
-                    let minV = values.min() ?? 0
-                    let maxV = values.max() ?? 1
-                    let spread = max(maxV - minV, max(maxV * 0.05, 1))   // 平盤保底，避免除以零
-                    let span = spread / 0.4
-                    let domainLow = minV - 0.2 * span
-                    let domainHigh = domainLow + span
-                    let xFirst = heroTrend.first?.weekStart ?? Date()
-                    let xLast = heroTrend.last?.weekStart ?? Date()
-                    // X 軸右側延伸 25% 資料跨距：資料只佔左邊 80% 寬，
-                    // 最後一個點落在「右邊往回 20%」的位置（使用者指定，類 3D 景深構圖）。
-                    let xSpan = max(xLast.timeIntervalSince(xFirst), 1)
-                    let xHigh = xLast.addingTimeInterval(xSpan * 0.25)
-                    let xDomain = xFirst...xHigh
-                    let yDomain = domainLow...domainHigh
-                    // 三線組合：主線＋左右各偏移「1% 卡片寬」的回聲側線（線條感）。
-                    // 側線 1pt、更透明、不帶漸層面積，只當造型陪襯；
-                    // 尾端收細尾：Charts 無法沿路徑變線寬，改用尾端漸層遮罩淡出模擬
-                    //（1pt 半透明細線淡出，視覺上即是收細收掉）。
-                    let echoShift = xSpan * 1.25 * 0.01   // domain 全寬（含右延 25%）的 1%
-                    let echoTailTaper = LinearGradient(stops: [
-                        .init(color: .white, location: 0.00),
-                        .init(color: .white, location: 0.45),
-                        .init(color: .clear, location: 0.80)   // 資料終點約在 80% 寬，尾段漸淡收掉
-                    ], startPoint: .leading, endPoint: .trailing)
-                    let trendGroup = ZStack {
-                        heroTrendLine(xDomain: xDomain, yDomain: yDomain,
-                                      xShift: -echoShift, lineWidth: 1,
-                                      lineOpacity: 0.22, showArea: false)
-                            .mask(echoTailTaper)
-                        heroTrendLine(xDomain: xDomain, yDomain: yDomain,
-                                      xShift: echoShift, lineWidth: 1,
-                                      lineOpacity: 0.22, showArea: false)
-                            .mask(echoTailTaper)
-                        heroTrendLine(xDomain: xDomain, yDomain: yDomain)
-                    }
-                    // 景深效果（左模糊→右漸清晰）：整組三線畫兩層——
-                    // 底層整組高斯模糊、頂層清晰，各用互補的左右漸層遮罩交叉淡化，
-                    // 左邊只看到模糊層、往右模糊淡出/清晰淡入，像相機失焦漸變到合焦。
-                    trendGroup
-                        .blur(radius: 2.2)
-                        .mask(LinearGradient(stops: [
-                            .init(color: .white, location: 0.00),
-                            .init(color: .white, location: 0.20),
-                            .init(color: .clear, location: 0.75)
-                        ], startPoint: .leading, endPoint: .trailing))
-                    trendGroup
-                        .mask(LinearGradient(stops: [
-                            .init(color: .clear, location: 0.20),
-                            .init(color: .white, location: 0.75)
-                        ], startPoint: .leading, endPoint: .trailing))
-                    // 上層：最後一個（真實）點——圓形實心、半透明 50%＋市值大字（同樣半透明）
-                    Chart(heroTrend) { p in
-                        if p.id == heroTrend.last?.id {
-                            PointMark(
-                                x: .value("週", p.weekStart),
-                                y: .value("市值", p.value)
-                            )
-                            .foregroundStyle(.white.opacity(0.50))
-                            .symbol(.circle)
-                            .symbolSize(90)
-                            .annotation(position: .top,
-                                        overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
-                                Text(p.value.ntdWanString)
-                                    .font(.system(size: 19, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.50))
-                                    .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
-                                    // 立體微傾（使用者指定）：X/Y 軸各轉 5 度、Z 軸轉 2 度，
-                                    // 讓數字有一點 3D 透視感、呼應景深構圖
-                                    .rotation3DEffect(.degrees(5), axis: (x: 1, y: 0, z: 0))
-                                    .rotation3DEffect(.degrees(5), axis: (x: 0, y: 1, z: 0))
-                                    .rotationEffect(.degrees(2))
-                            }
-                        }
-                    }
-                    .chartXAxis(.hidden)
-                    .chartYAxis(.hidden)
-                    .chartLegend(.hidden)
-                    .chartXScale(domain: xDomain)
-                    .chartYScale(domain: yDomain)
-                    .allowsHitTesting(false)
-                }
+                // 週市值趨勢曲線背景（HeroTrendBackground 標準模板：
+                // 20~60% 垂直帶、景深模糊、回聲側線、末端實心點＋大字）
+                HeroTrendBackground(points: heroTrend)
                 // 裝飾性散景圓（增加卡片層次感）
                 Circle()
                     .fill(.white.opacity(0.12))
@@ -1061,48 +940,13 @@ enum StockValueHistory {
         return list
     }
 
-    /// 顯示用資料點：真實快照不足 6 點時，在最前面補合成引導點湊滿 6 點——
-    /// 新使用者第一週只有 1 個點畫不出像樣的曲線，補點讓背景視覺舒服；
-    /// 合成點用「確定性偽隨機漫步」（種子＝首個真實點的週次＋市值）：同一週同市值
-    /// 形狀固定，不會每次重繪亂跳；每步 ±5% 波動、往回各推一週。
-    /// 合成點只在顯示時生成，不落地、不同步。
-    static func displayPoints(maxCount: Int = 40) -> [StockValueSnapshot] {
-        let real = sampled(maxCount: maxCount)
-        guard let first = real.first, real.count < 6 else { return real }
-        let padCount = 6 - real.count
-        var seed = UInt64(abs(first.weekStart.timeIntervalSince1970))
-            &+ UInt64(abs(first.value) + 1)
-        func nextUnit() -> Double {
-            seed = seed &* 6364136223846793005 &+ 1442695040888963407
-            return Double((seed >> 33) % 1000) / 1000.0   // 0..<1
-        }
-        let cal = Calendar.current
-        var value = first.value
-        var synthetic: [StockValueSnapshot] = []
-        for i in 1...padCount {
-            let delta = (nextUnit() - 0.5) * 0.10   // 每步 ±5%
-            value = max(value * (1 + delta), 1)
-            let week = cal.date(byAdding: .weekOfYear, value: -i, to: first.weekStart)
-                ?? first.weekStart.addingTimeInterval(Double(-i) * 604_800)
-            synthetic.append(StockValueSnapshot(weekStart: week, value: value))
-        }
-        return synthetic.reversed() + real
-    }
-
-    /// 等距取樣至最多 maxCount 點（頭尾必留；同 ChildDetailView 趨勢圖取樣規則）
-    static func sampled(maxCount: Int = 40) -> [StockValueSnapshot] {
-        let pts = load()
-        guard pts.count > maxCount, maxCount >= 2 else { return pts }
-        let step = Double(pts.count - 1) / Double(maxCount - 1)
-        var out: [StockValueSnapshot] = []
-        var lastIdx = -1
-        for i in 0..<maxCount {
-            let idx = Int((Double(i) * step).rounded())
-            if idx != lastIdx {
-                out.append(pts[idx])
-                lastIdx = idx
-            }
-        }
-        return out
+    /// 顯示用資料點：取樣／合成引導點邏輯已移入 HeroTrendSeries 標準模板
+    /// （HeroTrendChart.swift），此處只負責把週快照轉成 HeroTrendPoint。
+    static func displayPoints(maxCount: Int = 40) -> [HeroTrendPoint] {
+        HeroTrendSeries.displayPoints(
+            from: load().map { HeroTrendPoint(date: $0.weekStart, value: $0.value) },
+            maxCount: maxCount,
+            stepBack: 604_800   // 週資料：合成點往回各推一週
+        )
     }
 }

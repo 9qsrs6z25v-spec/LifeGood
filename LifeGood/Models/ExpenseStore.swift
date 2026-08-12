@@ -351,6 +351,60 @@ class ExpenseStore: ObservableObject {
         return active.reduce(0) { $0 + projectedAmount(for: $1, in: period) }
     }
 
+    // MARK: - 英雄卡背景趨勢序列（HeroTrendBackground 模板用，月粒度）
+
+    /// 近 maxMonths 個月的「單月收入」序列（含週期收入投射，與收入頁月統計同規則）
+    func heroIncomeSeries(maxMonths: Int = 40) -> [HeroTrendPoint] {
+        monthlyHeroSeries(maxMonths: maxMonths, firstDate: incomes.map(\.date).min()) { monthStart, _ in
+            incomeTotal(for: monthStart)
+        }
+    }
+
+    /// 近 maxMonths 個月的「單月變動支出」序列
+    func heroVariableSeries(maxMonths: Int = 40) -> [HeroTrendPoint] {
+        let cal = Calendar.current
+        let variable = expenses.filter { $0.expenseType == .variable }
+        return monthlyHeroSeries(maxMonths: maxMonths, firstDate: variable.map(\.date).min()) { monthStart, _ in
+            variable
+                .filter { cal.isDate($0.date, equalTo: monthStart, toGranularity: .month) }
+                .reduce(0) { $0 + $1.amount }
+        }
+    }
+
+    /// 近 maxMonths 個月的「月固定支出」序列——各月月底當時已存在的固定項目投射月額
+    /// （隨新增項目逐月墊高的階梯曲線；外幣儲蓄險經 ntdValue 換算 NT$）
+    func heroFixedSeries(maxMonths: Int = 40) -> [HeroTrendPoint] {
+        let cal = Calendar.current
+        let fixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
+        return monthlyHeroSeries(maxMonths: maxMonths, firstDate: fixed.map(\.date).min()) { _, monthEnd in
+            projectedFixedTotal(from: fixed, for: monthEnd, period: .monthly, calendar: cal)
+        }
+    }
+
+    /// 共用：從最早紀錄的月份（上限 maxMonths）到本月，每月產生一點；
+    /// valueFor 收到（月初、該月結算時點——過去月份為月底、本月收斂到現在）。
+    private func monthlyHeroSeries(maxMonths: Int, firstDate: Date?,
+                                   valueFor: (Date, Date) -> Double) -> [HeroTrendPoint] {
+        guard let firstDate else { return [] }
+        let cal = Calendar.current
+        let now = Date()
+        guard let currentMonth = cal.date(from: cal.dateComponents([.year, .month], from: now)),
+              let firstMonth = cal.date(from: cal.dateComponents([.year, .month], from: firstDate)) else {
+            return []
+        }
+        let monthsBetween = cal.dateComponents([.month], from: firstMonth, to: currentMonth).month ?? 0
+        let count = min(monthsBetween + 1, maxMonths)
+        guard count >= 1 else { return [] }
+        var out: [HeroTrendPoint] = []
+        for back in stride(from: count - 1, through: 0, by: -1) {
+            guard let monthStart = cal.date(byAdding: .month, value: -back, to: currentMonth) else { continue }
+            let nextMonth = cal.date(byAdding: .month, value: 1, to: monthStart) ?? monthStart
+            let monthEnd = min(nextMonth.addingTimeInterval(-1), now)
+            out.append(HeroTrendPoint(date: monthStart, value: valueFor(monthStart, monthEnd)))
+        }
+        return out
+    }
+
     // MARK: - 圖表資料
 
     func chartData(for period: TimePeriod) -> [ChartDataPoint] {
