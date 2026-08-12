@@ -1,135 +1,6 @@
 import SwiftUI
 
-// MARK: - 卡牌稀有度
-
-enum CardRarity {
-    case common
-    case uncommon
-    case rare
-    case epic
-    case legendary
-
-    /// 汽車分級：0~50萬 / 51~100萬 / 101~200萬 / 201萬以上
-    init(price: Double) {
-        let wan = price / 10000
-        switch wan {
-        case ..<51: self = .common
-        case ..<101: self = .uncommon
-        case ..<201: self = .rare
-        default: self = .legendary
-        }
-    }
-
-    /// 房地產分級：0~600萬 / 601~1000萬 / 1001~1500萬 / 1501~2000萬 / 2001萬以上
-    static func realEstate(price: Double) -> CardRarity {
-        let wan = price / 10000
-        switch wan {
-        case ..<601: return .common
-        case ..<1001: return .uncommon
-        case ..<1501: return .rare
-        case ..<2001: return .epic
-        default: return .legendary
-        }
-    }
-
-    /// 股票分級：以市值或成本（萬元）分級
-    /// 0~10萬 / 11~50萬 / 51~100萬 / 101~300萬 / 301萬以上
-    static func stock(value: Double) -> CardRarity {
-        let wan = value / 10000
-        switch wan {
-        case ..<11:  return .common
-        case ..<51:  return .uncommon
-        case ..<101: return .rare
-        case ..<301: return .epic
-        default:     return .legendary
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .common: return "COMMON"
-        case .uncommon: return "UNCOMMON"
-        case .rare: return "RARE"
-        case .epic: return "EPIC"
-        case .legendary: return "LEGENDARY"
-        }
-    }
-
-    var borderGradient: [Color] {
-        switch self {
-        case .common: return [.gray.opacity(0.4), .gray.opacity(0.2)]
-        case .uncommon: return [.cyan, .blue.opacity(0.6), .cyan]
-        case .rare: return [.yellow, .orange, .yellow]
-        case .epic: return [.purple, .pink, .purple, .indigo, .purple]
-        case .legendary: return [.purple, .pink, .orange, .yellow, .green, .cyan, .blue, .purple]
-        }
-    }
-
-    var bgGradient: [Color] {
-        switch self {
-        case .common: return [Color(.systemBackground), Color(.systemGray6)]
-        case .uncommon: return [Color(.systemBackground), Color.cyan.opacity(0.05)]
-        case .rare: return [Color(.systemBackground), Color.orange.opacity(0.08)]
-        case .epic: return [Color(.systemBackground), Color.purple.opacity(0.10)]
-        case .legendary: return [Color.black.opacity(0.9), Color.purple.opacity(0.15), Color.black.opacity(0.9)]
-        }
-    }
-
-    var borderWidth: CGFloat {
-        switch self {
-        case .common: return 1
-        case .uncommon: return 2
-        case .rare: return 2.5
-        case .epic: return 2.8
-        case .legendary: return 3
-        }
-    }
-
-    var textColor: Color {
-        switch self {
-        case .common: return .primary
-        case .uncommon: return .cyan
-        case .rare: return .orange
-        case .epic: return .purple
-        case .legendary: return .yellow
-        }
-    }
-
-    var shadowColor: Color {
-        switch self {
-        case .common: return .clear
-        case .uncommon: return .cyan.opacity(0.3)
-        case .rare: return .orange.opacity(0.4)
-        case .epic: return .purple.opacity(0.45)
-        case .legendary: return .purple.opacity(0.5)
-        }
-    }
-}
-
-// MARK: - 售出印章
-
-struct SoldStamp: View {
-    var size: CGFloat = 18
-
-    var body: some View {
-        Text("售出")
-            .font(.system(size: size, weight: .heavy, design: .rounded))
-            .tracking(2)
-            .foregroundStyle(.red)
-            .padding(.horizontal, size * 0.55)
-            .padding(.vertical, size * 0.2)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.white)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(.red, lineWidth: size * 0.14)
-            )
-            .rotationEffect(.degrees(-15))
-            .shadow(color: .black.opacity(0.3), radius: size * 0.18, x: size * 0.08, y: size * 0.15)
-    }
-}
+// CardRarity 與 SoldStamp 已移至 FlashCardView.swift（閃卡標準模板）
 
 // MARK: - 美化紀錄（VehicleDetailView）
 // [2026-06 v1] 本次美化方向：
@@ -211,7 +82,6 @@ struct VehicleDetailView: View {
     @State private var viewingItem: VehicleItemRef?
     @State private var editingLinkedExpense: Expense?
     // 美化：進場動畫旗標（對齊 StockDetailView / RealEstateDetailView 規格）
-    @State private var cardAppeared = false
     @State private var kpiStripAppeared = false
     @State private var infoRowsAppeared = false
 
@@ -221,14 +91,8 @@ struct VehicleDetailView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    // 進場動畫改由 FlashCardView 模板內建（進階設定可關閉）
                     flashCard
-                        .opacity(cardAppeared ? 1 : 0)
-                        .offset(y: cardAppeared ? 0 : 22)
-                        .onAppear {
-                            withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
-                                cardAppeared = true
-                            }
-                        }
                     // v2：KPI 摘要橫列（月固定 / 近12月變動 / 持有年限）
                     vehicleKpiStrip
                         .opacity(kpiStripAppeared ? 1 : 0)
@@ -301,111 +165,33 @@ struct VehicleDetailView: View {
     // MARK: - 閃卡主體
 
     private var flashCard: some View {
-        VStack(spacing: 0) {
-            // 頂部稀有度標籤
-            HStack {
-                Text(rarity.label)
-                    .font(.caption2.weight(.heavy))
-                    .tracking(2)
-                    .foregroundStyle(rarity.textColor)
-                Spacer()
-                Label(vehicle.powerType.rawValue, systemImage: vehicle.powerType.icon)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(rarity == .legendary ? .yellow : .secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-
-            // 車名 + 品牌
-            VStack(spacing: 6) {
-                Text(vehicle.name)
-                    .font(.title.weight(.bold))
-                    .foregroundStyle(rarity == .legendary ? .white : .primary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-
-                if !vehicle.brand.isEmpty {
-                    Text(vehicle.brand)
-                        .font(.subheadline)
-                        .foregroundStyle(rarity == .legendary ? .white.opacity(0.7) : .secondary)
-                }
-            }
-            .padding(.top, 16)
-            .padding(.horizontal, 24)
-
-            // 估值（大字）
-            VStack(spacing: 4) {
-                // v3：補上 minimumScaleFactor + lineLimit + contentTransition，
-                // 對齊 StockDetailView 市值大字規格，防止高額估值截斷並讓切換車輛時平滑過渡
-                // v4：改用 splitWan 取代 fmtWan，估值達 1 億以上自動換算為「億元」單位
-                let estimate = splitWan(vehicle.currentValue)
-                Text(estimate.number)
-                    .font(.system(size: 52, weight: .bold, design: .rounded))
-                    .foregroundStyle(rarity.textColor)
-                    .minimumScaleFactor(0.55)
-                    .lineLimit(1)
-                    .contentTransition(.numericText())
-                Text("\(estimate.unit)元")
+        // 改用 FlashCardView 標準模板：殼層與版面骨架由模板統一，本頁只填內容；
+        // 樣式參數由「設定 > 進階設定 > 閃卡樣式」控制。
+        let estimate = splitWan(vehicle.currentValue)
+        return FlashCardView(
+            rarity: rarity,
+            categoryLabel: vehicle.powerType.rawValue,
+            categoryIcon: vehicle.powerType.icon,
+            title: vehicle.name,
+            bigNumber: estimate.number,
+            bigCaption: "\(estimate.unit)元",
+            columns: [
+                FlashCardInfoColumn("購入", splitWanLabel(vehicle.purchasePrice)),
+                FlashCardInfoColumn("折舊", String(format: "%.1f%%", vehicle.depreciationRate),
+                                    valueColor: .red),
+                FlashCardInfoColumn("持有", String(format: "%.1f 年", vehicle.yearsOwned))
+            ],
+            isSold: vehicle.isSold
+        ) {
+            if !vehicle.brand.isEmpty {
+                Text(vehicle.brand)
                     .font(.subheadline)
-                    .foregroundStyle(rarity == .legendary ? .white.opacity(0.6) : .secondary)
+                    .foregroundStyle(rarity.secondaryTextColor)
             }
-            .padding(.vertical, 20)
-
-            // 底部資訊列
-            HStack {
-                VStack(spacing: 2) {
-                    Text("購入")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(splitWanLabel(vehicle.purchasePrice))
-                        .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
-                }
-                Spacer()
-                VStack(spacing: 2) {
-                    Text("折舊")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(String(format: "%.1f%%", vehicle.depreciationRate))
-                        .font(.caption.bold()).foregroundStyle(.red)
-                }
-                Spacer()
-                VStack(spacing: 2) {
-                    Text("持有")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(String(format: "%.1f 年", vehicle.yearsOwned))
-                        .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 16)
-        }
-        .background(
-            // v2：非 legendary 加玻璃光澤，legendary 本身已有豐富色彩故跳過
-            LinearGradient(colors: rarity.bgGradient,
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-                .overlay(
-                    LinearGradient(
-                        colors: rarity == .legendary
-                            ? [Color.clear, Color.clear]
-                            : [Color.white.opacity(0.18), Color.clear],
-                        startPoint: .top,
-                        endPoint: .center
-                    )
-                )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(
-                    AngularGradient(colors: rarity.borderGradient, center: .center),
-                    lineWidth: rarity.borderWidth
-                )
-        )
-        .shadow(color: rarity.shadowColor, radius: rarity == .legendary ? 15 : 8, y: 4)
-        .overlay(alignment: .topLeading) {
-            if vehicle.isSold {
-                SoldStamp(size: 32)
-                    .offset(x: -10, y: -14)
-            }
+        } middleExtra: {
+            EmptyView()
+        } extraBackground: {
+            EmptyView()
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)

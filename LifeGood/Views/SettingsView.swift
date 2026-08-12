@@ -2391,6 +2391,17 @@ struct AdvancedSettingsView: View {
             } footer: {
                 Text("之後開放的模板參數也會依分類收在這裡。")
             }
+            Section {
+                NavigationLink {
+                    FlashCardSettingsView()
+                } label: {
+                    advancedRow(icon: "rectangle.portrait.on.rectangle.portrait.fill", color: .purple,
+                                title: "閃卡樣式",
+                                note: "股票／汽車／房地產詳情閃卡共用")
+                }
+            } header: {
+                Text("卡片設定")
+            }
         }
         .navigationTitle("進階設定")
         .navigationBarTitleDisplayMode(.inline)
@@ -2702,6 +2713,144 @@ struct StockChartSettingsView: View {
         Section {
             Button {
                 volumeBarOpacity = 0.45
+            } label: {
+                Label("恢復預設值", systemImage: "arrow.counterclockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .foregroundStyle(.blue)
+        }
+    }
+}
+
+// MARK: 2.1 閃卡樣式（股票／汽車／房地產詳情閃卡共用）
+
+struct FlashCardSettingsView: View {
+    @AppStorage("flash_card_corner_radius") private var cornerRadius: Double = 16
+    @AppStorage("flash_card_border_scale") private var borderScale: Double = 1.0
+    @AppStorage("flash_card_value_size") private var valueFontSize: Double = 52
+    @AppStorage("flash_card_bokeh") private var bokehScale: Double = 1.0
+    @AppStorage("flash_card_shine") private var shineIntensity: Double = 0.18
+    @AppStorage("flash_card_shadow") private var shadowScale: Double = 1.0
+    @AppStorage("flash_card_animation") private var appearAnimation: Bool = true
+    /// 預覽用稀有度（只影響此頁預覽，不影響實際卡片——實際稀有度由資產價值決定）
+    @State private var previewRarity: CardRarity = .epic
+
+    var body: some View {
+        Form {
+            previewSection
+            paramsSection
+            resetSection
+        }
+        .navigationTitle("閃卡樣式")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // 即時預覽：示範資料跑真的 FlashCardView 模板，可切換稀有度看各級效果
+    private var previewSection: some View {
+        Section {
+            VStack(spacing: 12) {
+                Picker("預覽稀有度", selection: $previewRarity) {
+                    Text("普通").tag(CardRarity.common)
+                    Text("稀有").tag(CardRarity.rare)
+                    Text("史詩").tag(CardRarity.epic)
+                    Text("傳說").tag(CardRarity.legendary)
+                }
+                .pickerStyle(.segmented)
+
+                FlashCardView(
+                    rarity: previewRarity,
+                    categoryLabel: "股票",
+                    categoryIcon: "chart.line.uptrend.xyaxis",
+                    title: "示範資產",
+                    bigNumber: "128.5",
+                    bigCaption: "目前市值（萬元）",
+                    columns: [
+                        FlashCardInfoColumn("股數", "2,000"),
+                        FlashCardInfoColumn("目前價", "642.50"),
+                        FlashCardInfoColumn("成本價", "518.00")
+                    ]
+                ) {
+                    Text("DEMO")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 11).padding(.vertical, 4)
+                        .background((previewRarity == .legendary ? Color.white.opacity(0.18) : Color(.systemGray5)),
+                                    in: Capsule())
+                        .foregroundStyle(previewRarity.primaryTextColor)
+                } middleExtra: {
+                    EmptyView()
+                } extraBackground: {
+                    EmptyView()
+                }
+                // 預覽卡縮小一點以塞進設定頁
+                .scaleEffect(0.9)
+            }
+            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+            .listRowBackground(Color.clear)
+        } header: {
+            Text("即時預覽")
+        } footer: {
+            Text("稀有度切換只影響預覽；實際卡片的稀有度由資產價值自動分級。")
+        }
+    }
+
+    private var paramsSection: some View {
+        Section {
+            advancedSliderRow(
+                title: "卡片圓角",
+                display: String(format: "%.0f pt", cornerRadius),
+                value: $cornerRadius,
+                range: 8...28, step: 1
+            )
+            advancedSliderRow(
+                title: "邊框粗細",
+                display: String(format: "%.1f 倍", borderScale),
+                value: $borderScale,
+                range: 0.5...2.0, step: 0.1
+            )
+            advancedSliderRow(
+                title: "估值字級",
+                display: String(format: "%.0f pt", valueFontSize),
+                value: $valueFontSize,
+                range: 40...60, step: 2
+            )
+            advancedSliderRow(
+                title: "散景亮度",
+                display: String(format: "%.1f 倍", bokehScale),
+                value: $bokehScale,
+                range: 0.0...2.0, step: 0.1
+            )
+            advancedSliderRow(
+                title: "玻璃光澤",
+                display: "\(Int((shineIntensity * 100).rounded()))%",
+                value: $shineIntensity,
+                range: 0.0...0.40, step: 0.02
+            )
+            advancedSliderRow(
+                title: "陰影強度",
+                display: String(format: "%.1f 倍", shadowScale),
+                value: $shadowScale,
+                range: 0.0...2.0, step: 0.1
+            )
+            Toggle("進場動畫", isOn: $appearAnimation)
+                .font(.subheadline)
+                .tint(.blue)
+        } header: {
+            Text("卡片參數")
+        } footer: {
+            Text("套用於股票、汽車、房地產詳情頁的閃卡，調整立即生效。邊框粗細與陰影為各稀有度基準值的倍率。")
+        }
+    }
+
+    private var resetSection: some View {
+        Section {
+            Button {
+                cornerRadius = 16
+                borderScale = 1.0
+                valueFontSize = 52
+                bokehScale = 1.0
+                shineIntensity = 0.18
+                shadowScale = 1.0
+                appearAnimation = true
             } label: {
                 Label("恢復預設值", systemImage: "arrow.counterclockwise")
                     .frame(maxWidth: .infinity)

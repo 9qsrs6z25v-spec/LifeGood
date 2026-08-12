@@ -183,7 +183,6 @@ struct RealEstateDetailView: View {
     @State private var utilitiesRefreshID = UUID()
 
     // 美化：閃卡進場動畫旗標（對齊 SavingsInsuranceView headerAppeared 規格）
-    @State private var cardAppeared = false
     // 美化：自訂 tabPicker matchedGeometryEffect namespace
     @Namespace private var tabNamespace
 
@@ -237,14 +236,8 @@ struct RealEstateDetailView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    // 進場動畫改由 FlashCardView 模板內建（進階設定可關閉）
                     flashCard
-                        .opacity(cardAppeared ? 1 : 0)
-                        .offset(y: cardAppeared ? 0 : 22)
-                        .onAppear {
-                            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
-                                cardAppeared = true
-                            }
-                        }
                     tabPicker
                     switch detailTab {
                     case .finance: infoSection
@@ -391,120 +384,38 @@ struct RealEstateDetailView: View {
     // MARK: - 閃卡主體
 
     private var flashCard: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(rarity.label)
-                    .font(.caption2.weight(.heavy))
-                    .tracking(2)
-                    .foregroundStyle(rarity.textColor)
-                Spacer()
-                Label("房地產", systemImage: "building.2.fill")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(rarity == .legendary ? .yellow : .secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-
-            VStack(spacing: 6) {
-                Text(estate.name)
-                    .font(.title.weight(.bold))
-                    .foregroundStyle(rarity == .legendary ? .white : .primary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-
-                if !estate.fullAddress.isEmpty {
-                    Text(estate.fullAddress)
-                        .font(.subheadline)
-                        .foregroundStyle(rarity == .legendary ? .white.opacity(0.7) : .secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(3)
-                }
-            }
-            .padding(.top, 16)
-            .padding(.horizontal, 24)
-
-            VStack(spacing: 4) {
-                // v8：改用 splitWan 取代 fmtWan，估值達 1 億以上自動換算為「億元」單位
-                let estimate = splitWan(estate.currentValue)
-                Text(estimate.number)
-                    .font(.system(size: 52, weight: .bold, design: .rounded))
-                    .foregroundStyle(rarity.textColor)
-                    .minimumScaleFactor(0.5)
-                    .lineLimit(1)
-                    .contentTransition(.numericText())
-                Text("\(estimate.unit)元")
+        // 改用 FlashCardView 標準模板：殼層與版面骨架由模板統一，本頁只填內容；
+        // 樣式參數由「設定 > 進階設定 > 閃卡樣式」控制。
+        let estimate = splitWan(estate.currentValue)
+        return FlashCardView(
+            rarity: rarity,
+            categoryLabel: "房地產",
+            categoryIcon: "building.2.fill",
+            title: estate.name,
+            bigNumber: estimate.number,
+            bigCaption: "\(estimate.unit)元",
+            columns: [
+                FlashCardInfoColumn("購入", splitWanLabel(estate.purchasePrice)),
+                FlashCardInfoColumn("增值率",
+                                    String(format: "%@%.1f%%",
+                                           estate.appreciationRate >= 0 ? "+" : "",
+                                           estate.appreciationRate),
+                                    valueColor: estate.appreciationRate >= 0 ? .green : .red),
+                FlashCardInfoColumn("月租", estate.monthlyRental > 0 ? fmt(estate.monthlyRental) : "—")
+            ],
+            isSold: estate.isSold
+        ) {
+            if !estate.fullAddress.isEmpty {
+                Text(estate.fullAddress)
                     .font(.subheadline)
-                    .foregroundStyle(rarity == .legendary ? .white.opacity(0.6) : .secondary)
+                    .foregroundStyle(rarity.secondaryTextColor)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
             }
-            .padding(.vertical, 20)
-
-            HStack {
-                VStack(spacing: 2) {
-                    Text("購入")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(splitWanLabel(estate.purchasePrice))
-                        .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
-                }
-                Spacer()
-                VStack(spacing: 2) {
-                    Text("增值率")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(String(format: "%@%.1f%%", estate.appreciationRate >= 0 ? "+" : "", estate.appreciationRate))
-                        .font(.caption.bold()).foregroundStyle(estate.appreciationRate >= 0 ? .green : .red)
-                }
-                Spacer()
-                VStack(spacing: 2) {
-                    Text("月租")
-                        .font(.caption2).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(estate.monthlyRental > 0 ? fmt(estate.monthlyRental) : "—")
-                        .font(.caption.bold()).foregroundStyle(rarity == .legendary ? Color.white.opacity(0.8) : Color.primary)
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 16)
-        }
-        .background(
-            // [v3] 背景升級：漸層 + 三個 bokeh 裝飾圓 + 玻璃光澤，對齊 VehicleView 英雄卡規格
-            ZStack {
-                LinearGradient(colors: rarity.bgGradient,
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Circle()
-                    .fill(Color.white.opacity(0.06))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 90, y: -50)
-                    .allowsHitTesting(false)
-                Circle()
-                    .fill(Color.white.opacity(0.04))
-                    .frame(width: 80, height: 80)
-                    .offset(x: -70, y: 60)
-                    .allowsHitTesting(false)
-                Circle()
-                    .fill(Color.white.opacity(0.035))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 40, y: 90)
-                    .allowsHitTesting(false)
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top, endPoint: .center
-                )
-                .allowsHitTesting(false)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(
-                    AngularGradient(colors: rarity.borderGradient, center: .center),
-                    lineWidth: rarity.borderWidth
-                )
-        )
-        .shadow(color: rarity.shadowColor, radius: rarity == .legendary ? 15 : 8, y: 4)
-        .overlay(alignment: .topLeading) {
-            if estate.isSold {
-                SoldStamp(size: 32)
-                    .offset(x: -10, y: -14)
-            }
+        } middleExtra: {
+            EmptyView()
+        } extraBackground: {
+            EmptyView()
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)

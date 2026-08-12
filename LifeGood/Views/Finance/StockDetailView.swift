@@ -99,7 +99,6 @@ struct StockDetailView: View {
     @State private var addingDividend = false
     @State private var editingDividend: StockDividend?
     // 進場動畫：閃卡 / 交易紀錄 / 股利紀錄各自獨立控制
-    @State private var cardAppeared = false          // [v3] 閃卡進場動畫旗標
     @State private var transactionsAppeared = false
     @State private var dividendsAppeared = false
     // 閃卡背景日線（收盤價曲線＋成交量柱；與股票列表卡同一套資料快取）
@@ -199,64 +198,42 @@ struct StockDetailView: View {
     // MARK: - 閃卡
 
     private var flashCard: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(rarity.label)
-                    .font(.caption2.weight(.heavy))
-                    .tracking(2)
-                    .foregroundStyle(rarity.textColor)
-                Spacer()
-                Label("股票", systemImage: "chart.line.uptrend.xyaxis")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(rarity == .legendary ? .yellow : .secondary)
+        // [v7] 改用 FlashCardView 標準模板（FlashCardView.swift）：殼層（背景/邊框/
+        // 陰影/售出章/進場動畫）與版面骨架由模板統一，本頁只填內容；
+        // 圓角/邊框/大字字級等樣式參數由「設定 > 進階設定 > 閃卡樣式」控制。
+        let market = splitWan(stock.marketValue)
+        let pl = stock.profitLoss
+        let plColor: Color = pl >= 0 ? .green : .red
+        return FlashCardView(
+            rarity: rarity,
+            categoryLabel: "股票",
+            categoryIcon: "chart.line.uptrend.xyaxis",
+            title: stock.name,
+            bigNumber: market.number,
+            bigCaption: stock.isSold ? "賣出市值（\(market.unit)元）" : "目前市值（\(market.unit)元）",
+            columns: [
+                FlashCardInfoColumn("股數", "\(Int(stock.shares))"),
+                FlashCardInfoColumn(stock.isSold ? "賣出價" : "目前價",
+                                    String(format: "%.2f", stock.isSold ? stock.soldPrice : stock.currentPrice)),
+                FlashCardInfoColumn("成本價", String(format: "%.2f", stock.purchasePrice))
+            ],
+            isSold: stock.isSold
+        ) {
+            if !stock.symbol.isEmpty {
+                Text(stock.symbol)
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 11).padding(.vertical, 4)
+                    .background((rarity == .legendary ? Color.white.opacity(0.18) : Color(.systemGray5)),
+                                in: Capsule())
+                    .overlay(Capsule().stroke(
+                        rarity == .legendary ? Color.white.opacity(0.30) : Color(.separator).opacity(0.25),
+                        lineWidth: 0.75
+                    ))
+                    .foregroundStyle(rarity.primaryTextColor)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-
-            VStack(spacing: 6) {
-                Text(stock.name)
-                    .font(.title.weight(.bold))
-                    .foregroundStyle(rarity == .legendary ? .white : .primary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-
-                if !stock.symbol.isEmpty {
-                    // [v2] RoundedRectangle → Capsule + stroke 細邊框，對齊全 App 標籤膠囊規格
-                    Text(stock.symbol)
-                        .font(.subheadline.weight(.medium))
-                        .padding(.horizontal, 11).padding(.vertical, 4)
-                        .background((rarity == .legendary ? Color.white.opacity(0.18) : Color(.systemGray5)),
-                                    in: Capsule())
-                        .overlay(Capsule().stroke(
-                            rarity == .legendary ? Color.white.opacity(0.30) : Color(.separator).opacity(0.25),
-                            lineWidth: 0.75
-                        ))
-                        .foregroundStyle(rarity == .legendary ? .white : .primary)
-                }
-            }
-            .padding(.top, 16)
-
-            // 市值（大字）
-            VStack(spacing: 4) {
-                // [v3] minimumScaleFactor + contentTransition 防長數字溢出並平滑過渡
-                // [v4] 改用 splitWan 取代 fmtWan，市值達 1 億以上自動換算為「億元」單位
-                let market = splitWan(stock.marketValue)
-                Text(market.number)
-                    .font(.system(size: 52, weight: .bold, design: .rounded))
-                    .foregroundStyle(rarity.textColor)
-                    .minimumScaleFactor(0.55)
-                    .lineLimit(1)
-                    .contentTransition(.numericText())
-                Text(stock.isSold ? "賣出市值（\(market.unit)元）" : "目前市值（\(market.unit)元）")
-                    .font(.subheadline)
-                    .foregroundStyle(rarity == .legendary ? .white.opacity(0.6) : .secondary)
-            }
-            .padding(.vertical, 20)
-
-            // 損益百分比醒目顯示
+        } middleExtra: {
+            // 損益百分比醒目膠囊
             HStack(spacing: 6) {
-                let pl = stock.profitLoss
                 Image(systemName: pl >= 0 ? "arrow.up.right" : "arrow.down.right")
                     .font(.caption)
                 Text((pl >= 0 ? "+" : "") + fmt(pl))
@@ -265,113 +242,22 @@ struct StockDetailView: View {
                     .font(.caption2)
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(
-                (stock.profitLoss >= 0 ? Color.green : Color.red).opacity(0.15),
-                in: Capsule()
-            )
-            // [v3] 補入 stroke 細邊框，對齊全 App 膠囊邊框設計語言
-            .overlay(Capsule().stroke(
-                (stock.profitLoss >= 0 ? Color.green : Color.red).opacity(0.22),
-                lineWidth: 0.6
-            ))
-            .foregroundStyle(stock.profitLoss >= 0 ? .green : .red)
+            .background(plColor.opacity(0.15), in: Capsule())
+            .overlay(Capsule().stroke(plColor.opacity(0.22), lineWidth: 0.6))
+            .foregroundStyle(plColor)
             .padding(.bottom, 16)
-
-            // 底部資訊列
-            HStack {
-                VStack(spacing: 2) {
-                    Text("股數")
-                        .font(.caption2)
-                        .foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text("\(Int(stock.shares))")
-                        .font(.caption.bold())
-                        .foregroundStyle(rarity == .legendary ? Color.white.opacity(0.85) : Color.primary)
-                }
-                Spacer()
-                VStack(spacing: 2) {
-                    Text(stock.isSold ? "賣出價" : "目前價")
-                        .font(.caption2)
-                        .foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(String(format: "%.2f", stock.isSold ? stock.soldPrice : stock.currentPrice))
-                        .font(.caption.bold())
-                        .foregroundStyle(rarity == .legendary ? Color.white.opacity(0.85) : Color.primary)
-                }
-                Spacer()
-                VStack(spacing: 2) {
-                    Text("成本價")
-                        .font(.caption2)
-                        .foregroundStyle(rarity == .legendary ? Color.white.opacity(0.5) : Color(UIColor.tertiaryLabel))
-                    Text(String(format: "%.2f", stock.purchasePrice))
-                        .font(.caption.bold())
-                        .foregroundStyle(rarity == .legendary ? Color.white.opacity(0.85) : Color.primary)
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 16)
-        }
-        // [v3] 散景裝飾圓 + 玻璃光澤，對齊 VehicleView v3 / StockView v3 英雄卡規格
-        .background {
-            ZStack {
-                LinearGradient(colors: rarity.bgGradient,
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                // 個股 3 個月日線背景（收盤價曲線＋成交量柱，HeroPriceVolumeBackground
-                // 標準模板）：傳說卡深色底用白色、其他淺色底用橙色強調色
-                if heroPrices.count >= 2 {
-                    HeroPriceVolumeBackground(
-                        prices: heroPrices,
-                        volumes: heroVolumes,
-                        tint: rarity == .legendary
-                            ? .white
-                            : Color(red: 1.00, green: 0.62, blue: 0.22)
-                    )
-                    .allowsHitTesting(false)
-                }
-                Circle()
-                    .fill(Color.white.opacity(0.07))
-                    .frame(width: 95, height: 95)
-                    .blur(radius: 15)
-                    .offset(x: 65, y: -35)
-                    .allowsHitTesting(false)
-                Circle()
-                    .fill(Color.white.opacity(0.05))
-                    .frame(width: 70, height: 70)
-                    .blur(radius: 12)
-                    .offset(x: -60, y: 25)
-                    .allowsHitTesting(false)
-                Circle()
-                    .fill(Color.white.opacity(0.04))
-                    .frame(width: 55, height: 55)
-                    .blur(radius: 9)
-                    .offset(x: 55, y: 45)
-                    .allowsHitTesting(false)
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top, endPoint: .center
+        } extraBackground: {
+            // 個股 3 個月日線（收盤價曲線＋成交量柱）：傳說卡深色底用白、其他淺色底用橙
+            if heroPrices.count >= 2 {
+                HeroPriceVolumeBackground(
+                    prices: heroPrices,
+                    volumes: heroVolumes,
+                    tint: rarity == .legendary
+                        ? .white
+                        : Color(red: 1.00, green: 0.62, blue: 0.22)
                 )
-                .allowsHitTesting(false)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(
-                    AngularGradient(colors: rarity.borderGradient, center: .center),
-                    lineWidth: rarity.borderWidth
-                )
-        )
-        .shadow(color: rarity.shadowColor, radius: rarity == .legendary ? 15 : 8, y: 4)
-        .overlay(alignment: .topLeading) {
-            if stock.isSold {
-                SoldStamp(size: 32)
-                    .offset(x: -10, y: -14)
-            }
-        }
-        // [v3] 進場動畫，對齊 SavingsInsuranceView / RealEstateDetailView 閃卡規格
-        // 只保留 .animation modifier，移除重複的 withAnimation wrapper，避免兩個動畫上下文同時作用
-        .opacity(cardAppeared ? 1 : 0)
-        .offset(y: cardAppeared ? 0 : 14)
-        .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04), value: cardAppeared)
-        .onAppear { cardAppeared = true }
         .padding(.horizontal, 24)
         .padding(.top, 16)
     }
