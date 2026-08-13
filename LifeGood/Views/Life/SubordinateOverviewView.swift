@@ -262,7 +262,7 @@ struct SubordinateOverviewView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 14) {
-                        Button { exportText() } label: { Image(systemName: "square.and.arrow.up") }
+                        exportMenu
                         addMenu
                     }
                 }
@@ -274,6 +274,24 @@ struct SubordinateOverviewView: View {
             .sheet(item: $subAddKind) { kind in
                 AddSubItemSheet(kind: kind)
             }
+        }
+    }
+
+    /// 右上角匯出選單：完整文字＋各區塊圖片匯出（使用者指定）
+    private var exportMenu: some View {
+        Menu {
+            Button { exportText() } label: { Label("完整文字", systemImage: "text.alignleft") }
+            Section("圖片匯出") {
+                Button { exportImage(.hero) } label: { Label("總覽看板", systemImage: "rectangle.on.rectangle") }
+                Button { exportImage(.leaves) } label: { Label("請假", systemImage: "calendar.badge.minus") }
+                Button { exportImage(.reports) } label: { Label("報告", systemImage: "doc.text.fill") }
+                Button { exportImage(.meetings) } label: { Label("會議", systemImage: "person.3.fill") }
+                Button { exportImage(.dayTasks) } label: { Label("當日任務", systemImage: "checklist") }
+                Button { exportImage(.meetingItems) } label: { Label("未完成會議條目", systemImage: "person.3.sequence.fill") }
+                Button { exportImage(.tasks) } label: { Label("未完成任務", systemImage: "tray.full.fill") }
+            }
+        } label: {
+            Image(systemName: "square.and.arrow.up")
         }
     }
 
@@ -291,6 +309,83 @@ struct SubordinateOverviewView: View {
             }
         } label: {
             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+        }
+    }
+
+    // MARK: - 圖片匯出
+
+    /// 圖片匯出的區塊選項
+    private enum ExportSection: String {
+        case hero = "總覽看板"
+        case leaves = "請假"
+        case reports = "報告"
+        case meetings = "會議"
+        case dayTasks = "當日任務"
+        case meetingItems = "未完成會議條目"
+        case tasks = "未完成任務"
+    }
+
+    private static let stampFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
+
+    /// 把指定區塊渲染成 JPG 並開啟系統分享面板
+    /// （對齊 SubordinateDetailView.exportJPG 既有規格：寬 430、scale ≥3、JPG 0.95）
+    @MainActor
+    private func exportImage(_ section: ExportSection) {
+        let content = exportImageContent(section)
+            .frame(width: 430)
+            .padding(.vertical, 20)
+            .background(Color(.systemGroupedBackground))
+            .environmentObject(lifeStore)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage,
+              let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        let name = "部屬總覽_\(section.rawValue)_\(Self.stampFmt.string(from: Date())).jpg"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do {
+            try data.write(to: url)
+            sharePayload = OverviewSharePayload(items: [url])
+        } catch { }
+    }
+
+    /// 供 ImageRenderer 使用的靜態版面：非看板區塊在頂部附「部屬總覽｜日期」標題列，
+    /// 圖片單獨分享時仍看得出日期脈絡（看板本身已含日期資訊則免）
+    @ViewBuilder
+    private func exportImageContent(_ section: ExportSection) -> some View {
+        VStack(spacing: 12) {
+            if section != .hero {
+                HStack {
+                    Text("📊 部屬總覽｜\(Self.shareDateFmt.string(from: selectedDate))")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+            }
+            switch section {
+            case .hero:
+                summaryHeroCard(leaveCnt: todayLeaves.count,
+                                meetCnt: todayMeetings.count,
+                                taskCnt: incompleteTasks.count)
+            case .leaves:
+                leaveSection(todayLeaves)
+            case .reports:
+                reportSection(displayedReports)
+            case .meetings:
+                meetingSection(todayMeetings)
+            case .dayTasks:
+                taskGroupCard(title: "當日任務", icon: "checklist", color: .cyan,
+                              items: todayTasks, emptyText: "當日無任務")
+                    .padding(.horizontal)
+            case .meetingItems:
+                meetingItemsCard(incompleteMeetingItems)
+                    .padding(.horizontal)
+            case .tasks:
+                taskGroupCard(title: "未完成任務", icon: "tray.full.fill", color: .orange,
+                              items: incompleteTasks, emptyText: "沒有未完成任務")
+                    .padding(.horizontal)
+            }
         }
     }
 

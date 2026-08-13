@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.202", build: 955, date: "2026/08/12", notes: [
+            "【新增】部屬總覽匯出選單升級（使用者指定）：右上角匯出按鈕從單一「完整文字」改為選單——完整文字之外，新增七個「圖片匯出」選項：總覽看板／請假／報告／會議／當日任務／未完成會議條目／未完成任務，各自把該區塊渲染成 JPG 開系統分享面板（寬 430、3x 解析度，對齊部屬卡片既有匯出圖規格）。非看板的區塊圖片頂部附「部屬總覽｜日期」標題列，單獨分享也看得出日期脈絡。"
+        ]),
         ChangelogEntry(version: "25.201", build: 954, date: "2026/08/12", notes: [
             "【修正】v25.200 編譯錯誤（Xcode Cloud 回報）：MainTabView 的法人資料收集用了 Task.detached 包一層再 await .value，新 SDK 的 detached 多載（含 name 參數）造成型別推斷模稜兩可（Ambiguous use of detached）。其實不需要 detached——collectIfNeeded 是 nonisolated async 函式，本來就在背景執行緒跑、不佔主線，改為直接 await 呼叫（股票頁的同型呼叫一併簡化）。"
         ]),
