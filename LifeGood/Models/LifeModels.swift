@@ -1209,6 +1209,23 @@ struct WeeklyReport: Identifiable, Codable {
     }
 }
 
+/// 部屬升職紀錄：from/to 存「當時的職等職稱快照文字」，
+/// 職稱表日後改名或刪除都不影響歷史紀錄的可讀性
+struct PromotionRecord: Identifiable, Codable {
+    let id: UUID
+    var date: Date              // 生效日期
+    var fromTitle: String       // 升職前職稱（快照）
+    var toTitle: String         // 升職後職稱（快照）
+    var toGradeTitleId: UUID?   // 升任的職等職稱 ID（供對照，可能已被刪除）
+    var note: String
+
+    init(id: UUID = UUID(), date: Date = Date(), fromTitle: String = "",
+         toTitle: String = "", toGradeTitleId: UUID? = nil, note: String = "") {
+        self.id = id; self.date = date; self.fromTitle = fromTitle
+        self.toTitle = toTitle; self.toGradeTitleId = toGradeTitleId; self.note = note
+    }
+}
+
 struct Subordinate: Identifiable, Codable {
     let id: UUID
     var name: String
@@ -1228,19 +1245,22 @@ struct Subordinate: Identifiable, Codable {
     var weeklyReports: [WeeklyReport]
     /// 執掌設備（含預防保養 PM 記錄與警報記錄）
     var equipments: [ManagedEquipment]
+    /// 升職歷程（新到舊不強制，顯示時再排序）
+    var promotions: [PromotionRecord]
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
          department: String = "", note: String = "", gradeTitleId: UUID? = nil,
          departmentId: UUID? = nil, records: [SubordinateRecord] = [], joinDate: Date? = nil,
          meetings: [SubordinateMeeting] = [], tasks: [SubordinateTask] = [],
          shifts: [SubordinateShift] = [], plantArea: String = "", weeklyReports: [WeeklyReport] = [],
-         equipments: [ManagedEquipment] = []) {
+         equipments: [ManagedEquipment] = [], promotions: [PromotionRecord] = []) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
         self.departmentId = departmentId; self.records = records; self.joinDate = joinDate
         self.meetings = meetings; self.tasks = tasks; self.shifts = shifts
         self.plantArea = plantArea; self.weeklyReports = weeklyReports
         self.equipments = equipments
+        self.promotions = promotions
     }
 
     init(from decoder: Decoder) throws {
@@ -1262,6 +1282,7 @@ struct Subordinate: Identifiable, Codable {
         plantArea = (try? c.decode(String.self, forKey: .plantArea)) ?? ""
         weeklyReports = (try? c.decode(LossyArray<WeeklyReport>.self, forKey: .weeklyReports))?.elements ?? []
         equipments = (try? c.decode(LossyArray<ManagedEquipment>.self, forKey: .equipments))?.elements ?? []
+        promotions = (try? c.decode(LossyArray<PromotionRecord>.self, forKey: .promotions))?.elements ?? []
     }
 }
 

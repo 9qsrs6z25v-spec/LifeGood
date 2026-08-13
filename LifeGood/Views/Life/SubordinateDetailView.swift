@@ -242,6 +242,7 @@ struct SubordinateDetailView: View {
 
     let subordinateId: UUID
     @State private var showEdit = false
+    @State private var showPromotion = false   // 升職表單
     @State private var showCompleted = false
     @State private var previewItem: SubordinateItemRef?
     @State private var addingType: SubordinateRecordType?
@@ -390,6 +391,10 @@ struct SubordinateDetailView: View {
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05), value: tabSectionsAppeared)
                     } else {
+                        promotionSection
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.00), value: tabSectionsAppeared)
                         proConSection
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
@@ -427,6 +432,15 @@ struct SubordinateDetailView: View {
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
+                        // 升職（使用者指定）：付費鎖比照編輯
+                        Button {
+                            if subscription.isPremium { showPromotion = true }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.orange)
+                        }
                         Button("編輯") {
                             if subscription.isPremium { showEdit = true }
                             else { showPremiumAlert = true }
@@ -435,6 +449,7 @@ struct SubordinateDetailView: View {
                 }
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .sheet(isPresented: $showPromotion) { PromotionSheet(subordinateId: subordinateId) }
             .sheet(isPresented: $showEdit) { AddSubordinateView(editing: subordinate) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $addingType) { type in
@@ -1119,6 +1134,92 @@ struct SubordinateDetailView: View {
 
     // MARK: - 優缺點
 
+    /// 升職歷程（潛力性分頁）：from → to 時間軸，新到舊；無紀錄時整卡隱藏。
+    /// 紀錄由工具列「升職」按鈕（PromotionSheet）產生。
+    @ViewBuilder
+    private var promotionSection: some View {
+        let promotions = subordinate.promotions.sorted { $0.date > $1.date }
+        if !promotions.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                sectionHeader("升職歷程", icon: "arrow.up.right.circle.fill", color: .orange,
+                              count: promotions.count) { }
+                ForEach(Array(promotions.enumerated()), id: \.element.id) { idx, p in
+                    promotionRow(p)
+                    if idx < promotions.count - 1 {
+                        Divider().padding(.leading, 62)
+                    }
+                }
+            }
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+            )
+            .shadow(color: Color.orange.opacity(0.12), radius: 10, x: 0, y: 4)
+            .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
+            .padding(.horizontal)
+        }
+    }
+
+    private func promotionRow(_ p: PromotionRecord) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(colors: [Color.orange.opacity(0.22), Color.orange.opacity(0.10)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .frame(width: 36, height: 36)
+                    .overlay(Circle().stroke(Color.orange.opacity(0.20), lineWidth: 0.75))
+                    .shadow(color: Color.orange.opacity(0.18), radius: 5, x: 0, y: 2)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.orange)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                // from → to（from 可能為空：首任職稱直接顯示 to）
+                HStack(spacing: 5) {
+                    if !p.fromTitle.isEmpty {
+                        Text(p.fromTitle)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .strikethrough(false)
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.orange)
+                    }
+                    Text(p.toTitle.isEmpty ? "—" : p.toTitle)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(.primary)
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                HStack(spacing: 6) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 9))
+                        Text(formatDate(p.date))
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(Capsule())
+                    if !p.note.isEmpty {
+                        Text(p.note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
     private var proConSection: some View {
         let items = subordinate.records.filter { $0.type == .pro || $0.type == .con }.sorted { $0.date > $1.date }
         return VStack(alignment: .leading, spacing: 0) {
@@ -1434,6 +1535,7 @@ struct SubordinateDetailView: View {
                 recordSection(.leave)
                 completedSection
             case .rating:
+                promotionSection
                 proConSection
                 recordSection(.achievement)
                 recordSection(.improvement)
@@ -3400,5 +3502,109 @@ struct SubordinateItemCard: View {
             if lifeStore.businessCards.contains(where: { $0.id == uid }) { openCard = IDBox(id: uid) }
         }
         return .handled
+    }
+}
+
+// MARK: - 升職表單
+
+/// 部屬升職：選新職等職稱＋生效日期＋備註。儲存時寫入升職歷程
+/// （from/to 存當時職稱快照文字）並更新部屬的 gradeTitleId。
+struct PromotionSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    let subordinateId: UUID
+
+    @State private var selectedGradeTitleId: UUID?
+    @State private var effectiveDate = Date()
+    @State private var note = ""
+
+    private var subordinate: Subordinate? {
+        lifeStore.subordinates.first { $0.id == subordinateId }
+    }
+
+    /// 目前職稱文字（同部屬卡片 gradeTitleText 規則）
+    private var currentTitleText: String {
+        guard let sub = subordinate else { return "" }
+        if let gt = lifeStore.gradeTitles.first(where: { $0.id == sub.gradeTitleId }) {
+            return "\(gt.grade) — \(gt.title)"
+        }
+        return sub.jobTitle
+    }
+
+    private func titleText(_ gt: GradeTitle) -> String {
+        gt.grade.isEmpty ? gt.title : "\(gt.grade) — \(gt.title)"
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("目前職稱") {
+                    Text(currentTitleText.isEmpty ? "（未設定）" : currentTitleText)
+                        .foregroundStyle(currentTitleText.isEmpty ? .secondary : .primary)
+                }
+                Section {
+                    if lifeStore.gradeTitles.isEmpty {
+                        Text("尚未建立職等職稱。請先到「職等職稱」頁新增，再回來升職。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("升任職稱", selection: $selectedGradeTitleId) {
+                            Text("請選擇").tag(UUID?.none)
+                            ForEach(lifeStore.gradeTitles) { gt in
+                                Text(titleText(gt)).tag(Optional(gt.id))
+                            }
+                        }
+                    }
+                } header: {
+                    Text("升任職稱")
+                } footer: {
+                    Text("升職會記入「升職歷程」（保留升職前後職稱的快照），並同步更新部屬目前職稱。")
+                }
+                Section {
+                    DatePicker("生效日期", selection: $effectiveDate, displayedComponents: .date)
+                    TextField("備註（選填，例如晉升原因）", text: $note)
+                }
+                Section {
+                    Button {
+                        applyPromotion()
+                    } label: {
+                        Label("確認升職", systemImage: "arrow.up.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .foregroundStyle(.orange).bold()
+                    .disabled(!canPromote)
+                }
+            }
+            .navigationTitle("升職")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+            }
+        }
+    }
+
+    private var canPromote: Bool {
+        guard let sel = selectedGradeTitleId else { return false }
+        return sel != subordinate?.gradeTitleId
+    }
+
+    private func applyPromotion() {
+        guard let idx = lifeStore.subordinates.firstIndex(where: { $0.id == subordinateId }),
+              let sel = selectedGradeTitleId,
+              let target = lifeStore.gradeTitles.first(where: { $0.id == sel }) else { return }
+        var sub = lifeStore.subordinates[idx]
+        let record = PromotionRecord(
+            date: effectiveDate,
+            fromTitle: currentTitleText,
+            toTitle: titleText(target),
+            toGradeTitleId: sel,
+            note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        sub.promotions.append(record)
+        sub.gradeTitleId = sel
+        // 自訂職稱文字已被職等職稱取代，清空避免舊文字在對照失敗時誤顯示
+        sub.jobTitle = ""
+        lifeStore.subordinates[idx] = sub   // didSet 觸發 save + iCloud 同步
+        dismiss()
     }
 }
