@@ -477,3 +477,267 @@ struct InstNetBarCard: View {
         }
     }
 }
+
+// MARK: - AI 持股健診（呼叫語音 AI 助手設定的供應商 API）
+
+/// 把使用者目前持股＋技術面（日線/均線）＋籌碼面（法人買賣超）＋大盤現況
+/// 整理成結構化資料，交給語音 AI 助手設定的 AI 供應商做分析：
+/// 大盤簡評、各持股觀點與買賣建議、整體配置與風險提醒。
+/// 按「開始分析」才呼叫（花 API 費用），結果附「非投資建議」聲明。
+struct StockAIAnalysisView: View {
+    @EnvironmentObject var store: FinanceStore
+    @StateObject private var aiSettings = AISettingsStore.shared
+    @Environment(\.dismiss) private var dismiss
+
+    private enum Phase {
+        case idle
+        case loading
+        case done(String)
+        case failed(String)
+    }
+    @State private var phase: Phase = .idle
+
+    private let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    content
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("AI 持股健診")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("關閉") { dismiss() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        let holdings = store.stocks.filter { !$0.isSold }
+        if !aiSettings.isReady {
+            infoCard(icon: "key.slash.fill", color: .secondary,
+                     title: "尚未設定 AI 供應商",
+                     text: "此功能使用「語音 AI 助手」的 API 設定。請先到 設定 > 語音 AI 助手 選擇供應商並填入 API Key。")
+        } else if holdings.isEmpty {
+            infoCard(icon: "chart.line.uptrend.xyaxis", color: accent,
+                     title: "沒有持有中的股票",
+                     text: "先新增股票持股，再回來做 AI 健診。")
+        } else {
+            switch phase {
+            case .idle:
+                idleCard(holdings: holdings)
+            case .loading:
+                VStack(spacing: 14) {
+                    ProgressView().controlSize(.large)
+                    Text("AI 分析中…依供應商約需 10~30 秒")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 60)
+            case .done(let text):
+                resultCard(text)
+            case .failed(let err):
+                infoCard(icon: "exclamationmark.triangle.fill", color: .orange,
+                         title: "分析失敗", text: err)
+                Button {
+                    Task { await analyze() }
+                } label: {
+                    Label("重試", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(accent)
+            }
+        }
+    }
+
+    private func idleCard(holdings: [Stock]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("將提供給 AI 的資料", systemImage: "doc.text.magnifyingglass")
+                .font(.subheadline.weight(.bold))
+            VStack(alignment: .leading, spacing: 6) {
+                bulletRow("持股 \(holdings.count) 檔（名稱、股數、成本、現價、損益）")
+                bulletRow("技術面：近 3 個月日線、MA5／MA20（已快取，不另抓）")
+                bulletRow("籌碼面：已收集的三大法人買賣超")
+                bulletRow("大盤：加權指數近一個月走勢（現抓）")
+            }
+            Text("使用 \(aiSettings.activeProvider?.displayName ?? "") API，一次分析約消耗一次請求費用。分析結果僅供參考，非投資建議。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Button {
+                Task { await analyze() }
+            } label: {
+                Label("開始分析", systemImage: "sparkles")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(accent)
+        }
+        .padding(16)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    private func resultCard(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("分析結果", systemImage: "sparkles")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(accent)
+                Spacer()
+                Button {
+                    Task { await analyze() }
+                } label: {
+                    Label("重新分析", systemImage: "arrow.clockwise")
+                        .font(.caption)
+                }
+            }
+            Text(text)
+                .font(.subheadline)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    private func infoCard(icon: String, color: Color, title: String, text: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 34))
+                .foregroundStyle(color)
+            Text(title).font(.subheadline.weight(.semibold))
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .padding(.horizontal, 20)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func bulletRow(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text("•").foregroundStyle(accent)
+            Text(text)
+        }
+        .font(.caption)
+        .foregroundStyle(.primary.opacity(0.85))
+    }
+
+    // MARK: 分析流程
+
+    private func analyze() async {
+        phase = .loading
+        let prompt = await buildPrompt()
+        let system = """
+        你是台股投資分析助手。使用者提供持股現況、技術面（均線）、籌碼面（三大法人買賣超）與近月大盤走勢。請用繁體中文、條列輸出：
+        1. 大盤現況簡評（2~3 句）
+        2. 各持股逐檔分析：現況觀點、技術面與籌碼面解讀、建議（買進加碼／續抱觀察／減碼賣出，三選一）與理由
+        3. 整體配置觀點與風險提醒
+        語氣務實直接、不吹捧；某檔資料不足就直說。結尾必附一句：「以上為 AI 生成之參考觀點，非投資建議。」
+        """
+        do {
+            let out = try await AIExpenseParserService.shared.completeText(system: system, prompt: prompt)
+            phase = .done(out.trimmingCharacters(in: .whitespacesAndNewlines))
+        } catch {
+            phase = .failed(error.localizedDescription)
+        }
+    }
+
+    private func fmt2(_ v: Double) -> String { String(format: "%.2f", v) }
+
+    /// 把持股＋日線快取＋法人快照＋大盤現抓整理成給 AI 的結構化文字
+    private func buildPrompt() async -> String {
+        let holdings = store.stocks.filter { !$0.isSold }
+        var lines: [String] = []
+        lines.append("【持股明細】")
+        // 法人快照整批載入一次（背景執行緒）
+        let instRecords = await Task.detached(priority: .userInitiated) {
+            InstitutionalHistory.tradingRecords()
+        }.value
+        for s in holdings {
+            var l = "・\(s.name)（\(s.symbol)）：\(Int(s.shares)) 股，成本 \(fmt2(s.purchasePrice))，現價 \(fmt2(s.currentPrice))，損益 \(String(format: "%+.1f%%", s.returnRate))，市值約 \(Int(s.marketValue)) 元"
+            // 技術面（日線快取）
+            let closes = StockDailyHistory.cached(symbol: s.symbol).map(\.close)
+            if closes.count >= 20 {
+                let ma5 = closes.suffix(5).reduce(0, +) / 5
+                let ma20 = closes.suffix(20).reduce(0, +) / 20
+                let last = closes.last ?? 0
+                l += "；MA5 \(fmt2(ma5))、MA20 \(fmt2(ma20))（現價\(last >= ma20 ? "站上" : "跌破")月線）"
+                if closes.count >= 21 {
+                    let chg = (last / closes[closes.count - 21] - 1) * 100
+                    l += "、近 20 日\(String(format: "%+.1f%%", chg))"
+                }
+            }
+            // 籌碼面（法人快照）
+            if !instRecords.isEmpty {
+                var streak = 0
+                var sum5 = 0.0
+                for (i, rec) in instRecords.reversed().enumerated() {
+                    if let v = rec.net[s.symbol] {
+                        if i < 5 { sum5 += v }
+                        if v > 0, streak == i { streak += 1 }
+                    }
+                }
+                let sheets5 = Int((sum5 / 1000).rounded())
+                l += "；法人近 5 日\(sheets5 >= 0 ? "買超" : "賣超") \(abs(sheets5)) 張"
+                if streak >= 2 { l += "、已連續買超 \(streak) 天" }
+            }
+            lines.append(l)
+        }
+        // 大盤（加權指數，現抓 Yahoo）
+        if let taiex = await fetchTAIEX() {
+            lines.append("")
+            lines.append("【大盤（加權指數）】\(taiex)")
+        }
+        if let first = instRecords.first?.date, let last = instRecords.last?.date {
+            lines.append("")
+            lines.append("【法人資料範圍】\(first) ～ \(last)（共 \(instRecords.count) 個交易日）")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// 加權指數近一個月走勢（Yahoo ^TWII）
+    private func fetchTAIEX() async -> String? {
+        guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/%5ETWII?range=1mo&interval=1d") else { return nil }
+        do {
+            var req = URLRequest(url: url)
+            req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+            let (data, _) = try await URLSession.shared.data(for: req)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let chart = json["chart"] as? [String: Any],
+                  let result = (chart["result"] as? [[String: Any]])?.first,
+                  let quote = ((result["indicators"] as? [String: Any])?["quote"]
+                               as? [[String: Any]])?.first,
+                  let rawCloses = quote["close"] as? [Any] else { return nil }
+            let closes = rawCloses.compactMap { $0 as? Double }
+            guard let last = closes.last, let first = closes.first, closes.count >= 2 else { return nil }
+            let monthChg = (last / first - 1) * 100
+            var text = "目前約 \(Int(last)) 點，近一個月 \(String(format: "%+.1f%%", monthChg))"
+            if closes.count >= 6 {
+                let weekChg = (last / closes[closes.count - 6] - 1) * 100
+                text += "、近五個交易日 \(String(format: "%+.1f%%", weekChg))"
+            }
+            return text
+        } catch { return nil }
+    }
+}

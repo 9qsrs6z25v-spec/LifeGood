@@ -8,18 +8,31 @@ import CoreLocation
 // MARK: - Keychain 儲存 API Key
 
 /// 用 iOS Keychain 儲存第三方 AI 服務的 API Key（比 UserDefaults 安全）。
+/// v25.203 起改存「可同步」項目（kSecAttrSynchronizable）：走 iCloud 鑰匙圈
+/// 端對端加密同步到同一 Apple ID 的其他裝置——使用者回報 API Key 沒同步到另一支手機。
+/// 不走 App 的 CloudKit KV（那會把金鑰放進資料庫、家人共享時還會流到對方裝置）。
+/// 讀取用 kSecAttrSynchronizableAny 同時涵蓋舊的「僅本機」項目（向下相容）；
+/// 重新儲存時先刪掉新舊兩種再寫入可同步版本（自動遷移）。
 enum AIKeychainStore {
     @discardableResult
     static func set(_ value: String?, for key: String) -> Bool {
-        let baseQuery: [String: Any] = [
+        // 刪除既有項目：kSecAttrSynchronizableAny 涵蓋舊「僅本機」與新「可同步」兩種
+        let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key
+            kSecAttrAccount as String: key,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny
         ]
-        SecItemDelete(baseQuery as CFDictionary)
+        SecItemDelete(deleteQuery as CFDictionary)
         guard let value, !value.isEmpty,
               let data = value.data(using: .utf8) else { return true }
-        var add = baseQuery
-        add[kSecValueData as String] = data
+        let add: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecValueData as String: data,
+            kSecAttrSynchronizable as String: true,
+            // 可同步項目不能用 ThisDeviceOnly 保護等級；AfterFirstUnlock 讓背景同步也讀得到
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
@@ -27,6 +40,7 @@ enum AIKeychainStore {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -309,6 +323,100 @@ final class AIExpenseParserService {
         var result = try decodeJSON(raw)
         result.originalText = text
         return result
+    }
+
+    // MARK: 通用文字生成（股票 AI 持股健診等非記帳解析用途）
+
+    /// 帶自訂 system prompt 的通用補全：回傳純文字（不強制 JSON 格式）、輸出上限較高。
+    /// 供應商與 API Key 沿用語音 AI 助手的設定。
+    func completeText(system: String, prompt: String, maxTokens: Int = 1600) async throws -> String {
+        let (provider, key) = try await MainActor.run { () -> (AIProvider, String) in
+            let settings = AISettingsStore.shared
+            guard let p = settings.activeProvider else { throw AIParseError.noProvider }
+            let k = settings.key(for: p)
+            guard !k.isEmpty else { throw AIParseError.noKey }
+            return (p, k)
+        }
+        switch provider {
+        case .anthropic:
+            guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+                throw AIParseError.invalidResponse("internal: malformed Anthropic URL")
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue(key, forHTTPHeaderField: "x-api-key")
+            req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "model": "claude-sonnet-4-6",
+                "max_tokens": maxTokens,
+                "system": system,
+                "messages": [["role": "user", "content": prompt]]
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await sendRequest(req)
+            try ensureOK(data: data, resp: resp)
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let content = json["content"] as? [[String: Any]],
+                  let block = content.first(where: { ($0["type"] as? String) == "text" }),
+                  let textOut = block["text"] as? String else {
+                throw AIParseError.invalidResponse(String(data: data, encoding: .utf8) ?? "")
+            }
+            return textOut
+        case .openai:
+            guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+                throw AIParseError.invalidResponse("internal: malformed OpenAI URL")
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "model": "gpt-4o-mini",
+                "messages": [
+                    ["role": "system", "content": system],
+                    ["role": "user", "content": prompt]
+                ],
+                "max_tokens": maxTokens
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await sendRequest(req)
+            try ensureOK(data: data, resp: resp)
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let message = choices.first?["message"] as? [String: Any],
+                  let content = message["content"] as? String else {
+                throw AIParseError.invalidResponse(String(data: data, encoding: .utf8) ?? "")
+            }
+            return content
+        case .gemini:
+            guard var components = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent") else {
+                throw AIParseError.network("malformed Gemini base URL")
+            }
+            components.queryItems = [URLQueryItem(name: "key", value: key)]
+            guard let url = components.url else {
+                throw AIParseError.network("Invalid Gemini API key")
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "systemInstruction": ["parts": [["text": system]]],
+                "contents": [["role": "user", "parts": [["text": prompt]]]],
+                "generationConfig": ["maxOutputTokens": maxTokens]
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await sendRequest(req)
+            try ensureOK(data: data, resp: resp)
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let candidates = json["candidates"] as? [[String: Any]],
+                  let content = candidates.first?["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]],
+                  let textOut = parts.first?["text"] as? String else {
+                throw AIParseError.invalidResponse(String(data: data, encoding: .utf8) ?? "")
+            }
+            return textOut
+        }
     }
 
     // MARK: Anthropic

@@ -87,6 +87,8 @@ struct StockView: View {
     @State private var emptyPulseTask: Task<Void, Never>?
     /// 法人連續買超篩選頁
     @State private var showInstitutional = false
+    /// AI 持股健診頁
+    @State private var showAIAnalysis = false
     /// 股票卡背景序列（symbol → 已轉好的價/量 HeroTrendPoint）。
     /// 存「轉換完成」的最終形態而非原始 StockDailyPoint，
     /// 避免每次 render 每張卡都重複 map 兩個 60 點陣列。
@@ -166,8 +168,15 @@ struct StockView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
-                        // 法人連續買超篩選頁（使用者指定放在＋號旁）
-                        Button { showInstitutional = true } label: {
+                        // 功能選單（使用者指定）：法人連續買超＋AI 持股健診
+                        Menu {
+                            Button { showInstitutional = true } label: {
+                                Label("法人連續買超", systemImage: "building.columns.fill")
+                            }
+                            Button { showAIAnalysis = true } label: {
+                                Label("AI 持股健診", systemImage: "sparkles")
+                            }
+                        } label: {
                             Image(systemName: "building.columns.fill")
                                 .font(.title3)
                                 .foregroundStyle(.orange)
@@ -182,6 +191,7 @@ struct StockView: View {
             .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $showAdd) { AddStockView() }
             .sheet(isPresented: $showInstitutional) { InstitutionalBuyView() }
+            .sheet(isPresented: $showAIAnalysis) { StockAIAnalysisView() }
             .sheet(item: $editingItem) { item in AddStockView(editing: item) }
             .sheet(item: $viewingItem) { item in StockDetailView(stock: item) }
             .overlay(alignment: .top) {

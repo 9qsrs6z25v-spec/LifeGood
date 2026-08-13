@@ -39,7 +39,10 @@ final class CloudSyncManager: ObservableObject {
         // 股票每週市值快照（英雄卡背景折線）：同步安全性依賴「先拉後推」順序——
         // 少用的裝置會先拉到主力機的完整歷史，記錄本週快照時是在完整清單上加點再推回，
         // 歷史只增不減；不需自訂合併邏輯
-        "stock_value_weekly_history"
+        "stock_value_weekly_history",
+        // 進階設定＋AI 供應商選擇的打包 blob（KV 機制只搬 Data，散裝 Double/Int/Bool
+        // 由 AppPreferenceSync 推送前打包／拉取後解包）
+        AppPreferenceSync.blobKey
     ]
 
     private static let enabledKey = "icloud_sync_enabled"
@@ -354,6 +357,9 @@ final class CloudSyncManager: ObservableObject {
             NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
         }
 
+        // 覆蓋本機／合併後：進階設定 blob 也可能剛被雲端值覆蓋，解包回散裝鍵
+        AppPreferenceSync.unpack()
+
         // 把（覆蓋／合併後的）本機資料推回雲端，並上傳本機照片
         isSyncing = true
         CloudKitManager.shared.pushAllKV(keys: Self.syncKeys) { [weak self] pushOK in
@@ -487,6 +493,10 @@ final class CloudSyncManager: ObservableObject {
         // 自己負責的 key 有異動時才 load()，避免任一 Store 的雲端變更都讓所有 Store 全量重載、
         // 觸發不相關畫面（圖表／組織圖／行事曆等）不必要的重繪與進場動畫重播。
         let keys = note.userInfo?["keys"] as? [String]
+        // 進階設定 blob 從雲端更新：解包回散裝 @AppStorage 鍵，畫面即時生效
+        if keys == nil || keys?.contains(AppPreferenceSync.blobKey) == true {
+            AppPreferenceSync.unpack()
+        }
         DispatchQueue.main.async { [weak self] in
             self?.lastChangeReason = .serverChange
             self?.markSynced()
@@ -561,4 +571,72 @@ extension Notification.Name {
     static let cloudSyncDidPullChanges = Notification.Name("cloudSyncDidPullChanges")
     /// iCloud 拉到照片變更後發送，UI 需重新載入圖片
     static let cloudSyncPhotosDidUpdate = Notification.Name("cloudSyncPhotosDidUpdate")
+}
+
+// MARK: - 進階設定／AI 偏好打包同步
+
+/// KV 同步機制只搬「Data 型別」的 UserDefaults 值，@AppStorage 的散裝
+/// Double/Int/Bool/String（進階設定的模板參數、AI 供應商選擇）不會被搬。
+/// 解法：打包成單一 JSON blob 進 syncKeys——每次推送前（CloudKitManager.pushAllKV
+/// 開頭）打包、拉取到 blob 變更後（handleKVChanges／resolveInitialSync）解包。
+/// 衝突語意：最後推送者贏（模板偏好可容忍）。
+/// 注意：AI 的 API Key 存 Keychain、不進此 blob——Key 走 iCloud 鑰匙圈
+/// （kSecAttrSynchronizable）同步，端對端加密且不進 App 的 CloudKit 資料區。
+enum AppPreferenceSync {
+    static let blobKey = "app_preferences_blob_v1"
+
+    /// 要同步的散裝偏好鍵（新增進階設定參數時記得補進來）
+    static let scalarKeys: [String] = [
+        // 趨勢曲線模板
+        "hero_trend_point_count", "hero_trend_opacity", "hero_trend_line_width",
+        "hero_trend_blur", "hero_trend_left_pos", "hero_trend_right_pos",
+        "hero_trend_rot_x", "hero_trend_rot_y", "hero_trend_rot_z",
+        "hero_trend_end_opacity", "hero_trend_show_end_label",
+        // 股票量柱
+        "hero_volume_bar_opacity",
+        // 閃卡樣式
+        "flash_card_corner_radius", "flash_card_border_scale", "flash_card_value_size",
+        "flash_card_bokeh", "flash_card_shine", "flash_card_shadow", "flash_card_animation",
+        // 英雄卡樣式
+        "hero_card_corner_radius", "hero_card_bokeh", "hero_card_shine",
+        "hero_card_shadow", "hero_card_kpi_value_size",
+        // 法人連續買超天數
+        "inst_streak_days",
+        // 語音 AI 助手：供應商選擇（API Key 走 iCloud 鑰匙圈，不在此）
+        "LifeGood.ai.activeProvider"
+    ]
+
+    /// 推送前呼叫：把散裝值打包成 blob。內容沒變就不重寫，
+    /// 避免每輪同步都讓 blob 變髒、觸發無謂推送。
+    static func pack() {
+        let d = UserDefaults.standard
+        var dict: [String: Any] = [:]
+        for k in scalarKeys {
+            if let v = d.object(forKey: k), v is NSNumber || v is String {
+                dict[k] = v
+            }
+        }
+        guard !dict.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: dict,
+                                                     options: [.sortedKeys]) else { return }
+        if d.data(forKey: blobKey) != data {
+            d.set(data, forKey: blobKey)
+        }
+    }
+
+    /// 拉取到 blob 變更後呼叫：解包回散裝鍵（值相同不重寫，@AppStorage 畫面即時生效）
+    static func unpack() {
+        let d = UserDefaults.standard
+        guard let data = d.data(forKey: blobKey),
+              let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return
+        }
+        for (k, v) in dict where scalarKeys.contains(k) {
+            if let old = d.object(forKey: k) as? NSNumber, let new = v as? NSNumber,
+               old == new { continue }
+            if let old = d.object(forKey: k) as? String, let new = v as? String,
+               old == new { continue }
+            d.set(v, forKey: k)
+        }
+    }
 }

@@ -805,6 +805,9 @@ final class CloudKitManager {
         guard isAvailable else { completion?(false); return }
         // 指紋比對與雜湊計算搬到序列佇列：資料量大（數 MB JSON）時避免卡主執行緒
         queue.async {
+            // 推送前先把散裝偏好（進階設定/AI 供應商）打包成 blob，確保每輪推送
+            // 都帶到最新值（內容沒變不會重寫、不觸發無謂推送）
+            AppPreferenceSync.pack()
             let group = DispatchGroup()
             let lock = NSLock()
             var allOK = true
