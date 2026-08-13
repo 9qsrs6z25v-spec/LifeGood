@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.207", build: 960, date: "2026/08/13", notes: [
+            "【調整】股票明細移除右上角刪除按鈕（使用者指定）：刪除統一由列表左滑操作（SwipeDeleteRow：滑出按鈕、按下按鈕才刪除、不支援全滑直刪防誤觸），明細頁右上只留分享與編輯；連同已無入口的刪除確認框與明細頁專用刪除函式一併清除（列表版刪除的連動清理——連結支出/收入/股利收入/帳戶扣款紀錄——與明細版完全相同，無功能損失）。"
+        ]),
         ChangelogEntry(version: "25.206", build: 959, date: "2026/08/13", notes: [
             "【新增】股票列表左滑刪除模板＋明細分享圖片（使用者指定）：(1) 新模板 SwipeDeleteRow——ScrollView/LazyVStack 卡片列的左滑刪除（List 已有系統 swipeActions 但卡片列沒有）：左滑露出紅色刪除鈕、放開自動吸附開合、開啟時點內容收合不誤觸開卡、只吃明顯偏水平的拖曳不干擾垂直捲動、不支援全滑直刪（比照既定防誤刪決策）；先套用股票頁持有中＋已賣出兩份卡片列，其他 ScrollView 列表頁可直接共用。(2) 股票明細右上新增「分享」：閃卡＋技術線圖渲染成 JPG（寬 430、3x）開系統分享面板；FlashCardView 新增 animated 參數——離屏渲染不觸發進場動畫的 onAppear，不關閉會輸出整張透明空白圖。明細頁刪除按鈕原本就在右上角（編輯旁），維持不變。"
         ]),

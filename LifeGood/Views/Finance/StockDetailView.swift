@@ -94,7 +94,6 @@ struct StockDetailView: View {
     let stockId: UUID
     @State private var showEdit = false
     @State private var shareItem: StockCardSharePayload?   // 分享圖片
-    @State private var showDeleteConfirm = false
     @State private var showPremiumAlert = false
     @State private var addingTransaction = false
     @State private var editingTransaction: StockTransaction?
@@ -174,12 +173,8 @@ struct StockDetailView: View {
                         } label: {
                             Text("編輯").foregroundStyle(.green)
                         }
-                        Button {
-                            if subscription.isPremium { showDeleteConfirm = true }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            Text("刪除").foregroundStyle(.red)
-                        }
+                        // 「刪除」按鈕已移除（使用者指定）：刪除改由列表左滑
+                        //（SwipeDeleteRow）操作，明細頁只留分享/編輯
                     }
                 }
             }
@@ -200,15 +195,6 @@ struct StockDetailView: View {
                 StockDividendEditor(stockId: stockId, editing: div)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
-            .alert("確定要刪除這筆股票嗎？", isPresented: $showDeleteConfirm) {
-                Button("刪除", role: .destructive) {
-                    deleteStock()
-                    dismiss()
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("刪除後所有連結的記帳支出 / 收入與帳戶扣款紀錄一併移除，此操作無法復原。")
-            }
         }
     }
 
@@ -908,35 +894,6 @@ struct StockDetailView: View {
                 .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
         )
         .padding(.horizontal)
-    }
-
-    // MARK: - 刪除
-
-    private func deleteStock() {
-        if let expId = stock.linkedExpenseId,
-           let exp = expenseStore.expenses.first(where: { $0.id == expId }) {
-            expenseStore.delete(exp)
-        }
-        if let incId = stock.linkedIncomeId,
-           let inc = expenseStore.incomes.first(where: { $0.id == incId }) {
-            expenseStore.deleteIncome(inc)
-        }
-        // 每筆現金股利各自透過 linkedIncomeId 連結一筆 Income（見 syncCashDividendIncome），
-        // 不只 stock.linkedIncomeId 這個單一欄位，刪除股票時要一併清掉，避免留下永遠對應
-        // 不到任何股票、卻仍計入收入總額的孤兒「XX 配息」紀錄。
-        for div in stock.dividends {
-            if let incId = div.linkedIncomeId,
-               let inc = expenseStore.incomes.first(where: { $0.id == incId }) {
-                expenseStore.deleteIncome(inc)
-            }
-        }
-        for accId in [stock.linkedBankMilestoneId, stock.linkedSecuritiesMilestoneId].compactMap({ $0 }) {
-            if var ms = lifeStore.milestones.first(where: { $0.id == accId }) {
-                ms.bankDeposits?.removeAll { $0.linkedStockId == stock.id }
-                lifeStore.update(ms)
-            }
-        }
-        store.deleteStock(stock)
     }
 
     // MARK: - Helpers
