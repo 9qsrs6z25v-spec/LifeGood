@@ -69,6 +69,7 @@
 		A01B000001000209 /* HeroTrendChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000209 /* HeroTrendChart.swift */; };
 		A01B000001000210 /* FlashCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000210 /* FlashCardView.swift */; };
 		A01B000001000211 /* HeroCardKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000211 /* HeroCardKit.swift */; };
+		A01B000001000213 /* SwipeDeleteRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000213 /* SwipeDeleteRow.swift */; };
 		A01B000001000103 /* MultiPhotoGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000103 /* MultiPhotoGallery.swift */; };
 		A01B000001000104 /* ResumeGiftSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000104 /* ResumeGiftSection.swift */; };
 		A01B000001000105 /* OrganizationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000105 /* OrganizationView.swift */; };
@@ -166,6 +167,7 @@
 		A01A000001000209 /* HeroTrendChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroTrendChart.swift; sourceTree = "<group>"; };
 		A01A000001000210 /* FlashCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlashCardView.swift; sourceTree = "<group>"; };
 		A01A000001000211 /* HeroCardKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroCardKit.swift; sourceTree = "<group>"; };
+		A01A000001000213 /* SwipeDeleteRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeDeleteRow.swift; sourceTree = "<group>"; };
 		A01A000001000103 /* MultiPhotoGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiPhotoGallery.swift; sourceTree = "<group>"; };
 		A01A000001000104 /* ResumeGiftSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeGiftSection.swift; sourceTree = "<group>"; };
 		A01A000001000105 /* OrganizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationView.swift; sourceTree = "<group>"; };
@@ -290,6 +292,7 @@
 				A01A000001000209 /* HeroTrendChart.swift */,
 				A01A000001000210 /* FlashCardView.swift */,
 				A01A000001000211 /* HeroCardKit.swift */,
+				A01A000001000213 /* SwipeDeleteRow.swift */,
 				A01D000001000007 /* Finance */,
 			A01D000001000008 /* Life */,
 			);
@@ -504,6 +507,7 @@
 				A01B000001000209 /* HeroTrendChart.swift in Sources */,
 				A01B000001000210 /* FlashCardView.swift in Sources */,
 				A01B000001000211 /* HeroCardKit.swift in Sources */,
+				A01B000001000213 /* SwipeDeleteRow.swift in Sources */,
 				A01B000001000103 /* MultiPhotoGallery.swift in Sources */,
 				A01B000001000104 /* ResumeGiftSection.swift in Sources */,
 				A01B000001000105 /* OrganizationView.swift in Sources */,
@@ -547,7 +551,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 958;
+				CURRENT_PROJECT_VERSION = 959;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -572,7 +576,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.205;
+				MARKETING_VERSION = 25.206;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -588,7 +592,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 958;
+				CURRENT_PROJECT_VERSION = 959;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -613,7 +617,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.205;
+				MARKETING_VERSION = 25.206;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

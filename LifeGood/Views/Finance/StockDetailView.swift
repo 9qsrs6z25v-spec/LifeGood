@@ -93,6 +93,7 @@ struct StockDetailView: View {
 
     let stockId: UUID
     @State private var showEdit = false
+    @State private var shareItem: StockCardSharePayload?   // 分享圖片
     @State private var showDeleteConfirm = false
     @State private var showPremiumAlert = false
     @State private var addingTransaction = false
@@ -163,6 +164,10 @@ struct StockDetailView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
+                        // 分享（使用者指定）：閃卡＋技術線圖渲染成圖片開分享面板
+                        Button { exportCardImage() } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
                         Button {
                             if subscription.isPremium { showEdit = true }
                             else { showPremiumAlert = true }
@@ -181,6 +186,7 @@ struct StockDetailView: View {
             .sheet(isPresented: $showEdit) {
                 AddStockView(editing: stock)
             }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
             .sheet(isPresented: $addingTransaction) {
                 StockTransactionEditor(stockId: stockId, editing: nil)
             }
@@ -208,10 +214,13 @@ struct StockDetailView: View {
 
     // MARK: - 閃卡
 
-    private var flashCard: some View {
+    private var flashCard: some View { flashCardContent(animated: true) }
+
+    private func flashCardContent(animated: Bool) -> some View {
         // [v7] 改用 FlashCardView 標準模板（FlashCardView.swift）：殼層（背景/邊框/
         // 陰影/售出章/進場動畫）與版面骨架由模板統一，本頁只填內容；
         // 圓角/邊框/大字字級等樣式參數由「設定 > 進階設定 > 閃卡樣式」控制。
+        // animated: false 供 ImageRenderer 匯出分享圖（靜態渲染跳過進場動畫）。
         let market = splitWan(stock.marketValue)
         let pl = stock.profitLoss
         let plColor: Color = pl >= 0 ? .green : .red
@@ -228,7 +237,8 @@ struct StockDetailView: View {
                                     String(format: "%.2f", stock.isSold ? stock.soldPrice : stock.currentPrice)),
                 FlashCardInfoColumn("成本價", String(format: "%.2f", stock.purchasePrice))
             ],
-            isSold: stock.isSold
+            isSold: stock.isSold,
+            animated: animated
         ) {
             if !stock.symbol.isEmpty {
                 Text(stock.symbol)
@@ -271,6 +281,40 @@ struct StockDetailView: View {
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)
+    }
+
+    // MARK: - 分享圖片匯出
+
+    private static let shareStampFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
+
+    /// 把閃卡＋技術線圖渲染成 JPG 並開啟系統分享面板
+    /// （對齊 SubordinateDetailView.exportJPG 規格：寬 430、scale ≥3、JPG 0.95）
+    @MainActor
+    private func exportCardImage() {
+        let content = VStack(spacing: 16) {
+            flashCardContent(animated: false)
+            if !candlePoints.isEmpty {
+                CandleChartCard(candles: candlePoints)
+                    .padding(.horizontal, 24)
+            }
+        }
+        .frame(width: 430)
+        .padding(.vertical, 20)
+        .background(Color(.systemGroupedBackground))
+        .environmentObject(store)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage,
+              let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        let stockName = stock.name.isEmpty ? "股票" : stock.name
+        let name = "股票卡片_\(stockName)_\(Self.shareStampFmt.string(from: Date())).jpg"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do {
+            try data.write(to: url)
+            shareItem = StockCardSharePayload(items: [url])
+        } catch { }
     }
 
     // MARK: - 閃卡背景日線載入
@@ -1602,6 +1646,11 @@ struct StockDividendEditor: View {
                           bytes[12], bytes[13], bytes[14], bytes[15]))
     }
 }
+
+// MARK: - 分享圖片
+
+/// 分享面板項目的 Identifiable 包裝（供 .sheet(item:) 使用）
+struct StockCardSharePayload: Identifiable { let id = UUID(); let items: [Any] }
 
 // MARK: - 技術線圖（日 K 棒＋均線）
 

@@ -129,23 +129,26 @@ struct StockView: View {
                                         .padding(.horizontal, 4)
                                 }
                                 ForEach(Array(active.enumerated()), id: \.element.id) { idx, item in
-                                    stockCard(item)
-                                        .opacity(cardsAppeared ? 1 : 0)
-                                        .offset(y: cardsAppeared ? 0 : 18)
-                                        .animation(
-                                            .spring(response: 0.45, dampingFraction: 0.82)
-                                                .delay(0.04 * Double(idx)),
-                                            value: cardsAppeared
-                                        )
-                                        .onTapGesture { viewingItem = item }
-                                        .contextMenu {
-                                            Button { editingItem = item } label: {
-                                                Label("編輯", systemImage: "pencil")
+                                    // 左滑露出刪除鈕（SwipeDeleteRow 標準模板）
+                                    SwipeDeleteRow(onDelete: { deleteStock(item) }) {
+                                        stockCard(item)
+                                            .onTapGesture { viewingItem = item }
+                                            .contextMenu {
+                                                Button { editingItem = item } label: {
+                                                    Label("編輯", systemImage: "pencil")
+                                                }
+                                                Button(role: .destructive) { deleteStock(item) } label: {
+                                                    Label("刪除", systemImage: "trash")
+                                                }
                                             }
-                                            Button(role: .destructive) { deleteStock(item) } label: {
-                                                Label("刪除", systemImage: "trash")
-                                            }
-                                        }
+                                    }
+                                    .opacity(cardsAppeared ? 1 : 0)
+                                    .offset(y: cardsAppeared ? 0 : 18)
+                                    .animation(
+                                        .spring(response: 0.45, dampingFraction: 0.82)
+                                            .delay(0.04 * Double(idx)),
+                                        value: cardsAppeared
+                                    )
                                 }
 
                                 if !sold.isEmpty {
@@ -422,17 +425,19 @@ struct StockView: View {
             if soldExpanded {
                 LazyVStack(spacing: 12) {
                     ForEach(sold) { item in
-                        stockCard(item)
-                            .onTapGesture { viewingItem = item }
-                            .contextMenu {
-                                Button { editingItem = item } label: {
-                                    Label("編輯", systemImage: "pencil")
+                        SwipeDeleteRow(onDelete: { deleteStock(item) }) {
+                            stockCard(item)
+                                .onTapGesture { viewingItem = item }
+                                .contextMenu {
+                                    Button { editingItem = item } label: {
+                                        Label("編輯", systemImage: "pencil")
+                                    }
+                                    Button(role: .destructive) { deleteStock(item) } label: {
+                                        Label("刪除", systemImage: "trash")
+                                    }
                                 }
-                                Button(role: .destructive) { deleteStock(item) } label: {
-                                    Label("刪除", systemImage: "trash")
-                                }
-                            }
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
                 .padding(.top, 10)

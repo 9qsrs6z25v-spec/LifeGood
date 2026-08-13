@@ -186,6 +186,9 @@ struct FlashCardView<Subtitle: View, MiddleExtra: View, ExtraBackground: View>: 
     /// 底部三欄資訊
     let columns: [FlashCardInfoColumn]
     var isSold: Bool = false
+    /// 進場動畫開關：ImageRenderer 匯出圖片時傳 false——
+    /// 離屏渲染不觸發 onAppear，動畫初始態（透明）會讓輸出變成空白卡
+    var animated: Bool = true
     /// 名稱下方副標槽（股票代號膠囊／品牌／地址；不需要時傳 EmptyView）
     @ViewBuilder var subtitle: () -> Subtitle
     /// 大字下方中段槽（股票損益膠囊；不需要時傳 EmptyView）
@@ -312,9 +315,9 @@ struct FlashCardView<Subtitle: View, MiddleExtra: View, ExtraBackground: View>: 
                     .offset(x: -10, y: -14)
             }
         }
-        // 進場動畫（可由進階設定關閉）
-        .opacity(!appearAnimation || appeared ? 1 : 0)
-        .offset(y: !appearAnimation || appeared ? 0 : 14)
+        // 進場動畫（可由進階設定關閉；匯出圖的靜態渲染由 animated 參數關閉）
+        .opacity(!animated || !appearAnimation || appeared ? 1 : 0)
+        .offset(y: !animated || !appearAnimation || appeared ? 0 : 14)
         .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04), value: appeared)
         .onAppear { appeared = true }
         .onDisappear { appeared = false }
