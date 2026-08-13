@@ -481,28 +481,53 @@ struct InstNetBarCard: View {
 // MARK: - AI 持股健診（呼叫語音 AI 助手設定的供應商 API）
 
 /// 把使用者目前持股＋技術面（日線/均線）＋籌碼面（法人買賣超）＋大盤現況
-/// 整理成結構化資料，交給語音 AI 助手設定的 AI 供應商做分析：
-/// 大盤簡評、各持股觀點與買賣建議、整體配置與風險提醒。
+/// 整理成結構化資料，交給語音 AI 助手設定的 AI 供應商做分析。
+/// v25.204：要求 AI 回傳 JSON，App 端解析後用原生元件排版（大盤卡＋逐檔建議卡
+/// ＋配置卡＋風險卡）；JSON 解析失敗時退回純文字卡保底。
 /// 按「開始分析」才呼叫（花 API 費用），結果附「非投資建議」聲明。
 struct StockAIAnalysisView: View {
     @EnvironmentObject var store: FinanceStore
     @StateObject private var aiSettings = AISettingsStore.shared
     @Environment(\.dismiss) private var dismiss
 
+    // MARK: 結構化結果
+
+    fileprivate struct StockAdvice: Identifiable {
+        let id = UUID()
+        var symbol: String
+        var name: String
+        var action: String      // 買進加碼 / 續抱觀察 / 減碼賣出
+        var reason: String
+        var technical: String?
+        var chips: String?
+    }
+
+    fileprivate struct AIResult {
+        var marketSummary: String?
+        var marketSentiment: String?    // 偏多 / 中性 / 偏空
+        var stocks: [StockAdvice] = []
+        var portfolio: String?
+        var risks: [String] = []
+        var rawFallback: String?        // JSON 解析失敗時的純文字保底
+    }
+
     private enum Phase {
         case idle
         case loading
-        case done(String)
+        case done(AIResult)
         case failed(String)
     }
     @State private var phase: Phase = .idle
 
     private let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
+    // 台股慣例：偏多/買進紅、偏空/賣出綠
+    private let upColor = Color(red: 0.92, green: 0.26, blue: 0.21)
+    private let downColor = Color(red: 0.13, green: 0.65, blue: 0.37)
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 14) {
                     content
                 }
                 .padding()
@@ -542,8 +567,50 @@ struct StockAIAnalysisView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 60)
-            case .done(let text):
-                resultCard(text)
+            case .done(let result):
+                resultHeader
+                if let raw = result.rawFallback {
+                    // JSON 解析失敗保底：仍以純文字卡呈現
+                    sectionCard(title: "分析結果", icon: "sparkles", color: accent) {
+                        Text(raw)
+                            .font(.subheadline)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    if let summary = result.marketSummary {
+                        marketCard(summary: summary, sentiment: result.marketSentiment)
+                    }
+                    ForEach(result.stocks) { advice in
+                        stockAdviceCard(advice)
+                    }
+                    if let portfolio = result.portfolio, !portfolio.isEmpty {
+                        sectionCard(title: "整體配置觀點", icon: "chart.pie.fill", color: .indigo) {
+                            Text(portfolio)
+                                .font(.subheadline)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    if !result.risks.isEmpty {
+                        sectionCard(title: "風險提醒", icon: "exclamationmark.triangle.fill", color: .orange) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(Array(result.risks.enumerated()), id: \.offset) { _, risk in
+                                    HStack(alignment: .top, spacing: 6) {
+                                        Text("•").foregroundStyle(.orange)
+                                        Text(risk)
+                                    }
+                                    .font(.subheadline)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                Text("以上為 AI 生成之參考觀點，非投資建議。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 2)
             case .failed(let err):
                 infoCard(icon: "exclamationmark.triangle.fill", color: .orange,
                          title: "分析失敗", text: err)
@@ -559,6 +626,144 @@ struct StockAIAnalysisView: View {
             }
         }
     }
+
+    // MARK: 結果元件
+
+    private var resultHeader: some View {
+        HStack {
+            Label("分析結果", systemImage: "sparkles")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(accent)
+            Spacer()
+            Button {
+                Task { await analyze() }
+            } label: {
+                Label("重新分析", systemImage: "arrow.clockwise")
+                    .font(.caption)
+            }
+        }
+        .padding(.horizontal, 2)
+    }
+
+    /// 大盤卡：情緒膠囊（偏多紅／中性灰／偏空綠）＋簡評
+    private func marketCard(summary: String, sentiment: String?) -> some View {
+        sectionCard(title: "大盤現況", icon: "globe.asia.australia.fill", color: .blue) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let sentiment, !sentiment.isEmpty {
+                    let color = sentimentColor(sentiment)
+                    HStack(spacing: 4) {
+                        Image(systemName: sentimentIcon(sentiment))
+                            .font(.system(size: 10, weight: .bold))
+                        Text(sentiment)
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(color.opacity(0.12))
+                    .foregroundStyle(color)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(color.opacity(0.25), lineWidth: 0.6))
+                }
+                Text(summary)
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    /// 逐檔建議卡：名稱＋代號膠囊＋建議膠囊（買進紅/續抱藍/減碼綠）＋觀點列
+    private func stockAdviceCard(_ advice: StockAdvice) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(advice.name.isEmpty ? advice.symbol : advice.name)
+                    .font(.subheadline.weight(.bold))
+                if !advice.symbol.isEmpty {
+                    Text(advice.symbol)
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(accent.opacity(0.12))
+                        .foregroundStyle(accent)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                }
+                Spacer()
+                let color = actionColor(advice.action)
+                Text(advice.action)
+                    .font(.system(size: 12, weight: .bold))
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(color.opacity(0.12))
+                    .foregroundStyle(color)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(color.opacity(0.25), lineWidth: 0.6))
+            }
+            if !advice.reason.isEmpty {
+                adviceRow(label: "觀點", color: accent, text: advice.reason)
+            }
+            if let tech = advice.technical, !tech.isEmpty {
+                adviceRow(label: "技術面", color: .blue, text: tech)
+            }
+            if let chips = advice.chips, !chips.isEmpty {
+                adviceRow(label: "籌碼面", color: .purple, text: chips)
+            }
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+    }
+
+    private func adviceRow(label: String, color: Color, text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(label)
+                .font(.system(size: 10, weight: .bold))
+                .padding(.horizontal, 6).padding(.vertical, 2.5)
+                .background(color.opacity(0.10))
+                .foregroundStyle(color)
+                .clipShape(Capsule())
+                .fixedSize()
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(.primary.opacity(0.9))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func sectionCard<Content: View>(title: String, icon: String, color: Color,
+                                            @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(color)
+            content()
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+    }
+
+    private func actionColor(_ action: String) -> Color {
+        if action.contains("買") { return upColor }
+        if action.contains("減") || action.contains("賣") { return downColor }
+        return .blue
+    }
+
+    private func sentimentColor(_ s: String) -> Color {
+        if s.contains("多") { return upColor }
+        if s.contains("空") { return downColor }
+        return .secondary
+    }
+
+    private func sentimentIcon(_ s: String) -> String {
+        if s.contains("多") { return "arrow.up.right" }
+        if s.contains("空") { return "arrow.down.right" }
+        return "minus"
+    }
+
+    // MARK: 起始/提示元件
 
     private func idleCard(holdings: [Stock]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -582,32 +787,6 @@ struct StockAIAnalysisView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(accent)
-        }
-        .padding(16)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16)
-            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
-    }
-
-    private func resultCard(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("分析結果", systemImage: "sparkles")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(accent)
-                Spacer()
-                Button {
-                    Task { await analyze() }
-                } label: {
-                    Label("重新分析", systemImage: "arrow.clockwise")
-                        .font(.caption)
-                }
-            }
-            Text(text)
-                .font(.subheadline)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(16)
         .background(Color(.systemBackground))
@@ -649,18 +828,56 @@ struct StockAIAnalysisView: View {
         phase = .loading
         let prompt = await buildPrompt()
         let system = """
-        你是台股投資分析助手。使用者提供持股現況、技術面（均線）、籌碼面（三大法人買賣超）與近月大盤走勢。請用繁體中文、條列輸出：
-        1. 大盤現況簡評（2~3 句）
-        2. 各持股逐檔分析：現況觀點、技術面與籌碼面解讀、建議（買進加碼／續抱觀察／減碼賣出，三選一）與理由
-        3. 整體配置觀點與風險提醒
-        語氣務實直接、不吹捧；某檔資料不足就直說。結尾必附一句：「以上為 AI 生成之參考觀點，非投資建議。」
+        你是台股投資分析助手。使用者提供持股現況、技術面（均線）、籌碼面（三大法人買賣超）與近月大盤走勢。
+        只回傳 JSON（不要 markdown 圍欄、不要 JSON 以外的任何文字），格式如下：
+        {"market":{"summary":"大盤簡評 2~3 句","sentiment":"偏多|中性|偏空 三選一"},
+         "stocks":[{"symbol":"2330","name":"台積電","action":"買進加碼|續抱觀察|減碼賣出 三選一","reason":"建議理由 2~3 句","technical":"技術面解讀 1~2 句","chips":"籌碼面解讀 1~2 句"}],
+         "portfolio":"整體配置觀點 2~3 句",
+         "risks":["風險提醒（2~4 條）"]}
+        所有文字用繁體中文、語氣務實直接、不吹捧；某檔資料不足就在對應欄位直說。stocks 必須涵蓋使用者提供的每一檔持股。
         """
         do {
-            let out = try await AIExpenseParserService.shared.completeText(system: system, prompt: prompt)
-            phase = .done(out.trimmingCharacters(in: .whitespacesAndNewlines))
+            let out = try await AIExpenseParserService.shared.completeText(
+                system: system, prompt: prompt, maxTokens: 2000)
+            phase = .done(Self.parseResult(out))
         } catch {
             phase = .failed(error.localizedDescription)
         }
+    }
+
+    /// 解析 AI 回傳的 JSON；失敗時整段當純文字保底
+    fileprivate static func parseResult(_ raw: String) -> AIResult {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 容錯：去掉 markdown 圍欄、抓第一個 { 到最後一個 } 之間
+        if let a = s.firstIndex(of: "{"), let b = s.lastIndex(of: "}"), a < b {
+            s = String(s[a...b])
+        }
+        guard let data = s.data(using: .utf8),
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return AIResult(rawFallback: raw)
+        }
+        var result = AIResult()
+        if let market = json["market"] as? [String: Any] {
+            result.marketSummary = market["summary"] as? String
+            result.marketSentiment = market["sentiment"] as? String
+        }
+        for item in (json["stocks"] as? [[String: Any]]) ?? [] {
+            result.stocks.append(StockAdvice(
+                symbol: (item["symbol"] as? String ?? "").trimmingCharacters(in: .whitespaces),
+                name: (item["name"] as? String ?? "").trimmingCharacters(in: .whitespaces),
+                action: item["action"] as? String ?? "續抱觀察",
+                reason: item["reason"] as? String ?? "",
+                technical: item["technical"] as? String,
+                chips: item["chips"] as? String
+            ))
+        }
+        result.portfolio = json["portfolio"] as? String
+        result.risks = (json["risks"] as? [String]) ?? []
+        // 解析出來什麼都沒有：退回純文字
+        if result.stocks.isEmpty && (result.marketSummary ?? "").isEmpty {
+            return AIResult(rawFallback: raw)
+        }
+        return result
     }
 
     private func fmt2(_ v: Double) -> String { String(format: "%.2f", v) }
