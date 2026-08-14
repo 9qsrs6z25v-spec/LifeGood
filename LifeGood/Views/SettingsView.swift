@@ -2871,22 +2871,61 @@ struct FlashCardSettingsView: View {
     }
 }
 
-// MARK: 2.1 英雄卡樣式（收入／變動支出／固定支出／股票／儲蓄險看板共用殼層）
 
+// MARK: 2.1 英雄卡樣式（全域層；殼層／KPI／大字）
+
+/// 全域英雄卡樣式：表單由 HeroNum 目錄自動生成——
+/// 日後新增參數會自動出現在對應分區，不可能漏掉某一頁忘了加。
 struct HeroCardSettingsView: View {
-    @AppStorage("hero_card_corner_radius") private var cornerRadius: Double = 20
-    @AppStorage("hero_card_bokeh") private var bokehScale: Double = 1.0
-    @AppStorage("hero_card_shine") private var shineIntensity: Double = 0.18
-    @AppStorage("hero_card_shadow") private var shadowScale: Double = 1.0
-    @AppStorage("hero_card_kpi_value_size") private var kpiValueSize: Double = 12
+    @ObservedObject private var store = HeroStyleStore.shared
+    /// 按住預覽 = 暫時顯示全域版（取代原本的上下半高對照卡）
+    @State private var previewCard: HeroCard = .income
 
     var body: some View {
-        // 預覽卡固定在頂端不隨表單捲動
         VStack(spacing: 0) {
             pinnedPreview
             Form {
-                paramsSection
-                resetSection
+                ForEach(HeroNum.Bucket.allCases) { bucket in
+                    Section {
+                        ForEach(HeroNum.allCases.filter { $0.bucket == bucket }) { p in
+                            paramRow(p)
+                        }
+                    } header: {
+                        Text(bucket.rawValue)
+                    } footer: {
+                        if bucket == .kpi {
+                            Text("排法決定豎分隔線的基準高度（標籤在上 28pt／數值在上 32pt／圖示在上 36pt），下方倍率只做微調。")
+                        } else if bucket == .big {
+                            Text("次要數值字級自動 = 大字 × 0.62，不另開滑桿。")
+                        }
+                    }
+                }
+                Section {
+                    NavigationLink {
+                        HeroCardOverrideListView()
+                    } label: {
+                        HStack {
+                            Label("各卡覆寫", systemImage: "square.on.square.dashed")
+                            Spacer()
+                            let n = HeroCard.allCases.filter { $0 != .legacy && store.overrideCount($0) > 0 }.count
+                            Text("\(n) / \(HeroCard.allCases.count - 1)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+                Section {
+                    Button {
+                        store.resetGlobal()
+                    } label: {
+                        Label("恢復預設值", systemImage: "arrow.counterclockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .foregroundStyle(.blue)
+                } footer: {
+                    Text("只還原全域設定，不會清除任何卡片的覆寫。")
+                }
             }
         }
         .background(Color(.systemGroupedBackground))
@@ -2894,20 +2933,322 @@ struct HeroCardSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    // 置頂即時預覽：示範資料跑真的 heroCardShell + HeroKpiCell + 趨勢曲線
+    // MARK: 置頂預覽
+
     private var pinnedPreview: some View {
+        VStack(spacing: 8) {
+            Picker("預覽卡片", selection: $previewCard) {
+                Text("收入").tag(HeroCard.income)
+                Text("股票").tag(HeroCard.stock)
+                Text("固定支出").tag(HeroCard.fixedExpense)
+            }
+            .pickerStyle(.segmented)
+
+            HeroPreviewCard(card: previewCard)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+    }
+
+    // MARK: 參數列
+
+    @ViewBuilder
+    private func paramRow(_ p: HeroNum) -> some View {
+        let v = store.globalValue(p)
+        if p.isEnumLike {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(p.title).font(.subheadline)
+                    Spacer()
+                    if store.isGlobalCustomized(p) { customizedDot }
+                }
+                Picker(p.title, selection: Binding(
+                    get: { Int(v) },
+                    set: { store.set(p, Double($0)) }
+                )) {
+                    if p == .kpiLayout {
+                        ForEach(HeroKpiLayout.allCases) { Text($0.title).tag($0.rawValue) }
+                    } else {
+                        ForEach(HeroKpiChrome.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                }
+                .pickerStyle(.segmented)
+                overrideNote(p)
+            }
+            .padding(.vertical, 2)
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(p.title).font(.subheadline)
+                    Spacer()
+                    Text(p.display(v))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    if store.isGlobalCustomized(p) { customizedDot }
+                }
+                Slider(value: Binding(get: { v }, set: { store.set(p, $0) }),
+                       in: p.range, step: p.step)
+                    .tint(.blue)
+                overrideNote(p)
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private var customizedDot: some View {
+        Circle().fill(.blue).frame(width: 6, height: 6)
+    }
+
+    /// 有卡片覆寫此項時，給行動而不只給警告
+    @ViewBuilder
+    private func overrideNote(_ p: HeroNum) -> some View {
+        let cards = store.cardsOverriding(p)
+        if !cards.isEmpty {
+            HStack(spacing: 6) {
+                Text("\(cards.count) 張卡自訂此項")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                Button("一併套用") { store.clearOverridesEverywhere(p) }
+                    .font(.caption2.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+                Spacer()
+            }
+        }
+    }
+}
+
+// MARK: 2.2 各卡覆寫清單
+
+struct HeroCardOverrideListView: View {
+    @ObservedObject private var store = HeroStyleStore.shared
+    @State private var showOnlyCustomized = false
+
+    private var cards: [HeroCard] {
+        HeroCard.allCases.filter { $0 != .legacy }
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("篩選", selection: $showOnlyCustomized) {
+                    Text("全部（\(cards.count)）").tag(false)
+                    Text("已自訂（\(cards.filter { store.overrideCount($0) > 0 }.count)）").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
+            }
+            ForEach(HeroCard.Family.allCases) { family in
+                let list = cards.filter {
+                    $0.family == family && (!showOnlyCustomized || store.overrideCount($0) > 0)
+                }
+                if !list.isEmpty {
+                    Section(family.rawValue) {
+                        ForEach(list) { card in
+                            NavigationLink {
+                                HeroCardOverrideView(card: card)
+                            } label: {
+                                cardRow(card)
+                            }
+                        }
+                    }
+                }
+            }
+            Section {
+                Button(role: .destructive) {
+                    store.resetAllCards()
+                } label: {
+                    Label("全部恢復跟隨全域", systemImage: "arrow.uturn.backward")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .navigationTitle("各卡覆寫")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func cardRow(_ card: HeroCard) -> some View {
+        let n = store.overrideCount(card)
+        return HStack(spacing: 10) {
+            // 出廠漸層小色票：一眼認出是哪張卡
+            RoundedRectangle(cornerRadius: 4)
+                .fill(LinearGradient(colors: card.factoryGradient,
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 22, height: 22)
+            Text(card.title).font(.subheadline)
+            Spacer()
+            if n > 0 {
+                Circle().fill(.orange).frame(width: 6, height: 6)
+                Text("自訂 \(n) 項")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.orange)
+            } else {
+                Text("跟隨全域")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+// MARK: 2.3 單卡覆寫
+
+/// 單一參數化 struct，絕不為每張卡各寫一份（FamilySharingRow 型別深度爆棧的教訓）
+struct HeroCardOverrideView: View {
+    let card: HeroCard
+    @ObservedObject private var store = HeroStyleStore.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HeroPreviewCard(card: card)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+            Form {
+                Section {
+                    let n = store.overrideCount(card)
+                    Text(n > 0 ? "已自訂 \(n) 項 · 其餘跟隨全域" : "完全跟隨全域")
+                        .font(.caption)
+                        .foregroundStyle(n > 0 ? .orange : .secondary)
+                }
+                Section("顏色") {
+                    ForEach(HeroTint.allCases) { t in
+                        colorRow(t)
+                    }
+                }
+                Section("可覆寫參數") {
+                    ForEach(HeroNum.allCases.filter { $0.supportsPerCard }) { p in
+                        overridableRow(p)
+                    }
+                }
+                Section {
+                    Button(role: .destructive) {
+                        store.resetCard(card)
+                    } label: {
+                        Label("此卡恢復跟隨全域", systemImage: "arrow.uturn.backward")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(store.overrideCount(card) == 0)
+                }
+            }
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle(card.title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // 三態列：跟隨（灰、無控制項）→ 打開 Toggle 後才長出控制項（橙）
+    @ViewBuilder
+    private func overridableRow(_ p: HeroNum) -> some View {
+        let overridden = store.isOverridden(p, card)
+        let resolved = store.value(p, card)
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: Binding(
+                get: { overridden },
+                // 打開時 seed 成「當下的全域解析值」而非出廠值——一打開就跳版最勸退
+                set: { on in
+                    if on { store.set(p, store.globalValue(p), card: card) }
+                    else { store.clear(p, card: card) }
+                }
+            )) {
+                HStack {
+                    Text(p.title).font(.subheadline)
+                    Spacer()
+                    Text(overridden ? p.display(resolved) : "跟隨全域 · \(p.display(store.globalValue(p)))")
+                        .font(.caption)
+                        .foregroundStyle(overridden ? .orange : .secondary)
+                        .monospacedDigit()
+                }
+            }
+            .tint(.orange)
+
+            if overridden {
+                if p.isEnumLike {
+                    Picker(p.title, selection: Binding(
+                        get: { Int(resolved) },
+                        set: { store.set(p, Double($0), card: card) }
+                    )) {
+                        if p == .kpiLayout {
+                            ForEach(HeroKpiLayout.allCases) { Text($0.title).tag($0.rawValue) }
+                        } else {
+                            ForEach(HeroKpiChrome.allCases) { Text($0.title).tag($0.rawValue) }
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } else {
+                    Slider(value: Binding(
+                        get: { resolved },
+                        set: { store.set(p, $0, card: card) }
+                    ), in: p.range, step: p.step)
+                        .tint(.orange)
+                }
+                Button("回到全域") { store.clear(p, card: card) }
+                    .font(.caption2)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func colorRow(_ t: HeroTint) -> some View {
+        let overridden = store.isOverridden(t, card)
+        let s = store.style(for: card)
+        let current: Color = {
+            switch t {
+            case .gradA:  return s.gradient[0]
+            case .gradB:  return s.gradient[1]
+            case .bokeh:  return s.bokehTint
+            case .shadow: return s.shadowTint
+            }
+        }()
+        HStack {
+            ColorPicker(t.title, selection: Binding(
+                get: { current },
+                set: { store.setColor(t, $0, card: card) }
+            ), supportsOpacity: false)
+            if overridden {
+                Button {
+                    store.clear(t, card: card)
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+            }
+        }
+    }
+}
+
+// MARK: 預覽卡（跑真殼層＋真 KPI＋真趨勢曲線）
+
+/// 設定頁的即時預覽：用真的 heroCardShell / HeroKpiCell 跑，
+/// 示範字串刻意用「該卡可能出現的最長值」，才看得出何時開始被 minimumScaleFactor 縮掉。
+struct HeroPreviewCard: View {
+    let card: HeroCard
+    @ObservedObject private var store = HeroStyleStore.shared
+
+    var body: some View {
+        let s = store.style(for: card)
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("示範看板")
+                    Text(card.title)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
-                    Text("NT$12.8萬")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                    Text("NT$1,284.6億")
+                        .font(.system(size: s.bigValueSize, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                 }
                 Spacer()
-                Text("6 筆")
+                Text("26 筆")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 11).padding(.vertical, 5)
                     .background(.white.opacity(0.22))
@@ -2915,91 +3256,37 @@ struct HeroCardSettingsView: View {
                     .foregroundStyle(.white)
             }
             HStack(spacing: 0) {
-                HeroKpiCell(label: "年度預估", value: "NT$154萬")
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                HeroKpiCell(label: "日均", value: "NT$4,265")
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                HeroKpiCell(label: "月均", value: "NT$12.8萬")
+                HeroKpiCell(label: "年度預估", value: "NT$154萬", icon: "calendar")
+                HeroKpiDivider()
+                HeroKpiCell(label: "日均", value: "NT$4,265", icon: "sun.max.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "月均", value: "NT$12.8萬", icon: "chart.bar.fill")
             }
-            .padding(.vertical, 10)
-            .background(.white.opacity(0.08))
+            .padding(.vertical, s.kpiChrome == .bare ? 4 : 10)
+            .background(s.kpiChrome == .bare ? Color.clear : Color.white.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                if s.kpiChrome == .plateStroked {
+                    RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.18), lineWidth: 0.75)
+                }
+            }
             .padding(.top, 12)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .heroCardShell(colors: [Color(red: 0.16, green: 0.74, blue: 0.50),
-                                Color(red: 0.07, green: 0.50, blue: 0.38)]) {
-            HeroTrendBackground(points: heroDemoPoints, stepBack: 2_592_000)
+        .heroCardShell(card: card) {
+            HeroTrendBackground(points: Self.demoPoints, stepBack: 2_592_000)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
     }
 
-    /// 示範序列（12 個月、形狀固定），只給預覽卡用
-    private var heroDemoPoints: [HeroTrendPoint] {
+    /// 示範序列（12 個月、形狀固定）
+    private static var demoPoints: [HeroTrendPoint] {
         let cal = Calendar.current
         let base = cal.date(byAdding: .month, value: -11, to: Date()) ?? Date()
         let vals: [Double] = [52, 61, 55, 68, 74, 70, 82, 78, 88, 95, 102, 128]
         return vals.enumerated().map { i, v in
             HeroTrendPoint(date: cal.date(byAdding: .month, value: i, to: base) ?? base,
                            value: v * 1_000)
-        }
-    }
-
-    private var paramsSection: some View {
-        Section {
-            advancedSliderRow(
-                title: "卡片圓角",
-                display: String(format: "%.0f pt", cornerRadius),
-                value: $cornerRadius,
-                range: 12...28, step: 1
-            )
-            advancedSliderRow(
-                title: "散景亮度",
-                display: String(format: "%.1f 倍", bokehScale),
-                value: $bokehScale,
-                range: 0.0...2.0, step: 0.1
-            )
-            advancedSliderRow(
-                title: "玻璃光澤",
-                display: "\(Int((shineIntensity * 100).rounded()))%",
-                value: $shineIntensity,
-                range: 0.0...0.40, step: 0.02
-            )
-            advancedSliderRow(
-                title: "陰影強度",
-                display: String(format: "%.1f 倍", shadowScale),
-                value: $shadowScale,
-                range: 0.0...2.0, step: 0.1
-            )
-            advancedSliderRow(
-                title: "KPI 數值字級",
-                display: String(format: "%.0f pt", kpiValueSize),
-                value: $kpiValueSize,
-                range: 10...16, step: 1
-            )
-        } header: {
-            Text("看板參數")
-        } footer: {
-            Text("套用於收入、變動支出、固定支出、股票、儲蓄險五張看板的殼層（背景散景、光澤、圓角、陰影）與 KPI 橫列，調整立即生效。")
-        }
-    }
-
-    private var resetSection: some View {
-        Section {
-            Button {
-                cornerRadius = 20
-                bokehScale = 1.0
-                shineIntensity = 0.18
-                shadowScale = 1.0
-                kpiValueSize = 12
-            } label: {
-                Label("恢復預設值", systemImage: "arrow.counterclockwise")
-                    .frame(maxWidth: .infinity)
-            }
-            .foregroundStyle(.blue)
         }
     }
 }

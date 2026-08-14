@@ -369,7 +369,7 @@ struct SavingsInsuranceView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .heroCardShell(colors: [heroAccent, heroAccentDark]) {
+        .heroCardShell(card: .savings) {
             // 保單估值趨勢曲線背景（HeroTrendBackground 標準模板，逐月複利回算）
             HeroTrendBackground(points: heroTrendSeries, stepBack: 2_592_000)
         }

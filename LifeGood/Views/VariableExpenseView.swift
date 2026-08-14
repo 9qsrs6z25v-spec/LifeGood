@@ -380,8 +380,7 @@ struct VariableExpenseView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .heroCardShell(colors: [Color(red: 1.00, green: 0.62, blue: 0.22),
-                                Color(red: 0.86, green: 0.36, blue: 0.06)]) {
+        .heroCardShell(card: .variableExpense) {
             // 單月變動支出趨勢曲線背景（HeroTrendBackground 標準模板）
             HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
         }

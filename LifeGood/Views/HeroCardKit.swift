@@ -1,74 +1,91 @@
 import SwiftUI
 
-// MARK: - 英雄卡標準套件（殼層 + KPI 小格）
-// 從收入／變動支出／固定支出／股票／儲蓄險五張英雄卡收斂而成：
+// MARK: - 英雄卡標準套件（殼層 + KPI 小格 + 超支提示）
+// 版型元件住這裡；參數目錄與三層解析器住 HeroStyleKit.swift。
 //   1. heroCardShell：漸層底＋三顆散景圓＋玻璃光澤＋自訂背景層（趨勢曲線）＋
-//      圓角裁切＋主色光暈陰影——歷史上「三圓規格／glass shine 對齊」都是逐檔手動同步，
-//      收斂後改一處全部生效。
+//      圓角裁切＋主色光暈陰影——歷史上「三圓規格／glass shine 對齊」都是逐檔手動同步。
 //   2. HeroKpiCell：英雄卡 KPI 橫列小格（原本 7+ 個檔案各刻一份完全相同的實作）。
-// 可調參數（設定 > 進階設定 > 英雄卡樣式）：圓角、散景亮度、玻璃光澤、陰影強度、
-// KPI 數值字級——@AppStorage 即時生效。
+//   3. HeroOverspendHint：卡片下方的超支 emoji 小字提示（門檻的單一真相來源）。
+// 樣式全部經 HeroStyleStore 三層解析（單卡覆寫 → 全域 → 出廠），
+// 由「設定 > 進階設定 > 卡片設定 > 英雄卡樣式」調整、即時生效。
 
 // MARK: 殼層
 
 private struct HeroCardShellModifier<ExtraBackground: View>: ViewModifier {
-    let colors: [Color]
-    let shadowTint: Color?
+    let card: HeroCard
+    /// 呼叫端硬指定的顏色（遷移期舊多載用）；nil 代表吃 card 的出廠／覆寫色
+    let explicitColors: [Color]?
+    let explicitShadowTint: Color?
     @ViewBuilder let extraBackground: () -> ExtraBackground
 
-    @AppStorage("hero_card_corner_radius") private var cornerRadius: Double = 20
-    @AppStorage("hero_card_bokeh") private var bokehScale: Double = 1.0
-    @AppStorage("hero_card_shine") private var shineIntensity: Double = 0.18
-    @AppStorage("hero_card_shadow") private var shadowScale: Double = 1.0
+    @ObservedObject private var store = HeroStyleStore.shared
 
     func body(content: Content) -> some View {
-        content
+        let s = store.style(for: card)
+        let colors = explicitColors ?? s.gradient
+        let shadowTint = explicitShadowTint ?? (explicitColors?.last ?? s.shadowTint)
+        return content
             .background(
                 ZStack {
                     LinearGradient(colors: colors,
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
                     extraBackground()
-                    // 三顆散景裝飾圓（統一規格；亮度倍率可調）
+                    // 三顆散景裝飾圓（統一規格；亮度與尺寸倍率可調）
                     Circle()
-                        .fill(.white.opacity(0.12 * bokehScale))
-                        .frame(width: 130, height: 130)
+                        .fill(s.bokehTint.opacity(0.12 * s.bokehScale))
+                        .frame(width: 130 * s.bokehSize, height: 130 * s.bokehSize)
                         .offset(x: 90, y: -55)
                         .blur(radius: 14)
                     Circle()
-                        .fill(.white.opacity(0.07 * bokehScale))
-                        .frame(width: 80, height: 80)
+                        .fill(s.bokehTint.opacity(0.07 * s.bokehScale))
+                        .frame(width: 80 * s.bokehSize, height: 80 * s.bokehSize)
                         .offset(x: -70, y: 50)
                         .blur(radius: 10)
                     Circle()
-                        .fill(.white.opacity(0.06 * bokehScale))
-                        .frame(width: 55, height: 55)
+                        .fill(s.bokehTint.opacity(0.06 * s.bokehScale))
+                        .frame(width: 55 * s.bokehSize, height: 55 * s.bokehSize)
                         .offset(x: 30, y: 28)
                         .blur(radius: 8)
                     // 頂部玻璃光澤（強度可調）
-                    LinearGradient(colors: [.white.opacity(shineIntensity), .clear],
+                    LinearGradient(colors: [.white.opacity(s.shine), .clear],
                                    startPoint: .top, endPoint: .center)
                 }
                 .allowsHitTesting(false)
             )
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-            .shadow(color: (shadowTint ?? colors.last ?? .black).opacity(0.42 * shadowScale),
-                    radius: 16, x: 0, y: 8)
+            .clipShape(RoundedRectangle(cornerRadius: s.corner))
+            .shadow(color: shadowTint.opacity(0.42 * s.shadowScale),
+                    radius: s.shadowRadius, x: 0, y: s.shadowRadius / 2)
+            .environment(\.heroCard, card)
     }
 }
 
 extension View {
-    /// 英雄卡殼層：漸層底＋散景圓＋玻璃光澤＋extraBackground（趨勢曲線等）＋圓角＋陰影。
-    /// shadowTint 省略時用漸層最後一色（深色端）。
-    func heroCardShell<B: View>(colors: [Color], shadowTint: Color? = nil,
+    /// 英雄卡殼層（標準用法）：顏色由卡片身分決定，可在進階設定逐卡覆寫。
+    func heroCardShell<B: View>(card: HeroCard,
                                 @ViewBuilder extraBackground: @escaping () -> B) -> some View {
-        modifier(HeroCardShellModifier(colors: colors, shadowTint: shadowTint,
-                                       extraBackground: extraBackground))
+        modifier(HeroCardShellModifier(card: card, explicitColors: nil,
+                                       explicitShadowTint: nil, extraBackground: extraBackground))
     }
 
     /// 無額外背景層的簡便版
+    func heroCardShell(card: HeroCard) -> some View {
+        modifier(HeroCardShellModifier(card: card, explicitColors: nil,
+                                       explicitShadowTint: nil, extraBackground: { EmptyView() }))
+    }
+
+    /// 遷移期舊多載：顏色仍由呼叫端硬指定，身分為 .legacy（只吃全域層）。
+    /// 行為與遷移前完全一致；剩餘呼叫點清空後即可刪除。
+    @available(*, deprecated, message: "改用 heroCardShell(card:)，顏色搬進 HeroCard.factoryGradient")
+    func heroCardShell<B: View>(colors: [Color], shadowTint: Color? = nil,
+                                @ViewBuilder extraBackground: @escaping () -> B) -> some View {
+        modifier(HeroCardShellModifier(card: .legacy, explicitColors: colors,
+                                       explicitShadowTint: shadowTint, extraBackground: extraBackground))
+    }
+
+    @available(*, deprecated, message: "改用 heroCardShell(card:)")
     func heroCardShell(colors: [Color], shadowTint: Color? = nil) -> some View {
-        modifier(HeroCardShellModifier(colors: colors, shadowTint: shadowTint,
-                                       extraBackground: { EmptyView() }))
+        modifier(HeroCardShellModifier(card: .legacy, explicitColors: colors,
+                                       explicitShadowTint: shadowTint, extraBackground: { EmptyView() }))
     }
 }
 
@@ -157,26 +174,75 @@ struct HeroOverspendHint: View {
 
 // MARK: KPI 小格
 
-/// 英雄卡 KPI 橫列小格（白字系；標籤 9pt＋數值粗體圓體，數值字級可由進階設定調整）
+/// 英雄卡 KPI 橫列小格。排法／字級／圖示圓由 HeroStyleStore 三層解析
+/// （單卡覆寫 → 全域 → 出廠），卡片身分自 .heroCardShell 經環境傳下來。
 struct HeroKpiCell: View {
     let label: String
     let value: String
+    /// 「圖示在上」排法用；未提供時該排法退回「數值在上」
+    var icon: String? = nil
 
-    @AppStorage("hero_card_kpi_value_size") private var valueSize: Double = 12
+    @Environment(\.heroCard) private var card
+    @ObservedObject private var store = HeroStyleStore.shared
 
     var body: some View {
+        let s = store.style(for: card)
         VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.system(size: valueSize, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .contentTransition(.numericText())
+            switch s.kpiLayout {
+            case .labelTop:
+                labelText(s)
+                valueText(s)
+            case .valueTop:
+                valueText(s)
+                labelText(s)
+            case .iconTop:
+                if let icon {
+                    ZStack {
+                        Circle()
+                            .fill(.white.opacity(0.20))
+                            .frame(width: s.kpiIconSize, height: s.kpiIconSize)
+                        Image(systemName: icon)
+                            .font(.system(size: s.kpiIconSize * 0.45, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.95))
+                    }
+                    valueText(s)
+                    labelText(s)
+                } else {
+                    valueText(s)
+                    labelText(s)
+                }
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)
+    }
+
+    private func labelText(_ s: HeroStyle) -> some View {
+        Text(label)
+            .font(.system(size: s.kpiLabelSize, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.62))
+    }
+
+    private func valueText(_ s: HeroStyle) -> some View {
+        Text(value)
+            .font(.system(size: s.kpiValueSize, weight: .bold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.92))
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .contentTransition(.numericText())
+    }
+}
+
+// MARK: KPI 豎分隔線（高度隨排法推導 × 全域倍率）
+
+/// 收斂 28／32／36／48 四種寫死高度
+struct HeroKpiDivider: View {
+    @Environment(\.heroCard) private var card
+    @ObservedObject private var store = HeroStyleStore.shared
+
+    var body: some View {
+        Rectangle()
+            .fill(.white.opacity(0.25))
+            .frame(width: 0.5, height: store.style(for: card).kpiDividerHeight)
     }
 }

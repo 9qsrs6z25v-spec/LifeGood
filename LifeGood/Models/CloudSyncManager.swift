@@ -357,6 +357,9 @@ final class CloudSyncManager: ObservableObject {
             NotificationCenter.default.post(name: .cloudSyncDidPullChanges, object: nil)
         }
 
+        // 「以雲端覆蓋本機」時先清空前綴託管的命名空間：unpack() 在雲端沒有 blob 時
+        // 會直接 return，本機的樣式覆寫會原封不動留下、再被下方 pushAllKV 推回雲端。
+        if choice == .overwriteLocal { HeroStyleStore.shared.resetNamespace() }
         // 覆蓋本機／合併後：進階設定 blob 也可能剛被雲端值覆蓋，解包回散裝鍵
         AppPreferenceSync.unpack()
 
@@ -606,6 +609,13 @@ enum AppPreferenceSync {
         "LifeGood.ai.activeProvider"
     ]
 
+    /// 前綴託管的命名空間：整片掃描搬運，不逐把列舉。
+    /// 英雄卡樣式（hs.）的鍵數是「24 卡 × 8 項」量級，硬列舉必爆炸。
+    static let managedPrefixes = ["hs."]
+    /// blob 內宣告本次推送涵蓋哪些前綴——舊版 App 推的 blob 沒有這把，
+    /// 解包端據此判斷「可不可以刪本機多出來的鍵」（墓碑語意）
+    private static let markerKey = "__managedPrefixes"
+
     /// 推送前呼叫：把散裝值打包成 blob。內容沒變就不重寫，
     /// 避免每輪同步都讓 blob 變髒、觸發無謂推送。
     static func pack() {
@@ -616,27 +626,46 @@ enum AppPreferenceSync {
                 dict[k] = v
             }
         }
-        guard !dict.isEmpty,
-              let data = try? JSONSerialization.data(withJSONObject: dict,
+        // 前綴託管的鍵整片收進來（dictionaryRepresentation 全程只呼叫一次）
+        let all = d.dictionaryRepresentation()
+        for (k, v) in all where managedPrefixes.contains(where: k.hasPrefix) {
+            if v is NSNumber || v is String { dict[k] = v }
+        }
+        dict[markerKey] = managedPrefixes
+        guard let data = try? JSONSerialization.data(withJSONObject: dict,
                                                      options: [.sortedKeys]) else { return }
         if d.data(forKey: blobKey) != data {
             d.set(data, forKey: blobKey)
         }
     }
 
-    /// 拉取到 blob 變更後呼叫：解包回散裝鍵（值相同不重寫，@AppStorage 畫面即時生效）
+    /// 拉取到 blob 變更後呼叫：解包回散裝鍵（值相同不重寫，畫面即時生效）
     static func unpack() {
         let d = UserDefaults.standard
         guard let data = d.data(forKey: blobKey),
               let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            HeroStyleStore.shared.invalidate()
             return
         }
-        for (k, v) in dict where scalarKeys.contains(k) {
+        // 墓碑語意：對方有宣告同一前綴，才刪本機多出來的鍵——
+        // 「取消覆寫」是刪鍵，沒有這段就同步不過去。舊版 App 的 blob 沒有 marker，
+        // 只做加法、不會把新版的覆寫整片清光。
+        let peer = (dict[markerKey] as? [String]) ?? []
+        let all = d.dictionaryRepresentation()
+        for pre in managedPrefixes where peer.contains(pre) {
+            let incoming = Set(dict.keys.filter { $0.hasPrefix(pre) })
+            for k in all.keys where k.hasPrefix(pre) && !incoming.contains(k) {
+                d.removeObject(forKey: k)
+            }
+        }
+        for (k, v) in dict where k != markerKey
+            && (scalarKeys.contains(k) || managedPrefixes.contains(where: k.hasPrefix)) {
             if let old = d.object(forKey: k) as? NSNumber, let new = v as? NSNumber,
                old == new { continue }
             if let old = d.object(forKey: k) as? String, let new = v as? String,
                old == new { continue }
             d.set(v, forKey: k)
         }
+        HeroStyleStore.shared.invalidate()
     }
 }

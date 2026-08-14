@@ -512,8 +512,7 @@ struct IncomeView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
-        .heroCardShell(colors: [Color(red: 0.16, green: 0.74, blue: 0.50),
-                                Color(red: 0.07, green: 0.50, blue: 0.38)]) {
+        .heroCardShell(card: .income) {
             // 單月收入趨勢曲線背景（HeroTrendBackground 標準模板）
             HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
         }

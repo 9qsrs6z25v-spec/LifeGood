@@ -335,8 +335,7 @@ struct FixedExpenseView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .heroCardShell(colors: [Color(red: 0.22, green: 0.53, blue: 0.98),
-                                Color(red: 0.10, green: 0.35, blue: 0.82)]) {
+        .heroCardShell(card: .fixedExpense) {
             // 月固定支出趨勢曲線背景（HeroTrendBackground 標準模板）
             HeroTrendBackground(points: heroSeries, stepBack: 2_592_000)
         }
