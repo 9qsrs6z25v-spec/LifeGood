@@ -118,9 +118,38 @@ import SwiftUI
 //     陰影 green.25/12/6 → 出廠 .42/16/8。Phase 0 表裡「eInvoice 散景兩圓」
 //     是筆誤，實際兩張都是三圓。
 //
-// 至此 26 張卡全部走同一套殼層，遷移期的 heroCardShell(colors:) 舊多載
-// 與 explicitColors 欄位已刪除，.legacy 只剩四張未進列舉的卡在用
-//（AddVehicle 預覽卡、就醫地圖、子女履歷、部屬明細）。
+// 至此原列舉的 26 張卡全部走同一套殼層，遷移期的 heroCardShell(colors:) 舊多載
+// 與 explicitColors 欄位已刪除。
+//
+// ─────────────────────────────────────────────────────────────────────────
+// 【Phase 5a】補進 8 張漏網看板（v25.215）：列舉 26 → 34 張
+// ─────────────────────────────────────────────────────────────────────────
+// 這 8 張本來就是「頁面上方看板」，只是先前不在列舉裡，所以吃不到單卡覆寫：
+//   resume 人生履歷 · familyMembersResume 家庭成員履歷 · childrenResume 子女履歷
+//   childDetail 子女明細 · subordinateDetail 部屬明細 · taxOverview 稅務總覽
+//   medicalMap 就醫地圖 · calendarEvent 行事曆事件卡
+//
+// 兩張走 runtimeColors（同一張卡依狀態換色，機制與 settings 相同）：
+//   · childDetail    兒子藍／女兒粉
+//   · calendarEvent  會議靛藍／個人青／里程碑橘／系統行事曆藍／家人生日粉／家人粉
+//     出廠層各填其中一種，讓設定頁預覽與色票有東西可畫。
+//
+// 已知收斂：
+//   · resume／familyMembersResume 圓角 continuous → circular；散景圓
+//     110/80/55 → 130/80/55；陰影兩層 → 一層；大字 42 → 全域 32；
+//     白色描邊 overlay 保留（那是刻意的邊框，不是殼層該吸收的東西）。
+//   · childDetail 白色描邊 overlay 同樣保留。
+//   · medicalMap 只有一顆散景圓 → 補成三顆；光澤 0.16 → 0.18。
+//   · calendarEvent 兩圓 110/70 → 三圓 130/80/55；陰影 .35/14/7 → .42/16/8。
+//   · taxOverview 散景圓 140/85/50 → 130/80/55。
+//   · subordinateDetail／taxOverview 的自刻 KPI 格收進 HeroKpiCell。
+//     taxStatCell 的 color 原本畫在圖示圓上，改走 valueColor（與
+//     lifeRealEstate／talentMatrix 同處理）。
+//
+// ⚠️ statBadge 的 color 參數是**死參數**——原本 10 個呼叫點各自傳了語意色，
+//    但實作裡數值一律 .white，那個顏色從來沒被畫出來。遷移時刻意**不**把它
+//    接到 valueColor：那會是「新增原本沒有的顏色」，是改動不是收斂。
+//    真要上色是獨立的設計決定，不該混在重構裡偷渡。
 //
 // ─────────────────────────────────────────────────────────────────────────
 // 【Phase 3b 遷移狀態】KPI 橫列與主數值大字（v25.211）
@@ -167,6 +196,8 @@ enum HeroCard: String, CaseIterable, Identifiable {
     case talentMatrix, calendar, businessCardList, businessCardDetail
     case gradeTitle, spouseResume
     case travelMapStats, travelMapDetail, foodMapStats, foodMapDetail
+    case resume, familyMembersResume, childrenResume, childDetail
+    case subordinateDetail, taxOverview, medicalMap, calendarEvent
     // 系統
     case settings, eInvoice
 
@@ -224,6 +255,14 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .travelMapDetail:     return "旅遊地圖 › 詳情卡"
         case .foodMapStats:        return "美食地圖 › 統計卡"
         case .foodMapDetail:       return "美食地圖 › 詳情卡"
+        case .resume:              return "人生履歷"
+        case .familyMembersResume: return "家庭成員履歷"
+        case .childrenResume:      return "子女履歷"
+        case .childDetail:         return "子女明細"
+        case .subordinateDetail:   return "部屬明細"
+        case .taxOverview:         return "稅務總覽"
+        case .medicalMap:          return "就醫地圖"
+        case .calendarEvent:       return "行事曆事件"
         case .settings:            return "設定"
         case .eInvoice:            return "電子發票"
         }
@@ -241,6 +280,16 @@ enum HeroCard: String, CaseIterable, Identifiable {
         Color(red: 0.22, green: 0.14, blue: 0.60)
     ]
 
+    /// 子女明細卡依性別換色（兒子藍／女兒粉），走 runtimeColors。
+    static let childSonGradient: [Color] = [
+        Color(red: 0.25, green: 0.55, blue: 0.98),
+        Color(red: 0.14, green: 0.36, blue: 0.82)
+    ]
+    static let childDaughterGradient: [Color] = [
+        Color(red: 0.96, green: 0.38, blue: 0.62),
+        Color(red: 0.78, green: 0.20, blue: 0.50)
+    ]
+
     /// 出廠漸層（起點色、終點色；名片明細是三段）。
     /// 這是本次重構的第二個大收斂：41 處硬寫在呼叫端的顏色收進單一登錄表——
     /// 即使永遠不做覆寫也該做，因為設定頁的即時預覽要跑「真的那張卡的顏色」。
@@ -251,6 +300,31 @@ enum HeroCard: String, CaseIterable, Identifiable {
                     Color(red: 0.07, green: 0.50, blue: 0.38)]
         case .settings:
             return Self.settingsPremiumGradient
+        case .resume:
+            // ResumeView.resumeHeroCard：橘 → 琥珀
+            return [.orange, Color(red: 0.92, green: 0.62, blue: 0.12)]
+        case .familyMembersResume:
+            return [.pink, Color(red: 0.90, green: 0.22, blue: 0.55)]
+        case .childrenResume:
+            // 兒子藍 → 女兒粉紫（ChildrenResumeView heroBlue / heroPink）
+            return [Color(red: 0.30, green: 0.52, blue: 0.94),
+                    Color(red: 0.88, green: 0.28, blue: 0.55)]
+        case .childDetail:
+            // 出廠填兒子藍；實際顯示色由 runtimeColors 依性別供應
+            return Self.childSonGradient
+        case .subordinateDetail:
+            return [Color(red: 0.22, green: 0.53, blue: 0.98),
+                    Color(red: 0.10, green: 0.35, blue: 0.82)]
+        case .taxOverview:
+            return [Color(red: 0.90, green: 0.28, blue: 0.22),
+                    Color(red: 0.70, green: 0.15, blue: 0.12)]
+        case .medicalMap:
+            return [Color(red: 0.10, green: 0.62, blue: 0.58),
+                    Color(red: 0.04, green: 0.44, blue: 0.52)]
+        case .calendarEvent:
+            // 出廠填「會議」的靛藍；實際顯示色由 runtimeColors 依事件類型供應
+            return [Color(red: 0.36, green: 0.32, blue: 0.86),
+                    Color(red: 0.20, green: 0.42, blue: 0.90)]
         case .variableExpense, .stock:
             return [Color(red: 1.00, green: 0.62, blue: 0.22),
                     Color(red: 0.86, green: 0.36, blue: 0.06)]

@@ -210,154 +210,87 @@ struct FamilyMembersResumeView: View {
 
     /// 補齊全 App 主要列表頁均值，列出直系 / 兄弟姐妹 / 其他親屬人數 KPI。
     private var familyHeroCard: some View {
-        let accent = Color.pink
-        let accentDark = Color(red: 0.90, green: 0.22, blue: 0.55)
         let total = allMembers.count
 
-        return ZStack(alignment: .topLeading) {
-            // 漸層背景（粉紅→洋紅，象徵家庭溫暖主題）
-            LinearGradient(
-                colors: [accent, accentDark],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            // 散景裝飾圓 1（右上主光暈）
-            Circle()
-                .fill(.white.opacity(0.13))
-                .frame(width: 110, height: 110)
-                .offset(x: 80, y: -35)
-                .blur(radius: 16)
-
-            // 散景裝飾圓 2（左下次光暈）
-            Circle()
-                .fill(.white.opacity(0.08))
-                .frame(width: 80, height: 80)
-                .offset(x: -70, y: 45)
-                .blur(radius: 12)
-
-            // 散景裝飾圓 3（中右微光，對齊全 App 三圓規格）
-            Circle()
-                .fill(.white.opacity(0.06))
-                .frame(width: 55, height: 55)
-                .offset(x: 35, y: 20)
-                .blur(radius: 8)
-
-            // 頂部玻璃光澤（對齊全 App 英雄卡 glass shine 統一規格）
-            LinearGradient(
-                colors: [.white.opacity(0.18), .clear],
-                startPoint: .top,
-                endPoint: .center
-            )
-
-            // 卡片內容
-            VStack(alignment: .leading, spacing: 0) {
-                // 頂部列：圖示圓 + 小標 + 人數計數膠囊
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(.white.opacity(0.22))
-                            .frame(width: 36, height: 36)
-                            .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.75))
-                        Image(systemName: "figure.2.and.child.holdinghands")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    Text("家人履歷")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.88))
-                    Spacer()
-                    HStack(spacing: 3) {
-                        Image(systemName: "person.2.fill")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text("\(total) 位")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .foregroundStyle(.white.opacity(0.90))
-                    .padding(.horizontal, 9).padding(.vertical, 3.5)
-                    .background(.white.opacity(0.22))
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-
-                // 大字：總人數
-                HStack(alignment: .lastTextBaseline, spacing: 6) {
-                    Text("\(total)")
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
+        return VStack(alignment: .leading, spacing: 0) {
+            // 頂部列：圖示圓 + 小標 + 人數計數膠囊
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.22))
+                        .frame(width: 36, height: 36)
+                        .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.75))
+                    Image(systemName: "figure.2.and.child.holdinghands")
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
-                        .minimumScaleFactor(0.65)
-                        .lineLimit(1)
-                        .contentTransition(.numericText())
-                    Text("位家人")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.75))
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 6)
-                .padding(.bottom, 10)
-
-                // 分隔線
-                Rectangle()
-                    .fill(.white.opacity(0.20))
-                    .frame(height: 0.5)
-                    .padding(.horizontal, 16)
-
-                // KPI 橫列（直系親屬 / 兄弟姐妹 / 其他親屬）
-                HStack(spacing: 0) {
-                    heroKpiCell(
-                        value: directRelatives.isEmpty ? "—" : "\(directRelatives.count) 位",
-                        label: "直系親屬",
-                        icon: "person.2.fill"
-                    )
-                    Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5)
-                    heroKpiCell(
-                        value: siblings.isEmpty ? "—" : "\(siblings.count) 位",
-                        label: "兄弟姐妹",
-                        icon: "person.3.fill"
-                    )
-                    Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5)
-                    heroKpiCell(
-                        value: others.isEmpty ? "—" : "\(others.count) 位",
-                        label: "其他親屬",
-                        icon: "person.circle.fill"
-                    )
+                Text("家人履歷")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+                Spacer()
+                HStack(spacing: 3) {
+                    Image(systemName: "person.2.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("\(total) 位")
+                        .font(.caption2.weight(.semibold))
                 }
-                .background(.white.opacity(0.10))
-                .padding(.top, 10)
-                .padding(.bottom, 14)
-                .padding(.horizontal, 8)
+                .foregroundStyle(.white.opacity(0.90))
+                .padding(.horizontal, 9).padding(.vertical, 3.5)
+                .background(.white.opacity(0.22))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.75))
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+
+            // 大字：總人數
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
+                Text("\(total)")
+                    .heroBigValueFont()
+                    .foregroundStyle(.white)
+                    .minimumScaleFactor(0.65)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+                Text("位家人")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 10)
+
+            // 分隔線
+            Rectangle()
+                .fill(.white.opacity(0.20))
+                .frame(height: 0.5)
+                .padding(.horizontal, 16)
+
+            // KPI 橫列（直系親屬 / 兄弟姐妹 / 其他親屬）
+            HStack(spacing: 0) {
+                HeroKpiCell(label: "直系親屬",
+                            value: directRelatives.isEmpty ? "—" : "\(directRelatives.count) 位",
+                            icon: "person.2.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "兄弟姐妹",
+                            value: siblings.isEmpty ? "—" : "\(siblings.count) 位",
+                            icon: "person.3.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "其他親屬",
+                            value: others.isEmpty ? "—" : "\(others.count) 位",
+                            icon: "person.circle.fill")
+            }
+            .background(.white.opacity(0.10))
+            .padding(.top, 10)
+            .padding(.bottom, 14)
+            .padding(.horizontal, 8)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .heroCardShell(card: .familyMembersResume)
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 20)
                 .stroke(.white.opacity(0.18), lineWidth: 0.75)
         )
-        .shadow(color: accent.opacity(0.35), radius: 14, x: 0, y: 6)
-        .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
     }
 
-    /// 英雄卡 KPI 格（值大字 + 說明小字 + 圖示），對齊 ResumeView.heroKpiCell 規格。
-    private func heroKpiCell(value: String, label: String, icon: String) -> some View {
-        VStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.80))
-            Text(value)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .minimumScaleFactor(0.72)
-                .lineLimit(1)
-                .contentTransition(.numericText())
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.white.opacity(0.72))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-    }
 
     // MARK: Section Header（Capsule 側條 + 計數徽章）
     // [v3] 計數徽章從 frame 固定尺寸改為 padding 自適應，對齊 ResumeView.sectionHeader 規格

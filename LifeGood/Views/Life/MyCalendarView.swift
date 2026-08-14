@@ -2281,29 +2281,10 @@ struct CalendarEventCard: View {
             Spacer(minLength: 0)
         }
         .padding(18)
-        .background(
-            ZStack {
-                LinearGradient(colors: [heroGradientColors.top, heroGradientColors.bottom],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Circle()
-                    .fill(.white.opacity(0.10))
-                    .frame(width: 110, height: 110)
-                    .blur(radius: 16)
-                    .offset(x: 75, y: -40)
-                    .allowsHitTesting(false)
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 70, height: 70)
-                    .blur(radius: 11)
-                    .offset(x: -55, y: 40)
-                    .allowsHitTesting(false)
-                LinearGradient(colors: [.white.opacity(0.18), .clear],
-                               startPoint: .top, endPoint: .center)
-                    .allowsHitTesting(false)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: heroGradientColors.bottom.opacity(0.35), radius: 14, x: 0, y: 7)
+        // 事件卡的漸層依事件類型換色（會議／個人／里程碑／系統行事曆／家人生日等），
+        // 走 runtimeColors；使用者在進階設定指定的顏色仍然優先。
+        .heroCardShell(card: .calendarEvent,
+                       runtimeColors: [heroGradientColors.top, heroGradientColors.bottom])
         .opacity(cardAppeared ? 1 : 0)
         .offset(y: cardAppeared ? 0 : 14)
         .onAppear {

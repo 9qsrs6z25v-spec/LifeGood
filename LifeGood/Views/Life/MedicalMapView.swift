@@ -256,19 +256,7 @@ struct MedicalMapView: View {
             }
         }
         .padding(20)
-        .background(
-            ZStack {
-                LinearGradient(colors: [Color(red: 0.10, green: 0.62, blue: 0.58),
-                                        Color(red: 0.04, green: 0.44, blue: 0.52)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Circle().fill(.white.opacity(0.10)).frame(width: 120, height: 120)
-                    .offset(x: 90, y: -40).blur(radius: 12)
-                LinearGradient(colors: [.white.opacity(0.16), .clear], startPoint: .top, endPoint: .center)
-                    .allowsHitTesting(false)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.04, green: 0.44, blue: 0.52).opacity(0.35), radius: 14, x: 0, y: 7)
+        .heroCardShell(card: .medicalMap)
         .padding(.horizontal)
         .opacity(summaryCardAppeared ? 1 : 0)
         .offset(y: summaryCardAppeared ? 0 : 20)

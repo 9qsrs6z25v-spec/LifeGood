@@ -559,11 +559,14 @@ struct SubordinateDetailView: View {
 
             // 分數看板：主動性 / 潛力性 / 綜合
             HStack(spacing: 0) {
-                scoreCell("主動性", subordinate.proactivityScore(mentionedCount: mentionedCount))
+                HeroKpiCell(label: "主動性", value: "\(subordinate.proactivityScore(mentionedCount: mentionedCount))",
+                            icon: "bolt.fill")
                 HeroKpiDivider()
-                scoreCell("潛力性", subordinate.potentialScore)
+                HeroKpiCell(label: "潛力性", value: "\(subordinate.potentialScore)",
+                            icon: "arrow.up.right.circle.fill")
                 HeroKpiDivider()
-                scoreCell("綜合", subordinate.overallScore(mentionedCount: mentionedCount))
+                HeroKpiCell(label: "綜合", value: "\(subordinate.overallScore(mentionedCount: mentionedCount))",
+                            icon: "star.fill")
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.12))
@@ -579,15 +582,20 @@ struct SubordinateDetailView: View {
 
             // KPI 橫列：優點 / 缺點 / 成就 / Miss / 請假
             HStack(spacing: 0) {
-                statBadge(count: recordCounts[.pro] ?? 0,           label: "優點", color: .green)
+                HeroKpiCell(label: "優點", value: "\(recordCounts[.pro] ?? 0)",
+                            icon: "hand.thumbsup.fill")
                 HeroKpiDivider()
-                statBadge(count: recordCounts[.con] ?? 0,           label: "缺點", color: .red)
+                HeroKpiCell(label: "缺點", value: "\(recordCounts[.con] ?? 0)",
+                            icon: "hand.thumbsdown.fill")
                 HeroKpiDivider()
-                statBadge(count: recordCounts[.achievement] ?? 0,   label: "成就", color: .orange)
+                HeroKpiCell(label: "成就", value: "\(recordCounts[.achievement] ?? 0)",
+                            icon: "trophy.fill")
                 HeroKpiDivider()
-                statBadge(count: recordCounts[.missOperation] ?? 0, label: "Miss", color: .purple)
+                HeroKpiCell(label: "Miss", value: "\(recordCounts[.missOperation] ?? 0)",
+                            icon: "exclamationmark.triangle.fill")
                 HeroKpiDivider()
-                statBadge(count: recordCounts[.leave] ?? 0,         label: "請假", color: .teal)
+                HeroKpiCell(label: "請假", value: "\(recordCounts[.leave] ?? 0)",
+                            icon: "calendar.badge.minus")
             }
             .padding(.vertical, 8)
             .background(.white.opacity(0.08))
@@ -595,15 +603,20 @@ struct SubordinateDetailView: View {
 
             // 第二列 KPI：報告 / 會議 / 任務 / 被標註 / 請假
             HStack(spacing: 0) {
-                statBadge(count: subordinate.weeklyReports.count, label: "報告", color: .purple)
+                HeroKpiCell(label: "報告", value: "\(subordinate.weeklyReports.count)",
+                            icon: "doc.text.fill")
                 HeroKpiDivider()
-                statBadge(count: subordinate.meetings.count,      label: "會議", color: .indigo)
+                HeroKpiCell(label: "會議", value: "\(subordinate.meetings.count)",
+                            icon: "person.3.fill")
                 HeroKpiDivider()
-                statBadge(count: subordinate.tasks.count,         label: "任務", color: .cyan)
+                HeroKpiCell(label: "任務", value: "\(subordinate.tasks.count)",
+                            icon: "checklist")
                 HeroKpiDivider()
-                statBadge(count: mentionedCount,                   label: "被標註", color: .pink)
+                HeroKpiCell(label: "被標註", value: "\(mentionedCount)",
+                            icon: "at")
                 HeroKpiDivider()
-                statBadge(count: recordCounts[.leave] ?? 0,       label: "請假", color: .teal)
+                HeroKpiCell(label: "請假", value: "\(recordCounts[.leave] ?? 0)",
+                            icon: "calendar.badge.minus")
             }
             .padding(.vertical, 8)
             .background(.white.opacity(0.08))
@@ -611,45 +624,7 @@ struct SubordinateDetailView: View {
             .padding(.top, 8)
         }
         .padding(20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.22, green: 0.53, blue: 0.98),
-                        Color(red: 0.10, green: 0.35, blue: 0.82)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 85, y: -50)
-                    .blur(radius: 14)
-                // 左下次散景圓
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 80, height: 80)
-                    .offset(x: -60, y: 50)
-                    .blur(radius: 10)
-                // [v3] 第三顆散景圓（中右側）
-                Circle()
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 30, y: 28)
-                    .blur(radius: 8)
-                // [v3] 頂部玻璃光澤
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.42), radius: 18, x: 0, y: 9)
-        .shadow(color: .black.opacity(0.09), radius: 8, x: 0, y: 4)
+        .heroCardShell(card: .subordinateDetail)
         .padding(.horizontal)
         .opacity(headerAppeared ? 1 : 0)
         .offset(y: headerAppeared ? 0 : 20)
@@ -661,33 +636,8 @@ struct SubordinateDetailView: View {
     }
 
     // KPI 單格：白色大數字 + 小標籤（對齊 FixedExpenseView 英雄卡 KPI 橫列規格）
-    private func statBadge(count: Int, label: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            Text("\(count)")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .contentTransition(.numericText())
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.75))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // 分數看板單格：大白數字 + 標籤
-    private func scoreCell(_ label: String, _ value: Int) -> some View {
-        VStack(spacing: 3) {
-            Text("\(value)")
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .contentTransition(.numericText())
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.white.opacity(0.82))
-        }
-        .frame(maxWidth: .infinity)
-    }
 
     // MARK: - 會議章節
 

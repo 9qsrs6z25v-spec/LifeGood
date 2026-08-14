@@ -287,12 +287,6 @@ struct ChildDetailView: View {
 
     private var headerCard: some View {
         let isSon = child.role == .son
-        let gradStart: Color = isSon
-            ? Color(red: 0.25, green: 0.55, blue: 0.98)
-            : Color(red: 0.96, green: 0.38, blue: 0.62)
-        let gradEnd: Color = isSon
-            ? Color(red: 0.14, green: 0.36, blue: 0.82)
-            : Color(red: 0.78, green: 0.20, blue: 0.50)
 
         return HStack(alignment: .center, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
@@ -358,42 +352,12 @@ struct ChildDetailView: View {
             }
         }
         .padding(20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [gradStart, gradEnd],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上散景裝飾圓
-                Circle()
-                    .fill(.white.opacity(0.14))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 75, y: -50)
-                    .blur(radius: 14)
-                // 左下補光
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 80, height: 80)
-                    .offset(x: -60, y: 50)
-                    .blur(radius: 10)
-                // 第三顆散景圓：中下補深，增加卡片立體層次
-                Circle()
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 8, y: 38)
-                    .blur(radius: 8)
-                // 玻璃光澤：頂部白色高光漸層，對齊 OverviewView monthlyBalanceCard 規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        // 這張卡依子女性別換色（兒子藍／女兒粉），走 runtimeColors——
+        // 使用者若在進階設定指定顏色，那個顏色仍然優先。
+        .heroCardShell(card: .childDetail,
+                       runtimeColors: isSon ? HeroCard.childSonGradient
+                                            : HeroCard.childDaughterGradient)
         .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.18), lineWidth: 0.75))
-        .shadow(color: gradEnd.opacity(0.42), radius: 18, x: 0, y: 9)
         .padding(.horizontal)
     }
 

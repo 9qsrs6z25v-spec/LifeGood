@@ -222,47 +222,7 @@ struct ChildrenResumeView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
-        .background(
-            ZStack {
-                // 粉藍雙色漸層：兒子藍（topLeading）→ 女兒粉紫（bottomTrailing）
-                LinearGradient(
-                    colors: [heroBlue, heroPink],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓（對齊三圓散景 140pt 主圓規格）
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 85, y: -50)
-                    .blur(radius: 14)
-                    .allowsHitTesting(false)
-                // 左下次散景圓（對齊三圓散景 90pt 次圓規格）
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 80, height: 80)
-                    .offset(x: -60, y: 40)
-                    .blur(radius: 10)
-                    .allowsHitTesting(false)
-                // [v3] 中右微型散景圓（55pt），補齊三圓散景標準規格
-                // 對齊 IncomeView / VariableExpenseView v4 / SubordinateDetailView v3
-                Circle()
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 30, y: 28)
-                    .blur(radius: 8)
-                    .allowsHitTesting(false)
-                // [v3] 頂部玻璃光澤升為 0.18（對齊全 App 英雄卡統一規格）
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-                .allowsHitTesting(false)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: heroPink.opacity(0.38), radius: 16, x: 0, y: 8)
+        .heroCardShell(card: .childrenResume)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)

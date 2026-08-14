@@ -400,94 +400,26 @@ struct TaxOverviewView: View {
 
             // 4 個統計格
             HStack(spacing: 0) {
-                taxStatCell(icon: "building.2.fill",      label: "持有房產", value: "\(realEstateCount) 筆", color: Color(red: 0.42, green: 0.62, blue: 1.00))
-                taxStatDivider()
-                taxStatCell(icon: "car.fill",             label: "持有車輛", value: "\(vehicleCount) 台",   color: Color(red: 1.00, green: 0.72, blue: 0.20))
-                taxStatDivider()
-                taxStatCell(icon: "doc.text.fill",        label: "稅費筆數", value: "\(exps.count) 筆", color: Color(red: 1.00, green: 0.78, blue: 0.75))
-                taxStatDivider()
-                taxStatCell(icon: "leaf.fill",            label: "節稅累積", value: fmt(savingTotal), color: Color(red: 0.62, green: 1.00, blue: 0.75))
+                HeroKpiCell(label: "持有房產", value: "\(realEstateCount) 筆",
+                            icon: "building.2.fill", valueColor: Color(red: 0.42, green: 0.62, blue: 1.00))
+                HeroKpiDivider()
+                HeroKpiCell(label: "持有車輛", value: "\(vehicleCount) 台",
+                            icon: "car.fill", valueColor: Color(red: 1.00, green: 0.72, blue: 0.20))
+                HeroKpiDivider()
+                HeroKpiCell(label: "稅費筆數", value: "\(exps.count) 筆",
+                            icon: "doc.text.fill", valueColor: Color(red: 1.00, green: 0.78, blue: 0.75))
+                HeroKpiDivider()
+                HeroKpiCell(label: "節稅累積", value: fmt(savingTotal),
+                            icon: "leaf.fill", valueColor: Color(red: 0.62, green: 1.00, blue: 0.75))
             }
         }
         .padding(20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.90, green: 0.28, blue: 0.22),
-                        Color(red: 0.70, green: 0.15, blue: 0.12)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上散景圓
-                Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 85, y: -55)
-                    .blur(radius: 14)
-                // 左下散景圓
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 85, height: 85)
-                    .offset(x: -65, y: 48)
-                    .blur(radius: 10)
-                // 右中微型散景圓（v3：第三顆，增加卡片立體層次感）
-                Circle()
-                    .fill(.white.opacity(0.05))
-                    .frame(width: 50, height: 50)
-                    .offset(x: 70, y: 36)
-                    .blur(radius: 8)
-                // 玻璃光澤反光層（v3：對齊 VariableExpenseView / IncomeView 英雄卡規格）
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.70, green: 0.15, blue: 0.12).opacity(0.42), radius: 18, x: 0, y: 9)
+        .heroCardShell(card: .taxOverview)
         .padding(.horizontal)
     }
 
     // [v3] 36pt → 40pt + stroke overlay + contentTransition（對齊 FinanceOverviewView allocationSection kpi 規格）
-    private func taxStatCell(icon: String, label: String, value: String, color: Color) -> some View {
-        VStack(spacing: 6) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [color.opacity(0.35), color.opacity(0.18)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 40, height: 40)
-                    .overlay(Circle().stroke(color.opacity(0.25), lineWidth: 0.75))
-                Image(systemName: icon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-            Text(value)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .contentTransition(.numericText())
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.70))
-                .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity)
-    }
 
-    private func taxStatDivider() -> some View {
-        Rectangle()
-            .fill(.white.opacity(0.22))
-            .frame(width: 0.5, height: 44)
-    }
 
     // MARK: - 稅費紀錄（升級：漸層圖示圓 + 日期膠囊 + 空狀態佔位）
 
