@@ -13,17 +13,16 @@ import SwiftUI
 
 private struct HeroCardShellModifier<ExtraBackground: View>: ViewModifier {
     let card: HeroCard
-    /// 呼叫端硬指定的顏色（遷移期舊多載用）；nil 代表吃 card 的出廠／覆寫色
-    let explicitColors: [Color]?
-    let explicitShadowTint: Color?
+    /// 執行期依狀態切換的顏色（設定卡的付費綠／未付費紫）。
+    /// 解析順序：單卡覆寫 → 這裡 → 出廠。使用者手動指定的顏色永遠贏。
+    let runtimeColors: [Color]?
     @ViewBuilder let extraBackground: () -> ExtraBackground
 
     @ObservedObject private var store = HeroStyleStore.shared
 
     func body(content: Content) -> some View {
         let s = store.style(for: card)
-        let colors = explicitColors ?? s.gradient
-        let shadowTint = explicitShadowTint ?? (explicitColors?.last ?? s.shadowTint)
+        let (colors, shadowTint) = s.resolved(runtime: runtimeColors)
         return content
             .background(
                 ZStack {
@@ -61,31 +60,18 @@ private struct HeroCardShellModifier<ExtraBackground: View>: ViewModifier {
 
 extension View {
     /// 英雄卡殼層（標準用法）：顏色由卡片身分決定，可在進階設定逐卡覆寫。
-    func heroCardShell<B: View>(card: HeroCard,
+    /// runtimeColors 給「同一張卡依狀態換色」的情況（目前只有設定卡的訂閱狀態）；
+    /// 它插在出廠與單卡覆寫之間，使用者在設定頁指定的顏色仍然優先。
+    func heroCardShell<B: View>(card: HeroCard, runtimeColors: [Color]? = nil,
                                 @ViewBuilder extraBackground: @escaping () -> B) -> some View {
-        modifier(HeroCardShellModifier(card: card, explicitColors: nil,
-                                       explicitShadowTint: nil, extraBackground: extraBackground))
+        modifier(HeroCardShellModifier(card: card, runtimeColors: runtimeColors,
+                                       extraBackground: extraBackground))
     }
 
     /// 無額外背景層的簡便版
-    func heroCardShell(card: HeroCard) -> some View {
-        modifier(HeroCardShellModifier(card: card, explicitColors: nil,
-                                       explicitShadowTint: nil, extraBackground: { EmptyView() }))
-    }
-
-    /// 遷移期舊多載：顏色仍由呼叫端硬指定，身分為 .legacy（只吃全域層）。
-    /// 行為與遷移前完全一致；剩餘呼叫點清空後即可刪除。
-    @available(*, deprecated, message: "改用 heroCardShell(card:)，顏色搬進 HeroCard.factoryGradient")
-    func heroCardShell<B: View>(colors: [Color], shadowTint: Color? = nil,
-                                @ViewBuilder extraBackground: @escaping () -> B) -> some View {
-        modifier(HeroCardShellModifier(card: .legacy, explicitColors: colors,
-                                       explicitShadowTint: shadowTint, extraBackground: extraBackground))
-    }
-
-    @available(*, deprecated, message: "改用 heroCardShell(card:)")
-    func heroCardShell(colors: [Color], shadowTint: Color? = nil) -> some View {
-        modifier(HeroCardShellModifier(card: .legacy, explicitColors: colors,
-                                       explicitShadowTint: shadowTint, extraBackground: { EmptyView() }))
+    func heroCardShell(card: HeroCard, runtimeColors: [Color]? = nil) -> some View {
+        modifier(HeroCardShellModifier(card: card, runtimeColors: runtimeColors,
+                                       extraBackground: { EmptyView() }))
     }
 }
 

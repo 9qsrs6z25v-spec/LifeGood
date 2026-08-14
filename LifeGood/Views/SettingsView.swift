@@ -477,21 +477,17 @@ struct SettingsView: View {
 
             // 三模式 KPI 橫列
             HStack(spacing: 0) {
-                settingsHeroStatCell(
-                    label: "記帳",
-                    count: store.expenses.count + store.incomes.count
-                )
+                HeroKpiCell(label: "記帳",
+                            value: "\(store.expenses.count + store.incomes.count) 筆",
+                            icon: "list.bullet.rectangle.fill")
                 HeroKpiDivider()
-                settingsHeroStatCell(
-                    label: "理財",
-                    count: financeStore.insurances.count + financeStore.stocks.count
-                           + financeStore.vehicles.count + financeStore.realEstates.count
-                )
+                HeroKpiCell(label: "理財",
+                            value: "\(financeStore.insurances.count + financeStore.stocks.count + financeStore.vehicles.count + financeStore.realEstates.count) 筆",
+                            icon: "chart.pie.fill")
                 HeroKpiDivider()
-                settingsHeroStatCell(
-                    label: "人生",
-                    count: lifeStore.milestones.count + lifeStore.familyMembers.count
-                )
+                HeroKpiCell(label: "人生",
+                            value: "\(lifeStore.milestones.count + lifeStore.familyMembers.count) 筆",
+                            icon: "sparkles")
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -499,71 +495,14 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: subscription.isPremium
-                        ? [Color(red: 0.16, green: 0.74, blue: 0.50),
-                           Color(red: 0.07, green: 0.50, blue: 0.38)]
-                        : [Color(red: 0.38, green: 0.28, blue: 0.82),
-                           Color(red: 0.22, green: 0.14, blue: 0.60)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                // 左下補光
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 80, height: 80)
-                    .offset(x: -60, y: 50)
-                    .blur(radius: 10)
-                // [v4] 中右微光（第三顆散景圓），對齊 IncomeView / VariableExpenseView 三圓規格
-                Circle()
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 30, y: 42)
-                    .blur(radius: 8)
-                // [v4] 頂部玻璃光澤，對齊全 App 英雄卡 glass shine 規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(
-            color: (subscription.isPremium
-                ? Color(red: 0.07, green: 0.50, blue: 0.38)
-                : Color(red: 0.22, green: 0.14, blue: 0.60)).opacity(0.42),
-            radius: 16, x: 0, y: 8
-        )
+        // 這張卡的漸層依訂閱狀態切換（付費綠／未付費紫），所以走 runtimeColors——
+        // 它插在出廠與單卡覆寫之間：使用者若在進階設定指定了顏色，那個顏色仍然優先。
+        .heroCardShell(card: .settings,
+                       runtimeColors: subscription.isPremium
+                            ? HeroCard.settingsPremiumGradient
+                            : HeroCard.settingsFreeGradient)
     }
 
-    /// KPI 統計格（供英雄卡 KPI 橫列使用）
-    private func settingsHeroStatCell(label: String, count: Int) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text("\(count)")
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .contentTransition(.numericText())
-            Text("筆")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.45))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - 訂閱
 
@@ -3122,6 +3061,12 @@ struct HeroCardOverrideView: View {
                               systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
                             .foregroundStyle(.orange)
+                    }
+                    if card == .settings {
+                        Label("這張卡的漸層平常依訂閱狀態自動切換（付費綠／未付費紫）。一旦在下方指定了漸層顏色，就會固定用你指定的顏色、不再隨狀態變化；想恢復自動切換，把該項切回「跟隨全域」即可。",
+                              systemImage: "info.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Section("顏色") {

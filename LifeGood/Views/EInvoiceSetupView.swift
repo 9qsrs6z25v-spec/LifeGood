@@ -151,55 +151,31 @@ struct EInvoiceSetupView: View {
     // MARK: - 未連結英雄卡
 
     private var heroCard: some View {
-        ZStack {
-            // [v2] 三顆散景裝飾圓（對齊 IncomeView / VariableExpenseView v4 三圓規格）
-            Circle().fill(Color.white.opacity(0.12)).frame(width: 120, height: 120)
-                .offset(x: 70, y: -30).blur(radius: 18)
-            Circle().fill(Color.white.opacity(0.09)).frame(width: 80, height: 80)
-                .offset(x: -60, y: 20).blur(radius: 14)
-            Circle().fill(Color.white.opacity(0.05)).frame(width: 55, height: 55)
-                .offset(x: 50, y: 35).blur(radius: 8)
-
-            VStack(spacing: 12) {
-                // 圖示圓
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(colors: [.white.opacity(0.30), .white.opacity(0.12)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 64, height: 64)
-                    Image(systemName: "doc.text.fill")
-                        .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-
-                Text("電子發票自動匯入")
-                    .font(.title3.weight(.bold))
+        VStack(spacing: 12) {
+            // 圖示圓
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [.white.opacity(0.30), .white.opacity(0.12)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 64, height: 64)
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(.white)
-
-                Text("連結手機條碼載具，消費發票自動轉為變動支出，無需手動輸入。")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .multilineTextAlignment(.center)
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 28)
 
-            // [v2] 頂部玻璃光澤高光覆層（對齊 IncomeView / VariableExpenseView v4 規格）
-            LinearGradient(
-                colors: [.white.opacity(0.18), .clear],
-                startPoint: .top, endPoint: .center
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .allowsHitTesting(false)
+            Text("電子發票自動匯入")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+
+            Text("連結手機條碼載具，消費發票自動轉為變動支出，無需手動輸入。")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.85))
+                .multilineTextAlignment(.center)
         }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 28)
         .frame(maxWidth: .infinity)
-        .background(
-            LinearGradient(colors: [Color(red: 0.18, green: 0.70, blue: 0.42),
-                                    Color(red: 0.10, green: 0.55, blue: 0.30)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .shadow(color: Color.green.opacity(0.25), radius: 12, x: 0, y: 6)
+        .heroCardShell(card: .eInvoice)
         .padding(.horizontal, 16)
         .padding(.top, 16)
         .padding(.bottom, 8)
@@ -216,134 +192,84 @@ struct EInvoiceSetupView: View {
         let monthCount = monthFiltered.count
         let monthTotal = monthFiltered.reduce(0.0) { $0 + $1.amount }
 
-        return ZStack {
-            // [v2] 三顆散景裝飾圓（對齊 IncomeView v4 三圓規格）
-            Circle().fill(Color.white.opacity(0.10)).frame(width: 100, height: 100)
-                .offset(x: 60, y: -20).blur(radius: 16)
-            Circle().fill(Color.white.opacity(0.07)).frame(width: 70, height: 70)
-                .offset(x: -55, y: 22).blur(radius: 12)
-            Circle().fill(Color.white.opacity(0.05)).frame(width: 55, height: 55)
-                .offset(x: 48, y: 36).blur(radius: 8)
-
-            VStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(colors: [.white.opacity(0.28), .white.opacity(0.10)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 54, height: 54)
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-
-                Text("已連結載具")
-                    .font(.headline.weight(.bold))
+        return VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [.white.opacity(0.28), .white.opacity(0.10)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 54, height: 54)
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(.white)
-
-                // 載具號碼 Capsule
-                if let cardNo = sync.carrier?.cardNo {
-                    Text(cardNo)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12).padding(.vertical, 4)
-                        .background(.white.opacity(0.20))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
-                }
-
-                // 最近同步時間 Capsule
-                HStack(spacing: 6) {
-                    Image(systemName: "clock.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.80))
-                    Text(sync.lastSyncDate.map(formatDateTime) ?? "尚未同步")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.80))
-                }
-
-                // appID 警告
-                if EInvoiceClient.appID.isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2).foregroundStyle(.orange)
-                        Text("尚未設定 appID，同步功能無法使用")
-                            .font(.caption2).foregroundStyle(.orange)
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Color.orange.opacity(0.18))
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(Color.orange.opacity(0.35), lineWidth: 0.75))
-                    .padding(.top, 2)
-                }
-
-                // [v2] 三欄 KPI 橫列（對齊 LifeOverviewView.statsStrip 設計規格）
-                Rectangle()
-                    .fill(Color.white.opacity(0.14))
-                    .frame(height: 0.5)
-                    .padding(.top, 6)
-
-                HStack(spacing: 0) {
-                    statusKpiCell(icon: "doc.text.fill", color: .teal,
-                                  value: "\(sync.importHistory.count)",
-                                  label: "累計匯入")
-                    Rectangle().fill(Color.white.opacity(0.20)).frame(width: 0.5, height: 36)
-                    statusKpiCell(icon: "calendar", color: .mint,
-                                  value: "\(monthCount)",
-                                  label: "本月發票")
-                    Rectangle().fill(Color.white.opacity(0.20)).frame(width: 0.5, height: 36)
-                    statusKpiCell(icon: "banknote.fill", color: .green,
-                                  value: monthTotal.ntdWanString,
-                                  label: "本月支出")
-                }
-                .padding(.bottom, 4)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 20)
 
-            // [v2] 頂部玻璃光澤高光覆層
-            LinearGradient(
-                colors: [.white.opacity(0.18), .clear],
-                startPoint: .top, endPoint: .center
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .allowsHitTesting(false)
+            Text("已連結載具")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white)
+
+            // 載具號碼 Capsule
+            if let cardNo = sync.carrier?.cardNo {
+                Text(cardNo)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 4)
+                    .background(.white.opacity(0.20))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
+            }
+
+            // 最近同步時間 Capsule
+            HStack(spacing: 6) {
+                Image(systemName: "clock.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.80))
+                Text(sync.lastSyncDate.map(formatDateTime) ?? "尚未同步")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.80))
+            }
+
+            // appID 警告
+            if EInvoiceClient.appID.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2).foregroundStyle(.orange)
+                    Text("尚未設定 appID，同步功能無法使用")
+                        .font(.caption2).foregroundStyle(.orange)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.orange.opacity(0.18))
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.orange.opacity(0.35), lineWidth: 0.75))
+                .padding(.top, 2)
+            }
+
+            // [v2] 三欄 KPI 橫列（對齊 LifeOverviewView.statsStrip 設計規格）
+            Rectangle()
+                .fill(Color.white.opacity(0.14))
+                .frame(height: 0.5)
+                .padding(.top, 6)
+
+            HStack(spacing: 0) {
+                HeroKpiCell(label: "累計匯入", value: "\(sync.importHistory.count)",
+                            icon: "doc.text.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "本月發票", value: "\(monthCount)",
+                            icon: "calendar")
+                HeroKpiDivider()
+                HeroKpiCell(label: "本月支出", value: monthTotal.ntdWanString,
+                            icon: "banknote.fill")
+            }
+            .padding(.bottom, 4)
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 20)
         .frame(maxWidth: .infinity)
-        .background(
-            LinearGradient(colors: [Color(red: 0.18, green: 0.70, blue: 0.42),
-                                    Color(red: 0.10, green: 0.55, blue: 0.30)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .shadow(color: Color.green.opacity(0.25), radius: 12, x: 0, y: 6)
+        .heroCardShell(card: .eInvoice)
         .padding(.horizontal, 16)
         .padding(.top, 16)
         .padding(.bottom, 8)
     }
 
-    // [v2] KPI 格元件（對齊 TaxOverviewView.taxStatCell 設計規格）
-    private func statusKpiCell(icon: String, color: Color, value: String, label: String) -> some View {
-        VStack(spacing: 5) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0.14)],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 28, height: 28)
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            Text(value)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .minimumScaleFactor(0.72)
-                .lineLimit(1)
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.80))
-        }
-        .frame(maxWidth: .infinity)
-    }
 
     // MARK: - 連結輸入表單卡
 

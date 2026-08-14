@@ -84,20 +84,10 @@ import SwiftUI
 //   lifeFinance lifeRealEstate subordinateList talentMatrix spouseResume
 //   calendar travelMapStats travelMapDetail foodMapStats foodMapDetail
 //
-// 尚未遷移（結構不同，需各自改寫版面才能接殼層，不硬套以免退化）：
-//   · businessCardDetail   圓角 18 非 20、無光澤層、雙層陰影，與列表卡是兩張
-//                          不同規格的卡（拆成兩個身分的原因）
-//   · settings             漸層依訂閱狀態動態切換（付費綠／未付費紫），
-//                          殼層目前只吃靜態卡片身分，需先想清楚動態色怎麼表達
-//   · eInvoice             圓角非 20、僅兩顆散景圓，版面結構與其餘不同型
-//
 // ─────────────────────────────────────────────────────────────────────────
-// 【Phase 3c 遷移狀態】ZStack 型卡片改接殼層（v25.213）
+// 【Phase 3c／3d 遷移狀態】全數接上殼層（v25.213 三張、v25.214 三張）
 // ─────────────────────────────────────────────────────────────────────────
-// subordinateOverview / gradeTitle / businessCardList 三張遷移完成，
-// 共 22 張走同一套殼層。三張原本都是「ZStack 疊背景層 + 內容 + 光澤覆層」，
-// 改寫成「內容 .padding() .heroCardShell(card:)」——內容不動，只是背景層
-// 從手刻改成殼層供應。已知收斂：
+// v25.213（ZStack 型，殼層無處可掛 → 改寫成「內容 .padding() .heroCardShell」）：
 //   · subordinateOverview 散景圓 140/90/55 → 130/80/55、偏移量改用殼層標準
 //     （原本是 topLeading 對齊的絕對座標 x:200，殼層是置中相對偏移）；
 //     陰影 .38/14/6 + black.10/4/2 → .42/16/8 單層；KPI 分隔線 48 → 28。
@@ -105,9 +95,32 @@ import SwiftUI
 //     散景圓 160/90/60 → 130/80/55、模糊 30/22/14 → 14/10/8（原本糊很多）；
 //     陰影 indigo.28/16/8 + black.06/4/2 → 出廠 .42/16/8 單層；
 //     出廠漸層更正為實測的 indigo → purple.85（原本表裡填的是估計值）。
-//     KPI 的「值 + 單位」雙段基線對齊收斂成單段（「3」「個」→「3 個」），
-//     並補上圖示（部門／職等／關聯鏈）讓「圖示在上」排法有東西可顯示。
+//     KPI 的「值 + 單位」雙段基線對齊收斂成單段（「3」「個」→「3 個」）。
 //   · businessCardList 散景圓 130/75/55 → 130/80/55；大字 30 → 全域 32。
+//
+// v25.214（最後三張，各自需要殼層先補一個能力）：
+//   · businessCardDetail 需要「出廠漸層可以三段以上」——它是橘→粉→紫，
+//     原本解析器寫死 [factory[0], factory[1]]，紫色會被靜靜吃掉。
+//     改成保留全部段數，單卡覆寫只動頭尾兩端、中間段維持出廠。
+//     連帶把 shadowTint 的 fallback 從 gradient[1] 改成 gradient.last
+//     （三段時 [1] 是中間段；而且單色陣列會索引越界）。
+//     已知收斂：圓角 18 → 20、陰影 orange.38/18/9 + black.10/4/2 → 出廠
+//     .42/16/8 單層且光暈色由橘轉紫（跟著漸層末色，與其餘卡同規則）。
+//   · settings 需要「同一張卡兩種狀態色」——付費綠／未付費紫。出廠層一張卡
+//     只能有一組色，表達不了，所以新增 heroCardShell(runtimeColors:)：
+//     它插在「出廠」與「單卡覆寫」之間，優先序是 單卡覆寫 → runtime → 出廠。
+//     使用者若在進階設定指定顏色就固定用那個、不再隨狀態變化，切回「跟隨全域」
+//     即恢復自動切換。這一點在單卡設定頁有明寫。
+//   · eInvoice 同一個位置有兩張狀態卡（未連結／已連結），是同一個插槽的兩種
+//     狀態、不是兩張卡，所以維持單一身分（與名片列表／明細的情況相反）。
+//     已知收斂：兩張的散景圓（120/80/55 與 100/70/55）→ 130/80/55、模糊
+//     18/14/8 與 16/12/8 → 14/10/8；圓角 20 continuous → 20 circular；
+//     陰影 green.25/12/6 → 出廠 .42/16/8。Phase 0 表裡「eInvoice 散景兩圓」
+//     是筆誤，實際兩張都是三圓。
+//
+// 至此 26 張卡全部走同一套殼層，遷移期的 heroCardShell(colors:) 舊多載
+// 與 explicitColors 欄位已刪除，.legacy 只剩四張未進列舉的卡在用
+//（AddVehicle 預覽卡、就醫地圖、子女履歷、部屬明細）。
 //
 // ─────────────────────────────────────────────────────────────────────────
 // 【Phase 3b 遷移狀態】KPI 橫列與主數值大字（v25.211）
@@ -175,16 +188,12 @@ enum HeroCard: String, CaseIterable, Identifiable {
 
     /// 這張卡的殼層是否已接上樣式系統。
     /// false = 還在手刻背景，單卡覆寫調了也不會有反應——設定頁必須標示出來，
-    /// 否則使用者會以為是壞掉。清單隨 Phase 3c／4 遷移逐張縮短，全部清空後
-    /// 這個屬性連同設定頁的標示一起刪掉。
-    var isWired: Bool {
-        switch self {
-        case .businessCardDetail, .settings, .eInvoice:
-            return false
-        default:
-            return true
-        }
-    }
+    /// 否則使用者會以為是壞掉。
+    ///
+    /// v25.214 起全部 26 張都已接上，清單為空。**保留這個屬性不刪**：日後新增
+    /// 卡片身分時，從加進列舉到真正接上殼層之間一定有時間差，那段期間必須
+    /// 有辦法標示出來，不然又會回到「調了沒反應像壞掉」的狀態。
+    var isWired: Bool { true }
 
     /// 設定頁顯示的中文卡名
     var title: String {
@@ -220,14 +229,28 @@ enum HeroCard: String, CaseIterable, Identifiable {
         }
     }
 
-    /// 出廠漸層（起點色、終點色）。
+    /// 設定卡的兩組狀態色：付費綠／未付費紫。
+    /// 走 heroCardShell(runtimeColors:) 供應而非出廠層——出廠層一張卡只能有一組，
+    /// 表達不了「同一張卡兩種狀態」。出廠層仍填付費綠，讓設定頁預覽有東西可畫。
+    static let settingsPremiumGradient: [Color] = [
+        Color(red: 0.16, green: 0.74, blue: 0.50),
+        Color(red: 0.07, green: 0.50, blue: 0.38)
+    ]
+    static let settingsFreeGradient: [Color] = [
+        Color(red: 0.38, green: 0.28, blue: 0.82),
+        Color(red: 0.22, green: 0.14, blue: 0.60)
+    ]
+
+    /// 出廠漸層（起點色、終點色；名片明細是三段）。
     /// 這是本次重構的第二個大收斂：41 處硬寫在呼叫端的顏色收進單一登錄表——
     /// 即使永遠不做覆寫也該做，因為設定頁的即時預覽要跑「真的那張卡的顏色」。
     var factoryGradient: [Color] {
         switch self {
-        case .income, .overview, .chart, .settings, .legacy:
+        case .income, .overview, .chart, .legacy:
             return [Color(red: 0.16, green: 0.74, blue: 0.50),
                     Color(red: 0.07, green: 0.50, blue: 0.38)]
+        case .settings:
+            return Self.settingsPremiumGradient
         case .variableExpense, .stock:
             return [Color(red: 1.00, green: 0.62, blue: 0.22),
                     Color(red: 0.86, green: 0.36, blue: 0.06)]
@@ -617,8 +640,13 @@ final class HeroStyleStore: ObservableObject {
     func style(for card: HeroCard) -> HeroStyle {
         if let hit = cache[card] { return hit }
         let layout = HeroKpiLayout(rawValue: Int(value(.kpiLayout, card))) ?? .labelTop
-        let gradient = [cardColor(.gradA, card) ?? card.factoryGradient[0],
-                        cardColor(.gradB, card) ?? card.factoryGradient[1]]
+        // 出廠漸層可以是三段以上（名片明細是橘→粉→紫）。單卡覆寫只動頭尾兩端
+        // ——設定頁只給「起始色／結束色」兩個色票，中間段一律維持出廠。
+        var gradient = card.factoryGradient
+        let gradA = cardColor(.gradA, card)
+        let gradB = cardColor(.gradB, card)
+        if let gradA { gradient[0] = gradA }
+        if let gradB { gradient[gradient.count - 1] = gradB }
         let s = HeroStyle(
             corner: CGFloat(value(.corner, card)),
             bokehScale: value(.bokehScale, card),
@@ -634,10 +662,14 @@ final class HeroStyleStore: ObservableObject {
             kpiDividerHeight: layout.dividerBase * CGFloat(value(.kpiDividerScale, card)),
             bigValueSize: CGFloat(value(.bigValueSize, card)),
             gradient: gradient,
+            gradAIsCustom: gradA != nil,
+            gradBIsCustom: gradB != nil,
             bokehTint: cardColor(.bokeh, card) ?? globalColor(.bokeh) ?? .white,
-            // ⚠️ fallback 是「解析後的 gradB」而非出廠色，才維持現行
-            //    shadowTint ?? colors.last 的「陰影跟著當下顏色」行為
-            shadowTint: cardColor(.shadow, card) ?? globalColor(.shadow) ?? gradient[1])
+            // ⚠️ fallback 是「解析後的漸層末色」而非出廠色，才維持現行
+            //    shadowTint ?? colors.last 的「陰影跟著當下顏色」行為。
+            //    用 .last 不用 [1]：三段漸層時 [1] 會是中間段，而且單色陣列會越界。
+            shadowTint: cardColor(.shadow, card) ?? globalColor(.shadow) ?? (gradient.last ?? .black),
+            shadowIsCustom: cardColor(.shadow, card) != nil || globalColor(.shadow) != nil)
         cache[card] = s
         return s
     }
@@ -660,8 +692,23 @@ struct HeroStyle {
     let kpiDividerHeight: CGFloat
     let bigValueSize: CGFloat
     let gradient: [Color]
+    /// 頭／尾色是否來自單卡覆寫。殼層拿它判斷「執行期動態色」該不該被蓋掉
+    /// ——動態色插在「出廠」與「單卡覆寫」之間，使用者手動指定的顏色永遠贏。
+    let gradAIsCustom: Bool
+    let gradBIsCustom: Bool
     let bokehTint: Color
     let shadowTint: Color
+    let shadowIsCustom: Bool
+
+    /// 把執行期動態色（例如設定卡依訂閱狀態切換的綠／紫）疊進解析結果。
+    /// 傳 nil 或不足兩段時原樣返回。
+    func resolved(runtime: [Color]?) -> (colors: [Color], shadowTint: Color) {
+        guard let runtime, runtime.count >= 2 else { return (gradient, shadowTint) }
+        var c = runtime
+        if gradAIsCustom { c[0] = gradient[0] }
+        if gradBIsCustom { c[c.count - 1] = gradient[gradient.count - 1] }
+        return (c, shadowIsCustom ? shadowTint : (c.last ?? shadowTint))
+    }
 
     /// 次要數值字級由大字等比推導，不另開滑桿——
     /// 保證 40pt 大字不會配上固定 20pt 的副值

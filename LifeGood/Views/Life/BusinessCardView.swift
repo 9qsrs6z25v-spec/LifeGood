@@ -1521,31 +1521,7 @@ struct BusinessCardDetailView: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 200)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [Color.orange, Color.pink.opacity(0.85), Color.purple.opacity(0.7)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上散景裝飾圓：增加卡片立體層次感（對齊 FinanceOverviewView.totalAssetsCard 規格）
-                Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                // 左下補光
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 90, height: 90)
-                    .offset(x: -70, y: 60)
-                    .blur(radius: 10)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        // 雙層 shadow：橘色主光暈 + 黑色基礎陰影（對齊 IncomeView.summaryHeader 規格）
-        .shadow(color: Color.orange.opacity(0.38), radius: 18, x: 0, y: 9)
-        .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
+        .heroCardShell(card: .businessCardDetail)
         .padding(.horizontal)
         // 英雄卡片進場動畫（對齊 VehicleDetailView.flashCard / StockDetailView 進場規格）
         .opacity(cardAppeared ? 1 : 0)
