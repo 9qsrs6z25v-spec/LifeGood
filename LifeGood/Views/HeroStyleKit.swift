@@ -65,7 +65,9 @@ import SwiftUI
 //   travelMapDetail 110/65/50 · .12/.07/.04 | .35/14/7  | 30 | 數值在上(裸排無容器)
 //   foodMapStats    120/70/55 · .12/.07/.05 | .38/14/7  | 30 | 數值在上(14pt)
 //   foodMapDetail   110/65/50 · .12/.07/.04 | .35/14/7  | 30 | 數值在上
-//   businessCard    兩圓(130/80) · .12/.07  | .42/16/8  | 30 | 標籤在上
+//   businessCardList 130/75/55 · .12/.07/.06 | .42/16/8  | 30 | 標籤在上
+//   businessCardDetail 兩圓(140/90) · .12/.07 | .38/18/9 + black.10/4/2 | — | 裸排
+//                   （明細卡圓角 18 非 20、漸層是橘→粉→紫三色，遷移時要留意）
 //   spouseResume    140/90/55 · .12/.07/.05 | .42/16/8  | 30 | 數值在上(12pt)
 //   gradeTitle      160/90/60 · .12/.07/紫  | indigo.28/16/8 + black.06/4/2 | — | 數值在上(title3)
 //   settings        140/90/55 · .12/.07/.05 | .42/16/8  | 28 | 標籤在上
@@ -86,7 +88,9 @@ import SwiftUI
 //   · subordinateOverview  卡片本體是 ZStack 而非 .background()，殼層無處可掛
 //   · gradeTitle           同上；且散景圓其中一顆是紫色（遷移後會收斂成白，
 //                          屆時可用單卡「散景圓顏色」覆寫救回）
-//   · businessCard         玻璃光澤掛在 .overlay 而非背景層，遷移須先搬進背景
+//   · businessCardList     玻璃光澤掛在 .overlay 而非背景層，遷移須先搬進背景
+//   · businessCardDetail   圓角 18 非 20、無光澤層、雙層陰影，與列表卡是兩張
+//                          不同規格的卡（拆成兩個身分的原因）
 //   · settings             漸層依訂閱狀態動態切換（付費綠／未付費紫），
 //                          殼層目前只吃靜態卡片身分，需先想清楚動態色怎麼表達
 //   · eInvoice             圓角非 20、僅兩顆散景圓，版面結構與其餘不同型
@@ -133,7 +137,8 @@ enum HeroCard: String, CaseIterable, Identifiable {
     case stock, savings, vehicle, realEstate, financeOverview, financeChart
     // 人生
     case lifeFinance, lifeRealEstate, subordinateOverview, subordinateList
-    case talentMatrix, calendar, businessCard, gradeTitle, spouseResume
+    case talentMatrix, calendar, businessCardList, businessCardDetail
+    case gradeTitle, spouseResume
     case travelMapStats, travelMapDetail, foodMapStats, foodMapDetail
     // 系統
     case settings, eInvoice
@@ -151,6 +156,21 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .stock, .savings, .vehicle, .realEstate, .financeOverview, .financeChart: return .finance
         case .settings, .eInvoice, .legacy: return .system
         default: return .life
+        }
+    }
+
+    /// 這張卡的殼層是否已接上樣式系統。
+    /// false = 還在手刻背景，單卡覆寫調了也不會有反應——設定頁必須標示出來，
+    /// 否則使用者會以為是壞掉。清單隨 Phase 3c／4 遷移逐張縮短，全部清空後
+    /// 這個屬性連同設定頁的標示一起刪掉。
+    var isWired: Bool {
+        switch self {
+        case .subordinateOverview, .gradeTitle,
+             .businessCardList, .businessCardDetail,
+             .settings, .eInvoice:
+            return false
+        default:
+            return true
         }
     }
 
@@ -175,7 +195,8 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .subordinateList:     return "部屬列表"
         case .talentMatrix:        return "人才矩陣"
         case .calendar:            return "我的行事曆"
-        case .businessCard:        return "名片"
+        case .businessCardList:    return "名片列表"
+        case .businessCardDetail:  return "名片明細"
         case .gradeTitle:          return "職等職稱"
         case .spouseResume:        return "另一半履歷"
         case .travelMapStats:      return "旅遊地圖 › 統計卡"
@@ -228,9 +249,13 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .talentMatrix:
             return [Color(red: 0.30, green: 0.25, blue: 0.90),
                     Color(red: 0.18, green: 0.40, blue: 0.92)]
-        case .businessCard:
+        case .businessCardList:
+            // BusinessCardView:490 accentTop / accentBot
             return [Color(red: 1.00, green: 0.58, blue: 0.28),
                     Color(red: 0.90, green: 0.28, blue: 0.55)]
+        case .businessCardDetail:
+            // BusinessCardDetailView.heroCard：橘 → 粉 .85 → 紫 .70 三色
+            return [.orange, .pink.opacity(0.85), .purple.opacity(0.70)]
         case .gradeTitle:
             return [Color(red: 0.42, green: 0.36, blue: 0.90),
                     Color(red: 0.26, green: 0.20, blue: 0.70)]

@@ -3074,7 +3074,15 @@ struct HeroCardOverrideListView: View {
                 .fill(LinearGradient(colors: card.factoryGradient,
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
                 .frame(width: 22, height: 22)
-            Text(card.title).font(.subheadline)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(card.title).font(.subheadline)
+                // 殼層還沒遷移的卡：先講清楚調了不會動，免得被當成壞掉
+                if !card.isWired {
+                    Text("殼層尚未接上，調整暫時不會生效")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Spacer()
             if n > 0 {
                 Circle().fill(.orange).frame(width: 6, height: 6)
@@ -3109,6 +3117,12 @@ struct HeroCardOverrideView: View {
                     Text(n > 0 ? "已自訂 \(n) 項 · 其餘跟隨全域" : "完全跟隨全域")
                         .font(.caption)
                         .foregroundStyle(n > 0 ? .orange : .secondary)
+                    if !card.isWired {
+                        Label("這張卡的殼層還在手刻背景，尚未接上樣式系統。這裡的設定會存起來，等它遷移完成後自動生效，但現在調整畫面不會有反應。",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 }
                 Section("顏色") {
                     ForEach(HeroTint.allCases) { t in
