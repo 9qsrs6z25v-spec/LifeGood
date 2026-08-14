@@ -117,8 +117,14 @@ struct OverviewView: View {
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    monthlyBalanceCard(income: income, isEstimated: estimated)
-                        .padding(.horizontal)
+                    VStack(spacing: 0) {
+                        monthlyBalanceCard(income: income, isEstimated: estimated)
+                            .padding(.horizontal)
+                        // 超支警示：emoji 小字提示掛在卡片下方（正常時不顯示）
+                        HeroOverspendHint(
+                            ratio: income > 0 ? store.currentMonthTotal / income : 0,
+                            monthProgress: monthProgress)
+                    }
                         .opacity(appearedCards.contains("header") ? 1 : 0)
                         .offset(y: appearedCards.contains("header") ? 0 : 20)
                         .onAppear {
@@ -236,8 +242,10 @@ struct OverviewView: View {
         let isPositive = balance >= 0
         let spendingRatio = income > 0 ? min(total / income, 1.0) : 0.0
         let barColor: Color = {
-            if spendingRatio > 0.9 { return Color.red.opacity(0.85) }
-            if spendingRatio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90) }
+            if spendingRatio > HeroOverspendHint.dangerRatio { return Color.red.opacity(0.85) }
+            if spendingRatio > monthProgress + HeroOverspendHint.warnLead {
+                return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90)
+            }
             return .white.opacity(0.85)
         }()
         // [v4] KPI 橫列計算：一次讀取，避免 closure 內重複呼叫 store
@@ -384,18 +392,11 @@ struct OverviewView: View {
                     .frame(height: 6)
 
                     HStack {
-                        HStack(spacing: 3) {
-                            if spendingRatio > monthProgress + 0.08 {
-                                Image(systemName: spendingRatio > 0.9
-                                      ? "flame.fill"
-                                      : "exclamationmark.triangle.fill")
-                                    .font(.system(size: 8))
-                            }
-                            Text("支出 \(Int(spendingRatio * 100))%")
-                        }
+                        // 警示圖示已移至卡片下方的 HeroOverspendHint（emoji 小字提示）
+                        Text("支出 \(Int(spendingRatio * 100))%")
                         .font(.caption2)
-                        .foregroundStyle(spendingRatio > monthProgress + 0.08
-                                         ? (spendingRatio > 0.9
+                        .foregroundStyle(spendingRatio > monthProgress + HeroOverspendHint.warnLead
+                                         ? (spendingRatio > HeroOverspendHint.dangerRatio
                                             ? Color(red: 1.0, green: 0.78, blue: 0.75)
                                             : Color(red: 1.0, green: 0.90, blue: 0.55))
                                          : .white.opacity(0.60))

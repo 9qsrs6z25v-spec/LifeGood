@@ -103,12 +103,17 @@ struct IncomeView: View {
         NavigationStack {
             List {
                 Section {
-                    summaryHeader
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .opacity(headerAppeared ? 1 : 0)
-                        .offset(y: headerAppeared ? 0 : 22)
+                    VStack(spacing: 0) {
+                        summaryHeader
+                        // 超支警示：emoji 小字提示掛在卡片下方（正常時不顯示）
+                        HeroOverspendHint(ratio: overspendRatio,
+                                          monthProgress: headerMonthProgress)
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .opacity(headerAppeared ? 1 : 0)
+                    .offset(y: headerAppeared ? 0 : 22)
                 }
                 Section {
                     categoryFilter
@@ -264,6 +269,13 @@ struct IncomeView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)
+    }
+
+    /// 卡片下方超支提示用的比例（本月總支出 ÷ 本月收入；與卡內進度條同口徑、不夾住）
+    private var overspendRatio: Double {
+        let useEstimate = !store.hasCurrentMonthIncome && store.estimatedMonthlyIncome > 0
+        let income = useEstimate ? store.estimatedMonthlyIncome : store.currentMonthIncomeTotal
+        return income > 0 ? store.currentMonthTotal / income : 0
     }
 
     private var summaryHeader: some View {
@@ -432,20 +444,13 @@ struct IncomeView: View {
                     .frame(height: 6)
 
                     HStack {
-                        HStack(spacing: 3) {
-                            // 條件式警告圖示：正常時不顯示，對齊 OverviewView 規格
-                            if spendingRatio > headerMonthProgress + 0.08 {
-                                Image(systemName: spendingRatio > 0.9
-                                      ? "flame.fill"
-                                      : "exclamationmark.triangle.fill")
-                                    .font(.system(size: 8))
-                            }
-                            Text("支出 \(Int(rawSpendingRatio * 100))%")
-                        }
+                        // 警示圖示已移至卡片下方的 HeroOverspendHint（emoji 小字提示），
+                        // 卡內只留純數值；門檻常數統一由 HeroOverspendHint 提供
+                        Text("支出 \(Int(rawSpendingRatio * 100))%")
                         .font(.caption2)
-                        .foregroundStyle(spendingRatio > 0.9
+                        .foregroundStyle(spendingRatio > HeroOverspendHint.dangerRatio
                                          ? Color(red: 1.0, green: 0.78, blue: 0.75)
-                                         : spendingRatio > headerMonthProgress + 0.08
+                                         : spendingRatio > headerMonthProgress + HeroOverspendHint.warnLead
                                            ? Color(red: 1.0, green: 0.90, blue: 0.55)
                                            : .white.opacity(0.62))
                         Spacer()

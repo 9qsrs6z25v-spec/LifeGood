@@ -108,10 +108,16 @@ struct VariableExpenseView: View {
         NavigationStack {
             List {
                 Section {
-                    monthSummaryHeader
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                    VStack(spacing: 0) {
+                        monthSummaryHeader
+                        // 超支警示：emoji 小字提示掛在卡片下方（正常時不顯示）
+                        HeroOverspendHint(ratio: overspendRatio,
+                                          monthProgress: monthProgress,
+                                          noun: "變動支出")
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
                 Section {
                     categoryFilter
@@ -228,6 +234,12 @@ struct VariableExpenseView: View {
         return min(day / total, 1.0)
     }
 
+    /// 卡片下方超支提示用的比例（本月變動支出 ÷ 近 3 月均值；與卡內進度條同口徑、不夾住）
+    private var overspendRatio: Double {
+        let avg = trailingMonthlyAverageVariable
+        return avg > 0 ? store.currentMonthVariableTotal / avg : 0
+    }
+
     private var monthSummaryHeader: some View {
         // 一次 filter 同時算筆數與總額，避免 currentMonthExpenses（掃全部支出）被呼叫兩次
         let monthlyVariable = store.currentMonthExpenses.filter { $0.expenseType == .variable }
@@ -293,7 +305,9 @@ struct VariableExpenseView: View {
                 let barRatio = min(rawRatio, 1.0)
                 let barColor: Color = {
                     if rawRatio > 1.0 { return Color(red: 1.0, green: 0.78, blue: 0.75).opacity(0.90) }
-                    if rawRatio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90) }
+                    if rawRatio > monthProgress + HeroOverspendHint.warnLead {
+                        return Color(red: 1.0, green: 0.65, blue: 0.22).opacity(0.90)
+                    }
                     return .white.opacity(0.82)
                 }()
                 VStack(spacing: 5) {
@@ -326,17 +340,14 @@ struct VariableExpenseView: View {
                     }
                     .frame(height: 6)
                     HStack {
-                        HStack(spacing: 3) {
-                            if rawRatio > monthProgress + 0.08 {
-                                Image(systemName: rawRatio > 1.0 ? "flame.fill" : "exclamationmark.triangle.fill")
-                                    .font(.system(size: 8))
-                            }
-                            Text("支出 \(Int(rawRatio * 100))%（均）")
-                        }
+                        // 警示圖示已移至卡片下方的 HeroOverspendHint（emoji 小字提示）
+                        Text("支出 \(Int(rawRatio * 100))%（均）")
                         .font(.caption2)
                         .foregroundStyle({
                             if rawRatio > 1.0 { return Color(red: 1.0, green: 0.78, blue: 0.75) }
-                            if rawRatio > monthProgress + 0.08 { return Color(red: 1.0, green: 0.90, blue: 0.55) }
+                            if rawRatio > monthProgress + HeroOverspendHint.warnLead {
+                                return Color(red: 1.0, green: 0.90, blue: 0.55)
+                            }
                             return .white.opacity(0.60) as Color
                         }())
                         Spacer()
