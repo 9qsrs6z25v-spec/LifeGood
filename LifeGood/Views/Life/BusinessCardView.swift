@@ -487,8 +487,6 @@ struct BusinessCardView: View {
         let totalCards = lifeStore.businessCards.count
         let companyCount = Set(lifeStore.businessCards.map { $0.company }.filter { !$0.isEmpty }).count
         let contactCount = lifeStore.businessCards.filter { !$0.phones.isEmpty || !$0.emails.isEmpty }.count
-        let accentTop = Color(red: 1.00, green: 0.58, blue: 0.28)
-        let accentBot = Color(red: 0.90, green: 0.28, blue: 0.55)
 
         return VStack(spacing: 0) {
             HStack(alignment: .top) {
@@ -497,7 +495,7 @@ struct BusinessCardView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text("\(totalCards) 張名片")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
@@ -536,42 +534,7 @@ struct BusinessCardView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [accentTop, accentBot],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 85, y: -50)
-                    .blur(radius: 14)
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 75, height: 75)
-                    .offset(x: -65, y: 45)
-                    .blur(radius: 9)
-                // v2：第三顆散景裝飾圓，中右側
-                Circle()
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 20, y: 30)
-                    .blur(radius: 8)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        // v2：玻璃光澤高光覆層
-        .overlay(
-            LinearGradient(
-                colors: [.white.opacity(0.18), .clear],
-                startPoint: .top,
-                endPoint: .center
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-        )
-        .shadow(color: accentBot.opacity(0.42), radius: 16, x: 0, y: 8)
+        .heroCardShell(card: .businessCardList)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)

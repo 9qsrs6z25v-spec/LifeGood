@@ -176,106 +176,55 @@ struct GradeTitleView: View {
     // MARK: - Hero Card
 
     private var heroCard: some View {
-        ZStack(alignment: .topTrailing) {
-            LinearGradient(
-                colors: [Color.indigo, Color.purple.opacity(0.85)],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-
-            // [v2] 玻璃光澤 glass shine overlay（與 App 全局英雄卡一致）
-            LinearGradient(
-                colors: [.white.opacity(0.18), .clear],
-                startPoint: .top, endPoint: .center
-            )
-
-            // 第一顆散景圓（右上）
-            Circle()
-                .fill(Color.white.opacity(0.08))
-                .frame(width: 160, height: 160)
-                .blur(radius: 30)
-                .offset(x: 40, y: -30)
-
-            // [v2] 第二顆散景圓（左下）
-            Circle()
-                .fill(Color.purple.opacity(0.14))
-                .frame(width: 90, height: 90)
-                .blur(radius: 22)
-                .offset(x: -50, y: 50)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-
-            // [v2] 第三顆散景圓（右下，細小）
-            Circle()
-                .fill(Color.white.opacity(0.06))
-                .frame(width: 60, height: 60)
-                .blur(radius: 14)
-                .offset(x: 20, y: 30)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(colors: [.white.opacity(0.30), .white.opacity(0.10)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 44, height: 44)
-                        Circle()
-                            .stroke(Color.white.opacity(0.25), lineWidth: 1)
-                            .frame(width: 44, height: 44)
-                        Image(systemName: "person.badge.shield.checkmark.fill")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("部門職等總覽")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.85))
-                        Text("組織架構與職涯層級")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.60))
-                    }
-                    Spacer()
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [.white.opacity(0.30), .white.opacity(0.10)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 44, height: 44)
+                    Circle()
+                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "person.badge.shield.checkmark.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
                 }
-
-                HStack(spacing: 0) {
-                    kpiCell(title: "部門數", value: "\(lifeStore.departments.count)", unit: "個")
-                    Divider().frame(height: 36).background(.white.opacity(0.25))
-                    kpiCell(title: "職等數", value: "\(lifeStore.gradeTitles.count)", unit: "級")
-                    Divider().frame(height: 36).background(.white.opacity(0.25))
-                    // syncReverseLinks 會把每條上下游關係雙向寫入兩個部門（A 的 upstream 對應 B 的
-                    // downstream），直接加總 upstreamIds+downstreamIds 會把每條關係算兩次，故除以 2。
-                    let connCount = lifeStore.departments.reduce(0) { $0 + $1.upstreamIds.count + $1.downstreamIds.count } / 2
-                    kpiCell(title: "關聯鏈", value: "\(connCount)", unit: "條")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("部門職等總覽")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                    Text("組織架構與職涯層級")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.60))
                 }
-                .padding(.top, 4)
+                Spacer()
             }
-            .padding(20)
+
+            HStack(spacing: 0) {
+                HeroKpiCell(label: "部門數", value: "\(lifeStore.departments.count) 個",
+                            icon: "building.2.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "職等數", value: "\(lifeStore.gradeTitles.count) 級",
+                            icon: "chart.bar.doc.horizontal.fill")
+                HeroKpiDivider()
+                // syncReverseLinks 會把每條上下游關係雙向寫入兩個部門（A 的 upstream 對應 B 的
+                // downstream），直接加總 upstreamIds+downstreamIds 會把每條關係算兩次，故除以 2。
+                let connCount = lifeStore.departments.reduce(0) { $0 + $1.upstreamIds.count + $1.downstreamIds.count } / 2
+                HeroKpiCell(label: "關聯鏈", value: "\(connCount) 條",
+                            icon: "link")
+            }
+            .padding(.top, 4)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color.indigo.opacity(0.28), radius: 16, x: 0, y: 8)
-        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .heroCardShell(card: .gradeTitle)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .opacity(heroAppeared ? 1 : 0)
         .offset(y: heroAppeared ? 0 : -16)
     }
 
-    private func kpiCell(title: String, value: String, unit: String) -> some View {
-        VStack(spacing: 3) {
-            HStack(alignment: .lastTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
-                    .contentTransition(.numericText())
-                Text(unit)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.70))
-            }
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.60))
-        }
-        .frame(maxWidth: .infinity)
-    }
 
     // MARK: - Section Header
 

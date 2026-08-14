@@ -85,15 +85,29 @@ import SwiftUI
 //   calendar travelMapStats travelMapDetail foodMapStats foodMapDetail
 //
 // 尚未遷移（結構不同，需各自改寫版面才能接殼層，不硬套以免退化）：
-//   · subordinateOverview  卡片本體是 ZStack 而非 .background()，殼層無處可掛
-//   · gradeTitle           同上；且散景圓其中一顆是紫色（遷移後會收斂成白，
-//                          屆時可用單卡「散景圓顏色」覆寫救回）
-//   · businessCardList     玻璃光澤掛在 .overlay 而非背景層，遷移須先搬進背景
 //   · businessCardDetail   圓角 18 非 20、無光澤層、雙層陰影，與列表卡是兩張
 //                          不同規格的卡（拆成兩個身分的原因）
 //   · settings             漸層依訂閱狀態動態切換（付費綠／未付費紫），
 //                          殼層目前只吃靜態卡片身分，需先想清楚動態色怎麼表達
 //   · eInvoice             圓角非 20、僅兩顆散景圓，版面結構與其餘不同型
+//
+// ─────────────────────────────────────────────────────────────────────────
+// 【Phase 3c 遷移狀態】ZStack 型卡片改接殼層（v25.213）
+// ─────────────────────────────────────────────────────────────────────────
+// subordinateOverview / gradeTitle / businessCardList 三張遷移完成，
+// 共 22 張走同一套殼層。三張原本都是「ZStack 疊背景層 + 內容 + 光澤覆層」，
+// 改寫成「內容 .padding() .heroCardShell(card:)」——內容不動，只是背景層
+// 從手刻改成殼層供應。已知收斂：
+//   · subordinateOverview 散景圓 140/90/55 → 130/80/55、偏移量改用殼層標準
+//     （原本是 topLeading 對齊的絕對座標 x:200，殼層是置中相對偏移）；
+//     陰影 .38/14/6 + black.10/4/2 → .42/16/8 單層；KPI 分隔線 48 → 28。
+//   · gradeTitle 第二顆紫色散景圓收斂成白（要救回用單卡「散景圓顏色」覆寫）；
+//     散景圓 160/90/60 → 130/80/55、模糊 30/22/14 → 14/10/8（原本糊很多）；
+//     陰影 indigo.28/16/8 + black.06/4/2 → 出廠 .42/16/8 單層；
+//     出廠漸層更正為實測的 indigo → purple.85（原本表裡填的是估計值）。
+//     KPI 的「值 + 單位」雙段基線對齊收斂成單段（「3」「個」→「3 個」），
+//     並補上圖示（部門／職等／關聯鏈）讓「圖示在上」排法有東西可顯示。
+//   · businessCardList 散景圓 130/75/55 → 130/80/55；大字 30 → 全域 32。
 //
 // ─────────────────────────────────────────────────────────────────────────
 // 【Phase 3b 遷移狀態】KPI 橫列與主數值大字（v25.211）
@@ -165,9 +179,7 @@ enum HeroCard: String, CaseIterable, Identifiable {
     /// 這個屬性連同設定頁的標示一起刪掉。
     var isWired: Bool {
         switch self {
-        case .subordinateOverview, .gradeTitle,
-             .businessCardList, .businessCardDetail,
-             .settings, .eInvoice:
+        case .businessCardDetail, .settings, .eInvoice:
             return false
         default:
             return true
@@ -257,8 +269,8 @@ enum HeroCard: String, CaseIterable, Identifiable {
             // BusinessCardDetailView.heroCard：橘 → 粉 .85 → 紫 .70 三色
             return [.orange, .pink.opacity(0.85), .purple.opacity(0.70)]
         case .gradeTitle:
-            return [Color(red: 0.42, green: 0.36, blue: 0.90),
-                    Color(red: 0.26, green: 0.20, blue: 0.70)]
+            // GradeTitleView.heroCard 實測：系統 indigo → purple.85
+            return [.indigo, .purple.opacity(0.85)]
         case .spouseResume:
             // Self.heroAccent / heroAccentDark（SpouseResumeView:167）
             return [Color(red: 0.96, green: 0.35, blue: 0.58),

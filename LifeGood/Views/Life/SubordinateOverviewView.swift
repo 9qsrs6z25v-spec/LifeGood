@@ -1105,115 +1105,51 @@ struct SubordinateOverviewView: View {
     // MARK: - 英雄摘要卡
 
     private func summaryHeroCard(leaveCnt: Int, meetCnt: Int, taskCnt: Int) -> some View {
-        ZStack(alignment: .topLeading) {
-            // 主漸層背景
-            LinearGradient(
-                colors: [Color(red: 0.17, green: 0.54, blue: 0.90),
-                         Color(red: 0.05, green: 0.78, blue: 0.72)],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-
-            // v3：散景裝飾圓升級至全 App 標準規格（140/90/55 pt，opacity 0.13/0.08/0.06）
-            // 右上主散景圓
-            Circle()
-                .fill(Color.white.opacity(0.13))
-                .frame(width: 140, height: 140)
-                .blur(radius: 14)
-                .offset(x: 200, y: -50)
-            // 左下次散景圓
-            Circle()
-                .fill(Color.white.opacity(0.08))
-                .frame(width: 90, height: 90)
-                .blur(radius: 10)
-                .offset(x: -30, y: 60)
-            // 中右微散景圓
-            Circle()
-                .fill(Color.white.opacity(0.06))
-                .frame(width: 55, height: 55)
-                .blur(radius: 8)
-                .offset(x: 180, y: 52)
-
-            VStack(alignment: .leading, spacing: 12) {
-                // 標題列
-                HStack(spacing: 8) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.white.opacity(0.22))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: "person.3.sequence.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    Text("部屬總覽")
-                        .font(.headline.weight(.bold))
+        VStack(alignment: .leading, spacing: 12) {
+            // 標題列
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.22))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "person.3.sequence.fill")
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white)
-                    Spacer()
-                    Text("共 \(lifeStore.subordinates.count) 人")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.88))
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Color.white.opacity(0.20))
-                        .clipShape(Capsule())
-                        // v3：補 stroke 細邊框，對齊全 App Capsule 計數徽章規格
-                        .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
                 }
-
-                Rectangle()
-                    .fill(Color.white.opacity(0.22))
-                    .frame(height: 0.5)
-
-                // KPI 三格（v3：分隔線高度由 36 升至 48 以配合圖示圓高度）
-                HStack(spacing: 0) {
-                    heroKpiCell(value: "\(leaveCnt)", label: "今日請假",
-                                icon: "calendar.badge.minus")
-                    Rectangle().fill(Color.white.opacity(0.22)).frame(width: 0.5, height: 48)
-                    heroKpiCell(value: "\(meetCnt)", label: "今日會議",
-                                icon: "person.3.fill")
-                    Rectangle().fill(Color.white.opacity(0.22)).frame(width: 0.5, height: 48)
-                    heroKpiCell(value: "\(taskCnt)", label: "待辦任務",
-                                icon: "tray.full.fill")
-                }
+                Text("部屬總覽")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("共 \(lifeStore.subordinates.count) 人")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Color.white.opacity(0.20))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.30), lineWidth: 0.75))
             }
-            .padding(16)
 
-            // 玻璃光澤覆層
-            LinearGradient(
-                colors: [.white.opacity(0.18), .clear],
-                startPoint: .top, endPoint: .center
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .allowsHitTesting(false)
+            Rectangle()
+                .fill(Color.white.opacity(0.22))
+                .frame(height: 0.5)
+
+            HStack(spacing: 0) {
+                HeroKpiCell(label: "今日請假", value: "\(leaveCnt)",
+                            icon: "calendar.badge.minus")
+                HeroKpiDivider()
+                HeroKpiCell(label: "今日會議", value: "\(meetCnt)",
+                            icon: "person.3.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "待辦任務", value: "\(taskCnt)",
+                            icon: "tray.full.fill")
+            }
         }
+        .padding(16)
         .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        // v3：主色光暈 opacity 由 0.30 升至 0.38，對齊 SubordinateDetailView.headerCard 規格
-        .shadow(color: Color(red: 0.17, green: 0.54, blue: 0.90).opacity(0.38), radius: 14, x: 0, y: 6)
-        .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
+        .heroCardShell(card: .subordinateOverview)
         .padding(.horizontal)
     }
 
-    // v3：補渲染 icon 圓（原 icon 參數未使用），對齊 vehicleKpiCell / statsStrip 規格
-    private func heroKpiCell(value: String, label: String, icon: String) -> some View {
-        VStack(spacing: 4) {
-            ZStack {
-                Circle()
-                    .fill(.white.opacity(0.20))
-                    .frame(width: 28, height: 28)
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            Text(value)
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .contentTransition(.numericText())
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.80))
-        }
-        .frame(maxWidth: .infinity)
-    }
 
     // MARK: - 輔助元件
 
