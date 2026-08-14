@@ -916,40 +916,7 @@ struct MyCalendarView: View {
             }
         }
         .padding(20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.28, green: 0.48, blue: 0.90),
-                        Color(red: 0.16, green: 0.30, blue: 0.72)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 90, y: -50)
-                    .blur(radius: 14)
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 85, height: 85)
-                    .offset(x: -65, y: 52)
-                    .blur(radius: 10)
-                Circle()
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 28, y: 28)
-                    .blur(radius: 8)
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.16, green: 0.30, blue: 0.72).opacity(0.42), radius: 18, x: 0, y: 9)
+        .heroCardShell(card: .calendar)
         .padding(.horizontal)
     }
 

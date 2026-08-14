@@ -410,43 +410,7 @@ struct OverviewView: View {
             }
         }
         .padding(20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.16, green: 0.74, blue: 0.50),
-                        Color(red: 0.07, green: 0.50, blue: 0.38)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 裝飾性散景圓，增加卡片層次感
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 90, height: 90)
-                    .offset(x: -70, y: 55)
-                    .blur(radius: 10)
-                // [v4] 第三顆散景圓（中右微光），對齊 IncomeView / VariableExpenseView 三顆散景設計規格
-                Circle()
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 30, y: 42)
-                    .blur(radius: 8)
-                // [v3] 頂部玻璃光澤：LinearGradient white→clear，對齊 FinanceOverviewView totalAssetsCard 規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.42), radius: 18, x: 0, y: 9)
+        .heroCardShell(card: .overview)
     }
 
     // MARK: - 摘要小卡

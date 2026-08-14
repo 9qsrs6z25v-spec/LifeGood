@@ -459,41 +459,7 @@ struct VehicleView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [heroAccent, heroAccentDark],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 85, y: -50)
-                    .blur(radius: 14)
-                // 左下次散景圓
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 75, height: 75)
-                    .offset(x: -65, y: 45)
-                    .blur(radius: 9)
-                // 右下微光
-                Circle()
-                    .fill(.white.opacity(0.05))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 95, y: 40)
-                    .blur(radius: 10)
-                // [v3] 頂部玻璃光澤：LinearGradient white→clear，對齊全 App 英雄卡 glass shine 規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: heroAccentDark.opacity(0.42), radius: 16, x: 0, y: 8)
+        .heroCardShell(card: .vehicle)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)

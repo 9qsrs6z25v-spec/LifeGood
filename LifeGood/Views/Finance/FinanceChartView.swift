@@ -263,44 +263,7 @@ struct FinanceChartView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.44, green: 0.30, blue: 0.88),
-                        Color(red: 0.28, green: 0.16, blue: 0.68)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.11))
-                    .frame(width: 150, height: 150)
-                    .offset(x: 90, y: -58)
-                    .blur(radius: 16)
-                // 左下補光
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 90, height: 90)
-                    .offset(x: -65, y: 52)
-                    .blur(radius: 10)
-                // 中右第三顆散景（對齊 ChartView v4 三顆散景規格）
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 30, y: 28)
-                    .blur(radius: 8)
-                // 頂部玻璃光澤（對齊全 App 英雄卡片 glass shine 規格）
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.28, green: 0.16, blue: 0.68).opacity(0.42), radius: 18, x: 0, y: 9)
+        .heroCardShell(card: .financeChart)
     }
 
     private func heroKpiCell(label: String, value: String, icon: String) -> some View {

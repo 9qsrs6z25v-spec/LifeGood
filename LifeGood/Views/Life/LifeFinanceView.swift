@@ -495,42 +495,7 @@ struct LifeFinanceView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [heroAccent, heroAccentDark],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                // 左下補光
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 90, height: 90)
-                    .offset(x: -70, y: 55)
-                    .blur(radius: 10)
-                // 右下小散景（增加層次）
-                Circle()
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 60, y: 40)
-                    .blur(radius: 8)
-                // 玻璃光澤：頂部白色漸層 → 透明，對齊全 App 英雄卡規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        // [對齊 SavingsInsuranceView 看板規格] 圓角 20 卡片 + 16pt 水平內縮，取代原本滿版無圓角橫幅
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: heroAccentDark.opacity(0.42), radius: 16, x: 0, y: 8)
+        .heroCardShell(card: .lifeFinance)
         .padding(.horizontal, 16)
     }
 

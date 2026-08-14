@@ -259,43 +259,7 @@ struct SpouseResumeView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [accent, accentDark],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                // 左下補光
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 90, height: 90)
-                    .offset(x: -70, y: 55)
-                    .blur(radius: 10)
-                // 中右小散景
-                Circle()
-                    .fill(.white.opacity(0.05))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 55, y: 38)
-                    .blur(radius: 8)
-                // [v2-A] 頂部玻璃光澤：白→透明，對齊全 App 英雄卡片光澤標準
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        // [v3] 雙層 shadow：主色光暈 + 黑底基礎，對齊 FamilyMembersResumeView v3 / SubordinateOverviewView v3 規格
-        .shadow(color: accentDark.opacity(0.42), radius: 16, x: 0, y: 8)
-        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 4)
+        .heroCardShell(card: .spouseResume)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)

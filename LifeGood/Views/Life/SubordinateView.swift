@@ -508,44 +508,7 @@ struct SubordinateView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.22, green: 0.53, blue: 0.98),
-                        Color(red: 0.10, green: 0.35, blue: 0.82)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 85, y: -50)
-                    .blur(radius: 14)
-                // 左下次散景圓
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 80, height: 80)
-                    .offset(x: -65, y: 50)
-                    .blur(radius: 10)
-                // [2026-06 v2] 第三顆中右散景圓（對齊 v3+ hero card 標準）
-                Circle()
-                    .fill(.white.opacity(0.055))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 30, y: 40)
-                    .blur(radius: 8)
-                // [2026-06 v2] 玻璃光澤（對齊 v3+ hero card 標準）
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.10, green: 0.35, blue: 0.82).opacity(0.42), radius: 16, x: 0, y: 8)
+        .heroCardShell(card: .subordinateList)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)

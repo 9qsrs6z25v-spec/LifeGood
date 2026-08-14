@@ -374,42 +374,7 @@ struct RealEstateView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.48, green: 0.25, blue: 0.80),
-                        Color(red: 0.25, green: 0.15, blue: 0.60)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 散景裝飾圓（加入 .blur 讓邊緣柔和，與其他英雄卡一致）
-                Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 130, height: 130)
-                    .offset(x: 90, y: -50)
-                    .blur(radius: 14)
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 78, height: 78)
-                    .offset(x: -72, y: 48)
-                    .blur(radius: 10)
-                Circle()
-                    .fill(.white.opacity(0.05))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 80, y: 42)
-                    .blur(radius: 8)
-                // [v4] 頂部玻璃光澤：LinearGradient white→clear，對齊全 App 英雄卡 glass shine 統一規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.25, green: 0.15, blue: 0.60).opacity(0.42), radius: 16, x: 0, y: 8)
+        .heroCardShell(card: .realEstate)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 4)

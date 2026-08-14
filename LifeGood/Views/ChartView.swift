@@ -437,44 +437,7 @@ struct ChartView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.16, green: 0.74, blue: 0.50),
-                        Color(red: 0.07, green: 0.50, blue: 0.38)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                // 左下補光
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 90, height: 90)
-                    .offset(x: -70, y: 55)
-                    .blur(radius: 10)
-                // [v4] 中右輔助散景圓（對齊 IncomeView / VariableExpenseView 三顆散景規格）
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 30, y: 28)
-                    .blur(radius: 8)
-                // [v4] glass shine 頂部白色漸層（對齊全 App 英雄卡片 glass shine 統一規格）
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.07, green: 0.50, blue: 0.38).opacity(0.42), radius: 18, x: 0, y: 9)
+        .heroCardShell(card: .chart)
     }
 
     private func heroPeriodChip(_ period: TimePeriod) -> some View {

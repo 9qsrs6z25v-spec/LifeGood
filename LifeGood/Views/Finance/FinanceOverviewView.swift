@@ -297,36 +297,7 @@ struct FinanceOverviewView: View {
             }
         }
         .padding(20)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.14, green: 0.64, blue: 0.60),
-                        Color(red: 0.07, green: 0.46, blue: 0.42)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 90, height: 90)
-                    .offset(x: -70, y: 55)
-                    .blur(radius: 10)
-                // [v3] 頂部玻璃光澤：LinearGradient white→clear，對齊 OverviewView.monthlyBalanceCard v3 規格
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.07, green: 0.46, blue: 0.42).opacity(0.42), radius: 18, x: 0, y: 9)
+        .heroCardShell(card: .financeOverview)
     }
 
     // MARK: - 資產類別卡片

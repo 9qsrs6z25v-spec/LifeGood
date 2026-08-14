@@ -662,42 +662,7 @@ struct FoodMapView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 1.00, green: 0.55, blue: 0.18),
-                        Color(red: 0.85, green: 0.32, blue: 0.05)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // [v3] 三顆散景裝飾圓
-                Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 120, height: 120)
-                    .offset(x: 80, y: -40)
-                    .blur(radius: 12)
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 70, height: 70)
-                    .offset(x: -55, y: 42)
-                    .blur(radius: 8)
-                Circle()
-                    .fill(.white.opacity(0.05))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 50, y: 30)
-                    .blur(radius: 6)
-                // [v3] 頂部玻璃光澤
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top, endPoint: .center
-                )
-                .allowsHitTesting(false)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.85, green: 0.32, blue: 0.05).opacity(0.38), radius: 14, x: 0, y: 7)
+        .heroCardShell(card: .foodMapStats)
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 4)
@@ -1014,42 +979,7 @@ struct RestaurantDetailSheet: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
         .frame(maxWidth: .infinity)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 1.00, green: 0.55, blue: 0.18),
-                        Color(red: 0.85, green: 0.32, blue: 0.05)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // [v3] 三顆散景裝飾圓
-                Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 110, height: 110)
-                    .offset(x: 70, y: -35)
-                    .blur(radius: 12)
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 65, height: 65)
-                    .offset(x: -50, y: 35)
-                    .blur(radius: 8)
-                Circle()
-                    .fill(.white.opacity(0.04))
-                    .frame(width: 50, height: 50)
-                    .offset(x: 40, y: 28)
-                    .blur(radius: 6)
-                // [v3] 玻璃光澤
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top, endPoint: .center
-                )
-                .allowsHitTesting(false)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.85, green: 0.32, blue: 0.05).opacity(0.38), radius: 14, x: 0, y: 7)
+        .heroCardShell(card: .foodMapDetail)
         .padding(.horizontal)
     }
 

@@ -574,24 +574,7 @@ struct TravelMapView: View {
             .padding(.top, 12)
         }
         .padding(.horizontal, 20).padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(colors: [Color(red: 0.62, green: 0.36, blue: 1.0),
-                                        Color(red: 0.42, green: 0.16, blue: 0.82)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                // 三顆散景裝飾圓（對齊 FoodMapView.statsCard v3 規格）
-                Circle().fill(.white.opacity(0.12)).frame(width: 120, height: 120)
-                    .offset(x: 80, y: -40).blur(radius: 12)
-                Circle().fill(.white.opacity(0.07)).frame(width: 70, height: 70)
-                    .offset(x: -55, y: 42).blur(radius: 8)
-                Circle().fill(.white.opacity(0.05)).frame(width: 55, height: 55)
-                    .offset(x: 50, y: 30).blur(radius: 6)
-                LinearGradient(colors: [.white.opacity(0.18), .clear], startPoint: .top, endPoint: .center)
-                    .allowsHitTesting(false)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.42, green: 0.16, blue: 0.82).opacity(0.38), radius: 14, x: 0, y: 7)
+        .heroCardShell(card: .travelMapStats)
         .padding(.horizontal)
         .opacity(statsCardAppeared ? 1 : 0)
         .offset(y: statsCardAppeared ? 0 : 20)
@@ -820,24 +803,7 @@ struct TravelSpotDetailSheet: View {
             .padding(.top, 14)
         }
         .padding(.horizontal, 20).padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(colors: [Color(red: 0.62, green: 0.36, blue: 1.0),
-                                        Color(red: 0.42, green: 0.16, blue: 0.82)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                // 三顆散景裝飾圓 + 頂部玻璃光澤（對齊 FoodMapView.headerCard v3 規格）
-                Circle().fill(.white.opacity(0.12)).frame(width: 110, height: 110)
-                    .offset(x: 70, y: -35).blur(radius: 12)
-                Circle().fill(.white.opacity(0.07)).frame(width: 65, height: 65)
-                    .offset(x: -50, y: 35).blur(radius: 8)
-                Circle().fill(.white.opacity(0.04)).frame(width: 50, height: 50)
-                    .offset(x: 40, y: 28).blur(radius: 6)
-                LinearGradient(colors: [.white.opacity(0.18), .clear], startPoint: .top, endPoint: .center)
-                    .allowsHitTesting(false)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.42, green: 0.16, blue: 0.82).opacity(0.35), radius: 14, x: 0, y: 7)
+        .heroCardShell(card: .travelMapDetail)
         .padding(.horizontal)
         .opacity(cardAppeared ? 1 : 0)
         .offset(y: cardAppeared ? 0 : 20)

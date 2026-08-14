@@ -225,47 +225,7 @@ struct LifeRealEstateView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.50, green: 0.30, blue: 0.90),
-                        Color(red: 0.32, green: 0.14, blue: 0.72)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.13))
-                    .frame(width: 140, height: 140)
-                    .offset(x: 90, y: -55)
-                    .blur(radius: 14)
-                // 左下次散景圓
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 90, height: 90)
-                    .offset(x: -70, y: 55)
-                    .blur(radius: 10)
-                // 右下微光
-                Circle()
-                    .fill(.white.opacity(0.05))
-                    .frame(width: 55, height: 55)
-                    .offset(x: 80, y: 40)
-                    .blur(radius: 10)
-                // [v2] 頂部玻璃反光覆蓋層（對齊 OverviewView.monthlyBalanceCard v3 規格）
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-                .allowsHitTesting(false)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        // [v3] 雙層 shadow：主色光暈 + 黑底基礎陰影（對齊 SubordinateOverviewView v3 規格）
-        .shadow(color: Color(red: 0.32, green: 0.14, blue: 0.72).opacity(0.52), radius: 18, x: 0, y: 9)
-        .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+        .heroCardShell(card: .lifeRealEstate)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 8)

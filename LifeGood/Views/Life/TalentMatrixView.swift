@@ -434,49 +434,7 @@ struct TalentMatrixView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
-        .background(
-            ZStack {
-                // 藍紫漸層底色
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.30, green: 0.25, blue: 0.90),
-                        Color(red: 0.18, green: 0.40, blue: 0.92)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                // 右上主散景圓
-                Circle()
-                    .fill(.white.opacity(0.10))
-                    .frame(width: 120, height: 120)
-                    .offset(x: 80, y: -45)
-                    .blur(radius: 14)
-                    .allowsHitTesting(false)
-                // 左下次散景圓
-                Circle()
-                    .fill(.white.opacity(0.07))
-                    .frame(width: 80, height: 80)
-                    .offset(x: -50, y: 45)
-                    .blur(radius: 10)
-                    .allowsHitTesting(false)
-                // 中右微型散景圓（三顆散景圓標準）
-                Circle()
-                    .fill(.white.opacity(0.05))
-                    .frame(width: 50, height: 50)
-                    .offset(x: 55, y: 18)
-                    .blur(radius: 8)
-                    .allowsHitTesting(false)
-                // 頂部玻璃光澤
-                LinearGradient(
-                    colors: [.white.opacity(0.18), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-                .allowsHitTesting(false)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(red: 0.18, green: 0.25, blue: 0.88).opacity(0.38), radius: 16, x: 0, y: 8)
+        .heroCardShell(card: .talentMatrix)
         .padding(.horizontal)
         .opacity(heroCardAppeared ? 1 : 0)
         .offset(y: heroCardAppeared ? 0 : 18)

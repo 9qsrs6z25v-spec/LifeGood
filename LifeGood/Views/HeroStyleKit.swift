@@ -74,6 +74,23 @@ import SwiftUI
 // 【KPI 豎分隔線高度現況】28(標準) / 32(foodMap) / 36(lifeFinance,lifeRealEstate,eInvoice) / 48(subordinateOvw)
 // 【KPI 容器現況】白.08+圓角10+內距10(標準) / 白.10+內距8(addStock) / 有描邊(lifeFinance) / 裸排(travelMapDetail)
 //
+// ─────────────────────────────────────────────────────────────────────────
+// 【Phase 3a 遷移狀態】19 張已接殼層 / 5 張待處理
+// ─────────────────────────────────────────────────────────────────────────
+// 已遷移（v25.209 五張 + v25.210 十四張）：income variableExpense fixedExpense
+//   stock savings overview chart vehicle realEstate financeOverview financeChart
+//   lifeFinance lifeRealEstate subordinateList talentMatrix spouseResume
+//   calendar travelMapStats travelMapDetail foodMapStats foodMapDetail
+//
+// 尚未遷移（結構不同，需各自改寫版面才能接殼層，不硬套以免退化）：
+//   · subordinateOverview  卡片本體是 ZStack 而非 .background()，殼層無處可掛
+//   · gradeTitle           同上；且散景圓其中一顆是紫色（遷移後會收斂成白，
+//                          屆時可用單卡「散景圓顏色」覆寫救回）
+//   · businessCard         玻璃光澤掛在 .overlay 而非背景層，遷移須先搬進背景
+//   · settings             漸層依訂閱狀態動態切換（付費綠／未付費紫），
+//                          殼層目前只吃靜態卡片身分，需先想清楚動態色怎麼表達
+//   · eInvoice             圓角非 20、僅兩顆散景圓，版面結構與其餘不同型
+//
 // ═══════════════════════════════════════════════════════════════════════════
 
 // MARK: - 卡片身分
@@ -155,10 +172,13 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .income, .overview, .chart, .settings, .legacy:
             return [Color(red: 0.16, green: 0.74, blue: 0.50),
                     Color(red: 0.07, green: 0.50, blue: 0.38)]
-        case .variableExpense, .stock, .foodMapStats, .foodMapDetail:
+        case .variableExpense, .stock:
             return [Color(red: 1.00, green: 0.62, blue: 0.22),
                     Color(red: 0.86, green: 0.36, blue: 0.06)]
-        case .fixedExpense, .savings, .lifeFinance:
+        case .foodMapStats, .foodMapDetail:
+            return [Color(red: 1.00, green: 0.55, blue: 0.18),
+                    Color(red: 0.85, green: 0.32, blue: 0.05)]
+        case .fixedExpense, .savings, .lifeFinance, .subordinateList:
             return [Color(red: 0.22, green: 0.53, blue: 0.98),
                     Color(red: 0.10, green: 0.35, blue: 0.82)]
         case .vehicle:
@@ -174,11 +194,17 @@ enum HeroCard: String, CaseIterable, Identifiable {
             return [Color(red: 0.44, green: 0.30, blue: 0.88),
                     Color(red: 0.28, green: 0.16, blue: 0.68)]
         case .lifeRealEstate:
-            return [Color(red: 0.55, green: 0.28, blue: 0.92),
+            return [Color(red: 0.50, green: 0.30, blue: 0.90),
                     Color(red: 0.32, green: 0.14, blue: 0.72)]
-        case .subordinateOverview, .subordinateList, .talentMatrix, .calendar:
+        case .subordinateOverview:
             return [Color(red: 0.17, green: 0.54, blue: 0.90),
                     Color(red: 0.05, green: 0.78, blue: 0.72)]
+        case .calendar:
+            return [Color(red: 0.28, green: 0.48, blue: 0.90),
+                    Color(red: 0.16, green: 0.30, blue: 0.72)]
+        case .talentMatrix:
+            return [Color(red: 0.30, green: 0.25, blue: 0.90),
+                    Color(red: 0.18, green: 0.40, blue: 0.92)]
         case .businessCard:
             return [Color(red: 1.00, green: 0.58, blue: 0.28),
                     Color(red: 0.90, green: 0.28, blue: 0.55)]
@@ -186,6 +212,7 @@ enum HeroCard: String, CaseIterable, Identifiable {
             return [Color(red: 0.42, green: 0.36, blue: 0.90),
                     Color(red: 0.26, green: 0.20, blue: 0.70)]
         case .spouseResume:
+            // Self.heroAccent / heroAccentDark（SpouseResumeView:167）
             return [Color(red: 0.96, green: 0.35, blue: 0.58),
                     Color(red: 0.76, green: 0.18, blue: 0.40)]
         case .travelMapStats, .travelMapDetail:
