@@ -256,14 +256,13 @@ struct StockView: View {
         var success = 0
         var fail = 0
 
-        // 整批單一請求：原本逐檔並發、每檔先猜 tse 再猜 otc（上櫃股必打兩發），
-        // 一口氣連發 2N 個請求會觸發 MIS 的 IP 限流——上市股第一發就命中，
-        // 上櫃股的第二發永遠落在超額流量裡被拒，造成「上櫃每次都取不到」。
-        // MIS API 支援 ex_ch 用 | 串接多檔，改為整批一個請求＋記住每檔市場別。
-        let symbolPrices = await fetchPricesBatch(symbols: targets.map(\.symbol))
+        // 報價來源統一走 TWQuoteService（MIS 批次 → TPEx 興櫃批次 → Yahoo 補網）。
+        // 興櫃先前永遠取不到，是因為 MIS 對興櫃代號會回「OK 但全欄位是空的」，
+        // 不是流量問題也不是重試能解決——細節見 TWQuoteService 的說明。
+        let quotes = await TWQuoteService.batch(symbols: targets.map(\.symbol))
         var priceUpdates: [UUID: Double] = [:]
         for stock in targets {
-            if let price = symbolPrices[stock.symbol] {
+            if let price = quotes[stock.symbol]?.price {
                 priceUpdates[stock.id] = price
                 fetchStatus[stock.id] = true
                 success += 1
@@ -326,55 +325,6 @@ struct StockView: View {
             prices: pts.map { HeroTrendPoint(date: $0.date, value: $0.close) },
             volumes: pts.map { HeroTrendPoint(date: $0.date, value: $0.volume) }
         )
-    }
-
-    /// symbol → 已知市場別（tse/otc）快取：從批次回應的 ex 欄位學會後存起來，
-    /// 之後查價未知代號才需要 tse/otc 兩個候選都帶
-    private static let exchangeMapKey = "stock_symbol_exchange_map"
-
-    /// 整批查多檔即時報價（MIS API 的 ex_ch 支援 | 串接）：回傳 symbol → 現價。
-    /// 單一請求取代逐檔並發，避免 MIS IP 限流；每 20 個查詢項分一批保險 URL 長度。
-    private func fetchPricesBatch(symbols: [String]) async -> [String: Double] {
-        var exchangeMap = (UserDefaults.standard.dictionary(forKey: Self.exchangeMapKey)
-                           as? [String: String]) ?? [:]
-        var entries: [String] = []
-        for sym in Array(Set(symbols)).sorted() {
-            if let ex = exchangeMap[sym] {
-                entries.append("\(ex)_\(sym).tw")
-            } else {
-                entries.append("tse_\(sym).tw")
-                entries.append("otc_\(sym).tw")
-            }
-        }
-        var result: [String: Double] = [:]
-        var idx = 0
-        while idx < entries.count {
-            let chunk = Array(entries[idx..<min(idx + 20, entries.count)])
-            idx += 20
-            let exCh = chunk.joined(separator: "|")
-                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            let urlString = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=\(exCh)&json=1&delay=0"
-            guard let url = URL(string: urlString) else { continue }
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let arr = json["msgArray"] as? [[String: Any]] else { continue }
-                for m in arr {
-                    guard let sym = (m["c"] as? String)?.trimmingCharacters(in: .whitespaces),
-                          !sym.isEmpty else { continue }
-                    // 記住市場別：下次批次查價這檔只帶一個候選
-                    if let ex = m["ex"] as? String, !ex.isEmpty { exchangeMap[sym] = ex }
-                    if let z = m["z"] as? String, let p = Double(z), p > 0 {
-                        result[sym] = p
-                    } else if let y = m["y"] as? String, let p = Double(y), p > 0,
-                              result[sym] == nil {
-                        result[sym] = p
-                    }
-                }
-            } catch { continue }
-        }
-        UserDefaults.standard.set(exchangeMap, forKey: Self.exchangeMapKey)
-        return result
     }
 
     // MARK: - 黏著標題
@@ -1041,12 +991,241 @@ struct StockDailyPoint: Codable {
     var low: Double?
 }
 
+// MARK: - 台股報價來源
+
+/// 台股即時報價的單一入口。三段式，先官方、後備援：
+///
+///   ① TWSE MIS 批次（上市 tse_ / 上櫃 otc_）——官方、一個請求打完所有代號、有中文名。
+///   ② TPEx 興櫃 openapi（tpex_esb_latest_statistics）——官方、一個請求拿回全部
+///      興櫃個股（約 350 檔）的中文名與最新成交價。
+///   ③ Yahoo v8 chart 逐檔——不分上市／上櫃／興櫃都查得到，但只有英文名，
+///      而且是非官方 API（同站的 v7 批次報價已經開始回 401），所以只當補網。
+///
+/// 【為什麼興櫃非得多接一個來源】
+/// MIS 對興櫃代號會回 rtcode=0000「OK」，msgArray 也有對應筆數——但每一欄都是空的
+///（c/n 是 null、z 是 "-"）。也就是說它接受頻道名稱但根本沒有這份資料，
+/// 換 tse_／otc_／emg_／oes_ 任何前綴都一樣。這不是流量限制、不是重試能解決的，
+/// 舊版「切頁重取」永遠取不到興櫃就是這個原因。
+///
+/// 【為什麼不乾脆全部改用 Yahoo】
+/// Yahoo 的 .TWO 確實三種市場別都查得到（實測興櫃 1260/1269/1271/2071 的
+/// regularMarketPrice 與 TPEx 官方數字完全一致），但它的 shortName／longName
+/// 是英文（「FLAVOR」／「Flavor Full Foods Inc.」而不是「富味鄉」），
+/// 全面改用會讓中文名整個掉光；而且批次端點沒了，N 檔就是 N 個請求。
+/// 所以維持「官方批次為主、Yahoo 補網」。
+enum TWQuoteService {
+    struct Quote: Sendable {
+        var price: Double
+        var name: String?
+        /// 上市／上櫃／興櫃；查不到來源時為 nil
+        var tier: String?
+        var previousClose: Double?
+    }
+
+    /// symbol → 市場別（tse/otc）：從 MIS 回應學會後記住，之後只帶一個候選頻道
+    private static let exchangeMapKey = "stock_symbol_exchange_map"
+    /// 已知是興櫃的代號：記住後直接走 TPEx，不再浪費 MIS 的兩個候選欄位
+    private static let emergingSetKey = "stock_symbol_emerging_set"
+
+    /// 興櫃全表的行程內快取（一次請求 140KB 上下，同一輪刷新只抓一次）
+    private static var esbCache: (fetchedAt: Date, table: [String: Quote])?
+    private static let esbTTL: TimeInterval = 5 * 60
+
+    // MARK: 對外
+
+    /// 整批查報價。回傳 symbol → Quote；查不到的代號不會出現在結果裡。
+    static func batch(symbols: [String]) async -> [String: Quote] {
+        let wanted = Set(symbols.filter { !$0.isEmpty })
+        guard !wanted.isEmpty else { return [:] }
+
+        var result: [String: Quote] = [:]
+        let emerging = Set(UserDefaults.standard.stringArray(forKey: emergingSetKey) ?? [])
+
+        // ① MIS：已知興櫃的代號直接跳過，不佔 ex_ch 欄位
+        let misTargets = wanted.subtracting(emerging)
+        if !misTargets.isEmpty {
+            result.merge(await fetchMIS(symbols: Array(misTargets))) { a, _ in a }
+        }
+
+        // ② TPEx 興櫃：只在還有代號沒查到時才打
+        let missing = wanted.subtracting(result.keys)
+        if !missing.isEmpty {
+            let table = await fetchEmergingTable()
+            var learned = emerging
+            for sym in missing {
+                if let q = table[sym] {
+                    result[sym] = q
+                    learned.insert(sym)
+                } else if emerging.contains(sym) && !table.isEmpty {
+                    // 這檔先前被記成興櫃，但已經不在興櫃名冊裡了——興櫃轉上櫃是常態路徑。
+                    // 不把它移出集合的話，第 ① 段會永遠跳過它，之後只能靠 Yahoo 補網
+                    // 拿到沒有中文名的報價，而且再也回不到官方來源。
+                    // 條件帶 !table.isEmpty：抓表失敗時回傳空表，那時不能當成「已下市」。
+                    learned.remove(sym)
+                }
+            }
+            if learned != emerging {
+                UserDefaults.standard.set(Array(learned), forKey: emergingSetKey)
+            }
+        }
+
+        // ③ Yahoo 補網：逐檔查，但每輪最多 4 個並發——
+        //    這裡不設上限就是重演 MIS 那次「連發 2N 個請求被 IP 限流」的教訓。
+        let leftovers = Array(wanted.subtracting(result.keys)).sorted()
+        var idx = 0
+        while idx < leftovers.count {
+            let slice = Array(leftovers[idx..<min(idx + 4, leftovers.count)])
+            idx += 4
+            await withTaskGroup(of: (String, Quote?).self) { group in
+                for sym in slice {
+                    group.addTask { (sym, await fetchYahoo(symbol: sym)) }
+                }
+                for await (sym, q) in group {
+                    if let q { result[sym] = q }
+                }
+            }
+        }
+        return result
+    }
+
+    /// 單檔查價（新增／編輯股票頁的「重新查詢」用）
+    static func single(symbol: String) async -> Quote? {
+        await batch(symbols: [symbol])[symbol]
+    }
+
+    // MARK: ① TWSE MIS（上市／上櫃）
+
+    private static func fetchMIS(symbols: [String]) async -> [String: Quote] {
+        var exchangeMap = (UserDefaults.standard.dictionary(forKey: exchangeMapKey)
+                           as? [String: String]) ?? [:]
+        var entries: [String] = []
+        for sym in symbols.sorted() {
+            if let ex = exchangeMap[sym] {
+                entries.append("\(ex)_\(sym).tw")
+            } else {
+                entries.append("tse_\(sym).tw")
+                entries.append("otc_\(sym).tw")
+            }
+        }
+        var result: [String: Quote] = [:]
+        var idx = 0
+        while idx < entries.count {
+            let chunk = Array(entries[idx..<min(idx + 20, entries.count)])
+            idx += 20
+            let exCh = chunk.joined(separator: "|")
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+            let urlString = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=\(exCh)&json=1&delay=0"
+            guard let url = URL(string: urlString) else { continue }
+            do {
+                var req = URLRequest(url: url)
+                req.setValue("https://mis.twse.com.tw/stock/index.jsp", forHTTPHeaderField: "Referer")
+                let (data, _) = try await URLSession.shared.data(for: req)
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let arr = json["msgArray"] as? [[String: Any]] else { continue }
+                for m in arr {
+                    // 興櫃代號在這裡會出現「有筆數但全欄位是空的」的回應，c 為 nil 直接跳過
+                    guard let sym = (m["c"] as? String)?.trimmingCharacters(in: .whitespaces),
+                          !sym.isEmpty else { continue }
+                    let ex = (m["ex"] as? String) ?? ""
+                    if !ex.isEmpty { exchangeMap[sym] = ex }
+                    let z = Double(m["z"] as? String ?? "") ?? 0
+                    let y = Double(m["y"] as? String ?? "") ?? 0
+                    guard z > 0 || y > 0 else { continue }
+                    result[sym] = Quote(
+                        price: z > 0 ? z : y,
+                        name: (m["n"] as? String)?.trimmingCharacters(in: .whitespaces),
+                        tier: ex == "otc" ? "上櫃" : (ex == "tse" ? "上市" : nil),
+                        previousClose: y > 0 ? y : nil
+                    )
+                }
+            } catch { continue }
+        }
+        UserDefaults.standard.set(exchangeMap, forKey: exchangeMapKey)
+        return result
+    }
+
+    // MARK: ② TPEx 興櫃 openapi
+
+    /// 全興櫃表：一個請求拿回全部（約 350 檔），5 分鐘內共用同一份。
+    private static func fetchEmergingTable() async -> [String: Quote] {
+        if let c = esbCache, Date().timeIntervalSince(c.fetchedAt) < esbTTL { return c.table }
+        let urlString = "https://www.tpex.org.tw/openapi/v1/tpex_esb_latest_statistics"
+        guard let url = URL(string: urlString) else { return [:] }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [:] }
+            var table: [String: Quote] = [:]
+            for r in rows {
+                guard let sym = (r["SecuritiesCompanyCode"] as? String)?
+                        .trimmingCharacters(in: .whitespaces), !sym.isEmpty else { continue }
+                // 今日無成交的個股 LatestPrice 會是空字串，退到當日均價、再退到前一日均價
+                let price = Double(r["LatestPrice"] as? String ?? "")
+                    ?? Double(r["Average"] as? String ?? "")
+                    ?? Double(r["PreviousAveragePrice"] as? String ?? "")
+                guard let price, price > 0 else { continue }
+                table[sym] = Quote(
+                    price: price,
+                    name: (r["CompanyName"] as? String)?.trimmingCharacters(in: .whitespaces),
+                    tier: "興櫃",
+                    previousClose: Double(r["PreviousAveragePrice"] as? String ?? "")
+                )
+            }
+            if !table.isEmpty { esbCache = (Date(), table) }
+            return table
+        } catch { return esbCache?.table ?? [:] }
+    }
+
+    // MARK: ③ Yahoo 補網
+
+    private static func fetchYahoo(symbol: String) async -> Quote? {
+        for suffix in StockDailyHistory.suffixCandidates(for: symbol) {
+            let urlString = "https://query1.finance.yahoo.com/v8/finance/chart/\(symbol)\(suffix)?range=1d&interval=1d"
+            guard let url = URL(string: urlString) else { continue }
+            do {
+                var req = URLRequest(url: url)
+                req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+                let (data, _) = try await URLSession.shared.data(for: req)
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let chart = json["chart"] as? [String: Any],
+                      let meta = (chart["result"] as? [[String: Any]])?.first?["meta"] as? [String: Any],
+                      let price = meta["regularMarketPrice"] as? Double, price > 0 else { continue }
+                StockDailyHistory.rememberSuffix(suffix, for: symbol)
+                return Quote(
+                    price: price,
+                    // 這裡刻意不回名字：Yahoo 給的是英文，套進中文介面比留空更糟
+                    name: nil,
+                    tier: nil,
+                    previousClose: meta["chartPreviousClose"] as? Double
+                )
+            } catch { continue }
+        }
+        return nil
+    }
+
+}
+
 /// 個股日線抓取＋快取。既有 TWSE MIS API（getStockInfo.jsp）只有即時價、
 /// 沒有歷史，改用 Yahoo Finance v8 chart API 一次拿 3 個月每日收盤價＋成交量
 ///（免金鑰；台股上市 .TW、上櫃 .TWO 依序嘗試）。非官方 API、僅作項目卡
 /// 背景裝飾用途；失敗時回退快取，快取 6 小時內視為新鮮不重抓。
 enum StockDailyHistory {
     private static let keyPrefix = "stock_daily_history_"
+    private static let suffixMapKey = "stock_symbol_yahoo_suffix_map"
+
+    /// 這檔要試哪些後綴：學過就只試那一個。上櫃與興櫃都是 .TWO，
+    /// 沒有快取時每次都得先撞一發 .TW 才輪到 .TWO——白花一倍請求。
+    static func suffixCandidates(for symbol: String) -> [String] {
+        let map = (UserDefaults.standard.dictionary(forKey: suffixMapKey) as? [String: String]) ?? [:]
+        if let known = map[symbol] { return [known] }
+        return [".TW", ".TWO"]
+    }
+
+    static func rememberSuffix(_ suffix: String, for symbol: String) {
+        var map = (UserDefaults.standard.dictionary(forKey: suffixMapKey) as? [String: String]) ?? [:]
+        guard map[symbol] != suffix else { return }
+        map[symbol] = suffix
+        UserDefaults.standard.set(map, forKey: suffixMapKey)
+    }
 
     private struct CacheEntry: Codable {
         let fetchedAt: Date
@@ -1066,7 +1245,7 @@ enum StockDailyHistory {
     }
 
     static func fetch(symbol: String) async -> [StockDailyPoint] {
-        for suffix in [".TW", ".TWO"] {
+        for suffix in suffixCandidates(for: symbol) {
             let urlString = "https://query1.finance.yahoo.com/v8/finance/chart/\(symbol)\(suffix)?range=3mo&interval=1d"
             guard let url = URL(string: urlString) else { continue }
             do {
@@ -1098,6 +1277,7 @@ enum StockDailyHistory {
                     ))
                 }
                 if out.count >= 2 {
+                    rememberSuffix(suffix, for: symbol)
                     let entry = CacheEntry(fetchedAt: Date(), points: out)
                     if let d = try? JSONEncoder().encode(entry) {
                         UserDefaults.standard.set(d, forKey: keyPrefix + symbol)

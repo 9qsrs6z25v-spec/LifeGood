@@ -630,6 +630,8 @@ struct AddStockView: View {
         fetchError = ""
         defer { isFetching = false }
 
+        // 先走 MIS 拿完整行情（開高低量、時間戳），查不到再退到共用報價服務——
+        // 興櫃在 MIS 完全查不到，得靠 TPEx 官方興櫃表或 Yahoo 補網。
         if let result = await fetchTWSE(symbol: trimmed, exchange: "tse") {
             // 使用者可能在等待網路回應期間已把代號改成別的股票，回應回來時要先確認代號沒變才套用，
             // 避免舊代號的報價套到新代號的欄位上。
@@ -640,6 +642,16 @@ struct AddStockView: View {
         if let result = await fetchTWSE(symbol: trimmed, exchange: "otc") {
             guard symbol.trimmingCharacters(in: .whitespaces) == trimmed else { return }
             applyQuote(result)
+            return
+        }
+        if let q = await TWQuoteService.single(symbol: trimmed) {
+            guard symbol.trimmingCharacters(in: .whitespaces) == trimmed else { return }
+            applyQuote(StockQuote(
+                name: q.name ?? "",
+                exchange: q.tier ?? "",
+                lastPrice: q.price,
+                yesterdayClose: q.previousClose ?? 0
+            ))
             return
         }
 
