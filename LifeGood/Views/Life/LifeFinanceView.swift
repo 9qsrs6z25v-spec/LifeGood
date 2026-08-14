@@ -415,7 +415,7 @@ struct LifeFinanceView: View {
                             .foregroundStyle(.white.opacity(0.78))
                     }
                     Text(balance.ntdWanString)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)

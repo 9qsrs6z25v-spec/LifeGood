@@ -394,10 +394,10 @@ struct AddStockView: View {
 
                 HStack(spacing: 0) {
                     HeroKpiCell(label: "張數", value: "\(lotsText) 張")
-                    Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                    HeroKpiDivider()
                     HeroKpiCell(label: "買入均價", value: "NT$\(purchasePriceText)")
                     if hasCurrentPrice && totalCost > 0 {
-                        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                        HeroKpiDivider()
                         HeroKpiCell(label: "報酬率", value: String(format: "%@%.1f%%",
                                                         returnRate >= 0 ? "+" : "", returnRate))
                     }
@@ -782,16 +782,16 @@ struct AddStockView: View {
                     }
                     if q.highPrice > 0 {
                         if q.openPrice > 0 {
-                            Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                            HeroKpiDivider()
                         }
                         HeroKpiCell(label: "最高", value: String(format: "%.2f", q.highPrice))
                     }
                     if q.lowPrice > 0 {
-                        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                        HeroKpiDivider()
                         HeroKpiCell(label: "最低", value: String(format: "%.2f", q.lowPrice))
                     }
                     if q.yesterdayClose > 0 {
-                        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                        HeroKpiDivider()
                         HeroKpiCell(label: "昨收", value: String(format: "%.2f", q.yesterdayClose))
                     }
                 }

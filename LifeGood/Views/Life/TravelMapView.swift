@@ -549,7 +549,7 @@ struct TravelMapView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("旅遊足跡紀錄").font(.caption).foregroundStyle(.white.opacity(0.80))
                     Text(total.ntdWanString)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white).minimumScaleFactor(0.6).lineLimit(1)
                         .contentTransition(.numericText())
                 }
@@ -562,11 +562,11 @@ struct TravelMapView: View {
                     .foregroundStyle(.white)
             }
             HStack(spacing: 0) {
-                kpiCell(label: "造訪總次", value: "\(visits) 次")
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                kpiCell(label: "足跡縣市", value: "\(cityCount) 個")
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                kpiCell(label: "最常去", value: mostVisited?.name ?? "—")
+                HeroKpiCell(label: "造訪總次", value: "\(visits) 次", icon: "figure.walk")
+                HeroKpiDivider()
+                HeroKpiCell(label: "足跡縣市", value: "\(cityCount) 個", icon: "map.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "最常去", value: mostVisited?.name ?? "—", icon: "star.fill")
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -586,15 +586,6 @@ struct TravelMapView: View {
         .onDisappear { statsCardAppeared = false }
     }
 
-    private func kpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
-            Text(label).font(.caption2).foregroundStyle(.white.opacity(0.68))
-        }
-        .frame(maxWidth: .infinity).padding(.horizontal, 4)
-    }
 
     private func chip(_ text: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {

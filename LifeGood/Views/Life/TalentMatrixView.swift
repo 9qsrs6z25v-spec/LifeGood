@@ -420,13 +420,13 @@ struct TalentMatrixView: View {
 
             // KPI 四格：明星 / 潛力股 / 苦勞型 / 待加強
             HStack(spacing: 0) {
-                heroKpiCell(count: starCount(ctx), label: "明星", color: .green)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                heroKpiCell(count: potentialCount(ctx), label: "潛力股", color: Color(red: 0.50, green: 0.65, blue: 1.0))
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                heroKpiCell(count: hardWorkerCount(ctx), label: "苦勞型", color: Color(red: 1.0, green: 0.78, blue: 0.35))
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                heroKpiCell(count: needsImprovCount(ctx), label: "待加強", color: Color(red: 1.0, green: 0.50, blue: 0.50))
+                heroKpiCell(count: starCount(ctx), label: "明星", icon: "star.fill", color: .green)
+                HeroKpiDivider()
+                heroKpiCell(count: potentialCount(ctx), label: "潛力股", icon: "arrow.up.right.circle.fill", color: Color(red: 0.50, green: 0.65, blue: 1.0))
+                HeroKpiDivider()
+                heroKpiCell(count: hardWorkerCount(ctx), label: "苦勞型", icon: "hammer.fill", color: Color(red: 1.0, green: 0.78, blue: 0.35))
+                HeroKpiDivider()
+                heroKpiCell(count: needsImprovCount(ctx), label: "待加強", icon: "exclamationmark.triangle.fill", color: Color(red: 1.0, green: 0.50, blue: 0.50))
             }
             .padding(.vertical, 8)
             .background(.white.opacity(0.08))
@@ -446,18 +446,11 @@ struct TalentMatrixView: View {
     }
 
     // [v3] KPI 單格：>0 時數字用象限對應色，視覺對照更直觀
-    private func heroKpiCell(count: Int, label: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            Text("\(count)")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundStyle(count > 0 ? color : .white.opacity(0.38))
-                .contentTransition(.numericText())
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.75))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
+    // 薄轉接層：排法／字級／圖示圓一律交給 HeroKpiCell，這裡只負責把
+    // count 轉字串並決定「有沒有人」的灰階狀態，避免呼叫端把 count 算兩次。
+    private func heroKpiCell(count: Int, label: String, icon: String, color: Color) -> HeroKpiCell {
+        HeroKpiCell(label: label, value: "\(count)", icon: icon,
+                    valueColor: count > 0 ? color : .white.opacity(0.38))
     }
 
     // MARK: - [v2] 散布圖 Section Header（Capsule 側條 + 計數膠囊）

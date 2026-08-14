@@ -234,13 +234,13 @@ struct MedicalMapView: View {
             }
 
             HStack(spacing: 0) {
-                summaryKpi(icon: "heart.fill", value: bpText, label: "最近血壓")
+                HeroKpiCell(label: "最近血壓", value: bpText, icon: "heart.fill")
                 divider
-                summaryKpi(icon: "pills.fill", value: "\(health.activeMedications.count)", label: "服用中")
+                HeroKpiCell(label: "服用中", value: "\(health.activeMedications.count)", icon: "pills.fill")
                 divider
-                summaryKpi(icon: "cross.case.fill", value: "\(thisYearVisits)", label: "今年就診")
+                HeroKpiCell(label: "今年就診", value: "\(thisYearVisits)", icon: "cross.case.fill")
                 divider
-                summaryKpi(icon: "calendar", value: nextDueText, label: "下次回診")
+                HeroKpiCell(label: "下次回診", value: nextDueText, icon: "calendar")
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.10))
@@ -281,18 +281,9 @@ struct MedicalMapView: View {
     }
 
     private var divider: some View {
-        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 30)
+        HeroKpiDivider()
     }
 
-    private func summaryKpi(icon: String, value: String, label: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon).font(.system(size: 15)).foregroundStyle(.white.opacity(0.9))
-            Text(value).font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.55)
-            Text(label).font(.caption2).foregroundStyle(.white.opacity(0.68))
-        }
-        .frame(maxWidth: .infinity).padding(.horizontal, 2)
-    }
 
     // MARK: - 就醫地圖
 

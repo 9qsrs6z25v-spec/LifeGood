@@ -631,7 +631,7 @@ struct FoodMapView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text(total.ntdWanString)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .minimumScaleFactor(0.6)
                         .lineLimit(1)
@@ -649,11 +649,11 @@ struct FoodMapView: View {
 
             // KPI 橫列：造訪次數 / 平均每次 / 最常光顧
             HStack(spacing: 0) {
-                foodKpiCell(label: "造訪總次", value: "\(visits) 次")
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                foodKpiCell(label: "平均每次", value: avg.ntdWanString)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                foodKpiCell(label: "最常光顧", value: mostVisited?.name ?? "—")
+                HeroKpiCell(label: "造訪總次", value: "\(visits) 次", icon: "figure.walk")
+                HeroKpiDivider()
+                HeroKpiCell(label: "平均每次", value: avg.ntdWanString, icon: "chart.bar.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "最常光顧", value: mostVisited?.name ?? "—", icon: "star.fill")
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -676,20 +676,6 @@ struct FoodMapView: View {
         .onDisappear { statsCardAppeared = false }
     }
 
-    private func foodKpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - 餐廳列（44pt 漸層圖示圓 + 彩色膠囊標籤）
 
@@ -963,14 +949,14 @@ struct RestaurantDetailSheet: View {
 
             // KPI 三格：造訪次數 / 總花費 / 平均每次
             HStack(spacing: 0) {
-                detailKpiCell(icon: "calendar.circle.fill", label: "造訪次數",
-                              value: "\(aggregate.visitCount) 次")
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
-                detailKpiCell(icon: "yensign.circle.fill", label: "總花費",
-                              value: aggregate.totalSpent.ntdWanString)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
-                detailKpiCell(icon: "chart.bar.fill", label: "平均每次",
-                              value: aggregate.averageSpent.ntdWanString)
+                HeroKpiCell(label: "造訪次數", value: "\(aggregate.visitCount) 次",
+                            icon: "calendar.circle.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "總花費", value: aggregate.totalSpent.ntdWanString,
+                            icon: "yensign.circle.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "平均每次", value: aggregate.averageSpent.ntdWanString,
+                            icon: "chart.bar.fill")
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -983,23 +969,6 @@ struct RestaurantDetailSheet: View {
         .padding(.horizontal)
     }
 
-    private func detailKpiCell(icon: String, label: String, value: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundStyle(.white.opacity(0.85))
-            Text(value)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.68))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
-    }
 
     /// 此餐廳所有造訪所累積的照片檔名
     private var aggregatePhotos: [String] {

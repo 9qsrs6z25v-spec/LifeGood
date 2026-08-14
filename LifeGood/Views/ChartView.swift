@@ -385,7 +385,7 @@ struct ChartView: View {
                         }
                     }
                     Text(isLoading ? "---" : formatCurrency(totalForPeriod))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)

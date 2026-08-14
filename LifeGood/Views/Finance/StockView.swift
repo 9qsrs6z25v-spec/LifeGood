@@ -544,7 +544,7 @@ struct StockView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text(fmt(store.totalStockValue))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .minimumScaleFactor(0.65)
                         .lineLimit(1)

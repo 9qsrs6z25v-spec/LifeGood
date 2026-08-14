@@ -198,7 +198,7 @@ struct FixedExpenseView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text(formatCurrency(monthlyTotal))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
@@ -231,13 +231,9 @@ struct FixedExpenseView: View {
             // KPI 橫列：年度預估 / 日均負擔 / 月節稅（對齊 VariableExpenseView / IncomeView 三格規格）
             HStack(spacing: 0) {
                 HeroKpiCell(label: "年度預估", value: formatCurrency(yearlyEstimate))
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 HeroKpiCell(label: "日均負擔", value: formatCurrency(dailyFixed))
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 HeroKpiCell(label: "月節稅", value: taxTotal > 0 ? formatCurrency(taxTotal) : "NT$0")
             }
             .padding(.vertical, 10)

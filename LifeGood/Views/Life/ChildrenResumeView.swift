@@ -209,15 +209,11 @@ struct ChildrenResumeView: View {
 
             // KPI 橫列：兒子 / 女兒 / 生涯紀錄
             HStack(spacing: 0) {
-                heroKpiCell(icon: "figure.child", label: "兒子", value: "\(sons) 位")
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 36)
-                heroKpiCell(icon: "figure.child.and.lock", label: "女兒", value: "\(daughters) 位")
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 36)
-                heroKpiCell(icon: "list.clipboard.fill", label: "生涯紀錄", value: "\(totalRecords) 筆")
+                HeroKpiCell(label: "兒子", value: "\(sons) 位", icon: "figure.child")
+                HeroKpiDivider()
+                HeroKpiCell(label: "女兒", value: "\(daughters) 位", icon: "figure.child.and.lock")
+                HeroKpiDivider()
+                HeroKpiCell(label: "生涯紀錄", value: "\(totalRecords) 筆", icon: "list.clipboard.fill")
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -274,35 +270,6 @@ struct ChildrenResumeView: View {
 
     // [v3] KPI 格：補 28pt LinearGradient 圖示圓 + contentTransition
     // 對齊 SubordinateOverviewView v3 heroKpiCell / TalentMatrixView.heroKpiCell 規格
-    private func heroKpiCell(icon: String, label: String, value: String) -> some View {
-        VStack(spacing: 4) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.white.opacity(0.22), .white.opacity(0.09)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 28, height: 28)
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-            }
-            Text(value)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .contentTransition(.numericText())
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.65))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
-    }
 
     // MARK: - [v2] 清單 Section Header
 

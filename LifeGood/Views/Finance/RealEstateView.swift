@@ -315,7 +315,7 @@ struct RealEstateView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text(fmt(store.totalRealEstateValue))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .minimumScaleFactor(0.72)
                         .lineLimit(1)
@@ -362,9 +362,9 @@ struct RealEstateView: View {
             // KPI 橫列：月租金 / 月現金流 / 平均增值率（統一白色，對齊 kpiCell 規格）
             HStack(spacing: 0) {
                 HeroKpiCell(label: "月租金", value: fmt(store.monthlyRentalIncome))
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 HeroKpiCell(label: "月現金流", value: (flow >= 0 ? "+" : "") + fmt(flow))
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 HeroKpiCell(label: "平均增值", value: String(format: "%@%.1f%%", avgRate >= 0 ? "+" : "", avgRate))
             }
             .padding(.vertical, 10)

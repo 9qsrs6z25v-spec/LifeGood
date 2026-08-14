@@ -344,7 +344,7 @@ struct VehicleView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text(fmtShort(totalValue))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
@@ -389,13 +389,9 @@ struct VehicleView: View {
             // KPI 橫列：購入成本 / 月養車費
             HStack(spacing: 0) {
                 HeroKpiCell(label: "折舊估損", value: depreciationLoss > 0 ? "-\(fmtShort(depreciationLoss))" : "—")
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 HeroKpiCell(label: "月養車費", value: monthly > 0 ? fmt(monthly) : "—")
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 HeroKpiCell(label: "持有輛數", value: "\(count) 輛")
             }
             .padding(.vertical, 10)

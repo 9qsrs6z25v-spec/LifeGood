@@ -297,13 +297,9 @@ struct OverviewView: View {
             // 對齊 IncomeView / VariableExpenseView / FixedExpenseView summaryHeader KPI 三格規格
             HStack(spacing: 0) {
                 HeroKpiCell(label: "今日花費", value: smartCurrency(todayTotalKPI))
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 HeroKpiCell(label: "日均支出", value: smartCurrency(total / Double(max(day, 1))))
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 HeroKpiCell(label: "本月固定", value: smartCurrency(fixedTotalKPI))
             }
             .padding(.vertical, 10)
@@ -342,7 +338,7 @@ struct OverviewView: View {
                 // （"+"／"-" 符號 + 金額），v4 只補了收入／支出兩個子欄位，漏了這裡，
                 // 大額結餘（含負數）在小螢幕上原本沒有防截斷保護。
                 Text((isPositive ? "+" : "") + smartCurrency(balance))
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .heroBigValueFont()
                     .foregroundStyle(isPositive ? .white : Color(red: 1.0, green: 0.78, blue: 0.75))
                     .contentTransition(.numericText())
                     .lineLimit(1)

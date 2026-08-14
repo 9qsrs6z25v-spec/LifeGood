@@ -560,9 +560,9 @@ struct SubordinateDetailView: View {
             // 分數看板：主動性 / 潛力性 / 綜合
             HStack(spacing: 0) {
                 scoreCell("主動性", subordinate.proactivityScore(mentionedCount: mentionedCount))
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 34)
+                HeroKpiDivider()
                 scoreCell("潛力性", subordinate.potentialScore)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 34)
+                HeroKpiDivider()
                 scoreCell("綜合", subordinate.overallScore(mentionedCount: mentionedCount))
             }
             .padding(.vertical, 10)
@@ -580,13 +580,13 @@ struct SubordinateDetailView: View {
             // KPI 橫列：優點 / 缺點 / 成就 / Miss / 請假
             HStack(spacing: 0) {
                 statBadge(count: recordCounts[.pro] ?? 0,           label: "優點", color: .green)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                HeroKpiDivider()
                 statBadge(count: recordCounts[.con] ?? 0,           label: "缺點", color: .red)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                HeroKpiDivider()
                 statBadge(count: recordCounts[.achievement] ?? 0,   label: "成就", color: .orange)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                HeroKpiDivider()
                 statBadge(count: recordCounts[.missOperation] ?? 0, label: "Miss", color: .purple)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                HeroKpiDivider()
                 statBadge(count: recordCounts[.leave] ?? 0,         label: "請假", color: .teal)
             }
             .padding(.vertical, 8)
@@ -596,13 +596,13 @@ struct SubordinateDetailView: View {
             // 第二列 KPI：報告 / 會議 / 任務 / 被標註 / 請假
             HStack(spacing: 0) {
                 statBadge(count: subordinate.weeklyReports.count, label: "報告", color: .purple)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                HeroKpiDivider()
                 statBadge(count: subordinate.meetings.count,      label: "會議", color: .indigo)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                HeroKpiDivider()
                 statBadge(count: subordinate.tasks.count,         label: "任務", color: .cyan)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                HeroKpiDivider()
                 statBadge(count: mentionedCount,                   label: "被標註", color: .pink)
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 32)
+                HeroKpiDivider()
                 statBadge(count: recordCounts[.leave] ?? 0,       label: "請假", color: .teal)
             }
             .padding(.vertical, 8)

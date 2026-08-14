@@ -255,7 +255,7 @@ struct VariableExpenseView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text(formatCurrency(total))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
@@ -276,13 +276,9 @@ struct VariableExpenseView: View {
             // KPI 橫列：今日花費 / 日均支出 / 近3月均值
             HStack(spacing: 0) {
                 HeroKpiCell(label: "今日花費", value: formatCurrency(todayVariableTotal))
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 HeroKpiCell(label: "日均支出", value: formatCurrency(dailyAvg))
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 HeroKpiCell(label: "近3月均值", value: formatCurrency(trailingMonthlyAverageVariable))
             }
             .padding(.vertical, 10)

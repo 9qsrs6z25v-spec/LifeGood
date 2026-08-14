@@ -908,11 +908,11 @@ struct MyCalendarView: View {
                 .padding(.vertical, 14)
 
             HStack(spacing: 0) {
-                heroKpiCell(label: "今日", value: "\(todayEvCount) 件")
-                Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5, height: 28)
-                heroKpiCell(label: "本週七天", value: "\(weekTotal) 件")
-                Rectangle().fill(.white.opacity(0.22)).frame(width: 0.5, height: 28)
-                heroKpiCell(label: "未來 30 天", value: "\(upcomingCount) 個")
+                HeroKpiCell(label: "今日", value: "\(todayEvCount) 件", icon: "sun.max.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "本週七天", value: "\(weekTotal) 件", icon: "calendar")
+                HeroKpiDivider()
+                HeroKpiCell(label: "未來 30 天", value: "\(upcomingCount) 個", icon: "flag.fill")
             }
         }
         .padding(20)
@@ -920,19 +920,6 @@ struct MyCalendarView: View {
         .padding(.horizontal)
     }
 
-    private func heroKpiCell(label: String, value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.white.opacity(0.62))
-        }
-        .frame(maxWidth: .infinity)
-    }
 
     // MARK: - 部屬事項卡片（彙整自部屬總覽）
 

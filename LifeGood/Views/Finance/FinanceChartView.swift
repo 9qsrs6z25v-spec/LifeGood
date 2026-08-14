@@ -214,7 +214,7 @@ struct FinanceChartView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.78))
                     Text(fmtShort(totalAssetsValue))
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
@@ -244,17 +244,13 @@ struct FinanceChartView: View {
 
             // KPI 橫列：股票 / 房地產 / 儲蓄險 筆數
             HStack(spacing: 0) {
-                heroKpiCell(label: "股票", value: "\(activeStockCount) 檔",
+                HeroKpiCell(label: "股票", value: "\(activeStockCount) 檔",
                              icon: "chart.line.uptrend.xyaxis")
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
-                heroKpiCell(label: "房地產", value: "\(activeRealEstateCount) 筆",
+                HeroKpiDivider()
+                HeroKpiCell(label: "房地產", value: "\(activeRealEstateCount) 筆",
                              icon: "building.2.fill")
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
-                heroKpiCell(label: "儲蓄險", value: "\(store.insurances.count) 張",
+                HeroKpiDivider()
+                HeroKpiCell(label: "儲蓄險", value: "\(store.insurances.count) 張",
                              icon: "shield.fill")
             }
             .padding(.vertical, 10)
@@ -266,37 +262,6 @@ struct FinanceChartView: View {
         .heroCardShell(card: .financeChart)
     }
 
-    private func heroKpiCell(label: String, value: String, icon: String) -> some View {
-        VStack(spacing: 5) {
-            // 漸層圓圖示（對齊 SavingsInsuranceView / VehicleView heroKpiCell 設計規格）
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.white.opacity(0.18), .white.opacity(0.08)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 28, height: 28)
-                Circle()
-                    .stroke(.white.opacity(0.22), lineWidth: 0.75)
-                    .frame(width: 28, height: 28)
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.88))
-            }
-            Text(value)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.60))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - 資產配置圖
 

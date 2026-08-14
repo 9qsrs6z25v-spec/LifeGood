@@ -164,7 +164,7 @@ struct LifeRealEstateView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text("\(financeStore.realEstates.count)")
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
@@ -204,14 +204,17 @@ struct LifeRealEstateView: View {
 
             // 三欄 KPI：購入 / 持有中 / 已售出
             HStack(spacing: 0) {
-                heroKpiCell(icon: "building.2.fill", label: "總購入",
-                            value: "\(financeStore.realEstates.count)", color: Color(red: 0.72, green: 0.55, blue: 1.00))
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 36)
-                heroKpiCell(icon: "house.fill", label: "持有中",
-                            value: "\(ownedCount)", color: Color(red: 0.60, green: 1.00, blue: 0.75))
-                Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 36)
-                heroKpiCell(icon: "checkmark.seal.fill", label: "已售出",
-                            value: "\(soldCount)", color: Color(red: 1.00, green: 0.78, blue: 0.75))
+                HeroKpiCell(label: "總購入", value: "\(financeStore.realEstates.count)",
+                            icon: "building.2.fill",
+                            valueColor: Color(red: 0.72, green: 0.55, blue: 1.00))
+                HeroKpiDivider()
+                HeroKpiCell(label: "持有中", value: "\(ownedCount)",
+                            icon: "house.fill",
+                            valueColor: Color(red: 0.60, green: 1.00, blue: 0.75))
+                HeroKpiDivider()
+                HeroKpiCell(label: "已售出", value: "\(soldCount)",
+                            icon: "checkmark.seal.fill",
+                            valueColor: Color(red: 1.00, green: 0.78, blue: 0.75))
             }
             .padding(.vertical, 10)
             .background(.white.opacity(0.08))
@@ -242,35 +245,6 @@ struct LifeRealEstateView: View {
     }
 
     // [v2] heroKpiCell：圖示圓升級為 32pt LinearGradient + stroke border，對齊 OverviewView.summaryCard v3
-    private func heroKpiCell(icon: String, label: String, value: String, color: Color) -> some View {
-        VStack(spacing: 5) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [color.opacity(0.24), color.opacity(0.09)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 32, height: 32)
-                    .overlay(Circle().stroke(color.opacity(0.18), lineWidth: 0.75))
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-            Text(value)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .minimumScaleFactor(0.72)
-                .lineLimit(1)
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.65))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - [v3] 縣市分配彩條
     // 各縣市按物件筆數高低由左到右排列，最多顯示 5 個縣市，其餘合併為「其他」

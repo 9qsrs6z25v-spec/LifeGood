@@ -232,44 +232,6 @@ struct IncomeView: View {
         return (total, total / Double(monthCount))
     }
 
-    /// 把「NT$123.5萬」拆成（NT$／123.5／萬）三段，供 KPI 直式堆疊顯示；
-    /// 未滿一萬（無「萬」或「億」字）時 suffix 為空字串。
-    private func splitCurrency(_ s: String) -> (prefix: String, number: String, suffix: String) {
-        var str = s
-        var prefix = ""
-        if str.hasPrefix("NT$") { prefix = "NT$"; str.removeFirst(3) }
-        var suffix = ""
-        if str.hasSuffix("億") { suffix = "億"; str.removeLast() }
-        else if str.hasSuffix("萬") { suffix = "萬"; str.removeLast() }
-        return (prefix, str, suffix)
-    }
-
-    // KPI 值改為直式三行堆疊（NT$ ↵ 數字 ↵ 萬）：四格並列時數字不再被縮到難讀
-    private func kpiCell(label: String, value: String) -> some View {
-        let parts = splitCurrency(value)
-        return VStack(spacing: 2) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            if !parts.prefix.isEmpty {
-                Text(parts.prefix)
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-            Text(parts.number)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.95))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            if !parts.suffix.isEmpty {
-                Text(parts.suffix)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     /// 卡片下方超支提示用的比例（本月總支出 ÷ 本月收入；與卡內進度條同口徑、不夾住）
     private var overspendRatio: Double {
@@ -318,7 +280,7 @@ struct IncomeView: View {
                         }
                     }
                     Text(fmt(displayedIncome))
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
@@ -372,21 +334,15 @@ struct IncomeView: View {
 
             // KPI 橫列：累計收入 / 今年累計 / 月均收入 / 固定月收
             HStack(spacing: 0) {
-                kpiCell(label: "累計收入", value: fmt(stats.cumulative))
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiCell(label: "累計收入", value: fmt(stats.cumulative), icon: "sum")
+                HeroKpiDivider()
                 // 每年 1/1 重新起算的今年累計收入
-                kpiCell(label: "今年累計", value: fmt(store.yearToDateIncomeTotal))
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
-                kpiCell(label: "月均收入", value: fmt(stats.average))
+                HeroKpiCell(label: "今年累計", value: fmt(store.yearToDateIncomeTotal), icon: "calendar")
+                HeroKpiDivider()
+                HeroKpiCell(label: "月均收入", value: fmt(stats.average), icon: "chart.bar.fill")
                 if recurringMonthly > 0 {
-                    Rectangle()
-                        .fill(.white.opacity(0.25))
-                        .frame(width: 0.5, height: 28)
-                    kpiCell(label: "固定月收", value: fmt(recurringMonthly))
+                    HeroKpiDivider()
+                    HeroKpiCell(label: "固定月收", value: fmt(recurringMonthly), icon: "arrow.clockwise")
                 }
             }
             .padding(.vertical, 10)

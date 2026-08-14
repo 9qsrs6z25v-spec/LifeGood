@@ -791,43 +791,21 @@ struct AddVehicleView: View {
                         .fill(.white.opacity(0.20))
                         .frame(height: 0.5)
                     HStack(spacing: 0) {
-                        // 目前估值
-                        VStack(spacing: 2) {
-                            Text(currentWan > 0 ? current.ntdWanString : "—")
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .contentTransition(.numericText())
-                            Text("目前估值")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.70))
-                        }
-                        .frame(maxWidth: .infinity)
-                        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                        // 折舊金額
-                        VStack(spacing: 2) {
-                            Text(depAmt > 0 ? depAmt.ntdWanString : "—")
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                                .foregroundStyle(depAmt > 0
-                                    ? Color(red: 1.0, green: 0.82, blue: 0.50)
-                                    : .white.opacity(0.45))
-                                .contentTransition(.numericText())
-                            Text("折舊金額")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.70))
-                        }
-                        .frame(maxWidth: .infinity)
-                        Rectangle().fill(.white.opacity(0.25)).frame(width: 0.5, height: 28)
-                        // 月固定支出
-                        VStack(spacing: 2) {
-                            Text(monthlyFix > 0 ? monthlyFix.ntdWanString : "—")
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .contentTransition(.numericText())
-                            Text("月固定支出")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.70))
-                        }
-                        .frame(maxWidth: .infinity)
+                        HeroKpiCell(label: "目前估值",
+                                    value: currentWan > 0 ? current.ntdWanString : "—",
+                                    icon: "speedometer")
+                        HeroKpiDivider()
+                        // 折舊金額：>0 時用金色標示，維持與車輛卡片一致的語意色
+                        HeroKpiCell(label: "折舊金額",
+                                    value: depAmt > 0 ? depAmt.ntdWanString : "—",
+                                    icon: "arrow.down.right",
+                                    valueColor: depAmt > 0
+                                        ? Color(red: 1.0, green: 0.82, blue: 0.50)
+                                        : .white.opacity(0.45))
+                        HeroKpiDivider()
+                        HeroKpiCell(label: "月固定支出",
+                                    value: monthlyFix > 0 ? monthlyFix.ntdWanString : "—",
+                                    icon: "calendar")
                     }
                     .padding(.top, 2)
                 }

@@ -240,7 +240,7 @@ struct SavingsInsuranceView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text(hasItems ? fmtSmart(totalCurrentNT, code: "NT$") : "NT$0")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
                         .lineLimit(1)
@@ -287,14 +287,10 @@ struct SavingsInsuranceView: View {
 
                 HStack(spacing: 0) {
                     HeroKpiCell(label: "已繳總額", value: fmtSmart(totalPaidNT, code: "NT$"))
-                    Rectangle()
-                        .fill(.white.opacity(0.25))
-                        .frame(width: 0.5, height: 28)
+                    HeroKpiDivider()
                     HeroKpiCell(label: "帳面損益", value: (isPositive ? "+" : "") + fmtSmart(totalGainNT, code: "NT$"))
                     if !otherItems.isEmpty {
-                        Rectangle()
-                            .fill(.white.opacity(0.25))
-                            .frame(width: 0.5, height: 28)
+                        HeroKpiDivider()
                         HeroKpiCell(label: "其他幣別", value: "\(otherItems.count) 張")
                     }
                 }

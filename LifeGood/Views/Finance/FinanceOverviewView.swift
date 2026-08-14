@@ -205,7 +205,7 @@ struct FinanceOverviewView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text(fmt(totalAssetsNTD(insVal: insVal, stockVal: stockVal, vehicleVal: vehicleVal, reVal: reVal)))
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)

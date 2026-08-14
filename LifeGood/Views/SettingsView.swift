@@ -481,17 +481,13 @@ struct SettingsView: View {
                     label: "記帳",
                     count: store.expenses.count + store.incomes.count
                 )
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 settingsHeroStatCell(
                     label: "理財",
                     count: financeStore.insurances.count + financeStore.stocks.count
                            + financeStore.vehicles.count + financeStore.realEstates.count
                 )
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
                 settingsHeroStatCell(
                     label: "人生",
                     count: lifeStore.milestones.count + lifeStore.familyMembers.count

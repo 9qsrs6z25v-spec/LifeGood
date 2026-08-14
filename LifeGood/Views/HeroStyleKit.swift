@@ -91,6 +91,29 @@ import SwiftUI
 //                          殼層目前只吃靜態卡片身分，需先想清楚動態色怎麼表達
 //   · eInvoice             圓角非 20、僅兩顆散景圓，版面結構與其餘不同型
 //
+// ─────────────────────────────────────────────────────────────────────────
+// 【Phase 3b 遷移狀態】KPI 橫列與主數值大字（v25.211）
+// ─────────────────────────────────────────────────────────────────────────
+// · 大字：18 個寫死字級（30／32／34／40pt）→ .heroBigValueFont()，全部收斂到
+//   全域出廠 32pt。收斂幅度最大的兩張是 lifeRealEstate（40→32）與
+//   subordinateList（28→32）；兩張原本的字級是「內容驅動」（一個是筆數、
+//   一個是「N 位部屬」），要救回請用單卡覆寫。
+// · 豎分隔線：58 處寫死高度（28／30／32／34／36）→ HeroKpiDivider()，
+//   高度改由「排法基準高 × 全域倍率」推導（標籤在上 28／數值在上 32／
+//   圖示在上 36）。預設排法是標籤在上，所以原本 32～36 的卡片會縮到 28。
+// · KPI 小格：13 支各頁自刻的 kpiCell／heroKpiCell／summaryKpi 全數收掉，
+//   一律走 HeroKpiCell。原本各自不同的 12～17pt 數值、9～11pt 標籤、
+//   28～32pt 圖示圓，收斂成三層解析的 kpiValueSize／kpiLabelSize／kpiIconSize。
+//   為了不讓收斂變成退化，HeroKpiCell 同步補了兩件事：
+//     ① 圖示圓改成漸層 + 0.75pt 描邊（採用原本多數卡片的規格，而非扁平圓）
+//     ② 新增 valueColor，保住「這一格語意上就該有顏色」的欄位
+//        （talentMatrix 四象限色、lifeRealEstate 三態色、AddVehicle 折舊金色）
+// · 沿用 .legacy 身分（吃全域、不吃單卡覆寫）：AddVehicleView 預覽卡、
+//   MedicalMapView、ChildrenResumeView、SubordinateDetailView。這四張的殼層
+//   本來就沒遷移，等它們進 HeroCard 列舉後 KPI 會自動跟著吃單卡層。
+// · 未動：GradeTitleView（kpiCell 帶 unit 第三段）、SubordinateOverviewView／
+//   ResumeView／FamilyMembersResumeView（與其殼層同批待處理）。
+//
 // ═══════════════════════════════════════════════════════════════════════════
 
 // MARK: - 卡片身分

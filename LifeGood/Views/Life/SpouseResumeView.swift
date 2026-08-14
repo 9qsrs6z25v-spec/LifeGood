@@ -184,7 +184,7 @@ struct SpouseResumeView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.75))
                     Text(s.chineseName.isEmpty ? "未填寫姓名" : s.chineseName)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.65)
@@ -227,22 +227,21 @@ struct SpouseResumeView: View {
 
             // 三欄 KPI（[v3] 各格加 28pt 漸層圖示圓 + contentTransition，對齊 ChildrenResumeView v3 規格）
             HStack(spacing: 0) {
-                kpiCell(icon: "calendar", label: "結婚年數",
-                        value: marriageComp.map { "\($0.year)年\($0.month)月" } ?? "未填寫")
+                HeroKpiCell(label: "結婚年數",
+                            value: marriageComp.map { "\($0.year)年\($0.month)月" } ?? "未填寫",
+                            icon: "calendar")
 
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
 
-                kpiCell(icon: "bag.fill", label: "共同消費",
-                        value: expenseTotal.ntdWanString)
+                HeroKpiCell(label: "共同消費",
+                            value: expenseTotal.ntdWanString,
+                            icon: "bag.fill")
 
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
+                HeroKpiDivider()
 
-                kpiCell(icon: "gift.fill", label: "禮金紀錄",
-                        value: "\(giftCount) 筆")
+                HeroKpiCell(label: "禮金紀錄",
+                            value: "\(giftCount) 筆",
+                            icon: "gift.fill")
             }
             .padding(.vertical, 8)
             .background(
@@ -266,34 +265,6 @@ struct SpouseResumeView: View {
     }
 
     // [v3] 加入 icon 參數 + 28pt 漸層圖示圓 + contentTransition，對齊 ChildrenResumeView v3 heroKpiCell 規格
-    private func kpiCell(icon: String, label: String, value: String) -> some View {
-        VStack(spacing: 4) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.white.opacity(0.28), .white.opacity(0.10)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 28, height: 28)
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.88))
-            }
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .minimumScaleFactor(0.60)
-                .contentTransition(.numericText())
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
-    }
 
     // MARK: - Section Header 共用
 

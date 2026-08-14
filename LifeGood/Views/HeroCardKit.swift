@@ -181,6 +181,9 @@ struct HeroKpiCell: View {
     let value: String
     /// 「圖示在上」排法用；未提供時該排法退回「數值在上」
     var icon: String? = nil
+    /// 強調色數值（例如折舊金額的金色、損益的紅綠）。nil 走標準白 0.92。
+    /// 只給「這一格語意上就該有顏色」的欄位用，不要拿來做整卡調色。
+    var valueColor: Color? = nil
 
     @Environment(\.heroCard) private var card
     @ObservedObject private var store = HeroStyleStore.shared
@@ -197,14 +200,7 @@ struct HeroKpiCell: View {
                 labelText(s)
             case .iconTop:
                 if let icon {
-                    ZStack {
-                        Circle()
-                            .fill(.white.opacity(0.20))
-                            .frame(width: s.kpiIconSize, height: s.kpiIconSize)
-                        Image(systemName: icon)
-                            .font(.system(size: s.kpiIconSize * 0.45, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.95))
-                    }
+                    iconBadge(icon, s)
                     valueText(s)
                     labelText(s)
                 } else {
@@ -217,6 +213,26 @@ struct HeroKpiCell: View {
         .padding(.vertical, 2)
     }
 
+    /// 漸層圖示圓：收斂各卡原本手刻的 28pt 漸層圓 + 0.75pt 描邊規格，
+    /// 直徑改由 kpiIconSize 驅動，圖示與描邊隨直徑等比縮放。
+    private func iconBadge(_ icon: String, _ s: HeroStyle) -> some View {
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [.white.opacity(0.26), .white.opacity(0.09)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                )
+            Circle()
+                .stroke(.white.opacity(0.22), lineWidth: 0.75)
+            Image(systemName: icon)
+                .font(.system(size: s.kpiIconSize * 0.42, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+        }
+        .frame(width: s.kpiIconSize, height: s.kpiIconSize)
+    }
+
     private func labelText(_ s: HeroStyle) -> some View {
         Text(label)
             .font(.system(size: s.kpiLabelSize, weight: .semibold))
@@ -226,7 +242,7 @@ struct HeroKpiCell: View {
     private func valueText(_ s: HeroStyle) -> some View {
         Text(value)
             .font(.system(size: s.kpiValueSize, weight: .bold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.92))
+            .foregroundStyle(valueColor ?? .white.opacity(0.92))
             .lineLimit(1)
             .minimumScaleFactor(0.6)
             .contentTransition(.numericText())
@@ -245,4 +261,28 @@ struct HeroKpiDivider: View {
             .fill(.white.opacity(0.25))
             .frame(width: 0.5, height: store.style(for: card).kpiDividerHeight)
     }
+}
+
+// MARK: 主數值大字
+
+/// 英雄卡主數值大字的字級：由 HeroStyleStore 三層解析（單卡覆寫 → 全域 → 出廠 32pt）。
+/// 做成修飾器而非包裝 View，遷移時只需替換原本的 .font(...) 一行，
+/// 各卡既有的顏色／防截斷／數字動畫等修飾完全不動。
+///
+/// ⚠️ 已知限制：所有大字都帶 minimumScaleFactor 防爆版，金額到「億」量級時
+/// 把字級從 32 拉到 40 會被縮放係數自己吃掉、畫面幾乎不動。這是防爆版保護的
+/// 必然結果，除非拿掉保護（那會讓數字被裁切），無法消除。
+private struct HeroBigValueFont: ViewModifier {
+    @Environment(\.heroCard) private var card
+    @ObservedObject private var store = HeroStyleStore.shared
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: store.style(for: card).bigValueSize,
+                             weight: .bold, design: .rounded))
+    }
+}
+
+extension View {
+    /// 套用英雄卡主數值大字字級（取代寫死的 .font(.system(size: 30/32/34/40, ...))）
+    func heroBigValueFont() -> some View { modifier(HeroBigValueFont()) }
 }

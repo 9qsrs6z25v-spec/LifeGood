@@ -403,23 +403,6 @@ struct SubordinateView: View {
 
     // MARK: - 統計摘要卡
 
-    private func summaryKpiCell(label: String, value: String, icon: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.72))
-            Text(value)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
-    }
 
     private func summaryStatsCard(mentionCounts: [UUID: Int]) -> some View {
         let subordinates = lifeStore.subordinates
@@ -438,7 +421,7 @@ struct SubordinateView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.80))
                     Text("\(total) 位部屬")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .heroBigValueFont()
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
@@ -460,17 +443,13 @@ struct SubordinateView: View {
 
             // KPI 橫列：平均評分 / 優秀人數 / 整體分布
             HStack(spacing: 0) {
-                summaryKpiCell(label: "平均評分", value: "\(avg)",
+                HeroKpiCell(label: "平均評分", value: "\(avg)",
                                icon: "chart.bar.fill")
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
-                summaryKpiCell(label: "優秀（90+）", value: "\(excellent) 位",
+                HeroKpiDivider()
+                HeroKpiCell(label: "優秀（90+）", value: "\(excellent) 位",
                                icon: "star.fill")
-                Rectangle()
-                    .fill(.white.opacity(0.25))
-                    .frame(width: 0.5, height: 28)
-                summaryKpiCell(label: "待提升（<70）",
+                HeroKpiDivider()
+                HeroKpiCell(label: "待提升（<70）",
                                value: "\(needImprovement) 位",
                                icon: "exclamationmark.triangle.fill")
             }
