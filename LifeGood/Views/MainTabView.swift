@@ -86,6 +86,9 @@ enum LifeFeature: String, CaseIterable, Identifiable {
 
 enum ManagementFeature: String, CaseIterable, Identifiable {
     case calendar, overview, subordinates, businessCard, organization, gradeTitle
+    /// 兼任職務管理中樞。列出所有已啟用專屬管理頁的兼任職務。
+    /// 一個 case 承載 N 筆——動態數量不可能用靜態列舉逐一表達。
+    case sideRole
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -95,6 +98,7 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
         case .businessCard: return "名片"
         case .organization: return "公司組織"
         case .gradeTitle: return "部門職等"
+        case .sideRole: return "兼任職務"
         }
     }
     var icon: String {
@@ -105,6 +109,7 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
         case .businessCard: return "person.crop.rectangle.stack"
         case .organization: return "building.2.crop.circle"
         case .gradeTitle: return "list.number"
+        case .sideRole: return "person.badge.plus"
         }
     }
 }
@@ -284,6 +289,11 @@ struct MainTabView: View {
         return relevant.max(by: { $0.date < $1.date })?.isManagerial == true
     }
 
+    /// 有沒有任何已啟用專屬管理頁的兼任職務
+    private var hasAnySideRoleWorkspace: Bool {
+        lifeStore.milestones.contains { $0.hasSideRoleWorkspace }
+    }
+
     private var familyMgmtFeature: FamilyMgmtFeature? {
         FamilyMgmtFeature(rawValue: familyMgmtFeatureRaw)
     }
@@ -304,14 +314,31 @@ struct MainTabView: View {
         }
     }
 
-    /// 職涯子功能列在「職涯」被選取且使用者目前為主管時展開
+    /// 職涯子功能列在「職涯」被選取，且使用者是主管**或**有啟用中的兼任職務管理頁時展開。
+    ///
+    /// ⚠️ 原本只看 isCurrentlyManagerial（最近一筆本職異動有沒有勾管理職）。
+    ///    但兼任職務跟管理職是兩回事——「尾牙負責人」多半不是主管，
+    ///    只看管理職會讓這些人永遠看不到自己剛開好的管理頁，功能等於不存在。
     private var shouldExpandManagement: Bool {
-        currentMode == .life && lifeFeature == .career && isCurrentlyManagerial && !isSettingsActive
+        currentMode == .life && lifeFeature == .career
+            && (isCurrentlyManagerial || hasAnySideRoleWorkspace) && !isSettingsActive
     }
 
     /// 家庭子功能列在「家庭」被選取且有家庭成員時展開
     private var shouldExpandFamily: Bool {
         currentMode == .life && lifeFeature == .family && !lifeStore.familyMembers.isEmpty && !isSettingsActive
+    }
+
+    /// 職涯功能列實際要顯示哪幾顆。六個既有管理功能維持「限主管」，
+    /// 兼任職務則只看有沒有啟用中的管理頁——兩者互不相干。
+    private var availableManagementFeatures: [ManagementFeature] {
+        var list: [ManagementFeature] = []
+        if isCurrentlyManagerial {
+            list.append(contentsOf: [.calendar, .overview, .subordinates,
+                                     .businessCard, .organization, .gradeTitle])
+        }
+        if hasAnySideRoleWorkspace { list.append(.sideRole) }
+        return list
     }
 
     private var availableFamilyFeatures: [FamilyMgmtFeature] {
@@ -414,6 +441,14 @@ struct MainTabView: View {
                 // 切到別的人生子功能時，清除非當前父功能的 sub 選擇
                 if newValue != LifeFeature.career.rawValue { managementFeatureRaw = "" }
                 if newValue != LifeFeature.family.rawValue { familyMgmtFeatureRaw = "" }
+            }
+            // 目前選中的管理功能若已不在可用清單裡就清空路由。
+            // 兩種情況都會踩到：① 使用者關掉最後一個兼任職務的管理頁開關；
+            // ② 使用者把最近一筆本職異動的「管理職」取消、或新增一筆離職。
+            // 不清的話膠囊列上沒有任何一顆反白，內容區卻照樣渲染那一頁，
+            // 變成一個沒有入口也退不出去的畫面。
+            .onChange(of: availableManagementFeatures) { _, list in
+                if let m = managementFeature, !list.contains(m) { managementFeatureRaw = "" }
             }
 
             floatingActionButton
@@ -1075,7 +1110,7 @@ struct MainTabView: View {
                 lifeFeatureRaw = LifeFeature.career.rawValue
                 managementFeatureRaw = ""
             }
-            ForEach(ManagementFeature.allCases) { m in
+            ForEach(availableManagementFeatures) { m in
                 subFeaturePill(m.title, icon: m.icon,
                                isSelected: managementFeatureRaw == m.rawValue,
                                tint: .orange,
@@ -1464,6 +1499,7 @@ struct MainTabView: View {
                 case .businessCard: BusinessCardView()
                 case .organization: OrganizationView()
                 case .gradeTitle:   GradeTitleView()
+                case .sideRole:     SideRoleHubView()
                 }
             } else if hasCareerMilestones {
                 CareerView()

@@ -418,6 +418,32 @@ struct MyCalendarView: View {
             ))
         }
 
+        // 兼任職務的「重要日期」（尾牙的場勘日、彩排日等）。
+        // 兼任里程碑的就任日本來就會被上面那段帶進行事曆，但卸任日與這些
+        // 自訂日期不會——而它們才是使用者真正要被提醒的。
+        for role in lifeStore.sideRoles {
+            let roleName = SideRoleFormat.displayName(role)
+            for kd in role.sideRoleKeyDates ?? []
+            where calendar.isDate(kd.date, inSameDayAs: day) {
+                events.append(CalendarEvent(
+                    id: "srkd-\(kd.id.uuidString)",
+                    type: .milestone,
+                    title: kd.title.isEmpty ? roleName : "\(roleName)：\(kd.title)",
+                    time: kd.date,
+                    detail: "兼任職務"
+                ))
+            }
+            if let end = role.sideRoleEndDate, calendar.isDate(end, inSameDayAs: day) {
+                events.append(CalendarEvent(
+                    id: "srend-\(role.id.uuidString)",
+                    type: .milestone,
+                    title: "\(roleName) 卸任",
+                    time: end,
+                    detail: "兼任職務"
+                ))
+            }
+        }
+
         // Apple 系統行事曆（讀取自 EventKit）— 排除已從 LifeGood 同步出去的事件，避免重複
         if appleCal.hasAccess {
             let syncedIds = Set(lifeStore.personalEvents.compactMap { $0.ekEventIdentifier })
@@ -1194,6 +1220,35 @@ struct MyCalendarView: View {
                 typeLabel: "里程碑", title: ms.title.isEmpty ? "未命名里程碑" : ms.title,
                 snippet: ms.note.isEmpty ? nil : ms.note, date: ms.date,
                 target: .milestone(ms)))
+        }
+        // 兼任職務：職務名稱／主辦單位／負責範圍，以及底下的會議紀錄與待辦。
+        // 里程碑那一輪只吃 title 與 note，這些欄位全都搜不到。
+        for role in lifeStore.sideRoles {
+            let roleName = SideRoleFormat.displayName(role)
+            if hit([role.sideRoleName ?? "", role.sideRoleOrg ?? "", role.sideRoleScope ?? ""]) {
+                out.append(SearchHit(id: "sr_\(role.id)", icon: "person.badge.plus", color: .indigo,
+                    typeLabel: "兼任職務", title: roleName,
+                    snippet: SideRoleFormat.subtitle(role), date: role.date,
+                    target: .milestone(role)))
+            }
+            for mt in role.sideRoleMeetings ?? []
+            where hit([mt.topic, mt.decisions, mt.note, mt.attendees.joined(separator: "、")]) {
+                out.append(SearchHit(id: "srmt_\(mt.id)", icon: "text.bubble.fill", color: .indigo,
+                    typeLabel: "兼任會議", title: mt.topic.isEmpty ? "未命名會議" : mt.topic,
+                    snippet: "\(roleName)　" + (mt.decisions.isEmpty ? mt.note : mt.decisions),
+                    date: mt.date, target: .milestone(role)))
+            }
+            for tk in role.sideRoleTasks ?? [] where hit([tk.content, tk.note]) {
+                out.append(SearchHit(id: "srtk_\(tk.id)", icon: "checklist", color: .indigo,
+                    typeLabel: "兼任待辦", title: tk.content.isEmpty ? "未填內容" : tk.content,
+                    snippet: roleName, date: tk.dueDate ?? role.date,
+                    target: .milestone(role)))
+            }
+            for kd in role.sideRoleKeyDates ?? [] where hit([kd.title, kd.note]) {
+                out.append(SearchHit(id: "srkd_\(kd.id)", icon: "calendar", color: .indigo,
+                    typeLabel: "兼任日期", title: kd.title.isEmpty ? "未命名日期" : kd.title,
+                    snippet: roleName, date: kd.date, target: .milestone(role)))
+            }
         }
         for pe in lifeStore.personalEvents where hit([pe.title, pe.note, pe.location]) {
             out.append(SearchHit(id: "pe_\(pe.id)", icon: "calendar", color: .green,

@@ -116,6 +116,140 @@ class LifeStore: ObservableObject {
     }
     func deleteMilestone(_ item: LifeMilestone) { milestones.removeAll { $0.id == item.id } }
 
+    // MARK: - 兼任職務
+
+    /// 全部兼任職務里程碑，新到舊
+    var sideRoles: [LifeMilestone] {
+        milestones.filter { $0.isSideRole }.sorted { $0.date > $1.date }
+    }
+
+    /// 已啟用專屬管理頁的兼任職務（在任的排前面，其次依就任日新到舊）
+    var sideRoleWorkspaces: [LifeMilestone] {
+        sideRoles.filter { $0.hasSideRoleWorkspace }
+            .sorted {
+                if $0.isActiveSideRole != $1.isActiveSideRole { return $0.isActiveSideRole }
+                return $0.date > $1.date
+            }
+    }
+
+    /// 有內容但管理頁被關掉的兼任職務。
+    /// 用來在管理中樞底下列出「已停用」區塊——關開關只隱藏入口、資料仍在，
+    /// 但如果畫面上完全看不到，使用者會判定資料遺失並重新輸入一遍，
+    /// 那就等於白做了「不清除」的保護。
+    var dormantSideRoles: [LifeMilestone] {
+        sideRoles.filter { !$0.hasSideRoleWorkspace && $0.hasAnySideRoleContent }
+    }
+
+    /// 指定時間點上的本職職稱（兼任職務卡片要顯示「當時我是副理」）。
+    /// 同樣只看本職異動，不會被兼任自己污染。
+    func baseJobTitle(at date: Date) -> String? {
+        let employmentSubs: Set<CareerSubCategory> = [.join, .promote, .transfer, .demote]
+        return milestones
+            .filter { m in
+                guard m.category == .career, m.date <= date,
+                      let sub = m.careerSubCategory else { return false }
+                return employmentSubs.contains(sub)
+            }
+            .sorted { $0.date > $1.date }
+            .first
+            .flatMap { $0.jobTitle?.trimmingCharacters(in: .whitespaces) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// 對某筆兼任職務就地改一次。所有子項目 CRUD 都走這裡，
+    /// 保證只觸發一次 milestones 的 didSet（一次存檔、一次 CloudKit 推送）。
+    func mutateSideRole(_ id: UUID, _ body: (inout LifeMilestone) -> Void) {
+        guard let i = milestones.firstIndex(where: { $0.id == id }) else { return }
+        var m = milestones[i]
+        body(&m)
+        milestones[i] = m
+    }
+
+    func upsertSideRoleTask(_ task: SideRoleTask, in roleId: UUID) {
+        mutateSideRole(roleId) { m in
+            var list = m.sideRoleTasks ?? []
+            if let i = list.firstIndex(where: { $0.id == task.id }) { list[i] = task }
+            else { list.append(task) }
+            m.sideRoleTasks = list
+        }
+    }
+
+    func deleteSideRoleTask(_ taskId: UUID, in roleId: UUID) {
+        mutateSideRole(roleId) { $0.sideRoleTasks?.removeAll { $0.id == taskId } }
+    }
+
+    func upsertSideRoleMember(_ member: SideRoleMember, in roleId: UUID) {
+        mutateSideRole(roleId) { m in
+            var list = m.sideRoleMembers ?? []
+            if let i = list.firstIndex(where: { $0.id == member.id }) { list[i] = member }
+            else { list.append(member) }
+            m.sideRoleMembers = list
+        }
+    }
+
+    func deleteSideRoleMember(_ memberId: UUID, in roleId: UUID) {
+        mutateSideRole(roleId) { $0.sideRoleMembers?.removeAll { $0.id == memberId } }
+    }
+
+    func upsertSideRoleMeeting(_ meeting: SideRoleMeeting, in roleId: UUID) {
+        mutateSideRole(roleId) { m in
+            var list = m.sideRoleMeetings ?? []
+            if let i = list.firstIndex(where: { $0.id == meeting.id }) { list[i] = meeting }
+            else { list.append(meeting) }
+            m.sideRoleMeetings = list.sorted { $0.date > $1.date }
+        }
+    }
+
+    func deleteSideRoleMeeting(_ meetingId: UUID, in roleId: UUID) {
+        mutateSideRole(roleId) { $0.sideRoleMeetings?.removeAll { $0.id == meetingId } }
+    }
+
+    func upsertSideRoleKeyDate(_ keyDate: SideRoleKeyDate, in roleId: UUID) {
+        mutateSideRole(roleId) { m in
+            var list = m.sideRoleKeyDates ?? []
+            if let i = list.firstIndex(where: { $0.id == keyDate.id }) { list[i] = keyDate }
+            else { list.append(keyDate) }
+            m.sideRoleKeyDates = list.sorted { $0.date < $1.date }
+        }
+    }
+
+    func deleteSideRoleKeyDate(_ keyDateId: UUID, in roleId: UUID) {
+        mutateSideRole(roleId) { $0.sideRoleKeyDates?.removeAll { $0.id == keyDateId } }
+    }
+
+    /// 找同名兼任職務的上一屆（例：2026 尾牙負責人的上一屆是 2025 那筆）。
+    /// 年度性職務每年一筆，名單通常大同小異，重打十幾個人不合理。
+    func previousTermOfSideRole(_ role: LifeMilestone) -> LifeMilestone? {
+        guard let name = role.sideRoleName?.trimmingCharacters(in: .whitespaces),
+              !name.isEmpty else { return nil }
+        return sideRoles
+            .filter { $0.id != role.id && $0.date < role.date
+                      && $0.sideRoleName?.trimmingCharacters(in: .whitespaces) == name }
+            .max(by: { $0.date < $1.date })
+    }
+
+    /// 把上一屆的成員名單整包複製過來（各人配一組新 id，避免兩屆共用同一個 id）。
+    /// 刻意只複製成員：待辦與會議逐屆內容不同，複製過來只會製造要逐條刪除的雜訊。
+    /// 回傳實際複製的人數。
+    @discardableResult
+    func copyMembersFromPreviousTerm(into role: LifeMilestone) -> Int {
+        guard let prev = previousTermOfSideRole(role),
+              let source = prev.sideRoleMembers, !source.isEmpty else { return 0 }
+        let existingNames = Set((role.sideRoleMembers ?? []).map {
+            $0.name.trimmingCharacters(in: .whitespaces)
+        })
+        let incoming = source
+            .filter { !existingNames.contains($0.name.trimmingCharacters(in: .whitespaces)) }
+            .map {
+                SideRoleMember(name: $0.name, dutyInRole: $0.dutyInRole,
+                               contact: $0.contact, linkedPersonId: $0.linkedPersonId,
+                               note: $0.note)
+            }
+        guard !incoming.isEmpty else { return 0 }
+        mutateSideRole(role.id) { $0.sideRoleMembers = ($0.sideRoleMembers ?? []) + incoming }
+        return incoming.count
+    }
+
     // MARK: - 人際關係 CRUD
 
     func add(_ item: Relationship) { relationships.append(item) }
@@ -294,8 +428,22 @@ class LifeStore: ObservableObject {
     /// 我目前的公司：取「career 類別最新的非離職」里程碑的 companyName，
     /// 找不到就退到 profile.company。
     var myCurrentCompany: String {
+        // ⚠️ 這裡只看「本職異動」——入職／升職／調薪／轉職／降職／離職。
+        //
+        // 原本的寫法是「排除離職」的黑名單，而且第一道判斷是
+        // `careers.first?.careerSubCategory == .resign`。兼任職務也是 .career 類別，
+        // 所以只要新增一筆日期比離職還新的兼任里程碑，那道短路就失效，
+        // 迴圈接著往下找到更舊的入職紀錄、把前東家的名稱復活。
+        // 名片頁與公司組織都靠這個屬性抓公司名，錯了會連鎖出錯。
+        //
+        // 改成白名單，日後再新增任何「非本職」子分類也不會重蹈覆轍。
+        let employmentSubs: Set<CareerSubCategory> = [.join, .promote, .salaryAdjust,
+                                                      .transfer, .demote, .resign]
         let careers = milestones
-            .filter { $0.category == .career }
+            .filter { m in
+                guard m.category == .career, let sub = m.careerSubCategory else { return false }
+                return employmentSubs.contains(sub)
+            }
             .sorted { $0.date > $1.date }
         // 最近事件為離職 → 目前無業，直接用個人資料的公司欄位
         if careers.first?.careerSubCategory == .resign {

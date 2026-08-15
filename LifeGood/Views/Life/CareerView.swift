@@ -73,6 +73,15 @@ struct CareerView: View {
         let totalCompanies: Int
         let yearsAtCurrentCompany: Double?
         let subCounts: [CareerSubCategory: Int]
+        // ── 以下為後加欄位，一律追加在最後 ──
+        // memberwise init 的引數順序必須與宣告順序一致，插在中間會讓既有呼叫端
+        // 整段要重排。
+        /// 事件型里程碑（入職／升職／調薪／轉職／降職／離職），不含期間型的兼任職務
+        let eventMilestones: [LifeMilestone]
+        /// 目前仍在任的兼任職務
+        let activeSideRoles: [LifeMilestone]
+        /// 事件型子分類裡的最大筆數，供分佈長條圖當分母
+        let eventMaxSubCount: Int
     }
 
     private func makeCareerStats() -> CareerStats {
@@ -120,12 +129,24 @@ struct CareerView: View {
             if let s = m.careerSubCategory { subCounts[s, default: 0] += 1 }
         }
 
+        // 期間型（兼任職務）與事件型分開。上面的 currentCompany / currentPosition /
+        // totalCompanies / yearsAtCurrentCompany 都已經是按特定子分類 filter，
+        // 天生不受兼任影響；唯一會被污染的是「把每一筆都當一次職涯異動」的總數。
+        let eventMilestones = milestones.filter { !($0.careerSubCategory?.isPeriodType ?? false) }
+        let activeSideRoles = milestones.filter { $0.isActiveSideRole }
+        let eventMaxSubCount = subCounts
+            .filter { !$0.key.isPeriodType }
+            .map(\.value).max() ?? 1
+
         return CareerStats(milestones: milestones,
                             currentCompany: currentCompany,
                             currentPosition: currentPosition,
                             totalCompanies: totalCompanies,
                             yearsAtCurrentCompany: yearsAtCurrentCompany,
-                            subCounts: subCounts)
+                            subCounts: subCounts,
+                            eventMilestones: eventMilestones,
+                            activeSideRoles: activeSideRoles,
+                            eventMaxSubCount: eventMaxSubCount)
     }
 
     var body: some View {
@@ -179,8 +200,19 @@ struct CareerView: View {
                          icon: "clock.fill", color: .orange, delay: 0.18)
                 statCard(title: "任職公司數", value: "\(stats.totalCompanies)",
                          icon: "building.columns.fill", color: .teal, delay: 0.24)
-                statCard(title: "職涯里程碑", value: "\(stats.milestones.count)",
+                // 標題從「職涯里程碑」改成「職涯異動」且只數事件型：
+                // 兼任職務是期間不是異動，混進來會讓這個數字失去意義。
+                statCard(title: "職涯異動", value: "\(stats.eventMilestones.count)",
                          icon: "trophy.fill", color: Color(red: 1.00, green: 0.72, blue: 0.18), delay: 0.30)
+            }
+            if !stats.activeSideRoles.isEmpty {
+                HStack(spacing: 12) {
+                    statCard(title: "現任兼任職務", value: "\(stats.activeSideRoles.count)",
+                             icon: "person.badge.plus", color: .indigo, delay: 0.36)
+                    statCard(title: "兼任總紀錄",
+                             value: "\(stats.milestones.count - stats.eventMilestones.count)",
+                             icon: "clock.arrow.circlepath", color: .indigo, delay: 0.42)
+                }
             }
         }
         .padding(.horizontal)
@@ -315,7 +347,10 @@ struct CareerView: View {
     @ViewBuilder
     private func subCategoryBreakdown(_ stats: CareerStats) -> some View {
         let validSubs = CareerSubCategory.allCases.filter { stats.subCounts[$0, default: 0] > 0 }
-        let maxCount = validSubs.map { stats.subCounts[$0, default: 0] }.max() ?? 1
+        // 分母只取事件型的最大值。兼任是期間型，年度性職務（尾牙負責人）累積幾年後
+        // 筆數會超過任何一種異動，拿它當分母會把既有使用者原本的長條全部壓扁——
+        // 那是「新增一個分類卻讓舊畫面變樣」的典型退化。兼任自己的長條夾到 1.0。
+        let maxCount = max(1, stats.eventMaxSubCount)
 
         if !stats.subCounts.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
@@ -346,7 +381,7 @@ struct CareerView: View {
                     ForEach(Array(validSubs.enumerated()), id: \.element) { idx, sub in
                         let count = stats.subCounts[sub, default: 0]
                         let accent = subColor(sub)
-                        let ratio = maxCount > 0 ? Double(count) / Double(maxCount) : 0
+                        let ratio = min(1.0, Double(count) / Double(maxCount))
 
                         VStack(spacing: 8) {
                             HStack(spacing: 12) {
@@ -368,7 +403,7 @@ struct CareerView: View {
                                         .font(.system(size: 14, weight: .semibold))
                                         .foregroundStyle(accent)
                                 }
-                                Text(sub.rawValue)
+                                Text(sub.title)
                                     .font(.subheadline)
                                 Spacer()
                                 // [v3] 計數膠囊：補入 stroke 細邊框，對齊 LifeOverviewView.categoryBreakdownSection 規格
@@ -528,7 +563,7 @@ struct CareerView: View {
                     selectedSub = nil
                 }
                 ForEach(CareerSubCategory.allCases) { sub in
-                    FilterChip(title: sub.rawValue, icon: sub.icon,
+                    FilterChip(title: sub.title, icon: sub.icon,
                                isSelected: selectedSub == sub,
                                tint: subColor(sub)) {
                         selectedSub = sub
@@ -701,7 +736,7 @@ struct CareerView: View {
                     HStack(spacing: 6) {
                         if let sub = item.careerSubCategory {
                             // [v3] 子分類膠囊補 stroke 細邊框，對齊 ExpenseRow / IncomeView 膠囊規格
-                            Text(sub.rawValue)
+                            Text(sub.title)
                                 .font(.system(size: 10, weight: .semibold))
                                 .padding(.horizontal, 7).padding(.vertical, 2.5)
                                 .background(accent.opacity(0.12))
@@ -759,6 +794,8 @@ struct CareerView: View {
                     .clipShape(Capsule())
                     .overlay(Capsule().stroke(pctColor.opacity(0.25), lineWidth: 0.6))
             }
+        } else if item.careerSubCategory == .sideRole {
+            SideRoleRowSubtitle(item: item)
         } else if item.careerSubCategory == .resign {
             if let m = item.mood, !m.isEmpty {
                 Text("心境：\(m)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -786,6 +823,7 @@ struct CareerView: View {
         case .transfer:     return .orange
         case .demote:       return .purple
         case .resign:       return .red
+        case .sideRole:     return .indigo
         }
     }
 

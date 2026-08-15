@@ -538,7 +538,24 @@ enum CareerSubCategory: String, Codable, CaseIterable, Identifiable {
     case transfer = "轉職"
     case demote = "降職"
     case resign = "離職"
+    /// 與本職並行的額外職務（例：副理同時兼任氣體化學執行秘書、尾牙負責人）。
+    ///
+    /// ⚠️ rawValue 刻意用英文識別字，與上面六個舊 case 的中文 rawValue 不同——
+    /// rawValue 會直接寫進 iCloud 與備份 JSON，上線後永久凍結；舊 case 當年
+    /// 把中文字面值當識別字用，等於把「顯示名稱」也一起凍住了（想把「調薪」
+    /// 改成「薪資調整」就會讓所有舊資料解不出子分類）。新 case 不重蹈覆轍：
+    /// 識別字凍結、顯示名稱走下面的 title，隨時可以改。
+    case sideRole = "sideRole"
     var id: String { rawValue }
+
+    /// 畫面上顯示的名稱。舊 case 的 rawValue 本身就是中文所以直接回傳，
+    /// 新 case 一律在這裡給中文——不要再讓 rawValue 兼任顯示字串。
+    var title: String {
+        switch self {
+        case .sideRole: return "兼任"
+        default:        return rawValue
+        }
+    }
 
     var icon: String {
         switch self {
@@ -548,7 +565,153 @@ enum CareerSubCategory: String, Codable, CaseIterable, Identifiable {
         case .transfer: return "arrow.left.arrow.right"
         case .demote: return "arrow.down.circle.fill"
         case .resign: return "arrow.right.square"
+        case .sideRole: return "person.badge.plus"
         }
+    }
+
+    /// 期間型子分類（有起訖），與其餘「事件點」型不同。
+    /// 職涯統計要把兩者分開算，否則年資與異動次數會失真。
+    var isPeriodType: Bool { self == .sideRole }
+}
+
+// MARK: - 兼任職務的管理頁資料
+//
+// 四個型別共同的解碼紀律：**除了 id 以外一律 decodeIfPresent + 預設值**。
+// 理由不是潔癖：LifeStore.load() 的容錯粒度是「一筆 LifeMilestone」，
+// 這些 struct 是掛在 milestone 底下的陣列元素，任何一欄硬 decode 失敗，
+// 使用者失去的是整筆職涯里程碑，不只是一則待辦。
+//
+// 也因此刻意「不」複用既有的 SubordinateMeeting／SubordinateTask：
+// 那兩個是 Swift 合成解碼（沒有自訂 init(from:)），缺一個 key 就整筆炸掉。
+// 複用等於把那個脆弱點接到兼任職務上。
+
+/// 兼任職務的待辦事項
+struct SideRoleTask: Identifiable, Codable {
+    let id: UUID
+    var content: String
+    var dueDate: Date?
+    var isCompleted: Bool
+    var completedAt: Date?
+    var note: String
+
+    init(id: UUID = UUID(), content: String = "", dueDate: Date? = nil,
+         isCompleted: Bool = false, completedAt: Date? = nil, note: String = "") {
+        self.id = id; self.content = content; self.dueDate = dueDate
+        self.isCompleted = isCompleted; self.completedAt = completedAt; self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // id 用 try? 而非硬 decode：id 壞掉時寧可生一個新的，也不要讓整筆
+        // 職涯里程碑被 lossyDecodeArray 丟掉。代價是兩台裝置各自解一次會產生
+        // 不同 id——但那只發生在資料本來就已經損壞的情況。
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        content = (try? c.decodeIfPresent(String.self, forKey: .content)) ?? ""
+        dueDate = try? c.decodeIfPresent(Date.self, forKey: .dueDate)
+        isCompleted = (try? c.decodeIfPresent(Bool.self, forKey: .isCompleted)) ?? false
+        completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, content, dueDate, isCompleted, completedAt, note
+    }
+}
+
+/// 兼任職務的相關人員（例：尾牙負責人底下的場控、攝影、各組窗口）。
+/// name 一律存文字快照，linkedPersonId 只是「額外」的連結：兼任團隊常含
+/// 跨部門或外部人員，只存 UUID 的話對方被刪除後名單會變成空白列。
+struct SideRoleMember: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    /// 在本職務中的分工，如「場控」「攝影」「總務」
+    var dutyInRole: String
+    var contact: String
+    /// 對應部屬或名片的 id；外部人員為 nil
+    var linkedPersonId: UUID?
+    var note: String
+
+    init(id: UUID = UUID(), name: String = "", dutyInRole: String = "",
+         contact: String = "", linkedPersonId: UUID? = nil, note: String = "") {
+        self.id = id; self.name = name; self.dutyInRole = dutyInRole
+        self.contact = contact; self.linkedPersonId = linkedPersonId; self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        dutyInRole = (try? c.decodeIfPresent(String.self, forKey: .dutyInRole)) ?? ""
+        contact = (try? c.decodeIfPresent(String.self, forKey: .contact)) ?? ""
+        linkedPersonId = try? c.decodeIfPresent(UUID.self, forKey: .linkedPersonId)
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, dutyInRole, contact, linkedPersonId, note
+    }
+}
+
+/// 兼任職務的會議紀錄。
+/// 欄位比照 SubordinateMeeting 的語意，但解碼全部容錯——見本區塊開頭的說明。
+struct SideRoleMeeting: Identifiable, Codable {
+    let id: UUID
+    var date: Date
+    var topic: String
+    /// 出席者姓名（文字快照，不綁 id：外部與會者很常見）
+    var attendees: [String]
+    /// 決議事項
+    var decisions: String
+    var note: String
+
+    init(id: UUID = UUID(), date: Date = Date(), topic: String = "",
+         attendees: [String] = [], decisions: String = "", note: String = "") {
+        self.id = id; self.date = date; self.topic = topic
+        self.attendees = attendees; self.decisions = decisions; self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        date = (try? c.decodeIfPresent(Date.self, forKey: .date)) ?? Date()
+        topic = (try? c.decodeIfPresent(String.self, forKey: .topic)) ?? ""
+        attendees = (try? c.decodeIfPresent([String].self, forKey: .attendees)) ?? []
+        decisions = (try? c.decodeIfPresent(String.self, forKey: .decisions)) ?? ""
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, topic, attendees, decisions, note
+    }
+}
+
+/// 兼任職務的重要日期（例：尾牙的場勘日、彩排日、正式日）。
+/// 會同步顯示在「我的行事曆」上。
+struct SideRoleKeyDate: Identifiable, Codable {
+    let id: UUID
+    var date: Date
+    var title: String
+    /// 提前幾天提醒；0 代表當天、nil 代表不提醒
+    var remindDaysBefore: Int?
+    var note: String
+
+    init(id: UUID = UUID(), date: Date = Date(), title: String = "",
+         remindDaysBefore: Int? = nil, note: String = "") {
+        self.id = id; self.date = date; self.title = title
+        self.remindDaysBefore = remindDaysBefore; self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        date = (try? c.decodeIfPresent(Date.self, forKey: .date)) ?? Date()
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
+        remindDaysBefore = try? c.decodeIfPresent(Int.self, forKey: .remindDaysBefore)
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, title, remindDaysBefore, note
     }
 }
 
@@ -571,6 +734,38 @@ struct LifeMilestone: Identifiable, Codable {
     var salary: Double?
     var salaryBefore: Double?
     var salaryAfter: Double?
+
+    // 兼任職務專屬欄位（careerSubCategory == .sideRole 時才有值）
+    //
+    // 就任日沿用 LifeMilestone.date。「同時兼任多個職務」＝多筆里程碑，
+    // 不是一筆裡塞陣列——後者無法表達各自的起訖與各自的管理頁。
+    //
+    // 這些欄位刻意不進 memberwise init 的參數列（比照既有的 bankDeposits /
+    // isDisabled / easyCardNumber），那個 init 已經有 30 餘個參數，
+    // 再膨脹會加重 SwiftUI 呼叫端的型別推導負擔。
+    /// 兼任職務名稱（例：氣體化學執行秘書、尾牙負責人）
+    var sideRoleName: String?
+    /// 主辦單位（例：台灣氣體化學工業協會、員工福委會）。
+    /// 刻意不寫進 companyName——那個欄位是 LifeStore.myCurrentCompany 判斷
+    /// 「我目前在哪家公司」的依據，名片與公司組織都靠它，污染了會連鎖出錯。
+    var sideRoleOrg: String?
+    /// 卸任日；nil 代表仍在任
+    var sideRoleEndDate: Date?
+    /// 是否為此職務的主責者（使用者口中的「額外職務仲裁者」）；false / nil＝協辦或掛名
+    var sideRoleIsLead: Bool?
+    /// 負責範圍
+    var sideRoleScope: String?
+    /// 是否為這筆兼任職務啟用專屬管理頁面。
+    /// 關閉只隱藏入口，底下的待辦／成員／會議／重要日期永遠原樣保留。
+    var sideRoleWorkspaceEnabled: Bool?
+    /// 專屬管理頁：待辦
+    var sideRoleTasks: [SideRoleTask]?
+    /// 專屬管理頁：成員名單
+    var sideRoleMembers: [SideRoleMember]?
+    /// 專屬管理頁：會議紀錄
+    var sideRoleMeetings: [SideRoleMeeting]?
+    /// 專屬管理頁：重要日期（會同步到我的行事曆）
+    var sideRoleKeyDates: [SideRoleKeyDate]?
 
     // 理財專屬欄位
     var financeSubCategory: FinanceSubCategory?
@@ -684,6 +879,17 @@ struct LifeMilestone: Identifiable, Codable {
         easyCardNumber = try? c.decodeIfPresent(String.self, forKey: .easyCardNumber)
         iPassNumber = try? c.decodeIfPresent(String.self, forKey: .iPassNumber)
         happyGoNumber = try? c.decodeIfPresent(String.self, forKey: .happyGoNumber)
+        // 兼任職務
+        sideRoleName = try? c.decodeIfPresent(String.self, forKey: .sideRoleName)
+        sideRoleOrg = try? c.decodeIfPresent(String.self, forKey: .sideRoleOrg)
+        sideRoleEndDate = try? c.decodeIfPresent(Date.self, forKey: .sideRoleEndDate)
+        sideRoleIsLead = try? c.decodeIfPresent(Bool.self, forKey: .sideRoleIsLead)
+        sideRoleScope = try? c.decodeIfPresent(String.self, forKey: .sideRoleScope)
+        sideRoleWorkspaceEnabled = try? c.decodeIfPresent(Bool.self, forKey: .sideRoleWorkspaceEnabled)
+        sideRoleTasks = try? c.decodeIfPresent([SideRoleTask].self, forKey: .sideRoleTasks)
+        sideRoleMembers = try? c.decodeIfPresent([SideRoleMember].self, forKey: .sideRoleMembers)
+        sideRoleMeetings = try? c.decodeIfPresent([SideRoleMeeting].self, forKey: .sideRoleMeetings)
+        sideRoleKeyDates = try? c.decodeIfPresent([SideRoleKeyDate].self, forKey: .sideRoleKeyDates)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -695,6 +901,43 @@ struct LifeMilestone: Identifiable, Codable {
         case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary, bankDeposits, linkedBankMilestoneId
         case isDisabled
         case easyCardNumber, iPassNumber, happyGoNumber
+        // ⚠️ 這五行與上面 init(from:) 的十行必須成對存在。
+        //    本型別有自訂 init(from:) 與顯式 CodingKeys 但沒有自訂 encode(to:)，
+        //    所以編碼走合成版、只認 CodingKeys；漏在這裡加＝新欄位永遠寫不進
+        //    JSON，而且完全不會編譯錯，只會在殺掉 App 重開後靜默丟失。
+        case sideRoleName, sideRoleOrg, sideRoleEndDate, sideRoleIsLead
+        case sideRoleScope, sideRoleWorkspaceEnabled
+        case sideRoleTasks, sideRoleMembers, sideRoleMeetings, sideRoleKeyDates
+    }
+
+    // MARK: 兼任職務便利屬性
+
+    /// 這筆是不是兼任職務
+    var isSideRole: Bool { careerSubCategory == .sideRole }
+
+    /// 是否仍在任（沒填卸任日，或卸任日還沒到）
+    var isActiveSideRole: Bool {
+        guard isSideRole else { return false }
+        guard let end = sideRoleEndDate else { return true }
+        return end >= Calendar.current.startOfDay(for: Date())
+    }
+
+    /// 這筆兼任職務是否已啟用專屬管理頁（必須同時是主責者）。
+    /// 「關閉開關」只讓這個回 false、隱藏入口，底下的資料一律原樣保留。
+    var hasSideRoleWorkspace: Bool {
+        isSideRole && sideRoleIsLead == true && sideRoleWorkspaceEnabled == true
+    }
+
+    /// 管理頁裡已經累積了多少內容。用來在關閉開關時據實告訴使用者「保留了什麼」，
+    /// 而不是只給一句沒有憑據的「資料會保留」。
+    var sideRoleContentCount: (tasks: Int, members: Int, meetings: Int, keyDates: Int) {
+        (sideRoleTasks?.count ?? 0, sideRoleMembers?.count ?? 0,
+         sideRoleMeetings?.count ?? 0, sideRoleKeyDates?.count ?? 0)
+    }
+
+    var hasAnySideRoleContent: Bool {
+        let c = sideRoleContentCount
+        return c.tasks + c.members + c.meetings + c.keyDates > 0
     }
 
     /// 信用卡實際扣款日：以消費日推算結帳後的繳款日

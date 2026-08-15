@@ -394,6 +394,8 @@ struct ResumeView: View {
     @State private var editingItem: LifeMilestone?
     @State private var selectedCategory: MilestoneCategory?
     @State private var showPremiumAlert = false
+    /// 待確認刪除的兼任職務（底下已累積管理頁內容時才會被設定）
+    @State private var pendingSideRoleDelete: LifeMilestone?
     @State private var emptyStatePulse = false
     @State private var emptyStatePulseTask: Task<Void, Never>?
     @State private var rowsAppeared = false
@@ -463,12 +465,48 @@ struct ResumeView: View {
             .sheet(isPresented: $showAdd) { AddMilestoneView() }
             .sheet(item: $editingItem) { item in AddMilestoneView(editing: item) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+            .confirmationDialog("刪除這筆兼任職務？",
+                                isPresented: Binding(
+                                    get: { pendingSideRoleDelete != nil },
+                                    set: { if !$0 { pendingSideRoleDelete = nil } }),
+                                titleVisibility: .visible) {
+                Button("刪除", role: .destructive) {
+                    if let item = pendingSideRoleDelete { deleteMilestoneCleaningLinks(item) }
+                    pendingSideRoleDelete = nil
+                }
+                Button("取消", role: .cancel) { pendingSideRoleDelete = nil }
+            } message: {
+                Text(pendingDeleteMessage)
+            }
         }
     }
 
     /// 刪除里程碑並清除其他 Store 對此 id 的懸空引用。LifeStore.deleteMilestone 本身無法觸及
     /// FinanceStore／ExpenseStore（不同 store，無互相持有），比照 deleteFamilyMember／deleteSubordinate
     /// 解除交叉引用的既有寫法，改在同時持有三個 store 的這一層補上清除。
+    /// 刪除前的守門。兼任職務底下可能累積了半年的待辦、十幾位工作人員名單、
+    /// 會議紀錄與重要日期——這些不會出現在履歷列上，滑一下就全部消失、
+    /// 而且 milestones 沒有復原機制、didSet 立刻存檔並推 CloudKit。
+    /// 有內容就先問；其餘子分類維持原本的直接刪除，零行為變更。
+    private func requestDelete(_ item: LifeMilestone) {
+        if item.isSideRole && item.hasAnySideRoleContent {
+            pendingSideRoleDelete = item
+        } else {
+            deleteMilestoneCleaningLinks(item)
+        }
+    }
+
+    private var pendingDeleteMessage: String {
+        guard let item = pendingSideRoleDelete else { return "" }
+        let c = item.sideRoleContentCount
+        var parts: [String] = []
+        if c.tasks > 0 { parts.append("\(c.tasks) 則待辦") }
+        if c.members > 0 { parts.append("\(c.members) 位成員") }
+        if c.meetings > 0 { parts.append("\(c.meetings) 則會議紀錄") }
+        if c.keyDates > 0 { parts.append("\(c.keyDates) 個重要日期") }
+        return "這個職務的 " + parts.joined(separator: "、") + " 也會一併刪除，且無法復原。"
+    }
+
     private func deleteMilestoneCleaningLinks(_ item: LifeMilestone) {
         store.deleteMilestone(item)
 
@@ -581,7 +619,7 @@ struct ResumeView: View {
                                 if realMilestoneIDs.contains(item.id) {
                                     Button(role: .destructive) {
                                         guard subscription.isPremium else { showPremiumAlert = true; return }
-                                        deleteMilestoneCleaningLinks(item)
+                                        requestDelete(item)
                                     } label: {
                                         Label("刪除", systemImage: "trash")
                                     }
@@ -641,7 +679,7 @@ struct ResumeView: View {
                                 if realMilestoneIDs.contains(item.id) {
                                     Button(role: .destructive) {
                                         guard subscription.isPremium else { showPremiumAlert = true; return }
-                                        deleteMilestoneCleaningLinks(item)
+                                        requestDelete(item)
                                     } label: {
                                         Label("刪除", systemImage: "trash")
                                     }
@@ -1238,7 +1276,12 @@ struct ResumeView: View {
             if let g = item.jobGrade, !g.isEmpty { p.append(g) }
             return p
         }()
-        if sub == .resign {
+        if sub == .sideRole {
+            // 兼任職務的 department/jobTitle/jobGrade 都是空的，走一般分支只會掉到
+            // note；改顯示「主辦單位 · 期間」才是這一列真正的資訊。
+            Text(SideRoleFormat.subtitle(item))
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        } else if sub == .resign {
             if let m = item.mood, !m.isEmpty {
                 Text(m).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -1309,6 +1352,8 @@ struct AddMilestoneView: View {
     var editing: LifeMilestone?
     var editingFamily: FamilyMember?
     var initialCategory: MilestoneCategory = .other
+    /// 從「兼任職務」管理中樞按＋進來時帶入，讓表單直接停在兼任子分類
+    var initialCareerSub: CareerSubCategory?
 
     @State private var category: MilestoneCategory = .other
     @State private var title = ""
@@ -1350,6 +1395,15 @@ struct AddMilestoneView: View {
     @State private var salaryText = ""
     @State private var salaryBeforeText = ""
     @State private var salaryAfterText = ""
+
+    // 兼任職務專屬
+    @State private var sideRoleName = ""
+    @State private var sideRoleOrg = ""
+    @State private var sideRoleScope = ""
+    @State private var hasSideRoleEnd = false
+    @State private var sideRoleEndDate = Date()
+    @State private var sideRoleIsLead = false
+    @State private var sideRoleWorkspaceEnabled = false
 
     // 理財專屬
     @State private var financeSub: FinanceSubCategory = .bank
@@ -1397,6 +1451,7 @@ struct AddMilestoneView: View {
                 return (Double(salaryBeforeText) ?? 0) > 0 && (Double(salaryAfterText) ?? 0) > 0
             case .transfer: return !department.trimmingCharacters(in: .whitespaces).isEmpty
             case .resign: return true
+            case .sideRole: return !sideRoleName.trimmingCharacters(in: .whitespaces).isEmpty
             }
         }
         if isFinance {
@@ -1608,7 +1663,7 @@ struct AddMilestoneView: View {
     private var careerFields: some View {
         Picker("子分類", selection: $careerSub) {
             ForEach(CareerSubCategory.allCases) { sub in
-                Label(sub.rawValue, systemImage: sub.icon).tag(sub)
+                Label(sub.title, systemImage: sub.icon).tag(sub)
             }
         }
 
@@ -1632,10 +1687,16 @@ struct AddMilestoneView: View {
             salaryField
         case .resign:
             EmptyView()
+        case .sideRole:
+            // 兼任職務的欄位全部放在下方 sideRoleSections 的獨立 Section，
+            // 不擠進「基本資訊」——那個 Section 已經是 Picker + 多層條件分支的
+            // 複合泛型，再塞一組欄位進去有型別推導爆掉的風險。
+            EmptyView()
         }
 
         if careerSub != .salaryAdjust {
-            DatePicker("日期", selection: $date, displayedComponents: .date)
+            DatePicker(careerSub == .sideRole ? "就任日期" : "日期",
+                       selection: $date, displayedComponents: .date)
         }
 
         if careerSub == .join || careerSub == .promote || careerSub == .transfer {
@@ -1746,6 +1807,8 @@ struct AddMilestoneView: View {
             } header: {
                 milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
+        } else if careerSub == .sideRole {
+            sideRoleSections
         } else if careerSub == .resign {
             Section {
                 TextField("心境", text: $mood, axis: .vertical).lineLimit(3)
@@ -1760,6 +1823,67 @@ struct AddMilestoneView: View {
                 milestoneSectionHeader("備註", icon: "note.text", color: .secondary)
             }
         }
+    }
+
+    /// 兼任職務的表單區塊。刻意拆成三個扁平 Section、每個 Section 內只有單層欄位——
+    /// 不做巢狀條件包裝，避免加重 Form 的型別推導負擔。
+    @ViewBuilder
+    private var sideRoleSections: some View {
+        Section {
+            TextField("職務名稱（例：尾牙負責人）", text: $sideRoleName)
+            TextField("主辦單位（例：員工福委會）", text: $sideRoleOrg)
+            TextField("負責範圍", text: $sideRoleScope, axis: .vertical).lineLimit(3)
+        } header: {
+            milestoneSectionHeader("兼任職務", icon: "person.badge.plus", color: .indigo)
+        } footer: {
+            Text("與本職並行的額外職務。同時兼任多個就各記一筆，各自有自己的期間與管理頁。")
+        }
+
+        Section {
+            Toggle("已卸任", isOn: $hasSideRoleEnd)
+            if hasSideRoleEnd {
+                // in: date... 只夾住渲染當下的下限。使用者可以先設卸任日、
+                // 再回頭把就任日改晚，所以存檔時還會再夾一次（見 save()）。
+                DatePicker("卸任日期", selection: $sideRoleEndDate,
+                           in: date..., displayedComponents: .date)
+            }
+        } header: {
+            milestoneSectionHeader("任期", icon: "calendar", color: .indigo)
+        } footer: {
+            Text(hasSideRoleEnd ? "卸任後仍會保留在職涯紀錄裡。" : "未勾選代表目前仍在任。")
+        }
+
+        Section {
+            Toggle("我是這個職務的主責者", isOn: $sideRoleIsLead)
+            if sideRoleIsLead {
+                Toggle("啟用專屬管理頁面", isOn: $sideRoleWorkspaceEnabled)
+            }
+        } header: {
+            milestoneSectionHeader("主責與管理", icon: "checkmark.seal.fill", color: .indigo)
+        } footer: {
+            Text(sideRoleFooterText)
+        }
+    }
+
+    /// 開關說明。關閉時如果底下已經有內容，要把實際筆數講出來——
+    /// 只寫一句「資料會保留」沒有憑據，使用者看到內容消失還是會判定資料不見了。
+    private var sideRoleFooterText: String {
+        guard sideRoleIsLead else {
+            return "只有主責者才需要管理頁面；協辦或掛名的職務維持關閉即可。"
+        }
+        if sideRoleWorkspaceEnabled {
+            return "會在「職涯」的功能列出現「兼任職務」入口，裡面可以管待辦、成員名單、會議紀錄與重要日期。"
+        }
+        let c = editing?.sideRoleContentCount ?? (tasks: 0, members: 0, meetings: 0, keyDates: 0)
+        var parts: [String] = []
+        if c.tasks > 0 { parts.append("\(c.tasks) 則待辦") }
+        if c.members > 0 { parts.append("\(c.members) 位成員") }
+        if c.meetings > 0 { parts.append("\(c.meetings) 則會議紀錄") }
+        if c.keyDates > 0 { parts.append("\(c.keyDates) 個重要日期") }
+        if !parts.isEmpty {
+            return "目前保留 " + parts.joined(separator: "、") + "，重新開啟就會看到。關閉只是隱藏入口，不會刪除任何內容。"
+        }
+        return "開啟後會有一個專屬頁面，可以管待辦、成員名單、會議紀錄與重要日期。"
     }
 
     // MARK: - 導航標題
@@ -2046,7 +2170,8 @@ struct AddMilestoneView: View {
             // 對齊 careerFields 表單實際顯示這些欄位的子分類，避免切換子分類時把
             // 前一個子分類殘留的文字誤存進新子分類的紀錄。
             let hasTitleGrade = [.join, .promote, .transfer, .demote].contains(careerSub)
-            let item = LifeMilestone(
+            let isSide = careerSub == .sideRole
+            var item = LifeMilestone(
                 id: editing?.id ?? UUID(),
                 title: autoTitle, date: date, category: .career,
                 note: careerSub == .resign ? "" : note.trimmingCharacters(in: .whitespaces),
@@ -2062,6 +2187,24 @@ struct AddMilestoneView: View {
                 salaryBefore: careerSub == .salaryAdjust ? Double(salaryBeforeText) : nil,
                 salaryAfter: careerSub == .salaryAdjust ? Double(salaryAfterText) : nil
             )
+            // 兼任職務欄位（不在 memberwise init 裡，逐一指派）
+            item.sideRoleName = trimmedOrNil(sideRoleName, when: isSide)
+            item.sideRoleOrg = trimmedOrNil(sideRoleOrg, when: isSide)
+            item.sideRoleScope = trimmedOrNil(sideRoleScope, when: isSide)
+            // 卸任日再夾一次：DatePicker 的 in: date... 只夾住渲染當下，
+            // 使用者可以先設卸任日再把就任日改晚，那樣會存進「卸任早於就任」，
+            // 導致期間顯示顛倒、任期算成負數、在任判定錯誤，而且全程沒有任何提示。
+            item.sideRoleEndDate = (isSide && hasSideRoleEnd) ? max(date, sideRoleEndDate) : nil
+            item.sideRoleIsLead = isSide ? sideRoleIsLead : nil
+            item.sideRoleWorkspaceEnabled = (isSide && sideRoleIsLead) ? sideRoleWorkspaceEnabled : nil
+            // ⚠️ 管理頁的四份資料**無條件**從原紀錄帶回，不依 isSide 條件化。
+            //    這個 item 是整個重建的，沒帶回就等於每次編輯都把使用者累積的
+            //    待辦／名單／會議／重要日期全部清空。不條件化的用意是：連使用者
+            //    把子分類切走再切回來，資料都還在。
+            item.sideRoleTasks = editing?.sideRoleTasks
+            item.sideRoleMembers = editing?.sideRoleMembers
+            item.sideRoleMeetings = editing?.sideRoleMeetings
+            item.sideRoleKeyDates = editing?.sideRoleKeyDates
             if editing != nil { store.update(item) } else { store.add(item) }
         } else if isFinance {
             let autoTitle = generateFinanceTitle()
@@ -2154,6 +2297,12 @@ struct AddMilestoneView: View {
         case .resign:
             let company = co.isEmpty ? (latestCompanyName ?? "") : co
             return company.isEmpty ? "離職" : "從 \(company) 離職"
+        case .sideRole:
+            // 標題一律帶年份。年度性職務（尾牙負責人）每年一筆，
+            // 不帶年份的話職涯列表會出現一整排一模一樣的字，只剩右側日期膠囊能分辨。
+            let rn = sideRoleName.trimmingCharacters(in: .whitespaces)
+            let year = Calendar.current.component(.year, from: date)
+            return rn.isEmpty ? "兼任職務（\(year)）" : "兼任 \(rn)（\(year)）"
         }
     }
 
@@ -2183,6 +2332,14 @@ struct AddMilestoneView: View {
             if let s = e.salary, s > 0 { salaryText = String(format: "%.0f", s) }
             if let sb = e.salaryBefore, sb > 0 { salaryBeforeText = String(format: "%.0f", sb) }
             if let sa = e.salaryAfter, sa > 0 { salaryAfterText = String(format: "%.0f", sa) }
+            // 兼任職務欄位
+            sideRoleName = e.sideRoleName ?? ""
+            sideRoleOrg = e.sideRoleOrg ?? ""
+            sideRoleScope = e.sideRoleScope ?? ""
+            hasSideRoleEnd = e.sideRoleEndDate != nil
+            if let end = e.sideRoleEndDate { sideRoleEndDate = end }
+            sideRoleIsLead = e.sideRoleIsLead ?? false
+            sideRoleWorkspaceEnabled = e.sideRoleWorkspaceEnabled ?? false
             // 理財欄位
             if let fs = e.financeSubCategory { financeSub = fs }
             bankName = e.bankName ?? ""
@@ -2232,6 +2389,18 @@ struct AddMilestoneView: View {
             return
         }
         category = initialCategory
+        // 從「兼任職務」管理中樞按＋進來：直接停在兼任子分類，並預先勾好主責者與
+        // 管理頁開關。少了這兩個預設值，使用者在中樞裡新增完一筆、關掉表單後，
+        // 那筆不會出現在中樞裡（中樞只列已啟用管理頁的），畫面上也不會有任何說明——
+        // 從中樞進來的語意本來就是「我要為這個職務開一個管理頁」。
+        // 從職涯頁一般新增時 initialCareerSub 是 nil，預設仍然是關閉的。
+        if let s = initialCareerSub {
+            careerSub = s
+            if s == .sideRole {
+                sideRoleIsLead = true
+                sideRoleWorkspaceEnabled = true
+            }
+        }
         if isRealEstate && financeStore.realEstates.isEmpty {
             realEstateMode = .new
         }

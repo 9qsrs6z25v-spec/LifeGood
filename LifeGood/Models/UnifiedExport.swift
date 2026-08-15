@@ -351,6 +351,85 @@ enum UnifiedExporter {
             csv += fields.joined(separator: ",") + "\n"
         }
 
+        // 人生 - 兼任職務（含管理頁的四份子資料）
+        // JSON 匯出／備份是整包走 Codable，新欄位自動涵蓋；CSV 是逐欄手寫的，
+        // 不補在這裡就會變成「JSON 有、CSV 沒有」的靜默落差。
+        let sideRoles = life.milestones
+            .filter { $0.careerSubCategory == .sideRole }
+            .sorted { $0.date < $1.date }
+        if !sideRoles.isEmpty {
+            csv += "\n## 兼任職務 (Side Roles)\n"
+            csv += "id,roleName,org,startDate,endDate,isLead,workspaceEnabled,scope\n"
+            for r in sideRoles {
+                let fields: [String] = [
+                    r.id.uuidString,
+                    esc(r.sideRoleName ?? ""),
+                    esc(r.sideRoleOrg ?? ""),
+                    iso.string(from: r.date),
+                    r.sideRoleEndDate.map { iso.string(from: $0) } ?? "",
+                    (r.sideRoleIsLead ?? false) ? "1" : "0",
+                    (r.sideRoleWorkspaceEnabled ?? false) ? "1" : "0",
+                    esc(r.sideRoleScope ?? "")
+                ]
+                csv += fields.joined(separator: ",") + "\n"
+            }
+
+            csv += "\n## 兼任職務待辦 (Side Role Tasks)\n"
+            csv += "roleId,roleName,content,dueDate,isCompleted,completedAt,note\n"
+            for r in sideRoles {
+                for t in r.sideRoleTasks ?? [] {
+                    let fields: [String] = [
+                        r.id.uuidString, esc(r.sideRoleName ?? ""), esc(t.content),
+                        t.dueDate.map { iso.string(from: $0) } ?? "",
+                        t.isCompleted ? "1" : "0",
+                        t.completedAt.map { iso.string(from: $0) } ?? "",
+                        esc(t.note)
+                    ]
+                    csv += fields.joined(separator: ",") + "\n"
+                }
+            }
+
+            csv += "\n## 兼任職務成員 (Side Role Members)\n"
+            csv += "roleId,roleName,name,dutyInRole,contact,note\n"
+            for r in sideRoles {
+                for m in r.sideRoleMembers ?? [] {
+                    let fields: [String] = [
+                        r.id.uuidString, esc(r.sideRoleName ?? ""), esc(m.name),
+                        esc(m.dutyInRole), esc(m.contact), esc(m.note)
+                    ]
+                    csv += fields.joined(separator: ",") + "\n"
+                }
+            }
+
+            csv += "\n## 兼任職務會議 (Side Role Meetings)\n"
+            csv += "roleId,roleName,date,topic,attendees,decisions,note\n"
+            for r in sideRoles {
+                for mt in r.sideRoleMeetings ?? [] {
+                    let fields: [String] = [
+                        r.id.uuidString, esc(r.sideRoleName ?? ""),
+                        iso.string(from: mt.date), esc(mt.topic),
+                        esc(mt.attendees.joined(separator: "、")),
+                        esc(mt.decisions), esc(mt.note)
+                    ]
+                    csv += fields.joined(separator: ",") + "\n"
+                }
+            }
+
+            csv += "\n## 兼任職務重要日期 (Side Role Key Dates)\n"
+            csv += "roleId,roleName,date,title,remindDaysBefore,note\n"
+            for r in sideRoles {
+                for k in r.sideRoleKeyDates ?? [] {
+                    let fields: [String] = [
+                        r.id.uuidString, esc(r.sideRoleName ?? ""),
+                        iso.string(from: k.date), esc(k.title),
+                        k.remindDaysBefore.map(String.init) ?? "",
+                        esc(k.note)
+                    ]
+                    csv += fields.joined(separator: ",") + "\n"
+                }
+            }
+        }
+
         return csv
     }
 

@@ -198,6 +198,7 @@ enum HeroCard: String, CaseIterable, Identifiable {
     case travelMapStats, travelMapDetail, foodMapStats, foodMapDetail
     case resume, familyMembersResume, childrenResume, childDetail
     case subordinateDetail, taxOverview, medicalMap, calendarEvent
+    case sideRoleHub, sideRoleWorkspace
     // 系統
     case settings, eInvoice
 
@@ -263,6 +264,8 @@ enum HeroCard: String, CaseIterable, Identifiable {
         case .taxOverview:         return "稅務總覽"
         case .medicalMap:          return "就醫地圖"
         case .calendarEvent:       return "行事曆事件"
+        case .sideRoleHub:         return "兼任職務 › 中樞"
+        case .sideRoleWorkspace:   return "兼任職務 › 管理頁"
         case .settings:            return "設定"
         case .eInvoice:            return "電子發票"
         }
@@ -325,6 +328,11 @@ enum HeroCard: String, CaseIterable, Identifiable {
             // 出廠填「會議」的靛藍；實際顯示色由 runtimeColors 依事件類型供應
             return [Color(red: 0.36, green: 0.32, blue: 0.86),
                     Color(red: 0.20, green: 0.42, blue: 0.90)]
+        case .sideRoleHub, .sideRoleWorkspace:
+            // 兼任職務的主題色。靛藍是職涯子分類色裡唯一還沒被佔用的——
+            // 綠(入職)/藍(升職)/青(調薪)/橙(轉職)/紫(降職)/紅(離職)。
+            return [Color(red: 0.36, green: 0.30, blue: 0.84),
+                    Color(red: 0.22, green: 0.16, blue: 0.62)]
         case .variableExpense, .stock:
             return [Color(red: 1.00, green: 0.62, blue: 0.22),
                     Color(red: 0.86, green: 0.36, blue: 0.06)]
