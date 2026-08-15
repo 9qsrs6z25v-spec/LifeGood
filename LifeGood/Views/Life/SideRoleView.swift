@@ -71,6 +71,79 @@ enum SideRoleFormat {
     }
 }
 
+// MARK: - 資料來源：既有人員與既有單位
+
+/// 兼任職務成員可挑選的人員。來源是部屬與名片——本專案的人員資料就這兩處，
+/// 公司組織的 OrgPerson 會與這兩者雙向同步，不另外列以免同一個人出現兩次。
+struct SideRolePersonCandidate: Identifiable, Hashable {
+    enum Kind: String {
+        case subordinate = "部屬"
+        case card = "名片"
+        var icon: String {
+            switch self {
+            case .subordinate: return "person.2.fill"
+            case .card:        return "person.crop.rectangle.stack"
+            }
+        }
+    }
+    let id: UUID
+    let kind: Kind
+    let name: String
+    /// 職稱／公司，挑人時用來分辨同名的人
+    let subtitle: String
+    /// 自動帶入用的聯絡方式（名片才有）
+    let contact: String
+}
+
+extension LifeStore {
+    /// 挑選成員用的人員清單。
+    /// 刻意不複用 mentionPeople()：那個是給 @ 標註用的、不帶聯絡方式，
+    /// 而這裡挑完人要能自動帶入電話／Email，少了會變成挑完還要手動再打一次。
+    func sideRolePersonCandidates() -> [SideRolePersonCandidate] {
+        var out: [SideRolePersonCandidate] = []
+        for s in subordinates {
+            let n = s.name.trimmingCharacters(in: .whitespaces)
+            guard !n.isEmpty else { continue }
+            let sub = [s.jobTitle, s.department].filter { !$0.isEmpty }.joined(separator: " · ")
+            out.append(SideRolePersonCandidate(id: s.id, kind: .subordinate,
+                                               name: n, subtitle: sub, contact: ""))
+        }
+        for c in businessCards {
+            let n = c.name.trimmingCharacters(in: .whitespaces)
+            guard !n.isEmpty else { continue }
+            let sub = [c.company, c.jobTitle].filter { !$0.isEmpty }.joined(separator: " · ")
+            let contact = c.phones.first ?? c.emails.first ?? ""
+            out.append(SideRolePersonCandidate(id: c.id, kind: .card,
+                                               name: n, subtitle: sub, contact: contact))
+        }
+        return out.sorted { $0.name < $1.name }
+    }
+
+    /// 依 id 找回被連結的人現在的樣子。用來在名單上標「已連結」，
+    /// 以及在對方已被刪除時把徽章收掉——連結是額外資訊，斷了不影響名單本身，
+    /// 因為姓名一律存的是文字快照。
+    func sideRolePerson(_ id: UUID?) -> SideRolePersonCandidate? {
+        guard let id else { return nil }
+        return sideRolePersonCandidates().first { $0.id == id }
+    }
+
+    /// 主辦單位的候選清單：公司內部單位（部門表）＋ 過去填過的外部單位。
+    /// 兼任職務的主辦單位常常是外部組織（例如「台灣氣體化學工業協會」），
+    /// 不在部門表裡，所以填過一次就收進建議、下次直接選。
+    func sideRoleOrgSuggestions() -> (internalUnits: [String], usedBefore: [String]) {
+        let units = departments
+            .map { $0.name.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let used = sideRoles
+            .compactMap { $0.sideRoleOrg?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let unitSet = Set(units)
+        // 已經在部門表裡的就不重複列進「用過」
+        let extras = Array(Set(used).subtracting(unitSet)).sorted()
+        return (Array(Set(units)).sorted(), extras)
+    }
+}
+
 /// 職涯列表用的兼任副標。抽成獨立小 View 而不是塞進 subtitleText 的
 /// if/else 鏈裡，是為了不再加深那條鏈的型別推導深度。
 struct SideRoleRowSubtitle: View {
@@ -606,6 +679,11 @@ struct SideRoleWorkspaceView: View {
     private func memberSection(_ role: LifeMilestone) -> some View {
         let members = role.sideRoleMembers ?? []
         let hasPrevious = lifeStore.previousTermOfSideRole(role) != nil
+        // 人員對照表只建一次往下傳。放在 memberRow 裡就是每一列各建一次
+        // 完整清單（部屬 + 名片）並排序——15 位成員等於在 body 裡跑 15 次，
+        // 這是本專案改版紀錄裡反覆出現的那類效能問題。
+        let peopleIndex = Dictionary(lifeStore.sideRolePersonCandidates().map { ($0.id, $0) },
+                                     uniquingKeysWith: { a, _ in a })
         return sectionBox(title: "成員名單", icon: "person.2.fill", color: .indigo,
                           trailing: "\(members.count)",
                           onAdd: { editingMember = SideRoleMember() }) {
@@ -628,14 +706,15 @@ struct SideRoleWorkspaceView: View {
             } else {
                 ForEach(members) { m in
                     SwipeDeleteRow(onDelete: { lifeStore.deleteSideRoleMember(m.id, in: roleId) }) {
-                        memberRow(m)
+                        memberRow(m, peopleIndex: peopleIndex)
                     }
                 }
             }
         }
     }
 
-    private func memberRow(_ m: SideRoleMember) -> some View {
+    private func memberRow(_ m: SideRoleMember,
+                           peopleIndex: [UUID: SideRolePersonCandidate]) -> some View {
         HStack(spacing: 10) {
             ZStack {
                 Circle()
@@ -646,9 +725,16 @@ struct SideRoleWorkspaceView: View {
                     .foregroundStyle(.indigo)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(m.name.isEmpty ? "（未填姓名）" : m.name)
-                    .font(.subheadline)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(m.name.isEmpty ? "（未填姓名）" : m.name)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    if let id = m.linkedPersonId, let p = peopleIndex[id] {
+                        Image(systemName: p.kind.icon)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.indigo.opacity(0.7))
+                    }
+                }
                 if !m.dutyInRole.isEmpty || !m.contact.isEmpty {
                     Text([m.dutyInRole, m.contact].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.caption2)
@@ -832,9 +918,66 @@ struct SideRoleMemberEditor: View {
 
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
+    @State private var showPicker = false
+
+    /// 目前連結到的人（可能已被刪除 → nil）
+    private var linked: SideRolePersonCandidate? {
+        lifeStore.sideRolePerson(member.linkedPersonId)
+    }
 
     var body: some View {
         Form {
+            Section {
+                Button {
+                    showPicker = true
+                } label: {
+                    HStack {
+                        Label("從部屬／名片挑人", systemImage: "person.crop.circle.badge.plus")
+                            .foregroundStyle(.indigo)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                if let linked {
+                    HStack(spacing: 8) {
+                        Image(systemName: linked.kind.icon)
+                            .font(.caption)
+                            .foregroundStyle(.indigo)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("已連結\(linked.kind.rawValue)：\(linked.name)")
+                                .font(.caption)
+                            if !linked.subtitle.isEmpty {
+                                Text(linked.subtitle)
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button("解除") { member.linkedPersonId = nil }
+                            .font(.caption)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.red)
+                    }
+                } else if member.linkedPersonId != nil {
+                    // 連結指向的人已經被刪除。姓名是文字快照所以名單本身沒事，
+                    // 但要講清楚，不然使用者不知道這裡曾經連過。
+                    HStack(spacing: 8) {
+                        Image(systemName: "link.badge.plus")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("原本連結的人已不存在，姓名仍保留")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("清除連結") { member.linkedPersonId = nil }
+                            .font(.caption)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.red)
+                    }
+                }
+            } footer: {
+                Text("挑人只是把姓名與聯絡方式帶過來，之後對方資料異動或被刪除，這份名單都不會受影響。外部人員直接手動輸入即可。")
+            }
+
             Section("成員") {
                 TextField("姓名", text: $member.name)
                 TextField("分工（例：場控、攝影）", text: $member.dutyInRole)
@@ -865,6 +1008,91 @@ struct SideRoleMemberEditor: View {
                     dismiss()
                 }
                 .disabled(member.name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .sheet(isPresented: $showPicker) {
+            NavigationStack {
+                SideRolePersonPicker { picked in
+                    member.linkedPersonId = picked.id
+                    member.name = picked.name
+                    // 只在空白時才帶入，不覆蓋使用者已經打好的內容
+                    if member.contact.trimmingCharacters(in: .whitespaces).isEmpty {
+                        member.contact = picked.contact
+                    }
+                    if member.dutyInRole.trimmingCharacters(in: .whitespaces).isEmpty {
+                        member.dutyInRole = picked.subtitle
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 挑人清單。單一參數化 struct + 搜尋，不為每種來源各寫一份。
+struct SideRolePersonPicker: View {
+    let onPick: (SideRolePersonCandidate) -> Void
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var candidates: [SideRolePersonCandidate] {
+        let all = lifeStore.sideRolePersonCandidates()
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return all }
+        return all.filter { $0.name.localizedCaseInsensitiveContains(q)
+                         || $0.subtitle.localizedCaseInsensitiveContains(q) }
+    }
+
+    var body: some View {
+        List {
+            if candidates.isEmpty {
+                Text(lifeStore.sideRolePersonCandidates().isEmpty
+                     ? "還沒有部屬或名片資料。可以直接在上一頁手動輸入姓名。"
+                     : "找不到符合的人")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(candidates) { p in
+                    Button {
+                        onPick(p)
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.indigo.opacity(0.12))
+                                    .frame(width: 34, height: 34)
+                                Image(systemName: p.kind.icon)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.indigo)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(p.name).font(.subheadline).foregroundStyle(.primary)
+                                if !p.subtitle.isEmpty {
+                                    Text(p.subtitle).font(.caption2).foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            Spacer()
+                            Text(p.kind.rawValue)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color(.tertiarySystemFill))
+                                .clipShape(Capsule())
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .searchable(text: $query, prompt: "搜尋姓名或職稱")
+        .navigationTitle("挑選成員")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("取消") { dismiss() }
             }
         }
     }

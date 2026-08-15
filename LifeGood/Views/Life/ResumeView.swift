@@ -1831,7 +1831,10 @@ struct AddMilestoneView: View {
     private var sideRoleSections: some View {
         Section {
             TextField("職務名稱（例：尾牙負責人）", text: $sideRoleName)
-            TextField("主辦單位（例：員工福委會）", text: $sideRoleOrg)
+            HStack {
+                TextField("主辦單位（例：員工福委會）", text: $sideRoleOrg)
+                orgSuggestionMenu
+            }
             TextField("負責範圍", text: $sideRoleScope, axis: .vertical).lineLimit(3)
         } header: {
             milestoneSectionHeader("兼任職務", icon: "person.badge.plus", color: .indigo)
@@ -1862,6 +1865,45 @@ struct AddMilestoneView: View {
             milestoneSectionHeader("主責與管理", icon: "checkmark.seal.fill", color: .indigo)
         } footer: {
             Text(sideRoleFooterText)
+        }
+    }
+
+    /// 主辦單位建議選單：公司內部單位（部門表）＋ 過去填過的外部單位。
+    /// 做成選單而不是 Picker，是因為主辦單位常常是不在部門表裡的外部組織
+    /// （協會、工會、社團），必須永遠能自由輸入——選單只是省去重打。
+    @ViewBuilder
+    private var orgSuggestionMenu: some View {
+        let s = store.sideRoleOrgSuggestions()
+        if s.internalUnits.isEmpty && s.usedBefore.isEmpty {
+            EmptyView()
+        } else {
+            Menu {
+                if !s.internalUnits.isEmpty {
+                    Section("公司單位") {
+                        ForEach(s.internalUnits, id: \.self) { name in
+                            Button(name) { sideRoleOrg = name }
+                        }
+                    }
+                }
+                if !s.usedBefore.isEmpty {
+                    Section("用過的單位") {
+                        ForEach(s.usedBefore, id: \.self) { name in
+                            Button(name) { sideRoleOrg = name }
+                        }
+                    }
+                }
+                if !sideRoleOrg.isEmpty {
+                    Section {
+                        Button(role: .destructive) { sideRoleOrg = "" } label: {
+                            Label("清除", systemImage: "xmark.circle")
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "list.bullet.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.indigo)
+            }
         }
     }
 
