@@ -10,7 +10,7 @@ import SwiftUI
 // 【為什麼中樞是一個 ManagementFeature case 而不是每筆一個】
 // ManagementFeature 是靜態列舉、路由靠 @AppStorage 存的字串，
 // 但兼任職務的數量是動態的（可能 0 筆也可能 5 筆）。所以用一個 .sideRole case
-// 當中樞入口，中樞裡再用 NavigationLink 進到各筆的管理頁——
+// 當中樞入口，中樞裡再用 .sheet(item:) 開各筆的管理頁——
 // 這是本專案既有的「動態清單 → 詳情頁」模式（部屬列表 → 部屬明細）。
 //
 // 【關掉開關不會刪資料】
@@ -180,44 +180,51 @@ struct SideRoleHubView: View {
     @EnvironmentObject var subscription: SubscriptionManager
 
     @State private var showAdd = false
+    @State private var viewingRole: LifeMilestone?
     @State private var dormantExpanded = false
     @State private var heroAppeared = false
 
     private var roles: [LifeMilestone] { lifeStore.sideRoleWorkspaces }
     private var dormant: [LifeMilestone] { lifeStore.dormantSideRoles }
 
+    // ⚠️ MainTabView 沒有任何 NavigationStack，每個管理頁都必須自己帶一個
+    //（比照 SubordinateView / GradeTitleView / OrganizationView 的既有寫法）。
+    //   少了它，navigationTitle 與 toolbar 都不會出現、NavigationLink 也完全點不動——
+    //   卡片畫得出來但按了沒反應。也因此本專案的管理頁一律用 .sheet(item:) 開明細，
+    //   全 App 的管理頁沒有任何一處用 NavigationLink 推頁。
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                heroCard
-                if roles.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(roles) { role in
-                        NavigationLink {
-                            SideRoleWorkspaceView(roleId: role.id)
-                        } label: {
-                            roleCard(role)
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    heroCard
+                    if roles.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(roles) { role in
+                            Button { viewingRole = role } label: { roleCard(role) }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 16)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 16)
                     }
+                    if !dormant.isEmpty { dormantSection }
                 }
-                if !dormant.isEmpty { dormantSection }
+                .padding(.vertical, 8)
             }
-            .padding(.vertical, 8)
-        }
-        .navigationTitle("兼任職務")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showAdd = true } label: { Image(systemName: "plus") }
-                    .disabled(!subscription.isPremium)
+            .navigationTitle("兼任職務")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAdd = true } label: { Image(systemName: "plus") }
+                        .disabled(!subscription.isPremium)
+                }
             }
-        }
-        .sheet(isPresented: $showAdd) {
-            NavigationStack {
-                AddMilestoneView(initialCategory: .career, initialCareerSub: .sideRole)
+            .sheet(isPresented: $showAdd) {
+                NavigationStack {
+                    AddMilestoneView(initialCategory: .career, initialCareerSub: .sideRole)
+                }
+            }
+            .sheet(item: $viewingRole) { role in
+                SideRoleWorkspaceView(roleId: role.id)
             }
         }
     }
@@ -440,6 +447,7 @@ struct SideRoleWorkspaceView: View {
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
+    @Environment(\.dismiss) private var dismiss
 
     @State private var editingTask: SideRoleTask?
     @State private var editingMember: SideRoleMember?
@@ -460,38 +468,54 @@ struct SideRoleWorkspaceView: View {
             if let role {
                 content(role)
             } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "questionmark.folder")
-                        .font(.system(size: 34))
-                        .foregroundStyle(.secondary)
-                    Text("找不到這個兼任職務")
-                        .font(.subheadline.weight(.semibold))
-                    Text("它可能已經被刪除了。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                // 這一頁在別處被刪除時會落到這裡。它同樣是 sheet，
+                // 一樣要自己帶 NavigationStack 才會有「關閉」可按。
+                NavigationStack {
+                    VStack(spacing: 10) {
+                        Image(systemName: "questionmark.folder")
+                            .font(.system(size: 34))
+                            .foregroundStyle(.secondary)
+                        Text("找不到這個兼任職務")
+                            .font(.subheadline.weight(.semibold))
+                        Text("它可能已經被刪除了。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("關閉") { dismiss() }
+                        }
+                    }
                 }
-                .padding(.vertical, 60)
             }
         }
     }
 
     private func content(_ role: LifeMilestone) -> some View {
-        ScrollView {
-            LazyVStack(spacing: 14) {
-                header(role)
-                taskSection(role)
-                keyDateSection(role)
-                memberSection(role)
-                meetingSection(role)
+        // 這頁是被 .sheet 開起來的，同樣要自己帶 NavigationStack 才有標題與工具列
+        //（對齊 SubordinateDetailView 的既有寫法：左上「關閉」、右上動作）。
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 14) {
+                    header(role)
+                    taskSection(role)
+                    keyDateSection(role)
+                    memberSection(role)
+                    meetingSection(role)
+                }
+                .padding(.vertical, 8)
             }
-            .padding(.vertical, 8)
-        }
-        .navigationTitle(SideRoleFormat.displayName(role))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showEditRole = true } label: { Image(systemName: "square.and.pencil") }
-                    .disabled(!subscription.isPremium)
+            .navigationTitle(SideRoleFormat.displayName(role))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("關閉") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showEditRole = true } label: { Image(systemName: "square.and.pencil") }
+                        .disabled(!subscription.isPremium)
+                }
             }
         }
         .sheet(isPresented: $showEditRole) {
