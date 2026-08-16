@@ -37,7 +37,8 @@ class LifeStore: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         let didBackfill = backfillOrgPeopleFromSubordinates()
-        if didBackfill { save() }
+        let didRepair = repairSideRoleMemberLinks()
+        if didBackfill || didRepair { save() }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(reloadFromCloud),
@@ -64,8 +65,9 @@ class LifeStore: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         let didBackfill = backfillOrgPeopleFromSubordinates()
-        // 若 backfill 新建了 OrgPerson/BusinessCard，立即持久化避免重啟後消失
-        if didBackfill { save() }
+        let didRepair = repairSideRoleMemberLinks()
+        // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
+        if didBackfill || didRepair { save() }
     }
 
     // MARK: - 個人檔案
@@ -242,6 +244,50 @@ class LifeStore: ObservableObject {
 
     func makeScoreContext() -> ScoreContext {
         ScoreContext(mentions: mentionedCounts(), sideRoles: sideRoleTaskCounts())
+    }
+
+    /// 一次性修復：把兼任職務成員裡「指向名片」的連結改指回對應的部屬。
+    ///
+    /// v25.218～v25.224 之間，挑人清單會把同一位部屬同時列成「部屬」與「名片」兩列
+    ///（每位有部門的部屬都會自動產生一張名片）。使用者若點到名片那一列，
+    /// linkedPersonId 就會存成名片 id——後果是部屬明細頁的「兼任職務參與」查不到、
+    /// 他完成的兼任待辦也不計入主動性評分。清單重複已修掉，但已經存進去的資料
+    /// 要在這裡改回來。
+    ///
+    /// 回傳是否有實際變更（供呼叫端決定要不要 save）。
+    @discardableResult
+    func repairSideRoleMemberLinks() -> Bool {
+        // 名片 id → 部屬 id（循「名片 ← 組織人員 → 部屬」的既有連結還原）
+        let subIds = Set(subordinates.map(\.id))
+        var cardToSub: [UUID: UUID] = [:]
+        for p in orgPeople {
+            guard let sid = p.linkedSubordinateId, subIds.contains(sid),
+                  let cid = p.linkedBusinessCardId else { continue }
+            cardToSub[cid] = sid
+        }
+        guard !cardToSub.isEmpty else { return false }
+
+        var changed = false
+        for i in milestones.indices where milestones[i].isSideRole {
+            guard var members = milestones[i].sideRoleMembers, !members.isEmpty else { continue }
+            var touched = false
+            for j in members.indices {
+                guard let pid = members[j].linkedPersonId, let sid = cardToSub[pid] else { continue }
+                // 這位部屬已經在名單裡（使用者兩列都加過）→ 不要製造兩筆指向同一人，
+                // 保留既有那筆、把這筆的連結清掉即可，成員本身不刪（姓名可能已被改過）。
+                if members.contains(where: { $0.linkedPersonId == sid }) {
+                    members[j].linkedPersonId = nil
+                } else {
+                    members[j].linkedPersonId = sid
+                }
+                touched = true
+            }
+            if touched {
+                milestones[i].sideRoleMembers = members
+                changed = true
+            }
+        }
+        return changed
     }
 
     /// 這個人（部屬／名片 id）參與了哪些兼任職務，以及他在各職務裡的成員資料。

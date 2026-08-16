@@ -138,7 +138,25 @@ extension LifeStore {
                                                name: n, subtitle: sub, contact: "",
                                                department: dept))
         }
-        for c in businessCards {
+        // ⚠️ 每新增一位有部門的部屬，LifeStore.syncOrgPersonFor(subordinate:) 會
+        //    **自動**幫他建一張名片與一個組織人員。所以「全部部屬 + 全部名片」會讓
+        //    同一個人出現兩次（一次部屬、一次名片），而且兩列名字一模一樣、
+        //    只有右側小標籤有差，使用者根本分不出哪一列才是對的。
+        //
+        //    點到名片那一列的後果是實質的：成員的 linkedPersonId 存成名片 id，
+        //    於是部屬明細頁的「兼任職務參與」查不到（那裡用部屬 id 反查）、
+        //    他完成的兼任待辦也不會計入主動性評分（sideRoleTaskCounts 記在名片 id 底下）。
+        //
+        //    因此：凡是能循「名片 → 組織人員 → 部屬」連回某位部屬的名片一律不列，
+        //    部屬身分才是這個人的正典 id。
+        let listedSubIds = Set(subordinates.map(\.id))
+        let cardIdsOwnedBySubordinates = Set(
+            orgPeople.compactMap { p -> UUID? in
+                guard let sid = p.linkedSubordinateId, listedSubIds.contains(sid) else { return nil }
+                return p.linkedBusinessCardId
+            }
+        )
+        for c in businessCards where !cardIdsOwnedBySubordinates.contains(c.id) {
             let n = c.name.trimmingCharacters(in: .whitespaces)
             guard !n.isEmpty else { continue }
             let sub = [c.company, c.jobTitle, c.department]
@@ -150,7 +168,7 @@ extension LifeStore {
         }
         // 組織人員：只補「既不是部屬、也沒有名片」的那些，避免同一個人列三次。
         // 已離職者不列（isInactive）——找人做事不會找已經離開的人。
-        let linkedSubIds = Set(subordinates.map(\.id))
+        let linkedSubIds = listedSubIds
         let linkedCardIds = Set(businessCards.map(\.id))
         for p in orgPeople where !p.isInactive {
             let n = p.name.trimmingCharacters(in: .whitespaces)
