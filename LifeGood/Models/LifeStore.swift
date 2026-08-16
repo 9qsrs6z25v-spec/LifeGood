@@ -116,6 +116,30 @@ class LifeStore: ObservableObject {
     }
     func deleteMilestone(_ item: LifeMilestone) { milestones.removeAll { $0.id == item.id } }
 
+    // MARK: - 配偶協定
+
+    /// 對某位家庭成員就地改一次，保證只觸發一次 familyMembers 的 didSet
+    ///（一次存檔、一次 CloudKit 推送）。
+    func mutateFamilyMember(_ id: UUID, _ body: (inout FamilyMember) -> Void) {
+        guard let i = familyMembers.firstIndex(where: { $0.id == id }) else { return }
+        var m = familyMembers[i]
+        body(&m)
+        familyMembers[i] = m
+    }
+
+    func upsertAgreement(_ agreement: SpouseAgreement, for memberId: UUID) {
+        mutateFamilyMember(memberId) { m in
+            var list = m.agreements ?? []
+            if let i = list.firstIndex(where: { $0.id == agreement.id }) { list[i] = agreement }
+            else { list.append(agreement) }
+            m.agreements = list
+        }
+    }
+
+    func deleteAgreement(_ agreementId: UUID, for memberId: UUID) {
+        mutateFamilyMember(memberId) { $0.agreements?.removeAll { $0.id == agreementId } }
+    }
+
     // MARK: - 兼任職務
 
     /// 全部兼任職務里程碑，新到舊

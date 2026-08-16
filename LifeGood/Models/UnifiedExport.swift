@@ -351,6 +351,32 @@ enum UnifiedExporter {
             csv += fields.joined(separator: ",") + "\n"
         }
 
+        // 人生 - 配偶協定
+        // JSON 匯出／備份整包走 Codable 自動涵蓋；CSV 是逐欄手寫的，要另外補。
+        let agreementRows = life.familyMembers.flatMap { m in
+            (m.agreements ?? []).map { (m, $0) }
+        }
+        if !agreementRows.isEmpty {
+            csv += "\n## 協定 (Agreements)\n"
+            csv += "memberId,memberName,title,category,agreedDate,status,party,amount,cadence,detail,note\n"
+            for (m, a) in agreementRows.sorted(by: { $0.1.agreedDate < $1.1.agreedDate }) {
+                let fields: [String] = [
+                    m.id.uuidString,
+                    esc(m.chineseName),
+                    esc(a.title),
+                    a.category.title,
+                    iso.string(from: a.agreedDate),
+                    a.status.title,
+                    a.party?.title ?? "",
+                    a.amount.map { String(Int($0)) } ?? "",
+                    a.cadence?.title ?? "",
+                    esc(a.detail),
+                    esc(a.note)
+                ]
+                csv += fields.joined(separator: ",") + "\n"
+            }
+        }
+
         // 人生 - 兼任職務（含管理頁的四份子資料）
         // JSON 匯出／備份是整包走 Codable，新欄位自動涵蓋；CSV 是逐欄手寫的，
         // 不補在這裡就會變成「JSON 有、CSV 沒有」的靜默落差。

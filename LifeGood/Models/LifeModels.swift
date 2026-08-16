@@ -84,6 +84,177 @@ enum FamilySide: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// MARK: - 配偶協定
+//
+// 「跟配偶談好的事」——一次性的約定（今年不買車）、家事分工（垃圾我倒）、
+// 財務約定（每月家用各出三萬）。掛在 FamilyMember 底下，所以協定跟著人走。
+//
+// ⚠️ 以下四個列舉的 rawValue 一律用英文識別字。
+//    這是 CareerSubCategory 的教訓：它把中文字面值當 rawValue，等於把顯示名稱
+//    一起凍住了——想把「調薪」改成「薪資調整」就會讓所有舊資料解不出子分類。
+//    識別字凍結、顯示名稱走 title，隨時可以改。
+
+enum SpouseAgreementCategory: String, Codable, CaseIterable, Identifiable {
+    case chore, finance, living, parenting, majorDecision, other
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .chore:         return "家事分工"
+        case .finance:       return "財務"
+        case .living:        return "生活"
+        case .parenting:     return "育兒"
+        case .majorDecision: return "重大決定"
+        case .other:         return "其他"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .chore:         return "house.fill"
+        case .finance:       return "dollarsign.circle.fill"
+        case .living:        return "sun.max.fill"
+        case .parenting:     return "figure.and.child.holdinghands"
+        case .majorDecision: return "star.fill"
+        case .other:         return "text.bubble.fill"
+        }
+    }
+
+    /// 這個分類預設要不要顯示「負責方」與「金額」欄位。
+    /// 只是預設值，表單上仍可自由開關——家事分工也可能有金額（請鐘點的費用）。
+    var suggestsParty: Bool { self == .chore || self == .parenting }
+    var suggestsAmount: Bool { self == .finance }
+}
+
+/// 誰負責。用於家事分工。
+enum SpouseAgreementParty: String, Codable, CaseIterable, Identifiable {
+    case me, partner, both
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .me:      return "我"
+        case .partner: return "對方"
+        case .both:    return "雙方"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .me:      return "person.fill"
+        case .partner: return "person.fill.checkmark"
+        case .both:    return "person.2.fill"
+        }
+    }
+}
+
+enum SpouseAgreementStatus: String, Codable, CaseIterable, Identifiable {
+    case active, done, void
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .active: return "進行中"
+        case .done:   return "已完成"
+        case .void:   return "已作廢"
+        }
+    }
+}
+
+/// 週期。家事分工的「每天倒垃圾」與財務的「每月家用」都用得到。
+enum SpouseAgreementCadence: String, Codable, CaseIterable, Identifiable {
+    case oneTime, perTime, daily, weekly, monthly, yearly
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .oneTime: return "一次性"
+        case .perTime: return "每次"
+        case .daily:   return "每天"
+        case .weekly:  return "每週"
+        case .monthly: return "每月"
+        case .yearly:  return "每年"
+        }
+    }
+}
+
+/// 一則與配偶的協定。
+/// 解碼紀律同兼任職務的子項目：除 id 外一律 decodeIfPresent + 預設值——
+/// 這是掛在 FamilyMember 底下的陣列元素，任何一欄硬 decode 失敗，
+/// 使用者失去的是整位家庭成員（連同小孩的成長紀錄與照片），不只是一則協定。
+struct SpouseAgreement: Identifiable, Codable {
+    let id: UUID
+    /// 協定內容（例：今年不買車、垃圾我倒、每月家用各出三萬）
+    var title: String
+    var category: SpouseAgreementCategory
+    /// 談定的日期
+    var agreedDate: Date
+    var status: SpouseAgreementStatus
+    /// 詳細說明／前因後果
+    var detail: String
+    /// 誰負責；nil 代表這則協定沒有分工概念
+    var party: SpouseAgreementParty?
+    /// 金額（NT$）；nil 代表這則協定沒有金額
+    var amount: Double?
+    /// 週期；nil 代表沒特別指定
+    var cadence: SpouseAgreementCadence?
+    var note: String
+
+    init(id: UUID = UUID(), title: String = "",
+         category: SpouseAgreementCategory = .living,
+         agreedDate: Date = Date(),
+         status: SpouseAgreementStatus = .active,
+         detail: String = "",
+         party: SpouseAgreementParty? = nil,
+         amount: Double? = nil,
+         cadence: SpouseAgreementCadence? = nil,
+         note: String = "") {
+        self.id = id; self.title = title; self.category = category
+        self.agreedDate = agreedDate; self.status = status; self.detail = detail
+        self.party = party; self.amount = amount; self.cadence = cadence; self.note = note
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
+        category = (try? c.decodeIfPresent(SpouseAgreementCategory.self, forKey: .category)) ?? .living
+        agreedDate = (try? c.decodeIfPresent(Date.self, forKey: .agreedDate)) ?? Date()
+        status = (try? c.decodeIfPresent(SpouseAgreementStatus.self, forKey: .status)) ?? .active
+        detail = (try? c.decodeIfPresent(String.self, forKey: .detail)) ?? ""
+        party = try? c.decodeIfPresent(SpouseAgreementParty.self, forKey: .party)
+        amount = try? c.decodeIfPresent(Double.self, forKey: .amount)
+        cadence = try? c.decodeIfPresent(SpouseAgreementCadence.self, forKey: .cadence)
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, category, agreedDate, status, detail, party, amount, cadence, note
+    }
+
+    /// 卡片副標：「每月 · NT$30,000」「雙方 · 每週」
+    var subtitleText: String {
+        var parts: [String] = []
+        if let party { parts.append(party.title) }
+        if let cadence { parts.append(cadence.title) }
+        if let amount, amount > 0 {
+            parts.append("NT$" + (NumberFormatter.spouseAgreementAmount
+                .string(from: NSNumber(value: amount)) ?? String(Int(amount))))
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+extension NumberFormatter {
+    /// 協定金額用的千分位格式（整數）
+    static let spouseAgreementAmount: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        return f
+    }()
+}
+
 struct FamilyMember: Identifiable, Codable {
     let id: UUID
     var role: FamilyMemberRole
@@ -106,6 +277,8 @@ struct FamilyMember: Identifiable, Codable {
     var spouseId: UUID?
     /// 兒童疫苗接種狀態（對應 VaccineSchedule.taiwan 的各劑次；有施打日期＝已完成）
     var vaccinations: [VaccineDose]
+    /// 與這位家人談定的協定（目前只有配偶頁在用，掛在 FamilyMember 上讓它跟著人走）
+    var agreements: [SpouseAgreement]?
 
     init(id: UUID = UUID(), role: FamilyMemberRole = .spouse,
          chineseName: String = "", englishName: String = "",
@@ -154,6 +327,7 @@ struct FamilyMember: Identifiable, Codable {
         familySide = try? c.decodeIfPresent(FamilySide.self, forKey: .familySide)
         spouseId = try? c.decodeIfPresent(UUID.self, forKey: .spouseId)
         vaccinations = (try? c.decodeIfPresent([VaccineDose].self, forKey: .vaccinations)) ?? []
+        agreements = try? c.decodeIfPresent([SpouseAgreement].self, forKey: .agreements)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -176,12 +350,17 @@ struct FamilyMember: Identifiable, Codable {
         try c.encodeIfPresent(familySide, forKey: .familySide)
         try c.encodeIfPresent(spouseId, forKey: .spouseId)
         try c.encode(vaccinations, forKey: .vaccinations)
+        // ⚠️ FamilyMember 與 LifeMilestone 不同，它有自訂 encode(to:)。
+        //    漏了這一行，協定永遠寫不進 JSON——而且完全不會編譯錯，
+        //    只會在殺掉 App 重開後靜默消失。
+        try c.encodeIfPresent(agreements, forKey: .agreements)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, role, chineseName, englishName, birthday, marriageDate, isDivorced, divorceDate, childRecords, dailyRecords
         case birthYear, idNumber, relativeNote, familyEvents, familyPhotos
         case familySide, spouseId, vaccinations
+        case agreements
     }
 
     /// 顯示用稱謂：依 familySide 與 role 自動套用「我的」或「配偶的」前綴

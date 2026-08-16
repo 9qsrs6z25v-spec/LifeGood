@@ -54,6 +54,7 @@ import SwiftUI
 struct SpouseResumeView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var subscription: SubscriptionManager
 
     // 進場動畫旗標
     @State private var cardAppeared = false
@@ -66,6 +67,13 @@ struct SpouseResumeView: View {
     @State private var expenseEmptyPulse = false
     @State private var milestoneEmptyPulseTask: Task<Void, Never>?
     @State private var expenseEmptyPulseTask: Task<Void, Never>?
+    // 協定
+    @State private var editingAgreement: SpouseAgreement?
+    @State private var agreementSpouseId: UUID?
+    @State private var agreementEmptyPulse = false
+    @State private var agreementEmptyPulseTask: Task<Void, Never>?
+    @State private var showDoneAgreements = false
+    @State private var showPremiumAlert = false
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/M/d"; return f
@@ -133,6 +141,7 @@ struct SpouseResumeView: View {
                             }
                     }
                     marriageSection(s)
+                    agreementSection(s)
                     milestoneSection
                     giftSection(gifts)
                     expenseSection(expenses, expenseTotal: expenseTotal)
@@ -159,6 +168,12 @@ struct SpouseResumeView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("配偶履歷")
             .navigationBarTitleDisplayMode(.large)
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+            .sheet(item: $editingAgreement) { ag in
+                if let sid = agreementSpouseId {
+                    NavigationStack { SpouseAgreementEditor(memberId: sid, agreement: ag) }
+                }
+            }
         }
     }
 
@@ -390,6 +405,152 @@ struct SpouseResumeView: View {
             trailing()
         }
         .padding(.vertical, 4)
+    }
+
+    // MARK: - 協定
+
+    /// 與配偶談定的事。進行中的排前面，已完成／已作廢收在可展開區塊裡——
+    /// 這些是「曾經談過但已經翻頁」的事，平常擋在主清單前面只會製造雜訊，
+    /// 但也不該直接看不到（使用者會以為被刪了）。
+    private func agreementSection(_ s: FamilyMember) -> some View {
+        let accent = Color(red: 0.55, green: 0.42, blue: 0.92)
+        let all = (s.agreements ?? []).sorted { $0.agreedDate > $1.agreedDate }
+        let active = all.filter { $0.status == .active }
+        let archived = all.filter { $0.status != .active }
+
+        return Section(
+            header: HStack(spacing: 10) {
+                sectionHeader(title: "協定", icon: "hands.sparkles.fill", color: accent,
+                              count: active.isEmpty ? nil : active.count)
+                Button {
+                    guard subscription.isPremium else { showPremiumAlert = true; return }
+                    agreementSpouseId = s.id
+                    editingAgreement = SpouseAgreement()
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(accent)
+                }
+                .buttonStyle(.plain)
+            }
+        ) {
+            if all.isEmpty {
+                emptyPlaceholder(icon: "hands.sparkles", text: "尚無協定", color: accent,
+                                 pulse: $agreementEmptyPulse, pulseTask: $agreementEmptyPulseTask)
+            } else {
+                ForEach(Array(active.enumerated()), id: \.element.id) { idx, ag in
+                    agreementRow(ag, spouseId: s.id, accent: accent)
+                        .opacity(milestonesAppeared ? 1 : 0)
+                        .offset(y: milestonesAppeared ? 0 : 12)
+                        .animation(
+                            .spring(response: 0.44, dampingFraction: 0.82)
+                                .delay(0.05 * Double(idx)),
+                            value: milestonesAppeared
+                        )
+                }
+                if !archived.isEmpty {
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            showDoneAgreements.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "archivebox.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                            Text("已完成／已作廢（\(archived.count)）")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Image(systemName: showDoneAgreements ? "chevron.up" : "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    if showDoneAgreements {
+                        ForEach(archived) { ag in
+                            agreementRow(ag, spouseId: s.id, accent: accent)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func agreementRow(_ ag: SpouseAgreement, spouseId: UUID, accent: Color) -> some View {
+        let isArchived = ag.status != .active
+        let sub = ag.subtitleText
+        return HStack(alignment: .center, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .frame(width: 36, height: 36)
+                    .overlay(Circle().stroke(accent.opacity(0.22), lineWidth: 0.75))
+                Image(systemName: ag.category.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(ag.title.isEmpty ? "（未填內容）" : ag.title)
+                    .font(.subheadline.weight(.medium))
+                    .strikethrough(isArchived, color: .secondary)
+                    .foregroundStyle(isArchived ? .secondary : .primary)
+                    .lineLimit(2)
+                HStack(spacing: 5) {
+                    Text(ag.category.title)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(accent.opacity(0.12))
+                        .clipShape(Capsule())
+                    if !sub.isEmpty {
+                        Text(sub)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                if !ag.detail.isEmpty {
+                    Text(ag.detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 4)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(Self.dateFormatter.string(from: ag.agreedDate))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                if isArchived {
+                    Text(ag.status.title)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard subscription.isPremium else { showPremiumAlert = true; return }
+            agreementSpouseId = spouseId
+            editingAgreement = ag
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                guard subscription.isPremium else { showPremiumAlert = true; return }
+                lifeStore.deleteAgreement(ag.id, for: spouseId)
+            } label: {
+                Label("刪除", systemImage: "trash")
+            }
+        }
     }
 
     // MARK: - 里程碑
@@ -657,5 +818,168 @@ struct SpouseResumeView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
+    }
+}
+
+// MARK: - 協定編輯
+
+/// 協定的新增／編輯表單。
+///
+/// 「負責方」與「金額」是選填開關而不是永遠顯示的欄位——多數協定兩者都用不到
+///（「今年不買車」既沒有負責方也沒有金額），永遠攤開會讓表單看起來比實際複雜。
+/// 選了分類會依 suggestsParty / suggestsAmount 預先幫你打開對應開關，
+/// 但仍可自由改：家事分工也可能有金額（請鐘點的費用）。
+struct SpouseAgreementEditor: View {
+    let memberId: UUID
+    @State var agreement: SpouseAgreement
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var hasParty = false
+    @State private var hasAmount = false
+    @State private var hasCadence = false
+    @State private var amountText = ""
+    /// 進表單當下這則是不是全新的（用來決定標題與有沒有刪除鈕）
+    @State private var isNew = false
+
+    private var canSave: Bool {
+        !agreement.title.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("協定內容（例：今年不買車）", text: $agreement.title, axis: .vertical)
+                    .lineLimit(2)
+                Picker("分類", selection: $agreement.category) {
+                    ForEach(SpouseAgreementCategory.allCases) { c in
+                        Label(c.title, systemImage: c.icon).tag(c)
+                    }
+                }
+                DatePicker("約定日期", selection: $agreement.agreedDate, displayedComponents: .date)
+            } header: {
+                Text("協定")
+            }
+
+            Section {
+                Toggle("指定負責方", isOn: $hasParty)
+                if hasParty {
+                    Picker("負責方", selection: Binding(
+                        get: { agreement.party ?? .both },
+                        set: { agreement.party = $0 }
+                    )) {
+                        ForEach(SpouseAgreementParty.allCases) { p in
+                            Label(p.title, systemImage: p.icon).tag(p)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+            } header: {
+                Text("分工")
+            } footer: {
+                Text("家事分工這類「誰負責什麼」的協定才需要。")
+            }
+
+            Section {
+                Toggle("有金額", isOn: $hasAmount)
+                if hasAmount {
+                    HStack {
+                        Text("NT$").foregroundStyle(.secondary)
+                        TextField("金額", text: $amountText)
+                            .keyboardType(.numberPad)
+                    }
+                }
+                Toggle("有週期", isOn: $hasCadence)
+                if hasCadence {
+                    Picker("週期", selection: Binding(
+                        get: { agreement.cadence ?? .monthly },
+                        set: { agreement.cadence = $0 }
+                    )) {
+                        ForEach(SpouseAgreementCadence.allCases) { c in
+                            Text(c.title).tag(c)
+                        }
+                    }
+                }
+            } header: {
+                Text("金額與週期")
+            } footer: {
+                Text("例：每月家用各出三萬 → 金額 30000、週期每月。")
+            }
+
+            Section {
+                Picker("狀態", selection: $agreement.status) {
+                    ForEach(SpouseAgreementStatus.allCases) { st in
+                        Text(st.title).tag(st)
+                    }
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("狀態")
+            } footer: {
+                Text("改成「已完成」或「已作廢」不會刪除紀錄，只會收進配偶頁的收合區塊裡。")
+            }
+
+            Section("詳細說明") {
+                TextField("前因後果、細節條件…", text: $agreement.detail, axis: .vertical)
+                    .lineLimit(5)
+            }
+
+            Section("備註") {
+                TextField("選填備註", text: $agreement.note, axis: .vertical).lineLimit(3)
+            }
+
+            if !isNew {
+                Section {
+                    Button(role: .destructive) {
+                        lifeStore.deleteAgreement(agreement.id, for: memberId)
+                        dismiss()
+                    } label: {
+                        Label("刪除此協定", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+        .navigationTitle(isNew ? "新增協定" : "編輯協定")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("取消") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("儲存") { save() }.disabled(!canSave)
+            }
+        }
+        .onChange(of: agreement.category) { _, newValue in
+            // 只在使用者還沒動過這兩個開關時才幫忙預設，
+            // 不覆蓋已經明確打開／關閉的選擇。
+            if agreement.party == nil { hasParty = newValue.suggestsParty }
+            if agreement.amount == nil { hasAmount = newValue.suggestsAmount }
+        }
+        .onAppear {
+            // 全新的一則：title 為空且不在既有清單裡
+            let existing = lifeStore.familyMembers
+                .first { $0.id == memberId }?.agreements ?? []
+            isNew = !existing.contains { $0.id == agreement.id }
+            hasParty = agreement.party != nil || (isNew && agreement.category.suggestsParty)
+            hasAmount = agreement.amount != nil || (isNew && agreement.category.suggestsAmount)
+            hasCadence = agreement.cadence != nil
+            if let a = agreement.amount, a > 0 { amountText = String(Int(a)) }
+        }
+    }
+
+    private func save() {
+        var item = agreement
+        item.title = item.title.trimmingCharacters(in: .whitespaces)
+        item.detail = item.detail.trimmingCharacters(in: .whitespaces)
+        item.note = item.note.trimmingCharacters(in: .whitespaces)
+        // 開關關掉就一律清成 nil，不留上一次填過的殘值——
+        // 否則關掉「有金額」再存檔，卡片副標仍會印出金額。
+        item.party = hasParty ? (item.party ?? .both) : nil
+        item.amount = hasAmount ? (Double(amountText).flatMap { $0 > 0 ? $0 : nil }) : nil
+        item.cadence = hasCadence ? (item.cadence ?? .monthly) : nil
+        lifeStore.upsertAgreement(item, for: memberId)
+        dismiss()
     }
 }

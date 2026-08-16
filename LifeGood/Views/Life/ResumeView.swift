@@ -2157,13 +2157,22 @@ struct AddMilestoneView: View {
                 familySide: familyRole.supportsFamilySide ? familySide : nil,
                 spouseId: familyRole.spouseCandidateRole != nil ? familySpouseId : nil
             )
-            // 保留既有的 dailyRecords / childRecords / familyEvents / familyPhotos
+            // 保留所有「不在這張表單上、但掛在這位成員底下」的集合。
+            //
+            // ⚠️ member 是用 memberwise init 整個重建的，沒在這裡帶回的欄位一律變成
+            //    預設空值。原本漏了 vaccinations——編輯小孩的姓名或生日，
+            //    疫苗接種紀錄就會被整批清空（那份資料是在兒童疫苗頁另外填的，
+            //    這張表單上完全看不到，所以出事也不會當場察覺）。
+            //    新增 agreements 時一併補上。日後再往 FamilyMember 加集合欄位，
+            //    這裡一定要同步補一行。
             var preserved = member
             if let original = editingFamily {
                 preserved.childRecords = original.childRecords
                 preserved.dailyRecords = original.dailyRecords
                 preserved.familyEvents = original.familyEvents
                 preserved.familyPhotos = original.familyPhotos
+                preserved.vaccinations = original.vaccinations
+                preserved.agreements = original.agreements
             }
             if editingFamily != nil { store.update(preserved) } else { store.add(preserved) }
             // 解除舊配對關係，避免殘留失效引用（比照 LifeStore.deleteFamilyMember 解除
