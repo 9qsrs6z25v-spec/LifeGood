@@ -1246,18 +1246,33 @@ struct SideRolePersonPicker: View {
     private var all: [SideRolePersonCandidate] { lifeStore.sideRolePersonCandidates() }
 
     /// 有人的部門清單（依人數多寡排序，人最多的排前面）
+    ///
+    /// ⚠️ 刻意寫成逐步的命令式迴圈、每個中間值都標型別。
+    ///    原本是 Dictionary(grouping:) → tuple .map → .sorted → .map(\.0) 一路鏈下去，
+    ///    全部靠推導，Xcode 直接回「unable to type-check this expression in
+    ///    reasonable time」。這種鏈式寫法在 tuple 上特別容易爆。
     private var departments: [String] {
-        Dictionary(grouping: all, by: { $0.department.isEmpty ? "未分部門" : $0.department })
-            .map { ($0.key, $0.value.count) }
-            .sorted { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 > $1.1 }
-            .map(\.0)
+        var counts: [String: Int] = [:]
+        for p in all {
+            let key: String = p.department.isEmpty ? Self.noDeptKey : p.department
+            counts[key, default: 0] += 1
+        }
+        let pairs: [(name: String, count: Int)] = counts.map { (name: $0.key, count: $0.value) }
+        let sorted: [(name: String, count: Int)] = pairs.sorted { a, b in
+            if a.count != b.count { return a.count > b.count }
+            return a.name < b.name
+        }
+        return sorted.map { $0.name }
     }
+
+    /// 沒有部門的人歸到這一組。字面值收成常數，避免三處各寫一次寫錯。
+    private static let noDeptKey = "未分部門"
 
     private var candidates: [SideRolePersonCandidate] {
         var list = all
         if let deptFilter {
             list = list.filter {
-                ($0.department.isEmpty ? "未分部門" : $0.department) == deptFilter
+                ($0.department.isEmpty ? Self.noDeptKey : $0.department) == deptFilter
             }
         }
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -1272,11 +1287,15 @@ struct SideRolePersonPicker: View {
         var order: [String] = []
         var map: [String: [SideRolePersonCandidate]] = [:]
         for p in candidates {
-            let key = p.department.isEmpty ? "未分部門" : p.department
+            let key: String = p.department.isEmpty ? Self.noDeptKey : p.department
             if map[key] == nil { order.append(key) }
             map[key, default: []].append(p)
         }
-        return order.map { ($0, map[$0] ?? []) }
+        // 明確標型別：回傳型別是具名 tuple，寫成 ($0, ...) 要靠推導轉換，
+        // 而這支檔案剛因為 tuple 鏈式推導爆過 type-check 逾時。
+        return order.map { (dept: String) -> (dept: String, people: [SideRolePersonCandidate]) in
+            (dept: dept, people: map[dept] ?? [])
+        }
     }
 
     var body: some View {
@@ -1982,7 +2001,11 @@ struct SideRoleAttendeePicker: View {
             if map[key] == nil { order.append(key) }
             map[key, default: []].append(p)
         }
-        return order.map { ($0, map[$0] ?? []) }
+        // 明確標型別：回傳型別是具名 tuple，寫成 ($0, ...) 要靠推導轉換，
+        // 而這支檔案剛因為 tuple 鏈式推導爆過 type-check 逾時。
+        return order.map { (dept: String) -> (dept: String, people: [SideRolePersonCandidate]) in
+            (dept: dept, people: map[dept] ?? [])
+        }
     }
 
     var body: some View {

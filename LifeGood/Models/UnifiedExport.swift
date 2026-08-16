@@ -353,13 +353,19 @@ enum UnifiedExporter {
 
         // 人生 - 配偶協定
         // JSON 匯出／備份整包走 Codable 自動涵蓋；CSV 是逐欄手寫的，要另外補。
-        let agreementRows = life.familyMembers.flatMap { m in
-            (m.agreements ?? []).map { (m, $0) }
+        // ⚠️ LifeBundle.familyMembers 是 Optional 陣列。直接 .flatMap 會呼叫到
+        //    Optional.flatMap，閉包參數變成整個 [FamilyMember] 而不是單一成員。
+        var agreementRows: [(member: FamilyMember, agreement: SpouseAgreement)] = []
+        for m in life.familyMembers ?? [] {
+            for a in m.agreements ?? [] { agreementRows.append((member: m, agreement: a)) }
         }
         if !agreementRows.isEmpty {
             csv += "\n## 協定 (Agreements)\n"
             csv += "memberId,memberName,title,category,agreedDate,status,party,amount,cadence,detail,note\n"
-            for (m, a) in agreementRows.sorted(by: { $0.1.agreedDate < $1.1.agreedDate }) {
+            let sortedRows = agreementRows.sorted { $0.agreement.agreedDate < $1.agreement.agreedDate }
+            for row in sortedRows {
+                let m = row.member
+                let a = row.agreement
                 let fields: [String] = [
                     m.id.uuidString,
                     esc(m.chineseName),
