@@ -227,6 +227,81 @@ class LifeStore: ObservableObject {
         }
     }
 
+    /// 部屬評分所需的整批預算結果。
+    ///
+    /// 兩份都是 O(全體) 的全量掃描，一次算好往下傳，不讓每一列各自重算
+    ///（mentionedCounts 的既有教訓）。打包成一個型別而非兩個平行參數：
+    /// 評分因子將來還會增加，每加一個就要動遍所有中間層函式的簽章太脆弱。
+    struct ScoreContext {
+        var mentions: [UUID: Int] = [:]
+        var sideRoles: [UUID: (done: Int, total: Int)] = [:]
+        func mention(_ id: UUID) -> Int { mentions[id] ?? 0 }
+        func sideRoleDone(_ id: UUID) -> Int { sideRoles[id]?.done ?? 0 }
+        func sideRoleTotal(_ id: UUID) -> Int { sideRoles[id]?.total ?? 0 }
+    }
+
+    func makeScoreContext() -> ScoreContext {
+        ScoreContext(mentions: mentionedCounts(), sideRoles: sideRoleTaskCounts())
+    }
+
+    /// 這個人（部屬／名片 id）參與了哪些兼任職務，以及他在各職務裡的成員資料。
+    /// 反向查詢用：從部屬明細頁列出「他在哪些兼任職務裡、負責什麼」。
+    func sideRoleParticipations(of personId: UUID) -> [(role: LifeMilestone, member: SideRoleMember)] {
+        sideRoles.compactMap { role in
+            guard let m = role.sideRoleMembers?.first(where: { $0.linkedPersonId == personId })
+            else { return nil }
+            return (role, m)
+        }
+    }
+
+    /// 全體「已連結人員」的兼任待辦統計，key 是部屬／名片 id。
+    ///
+    /// 一次算好整批往下傳，比照 mentionedCounts() 的既有做法——評分被列表、
+    /// 人才矩陣、明細頁十餘處呼叫，每處各自全量掃描會是效能災難。
+    ///
+    /// 只計入 linkedPersonId 有值的成員：手打姓名的外部人員不是部屬，
+    /// 不該影響任何人的評分。
+    func sideRoleTaskCounts() -> [UUID: (done: Int, total: Int)] {
+        var out: [UUID: (done: Int, total: Int)] = [:]
+        for role in milestones where role.isSideRole {
+            let members = role.sideRoleMembers ?? []
+            guard !members.isEmpty else { continue }
+            // memberId → personId，避免內層迴圈對成員清單重複線性搜尋
+            var linkOf: [UUID: UUID] = [:]
+            for m in members where m.linkedPersonId != nil {
+                linkOf[m.id] = m.linkedPersonId
+            }
+            guard !linkOf.isEmpty else { continue }
+            for t in role.sideRoleTasks ?? [] {
+                for mid in t.assigneeIds ?? [] {
+                    guard let pid = linkOf[mid] else { continue }
+                    var cur = out[pid] ?? (0, 0)
+                    cur.total += 1
+                    if t.isCompleted { cur.done += 1 }
+                    out[pid] = cur
+                }
+            }
+        }
+        return out
+    }
+
+    /// 把某位部屬／名片人員加進某筆兼任職務的成員名單。
+    /// 已經在名單裡就只回傳 false，不重複新增。
+    @discardableResult
+    func addPersonToSideRole(_ person: SideRolePersonCandidate, roleId: UUID,
+                             dutyInRole: String = "") -> Bool {
+        guard let role = milestones.first(where: { $0.id == roleId }) else { return false }
+        if (role.sideRoleMembers ?? []).contains(where: { $0.linkedPersonId == person.id }) {
+            return false
+        }
+        let member = SideRoleMember(name: person.name,
+                                    dutyInRole: dutyInRole.isEmpty ? person.subtitle : dutyInRole,
+                                    contact: person.contact,
+                                    linkedPersonId: person.id)
+        upsertSideRoleMember(member, in: roleId)
+        return true
+    }
+
     /// 某位成員被指派的待辦（依「未完成優先、再依截止日」排序）
     func sideRoleTasks(of memberId: UUID, in role: LifeMilestone) -> [SideRoleTask] {
         (role.sideRoleTasks ?? [])

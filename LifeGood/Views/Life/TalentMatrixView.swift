@@ -32,7 +32,13 @@ extension Subordinate {
 
     /// 主動性分數（日常，0~100）：完成任務 / 完成會議議程項目 / 報告加分、被標註加分，請假時數扣分。
     /// mentionedCount = 此人被其他項目 @ 標註的項目數（由 LifeStore 計算後傳入）。
-    func proactivityScore(mentionedCount: Int = 0) -> Int {
+    /// sideRoleDone = 此人在兼任職務裡完成的待辦數（由 LifeStore.sideRoleTaskCounts() 傳入）——
+    ///   兼任職務是本職以外的實際工作量，完成的事該和本職任務同權重計分（每項 +3）。
+    ///
+    /// ⚠️ sideRoleDone **刻意不給預設值**。給了預設值，任何忘記傳的呼叫點都會靜默算成 0，
+    ///    同一個人在列表、人才矩陣、明細頁就會顯示三個不同的分數，而且完全不會編譯錯。
+    ///    設成必填的話漏掉就編不過——這裡寧可編譯失敗。
+    func proactivityScore(mentionedCount: Int = 0, sideRoleDone: Int) -> Int {
         let completedTasks = tasks.filter { $0.isCompleted }.count
         let completedItems = meetings.flatMap { $0.items }.filter { $0.isCompleted }.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
@@ -43,13 +49,16 @@ extension Subordinate {
         score += Double(completedItems) * 2      // 每完成一個議程項目 +2
         score += Double(completedReports) * 3    // 每完成一份報告 +3
         score += Double(mentionedCount) * 2      // 每被標註一項 +2
+        score += Double(sideRoleDone) * 3        // 每完成一項兼任待辦 +3（與本職任務同權重）
         score -= leaveHours / 8 * 2              // 每請假 8 小時 -2
         return max(0, min(100, Int(score.rounded())))
     }
 
     /// 綜合分數＝潛力與主動性的平均（部屬列表左側顯示用）
-    func overallScore(mentionedCount: Int = 0) -> Int {
-        Int(((Double(potentialScore) + Double(proactivityScore(mentionedCount: mentionedCount))) / 2).rounded())
+    func overallScore(mentionedCount: Int = 0, sideRoleDone: Int) -> Int {
+        Int(((Double(potentialScore)
+              + Double(proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleDone)))
+             / 2).rounded())
     }
 
     /// 潛力評分的計算明細（分組條目 + 加減分）
@@ -85,7 +94,7 @@ extension Subordinate {
     }
 
     /// 主動性評分的計算明細（分組條目 + 加減分）
-    func proactivityBreakdown(mentionedCount: Int = 0) -> [(label: String, points: Int)] {
+    func proactivityBreakdown(mentionedCount: Int = 0, sideRoleDone: Int) -> [(label: String, points: Int)] {
         var items: [(String, Int)] = [("基礎分", 60)]
         let completedTasks = tasks.filter { $0.isCompleted }.count
         let completedItems = meetings.flatMap { $0.items }.filter { $0.isCompleted }.count
@@ -96,6 +105,7 @@ extension Subordinate {
         if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems * 2)) }
         if completedReports > 0 { items.append(("完成報告 ×\(completedReports)", completedReports * 3)) }
         if mentionedCount > 0 { items.append(("被標註 ×\(mentionedCount)", mentionedCount * 2)) }
+        if sideRoleDone > 0 { items.append(("完成兼任待辦 ×\(sideRoleDone)", sideRoleDone * 3)) }
         if leaveHours > 0 {
             let h = leaveHours.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(leaveHours))" : String(format: "%.1f", leaveHours)
             items.append(("請假 \(h) 小時", -Int((leaveHours / 8 * 2).rounded())))
@@ -202,6 +212,8 @@ struct TalentMatrixView: View {
     /// 掃描（O(全部部屬 × 任務/會議/報告) 的重複計算，members 數愈多重複次數愈多）。
     private struct AxisContext {
         let mentionCounts: [UUID: Int]
+        /// 部屬 id → 兼任待辦（完成／總數）。與 mentionCounts 同樣一次算好整批傳入。
+        let sideRoleCounts: [UUID: (done: Int, total: Int)]
         let scores: [UUID: Int]
         let xRange: ClosedRange<Double>
         let xMid: Double
@@ -211,14 +223,16 @@ struct TalentMatrixView: View {
     }
     private func makeAxisContext() -> AxisContext {
         let mentionCounts = lifeStore.mentionedCounts()
+        let sideRoleCounts = lifeStore.sideRoleTaskCounts()
         let scores = Dictionary(members.map {
-            ($0.id, $0.proactivityScore(mentionedCount: mentionCounts[$0.id] ?? 0))
+            ($0.id, $0.proactivityScore(mentionedCount: mentionCounts[$0.id] ?? 0,
+                                        sideRoleDone: sideRoleCounts[$0.id]?.done ?? 0))
         }, uniquingKeysWith: { first, _ in first })
         let range = domain(members.map { scores[$0.id] ?? 0 })
         let potentialScores = Dictionary(members.map { ($0.id, $0.potentialScore) }, uniquingKeysWith: { first, _ in first })
         let yRange = domain(members.map { potentialScores[$0.id] ?? 0 })
         return AxisContext(
-            mentionCounts: mentionCounts, scores: scores, xRange: range, xMid: (range.lowerBound + range.upperBound) / 2,
+            mentionCounts: mentionCounts, sideRoleCounts: sideRoleCounts, scores: scores, xRange: range, xMid: (range.lowerBound + range.upperBound) / 2,
             potentialScores: potentialScores, yRange: yRange, yMid: (yRange.lowerBound + yRange.upperBound) / 2
         )
     }
@@ -728,7 +742,8 @@ struct TalentMatrixView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    breakdownGroup("主動性（日常）", color: .blue, total: proactivity(m, ctx), items: m.proactivityBreakdown(mentionedCount: ctx.mentionCounts[m.id] ?? 0))
+                    breakdownGroup("主動性（日常）", color: .blue, total: proactivity(m, ctx), items: m.proactivityBreakdown(mentionedCount: ctx.mentionCounts[m.id] ?? 0,
+                                                                  sideRoleDone: ctx.sideRoleCounts[m.id]?.done ?? 0))
                     breakdownGroup("潛力（評分）", color: .indigo, total: m.potentialScore, items: m.potentialBreakdown)
                 }
                 .padding(.vertical, 4)

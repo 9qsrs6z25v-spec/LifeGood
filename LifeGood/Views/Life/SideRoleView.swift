@@ -457,6 +457,10 @@ struct SideRoleHubView: View {
 
 struct SideRoleWorkspaceView: View {
     let roleId: UUID
+    /// 成員明細裡要不要提供「跳到部屬明細」的入口。
+    /// 從部屬明細頁開進來時傳 false——否則會變成
+    /// 部屬 → 職務 → 成員 → 部屬 → … 無限往下疊 sheet，而且每一層都要各自關閉。
+    var allowSubordinateJump: Bool = true
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
@@ -540,7 +544,8 @@ struct SideRoleWorkspaceView: View {
             NavigationStack { SideRoleTaskEditor(roleId: roleId, task: t) }
         }
         .sheet(item: $viewingMember) { m in
-            SideRoleMemberDetailView(roleId: roleId, memberId: m.id)
+            SideRoleMemberDetailView(roleId: roleId, memberId: m.id,
+                                     allowSubordinateJump: allowSubordinateJump)
         }
         .sheet(item: $editingMember) { m in
             NavigationStack { SideRoleMemberEditor(roleId: roleId, member: m) }
@@ -1354,6 +1359,8 @@ struct SideRoleKeyDateEditor: View {
 struct SideRoleMemberDetailView: View {
     let roleId: UUID
     let memberId: UUID
+    /// 見 SideRoleWorkspaceView.allowSubordinateJump
+    var allowSubordinateJump: Bool = true
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
@@ -1361,6 +1368,9 @@ struct SideRoleMemberDetailView: View {
 
     @State private var showEdit = false
     @State private var editingTask: SideRoleTask?
+    /// 點「已連結部屬」跳過去的部屬。存整個 Subordinate 而不是 UUID——
+    /// UUID 沒有 Identifiable，.sheet(item:) 吃不了。
+    @State private var viewingSubordinate: Subordinate?
 
     private var role: LifeMilestone? {
         lifeStore.milestones.first { $0.id == roleId }
@@ -1407,6 +1417,9 @@ struct SideRoleMemberDetailView: View {
             }
             .sheet(item: $editingTask) { t in
                 NavigationStack { SideRoleTaskEditor(roleId: roleId, task: t) }
+            }
+            .sheet(item: $viewingSubordinate) { sub in
+                SubordinateDetailView(subordinate: sub)
             }
         }
     }
@@ -1461,8 +1474,29 @@ struct SideRoleMemberDetailView: View {
                     .textSelection(.enabled)
             }
             if let p = lifeStore.sideRolePerson(member.linkedPersonId) {
-                Label("已連結\(p.kind.rawValue)：\(p.name)", systemImage: p.kind.icon)
-                    .font(.caption2).foregroundStyle(.white.opacity(0.75))
+                if p.kind == .subordinate && allowSubordinateJump {
+                    // 只有部屬有明細頁可跳；名片的明細在另一個模式底下，
+                    // 從這裡硬跳過去會把使用者丟到完全不同的分頁，反而迷路。
+                    Button {
+                        viewingSubordinate = lifeStore.subordinates.first { $0.id == p.id }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: p.kind.icon).font(.system(size: 10))
+                            Text("已連結部屬：\(p.name)")
+                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(.white.opacity(0.16))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.6))
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Label("已連結\(p.kind.rawValue)：\(p.name)", systemImage: p.kind.icon)
+                        .font(.caption2).foregroundStyle(.white.opacity(0.75))
+                }
             }
 
             HStack(spacing: 0) {
@@ -1607,5 +1641,123 @@ struct SideRoleMemberDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14).padding(.vertical, 14)
             .background(Color(.systemBackground))
+    }
+}
+
+// MARK: - 從部屬那一側加入兼任職務
+
+/// 「把這位部屬加進某個兼任職務的成員名單」的挑選頁。
+///
+/// 這是雙向新增的另一半：原本只能從兼任職務的成員名單挑部屬（SideRolePersonPicker），
+/// 現在從部屬明細頁也能反過來把他掛進某個職務。兩邊寫入的是同一份
+/// SideRoleMember，linkedPersonId 一律填上，所以雙向查詢立刻成立。
+struct SideRoleJoinPicker: View {
+    let personId: UUID
+    let personName: String
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var duty = ""
+
+    /// 尚未加入這位部屬的兼任職務（在任的排前面）
+    private var candidates: [LifeMilestone] {
+        lifeStore.sideRoles
+            .filter { role in
+                !(role.sideRoleMembers ?? []).contains { $0.linkedPersonId == personId }
+            }
+            .sorted {
+                if $0.isActiveSideRole != $1.isActiveSideRole { return $0.isActiveSideRole }
+                return $0.date > $1.date
+            }
+    }
+
+    /// 已經加入的（列出來當作說明，避免使用者以為漏了）
+    private var joined: [LifeMilestone] {
+        lifeStore.sideRoleParticipations(of: personId).map(\.role)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("分工（選填，例：場控、資料彙整）", text: $duty)
+            } header: {
+                Text("分工")
+            } footer: {
+                Text("留空的話會自動帶入他的職稱與部門。")
+            }
+
+            Section {
+                if candidates.isEmpty {
+                    Text(lifeStore.sideRoles.isEmpty
+                         ? "目前沒有任何兼任職務。先到「職涯」新增一筆「兼任」里程碑。"
+                         : "\(personName.isEmpty ? "這位部屬" : personName) 已經在所有兼任職務的名單裡了。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(candidates) { role in
+                        Button {
+                            add(to: role)
+                        } label: {
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    Circle().fill(Color.indigo.opacity(0.12))
+                                        .frame(width: 34, height: 34)
+                                    Image(systemName: "person.badge.plus")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.indigo)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(SideRoleFormat.displayName(role))
+                                        .foregroundStyle(.primary)
+                                    Text(SideRoleFormat.subtitle(role))
+                                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                if role.isActiveSideRole {
+                                    Text("在任")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(.indigo)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color.indigo.opacity(0.12))
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            } header: {
+                Text("加入哪個兼任職務")
+            }
+
+            if !joined.isEmpty {
+                Section("已經在名單裡") {
+                    ForEach(joined) { role in
+                        HStack {
+                            Text(SideRoleFormat.displayName(role))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Image(systemName: "checkmark")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("加入兼任職務")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+        }
+    }
+
+    private func add(to role: LifeMilestone) {
+        // 用 sideRolePersonCandidates 取回這個人現在的姓名與聯絡方式，
+        // 而不是只寫 personName——成員存的是文字快照，寫入當下就該是最完整的一份。
+        guard let person = lifeStore.sideRolePerson(personId) else { return }
+        lifeStore.addPersonToSideRole(person, roleId: role.id, dutyInRole: duty)
+        dismiss()
     }
 }

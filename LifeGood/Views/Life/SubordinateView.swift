@@ -204,7 +204,7 @@ struct SubordinateView: View {
     // MARK: - 列表內容（拆分以降低型別檢查負擔）
 
     @ViewBuilder
-    private func subordinateSections(mentionCounts: [UUID: Int]) -> some View {
+    private func subordinateSections(ctx: LifeStore.ScoreContext) -> some View {
         // filteredSubordinates／displayRows 各自是 filter/O(n log n) 排序，一次算好供本
         // section 的空狀態檢查、計數徽章、ForEach 共用，避免同一次 body 求值各自重跑三次。
         let filtered = filteredSubordinates
@@ -243,7 +243,7 @@ struct SubordinateView: View {
             }
         } else {
             ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
-                listRow(row, idx: idx, mentionCounts: mentionCounts)
+                listRow(row, idx: idx, ctx: ctx)
                     // 改用 allowsFullSwipe: false 的滑出按鈕取代 .onDelete：
                     // 避免整列滑到底直接刪除（與邊緣切頁手勢衝突，同型修正見 v25.154）
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -312,7 +312,7 @@ struct SubordinateView: View {
     }
 
     @ViewBuilder
-    private func listRow(_ row: ListRow, idx: Int, mentionCounts: [UUID: Int]) -> some View {
+    private func listRow(_ row: ListRow, idx: Int, ctx: LifeStore.ScoreContext) -> some View {
         switch row {
         case .header(let area):
             plantAreaHeader(area)
@@ -320,7 +320,7 @@ struct SubordinateView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
         case .person(let sub):
-            subordinateRow(sub, mentionCounts: mentionCounts)
+            subordinateRow(sub, ctx: ctx)
                 .contentShape(Rectangle())
                 .onTapGesture { viewingItem = sub }
                 .opacity(rowsAppeared ? 1 : 0)
@@ -333,15 +333,15 @@ struct SubordinateView: View {
     }
 
     var body: some View {
-        // 一次計算被標註計數（O(N×M) 全量掃描），供頂部統計卡與每一列共用，
-        // 避免 summaryStatsCard 的 subordinates.map 與每一列 subordinateRow 各自重複觸發全量重算。
-        let mentionCounts = lifeStore.mentionedCounts()
+        // 一次計算評分所需的整批資料（被標註計數 + 兼任待辦統計，皆為全量掃描），
+        // 供頂部統計卡與每一列共用，避免各自重複觸發全量重算。
+        let ctx = lifeStore.makeScoreContext()
         return NavigationStack {
             List {
                 // 頂部統計摘要卡（有部屬才顯示）
                 if !lifeStore.subordinates.isEmpty {
                     Section {
-                        summaryStatsCard(mentionCounts: mentionCounts)
+                        summaryStatsCard(ctx: ctx)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -363,7 +363,7 @@ struct SubordinateView: View {
                             .listRowSeparator(.hidden)
                     }
                 } else {
-                    subordinateSections(mentionCounts: mentionCounts)
+                    subordinateSections(ctx: ctx)
                 }
             }
             .environment(\.editMode, sortOption == .manual ? .constant(.active) : .constant(.inactive))
@@ -404,9 +404,9 @@ struct SubordinateView: View {
     // MARK: - 統計摘要卡
 
 
-    private func summaryStatsCard(mentionCounts: [UUID: Int]) -> some View {
+    private func summaryStatsCard(ctx: LifeStore.ScoreContext) -> some View {
         let subordinates = lifeStore.subordinates
-        let scores = subordinates.map { subordinateScore($0, mentionCounts: mentionCounts) }
+        let scores = subordinates.map { subordinateScore($0, ctx: ctx) }
         let total = subordinates.count
         let avg: Int = scores.isEmpty ? 0 : scores.reduce(0, +) / scores.count
         let excellent = scores.filter { $0 >= 90 }.count
@@ -684,8 +684,8 @@ struct SubordinateView: View {
 
     // MARK: - 部屬列
 
-    private func subordinateRow(_ sub: Subordinate, mentionCounts: [UUID: Int]) -> some View {
-        let score = subordinateScore(sub, mentionCounts: mentionCounts)
+    private func subordinateRow(_ sub: Subordinate, ctx: LifeStore.ScoreContext) -> some View {
+        let score = subordinateScore(sub, ctx: ctx)
         let accent = scoreColor(score)
 
         return HStack(spacing: 0) {
@@ -827,10 +827,11 @@ struct SubordinateView: View {
     }
 
     /// 列表顯示分數：潛力與主動性的平均（含被標註加分）。
-    /// mentionCounts 由呼叫端（body）以 lifeStore.mentionedCounts() 算好一次傳入，
-    /// 避免每一列各自重新全量掃描所有部屬的任務/會議/報告。
-    private func subordinateScore(_ sub: Subordinate, mentionCounts: [UUID: Int]) -> Int {
-        sub.overallScore(mentionedCount: mentionCounts[sub.id] ?? 0)
+    /// ctx 由呼叫端（body）以 lifeStore.makeScoreContext() 算好一次傳入，
+    /// 避免每一列各自重新全量掃描所有部屬的任務/會議/報告與兼任待辦。
+    private func subordinateScore(_ sub: Subordinate, ctx: LifeStore.ScoreContext) -> Int {
+        sub.overallScore(mentionedCount: ctx.mention(sub.id),
+                         sideRoleDone: ctx.sideRoleDone(sub.id))
     }
 
     private func scoreColor(_ score: Int) -> Color {

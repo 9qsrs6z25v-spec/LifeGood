@@ -267,6 +267,10 @@ struct SubordinateDetailView: View {
 
     enum DetailTab: String, CaseIterable { case daily = "主動性"; case rating = "潛力性"; case duty = "執掌" }
     @State private var detailTab: DetailTab = .daily
+    /// 兼任職務：檢視中的職務（點卡片開該職務的管理頁）
+    @State private var viewingSideRole: LifeMilestone?
+    /// 「加入兼任職務」挑選面板
+    @State private var showJoinSideRole = false
     // matchedGeometryEffect：Tab 指示器平滑滑動（對齊 RealEstateDetailView / ChildDetailView 規格）
     @Namespace private var tabNamespace
 
@@ -373,6 +377,10 @@ struct SubordinateDetailView: View {
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.07), value: tabSectionsAppeared)
+                        sideRoleSection
+                            .opacity(tabSectionsAppeared ? 1 : 0)
+                            .offset(y: tabSectionsAppeared ? 0 : 14)
+                            .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.09), value: tabSectionsAppeared)
                         recordSection(.leave)
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
@@ -450,6 +458,15 @@ struct SubordinateDetailView: View {
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
             .sheet(isPresented: $showPromotion) { PromotionSheet(subordinateId: subordinateId) }
+            .sheet(item: $viewingSideRole) { role in
+                // 不給跳回部屬明細：我們就是從那裡進來的，會無限疊 sheet
+                SideRoleWorkspaceView(roleId: role.id, allowSubordinateJump: false)
+            }
+            .sheet(isPresented: $showJoinSideRole) {
+                NavigationStack {
+                    SideRoleJoinPicker(personId: subordinateId, personName: subordinate.name)
+                }
+            }
             .sheet(isPresented: $showEdit) { AddSubordinateView(editing: subordinate) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $addingType) { type in
@@ -483,6 +500,21 @@ struct SubordinateDetailView: View {
     }
 
     // MARK: - 英雄頭部卡片
+
+    /// 這位部屬在兼任職務裡的待辦統計（完成／總數）。
+    /// 只看一個人，直接查自己的即可，不必跑整批 sideRoleTaskCounts()。
+    private var sideRoleStat: (done: Int, total: Int) {
+        var done = 0, total = 0
+        for role in lifeStore.sideRoles {
+            guard let m = role.sideRoleMembers?.first(where: { $0.linkedPersonId == subordinate.id })
+            else { continue }
+            for t in role.sideRoleTasks ?? [] where t.assigneeIds?.contains(m.id) == true {
+                total += 1
+                if t.isCompleted { done += 1 }
+            }
+        }
+        return (done, total)
+    }
 
     private func headerCard(mentionedCount: Int) -> some View {
         let initials = String(subordinate.name.prefix(2))
@@ -559,13 +591,13 @@ struct SubordinateDetailView: View {
 
             // 分數看板：主動性 / 潛力性 / 綜合
             HStack(spacing: 0) {
-                HeroKpiCell(label: "主動性", value: "\(subordinate.proactivityScore(mentionedCount: mentionedCount))",
+                HeroKpiCell(label: "主動性", value: "\(subordinate.proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done))",
                             icon: "bolt.fill")
                 HeroKpiDivider()
                 HeroKpiCell(label: "潛力性", value: "\(subordinate.potentialScore)",
                             icon: "arrow.up.right.circle.fill")
                 HeroKpiDivider()
-                HeroKpiCell(label: "綜合", value: "\(subordinate.overallScore(mentionedCount: mentionedCount))",
+                HeroKpiCell(label: "綜合", value: "\(subordinate.overallScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done))",
                             icon: "star.fill")
             }
             .padding(.vertical, 10)
@@ -798,6 +830,87 @@ struct SubordinateDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+    }
+
+    // MARK: - 兼任職務參與
+
+    /// 這位部屬參與了哪些兼任職務、各自負責幾則待辦。
+    /// 掛在「主動性」分頁——兼任待辦本來就計入主動性分數，放這裡口徑一致。
+    private var sideRoleSection: some View {
+        let parts = lifeStore.sideRoleParticipations(of: subordinateId)
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("兼任職務參與", icon: "person.badge.plus", color: .indigo,
+                          count: parts.count) {
+                Button {
+                    guard subscription.isPremium else { showPremiumAlert = true; return }
+                    showJoinSideRole = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.indigo)
+                }
+                .buttonStyle(.plain)
+            }
+            if parts.isEmpty {
+                emptyHint
+            } else {
+                ForEach(Array(parts.enumerated()), id: \.element.role.id) { idx, p in
+                    Button { viewingSideRole = p.role } label: { sideRoleRow(p.role, member: p.member) }
+                        .buttonStyle(.plain)
+                    if idx < parts.count - 1 { Divider().padding(.leading, 58) }
+                }
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        .padding(.horizontal)
+    }
+
+    private func sideRoleRow(_ role: LifeMilestone, member: SideRoleMember) -> some View {
+        let tasks = lifeStore.sideRoleTasks(of: member.id, in: role)
+        let done = tasks.filter(\.isCompleted).count
+        return HStack(spacing: 11) {
+            ZStack {
+                Circle().fill(LinearGradient(colors: [.indigo.opacity(0.20), .indigo.opacity(0.08)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 34, height: 34)
+                Image(systemName: "person.badge.plus")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.indigo)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(SideRoleFormat.displayName(role))
+                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                    if role.isActiveSideRole {
+                        Text("在任").font(.caption2.weight(.bold))
+                            .padding(.horizontal, 6).padding(.vertical, 1.5)
+                            .background(Color.indigo.opacity(0.14))
+                            .foregroundStyle(.indigo).clipShape(Capsule())
+                    }
+                }
+                Text([member.dutyInRole, SideRoleFormat.period(role)]
+                        .filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if !tasks.isEmpty {
+                HStack(spacing: 3) {
+                    Image(systemName: "checklist").font(.system(size: 9))
+                    Text("\(done)/\(tasks.count)")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(done == tasks.count ? .green : .indigo)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background((done == tasks.count ? Color.green : Color.indigo).opacity(0.12))
+                .clipShape(Capsule())
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .contentShape(Rectangle())
     }
 
     private func mentionedRow(_ ref: SubordinateItemRef) -> some View {
@@ -1437,7 +1550,7 @@ struct SubordinateDetailView: View {
     /// Tab 徽章數字：主動性/潛力性顯示分數，執掌顯示設備台數
     private func tabBadgeValue(_ tab: DetailTab, mentionedCount: Int) -> Int {
         switch tab {
-        case .daily: return subordinate.proactivityScore(mentionedCount: mentionedCount)
+        case .daily: return subordinate.proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done)
         case .rating: return subordinate.potentialScore
         case .duty: return subordinate.equipments.count
         }
@@ -1509,7 +1622,8 @@ struct SubordinateDetailView: View {
         if !departmentText.isEmpty { lines.append("🏢 部門：\(departmentText)") }
         if !sub.plantArea.isEmpty { lines.append("🏭 廠區：\(sub.plantArea)") }
         if let jd = sub.joinDate { lines.append("📅 入職：\(formatDate(jd))") }
-        lines.append("📊 主動性 \(sub.proactivityScore(mentionedCount: mentioned.count))｜潛力性 \(sub.potentialScore)｜綜合 \(sub.overallScore(mentionedCount: mentioned.count))")
+        let srDone = sideRoleStat.done
+        lines.append("📊 主動性 \(sub.proactivityScore(mentionedCount: mentioned.count, sideRoleDone: srDone))｜潛力性 \(sub.potentialScore)｜綜合 \(sub.overallScore(mentionedCount: mentioned.count, sideRoleDone: srDone))")
 
         switch detailTab {
         case .daily:
