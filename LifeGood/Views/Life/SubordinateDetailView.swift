@@ -2890,13 +2890,34 @@ struct MentionPerson: Identifiable, Hashable {
 
 extension LifeStore {
     /// 供 @ 標註使用的人員清單（部屬 + 名片）
+    ///
+    /// ⚠️ 每新增一位有部門的部屬，syncOrgPersonFor(subordinate:) 會**自動**幫他建一張
+    ///    名片。所以「全部部屬 + 全部名片」會讓同一個人在挑人清單裡出現兩次
+    ///    （一列標「部屬」、一列標「名片」，名字一模一樣），這是使用者長期回報
+    ///    「選人時常常出現兩個相同的名字」的原因。
+    ///
+    ///    凡是能循「名片 ← 組織人員 → 部屬」連回某位部屬的名片一律不列，
+    ///    部屬身分才是這個人的正典 id。
+    ///
+    ///    去重不影響既有文字：標註在文字裡是以「@名字」純文字儲存、顯示時才依名字
+    ///    解析成連結（見 MentionText），不是存 id。也不影響評分：mentionedCounts()
+    ///    產生的計數表本來就只有 counts[部屬 id] 會被 proactivityScore 讀取，
+    ///    先前多出來的那份名片計數從來沒有人用。
     func mentionPeople() -> [MentionPerson] {
         var out: [MentionPerson] = []
+        let listedSubIds = Set(subordinates.map(\.id))
+        let cardIdsOwnedBySubordinates = Set(
+            orgPeople.compactMap { p -> UUID? in
+                guard let sid = p.linkedSubordinateId, listedSubIds.contains(sid) else { return nil }
+                return p.linkedBusinessCardId
+            }
+        )
         for s in subordinates where !s.name.trimmingCharacters(in: .whitespaces).isEmpty {
             out.append(MentionPerson(id: s.id, kind: .sub, name: s.name,
                                      subtitle: s.jobTitle.isEmpty ? s.department : s.jobTitle))
         }
-        for c in businessCards where !c.name.trimmingCharacters(in: .whitespaces).isEmpty {
+        for c in businessCards where !c.name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !cardIdsOwnedBySubordinates.contains(c.id) {
             out.append(MentionPerson(id: c.id, kind: .card, name: c.name, subtitle: c.company))
         }
         return out

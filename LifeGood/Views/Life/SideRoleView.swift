@@ -127,6 +127,19 @@ extension LifeStore {
         let deptName = Dictionary(departments.map { ($0.id, $0.name) },
                                   uniquingKeysWith: { a, _ in a })
 
+        // 部屬本身沒有聯絡方式欄位，電話／Email 存在他自動產生的那張名片上。
+        // 去重之後名片那一列不再出現，所以要在這裡把聯絡方式接回來，
+        // 否則挑了部屬卻帶不進電話，等於比去重前更難用。
+        let cardById = Dictionary(businessCards.map { ($0.id, $0) },
+                                  uniquingKeysWith: { a, _ in a })
+        var contactOfSub: [UUID: String] = [:]
+        for p in orgPeople {
+            guard let sid = p.linkedSubordinateId, let cid = p.linkedBusinessCardId,
+                  let card = cardById[cid] else { continue }
+            let c = card.phones.first ?? card.emails.first ?? ""
+            if !c.isEmpty { contactOfSub[sid] = c }
+        }
+
         for s in subordinates {
             let n = s.name.trimmingCharacters(in: .whitespaces)
             guard !n.isEmpty else { continue }
@@ -135,7 +148,8 @@ extension LifeStore {
                 : s.department
             let sub = [s.jobTitle, dept].filter { !$0.isEmpty }.joined(separator: " · ")
             out.append(SideRolePersonCandidate(id: s.id, kind: .subordinate,
-                                               name: n, subtitle: sub, contact: "",
+                                               name: n, subtitle: sub,
+                                               contact: contactOfSub[s.id] ?? "",
                                                department: dept))
         }
         // ⚠️ 每新增一位有部門的部屬，LifeStore.syncOrgPersonFor(subordinate:) 會
