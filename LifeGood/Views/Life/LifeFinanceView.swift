@@ -1582,10 +1582,36 @@ struct FinanceCardView: View {
 
     @State private var ccExpanded = false
 
-    private var creditCardExpenseItems: [Expense] {
-        expenseStore.expenses
-            .filter { $0.linkedCreditCardMilestoneId == milestoneId }
-            .sorted { $0.date > $1.date }
+    /// 信用卡個別項目列表的一列。
+    /// 週期性固定支出會展開成每期一列，所以「一列」不等於「一筆 Expense」——
+    /// 五月設定的月繳訂閱在六、七、八月各有一列，但它們指向同一筆 Expense。
+    private struct CreditCardExpenseRow: Identifiable {
+        let id: String
+        let date: Date
+        let amount: Double
+        let expense: Expense
+        /// 由週期自動展開出來的期別（非使用者手動記的那一筆）
+        let isProjected: Bool
+    }
+
+    /// ⚠️ 這份清單以前直接列 expenseStore.expenses，週期性固定支出只會出現「原始設定」
+    ///    那一筆——五月設定的月繳訂閱，六、七、八月完全看不到，看起來像漏帳。
+    ///    實際上金額從來沒算錯：銀行餘額、銀行明細的扣款紀錄、本頁的消費趨勢圖與
+    ///    「最近一期」四條路徑都走 expandedCreditCardEntries、都有展開；
+    ///    只有這份清單沒有，是顯示口徑不一致。改成同樣展開。
+    private var creditCardExpenseRows: [CreditCardExpenseRow] {
+        let byId = Dictionary(expenseStore.expenses.map { ($0.id, $0) },
+                              uniquingKeysWith: { first, _ in first })
+        let entries = expandedCreditCardEntries(forCard: milestoneId, expenses: expenseStore.expenses)
+        return entries.compactMap { e -> CreditCardExpenseRow? in
+            guard let exp = byId[e.expenseId] else { return nil }
+            let projected = exp.expenseType == .fixed && exp.recurrence != nil
+                && !Calendar.current.isDate(e.date, inSameDayAs: exp.date)
+            return CreditCardExpenseRow(
+                id: "\(e.expenseId)-\(e.date.timeIntervalSince1970)",
+                date: e.date, amount: e.amount, expense: exp, isProjected: projected)
+        }
+        .sorted { $0.date > $1.date }
     }
 
     private var creditCardChartSection: some View {
@@ -1641,12 +1667,13 @@ struct FinanceCardView: View {
                 Divider().padding(.horizontal)
 
                 // 個別項目列表
-                let items = creditCardExpenseItems
+                let items = creditCardExpenseRows
                 let visible = ccExpanded ? items : Array(items.prefix(6))
                 // 信用卡個別支出列：32pt 漸層圖示圓 + 日期 Capsule 徽章 + 金額 rounded bold
                 // 對齊 depositRow 視覺語言，形成帳戶詳頁統一 row 規格
-                ForEach(visible) { exp in
-                    Button { editingExpense = exp } label: {
+                ForEach(visible) { row in
+                    // 展開出來的期別點下去編輯的是同一筆原始 Expense
+                    Button { editingExpense = row.expense } label: {
                         HStack(spacing: 10) {
                             // 32pt 漸層圖示圓（橙色 = 信用卡消費）
                             ZStack {
@@ -1662,29 +1689,41 @@ struct FinanceCardView: View {
                                 Circle()
                                     .stroke(Color.orange.opacity(0.18), lineWidth: 0.75)
                                     .frame(width: 32, height: 32)
-                                Image(systemName: exp.categoryIcon)
+                                Image(systemName: row.expense.categoryIcon)
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(Color.orange)
                             }
 
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(exp.title)
+                                Text(row.expense.title)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
                                 // 日期 Capsule 徽章
-                                Text(fmtDate(exp.date))
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Color(.tertiarySystemFill))
-                                    .clipShape(Capsule())
+                                HStack(spacing: 4) {
+                                    Text(fmtDate(row.date))
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color(.tertiarySystemFill))
+                                        .clipShape(Capsule())
+                                    // 標示這一列是週期自動展開的期別，不是另外記的一筆帳，
+                                    // 否則使用者會以為同一筆訂閱被重複輸入了四次。
+                                    if row.isProjected {
+                                        Text("週期")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .foregroundStyle(.orange)
+                                            .padding(.horizontal, 5).padding(.vertical, 2)
+                                            .background(Color.orange.opacity(0.12))
+                                            .clipShape(Capsule())
+                                    }
+                                }
                             }
 
                             Spacer(minLength: 4)
 
                             VStack(alignment: .trailing, spacing: 3) {
-                                Text("-\(exp.amount.ntdWanString)")
+                                Text("-\(row.amount.ntdWanString)")
                                     .font(.system(size: 14, weight: .bold, design: .rounded))
                                     .foregroundStyle(Color.red)
                                     .contentTransition(.numericText())
