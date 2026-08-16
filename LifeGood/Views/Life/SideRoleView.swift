@@ -64,6 +64,19 @@ enum SideRoleFormat {
         return parts.joined(separator: " · ")
     }
 
+    /// 一則待辦的負責人姓名（逗號串接）。名稱取自成員名單的文字快照，
+    /// 指派到已被刪除的成員時該筆自動略過（刪成員時本來就會清掉指派，
+    /// 這裡只是多一層保險，避免舊資料留下的懸空 id 印出空字串）。
+    static func assigneeNames(_ task: SideRoleTask, in role: LifeMilestone) -> String {
+        guard let ids = task.assigneeIds, !ids.isEmpty else { return "" }
+        let members = role.sideRoleMembers ?? []
+        return ids.compactMap { id in
+            members.first { $0.id == id }?.name.trimmingCharacters(in: .whitespaces)
+        }
+        .filter { !$0.isEmpty }
+        .joined(separator: "、")
+    }
+
     /// 待辦完成度
     static func taskProgress(_ role: LifeMilestone) -> (done: Int, total: Int) {
         let list = role.sideRoleTasks ?? []
@@ -451,6 +464,8 @@ struct SideRoleWorkspaceView: View {
 
     @State private var editingTask: SideRoleTask?
     @State private var editingMember: SideRoleMember?
+    /// 點成員列開明細（可看到他負責的待辦與出席的會議）；編輯是明細頁裡的動作
+    @State private var viewingMember: SideRoleMember?
     @State private var editingMeeting: SideRoleMeeting?
     @State private var editingKeyDate: SideRoleKeyDate?
     @State private var showCopyResult: String?
@@ -523,6 +538,9 @@ struct SideRoleWorkspaceView: View {
         }
         .sheet(item: $editingTask) { t in
             NavigationStack { SideRoleTaskEditor(roleId: roleId, task: t) }
+        }
+        .sheet(item: $viewingMember) { m in
+            SideRoleMemberDetailView(roleId: roleId, memberId: m.id)
         }
         .sheet(item: $editingMember) { m in
             NavigationStack { SideRoleMemberEditor(roleId: roleId, member: m) }
@@ -599,14 +617,14 @@ struct SideRoleWorkspaceView: View {
             } else {
                 ForEach(tasks) { task in
                     SwipeDeleteRow(onDelete: { lifeStore.deleteSideRoleTask(task.id, in: roleId) }) {
-                        taskRow(task)
+                        taskRow(task, assigneeNames: SideRoleFormat.assigneeNames(task, in: role))
                     }
                 }
             }
         }
     }
 
-    private func taskRow(_ task: SideRoleTask) -> some View {
+    private func taskRow(_ task: SideRoleTask, assigneeNames: String) -> some View {
         HStack(spacing: 10) {
             Button {
                 var t = task
@@ -627,11 +645,19 @@ struct SideRoleWorkspaceView: View {
                     .strikethrough(task.isCompleted, color: .secondary)
                     .foregroundStyle(task.isCompleted ? .secondary : .primary)
                     .lineLimit(2)
-                if let due = task.dueDate {
-                    let overdue = !task.isCompleted && due < Calendar.current.startOfDay(for: Date())
-                    Text((overdue ? "已逾期 · " : "") + SideRoleFormat.date(due))
-                        .font(.caption2)
-                        .foregroundStyle(overdue ? .red : .secondary)
+                HStack(spacing: 5) {
+                    if let due = task.dueDate {
+                        let overdue = !task.isCompleted && due < Calendar.current.startOfDay(for: Date())
+                        Text((overdue ? "已逾期 · " : "") + SideRoleFormat.date(due))
+                            .font(.caption2)
+                            .foregroundStyle(overdue ? .red : .secondary)
+                    }
+                    if !assigneeNames.isEmpty {
+                        Text(assigneeNames)
+                            .font(.caption2)
+                            .foregroundStyle(.indigo.opacity(0.85))
+                            .lineLimit(1)
+                    }
                 }
             }
             Spacer()
@@ -730,15 +756,23 @@ struct SideRoleWorkspaceView: View {
             } else {
                 ForEach(members) { m in
                     SwipeDeleteRow(onDelete: { lifeStore.deleteSideRoleMember(m.id, in: roleId) }) {
-                        memberRow(m, peopleIndex: peopleIndex)
+                        memberRow(m, peopleIndex: peopleIndex,
+                                  taskStat: memberTaskStat(of: m.id, in: role))
                     }
                 }
             }
         }
     }
 
+    /// 這位成員被指派了幾則待辦、完成幾則
+    private func memberTaskStat(of memberId: UUID, in role: LifeMilestone) -> (done: Int, total: Int) {
+        let list = lifeStore.sideRoleTasks(of: memberId, in: role)
+        return (list.filter(\.isCompleted).count, list.count)
+    }
+
     private func memberRow(_ m: SideRoleMember,
-                           peopleIndex: [UUID: SideRolePersonCandidate]) -> some View {
+                           peopleIndex: [UUID: SideRolePersonCandidate],
+                           taskStat: (done: Int, total: Int)) -> some View {
         HStack(spacing: 10) {
             ZStack {
                 Circle()
@@ -766,12 +800,27 @@ struct SideRoleWorkspaceView: View {
                         .lineLimit(1)
                 }
             }
-            Spacer()
+            Spacer(minLength: 4)
+            if taskStat.total > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 9))
+                    Text("\(taskStat.done)/\(taskStat.total)")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(taskStat.done == taskStat.total ? .green : .indigo)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background((taskStat.done == taskStat.total ? Color.green : Color.indigo).opacity(0.12))
+                .clipShape(Capsule())
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(Color(.systemBackground))
         .contentShape(Rectangle())
-        .onTapGesture { editingMember = m }
+        .onTapGesture { viewingMember = m }
     }
 
     // MARK: 會議
@@ -890,10 +939,51 @@ struct SideRoleTaskEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var hasDue = false
 
+    /// 這筆兼任職務底下的成員名單（指派對象）
+    private var members: [SideRoleMember] {
+        lifeStore.milestones.first { $0.id == roleId }?.sideRoleMembers ?? []
+    }
+
     var body: some View {
         Form {
             Section("內容") {
                 TextField("待辦內容", text: $task.content, axis: .vertical).lineLimit(3)
+            }
+            Section {
+                if members.isEmpty {
+                    Text("還沒有成員。先到「成員名單」新增，就能把待辦指派給人。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    // 直接列成可勾選的列，不用 Picker——多選在 Picker 上表達不了，
+                    // 而成員數量本來就不多（一場尾牙十來個人），攤開反而好按。
+                    ForEach(members) { m in
+                        Button {
+                            toggleAssignee(m.id)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: isAssigned(m.id)
+                                      ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(isAssigned(m.id) ? .indigo : .secondary)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(m.name.isEmpty ? "（未填姓名）" : m.name)
+                                        .foregroundStyle(.primary)
+                                    if !m.dutyInRole.isEmpty {
+                                        Text(m.dutyInRole)
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            } header: {
+                Text("負責成員")
+            } footer: {
+                Text("可以多選。指派後，在成員頁就看得到他負責哪些事。")
             }
             Section("截止日") {
                 Toggle("設定截止日", isOn: $hasDue)
@@ -926,6 +1016,9 @@ struct SideRoleTaskEditor: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("儲存") {
                     if !hasDue { task.dueDate = nil }
+                    // 空陣列收成 nil：兩者語意相同，但留著空陣列會讓 JSON 多一個
+                    // 沒意義的鍵，也讓 assigneeIds != nil 的判斷變得不可靠。
+                    if task.assigneeIds?.isEmpty == true { task.assigneeIds = nil }
                     lifeStore.upsertSideRoleTask(task, in: roleId)
                     dismiss()
                 }
@@ -933,6 +1026,16 @@ struct SideRoleTaskEditor: View {
             }
         }
         .onAppear { hasDue = task.dueDate != nil }
+    }
+
+    private func isAssigned(_ id: UUID) -> Bool {
+        task.assigneeIds?.contains(id) == true
+    }
+
+    private func toggleAssignee(_ id: UUID) {
+        var ids = task.assigneeIds ?? []
+        if let i = ids.firstIndex(of: id) { ids.remove(at: i) } else { ids.append(id) }
+        task.assigneeIds = ids.isEmpty ? nil : ids
     }
 }
 
@@ -1239,5 +1342,270 @@ struct SideRoleKeyDateEditor: View {
             hasRemind = keyDate.remindDaysBefore != nil
             remindDays = keyDate.remindDaysBefore ?? 3
         }
+    }
+}
+
+// MARK: - 成員明細
+
+/// 點成員列進來的頁面：這個人是誰、他負責哪些待辦、他出席過哪些會議。
+///
+/// 資料一律從 store 現查（吃 roleId + memberId），不快取進 @State——
+/// 在這頁勾完成一則待辦後，統計與清單要立刻跟著更新。
+struct SideRoleMemberDetailView: View {
+    let roleId: UUID
+    let memberId: UUID
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var showEdit = false
+    @State private var editingTask: SideRoleTask?
+
+    private var role: LifeMilestone? {
+        lifeStore.milestones.first { $0.id == roleId }
+    }
+    private var member: SideRoleMember? {
+        role?.sideRoleMembers?.first { $0.id == memberId }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let role, let member {
+                    content(role: role, member: member)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "person.slash")
+                            .font(.system(size: 34))
+                            .foregroundStyle(.secondary)
+                        Text("找不到這位成員")
+                            .font(.subheadline.weight(.semibold))
+                        Text("他可能已經從名單裡移除了。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .navigationTitle(member?.name.isEmpty == false ? member!.name : "成員")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("關閉") { dismiss() }
+                }
+                if member != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showEdit = true } label: { Image(systemName: "square.and.pencil") }
+                            .disabled(!subscription.isPremium)
+                    }
+                }
+            }
+            .sheet(isPresented: $showEdit) {
+                if let member {
+                    NavigationStack { SideRoleMemberEditor(roleId: roleId, member: member) }
+                }
+            }
+            .sheet(item: $editingTask) { t in
+                NavigationStack { SideRoleTaskEditor(roleId: roleId, task: t) }
+            }
+        }
+    }
+
+    private func content(role: LifeMilestone, member: SideRoleMember) -> some View {
+        let tasks = lifeStore.sideRoleTasks(of: memberId, in: role)
+        let done = tasks.filter(\.isCompleted).count
+        let meetings = attendedMeetings(role: role, member: member)
+        return ScrollView {
+            LazyVStack(spacing: 14) {
+                headerCard(role: role, member: member, done: done, total: tasks.count,
+                           meetingCount: meetings.count)
+                taskBox(tasks)
+                meetingBox(meetings)
+            }
+            .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: 標頭
+
+    private func headerCard(role: LifeMilestone, member: SideRoleMember,
+                            done: Int, total: Int, meetingCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.20))
+                        .frame(width: 48, height: 48)
+                        .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.75))
+                    Text(String(member.name.prefix(1)))
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(member.name.isEmpty ? "（未填姓名）" : member.name)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text(SideRoleFormat.displayName(role))
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.80))
+                }
+                Spacer()
+            }
+            if !member.dutyInRole.isEmpty {
+                Label(member.dutyInRole, systemImage: "checkmark.seal.fill")
+                    .font(.caption).foregroundStyle(.white.opacity(0.88))
+            }
+            if !member.contact.isEmpty {
+                Label(member.contact, systemImage: "phone.fill")
+                    .font(.caption).foregroundStyle(.white.opacity(0.88))
+                    .textSelection(.enabled)
+            }
+            if let p = lifeStore.sideRolePerson(member.linkedPersonId) {
+                Label("已連結\(p.kind.rawValue)：\(p.name)", systemImage: p.kind.icon)
+                    .font(.caption2).foregroundStyle(.white.opacity(0.75))
+            }
+
+            HStack(spacing: 0) {
+                HeroKpiCell(label: "負責待辦", value: "\(done)/\(total)", icon: "checklist")
+                HeroKpiDivider()
+                HeroKpiCell(label: "出席會議", value: "\(meetingCount)", icon: "text.bubble.fill")
+                HeroKpiDivider()
+                HeroKpiCell(label: "未完成",
+                            value: "\(max(0, total - done))",
+                            icon: "exclamationmark.circle.fill")
+            }
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .heroCardShell(card: .sideRoleWorkspace)
+        .padding(.horizontal, 16)
+    }
+
+    // MARK: 負責的待辦
+
+    private func taskBox(_ tasks: [SideRoleTask]) -> some View {
+        box(title: "負責的待辦", icon: "checklist", trailing: "\(tasks.count)") {
+            if tasks.isEmpty {
+                emptyRow("還沒有指派給他的待辦。到「待辦」區塊編輯任一則，在「負責成員」勾選即可。")
+            } else {
+                ForEach(tasks) { t in
+                    Button {
+                        editingTask = t
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: t.isCompleted ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 18))
+                                .foregroundStyle(t.isCompleted ? .indigo : .secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(t.content.isEmpty ? "（未填內容）" : t.content)
+                                    .font(.subheadline)
+                                    .strikethrough(t.isCompleted, color: .secondary)
+                                    .foregroundStyle(t.isCompleted ? .secondary : .primary)
+                                    .lineLimit(2)
+                                if let due = t.dueDate {
+                                    let overdue = !t.isCompleted
+                                        && due < Calendar.current.startOfDay(for: Date())
+                                    Text((overdue ? "已逾期 · " : "") + SideRoleFormat.date(due))
+                                        .font(.caption2)
+                                        .foregroundStyle(overdue ? .red : .secondary)
+                                }
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .background(Color(.systemBackground))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!subscription.isPremium)
+                }
+            }
+        }
+    }
+
+    // MARK: 出席的會議
+
+    /// 會議的出席者存的是姓名文字（外部與會者很常見，不綁 id），
+    /// 所以這裡用姓名比對。姓名為空的成員一律不比對，否則會把所有
+    /// 出席者欄位有空字串的會議都算成他出席。
+    private func attendedMeetings(role: LifeMilestone, member: SideRoleMember) -> [SideRoleMeeting] {
+        let name = member.name.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return [] }
+        return (role.sideRoleMeetings ?? [])
+            .filter { $0.attendees.contains { $0.trimmingCharacters(in: .whitespaces) == name } }
+            .sorted { $0.date > $1.date }
+    }
+
+    private func meetingBox(_ meetings: [SideRoleMeeting]) -> some View {
+        box(title: "出席的會議", icon: "text.bubble.fill", trailing: "\(meetings.count)") {
+            if meetings.isEmpty {
+                emptyRow("還沒有他出席的會議紀錄（依會議的出席者姓名比對）。")
+            } else {
+                ForEach(meetings) { mt in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(SideRoleFormat.date(mt.date))
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.indigo)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.indigo.opacity(0.12))
+                                .clipShape(Capsule())
+                            Text(mt.topic.isEmpty ? "（未填主題）" : mt.topic)
+                                .font(.subheadline).lineLimit(1)
+                        }
+                        if !mt.decisions.isEmpty {
+                            Text(mt.decisions)
+                                .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Color(.systemBackground))
+                }
+            }
+        }
+    }
+
+    // MARK: 共用外框
+
+    @ViewBuilder
+    private func box<Content: View>(title: String, icon: String, trailing: String,
+                                    @ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.indigo, .indigo.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.indigo)
+                Text(title).font(.subheadline.weight(.bold))
+                Text(trailing)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.indigo)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color.indigo.opacity(0.12))
+                    .clipShape(Capsule())
+                Spacer()
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            content()
+        }
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 16)
+    }
+
+    private func emptyRow(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 14)
+            .background(Color(.systemBackground))
     }
 }

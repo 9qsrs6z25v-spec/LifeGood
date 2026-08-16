@@ -212,7 +212,29 @@ class LifeStore: ObservableObject {
     }
 
     func deleteSideRoleMember(_ memberId: UUID, in roleId: UUID) {
-        mutateSideRole(roleId) { $0.sideRoleMembers?.removeAll { $0.id == memberId } }
+        mutateSideRole(roleId) { m in
+            m.sideRoleMembers?.removeAll { $0.id == memberId }
+            // 連帶把待辦上的指派清掉，否則會留下指向不存在成員的懸空引用——
+            // 那些待辦在成員頁查不到、在待辦列上又會顯示一個空白的負責人。
+            // 比照 deleteFamilyMember 解除 spouseId、deleteMilestoneCleaningLinks 的既有做法。
+            m.sideRoleTasks = m.sideRoleTasks?.map { t in
+                guard var ids = t.assigneeIds, ids.contains(memberId) else { return t }
+                ids.removeAll { $0 == memberId }
+                var copy = t
+                copy.assigneeIds = ids.isEmpty ? nil : ids
+                return copy
+            }
+        }
+    }
+
+    /// 某位成員被指派的待辦（依「未完成優先、再依截止日」排序）
+    func sideRoleTasks(of memberId: UUID, in role: LifeMilestone) -> [SideRoleTask] {
+        (role.sideRoleTasks ?? [])
+            .filter { $0.assigneeIds?.contains(memberId) == true }
+            .sorted { a, b in
+                if a.isCompleted != b.isCompleted { return !a.isCompleted }
+                return (a.dueDate ?? .distantFuture) < (b.dueDate ?? .distantFuture)
+            }
     }
 
     func upsertSideRoleMeeting(_ meeting: SideRoleMeeting, in roleId: UUID) {

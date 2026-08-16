@@ -772,11 +772,17 @@ struct SideRoleTask: Identifiable, Codable {
     var isCompleted: Bool
     var completedAt: Date?
     var note: String
+    /// 負責這則待辦的成員（對應同一筆兼任職務底下 SideRoleMember.id）。
+    /// 用陣列而非單一 id：一件事常常是兩三個人一起扛，而單人只是「陣列長度 1」，
+    /// 反過來用單一欄位就表達不了多人。nil／空陣列＝尚未指派。
+    var assigneeIds: [UUID]?
 
     init(id: UUID = UUID(), content: String = "", dueDate: Date? = nil,
-         isCompleted: Bool = false, completedAt: Date? = nil, note: String = "") {
+         isCompleted: Bool = false, completedAt: Date? = nil, note: String = "",
+         assigneeIds: [UUID]? = nil) {
         self.id = id; self.content = content; self.dueDate = dueDate
         self.isCompleted = isCompleted; self.completedAt = completedAt; self.note = note
+        self.assigneeIds = assigneeIds
     }
 
     init(from decoder: Decoder) throws {
@@ -790,10 +796,11 @@ struct SideRoleTask: Identifiable, Codable {
         isCompleted = (try? c.decodeIfPresent(Bool.self, forKey: .isCompleted)) ?? false
         completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
         note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+        assigneeIds = try? c.decodeIfPresent([UUID].self, forKey: .assigneeIds)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, content, dueDate, isCompleted, completedAt, note
+        case id, content, dueDate, isCompleted, completedAt, note, assigneeIds
     }
 }
 

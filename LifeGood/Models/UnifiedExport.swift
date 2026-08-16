@@ -401,11 +401,19 @@ enum UnifiedExporter {
             }
 
             csv += "\n## 兼任職務待辦 (Side Role Tasks)\n"
-            csv += "roleId,roleName,content,dueDate,isCompleted,completedAt,note\n"
+            csv += "roleId,roleName,content,assignees,dueDate,isCompleted,completedAt,note\n"
             for r in sideRoles {
+                let memberNames = Dictionary(
+                    (r.sideRoleMembers ?? []).map { ($0.id, $0.name) },
+                    uniquingKeysWith: { a, _ in a })
                 for t in r.sideRoleTasks ?? [] {
+                    let assignees = (t.assigneeIds ?? [])
+                        .compactMap { memberNames[$0] }
+                        .filter { !$0.isEmpty }
+                        .joined(separator: "、")
                     let fields: [String] = [
                         r.id.uuidString, esc(r.sideRoleName ?? ""), esc(t.content),
+                        esc(assignees),
                         t.dueDate.map { iso.string(from: $0) } ?? "",
                         t.isCompleted ? "1" : "0",
                         t.completedAt.map { iso.string(from: $0) } ?? "",
