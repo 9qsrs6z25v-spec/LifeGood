@@ -86,16 +86,23 @@ enum SideRoleFormat {
 
 // MARK: - 資料來源：既有人員與既有單位
 
-/// 兼任職務成員可挑選的人員。來源是部屬與名片——本專案的人員資料就這兩處，
-/// 公司組織的 OrgPerson 會與這兩者雙向同步，不另外列以免同一個人出現兩次。
+/// 兼任職務成員可挑選的人員。三個來源：部屬、名片、公司組織人員。
+///
+/// ⚠️ 早期版本只列部屬與名片，理由寫的是「公司組織人員會與這兩者雙向同步」——
+///    那是錯的。刪除一張名片時，LifeStore 只會把 OrgPerson.linkedBusinessCardId
+///    清成 nil、人員本身留著（LifeStore.deleteBusinessCard），這種人既不是部屬
+///    也沒有名片，於是完全挑不到。跨部門的同事多半就是這樣進來的，
+///    造成「其他部門的人選不到」。現在三個來源都列，靠 id 連結去重。
 struct SideRolePersonCandidate: Identifiable, Hashable {
     enum Kind: String {
         case subordinate = "部屬"
         case card = "名片"
+        case orgPerson = "組織"
         var icon: String {
             switch self {
             case .subordinate: return "person.2.fill"
             case .card:        return "person.crop.rectangle.stack"
+            case .orgPerson:   return "building.2.crop.circle"
             }
         }
     }
@@ -106,6 +113,9 @@ struct SideRolePersonCandidate: Identifiable, Hashable {
     let subtitle: String
     /// 自動帶入用的聯絡方式（名片才有）
     let contact: String
+    /// 部門名稱（沒有就空字串）。挑跨部門的人時，這是唯一分得出誰是誰的欄位，
+    /// 所以拉成獨立欄位供分組與篩選用，不只是塞進 subtitle。
+    var department: String = ""
 }
 
 extension LifeStore {
@@ -114,22 +124,51 @@ extension LifeStore {
     /// 而這裡挑完人要能自動帶入電話／Email，少了會變成挑完還要手動再打一次。
     func sideRolePersonCandidates() -> [SideRolePersonCandidate] {
         var out: [SideRolePersonCandidate] = []
+        let deptName = Dictionary(departments.map { ($0.id, $0.name) },
+                                  uniquingKeysWith: { a, _ in a })
+
         for s in subordinates {
             let n = s.name.trimmingCharacters(in: .whitespaces)
             guard !n.isEmpty else { continue }
-            let sub = [s.jobTitle, s.department].filter { !$0.isEmpty }.joined(separator: " · ")
+            let dept = s.department.isEmpty
+                ? (s.departmentId.flatMap { deptName[$0] } ?? "")
+                : s.department
+            let sub = [s.jobTitle, dept].filter { !$0.isEmpty }.joined(separator: " · ")
             out.append(SideRolePersonCandidate(id: s.id, kind: .subordinate,
-                                               name: n, subtitle: sub, contact: ""))
+                                               name: n, subtitle: sub, contact: "",
+                                               department: dept))
         }
         for c in businessCards {
             let n = c.name.trimmingCharacters(in: .whitespaces)
             guard !n.isEmpty else { continue }
-            let sub = [c.company, c.jobTitle].filter { !$0.isEmpty }.joined(separator: " · ")
+            let sub = [c.company, c.jobTitle, c.department]
+                .filter { !$0.isEmpty }.joined(separator: " · ")
             let contact = c.phones.first ?? c.emails.first ?? ""
             out.append(SideRolePersonCandidate(id: c.id, kind: .card,
-                                               name: n, subtitle: sub, contact: contact))
+                                               name: n, subtitle: sub, contact: contact,
+                                               department: c.department))
         }
-        return out.sorted { $0.name < $1.name }
+        // 組織人員：只補「既不是部屬、也沒有名片」的那些，避免同一個人列三次。
+        // 已離職者不列（isInactive）——找人做事不會找已經離開的人。
+        let linkedSubIds = Set(subordinates.map(\.id))
+        let linkedCardIds = Set(businessCards.map(\.id))
+        for p in orgPeople where !p.isInactive {
+            let n = p.name.trimmingCharacters(in: .whitespaces)
+            guard !n.isEmpty else { continue }
+            if let sid = p.linkedSubordinateId, linkedSubIds.contains(sid) { continue }
+            if let cid = p.linkedBusinessCardId, linkedCardIds.contains(cid) { continue }
+            let dept = p.departmentId.flatMap { deptName[$0] } ?? ""
+            let title = gradeTitles.first { $0.id == p.gradeTitleId }?.title ?? p.jobTitle
+            let sub = [title, dept].filter { !$0.isEmpty }.joined(separator: " · ")
+            out.append(SideRolePersonCandidate(id: p.id, kind: .orgPerson,
+                                               name: n, subtitle: sub, contact: "",
+                                               department: dept))
+        }
+        return out.sorted {
+            // 先依部門再依姓名：跨部門挑人時，同部門的人會聚在一起
+            if $0.department != $1.department { return $0.department < $1.department }
+            return $0.name < $1.name
+        }
     }
 
     /// 依 id 找回被連結的人現在的樣子。用來在名單上標「已連結」，
@@ -1160,72 +1199,142 @@ struct SideRoleMemberEditor: View {
     }
 }
 
-/// 挑人清單。單一參數化 struct + 搜尋，不為每種來源各寫一份。
+/// 挑人清單。單一參數化 struct + 搜尋 + 部門篩選，不為每種來源各寫一份。
+///
+/// 跨部門挑人是主要情境（要 drive 別的部門的人），所以清單依部門分組、
+/// 上方有部門篩選膠囊列——只靠一個平坦的姓名清單，人一多就等於找不到。
 struct SideRolePersonPicker: View {
     let onPick: (SideRolePersonCandidate) -> Void
 
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @State private var deptFilter: String?
+
+    private var all: [SideRolePersonCandidate] { lifeStore.sideRolePersonCandidates() }
+
+    /// 有人的部門清單（依人數多寡排序，人最多的排前面）
+    private var departments: [String] {
+        Dictionary(grouping: all, by: { $0.department.isEmpty ? "未分部門" : $0.department })
+            .map { ($0.key, $0.value.count) }
+            .sorted { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 > $1.1 }
+            .map(\.0)
+    }
 
     private var candidates: [SideRolePersonCandidate] {
-        let all = lifeStore.sideRolePersonCandidates()
+        var list = all
+        if let deptFilter {
+            list = list.filter {
+                ($0.department.isEmpty ? "未分部門" : $0.department) == deptFilter
+            }
+        }
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return all }
-        return all.filter { $0.name.localizedCaseInsensitiveContains(q)
-                         || $0.subtitle.localizedCaseInsensitiveContains(q) }
+        guard !q.isEmpty else { return list }
+        return list.filter { $0.name.localizedCaseInsensitiveContains(q)
+                          || $0.subtitle.localizedCaseInsensitiveContains(q)
+                          || $0.department.localizedCaseInsensitiveContains(q) }
+    }
+
+    /// 依部門分組（保留 candidates 的排序）
+    private var grouped: [(dept: String, people: [SideRolePersonCandidate])] {
+        var order: [String] = []
+        var map: [String: [SideRolePersonCandidate]] = [:]
+        for p in candidates {
+            let key = p.department.isEmpty ? "未分部門" : p.department
+            if map[key] == nil { order.append(key) }
+            map[key, default: []].append(p)
+        }
+        return order.map { ($0, map[$0] ?? []) }
     }
 
     var body: some View {
         List {
+            if departments.count > 1 {
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            deptChip("全部", value: nil)
+                            ForEach(departments, id: \.self) { d in
+                                deptChip(d, value: d)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                }
+            }
             if candidates.isEmpty {
-                Text(lifeStore.sideRolePersonCandidates().isEmpty
-                     ? "還沒有部屬或名片資料。可以直接在上一頁手動輸入姓名。"
+                Text(all.isEmpty
+                     ? "還沒有部屬、名片或公司組織人員。可以直接在上一頁手動輸入姓名。"
                      : "找不到符合的人")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(candidates) { p in
-                    Button {
-                        onPick(p)
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 10) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.indigo.opacity(0.12))
-                                    .frame(width: 34, height: 34)
-                                Image(systemName: p.kind.icon)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.indigo)
+                ForEach(grouped, id: \.dept) { group in
+                    Section(group.dept) {
+                        ForEach(group.people) { p in
+                            Button {
+                                onPick(p)
+                                dismiss()
+                            } label: {
+                                personRow(p)
                             }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(p.name).font(.subheadline).foregroundStyle(.primary)
-                                if !p.subtitle.isEmpty {
-                                    Text(p.subtitle).font(.caption2).foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            Spacer()
-                            Text(p.kind.rawValue)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color(.tertiarySystemFill))
-                                .clipShape(Capsule())
+                            .buttonStyle(.plain)
                         }
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
-        .searchable(text: $query, prompt: "搜尋姓名或職稱")
+        .searchable(text: $query, prompt: "搜尋姓名、職稱或部門")
         .navigationTitle("挑選成員")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("取消") { dismiss() }
             }
+        }
+    }
+
+    private func deptChip(_ label: String, value: String?) -> some View {
+        let selected = deptFilter == value
+        return Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) { deptFilter = value }
+        } label: {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 11).padding(.vertical, 6)
+                .background(selected ? AnyShapeStyle(Color.indigo) : AnyShapeStyle(.ultraThinMaterial))
+                .foregroundStyle(selected ? .white : .primary)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(.primary.opacity(selected ? 0 : 0.08), lineWidth: 0.6))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func personRow(_ p: SideRolePersonCandidate) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(Color.indigo.opacity(0.12))
+                    .frame(width: 34, height: 34)
+                Image(systemName: p.kind.icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.indigo)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(p.name).font(.subheadline).foregroundStyle(.primary)
+                if !p.subtitle.isEmpty {
+                    Text(p.subtitle).font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            Text(p.kind.rawValue)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color(.tertiarySystemFill))
+                .clipShape(Capsule())
         }
     }
 }
@@ -1236,8 +1345,9 @@ struct SideRoleMeetingEditor: View {
 
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
-    /// 出席者用逗號分隔輸入，存進去時切成陣列
+    /// 手動輸入的出席者（用、或,分隔）。與挑選來的名單合併後存檔。
     @State private var attendeeText = ""
+    @State private var showAttendeePicker = false
 
     var body: some View {
         Form {
@@ -1246,11 +1356,36 @@ struct SideRoleMeetingEditor: View {
                 TextField("主題", text: $meeting.topic)
             }
             Section {
-                TextField("出席者（用、或,分隔）", text: $attendeeText, axis: .vertical).lineLimit(2)
+                if !meeting.attendees.isEmpty {
+                    // 已選出席者的膠囊列，點 × 移除
+                    FlexibleChipWrap(items: meeting.attendees) { name in
+                        HStack(spacing: 4) {
+                            Text(name).font(.caption)
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(Color.indigo.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
+                        .onTapGesture {
+                            meeting.attendees.removeAll { $0 == name }
+                        }
+                    }
+                }
+                Button {
+                    showAttendeePicker = true
+                } label: {
+                    Label("從成員／部屬／名片／組織挑人", systemImage: "person.crop.circle.badge.plus")
+                        .foregroundStyle(.indigo)
+                }
+                TextField("或直接輸入（用、或,分隔）", text: $attendeeText, axis: .vertical)
+                    .lineLimit(2)
             } header: {
                 Text("出席者")
             } footer: {
-                Text("例：王小明、李大華、陳美玲")
+                Text("挑人涵蓋這個職務的成員、以及全部部屬、名片與公司組織人員（含其他部門）。外部與會者直接打字即可，兩種方式可以混用。")
             }
             Section("決議事項") {
                 TextField("決議", text: $meeting.decisions, axis: .vertical).lineLimit(5)
@@ -1276,17 +1411,27 @@ struct SideRoleMeetingEditor: View {
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("儲存") {
-                    meeting.attendees = attendeeText
+                    // 挑選來的（已在 meeting.attendees）＋ 手打的，合併去重、保留順序
+                    let typed = attendeeText
                         .split(whereSeparator: { $0 == "、" || $0 == "," || $0 == "，" })
                         .map { $0.trimmingCharacters(in: .whitespaces) }
                         .filter { !$0.isEmpty }
+                    var merged = meeting.attendees
+                    for n in typed where !merged.contains(n) { merged.append(n) }
+                    meeting.attendees = merged
                     lifeStore.upsertSideRoleMeeting(meeting, in: roleId)
                     dismiss()
                 }
                 .disabled(meeting.topic.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .onAppear { attendeeText = meeting.attendees.joined(separator: "、") }
+        .sheet(isPresented: $showAttendeePicker) {
+            NavigationStack {
+                SideRoleAttendeePicker(roleId: roleId, selected: $meeting.attendees)
+            }
+        }
+        // 出席者改成「膠囊＋挑人」後，attendeeText 只承載「還沒挑過的手打內容」，
+        // 不再預先塞入既有名單——否則儲存時會與膠囊列的內容重複合併一次。
     }
 }
 
@@ -1759,5 +1904,161 @@ struct SideRoleJoinPicker: View {
         guard let person = lifeStore.sideRolePerson(personId) else { return }
         lifeStore.addPersonToSideRole(person, roleId: role.id, dutyInRole: duty)
         dismiss()
+    }
+}
+
+// MARK: - 出席者挑選
+
+/// 會議出席者挑選：涵蓋這個職務的成員 ＋ 全部部屬／名片／公司組織人員。
+///
+/// 與 SideRolePersonPicker 的差別：這裡是「多選、回填姓名字串」，
+/// 因為 SideRoleMeeting.attendees 存的是姓名文字快照（外部與會者很常見，不綁 id）。
+struct SideRoleAttendeePicker: View {
+    let roleId: UUID
+    @Binding var selected: [String]
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    /// 這個職務的成員排最前面——開會最常出席的就是自己團隊的人
+    private var members: [SideRoleMember] {
+        lifeStore.milestones.first { $0.id == roleId }?.sideRoleMembers ?? []
+    }
+
+    private var others: [SideRolePersonCandidate] {
+        let memberNames = Set(members.map { $0.name.trimmingCharacters(in: .whitespaces) })
+        return lifeStore.sideRolePersonCandidates()
+            .filter { !memberNames.contains($0.name) }
+    }
+
+    private func matches(_ text: String) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return q.isEmpty || text.localizedCaseInsensitiveContains(q)
+    }
+
+    private var filteredMembers: [SideRoleMember] {
+        members.filter { matches($0.name) || matches($0.dutyInRole) }
+    }
+
+    private var groupedOthers: [(dept: String, people: [SideRolePersonCandidate])] {
+        let list = others.filter { matches($0.name) || matches($0.subtitle) || matches($0.department) }
+        var order: [String] = []
+        var map: [String: [SideRolePersonCandidate]] = [:]
+        for p in list {
+            let key = p.department.isEmpty ? "未分部門" : p.department
+            if map[key] == nil { order.append(key) }
+            map[key, default: []].append(p)
+        }
+        return order.map { ($0, map[$0] ?? []) }
+    }
+
+    var body: some View {
+        List {
+            if !filteredMembers.isEmpty {
+                Section("本職務成員") {
+                    ForEach(filteredMembers) { m in
+                        row(name: m.name, sub: m.dutyInRole, icon: "person.badge.plus")
+                    }
+                }
+            }
+            ForEach(groupedOthers, id: \.dept) { group in
+                Section(group.dept) {
+                    ForEach(group.people) { p in
+                        row(name: p.name, sub: p.subtitle, icon: p.kind.icon)
+                    }
+                }
+            }
+            if filteredMembers.isEmpty && groupedOthers.isEmpty {
+                Text("找不到符合的人。外部與會者可以回上一頁直接輸入姓名。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .searchable(text: $query, prompt: "搜尋姓名、職稱或部門")
+        .navigationTitle("挑選出席者")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+        }
+    }
+
+    private func row(name: String, sub: String, icon: String) -> some View {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let isOn = selected.contains(trimmed)
+        return Button {
+            guard !trimmed.isEmpty else { return }
+            if isOn { selected.removeAll { $0 == trimmed } }
+            else { selected.append(trimmed) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(isOn ? .indigo : .secondary)
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.indigo.opacity(0.7))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(trimmed.isEmpty ? "（未填姓名）" : trimmed)
+                        .foregroundStyle(.primary)
+                    if !sub.isEmpty {
+                        Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(trimmed.isEmpty)
+    }
+}
+
+// MARK: - 自動換行膠囊列
+
+/// 會依寬度自動換行的膠囊容器。SwiftUI 沒有內建的 flow layout，
+/// 用 iOS 16+ 的 Layout 協定實作一份最小可用版本（只做換行，不做對齊變化）。
+struct FlexibleChipWrap<Item: Hashable, Content: View>: View {
+    let items: [Item]
+    @ViewBuilder let content: (Item) -> Content
+
+    var body: some View {
+        ChipFlowLayout(spacing: 6) {
+            ForEach(items, id: \.self) { content($0) }
+        }
+    }
+}
+
+private struct ChipFlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for v in subviews {
+            let size = v.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > maxWidth {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: proposal.width ?? x, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
+                       subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for v in subviews {
+            let size = v.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            v.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
     }
 }
