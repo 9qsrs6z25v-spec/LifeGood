@@ -474,8 +474,8 @@ class LifeStore: ObservableObject {
         for si in subordinates.indices {
             for mi in subordinates[si].meetings.indices {
                 for ii in subordinates[si].meetings[mi].items.indices
-                where subordinates[si].meetings[mi].items[ii].assigneeId == item.id {
-                    subordinates[si].meetings[mi].items[ii].assigneeId = nil
+                where subordinates[si].meetings[mi].items[ii].assigneeIds.contains(item.id) {
+                    subordinates[si].meetings[mi].items[ii].assigneeIds.removeAll { $0 == item.id }
                 }
             }
         }

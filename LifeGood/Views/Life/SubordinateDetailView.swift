@@ -2336,6 +2336,7 @@ struct MeetingEditorSheet: View {
     var editing: SubordinateMeeting?
 
     @State private var topic = ""
+    @State private var createdAt = Date()
     @State private var date = Date()
     @State private var durationText = "60"
     @State private var recurrence: MeetingRecurrence?
@@ -2343,8 +2344,13 @@ struct MeetingEditorSheet: View {
     @State private var items: [MeetingItem] = []
     @State private var note = ""
     @State private var isSaving = false
+    /// 正在挑負責人的項目 id。用 .sheet(item:) 開挑人頁——本檔案的 Sheet 一律走這個模式。
+    @State private var pickingAssigneeFor: IDBox?
 
-    private var allSubordinates: [Subordinate] { lifeStore.subordinates }
+    /// 負責人姓名快取：sideRolePersonCandidates() 每次呼叫都會重建三種來源、做去重與排序，
+    /// 直接在每一列裡呼叫會讓打字時每個字元都重算一次全公司名單。
+    /// 編輯頁開著的期間人員名單不會變，所以 onAppear 建一次就好。
+    @State private var peopleIndex: [UUID: SideRolePersonCandidate] = [:]
 
     /// 統一 Section 標題：4pt 漸層色條 + 圖示 + 粗體文字，對齊 RecordEditorSheet.editorSectionHeader 規格。
     private func editorSectionHeader(_ title: String, icon: String, tint: Color = .indigo) -> some View {
@@ -2363,16 +2369,39 @@ struct MeetingEditorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                // 會議資訊＝這個 Task 本身（名稱／何時立的／備註），與「什麼時候開」分開。
                 Section {
-                    TextField("會議主題", text: $topic)
+                    TextField("Task 名稱", text: $topic)
                     HStack {
-                        Text("日期時間")
+                        Text("產生時間")
+                        Spacer()
+                        FiveMinuteDateTimePicker(selection: $createdAt).fixedSize()
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("備註").font(.caption).foregroundStyle(.secondary)
+                        MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）",
+                                         people: lifeStore.mentionPeople())
+                    }
+                } header: {
+                    editorSectionHeader("會議資訊", icon: "person.badge.clock")
+                }
+
+                Section {
+                    HStack {
+                        Text("開始時間")
                         Spacer()
                         FiveMinuteDateTimePicker(selection: $date).fixedSize()
                     }
                     HStack {
                         TextField("會議長度", text: $durationText).keyboardType(.numberPad)
                         Text("分鐘").foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("結束時間").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(MeetingTimeFormat.rangeText(start: date, minutes: Int(durationText) ?? 60))
+                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.indigo)
                     }
                     Toggle("設定週期", isOn: $hasRecurrence)
                     if hasRecurrence {
@@ -2382,7 +2411,7 @@ struct MeetingEditorSheet: View {
                         }
                     }
                 } header: {
-                    editorSectionHeader("會議資訊", icon: "calendar.badge.clock")
+                    editorSectionHeader("會議時間", icon: "calendar.badge.clock")
                 }
 
                 Section {
@@ -2395,41 +2424,7 @@ struct MeetingEditorSheet: View {
                         .padding(.vertical, 6)
                     }
                     ForEach($items) { $item in
-                        VStack(spacing: 8) {
-                            if items.first?.id != item.id { Divider() }
-                            HStack {
-                                TextField("項目內容", text: $item.content)
-                                Button(role: .destructive) { items.removeAll { $0.id == item.id } } label: {
-                                    Image(systemName: "minus.circle.fill").foregroundStyle(.red)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            Picker("負責人", selection: $item.assigneeId) {
-                                Text("未指定").tag(nil as UUID?)
-                                ForEach(allSubordinates) { s in Text(s.name).tag(s.id as UUID?) }
-                            }
-                            Toggle("設定截止時間", isOn: Binding(
-                                get: { item.dueDate != nil },
-                                set: { $item.wrappedValue.dueDate = $0 ? (item.dueDate ?? FiveMinuteDateTimePicker.defaultSchedulingTime()) : nil }
-                            ))
-                            if item.dueDate != nil {
-                                DatePicker("截止", selection: Binding(
-                                    get: { item.dueDate ?? Date() },
-                                    set: { $item.wrappedValue.dueDate = $0 }
-                                ), displayedComponents: [.date, .hourAndMinute])
-                            }
-                            Toggle(isOn: Binding(
-                                get: { item.isCompleted },
-                                set: { newVal in
-                                    $item.wrappedValue.isCompleted = newVal
-                                    $item.wrappedValue.completedAt = newVal ? (item.completedAt ?? Date()) : nil
-                                }
-                            )) {
-                                Label(item.isCompleted ? "已完成" : "未完成",
-                                      systemImage: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                                    .foregroundStyle(item.isCompleted ? .green : .secondary)
-                            }
-                        }
+                        itemEditor($item)
                     }
                     Button { items.append(MeetingItem()) } label: {
                         Label("新增項目", systemImage: "plus.circle").foregroundStyle(.indigo)
@@ -2438,11 +2433,6 @@ struct MeetingEditorSheet: View {
                     editorSectionHeader("會議項目", icon: "checklist")
                 }
 
-                Section {
-                    MentionTextField(text: $note, placeholder: "選填（可打 @ 標註人員）", people: lifeStore.mentionPeople())
-                } header: {
-                    editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
-                }
                 if editing != nil {
                     Section {
                         Button(role: .destructive) { deleteMeeting() } label: { Label("刪除會議", systemImage: "trash") }
@@ -2466,18 +2456,114 @@ struct MeetingEditorSheet: View {
                     }
                 }
             }
+            .sheet(item: $pickingAssigneeFor) { box in
+                NavigationStack {
+                    MeetingAssigneePicker(
+                        initial: items.first { $0.id == box.id }?.assigneeIds ?? [],
+                        onDone: { ids in
+                            guard let idx = items.firstIndex(where: { $0.id == box.id }) else { return }
+                            items[idx].assigneeIds = ids
+                        }
+                    )
+                }
+            }
             .onAppear {
+                peopleIndex = Dictionary(lifeStore.sideRolePersonCandidates().map { ($0.id, $0) },
+                                         uniquingKeysWith: { a, _ in a })
                 if let e = editing {
-                    topic = e.topic; date = e.date
+                    topic = e.topic; date = e.date; createdAt = e.createdAt
                     durationText = "\(e.durationMinutes)"
                     if let r = e.recurrence { hasRecurrence = true; recurrence = r }
                     items = e.items; note = e.note
                 } else {
                     // 新會議：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
+                    createdAt = Date()
                 }
             }
         }
+    }
+
+    /// 單一議程項目的編輯區塊。刻意抽成函式：本檔案曾因 ForEach 內大量巢狀
+    /// Binding 轉換撞上 Swift 型別推導逾時。
+    @ViewBuilder
+    private func itemEditor(_ item: Binding<MeetingItem>) -> some View {
+        let value = item.wrappedValue
+        VStack(alignment: .leading, spacing: 8) {
+            if items.first?.id != value.id { Divider() }
+            HStack {
+                TextField("項目名稱", text: item.content)
+                Button(role: .destructive) { items.removeAll { $0.id == value.id } } label: {
+                    Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+            }
+
+            // 負責人（多選）：部屬／名片／組織人員三種來源都可挑，可搜尋。
+            Button { pickingAssigneeFor = IDBox(id: value.id) } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.badge.plus")
+                        .font(.system(size: 12)).foregroundStyle(.indigo)
+                    Text(value.assigneeIds.isEmpty ? "指派負責人" : "負責人（\(value.assigneeIds.count)）")
+                        .font(.subheadline)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
+                }
+            }
+            .buttonStyle(.plain)
+            if !value.assigneeIds.isEmpty {
+                FlexibleChipWrap(items: value.assigneeIds) { pid in
+                    assigneeChip(pid, itemId: value.id)
+                }
+            }
+
+            Toggle("設定截止時間", isOn: Binding(
+                get: { value.dueDate != nil },
+                set: { item.wrappedValue.dueDate = $0 ? (value.dueDate ?? FiveMinuteDateTimePicker.defaultSchedulingTime()) : nil }
+            ))
+            if value.dueDate != nil {
+                DatePicker("截止", selection: Binding(
+                    get: { item.wrappedValue.dueDate ?? Date() },
+                    set: { item.wrappedValue.dueDate = $0 }
+                ), displayedComponents: [.date, .hourAndMinute])
+            }
+            Toggle(isOn: Binding(
+                get: { item.wrappedValue.isCompleted },
+                set: { newVal in
+                    item.wrappedValue.isCompleted = newVal
+                    item.wrappedValue.completedAt = newVal ? (value.completedAt ?? Date()) : nil
+                }
+            )) {
+                Label(value.isCompleted ? "已完成" : "未完成",
+                      systemImage: value.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(value.isCompleted ? .green : .secondary)
+            }
+            MentionTextField(text: item.note, placeholder: "項目備註（可打 @ 標註人員）",
+                             people: lifeStore.mentionPeople())
+        }
+    }
+
+    /// 已選負責人膠囊。點一下即移除——挑錯人時不必再開一次挑人頁。
+    private func assigneeChip(_ pid: UUID, itemId: UUID) -> some View {
+        let person = peopleIndex[pid]
+        return Button {
+            guard let idx = items.firstIndex(where: { $0.id == itemId }) else { return }
+            items[idx].assigneeIds.removeAll { $0 == pid }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: person?.kind.icon ?? "person.crop.circle.badge.questionmark")
+                    .font(.system(size: 10))
+                Text(person?.name ?? "已移除的人員")
+                    .font(.caption)
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color.indigo.opacity(person == nil ? 0.05 : 0.12), in: Capsule())
+            .foregroundStyle(person == nil ? Color.secondary : Color.indigo)
+        }
+        .buttonStyle(.plain)
     }
 
     private func save() {
@@ -2489,7 +2575,8 @@ struct MeetingEditorSheet: View {
             topic: topic.trimmingCharacters(in: .whitespaces),
             date: date, durationMinutes: Int(durationText) ?? 60,
             recurrence: hasRecurrence ? recurrence : nil,
-            items: items, note: note.trimmingCharacters(in: .whitespaces)
+            items: items, note: note.trimmingCharacters(in: .whitespaces),
+            createdAt: createdAt
         )
         if let idx = sub.meetings.firstIndex(where: { $0.id == meeting.id }) { sub.meetings[idx] = meeting }
         else { sub.meetings.append(meeting) }
@@ -2502,6 +2589,94 @@ struct MeetingEditorSheet: View {
         isSaving = true
         sub.meetings.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
+    }
+}
+
+// MARK: - 議程項目負責人挑選（部屬／名片／組織人員）
+
+/// 議程項目的負責人挑選頁。與兼任職務的出席者挑選共用同一份候選清單
+/// （sideRolePersonCandidates()，已處理「同一位部屬同時出現在名片列」的去重），
+/// 但這裡存的是 **id 而非姓名**——負責人要能連回本人的紀錄，姓名快照做不到。
+struct MeetingAssigneePicker: View {
+    let initial: [UUID]
+    let onDone: ([UUID]) -> Void
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    /// 刻意用自己的 @State 而非 @Binding：外層是用 Binding(get:set:) 現組的，
+    /// SwiftUI 追蹤不到它的相依性，打勾後畫面不會更新。改完按「完成」才寫回。
+    @State private var selected: [UUID] = []
+
+    private func matches(_ p: SideRolePersonCandidate) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return true }
+        return p.name.localizedCaseInsensitiveContains(q)
+            || p.subtitle.localizedCaseInsensitiveContains(q)
+            || p.department.localizedCaseInsensitiveContains(q)
+    }
+
+    private var grouped: [(dept: String, people: [SideRolePersonCandidate])] {
+        let list = lifeStore.sideRolePersonCandidates().filter(matches)
+        var order: [String] = []
+        var map: [String: [SideRolePersonCandidate]] = [:]
+        for p in list {
+            let key = p.department.isEmpty ? "未分部門" : p.department
+            if map[key] == nil { order.append(key) }
+            map[key, default: []].append(p)
+        }
+        // 明確標型別：本檔案曾因具名 tuple 的鏈式推導撞上 type-check 逾時
+        return order.map { (dept: String) -> (dept: String, people: [SideRolePersonCandidate]) in
+            (dept: dept, people: map[dept] ?? [])
+        }
+    }
+
+    var body: some View {
+        List {
+            ForEach(grouped, id: \.dept) { group in
+                Section(group.dept) {
+                    ForEach(group.people) { p in row(p) }
+                }
+            }
+            if grouped.isEmpty {
+                Text("找不到符合的人。負責人只能從部屬、名片或組織人員中挑選。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .searchable(text: $query, prompt: "搜尋姓名、職稱或部門")
+        .navigationTitle("指派負責人")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") { onDone(selected); dismiss() }.bold()
+            }
+        }
+        .onAppear { selected = initial }
+    }
+
+    private func row(_ p: SideRolePersonCandidate) -> some View {
+        let isOn = selected.contains(p.id)
+        return Button {
+            if isOn { selected.removeAll { $0 == p.id } } else { selected.append(p.id) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(isOn ? .indigo : .secondary)
+                Image(systemName: p.kind.icon)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.indigo.opacity(0.7))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(p.name).foregroundStyle(.primary)
+                    if !p.subtitle.isEmpty {
+                        Text(p.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -2938,7 +3113,10 @@ extension LifeStore {
             }
             for m in s.meetings {
                 var ids = MentionText.mentionedIDs(in: m.note, sortedPeople: sortedPeople)
-                for item in m.items { ids.formUnion(MentionText.mentionedIDs(in: item.content, sortedPeople: sortedPeople)) }
+                for item in m.items {
+                    ids.formUnion(MentionText.mentionedIDs(in: item.content, sortedPeople: sortedPeople))
+                    ids.formUnion(MentionText.mentionedIDs(in: item.note, sortedPeople: sortedPeople))
+                }
                 for id in ids { counts[id, default: 0] += 1 }
             }
             for r in s.weeklyReports {
@@ -3193,9 +3371,10 @@ struct SubordinateItemCard: View {
         shareItem = CardSharePayload(items: [shareTextContent()])
     }
 
-    private func assigneeName(_ id: UUID?) -> String? {
-        guard let id else { return nil }
-        return lifeStore.subordinates.first { $0.id == id }?.name
+    /// 負責人可能來自部屬／名片／組織人員三種來源，統一走挑人清單那份反查。
+    private func assigneeNames(_ ids: [UUID]) -> String? {
+        let names = ids.compactMap { lifeStore.sideRolePerson($0)?.name }
+        return names.isEmpty ? nil : names.joined(separator: "、")
     }
 
     private func shareTextContent() -> String {
@@ -3215,21 +3394,23 @@ struct SubordinateItemCard: View {
             let m = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
             lines.append("👥 會議｜\(m.topic.isEmpty ? "未命名會議" : m.topic)")
             lines.append(divider)
-            lines.append("🕐 會議時間：\(fmt(m.date))")
+            lines.append("🕐 會議時間：\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
             lines.append("⏱ 會議長度：\(m.durationMinutes) 分鐘")
+            lines.append("🗓 產生時間：\(fmt(m.createdAt))")
             if !m.items.isEmpty {
                 let done = m.items.filter(\.isCompleted).count
                 lines.append("")
                 lines.append("📌 議程項目（\(done)/\(m.items.count) 完成）")
                 for item in m.items {
                     var row = "\(item.isCompleted ? "✅" : "⬜️") \(item.content.isEmpty ? "未填內容" : item.content)"
-                    if let who = assigneeName(item.assigneeId) { row += "｜👤 \(who)" }
+                    if let who = assigneeNames(item.assigneeIds) { row += "｜👤 \(who)" }
                     lines.append(row)
                     if item.isCompleted, let at = item.completedAt {
                         lines.append("　└ 🏁 \(fmtDue(at)) 完成")
                     } else if let due = item.dueDate {
                         lines.append("　└ ⏰ 截止 \(fmtDue(due))")
                     }
+                    if !item.note.isEmpty { lines.append("　└ 💬 \(item.note)") }
                 }
             }
             if !m.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(m.note) }
@@ -3344,8 +3525,9 @@ struct SubordinateItemCard: View {
             let m = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "person.3.fill", color: .indigo, title: m.topic.isEmpty ? "未命名會議" : m.topic)
             ownerBlock(subId: subId, accent: .indigo)
-            field("會議時間", fmt(m.date))
+            field("會議時間", "\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
             field("會議長度", "\(m.durationMinutes) 分鐘")
+            field("產生時間", fmt(m.createdAt))
             if !m.items.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("議程項目").font(.caption).foregroundStyle(.secondary)
@@ -3363,9 +3545,17 @@ struct SubordinateItemCard: View {
                                     .font(.subheadline).tint(.blue)
                                     .strikethrough(item.isCompleted, color: .secondary)
                                     .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                                if let who = assigneeNames(item.assigneeIds) {
+                                    Label(who, systemImage: "person.2.fill")
+                                        .font(.caption2).foregroundStyle(.indigo)
+                                }
                                 if let due = item.dueDate {
                                     Label(fmtDue(due), systemImage: "clock")
                                         .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                if !item.note.isEmpty {
+                                    Text(MentionText.attributed(item.note, people: people))
+                                        .font(.caption2).tint(.blue).foregroundStyle(.secondary)
                                 }
                             }
                             Spacer(minLength: 0)

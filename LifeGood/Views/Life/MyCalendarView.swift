@@ -1201,7 +1201,7 @@ struct MyCalendarView: View {
                         snippet: who, date: m.date,
                         target: .meeting(subId: sub.id, meeting: m)))
                 }
-                for item in m.items where hit([item.content]) {
+                for item in m.items where hit([item.content, item.note]) {
                     out.append(SearchHit(id: "mi_\(item.id)", icon: "person.3.sequence.fill", color: .indigo,
                         typeLabel: "會議項目", title: item.content.isEmpty ? "未填內容" : item.content,
                         snippet: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)", date: m.date,

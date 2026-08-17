@@ -1527,30 +1527,67 @@ enum MeetingRecurrence: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// 會議時間的顯示格式。使用者要求 24 小時制，所以刻意不用 .formatted(date:time:)
+/// ——那個會跟著 zh-TW 語系跑出「下午 3:00」。
+enum MeetingTimeFormat {
+    static let time24: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "HH:mm"; return f
+    }()
+    static let dateTime24: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
+    }()
+    /// 「14:00 – 15:00（60 分鐘）」
+    static func rangeText(start: Date, minutes: Int) -> String {
+        let end = start.addingTimeInterval(TimeInterval(max(0, minutes) * 60))
+        return "\(time24.string(from: start)) – \(time24.string(from: end))"
+    }
+}
+
 struct MeetingItem: Identifiable, Codable {
     let id: UUID
     var content: String
-    var assigneeId: UUID?
+    /// 負責人（可多位）。id 可能是部屬、名片或組織人員——挑人清單三種來源共用同一個欄位，
+    /// 用 LifeStore.sideRolePerson(_:) 反查現在的姓名／職稱。
+    /// 舊資料只有單一 assigneeId，解碼時會折進這裡（見下方 LegacyKeys）。
+    var assigneeIds: [UUID]
     var dueDate: Date?
     var isCompleted: Bool
     var completedAt: Date?
+    /// 項目層級備註（可 @ 標註人員）
+    var note: String
 
-    init(id: UUID = UUID(), content: String = "", assigneeId: UUID? = nil, dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil) {
-        self.id = id; self.content = content; self.assigneeId = assigneeId
+    init(id: UUID = UUID(), content: String = "", assigneeIds: [UUID] = [],
+         dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil,
+         note: String = "") {
+        self.id = id; self.content = content; self.assigneeIds = assigneeIds
         self.dueDate = dueDate; self.isCompleted = isCompleted; self.completedAt = completedAt
+        self.note = note
     }
 
-    enum CodingKeys: String, CodingKey { case id, content, assigneeId, dueDate, isCompleted, completedAt }
+    enum CodingKeys: String, CodingKey { case id, content, assigneeIds, dueDate, isCompleted, completedAt, note }
+
+    /// 舊版單一負責人欄位。刻意放在獨立的 CodingKey，讓 encode 仍可用合成版
+    /// （CodingKeys 裡出現沒有對應屬性的 case 會讓合成的 encode 編不過）。
+    private enum LegacyKeys: String, CodingKey { case assigneeId }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         content = (try? c.decode(String.self, forKey: .content)) ?? ""
-        assigneeId = try? c.decodeIfPresent(UUID.self, forKey: .assigneeId)
+        if let list = try? c.decodeIfPresent([UUID].self, forKey: .assigneeIds), !list.isEmpty {
+            assigneeIds = list
+        } else if let legacy = try? decoder.container(keyedBy: LegacyKeys.self),
+                  let single = try? legacy.decodeIfPresent(UUID.self, forKey: .assigneeId) {
+            // 升級遷移：舊的單一負責人收進多選陣列，否則既有議程項目的負責人會全部消失
+            assigneeIds = [single]
+        } else {
+            assigneeIds = []
+        }
         dueDate = try? c.decodeIfPresent(Date.self, forKey: .dueDate)
         // 舊資料沒有 isCompleted → 視為未完成（避免整批會議解碼失敗）
         isCompleted = (try? c.decode(Bool.self, forKey: .isCompleted)) ?? false
         completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
     }
 }
 
@@ -1562,13 +1599,40 @@ struct SubordinateMeeting: Identifiable, Codable {
     var recurrence: MeetingRecurrence?
     var items: [MeetingItem]
     var note: String
+    /// Task 產生時間：這個會議主題「當初是什麼時候立的」，與開會時間分開。
+    /// 舊資料沒有這個欄位，解碼時退回 date（開會時間），不會出現 1970 年。
+    var createdAt: Date
 
     init(id: UUID = UUID(), topic: String = "", date: Date = Date(),
          durationMinutes: Int = 60, recurrence: MeetingRecurrence? = nil,
-         items: [MeetingItem] = [], note: String = "") {
+         items: [MeetingItem] = [], note: String = "", createdAt: Date? = nil) {
         self.id = id; self.topic = topic; self.date = date
         self.durationMinutes = durationMinutes; self.recurrence = recurrence
         self.items = items; self.note = note
+        self.createdAt = createdAt ?? date
+    }
+
+    /// 依時長推出的結束時間（編輯頁與清單顯示「14:00–15:00」用）
+    var endDate: Date {
+        date.addingTimeInterval(TimeInterval(max(0, durationMinutes) * 60))
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, topic, date, durationMinutes, recurrence, items, note, createdAt
+    }
+
+    // 自訂解碼：createdAt 為後加欄位。這裡的容錯粒度是「整個部屬」——
+    // 少一個 key 若讓 SubordinateMeeting 解碼失敗，整位部屬的資料都會消失。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        topic = (try? c.decodeIfPresent(String.self, forKey: .topic)) ?? ""
+        date = (try? c.decodeIfPresent(Date.self, forKey: .date)) ?? Date()
+        durationMinutes = (try? c.decodeIfPresent(Int.self, forKey: .durationMinutes)) ?? 60
+        recurrence = try? c.decodeIfPresent(MeetingRecurrence.self, forKey: .recurrence)
+        items = (try? c.decodeIfPresent([MeetingItem].self, forKey: .items)) ?? []
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+        createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? date
     }
 }
 
