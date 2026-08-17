@@ -1777,9 +1777,11 @@ struct SubordinateMeeting: Identifiable, Codable {
     var isRecurring: Bool { rule != nil }
 
     /// 全部議程項目（不分場次）。評分、行事曆待辦、搜尋、匯出一律走這裡——
-    /// 直接用 items 的話，有週期的會議所有項目都會憑空消失。
+    /// 直接用 items 的話，場次上的項目都會憑空消失。
+    /// items＋各場次相加：有週期時 items 是空的，沒週期時也可能有臨時加開的場次
+    ///（v25.237 起不開週期也能加場），兩邊都要算。
     var allItems: [MeetingItem] {
-        isRecurring ? occurrences.flatMap(\.items) : items
+        items + occurrences.flatMap(\.items)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1831,14 +1833,22 @@ struct SubordinateMeeting: Identifiable, Codable {
         let overrides = Dictionary(occurrences.map { ($0.scheduledDate.timeIntervalSinceReferenceDate, $0) },
                                    uniquingKeysWith: { a, _ in a })
         guard let rule else {
-            let o = overrides.values.first
-            return [ResolvedMeetingOccurrence(scheduledDate: date,
-                                              date: o?.effectiveDate ?? date,
-                                              isCancelled: o?.isCancelled ?? false,
-                                              isMoved: o?.movedTo != nil,
-                                              items: o?.items ?? items,
-                                              isMaterialised: o != nil,
-                                              isAdHoc: o?.isAdHoc ?? false)]
+            // 沒有週期：主場次（會議本身）＋臨時加開的場次。
+            // 主場次標 isMaterialised——它就是這個會議，顯示窗的舊日期過濾不該把它濾掉。
+            var out = [ResolvedMeetingOccurrence(scheduledDate: date, date: date,
+                                                 isCancelled: false, isMoved: false,
+                                                 items: items, isMaterialised: true,
+                                                 isAdHoc: false)]
+            for o in occurrences {
+                out.append(ResolvedMeetingOccurrence(scheduledDate: o.scheduledDate,
+                                                     date: o.effectiveDate,
+                                                     isCancelled: o.isCancelled,
+                                                     isMoved: o.movedTo != nil,
+                                                     items: o.items,
+                                                     isMaterialised: true,
+                                                     isAdHoc: o.isAdHoc))
+            }
+            return out.sorted { $0.date < $1.date }
         }
 
         let limit = rule.endDate.map { max($0, date) } ?? max(horizon, date)

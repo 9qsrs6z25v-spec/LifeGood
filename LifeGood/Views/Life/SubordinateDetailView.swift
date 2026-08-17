@@ -2446,6 +2446,7 @@ struct MeetingEditorSheet: View {
                 } else {
                     MeetingItemsEditor(items: $items, peopleIndex: peopleIndex,
                                        pickingAssigneeFor: $pickingAssigneeFor)
+                    adHocSection
                 }
 
                 if editing != nil {
@@ -2506,8 +2507,11 @@ struct MeetingEditorSheet: View {
                     occurrences.append(MeetingOccurrence(scheduledDate: date, items: items))
                     items = []
                 } else {
-                    items.append(contentsOf: occurrences.flatMap(\.items))
-                    occurrences.removeAll()
+                    // 只把「規則生的」場次項目併回 items；臨時加開的場次保留原樣——
+                    // 它們在沒有週期的模式下照樣存在（加開場次區），拆掉等於把
+                    // 使用者親手加的那幾場砍成一團混在一起的項目清單。
+                    items.append(contentsOf: occurrences.filter { !$0.isAdHoc }.flatMap(\.items))
+                    occurrences.removeAll { !$0.isAdHoc }
                 }
             }
             .onAppear {
@@ -2651,6 +2655,39 @@ struct MeetingEditorSheet: View {
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(tint.opacity(0.14), in: Capsule())
             .foregroundStyle(tint)
+    }
+
+    /// 沒開週期時的「加開場次」：不必先設週期也能加額外的會議時間，
+    /// 每一場有自己的日期時間與議程項目（使用者需求 v25.237）。
+    @ViewBuilder
+    private var adHocSection: some View {
+        let list = occurrences.filter(\.isAdHoc).sorted { $0.effectiveDate < $1.effectiveDate }
+        Section {
+            ForEach(list) { occ in
+                Button { editingOccurrence = DateBox(id: occ.scheduledDate) } label: {
+                    occurrenceRow(resolvedAdHoc(occ))
+                }
+                .buttonStyle(.plain)
+            }
+            Button {
+                creatingAdHoc = DateBox(id: FiveMinuteDateTimePicker.defaultSchedulingTime())
+            } label: {
+                Label("加開一場", systemImage: "calendar.badge.plus").foregroundStyle(.indigo)
+            }
+        } header: {
+            editorSectionHeader("加開場次" + (list.isEmpty ? "" : "（\(list.count)）"),
+                                icon: "calendar.badge.plus")
+        } footer: {
+            Text("臨時需要多開一場時用這裡，不必設定週期。每一場有自己的時間與議程項目。")
+                .font(.caption2)
+        }
+    }
+
+    /// 把原始覆寫包成顯示用的展開結果（加開場次列共用 occurrenceRow 的外觀）
+    private func resolvedAdHoc(_ o: MeetingOccurrence) -> ResolvedMeetingOccurrence {
+        ResolvedMeetingOccurrence(scheduledDate: o.scheduledDate, date: o.effectiveDate,
+                                  isCancelled: o.isCancelled, isMoved: o.movedTo != nil,
+                                  items: o.items, isMaterialised: true, isAdHoc: o.isAdHoc)
     }
 
     /// 場次編輯完成後寫回。全部清空的場次直接回收，不留空殼在存檔裡。
@@ -3921,12 +3958,14 @@ struct SubordinateItemCard: View {
             lines.append("⏱ 會議長度：\(m.durationMinutes) 分鐘")
             lines.append("🗓 產生時間：\(fmt(m.createdAt))")
             if let r = m.rule { lines.append("🔁 週期：\(ruleSummary(r))") }
-            if m.isRecurring {
+            if m.isRecurring || !m.occurrences.isEmpty {
+                // 有週期、或不開週期但有加開場次：都依場次分段
                 for occ in displayOccurrences(of: m) {
                     lines.append("")
                     var head = "📅 \(MeetingTimeFormat.dateTime24.string(from: occ.date))"
                     if occ.isCancelled { head += "（已取消）" }
                     else if occ.isMoved { head += "（原定 \(MeetingTimeFormat.dateTime24.string(from: occ.scheduledDate))）" }
+                    if occ.isAdHoc { head += "（臨時）" }
                     lines.append(head)
                     if occ.items.isEmpty { lines.append("　（尚無議程）") }
                     else { lines.append(contentsOf: agendaLines(occ.items)) }
@@ -4053,8 +4092,9 @@ struct SubordinateItemCard: View {
             field("會議長度", "\(m.durationMinutes) 分鐘")
             field("產生時間", fmt(m.createdAt))
             if let r = m.rule { field("週期", ruleSummary(r)) }
-            if m.isRecurring {
-                // 有週期的會議：議程項目屬於各場次，攤平顯示會看不出哪一項是哪一場的
+            if m.isRecurring || !m.occurrences.isEmpty {
+                // 有週期、或不開週期但有加開場次：議程項目屬於各場次，
+                // 攤平顯示會看不出哪一項是哪一場的
                 ForEach(displayOccurrences(of: m)) { occ in
                     occurrenceBlock(occ, meeting: m, subId: subId)
                 }
