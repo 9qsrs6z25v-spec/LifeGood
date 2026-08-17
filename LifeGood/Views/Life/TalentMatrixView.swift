@@ -5,8 +5,14 @@ import UIKit
 // MARK: - 部屬評分（潛力 / 主動性）
 
 extension Subordinate {
-    /// 潛力分數（記錄式評分，0~100；與部屬列表的評分一致）：
+    /// 潛力分數（記錄式評分；與部屬列表的評分一致）：
     /// 基礎 80，優點/成就/進步加分，缺點/缺失/疏失扣分。請假不計入（已反映在主動性）。
+    ///
+    /// ⚠️ **沒有 100 分上限**（使用者要求，v25.230）。原本夾在 0~100，
+    ///    表現特別突出的人一旦頂到 100 就再也看不出差異——同樣是 100 分，
+    ///    可能是剛好達標，也可能是超標三倍。散布圖的座標軸走 domain()
+    ///    依實際最大最小值自動縮放，scoreColor 的 `case 90...` 也是開放區間，
+    ///    所以破百不會撐破任何畫面。下限仍保留 0。
     var potentialScore: Int {
         var score: Double = 80
         for rec in records {
@@ -27,10 +33,11 @@ extension Subordinate {
                 break   // 請假不計入潛力（已反映在主動性）
             }
         }
-        return max(0, min(100, Int(score.rounded())))
+        return max(0, Int(score.rounded()))
     }
 
-    /// 主動性分數（日常，0~100）：完成任務 / 完成會議議程項目 / 報告加分、被標註加分，請假時數扣分。
+    /// 主動性分數（日常）：完成任務 / 完成會議議程項目 / 報告加分、被標註加分，請假時數扣分。
+    /// 與潛力分數一樣**沒有 100 分上限**（見上方說明），下限仍為 0。
     /// mentionedCount = 此人被其他項目 @ 標註的項目數（由 LifeStore 計算後傳入）。
     /// sideRoleDone = 此人在兼任職務裡完成的待辦數（由 LifeStore.sideRoleTaskCounts() 傳入）——
     ///   兼任職務是本職以外的實際工作量，完成的事該和本職任務同權重計分（每項 +3）。
@@ -46,12 +53,12 @@ extension Subordinate {
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         var score = 60.0
         score += Double(completedTasks) * 3      // 每完成一項任務 +3
-        score += Double(completedItems) * 2      // 每完成一個議程項目 +2
+        score += Double(completedItems)          // 每完成一個議程項目 +1（顆粒最小，且週期會議每場各有一份，權重刻意壓低）
         score += Double(completedReports) * 3    // 每完成一份報告 +3
         score += Double(mentionedCount) * 2      // 每被標註一項 +2
         score += Double(sideRoleDone) * 3        // 每完成一項兼任待辦 +3（與本職任務同權重）
         score -= leaveHours / 8 * 2              // 每請假 8 小時 -2
-        return max(0, min(100, Int(score.rounded())))
+        return max(0, Int(score.rounded()))
     }
 
     /// 綜合分數＝潛力與主動性的平均（部屬列表左側顯示用）
@@ -102,7 +109,7 @@ extension Subordinate {
         // 喪假／公假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         if completedTasks > 0 { items.append(("完成任務 ×\(completedTasks)", completedTasks * 3)) }
-        if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems * 2)) }
+        if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems)) }
         if completedReports > 0 { items.append(("完成報告 ×\(completedReports)", completedReports * 3)) }
         if mentionedCount > 0 { items.append(("被標註 ×\(mentionedCount)", mentionedCount * 2)) }
         if sideRoleDone > 0 { items.append(("完成兼任待辦 ×\(sideRoleDone)", sideRoleDone * 3)) }
