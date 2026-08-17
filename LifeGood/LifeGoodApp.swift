@@ -64,20 +64,14 @@ struct LifeGoodApp: App {
     @StateObject private var einvoiceSync = EInvoiceSyncManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
-    // 開場動畫旗標：屬於 App 結構的 @State，只在「程序重新建立（冷啟動）」時重置為 true，
-    // 從背景喚醒不會重播。因此「看到開場動畫＝App 曾被系統終止後重新啟動」，
-    // 可直接目視判斷 App 是否在後台被殺（也可順帶確認畫面上顯示的版本號是不是剛裝的 build）。
-    @State private var showSplash = true
-    /// 開場謝幕動畫的驅動旗標。
-    /// ⚠️ 謝幕**不走 .transition**：條件移除 + withAnimation 在 App 根層（WindowGroup
-    /// 直下）的移除轉場經實測不會播——v25.234 以前的 .opacity 淡出其實也從來沒動過，
-    /// 使用者一直看到的都是硬切。改為「先用 modifier 動畫把透明度/縮放播完、
-    /// 再卸載」，modifier 動畫不經過轉場系統，在根層一樣可靠。
-    @State private var splashDismissed = false
-
     var body: some Scene {
         WindowGroup {
-            ZStack {
+            // 開場謝幕動畫的狀態與 withAnimation **必須住在一個真正的 View 裡**
+            //（LaunchGate）。先前兩版失敗的修法（v25.234 的 .transition、
+            // v25.240 的 modifier 動畫）狀態都掛在 App 結構上、由 Scene body 重算驅動
+            // ——App 不是 View，Scene 根層的重算會丟棄動畫交易，withAnimation 形同
+            // 直接賦值，使用者永遠看到硬切。搬進 View 之後才是一般的、可靠的動畫路徑。
+            LaunchGate {
             MainTabView()
                 .environmentObject(expenseStore)
                 .environmentObject(financeStore)
@@ -119,29 +113,47 @@ struct LifeGoodApp: App {
                         }
                     }
                 }
-                // 開場謝幕的接手動畫：Splash 放大淡出的同時，主畫面從 97% 輕微回正。
-                // 兩個動畫由同一次 withAnimation（splashDismissed）驅動，
-                // 銜接像一個連續鏡頭。冷啟動以外 showSplash 為 false，直接滿版。
+            }
+        }
+    }
+}
+
+// MARK: - 開場閘門（真正的 View，動畫在這裡才會播）
+
+/// 包住主畫面的開場層。冷啟動時蓋著品牌開場 1.4 秒，然後「往觀者方向放大 + 淡出」
+/// 謝幕，主畫面同時從 97% 回正；動畫播完才卸載開場層（卸載瞬間已全透明）。
+/// @State 屬於這個 View，只在程序重建（冷啟動）時重置——從背景喚醒不重播，
+/// 「看到開場＝App 曾被系統終止」的目視判斷維持不變。
+///
+/// 動畫用 .animation(value:) 綁定驅動（不靠 withAnimation 的交易傳遞）：
+/// 值一變就在本視圖層級播動畫，這是整個 App 其他動畫走的同一條路徑。
+private struct LaunchGate<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    @State private var showSplash = true
+    @State private var splashDismissed = false
+
+    var body: some View {
+        ZStack {
+            content
                 .scaleEffect(showSplash && !splashDismissed ? 0.97 : 1)
+                .animation(.easeInOut(duration: 0.6), value: splashDismissed)
 
             if showSplash {
                 LaunchSplashView()
-                    // 謝幕：往觀者方向放大 + 淡出（modifier 動畫，不走轉場系統——
-                    // 見 splashDismissed 宣告處的說明）。動畫播完才卸載，
-                    // 卸載瞬間畫面已全透明，看不到任何跳動。
                     .opacity(splashDismissed ? 0 : 1)
                     .scaleEffect(splashDismissed ? 1.1 : 1)
+                    .animation(.easeInOut(duration: 0.6), value: splashDismissed)
                     .allowsHitTesting(!splashDismissed)
                     .zIndex(10)
                     .task {
-                        // 動畫播 1.4 秒後謝幕；只擋視覺不擋啟動流程
-                        //（上方 MainTabView 的 task/onAppear 同步照常執行）
+                        // 開場停留 1.4 秒後謝幕；只擋視覺不擋啟動流程
+                        //（content 的 task/onAppear 同步照常執行）
                         try? await Task.sleep(nanoseconds: 1_400_000_000)
-                        withAnimation(.easeInOut(duration: 0.6)) { splashDismissed = true }
+                        splashDismissed = true
                         try? await Task.sleep(nanoseconds: 700_000_000)
                         showSplash = false
                     }
-            }
             }
         }
     }
