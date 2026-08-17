@@ -16,8 +16,13 @@ import Charts
 /// 單一交易日的三大法人買賣超快照
 struct InstDailyRecord: Codable {
     let date: String                 // "yyyy-MM-dd"
-    var net: [String: Double]        // symbol → 買賣超股數（+買超 / −賣超）
+    var net: [String: Double]        // symbol → 三大法人合計買賣超股數（+買超 / −賣超）
     var names: [String: String]      // symbol → 名稱
+    // 分計（v25.239 起收集；舊快照檔沒有這三個 key，Optional 解碼自動為 nil，
+    // 畫面對沒有分計的日子退回只畫合計）。外資含外資自營商。
+    var foreign: [String: Double]?   // symbol → 外資買賣超股數
+    var trust: [String: Double]?     // symbol → 投信買賣超股數
+    var dealer: [String: Double]?    // symbol → 自營商買賣超股數
 }
 
 enum InstitutionalHistory {
@@ -100,6 +105,11 @@ enum InstitutionalHistory {
                 needFetch = true
             } else if back == 0, existing?.net.isEmpty == true {
                 needFetch = true   // 今天先前抓太早（資料未公布），重試
+            } else if existing?.net.isEmpty == false, existing?.foreign == nil {
+                // 升級回補：v25.239 前收集的快照只有合計、沒有分計。官方歷史日期
+                // 照樣查得到，回看窗內的舊快照重抓一次補上外資/投信/自營，
+                // 之後 foreign 有值就不會再進到這個分支。
+                needFetch = true
             } else {
                 needFetch = false
             }
@@ -116,11 +126,14 @@ enum InstitutionalHistory {
         return added
     }
 
-    /// 抓某一天：上市（T86）＋上櫃（TPEx）合併為一份快照
+    /// 抓某一天：上市（T86）＋上櫃（TPEx）合併為一份快照，含外資／投信／自營分計
     static func fetchDay(_ day: Date) async -> InstDailyRecord {
         let key = dayFmt.string(from: day)
         var net: [String: Double] = [:]
         var names: [String: String] = [:]
+        var foreign: [String: Double] = [:]
+        var trust: [String: Double] = [:]
+        var dealer: [String: Double] = [:]
 
         func parseNumber(_ s: String) -> Double? {
             Double(s.replacingOccurrences(of: ",", with: "")
@@ -141,6 +154,12 @@ enum InstitutionalHistory {
                    let codeIdx = fields.firstIndex(of: "證券代號"),
                    let nameIdx = fields.firstIndex(of: "證券名稱"),
                    let netIdx = fields.firstIndex(of: "三大法人買賣超股數") {
+                    // 分計欄（依欄名找；找不到就只存合計，不因官方改欄名整天資料泡湯）。
+                    // 「外資」照一般看盤軟體口徑＝外陸資（不含外資自營商）＋外資自營商。
+                    let fIdx1 = fields.firstIndex(of: "外陸資買賣超股數(不含外資自營商)")
+                    let fIdx2 = fields.firstIndex(of: "外資自營商買賣超股數")
+                    let tIdx = fields.firstIndex(of: "投信買賣超股數")
+                    let dIdx = fields.firstIndex(of: "自營商買賣超股數")
                     for row in rows {
                         guard row.count > max(codeIdx, max(nameIdx, netIdx)),
                               let code = (row[codeIdx] as? String)?
@@ -150,6 +169,13 @@ enum InstitutionalHistory {
                         net[code] = v
                         names[code] = (row[nameIdx] as? String)?
                             .trimmingCharacters(in: .whitespaces) ?? code
+                        func col(_ idx: Int?) -> Double? {
+                            guard let idx, row.count > idx, let s = row[idx] as? String else { return nil }
+                            return parseNumber(s)
+                        }
+                        if let f1 = col(fIdx1) { foreign[code] = f1 + (col(fIdx2) ?? 0) }
+                        if let t = col(tIdx) { trust[code] = t }
+                        if let d = col(dIdx) { dealer[code] = d }
                     }
                 }
             } catch {}
@@ -183,12 +209,25 @@ enum InstitutionalHistory {
                             net[code] = v
                             names[code] = (row[nameIdx] as? String)?
                                 .trimmingCharacters(in: .whitespaces) ?? code
+                            // 分計：TPEx 欄名整排重複（買進/賣出/買賣超 ×7 組）沒法靠名字找，
+                            // 用固定位置（10 外資合計、13 投信、22 自營合計），但**驗算後才收**：
+                            // 三者相加要等於末欄合計，不合就代表官方改了版面，寧可當天只存合計。
+                            if row.count > 22,
+                               let f = (row[10] as? String).flatMap(parseNumber),
+                               let t = (row[13] as? String).flatMap(parseNumber),
+                               let dd = (row[22] as? String).flatMap(parseNumber),
+                               abs(f + t + dd - v) < 1 {
+                                foreign[code] = f; trust[code] = t; dealer[code] = dd
+                            }
                         }
                     }
                 } catch {}
             }
         }
-        return InstDailyRecord(date: key, net: net, names: names)
+        return InstDailyRecord(date: key, net: net, names: names,
+                               foreign: foreign.isEmpty ? nil : foreign,
+                               trust: trust.isEmpty ? nil : trust,
+                               dealer: dealer.isEmpty ? nil : dealer)
     }
 }
 
@@ -405,12 +444,21 @@ struct InstNetBarCard: View {
     private struct DayNet: Identifiable {
         let date: Date
         let net: Double
+        /// 分計（v25.239 之前收集的舊快照沒有 → nil，該日退回畫單色合計柱）
+        let foreign: Double?
+        let trust: Double?
+        let dealer: Double?
         var id: Date { date }
+        var hasBreakdown: Bool { foreign != nil || trust != nil || dealer != nil }
     }
     @State private var points: [DayNet] = []
 
     private let upColor = Color(red: 0.92, green: 0.26, blue: 0.21)
     private let downColor = Color(red: 0.13, green: 0.65, blue: 0.37)
+    // 分計三色（外資／投信／自營商），對齊一般看盤軟體的直覺配色
+    private let foreignColor = Color.blue
+    private let trustColor = Color.orange
+    private let dealerColor = Color.purple
 
     var body: some View {
         Group {
@@ -438,17 +486,39 @@ struct InstNetBarCard: View {
                                 .clipShape(Capsule())
                         }
                     }
-                    Chart(points) { p in
-                        BarMark(
-                            x: .value("日", p.date),
-                            y: .value("張", p.net / 1000),
-                            width: .fixed(6)
-                        )
-                        .foregroundStyle(p.net >= 0 ? upColor : downColor)
+                    if let last = points.last, last.hasBreakdown {
+                        breakdownRow(last)
+                    }
+                    // 有分計的日子畫三色堆疊柱（正values往上疊、負往下疊，Charts 自動處理）；
+                    // 舊快照沒有分計的日子退回單色合計柱，兩種同圖共存。
+                    Chart {
+                        ForEach(points) { p in
+                            if p.hasBreakdown {
+                                BarMark(x: .value("日", p.date),
+                                        y: .value("張", (p.foreign ?? 0) / 1000),
+                                        width: .fixed(6))
+                                    .foregroundStyle(foreignColor)
+                                BarMark(x: .value("日", p.date),
+                                        y: .value("張", (p.trust ?? 0) / 1000),
+                                        width: .fixed(6))
+                                    .foregroundStyle(trustColor)
+                                BarMark(x: .value("日", p.date),
+                                        y: .value("張", (p.dealer ?? 0) / 1000),
+                                        width: .fixed(6))
+                                    .foregroundStyle(dealerColor)
+                            } else {
+                                BarMark(x: .value("日", p.date),
+                                        y: .value("張", p.net / 1000),
+                                        width: .fixed(6))
+                                    .foregroundStyle((p.net >= 0 ? upColor : downColor).opacity(0.55))
+                            }
+                        }
                     }
                     .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
                     .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) }
                     .frame(height: 120)
+
+                    legendRow
                 }
                 .padding(14)
                 .background(Color(.systemBackground))
@@ -463,18 +533,60 @@ struct InstNetBarCard: View {
         .task { await load() }
     }
 
+    /// 最新一日的分計明細列（張；外資含外資自營商）
+    private func breakdownRow(_ p: DayNet) -> some View {
+        HStack(spacing: 10) {
+            breakdownPair("外資", p.foreign, color: foreignColor)
+            breakdownPair("投信", p.trust, color: trustColor)
+            breakdownPair("自營", p.dealer, color: dealerColor)
+            Spacer()
+            Text(String(format: "合計 %+.0f 張", p.net / 1000))
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(p.net >= 0 ? upColor : downColor)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func breakdownPair(_ label: String, _ shares: Double?, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(shares.map { String(format: "%+.0f", $0 / 1000) } ?? "—")
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.primary)
+        }
+    }
+
+    private var legendRow: some View {
+        HStack(spacing: 10) {
+            ForEach([("外資", foreignColor), ("投信", trustColor), ("自營商", dealerColor)], id: \.0) { label, color in
+                HStack(spacing: 3) {
+                    RoundedRectangle(cornerRadius: 1.5).fill(color).frame(width: 8, height: 8)
+                    Text(label).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            if points.contains(where: { !$0.hasBreakdown }) {
+                Text("灰柱＝僅有合計的舊資料")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer()
+        }
+    }
+
     private func load() async {
         let sym = symbol
-        let result = await Task.detached(priority: .userInitiated) { () -> [(String, Double)] in
+        let result = await Task.detached(priority: .userInitiated) { () -> [DayNet] in
             InstitutionalHistory.tradingRecords().compactMap { rec in
-                guard let v = rec.net[sym] else { return nil }
-                return (rec.date, v)
+                guard let v = rec.net[sym],
+                      let d = InstitutionalHistory.dayFmt.date(from: rec.date) else { return nil }
+                return DayNet(date: d, net: v,
+                              foreign: rec.foreign?[sym],
+                              trust: rec.trust?[sym],
+                              dealer: rec.dealer?[sym])
             }
         }.value
-        points = result.compactMap { pair in
-            guard let d = InstitutionalHistory.dayFmt.date(from: pair.0) else { return nil }
-            return DayNet(date: d, net: pair.1)
-        }
+        points = result
     }
 }
 
