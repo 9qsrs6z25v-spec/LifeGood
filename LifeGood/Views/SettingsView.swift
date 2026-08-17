@@ -711,47 +711,25 @@ struct SettingsView: View {
         }
     }
 
-    /// 自動更新：認得的幣別逐一抓即時匯率覆寫，認不得的不動。
-    /// 結果文字停留在區塊內（不用轉瞬即逝的橫幅）——使用者需要看清楚哪些沒更新到。
+    /// 自動更新：邏輯在 ExpenseStore.autoUpdateCurrencyRates()（App 啟動時的靜默
+    /// 更新共用同一份），這裡只負責把結果組成常駐文字——不用轉瞬即逝的橫幅，
+    /// 使用者需要看清楚哪些沒更新到。
     @MainActor
     private func autoUpdateRates() async {
         guard !isFetchingRates else { return }
         isFetchingRates = true
         defer { isFetchingRates = false }
 
-        // 幣別文字 → ISO；認不得的先記下來，結果訊息要指名道姓
-        var isoOf: [UUID: String] = [:]
-        var unknown: [String] = []
-        for r in store.currencyRates {
-            let label = r.code.trimmingCharacters(in: .whitespaces)
-            guard !label.isEmpty else { continue }
-            if let iso = FXRateService.isoCode(for: label) { isoOf[r.id] = iso }
-            else { unknown.append(label) }
-        }
-        guard !isoOf.isEmpty else {
+        let outcome = await store.autoUpdateCurrencyRates()
+        if outcome.updated > 0 { rateRowsRefreshToken += 1 }
+
+        guard outcome.recognizedAny || !outcome.unknown.isEmpty else {
             rateUpdateResult = "沒有可辨識的幣別（支援：美金、日圓、歐元、人民幣、港幣…或直接填 USD、JPY 等代碼）"
             return
         }
-
-        let fetched = await FXRateService.fetchRates(isoCodes: Array(Set(isoOf.values)))
-        var updated = 0
-        var newRates = store.currencyRates
-        for idx in newRates.indices {
-            guard let iso = isoOf[newRates[idx].id], let rate = fetched[iso] else { continue }
-            // 保留兩位小數以上的精度（日圓 0.1982 這種小數匯率不能四捨五入成 0.2 存）
-            if newRates[idx].rate != rate { newRates[idx].rate = rate; updated += 1 }
-            // 美金順帶同步股票市值換算用的全域匯率，兩處口徑一致
-            if iso == "USD" { UserDefaults.standard.set(rate, forKey: Stock.usdTwdRateKey) }
-        }
-        if updated > 0 {
-            store.currencyRates = newRates
-            rateRowsRefreshToken += 1
-        }
-
-        var parts: [String] = ["已更新 \(updated) 筆"]
-        let failedIso = Set(isoOf.values).subtracting(fetched.keys)
-        if !failedIso.isEmpty { parts.append("查詢失敗：\(failedIso.sorted().joined(separator: "、"))") }
-        if !unknown.isEmpty { parts.append("無法辨識：\(unknown.joined(separator: "、"))") }
+        var parts: [String] = ["已更新 \(outcome.updated) 筆"]
+        if !outcome.failedIso.isEmpty { parts.append("查詢失敗：\(outcome.failedIso.joined(separator: "、"))") }
+        if !outcome.unknown.isEmpty { parts.append("無法辨識：\(outcome.unknown.joined(separator: "、"))") }
         rateUpdateResult = parts.joined(separator: "；")
     }
 

@@ -657,6 +657,41 @@ class ExpenseStore: ObservableObject {
         }
     }
 
+    /// 自動更新自訂幣別匯率：認得的幣別帶入即時匯率，認不得的維持手動值。
+    /// 設定頁的按鈕與 App 啟動時的靜默更新共用這一份——邏輯只有一處。
+    @MainActor
+    func autoUpdateCurrencyRates() async -> FXRateService.UpdateOutcome {
+        var outcome = FXRateService.UpdateOutcome()
+        // 幣別文字 → ISO；認不得的記下原文，設定頁的結果訊息要指名道姓
+        var isoOf: [UUID: String] = [:]
+        for r in currencyRates {
+            let label = r.code.trimmingCharacters(in: .whitespaces)
+            guard !label.isEmpty else { continue }
+            if let iso = FXRateService.isoCode(for: label) { isoOf[r.id] = iso }
+            else { outcome.unknown.append(label) }
+        }
+        guard !isoOf.isEmpty else { return outcome }
+
+        let wanted = Array(Set(isoOf.values))
+        let fetched = await FXRateService.fetchRates(isoCodes: wanted)
+        outcome.failedIso = Set(wanted).subtracting(fetched.keys).sorted()
+
+        var newRates = currencyRates
+        var changed = false
+        for idx in newRates.indices {
+            guard let iso = isoOf[newRates[idx].id], let rate = fetched[iso] else { continue }
+            // updated 計「成功帶入」而非「數值有變」——匯率剛好沒動時回報 0 筆
+            // 會讓使用者以為更新失敗
+            outcome.updated += 1
+            if newRates[idx].rate != rate { newRates[idx].rate = rate; changed = true }
+            // 美金順帶同步股票市值換算用的全域匯率，兩處口徑一致
+            if iso == "USD" { UserDefaults.standard.set(rate, forKey: Stock.usdTwdRateKey) }
+        }
+        // 數值沒變就不寫回：didSet 會觸發存檔與 CloudKit 推送，沒必要白跑一趟
+        if changed { currencyRates = newRates }
+        return outcome
+    }
+
     private func saveCurrencyRates() {
         let snap = currencyRates
         let key = currencyRatesKey

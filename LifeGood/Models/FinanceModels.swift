@@ -152,6 +152,16 @@ enum FXRateService {
         return result
     }
 
+    /// 一次自動更新的結果（設定頁組訊息用；App 啟動時的靜默更新忽略它）
+    struct UpdateOutcome {
+        var updated = 0
+        /// 認得但查價失敗的 ISO 代碼
+        var failedIso: [String] = []
+        /// 別名表認不得的幣別原文
+        var unknown: [String] = []
+        var recognizedAny: Bool { updated > 0 || !failedIso.isEmpty }
+    }
+
     /// 單一幣別對台幣。USD 的 Yahoo 代號是特例「TWD=X」，其餘為「{代碼}TWD=X」。
     private static func fetchRate(isoCode: String) async -> Double? {
         let pair = isoCode == "USD" ? "TWD=X" : "\(isoCode)TWD=X"

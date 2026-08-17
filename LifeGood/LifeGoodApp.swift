@@ -85,6 +85,10 @@ struct LifeGoodApp: App {
                     await einvoiceSync.syncIfDue(expenseStore: expenseStore)
                     // 啟動時重排所有事件提醒，讓舊事件升級到新版 body / 截止日邏輯
                     await NotificationManager.shared.rescheduleAll(events: lifeStore.personalEvents)
+                    // 冷啟動順帶刷新自訂幣別匯率（與設定頁那顆按鈕同一套邏輯，
+                    // 認不得的幣別維持手動值）。放最後、結果不看：開場動畫期間
+                    // 網路慢也不擋任何啟動流程，失敗就沿用上次的值。
+                    _ = await expenseStore.autoUpdateCurrencyRates()
                 }
                 .onAppear {
                     BackupManager.shared.createSnapshotIfNeeded(
@@ -109,16 +113,25 @@ struct LifeGoodApp: App {
                         }
                     }
                 }
+                // 開場謝幕的接手動畫：Splash 放大淡出的同時，主畫面從 98% 輕微回正。
+                // 兩個 scale 同向、同一次 withAnimation 驅動，銜接才會像一個連續鏡頭。
+                .scaleEffect(showSplash ? 0.98 : 1)
 
             if showSplash {
                 LaunchSplashView()
-                    .transition(.opacity)
+                    // 謝幕改成「往觀者方向放大 + 淡出」：配合下方主畫面同時從 98%
+                    // 回正，兩層朝同一個方向運動，觀感是「穿過」開場進到 App，
+                    // 而不是原本單純 opacity 交叉的硬切。
+                    .transition(.asymmetric(
+                        insertion: .identity,
+                        removal: .opacity.combined(with: .scale(scale: 1.08))
+                    ))
                     .zIndex(10)
                     .task {
                         // 動畫播 1.4 秒後淡出移除；只擋視覺不擋啟動流程
                         //（上方 MainTabView 的 task/onAppear 同步照常執行）
                         try? await Task.sleep(nanoseconds: 1_400_000_000)
-                        withAnimation(.easeOut(duration: 0.35)) { showSplash = false }
+                        withAnimation(.easeInOut(duration: 0.55)) { showSplash = false }
                     }
             }
             }
