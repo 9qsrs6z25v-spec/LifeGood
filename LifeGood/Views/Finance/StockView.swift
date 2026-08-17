@@ -321,9 +321,12 @@ struct StockView: View {
     }
 
     private static func makeSeries(_ pts: [StockDailyPoint]) -> StockCardSeries {
-        StockCardSeries(
-            prices: pts.map { HeroTrendPoint(date: $0.date, value: $0.close) },
-            volumes: pts.map { HeroTrendPoint(date: $0.date, value: $0.volume) }
+        // 快取自 v25.238 起存一整年（K 線圖可切 3月/6月/1年），
+        // 卡片背景趨勢維持近 3 個月（約 66 個交易日）不變，只取尾段。
+        let tail = Array(pts.suffix(66))
+        return StockCardSeries(
+            prices: tail.map { HeroTrendPoint(date: $0.date, value: $0.close) },
+            volumes: tail.map { HeroTrendPoint(date: $0.date, value: $0.volume) }
         )
     }
 
@@ -1316,7 +1319,10 @@ enum StockDailyHistory {
 
     static func fetch(symbol: String) async -> [StockDailyPoint] {
         for suffix in suffixCandidates(for: symbol) {
-            let urlString = "https://query1.finance.yahoo.com/v8/finance/chart/\(symbol)\(suffix)?range=3mo&interval=1d"
+            // range=1y：K 線圖提供 3月/6月/1年 三檔顯示窗（v25.238），
+            // 一次抓一年、顯示端切窗，切換不用重新請求。日線一年約 245 點，
+            // 快取體積無虞；卡片背景趨勢在 makeSeries 只取尾段 66 點維持原觀感。
+            let urlString = "https://query1.finance.yahoo.com/v8/finance/chart/\(symbol)\(suffix)?range=1y&interval=1d"
             guard let url = URL(string: urlString) else { continue }
             do {
                 var req = URLRequest(url: url)

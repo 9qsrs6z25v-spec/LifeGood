@@ -326,8 +326,11 @@ struct StockDetailView: View {
 
     private func applyDailySeries(_ pts: [StockDailyPoint]) {
         guard pts.count >= 2 else { return }
-        heroPrices = pts.map { HeroTrendPoint(date: $0.date, value: $0.close) }
-        heroVolumes = pts.map { HeroTrendPoint(date: $0.date, value: $0.volume) }
+        // 快取自 v25.238 起存一整年；英雄卡背景趨勢維持近 3 個月的觀感只取尾段，
+        // K 線圖（dailyPoints）拿整年，由卡片內的顯示窗自行切 3月/6月/1年。
+        let tail = Array(pts.suffix(66))
+        heroPrices = tail.map { HeroTrendPoint(date: $0.date, value: $0.close) }
+        heroVolumes = tail.map { HeroTrendPoint(date: $0.date, value: $0.volume) }
         dailyPoints = pts
     }
 
@@ -336,7 +339,8 @@ struct StockDetailView: View {
         dailyPoints.compactMap { p in
             guard let o = p.open, let h = p.high, let l = p.low,
                   o > 0, h > 0, l > 0 else { return nil }
-            return CandlePoint(date: p.date, open: o, high: h, low: l, close: p.close)
+            return CandlePoint(date: p.date, open: o, high: h, low: l, close: p.close,
+                               volume: p.volume)
         }
     }
 
@@ -1620,15 +1624,22 @@ private struct CandlePoint: Identifiable {
     let high: Double
     let low: Double
     let close: Double
+    var volume: Double = 0
     var id: Date { date }
     var isUp: Bool { close >= open }
 }
 
 /// 技術線圖卡：日 K 棒（台股慣例紅漲綠跌）＋ MA5／MA20 均線。
-/// 資料來自 Yahoo 日線快取（含開高低），均線本地滾動計算；
+/// 資料來自 Yahoo 日線快取（含開高低，一年份），均線本地滾動計算；
+/// 顯示窗可切 3月/6月/1年，點按 K 棒顯示當日明細（開高低收／漲跌／量／均線）。
 /// 抽成獨立 struct 降低 StockDetailView body 型別深度（FamilySharingRow 教訓）。
 private struct CandleChartCard: View {
     let candles: [CandlePoint]
+
+    /// 顯示窗（月數）。存全域偏好：看盤習慣是跨個股的，不必每檔各記一份。
+    @AppStorage("stock_kline_window_months") private var windowMonths = 3
+    /// 點選中的 K 棒日期（Charts 的 X 軸選取）
+    @State private var selectedDate: Date?
 
     // 台股慣例：紅漲綠跌
     private let upColor = Color(red: 0.92, green: 0.26, blue: 0.21)
@@ -1636,8 +1647,22 @@ private struct CandleChartCard: View {
     private let ma5Color = Color.orange
     private let ma20Color = Color.blue
 
-    private var ma5: [HeroTrendPoint] { movingAverage(5) }
-    private var ma20: [HeroTrendPoint] { movingAverage(20) }
+    /// 顯示窗內的 K 棒
+    private var visibleCandles: [CandlePoint] {
+        guard let cutoff = Calendar.current.date(byAdding: .month, value: -windowMonths,
+                                                 to: Date()) else { return candles }
+        return candles.filter { $0.date >= cutoff }
+    }
+
+    // 均線在**整年**資料上滾動計算、再切到顯示窗——只用顯示窗算的話，
+    // 窗口左緣的前 19 天會沒有 MA20，切到 3 個月時月線開頭會憑空缺一段。
+    private var ma5: [HeroTrendPoint] { visibleWindow(movingAverage(5)) }
+    private var ma20: [HeroTrendPoint] { visibleWindow(movingAverage(20)) }
+
+    private func visibleWindow(_ pts: [HeroTrendPoint]) -> [HeroTrendPoint] {
+        guard let first = visibleCandles.first?.date else { return pts }
+        return pts.filter { $0.date >= first }
+    }
 
     /// 滾動視窗均線：前 window-1 天視窗未滿不出點
     private func movingAverage(_ window: Int) -> [HeroTrendPoint] {
@@ -1654,6 +1679,20 @@ private struct CandleChartCard: View {
         return out
     }
 
+    /// 被點選的 K 棒（取最接近選取日期的那根）
+    private var selectedCandle: CandlePoint? {
+        guard let selectedDate else { return nil }
+        return visibleCandles.min {
+            abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate))
+        }
+    }
+
+    /// 選中 K 棒的前一根（算漲跌用：對前一日收盤，不是對當日開盤）
+    private func previousClose(of c: CandlePoint) -> Double? {
+        guard let i = candles.firstIndex(where: { $0.id == c.id }), i > 0 else { return nil }
+        return candles[i - 1].close
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // 標題列（Capsule 側條規格對齊全 App section header）
@@ -1666,13 +1705,18 @@ private struct CandleChartCard: View {
                     .frame(width: 4, height: 14)
                 Text("技術線圖")
                     .font(.subheadline.weight(.bold))
-                Text("日K · 近 3 個月")
+                Text("日K")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
+                windowPicker
             }
 
-            legendRow
+            if let c = selectedCandle {
+                selectedDetail(c)
+            } else {
+                legendRow
+            }
             chartView
         }
         .padding(14)
@@ -1684,6 +1728,80 @@ private struct CandleChartCard: View {
         )
         .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
     }
+
+    /// 顯示窗切換（3月/6月/1年）。快取本來就存一整年，切換純本地、不重新請求。
+    private var windowPicker: some View {
+        HStack(spacing: 4) {
+            ForEach([(3, "3月"), (6, "6月"), (12, "1年")], id: \.0) { months, label in
+                let on = windowMonths == months
+                Button {
+                    windowMonths = months
+                    selectedDate = nil
+                } label: {
+                    Text(label)
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(on ? Color.orange.opacity(0.15) : Color(.tertiarySystemFill),
+                                    in: Capsule())
+                        .foregroundStyle(on ? Color.orange : Color.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// 點選 K 棒後的當日明細列（取代圖例列的位置，點空白處或再點一下即恢復）
+    private func selectedDetail(_ c: CandlePoint) -> some View {
+        let prev = previousClose(of: c)
+        let chg = prev.map { (c.close / $0 - 1) * 100 }
+        let chgColor: Color = (chg ?? 0) >= 0 ? upColor : downColor
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Text(Self.detailFmt.string(from: c.date))
+                    .font(.caption.weight(.bold))
+                if let chg {
+                    Text(String(format: "%+.2f%%", chg))
+                        .font(.caption.weight(.bold).monospacedDigit())
+                        .foregroundStyle(chgColor)
+                }
+                Spacer()
+                Button {
+                    selectedDate = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14)).foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+            HStack(spacing: 10) {
+                detailPair("開", c.open)
+                detailPair("高", c.high)
+                detailPair("低", c.low)
+                detailPair("收", c.close, color: c.isUp ? upColor : downColor)
+                if c.volume > 0 {
+                    Text("量 \(Int((c.volume / 1000).rounded())) 張")
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func detailPair(_ label: String, _ value: Double, color: Color = .primary) -> some View {
+        HStack(spacing: 2) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(String(format: "%.2f", value))
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(color)
+        }
+    }
+
+    private static let detailFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d (E)"; return f
+    }()
 
     private var legendRow: some View {
         HStack(spacing: 12) {
@@ -1712,21 +1830,29 @@ private struct CandleChartCard: View {
     }
 
     private var chartView: some View {
-        let minLow = candles.map(\.low).min() ?? 0
-        let maxHigh = candles.map(\.high).max() ?? 1
+        let shown = visibleCandles
+        let minLow = shown.map(\.low).min() ?? 0
+        let maxHigh = shown.map(\.high).max() ?? 1
         return Chart {
-            ForEach(candles) { c in
+            if let sel = selectedCandle {
+                // 選取十字線（畫在 K 棒後面）
+                RuleMark(x: .value("選取", sel.date))
+                    .foregroundStyle(Color.secondary.opacity(0.35))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
+            ForEach(shown) { c in
                 // 影線（高–低）
                 RuleMark(x: .value("日", c.date),
                          yStart: .value("低", c.low),
                          yEnd: .value("高", c.high))
                     .lineStyle(StrokeStyle(lineWidth: 1))
                     .foregroundStyle((c.isUp ? upColor : downColor).opacity(0.85))
-                // 實體（開–收）
+                // 實體（開–收）。寬度隨顯示窗調整：一年約 245 根，
+                // 維持 3.5pt 會整片糊在一起。
                 RectangleMark(x: .value("日", c.date),
                               yStart: .value("開", min(c.open, c.close)),
                               yEnd: .value("收", candleBodyTop(c)),
-                              width: .fixed(3.5))
+                              width: .fixed(candleWidth(count: shown.count)))
                     .foregroundStyle(c.isUp ? upColor : downColor)
             }
             ForEach(ma5) { p in
@@ -1746,7 +1872,18 @@ private struct CandleChartCard: View {
         .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
         .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) }
         .chartLegend(.hidden)
+        // 點按／拖曳選取 K 棒：selectedCandle 取最近的那根，明細顯示在圖上方
+        .chartXSelection(value: $selectedDate)
         .frame(height: 200)
+    }
+
+    /// K 棒實體寬度：依顯示窗內的根數縮放（3月≈66 根 3.5pt、1年≈245 根 1.2pt）
+    private func candleWidth(count: Int) -> CGFloat {
+        switch count {
+        case ..<90:   return 3.5
+        case ..<160:  return 2.2
+        default:      return 1.2
+        }
     }
 
     /// 平盤日（開＝收）實體高度為零會看不見，給 0.1% 最小高度
