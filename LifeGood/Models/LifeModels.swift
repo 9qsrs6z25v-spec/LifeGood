@@ -1691,19 +1691,23 @@ struct MeetingOccurrence: Identifiable, Codable {
     var isCancelled: Bool
     /// 這一場自己的議程項目
     var items: [MeetingItem]
+    /// 臨時加開的一場（不是規則推導出來的）。這種場次「存在」本身就是狀態，
+    /// 就算還沒填議程也不能被回收——回收了它就從清單上消失。
+    var isAdHoc: Bool
 
     /// 實際開會時間
     var effectiveDate: Date { movedTo ?? scheduledDate }
     /// 是否還留著任何「值得存檔」的狀態。全部清空的場次會被回收，避免存檔無限膨脹。
-    var isMeaningful: Bool { isCancelled || movedTo != nil || !items.isEmpty }
+    var isMeaningful: Bool { isCancelled || movedTo != nil || !items.isEmpty || isAdHoc }
 
     init(id: UUID = UUID(), scheduledDate: Date, movedTo: Date? = nil,
-         isCancelled: Bool = false, items: [MeetingItem] = []) {
+         isCancelled: Bool = false, items: [MeetingItem] = [], isAdHoc: Bool = false) {
         self.id = id; self.scheduledDate = scheduledDate
         self.movedTo = movedTo; self.isCancelled = isCancelled; self.items = items
+        self.isAdHoc = isAdHoc
     }
 
-    enum CodingKeys: String, CodingKey { case id, scheduledDate, movedTo, isCancelled, items }
+    enum CodingKeys: String, CodingKey { case id, scheduledDate, movedTo, isCancelled, items, isAdHoc }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1712,6 +1716,7 @@ struct MeetingOccurrence: Identifiable, Codable {
         movedTo = try? c.decodeIfPresent(Date.self, forKey: .movedTo)
         isCancelled = (try? c.decodeIfPresent(Bool.self, forKey: .isCancelled)) ?? false
         items = (try? c.decodeIfPresent([MeetingItem].self, forKey: .items)) ?? []
+        isAdHoc = (try? c.decodeIfPresent(Bool.self, forKey: .isAdHoc)) ?? false
     }
 }
 
@@ -1726,6 +1731,8 @@ struct ResolvedMeetingOccurrence: Identifiable {
     let items: [MeetingItem]
     /// 已經落地成覆寫（使用者動過）
     let isMaterialised: Bool
+    /// 臨時加開（非規則推導）
+    let isAdHoc: Bool
 }
 
 struct SubordinateMeeting: Identifiable, Codable {
@@ -1830,7 +1837,8 @@ struct SubordinateMeeting: Identifiable, Codable {
                                               isCancelled: o?.isCancelled ?? false,
                                               isMoved: o?.movedTo != nil,
                                               items: o?.items ?? items,
-                                              isMaterialised: o != nil)]
+                                              isMaterialised: o != nil,
+                                              isAdHoc: o?.isAdHoc ?? false)]
         }
 
         let limit = rule.endDate.map { max($0, date) } ?? max(horizon, date)
@@ -1856,7 +1864,8 @@ struct SubordinateMeeting: Identifiable, Codable {
                                                  isCancelled: o?.isCancelled ?? false,
                                                  isMoved: o?.movedTo != nil,
                                                  items: o?.items ?? [],
-                                                 isMaterialised: o != nil))
+                                                 isMaterialised: o != nil,
+                                                 isAdHoc: o?.isAdHoc ?? false))
         }
         // 落在展開範圍外的覆寫（例如把某場改期到結束日之後，或縮短了結束日）
         // 仍然要看得到——它承載著使用者親手填的議程項目。
@@ -1866,7 +1875,8 @@ struct SubordinateMeeting: Identifiable, Codable {
                                                  isCancelled: o.isCancelled,
                                                  isMoved: o.movedTo != nil,
                                                  items: o.items,
-                                                 isMaterialised: true))
+                                                 isMaterialised: true,
+                                                 isAdHoc: o.isAdHoc))
         }
         return out.sorted { $0.date < $1.date }
     }

@@ -2355,6 +2355,11 @@ struct MeetingEditorSheet: View {
     @State private var isSaving = false
     /// 正在編輯的場次（以原定日期為鍵）。用 .sheet(item:) 開——本檔案的 Sheet 一律走這個模式。
     @State private var editingOccurrence: DateBox?
+    /// 正在新增的臨時場次（規則之外加開的一場），值是預設的開會時間
+    @State private var creatingAdHoc: DateBox?
+    /// 正在挑負責人的項目 id。狀態放這裡、.sheet 掛在 Form 根層——
+    /// 掛在 Form 的 Section 上會讓外層編輯頁被一併收掉（見 MeetingItemsEditor 註解）。
+    @State private var pickingAssigneeFor: IDBox?
 
     /// 負責人姓名快取：sideRolePersonCandidates() 每次呼叫都會重建三種來源、做去重與排序，
     /// 直接在每一列裡呼叫會讓打字時每個字元都重算一次全公司名單。
@@ -2439,7 +2444,8 @@ struct MeetingEditorSheet: View {
                 if hasRecurrence {
                     occurrenceSection
                 } else {
-                    MeetingItemsEditor(items: $items, peopleIndex: peopleIndex)
+                    MeetingItemsEditor(items: $items, peopleIndex: peopleIndex,
+                                       pickingAssigneeFor: $pickingAssigneeFor)
                 }
 
                 if editing != nil {
@@ -2471,6 +2477,25 @@ struct MeetingEditorSheet: View {
                                         occurrence: occurrences.first { $0.scheduledDate == box.id },
                                         peopleIndex: peopleIndex,
                                         onSave: applyOccurrence)
+            }
+            .sheet(item: $creatingAdHoc) { box in
+                MeetingOccurrenceEditor(scheduledDate: box.id,
+                                        durationMinutes: Int(durationText) ?? 60,
+                                        occurrence: nil,
+                                        peopleIndex: peopleIndex,
+                                        isAdHoc: true,
+                                        onSave: applyOccurrence)
+            }
+            .sheet(item: $pickingAssigneeFor) { box in
+                NavigationStack {
+                    MeetingAssigneePicker(
+                        initial: items.first { $0.id == box.id }?.assigneeIds ?? [],
+                        onDone: { ids in
+                            guard let idx = items.firstIndex(where: { $0.id == box.id }) else { return }
+                            items[idx].assigneeIds = ids
+                        }
+                    )
+                }
             }
             // 切換週期時就把議程項目搬到該去的地方：不重複的會議項目住在 items，
             // 有週期的會議住在各場次。等到存檔才搬的話，切換後畫面會先變成空的、
@@ -2573,10 +2598,15 @@ struct MeetingEditorSheet: View {
                 }
                 .buttonStyle(.plain)
             }
+            Button {
+                creatingAdHoc = DateBox(id: FiveMinuteDateTimePicker.defaultSchedulingTime())
+            } label: {
+                Label("新增臨時場次", systemImage: "calendar.badge.plus").foregroundStyle(.indigo)
+            }
         } header: {
             editorSectionHeader("場次（\(list.count)）", icon: "calendar.day.timeline.left")
         } footer: {
-            Text("每一場各有自己的議程項目。點一場可以編輯項目、改期或取消那一場，不影響其他場次。")
+            Text("每一場各有自己的議程項目。點一場可以編輯項目、改期或取消那一場，不影響其他場次。臨時場次是在週期之外加開的一場，日期時間自由指定。")
                 .font(.caption2)
         }
     }
@@ -2592,6 +2622,7 @@ struct MeetingEditorSheet: View {
                         .foregroundStyle(occ.isCancelled ? Color.secondary : Color.primary)
                     if occ.isCancelled { occurrenceBadge("已取消", .red) }
                     else if occ.isMoved { occurrenceBadge("已改期", .orange) }
+                    if occ.isAdHoc { occurrenceBadge("臨時", .indigo) }
                 }
                 HStack(spacing: 8) {
                     if occ.isMoved {
@@ -2702,9 +2733,13 @@ struct MeetingItemsEditor: View {
     /// 由外層 onAppear 建好傳入：sideRolePersonCandidates() 每次呼叫都會重建
     /// 三種來源、去重與排序，放在每一列裡呼叫會讓打字時每個字元都重算全公司名單。
     let peopleIndex: [UUID: SideRolePersonCandidate]
+    /// 挑負責人的彈頁狀態**由外層編輯頁持有**、.sheet 掛在編輯頁根層。
+    /// ⚠️ 曾把 .sheet 掛在這個 Section 上（v25.229）：Form 的列由 UIKit 代管，
+    /// 從列層級發起 sheet 會讓系統向上找錯簡報來源，彈出挑人頁的同時把
+    /// 外層的會議編輯頁一併收掉——使用者按「指派負責人」就被踢出編輯、改到一半全丟。
+    @Binding var pickingAssigneeFor: IDBox?
 
     @EnvironmentObject var lifeStore: LifeStore
-    @State private var pickingAssigneeFor: IDBox?
 
     var body: some View {
         Section {
@@ -2732,17 +2767,6 @@ struct MeetingItemsEditor: View {
                 Image(systemName: icon)
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(.indigo)
                 Text(title).font(.subheadline.weight(.bold))
-            }
-        }
-        .sheet(item: $pickingAssigneeFor) { box in
-            NavigationStack {
-                MeetingAssigneePicker(
-                    initial: items.first { $0.id == box.id }?.assigneeIds ?? [],
-                    onDone: { ids in
-                        guard let idx = items.firstIndex(where: { $0.id == box.id }) else { return }
-                        items[idx].assigneeIds = ids
-                    }
-                )
             }
         }
     }
@@ -2841,6 +2865,8 @@ struct MeetingOccurrenceEditor: View {
     /// 既有的覆寫；nil 表示這一場使用者還沒動過
     let occurrence: MeetingOccurrence?
     let peopleIndex: [UUID: SideRolePersonCandidate]
+    /// 新增臨時場次模式：日期直接可編（沒有「原定／改期」的概念，這一場就不是規則生的）
+    var isAdHoc: Bool = false
     let onSave: (MeetingOccurrence) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -2849,53 +2875,102 @@ struct MeetingOccurrenceEditor: View {
     @State private var isCancelled = false
     @State private var isMoved = false
     @State private var movedTo = Date()
+    @State private var adHocDate = Date()
     @State private var loaded = false
+    /// 挑負責人的彈頁：狀態在這裡、.sheet 掛在 Form 根層（掛在 Section 上
+    /// 會把本編輯頁一併收掉，見 MeetingItemsEditor 註解）
+    @State private var pickingAssigneeFor: IDBox?
+
+    /// 這一場實際開會時間（時間列與存檔共用）
+    private var effectiveStart: Date {
+        if isAdHoc { return adHocDate }
+        return isMoved ? movedTo : scheduledDate
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    HStack {
-                        Text("原定")
-                        Spacer()
-                        Text(MeetingTimeFormat.dateTime24.string(from: scheduledDate))
-                            .foregroundStyle(.secondary)
-                    }
-                    Toggle("改期", isOn: $isMoved)
-                    if isMoved {
+                    if isAdHoc {
                         HStack {
-                            Text("改到")
+                            Text("日期時間")
                             Spacer()
-                            FiveMinuteDateTimePicker(selection: $movedTo).fixedSize()
+                            FiveMinuteDateTimePicker(selection: $adHocDate).fixedSize()
+                        }
+                    } else {
+                        HStack {
+                            Text("原定")
+                            Spacer()
+                            Text(MeetingTimeFormat.dateTime24.string(from: scheduledDate))
+                                .foregroundStyle(.secondary)
+                        }
+                        Toggle("改期", isOn: $isMoved)
+                        if isMoved {
+                            HStack {
+                                Text("改到")
+                                Spacer()
+                                FiveMinuteDateTimePicker(selection: $movedTo).fixedSize()
+                            }
                         }
                     }
                     HStack {
                         Text("時間").foregroundStyle(.secondary)
                         Spacer()
-                        Text(MeetingTimeFormat.rangeText(start: isMoved ? movedTo : scheduledDate,
+                        Text(MeetingTimeFormat.rangeText(start: effectiveStart,
                                                          minutes: durationMinutes))
                             .font(.system(.subheadline, design: .rounded).weight(.semibold))
                             .foregroundStyle(.indigo)
                     }
-                    Toggle(isOn: $isCancelled) {
-                        Label("取消這一場", systemImage: "calendar.badge.minus")
-                            .foregroundStyle(isCancelled ? Color.red : Color.primary)
+                    if !isAdHoc {
+                        Toggle(isOn: $isCancelled) {
+                            Label("取消這一場", systemImage: "calendar.badge.minus")
+                                .foregroundStyle(isCancelled ? Color.red : Color.primary)
+                        }
                     }
                 } header: {
                     Text("這一場")
                 } footer: {
-                    Text("取消或改期只影響這一場，週期本身不變。")
+                    Text(isAdHoc
+                         ? "臨時場次是在週期之外加開的一場，不影響原本的週期。"
+                         : "取消或改期只影響這一場，週期本身不變。")
                 }
 
                 MeetingItemsEditor(items: $items, title: "這一場的議程項目",
-                                   peopleIndex: peopleIndex)
+                                   peopleIndex: peopleIndex,
+                                   pickingAssigneeFor: $pickingAssigneeFor)
+
+                if occurrence?.isAdHoc == true {
+                    Section {
+                        Button(role: .destructive) {
+                            // 交回一個「什麼狀態都沒有」的場次：applyOccurrence 對
+                            // isMeaningful == false 的覆寫是直接回收，等同刪除這一場。
+                            // 規則生的場次沒有這顆按鈕——它們用「取消」，刪了下次還是會長回來。
+                            onSave(MeetingOccurrence(id: occurrence?.id ?? UUID(),
+                                                     scheduledDate: scheduledDate))
+                            dismiss()
+                        } label: {
+                            Label("刪除這一場臨時場次", systemImage: "trash")
+                        }
+                    }
+                }
             }
-            .navigationTitle("場次")
+            .navigationTitle(isAdHoc ? "臨時場次" : "場次")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { commit() }.bold().foregroundStyle(.green)
+                    Button(isAdHoc ? "新增" : "完成") { commit() }.bold().foregroundStyle(.green)
+                }
+            }
+            .sheet(item: $pickingAssigneeFor) { box in
+                NavigationStack {
+                    MeetingAssigneePicker(
+                        initial: items.first { $0.id == box.id }?.assigneeIds ?? [],
+                        onDone: { ids in
+                            guard let idx = items.firstIndex(where: { $0.id == box.id }) else { return }
+                            items[idx].assigneeIds = ids
+                        }
+                    )
                 }
             }
             .onAppear {
@@ -2905,16 +2980,20 @@ struct MeetingOccurrenceEditor: View {
                 isCancelled = occurrence?.isCancelled ?? false
                 if let m = occurrence?.movedTo { isMoved = true; movedTo = m }
                 else { movedTo = scheduledDate }
+                adHocDate = scheduledDate
             }
         }
     }
 
     private func commit() {
+        // 臨時場次的 scheduledDate 就是使用者挑的日期；事後編輯（isAdHoc 已存在
+        // occurrence 上）要保留旗標，否則議程清空的那一刻它會被回收、從清單上消失。
         onSave(MeetingOccurrence(id: occurrence?.id ?? UUID(),
-                                 scheduledDate: scheduledDate,
+                                 scheduledDate: isAdHoc ? adHocDate : scheduledDate,
                                  movedTo: isMoved ? movedTo : nil,
                                  isCancelled: isCancelled,
-                                 items: items))
+                                 items: items,
+                                 isAdHoc: isAdHoc || (occurrence?.isAdHoc ?? false)))
         dismiss()
     }
 }
@@ -3729,6 +3808,7 @@ struct SubordinateItemCard: View {
                                  meeting: SubordinateMeeting, subId: UUID) -> some View {
         let head = MeetingTimeFormat.dateTime24.string(from: occ.date)
             + (occ.isCancelled ? "（已取消）" : occ.isMoved ? "（已改期）" : "")
+            + (occ.isAdHoc ? "（臨時）" : "")
         if occ.items.isEmpty {
             HStack(spacing: 6) {
                 Image(systemName: occ.isCancelled ? "calendar.badge.minus" : "calendar")
