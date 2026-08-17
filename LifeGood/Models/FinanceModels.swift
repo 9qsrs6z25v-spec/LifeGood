@@ -95,6 +95,81 @@ enum Currency: String, Codable, CaseIterable {
 
 // MARK: - 自訂匯率
 
+/// 設定頁「自訂幣別匯率」的自動取值。
+/// 資料源與美股市值換算同一個（Yahoo v8 chart 的 {幣別}TWD=X），
+/// 實測 JPY 0.1982／EUR 36.96／CNY 4.74 等皆與台銀牌價同量級。
+///
+/// 使用者的幣別欄是自由文字（「美金」「日圓」……），所以先過一張別名表
+/// 對成 ISO 代碼再查；對不上的（例如自創代號）不動它，維持手動值。
+enum FXRateService {
+    /// 常見寫法 → ISO 代碼。鍵一律存大寫，查表前先 uppercased。
+    private static let aliases: [String: String] = [
+        "美金": "USD", "美元": "USD", "USD": "USD",
+        "日圓": "JPY", "日幣": "JPY", "日元": "JPY", "JPY": "JPY",
+        "歐元": "EUR", "EUR": "EUR",
+        "人民幣": "CNY", "RMB": "CNY", "CNY": "CNY",
+        "港幣": "HKD", "港元": "HKD", "HKD": "HKD",
+        "英鎊": "GBP", "GBP": "GBP",
+        "澳幣": "AUD", "澳元": "AUD", "AUD": "AUD",
+        "加幣": "CAD", "加元": "CAD", "CAD": "CAD",
+        "韓元": "KRW", "韓圜": "KRW", "KRW": "KRW",
+        "新加坡幣": "SGD", "新幣": "SGD", "星幣": "SGD", "SGD": "SGD",
+        "瑞士法郎": "CHF", "CHF": "CHF",
+        "泰銖": "THB", "THB": "THB",
+        "越南盾": "VND", "VND": "VND",
+        "馬來幣": "MYR", "令吉": "MYR", "MYR": "MYR",
+        "菲律賓披索": "PHP", "披索": "PHP", "PHP": "PHP",
+        "印尼盾": "IDR", "IDR": "IDR",
+        "紐幣": "NZD", "紐元": "NZD", "NZD": "NZD"
+    ]
+
+    /// 把使用者輸入的幣別文字對成 ISO 代碼；對不上回 nil（該列維持手動）
+    static func isoCode(for raw: String) -> String? {
+        let key = raw.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !key.isEmpty else { return nil }
+        return aliases[key]
+    }
+
+    /// 抓一批幣別的對台幣匯率。回傳 ISO 代碼 → 匯率；抓不到的不出現在結果裡。
+    /// 併發上限 4，比照股票報價補網的既有節流。
+    static func fetchRates(isoCodes: [String]) async -> [String: Double] {
+        let wanted = Array(Set(isoCodes)).sorted()
+        guard !wanted.isEmpty else { return [:] }
+        var result: [String: Double] = [:]
+        var idx = 0
+        while idx < wanted.count {
+            let slice = Array(wanted[idx..<min(idx + 4, wanted.count)])
+            idx += 4
+            await withTaskGroup(of: (String, Double?).self) { group in
+                for code in slice {
+                    group.addTask { (code, await fetchRate(isoCode: code)) }
+                }
+                for await (code, r) in group {
+                    if let r { result[code] = r }
+                }
+            }
+        }
+        return result
+    }
+
+    /// 單一幣別對台幣。USD 的 Yahoo 代號是特例「TWD=X」，其餘為「{代碼}TWD=X」。
+    private static func fetchRate(isoCode: String) async -> Double? {
+        let pair = isoCode == "USD" ? "TWD=X" : "\(isoCode)TWD=X"
+        let urlString = "https://query1.finance.yahoo.com/v8/finance/chart/\(pair)?range=1d&interval=1d"
+        guard let url = URL(string: urlString) else { return nil }
+        do {
+            var req = URLRequest(url: url)
+            req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+            let (data, _) = try await URLSession.shared.data(for: req)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let chart = json["chart"] as? [String: Any],
+                  let meta = (chart["result"] as? [[String: Any]])?.first?["meta"] as? [String: Any],
+                  let rate = meta["regularMarketPrice"] as? Double, rate > 0 else { return nil }
+            return rate
+        } catch { return nil }
+    }
+}
+
 struct CurrencyRate: Identifiable, Codable {
     let id: UUID
     var code: String   // 例：美金

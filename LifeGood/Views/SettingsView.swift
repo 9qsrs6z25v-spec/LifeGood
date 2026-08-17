@@ -263,6 +263,10 @@ struct SettingsView: View {
     @State private var subscriptionExpanded = true   // 訂閱常會看，預設開
     @State private var einvoiceExpanded = false
     @State private var currencyExpanded = false
+    // 匯率自動更新
+    @State private var isFetchingRates = false
+    @State private var rateUpdateResult = ""
+    @State private var rateRowsRefreshToken = 0
     @State private var iCloudExpanded = false
     @State private var aiExpanded = false
     @State private var dataManagementExpanded = false
@@ -659,7 +663,7 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - 手動設定匯率
+    // MARK: - 幣別匯率（手動輸入＋自動更新）
 
     private var currencyRateSection: some View {
         Section {
@@ -670,6 +674,10 @@ struct SettingsView: View {
             ForEach(store.currencyRates) { rate in
                 CurrencyRateRow(rateId: rate.id, initialCode: rate.code, initialRate: rate.rate)
             }
+            // 自動更新改寫 store 後，用 token 讓列整批重建——
+            // CurrencyRateRow 為效能刻意持有本地 @State（400ms 才提交回 store），
+            // 不換 id 的話畫面會停在舊值，看起來像沒更新成功。
+            .id(rateRowsRefreshToken)
 
             Button {
                 store.currencyRates.append(CurrencyRate())
@@ -677,11 +685,74 @@ struct SettingsView: View {
                 Label("新增匯率", systemImage: "plus.circle")
                     .foregroundStyle(.green)
             }
+
+            Button {
+                Task { await autoUpdateRates() }
+            } label: {
+                HStack(spacing: 6) {
+                    if isFetchingRates {
+                        ProgressView().scaleEffect(0.7)
+                    }
+                    Label("自動更新匯率", systemImage: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(.blue)
+                }
+            }
+            .disabled(isFetchingRates || store.currencyRates.isEmpty)
+
+            if !rateUpdateResult.isEmpty {
+                Text(rateUpdateResult)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         } header: {
-            Text("手動設定匯率")
+            Text("幣別匯率")
         } footer: {
-            Text("輸入幣別代號與對 NT$ 的比值（例：美金 = 32 元）。新增後，記帳的金額輸入欄位左側即可選擇該幣別，輸入金額時將自動換算為 NT$。")
+            Text("輸入幣別與對 NT$ 的比值（例：美金 = 32 元）。新增後，記帳的金額輸入欄位左側即可選擇該幣別，輸入金額時將自動換算為 NT$。「自動更新」會辨識常見幣別（美金、日圓、歐元、人民幣…）並帶入即時匯率；認不得的幣別維持手動值不變。")
         }
+    }
+
+    /// 自動更新：認得的幣別逐一抓即時匯率覆寫，認不得的不動。
+    /// 結果文字停留在區塊內（不用轉瞬即逝的橫幅）——使用者需要看清楚哪些沒更新到。
+    @MainActor
+    private func autoUpdateRates() async {
+        guard !isFetchingRates else { return }
+        isFetchingRates = true
+        defer { isFetchingRates = false }
+
+        // 幣別文字 → ISO；認不得的先記下來，結果訊息要指名道姓
+        var isoOf: [UUID: String] = [:]
+        var unknown: [String] = []
+        for r in store.currencyRates {
+            let label = r.code.trimmingCharacters(in: .whitespaces)
+            guard !label.isEmpty else { continue }
+            if let iso = FXRateService.isoCode(for: label) { isoOf[r.id] = iso }
+            else { unknown.append(label) }
+        }
+        guard !isoOf.isEmpty else {
+            rateUpdateResult = "沒有可辨識的幣別（支援：美金、日圓、歐元、人民幣、港幣…或直接填 USD、JPY 等代碼）"
+            return
+        }
+
+        let fetched = await FXRateService.fetchRates(isoCodes: Array(Set(isoOf.values)))
+        var updated = 0
+        var newRates = store.currencyRates
+        for idx in newRates.indices {
+            guard let iso = isoOf[newRates[idx].id], let rate = fetched[iso] else { continue }
+            // 保留兩位小數以上的精度（日圓 0.1982 這種小數匯率不能四捨五入成 0.2 存）
+            if newRates[idx].rate != rate { newRates[idx].rate = rate; updated += 1 }
+            // 美金順帶同步股票市值換算用的全域匯率，兩處口徑一致
+            if iso == "USD" { UserDefaults.standard.set(rate, forKey: Stock.usdTwdRateKey) }
+        }
+        if updated > 0 {
+            store.currencyRates = newRates
+            rateRowsRefreshToken += 1
+        }
+
+        var parts: [String] = ["已更新 \(updated) 筆"]
+        let failedIso = Set(isoOf.values).subtracting(fetched.keys)
+        if !failedIso.isEmpty { parts.append("查詢失敗：\(failedIso.sorted().joined(separator: "、"))") }
+        if !unknown.isEmpty { parts.append("無法辨識：\(unknown.joined(separator: "、"))") }
+        rateUpdateResult = parts.joined(separator: "；")
     }
 
     /// 匯率清單空狀態（Form Section 內緊湊樣式），對齊 HealthProfileEditView.emptyRow 規格
