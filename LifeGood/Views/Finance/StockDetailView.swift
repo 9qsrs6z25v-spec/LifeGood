@@ -219,9 +219,11 @@ struct StockDetailView: View {
             bigCaption: stock.isSold ? "賣出市值（\(market.unit)元）" : "目前市值（\(market.unit)元）",
             columns: [
                 FlashCardInfoColumn("股數", "\(Int(stock.shares))"),
-                FlashCardInfoColumn(stock.isSold ? "賣出價" : "目前價",
+                // 每股價格是原幣別（美股＝美元），欄名標明幣別，市值大字才是 NT$
+                FlashCardInfoColumn((stock.isSold ? "賣出價" : "目前價") + (stock.isUSStock ? "(US$)" : ""),
                                     String(format: "%.2f", stock.isSold ? stock.soldPrice : stock.currentPrice)),
-                FlashCardInfoColumn("成本價", String(format: "%.2f", stock.purchasePrice))
+                FlashCardInfoColumn("成本價" + (stock.isUSStock ? "(US$)" : ""),
+                                    String(format: "%.2f", stock.purchasePrice))
             ],
             isSold: stock.isSold,
             animated: animated

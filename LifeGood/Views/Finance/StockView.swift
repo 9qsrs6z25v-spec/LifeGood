@@ -696,9 +696,11 @@ struct StockView: View {
         let isPositive = pl >= 0
         let plColor: Color = isPositive ? .green : .red
         let accent: Color = item.isSold ? .secondary : Color(red: 1.00, green: 0.62, blue: 0.22)
+        // 每股價格顯示原幣別：美股報價是美元，掛 NT$ 字頭會讓人以為漲了三十倍
+        let curSymbol = item.isUSStock ? "US$" : "NT$"
         let priceStr = item.isSold
-            ? String(format: "NT$%.2f（賣出）", item.soldPrice)
-            : String(format: "NT$%.2f", item.currentPrice)
+            ? String(format: "%@%.2f（賣出）", curSymbol, item.soldPrice)
+            : String(format: "%@%.2f", curSymbol, item.currentPrice)
 
         return HStack(spacing: 0) {
             // 左側 4pt 橙色強調條
@@ -755,6 +757,15 @@ struct StockView: View {
                                 .background(accent.opacity(0.12))
                                 .clipShape(Capsule())
                                 .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                        }
+                        if item.isUSStock {
+                            Text("美股")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.blue)
+                                .padding(.horizontal, 7).padding(.vertical, 2.5)
+                                .background(Color.blue.opacity(0.12))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.6))
                         }
                         if item.isSold {
                             Text("已賣出")
@@ -1033,12 +1044,40 @@ enum TWQuoteService {
 
     // MARK: 對外
 
+    /// 美股判定（與 Stock.isUSStock 同一條規則）：字母開頭＝美股、數字開頭＝台股。
+    static func isUSSymbol(_ s: String) -> Bool { s.first?.isLetter == true }
+
     /// 整批查報價。回傳 symbol → Quote；查不到的代號不會出現在結果裡。
     static func batch(symbols: [String]) async -> [String: Quote] {
-        let wanted = Set(symbols.filter { !$0.isEmpty })
-        guard !wanted.isEmpty else { return [:] }
+        let all = Set(symbols.filter { !$0.isEmpty })
+        guard !all.isEmpty else { return [:] }
 
         var result: [String: Quote] = [:]
+
+        // ⓪ 美股：MIS 與 TPEx 都不可能有資料，直接走 Yahoo（無後綴），
+        //    不讓它們白佔台股批次的 ex_ch 欄位。順便刷新 USD→TWD 匯率，
+        //    彙總換算（Stock.currencyFactor）才會用到當下的匯率而不是舊值。
+        let usSymbols = all.filter { isUSSymbol($0) }
+        if !usSymbols.isEmpty {
+            await refreshUSDRate()
+            var idx = 0
+            let list = Array(usSymbols).sorted()
+            while idx < list.count {
+                let slice = Array(list[idx..<min(idx + 4, list.count)])
+                idx += 4
+                await withTaskGroup(of: (String, Quote?).self) { group in
+                    for sym in slice {
+                        group.addTask { (sym, await fetchYahoo(symbol: sym)) }
+                    }
+                    for await (sym, q) in group {
+                        if let q { result[sym] = q }
+                    }
+                }
+            }
+        }
+
+        let wanted = all.subtracting(usSymbols)
+        guard !wanted.isEmpty else { return result }
         let emerging = Set(UserDefaults.standard.stringArray(forKey: emergingSetKey) ?? [])
 
         // ① MIS：已知興櫃的代號直接跳過，不佔 ex_ch 欄位
@@ -1175,9 +1214,10 @@ enum TWQuoteService {
         } catch { return esbCache?.table ?? [:] }
     }
 
-    // MARK: ③ Yahoo 補網
+    // MARK: ③ Yahoo（台股補網／美股主來源）
 
     private static func fetchYahoo(symbol: String) async -> Quote? {
+        let isUS = isUSSymbol(symbol)
         for suffix in StockDailyHistory.suffixCandidates(for: symbol) {
             let urlString = "https://query1.finance.yahoo.com/v8/finance/chart/\(symbol)\(suffix)?range=1d&interval=1d"
             guard let url = URL(string: urlString) else { continue }
@@ -1192,14 +1232,42 @@ enum TWQuoteService {
                 StockDailyHistory.rememberSuffix(suffix, for: symbol)
                 return Quote(
                     price: price,
-                    // 這裡刻意不回名字：Yahoo 給的是英文，套進中文介面比留空更糟
-                    name: nil,
-                    tier: nil,
+                    // 台股刻意不回名字（Yahoo 給的是英文，套進中文介面比留空更糟）；
+                    // 美股的正式名稱本來就是英文，照用。
+                    name: isUS ? (meta["shortName"] as? String)?
+                        .trimmingCharacters(in: .whitespaces) : nil,
+                    tier: isUS ? "美股" : nil,
                     previousClose: meta["chartPreviousClose"] as? Double
                 )
             } catch { continue }
         }
         return nil
+    }
+
+    // MARK: USD→TWD 匯率
+
+    /// 匯率的行程內節流：同一輪批次刷新只抓一次，5 分鐘內共用
+    private static var usdRateFetchedAt: Date?
+
+    /// 抓 Yahoo 的 TWD=X（USD→TWD 即期），寫進 Stock.usdTwdRateKey 供彙總換算。
+    /// 失敗就沿用上次存的值——匯率一天內的波動遠小於股價，舊一點無妨。
+    private static func refreshUSDRate() async {
+        if let t = usdRateFetchedAt, Date().timeIntervalSince(t) < 5 * 60 { return }
+        let urlString = "https://query1.finance.yahoo.com/v8/finance/chart/TWD=X?range=1d&interval=1d"
+        guard let url = URL(string: urlString) else { return }
+        do {
+            var req = URLRequest(url: url)
+            req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+            let (data, _) = try await URLSession.shared.data(for: req)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let chart = json["chart"] as? [String: Any],
+                  let meta = (chart["result"] as? [[String: Any]])?.first?["meta"] as? [String: Any],
+                  let rate = meta["regularMarketPrice"] as? Double,
+                  // 合理性檢查：USD→TWD 幾十年都在 25~35 之間，超出太多就是抓錯東西
+                  rate > 10, rate < 100 else { return }
+            UserDefaults.standard.set(rate, forKey: Stock.usdTwdRateKey)
+            usdRateFetchedAt = Date()
+        } catch { }
     }
 
 }
@@ -1214,7 +1282,9 @@ enum StockDailyHistory {
 
     /// 這檔要試哪些後綴：學過就只試那一個。上櫃與興櫃都是 .TWO，
     /// 沒有快取時每次都得先撞一發 .TW 才輪到 .TWO——白花一倍請求。
+    /// 美股不加後綴（AAPL 就是 AAPL）。
     static func suffixCandidates(for symbol: String) -> [String] {
+        if TWQuoteService.isUSSymbol(symbol) { return [""] }
         let map = (UserDefaults.standard.dictionary(forKey: suffixMapKey) as? [String: String]) ?? [:]
         if let known = map[symbol] { return [known] }
         return [".TW", ".TWO"]

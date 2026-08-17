@@ -134,9 +134,9 @@ struct AddStockView: View {
 
                 Section {
                     HStack {
-                        // 代號可含英文字母（如主動式 ETF 00981A），改用一般鍵盤；
+                        // 代號可含英文字母（如主動式 ETF 00981A、美股 AAPL），改用一般鍵盤；
                         // 儲存時已自動 uppercased，小寫輸入也沒問題
-                        TextField("股票代號（如 2330、00981A）", text: $symbol)
+                        TextField("股票代號（如 2330、AAPL）", text: $symbol)
                             .keyboardType(.asciiCapable)
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
@@ -629,6 +629,25 @@ struct AddStockView: View {
         isFetching = true
         fetchError = ""
         defer { isFetching = false }
+
+        // 美股（字母開頭）直接走共用報價服務的 Yahoo 路徑——
+        // MIS 只有台股，白打兩發還要等它逾時。
+        if TWQuoteService.isUSSymbol(trimmed) {
+            if let q = await TWQuoteService.single(symbol: trimmed) {
+                guard symbol.trimmingCharacters(in: .whitespaces) == trimmed else { return }
+                applyQuote(StockQuote(
+                    name: q.name ?? "",
+                    exchange: q.tier ?? "美股",
+                    lastPrice: q.price,
+                    yesterdayClose: q.previousClose ?? 0
+                ))
+            } else {
+                guard symbol.trimmingCharacters(in: .whitespaces) == trimmed else { return }
+                quote = nil
+                fetchError = "查無股票代號 \(trimmed) 的報價"
+            }
+            return
+        }
 
         // 先走 MIS 拿完整行情（開高低量、時間戳），查不到再退到共用報價服務——
         // 興櫃在 MIS 完全查不到，得靠 TPEx 官方興櫃表或 Yahoo 補網。

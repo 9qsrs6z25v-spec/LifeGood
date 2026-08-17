@@ -490,10 +490,32 @@ struct Stock: Identifiable, Codable {
         case transactions, dividends
     }
 
-    /// 投入成本
-    var totalCost: Double { shares * purchasePrice }
-    /// 目前市值
-    var marketValue: Double { shares * (isSold ? soldPrice : currentPrice) }
+    // MARK: - 美股
+
+    /// 美股判定：台股代號一律以數字開頭（含 00878B 這類債券 ETF），
+    /// 美股代號一律以英文字母開頭（AAPL、TSLA、BRK.B）。以代號判定而非另存欄位，
+    /// 舊資料不需遷移，使用者也不用多按一個開關。
+    var isUSStock: Bool { symbol.first?.isLetter == true }
+
+    /// USD→TWD 匯率的全域快取。每次報價刷新時由 TWQuoteService 抓
+    /// Yahoo 的 TWD=X 更新；還沒抓過任何一次時退回 31（近年區間中值），
+    /// 首次刷新報價後就會被真實匯率覆蓋。
+    static let usdTwdRateKey = "stock_usd_twd_rate"
+    static var usdTwdRate: Double {
+        let r = UserDefaults.standard.double(forKey: usdTwdRateKey)
+        return r > 0 ? r : 31.0
+    }
+
+    /// 換算成 NT$ 用的係數。台股為 1；美股為 USD→TWD 匯率。
+    /// per-share 價格（purchasePrice／currentPrice／soldPrice／交易價）一律存原幣別，
+    /// 只在彙總（成本／市值／損益）時乘上係數——這樣總資產、圖表、英雄卡
+    /// 全部經由 totalCost／marketValue 的既有路徑自動變成 NT$，一處都不用改。
+    var currencyFactor: Double { isUSStock ? Self.usdTwdRate : 1 }
+
+    /// 投入成本（NT$；美股已按匯率換算）
+    var totalCost: Double { shares * purchasePrice * currencyFactor }
+    /// 目前市值（NT$；美股已按匯率換算）
+    var marketValue: Double { shares * (isSold ? soldPrice : currentPrice) * currencyFactor }
     /// 損益
     var profitLoss: Double { marketValue - totalCost }
     /// 報酬率
