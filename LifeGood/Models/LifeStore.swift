@@ -191,17 +191,36 @@ class LifeStore: ObservableObject {
         milestones[i] = m
     }
 
+    /// 寫入兼任待辦，並立刻把連結同步到部屬那一側。
+    /// 所有寫入點（編輯頁存檔、待辦列打勾）都走這裡，同步邏輯才只有一份。
     func upsertSideRoleTask(_ task: SideRoleTask, in roleId: UUID) {
-        mutateSideRole(roleId) { m in
-            var list = m.sideRoleTasks ?? []
-            if let i = list.firstIndex(where: { $0.id == task.id }) { list[i] = task }
-            else { list.append(task) }
-            m.sideRoleTasks = list
+        batched {
+            mutateSideRole(roleId) { m in
+                var list = m.sideRoleTasks ?? []
+                if let i = list.firstIndex(where: { $0.id == task.id }) { list[i] = task }
+                else { list.append(task) }
+                m.sideRoleTasks = list
+            }
+            syncSideRoleTaskLinksBody(task.id, in: roleId)
         }
     }
 
+    /// 刪除兼任待辦。系統自動建立的部屬任務一併刪掉（那是這則待辦的分身）；
+    /// 從部屬那邊拉進來的紀錄只解除連結——那筆本來就存在，不該替使用者刪掉。
     func deleteSideRoleTask(_ taskId: UUID, in roleId: UUID) {
-        mutateSideRole(roleId) { $0.sideRoleTasks?.removeAll { $0.id == taskId } }
+        let links = milestones.first { $0.id == roleId }?
+            .sideRoleTasks?.first { $0.id == taskId }?.links ?? []
+        batched {
+            detachLinks(links)
+            mutateSideRole(roleId) { $0.sideRoleTasks?.removeAll { $0.id == taskId } }
+        }
+    }
+
+    /// 這則待辦會連帶刪掉幾筆自動建立的部屬任務（刪除確認用）
+    func autoCreatedLinkCount(taskId: UUID, in roleId: UUID) -> Int {
+        (milestones.first { $0.id == roleId }?
+            .sideRoleTasks?.first { $0.id == taskId }?.links ?? [])
+            .filter(\.isAutoCreated).count
     }
 
     func upsertSideRoleMember(_ member: SideRoleMember, in roleId: UUID) {
@@ -214,18 +233,245 @@ class LifeStore: ObservableObject {
     }
 
     func deleteSideRoleMember(_ memberId: UUID, in roleId: UUID) {
-        mutateSideRole(roleId) { m in
-            m.sideRoleMembers?.removeAll { $0.id == memberId }
-            // 連帶把待辦上的指派清掉，否則會留下指向不存在成員的懸空引用——
-            // 那些待辦在成員頁查不到、在待辦列上又會顯示一個空白的負責人。
-            // 比照 deleteFamilyMember 解除 spouseId、deleteMilestoneCleaningLinks 的既有做法。
-            m.sideRoleTasks = m.sideRoleTasks?.map { t in
-                guard var ids = t.assigneeIds, ids.contains(memberId) else { return t }
-                ids.removeAll { $0 == memberId }
-                var copy = t
-                copy.assigneeIds = ids.isEmpty ? nil : ids
-                return copy
+        var affected: [UUID] = []
+        batched {
+            mutateSideRole(roleId) { m in
+                m.sideRoleMembers?.removeAll { $0.id == memberId }
+                // 連帶把待辦上的指派清掉，否則會留下指向不存在成員的懸空引用——
+                // 那些待辦在成員頁查不到、在待辦列上又會顯示一個空白的負責人。
+                // 比照 deleteFamilyMember 解除 spouseId、deleteMilestoneCleaningLinks 的既有做法。
+                m.sideRoleTasks = m.sideRoleTasks?.map { t in
+                    guard var ids = t.assigneeIds, ids.contains(memberId) else { return t }
+                    ids.removeAll { $0 == memberId }
+                    var copy = t
+                    copy.assigneeIds = ids.isEmpty ? nil : ids
+                    affected.append(copy.id)
+                    return copy
+                }
             }
+            // 少了一位負責人，他名下自動建立的部屬任務就該收回——
+            // 不重跑同步的話，那些任務會留在對方的清單上，而兼任這邊已經查不到了。
+            for tid in affected { syncSideRoleTaskLinksBody(tid, in: roleId) }
+        }
+    }
+
+    // MARK: - 兼任待辦 ↔ 部屬紀錄 雙向連結
+    //
+    // 使用者要的是「同一件事的兩面」，不是兩筆各自獨立的紀錄：
+    //   • 指派給部屬 → 自動在他的任務清單建一筆（不用兩邊各打一次字）
+    //   • 任一邊打勾 → 另一邊跟著完成
+    //   • 評分只算一次（走兼任那邊的 +3，本職那邊跳過），否則同一件事 +6
+    //
+    // 兩側各存一份指標（SideRoleTaskLink / SideRoleBackLink）。只存單側的話，
+    // 從部屬那邊打勾就得掃遍所有兼任職務的所有待辦才找得到對象——而打勾是熱路徑。
+
+    /// 把一段會多次寫入 @Published 陣列的操作包成「只存一次檔」。
+    /// 連結同步一次可能改到三、四位部屬，每次 subscript 寫回都會觸發
+    /// didSet → save() → CloudKit 推送，不批次的話一次指派就是十幾次存檔。
+    /// 巢狀呼叫安全：內層還原成外層原本的值，只有最外層那次真的 save()。
+    private func batched(_ body: () -> Void) {
+        let wasLoading = isLoading
+        isLoading = true
+        body()
+        isLoading = wasLoading
+        if !wasLoading { save() }
+    }
+
+    /// 把某筆兼任待辦的狀態推到部屬那一側：
+    /// 補上新指派的人、收回取消指派的人、同步內容與完成狀態。
+    func syncSideRoleTaskLinks(_ taskId: UUID, in roleId: UUID) {
+        batched { syncSideRoleTaskLinksBody(taskId, in: roleId) }
+    }
+
+    private func syncSideRoleTaskLinksBody(_ taskId: UUID, in roleId: UUID) {
+        guard let ri = milestones.firstIndex(where: { $0.id == roleId }),
+              let ti = milestones[ri].sideRoleTasks?.firstIndex(where: { $0.id == taskId }),
+              var task = milestones[ri].sideRoleTasks?[ti] else { return }
+
+        let roleTitle = milestones[ri].sideRoleName?.trimmingCharacters(in: .whitespaces) ?? ""
+        let topic = roleTitle.isEmpty ? "兼任職務" : roleTitle
+
+        // 指派對象 → 部屬 id。名片與組織人員不是部屬，沒有任務清單可以放，
+        // 硬要建會產生一筆沒有歸屬的孤兒任務。
+        let subIds = Set(subordinates.map(\.id))
+        var linkOf: [UUID: UUID] = [:]
+        for m in milestones[ri].sideRoleMembers ?? [] where m.linkedPersonId != nil {
+            linkOf[m.id] = m.linkedPersonId
+        }
+        var desired = Set<UUID>()
+        for mid in task.assigneeIds ?? [] {
+            if let pid = linkOf[mid], subIds.contains(pid) { desired.insert(pid) }
+        }
+
+        var links = task.links ?? []
+        let back = SideRoleBackLink(roleId: roleId, taskId: taskId)
+
+        // 1. 取消指派 → 收回當初自動建立的那筆任務。
+        //    手動拉進來的連結不受指派變動影響：那是使用者刻意接上的一筆既有紀錄，
+        //    不該因為指派名單一動就自己斷掉（要斷請按解除連結）。
+        var dropped: [SideRoleTaskLink] = []
+        links.removeAll { link in
+            guard link.isAutoCreated, !desired.contains(link.subordinateId) else { return false }
+            dropped.append(link)
+            return true
+        }
+        detachLinks(dropped)
+
+        // 2. 既有連結：同步內容與完成狀態
+        for link in links {
+            guard let si = subordinates.firstIndex(where: { $0.id == link.subordinateId }) else { continue }
+            switch link.kind {
+            case .task:
+                guard let i = subordinates[si].tasks.firstIndex(where: { $0.id == link.itemId }) else { continue }
+                if link.isAutoCreated {
+                    // 自動建立的那筆是分身，內容以兼任這邊為準
+                    subordinates[si].tasks[i].topic = topic
+                    subordinates[si].tasks[i].content = task.content
+                    subordinates[si].tasks[i].dueDate = task.dueDate
+                    subordinates[si].tasks[i].note = task.note
+                }
+                subordinates[si].tasks[i].isCompleted = task.isCompleted
+                subordinates[si].tasks[i].completedAt = task.completedAt
+                subordinates[si].tasks[i].sideRoleLink = back
+            case .meetingItem:
+                guard let mid = link.meetingId,
+                      let mi = subordinates[si].meetings.firstIndex(where: { $0.id == mid }) else { continue }
+                mutateMeetingItem(&subordinates[si].meetings[mi], itemId: link.itemId) { item in
+                    item.isCompleted = task.isCompleted
+                    item.completedAt = task.completedAt
+                    item.sideRoleLink = back
+                }
+            }
+        }
+
+        // 3. 新指派的人：自動建一筆任務
+        let linked = Set(links.map(\.subordinateId))
+        for pid in desired where !linked.contains(pid) {
+            guard let si = subordinates.firstIndex(where: { $0.id == pid }) else { continue }
+            let newTask = SubordinateTask(topic: topic, content: task.content,
+                                          date: Date(), dueDate: task.dueDate, note: task.note,
+                                          isCompleted: task.isCompleted, completedAt: task.completedAt,
+                                          sideRoleLink: back)
+            subordinates[si].tasks.append(newTask)
+            links.append(SideRoleTaskLink(kind: .task, subordinateId: pid,
+                                          itemId: newTask.id, isAutoCreated: true))
+        }
+
+        task.links = links.isEmpty ? nil : links
+        milestones[ri].sideRoleTasks?[ti] = task
+    }
+
+    /// 把某筆既有的部屬任務／會議議程項目「拉進」某則兼任待辦。
+    /// isAutoCreated = false，所以日後解除連結時只斷線、不刪紀錄。
+    func linkExistingItemToSideRoleTask(_ link: SideRoleTaskLink, taskId: UUID, in roleId: UUID) {
+        guard let ri = milestones.firstIndex(where: { $0.id == roleId }),
+              let ti = milestones[ri].sideRoleTasks?.firstIndex(where: { $0.id == taskId }) else { return }
+        var links = milestones[ri].sideRoleTasks?[ti].links ?? []
+        // 同一筆紀錄只連一次
+        guard !links.contains(where: { $0.itemId == link.itemId }) else { return }
+        batched {
+            links.append(link)
+            milestones[ri].sideRoleTasks?[ti].links = links
+            syncSideRoleTaskLinksBody(taskId, in: roleId)
+        }
+    }
+
+    /// 解除一條連結（不刪兼任待辦本身）
+    func unlinkSideRoleTaskLink(itemId: UUID, taskId: UUID, in roleId: UUID) {
+        guard let ri = milestones.firstIndex(where: { $0.id == roleId }),
+              let ti = milestones[ri].sideRoleTasks?.firstIndex(where: { $0.id == taskId }) else { return }
+        batched {
+            var links = milestones[ri].sideRoleTasks?[ti].links ?? []
+            let removed = links.filter { $0.itemId == itemId }
+            links.removeAll { $0.itemId == itemId }
+            milestones[ri].sideRoleTasks?[ti].links = links.isEmpty ? nil : links
+            detachLinks(removed)
+            // 立刻重跑同步：若那個人還在指派名單上，規則是「指派就要有一筆」，
+            // 這裡會補一筆自動建立的給他。不重跑的話狀態要拖到下次存檔才收斂，
+            // 使用者會看到「解除後什麼都沒發生、隔一陣子又冒出一筆」。
+            syncSideRoleTaskLinksBody(taskId, in: roleId)
+        }
+    }
+
+    /// 從部屬那一側打勾時呼叫：更新兼任待辦，再散布到同一則待辦的其他連結。
+    /// 刻意不走 upsertSideRoleTask——那會再繞回來，形成來回同步。
+    func propagateCompletionToSideRole(_ back: SideRoleBackLink, isCompleted: Bool) {
+        guard let ri = milestones.firstIndex(where: { $0.id == back.roleId }),
+              let ti = milestones[ri].sideRoleTasks?.firstIndex(where: { $0.id == back.taskId }) else { return }
+        milestones[ri].sideRoleTasks?[ti].isCompleted = isCompleted
+        milestones[ri].sideRoleTasks?[ti].completedAt = isCompleted ? Date() : nil
+        let task = milestones[ri].sideRoleTasks?[ti]
+        for link in task?.links ?? [] {
+            guard let si = subordinates.firstIndex(where: { $0.id == link.subordinateId }) else { continue }
+            switch link.kind {
+            case .task:
+                guard let i = subordinates[si].tasks.firstIndex(where: { $0.id == link.itemId }) else { continue }
+                subordinates[si].tasks[i].isCompleted = isCompleted
+                subordinates[si].tasks[i].completedAt = task?.completedAt
+            case .meetingItem:
+                guard let mid = link.meetingId,
+                      let mi = subordinates[si].meetings.firstIndex(where: { $0.id == mid }) else { continue }
+                mutateMeetingItem(&subordinates[si].meetings[mi], itemId: link.itemId) { item in
+                    item.isCompleted = isCompleted
+                    item.completedAt = task?.completedAt
+                }
+            }
+        }
+    }
+
+    /// 連結列要顯示的文字。對象已被刪除時給明確字樣，不留空白列。
+    func sideRoleLinkDescription(_ link: SideRoleTaskLink) -> (title: String, subtitle: String) {
+        guard let sub = subordinates.first(where: { $0.id == link.subordinateId }) else {
+            return ("已刪除的紀錄", "原負責人已不在部屬名單")
+        }
+        let who = sub.name.isEmpty ? "未命名部屬" : sub.name
+        switch link.kind {
+        case .task:
+            guard let t = sub.tasks.first(where: { $0.id == link.itemId }) else {
+                return ("已刪除的任務", who)
+            }
+            let title = t.content.isEmpty ? (t.topic.isEmpty ? "未命名任務" : t.topic) : t.content
+            return (title, "\(who)・任務")
+        case .meetingItem:
+            for m in sub.meetings {
+                guard let item = m.allItems.first(where: { $0.id == link.itemId }) else { continue }
+                let title = item.content.isEmpty ? "未填內容" : item.content
+                return (title, "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)")
+            }
+            return ("已刪除的議程項目", who)
+        }
+    }
+
+    /// 收回連結：自動建立的紀錄整筆刪掉，拉進來的只清掉回指。
+    private func detachLinks(_ links: [SideRoleTaskLink]) {
+        for link in links {
+            guard let si = subordinates.firstIndex(where: { $0.id == link.subordinateId }) else { continue }
+            switch link.kind {
+            case .task:
+                if link.isAutoCreated {
+                    subordinates[si].tasks.removeAll { $0.id == link.itemId }
+                } else if let i = subordinates[si].tasks.firstIndex(where: { $0.id == link.itemId }) {
+                    subordinates[si].tasks[i].sideRoleLink = nil
+                }
+            case .meetingItem:
+                // 議程項目一律是「拉進來的」——系統不會自動建會議
+                guard let mid = link.meetingId,
+                      let mi = subordinates[si].meetings.firstIndex(where: { $0.id == mid }) else { continue }
+                mutateMeetingItem(&subordinates[si].meetings[mi], itemId: link.itemId) { $0.sideRoleLink = nil }
+            }
+        }
+    }
+
+    /// 改一筆議程項目——不重複的會議住在 items，有週期的住在各場次，
+    /// 兩處都要找，只找 items 的話週期會議上的連結會靜默失效。
+    private func mutateMeetingItem(_ meeting: inout SubordinateMeeting, itemId: UUID,
+                                   _ body: (inout MeetingItem) -> Void) {
+        if let i = meeting.items.firstIndex(where: { $0.id == itemId }) {
+            body(&meeting.items[i]); return
+        }
+        for oi in meeting.occurrences.indices {
+            guard let i = meeting.occurrences[oi].items.firstIndex(where: { $0.id == itemId }) else { continue }
+            body(&meeting.occurrences[oi].items[i]); return
         }
     }
 
@@ -483,6 +729,17 @@ class LifeStore: ObservableObject {
                 }
             }
         }
+        // 兼任待辦上指向這位部屬的連結一併清掉，否則會留下指向不存在部屬的
+        // 懸空引用：同步時查不到人（靜默跳過），但刪除確認會多報一筆。
+        for ri in milestones.indices {
+            guard milestones[ri].sideRoleTasks != nil else { continue }
+            for ti in milestones[ri].sideRoleTasks!.indices {
+                guard var links = milestones[ri].sideRoleTasks![ti].links,
+                      links.contains(where: { $0.subordinateId == item.id }) else { continue }
+                links.removeAll { $0.subordinateId == item.id }
+                milestones[ri].sideRoleTasks![ti].links = links.isEmpty ? nil : links
+            }
+        }
         save()
     }
 
@@ -498,6 +755,10 @@ class LifeStore: ObservableObject {
         defer { isLoading = false }
         subordinates[si].tasks[ti].isCompleted.toggle()
         subordinates[si].tasks[ti].completedAt = subordinates[si].tasks[ti].isCompleted ? Date() : nil
+        // 這筆若是某則兼任待辦的另一面，兩邊要一起完成（含指派給同一件事的其他人）
+        if let back = subordinates[si].tasks[ti].sideRoleLink {
+            propagateCompletionToSideRole(back, isCompleted: subordinates[si].tasks[ti].isCompleted)
+        }
         save()
     }
 
@@ -511,18 +772,16 @@ class LifeStore: ObservableObject {
         defer { isLoading = false }
         // 有週期的會議，議程項目住在各場次底下；不重複的會議才住在 items。
         // 只找 items 的話，週期會議上的打勾會靜默失效（按了沒反應）。
-        if let ii = subordinates[si].meetings[mi].items.firstIndex(where: { $0.id == itemId }) {
-            subordinates[si].meetings[mi].items[ii].isCompleted.toggle()
-            subordinates[si].meetings[mi].items[ii].completedAt = subordinates[si].meetings[mi].items[ii].isCompleted ? Date() : nil
-        } else {
-            for oi in subordinates[si].meetings[mi].occurrences.indices {
-                guard let ii = subordinates[si].meetings[mi].occurrences[oi].items.firstIndex(where: { $0.id == itemId }) else { continue }
-                subordinates[si].meetings[mi].occurrences[oi].items[ii].isCompleted.toggle()
-                subordinates[si].meetings[mi].occurrences[oi].items[ii].completedAt =
-                    subordinates[si].meetings[mi].occurrences[oi].items[ii].isCompleted ? Date() : nil
-                break
-            }
+        var back: SideRoleBackLink?
+        var nowCompleted = false
+        mutateMeetingItem(&subordinates[si].meetings[mi], itemId: itemId) { item in
+            item.isCompleted.toggle()
+            item.completedAt = item.isCompleted ? Date() : nil
+            back = item.sideRoleLink
+            nowCompleted = item.isCompleted
         }
+        // 這個項目若是某則兼任待辦的另一面，兩邊要一起完成
+        if let back { propagateCompletionToSideRole(back, isCompleted: nowCompleted) }
         save()
     }
 

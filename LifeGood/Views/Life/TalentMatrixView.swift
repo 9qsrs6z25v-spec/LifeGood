@@ -46,8 +46,11 @@ extension Subordinate {
     ///    同一個人在列表、人才矩陣、明細頁就會顯示三個不同的分數，而且完全不會編譯錯。
     ///    設成必填的話漏掉就編不過——這裡寧可編譯失敗。
     func proactivityScore(mentionedCount: Int = 0, sideRoleDone: Int) -> Int {
-        let completedTasks = tasks.filter { $0.isCompleted }.count
-        let completedItems = meetings.flatMap { $0.allItems }.filter { $0.isCompleted }.count
+        // 連到兼任待辦的紀錄跳過：那是「同一件事的另一面」，已由 sideRoleDone
+        // 以 +3 計過一次。不跳的話同一件事會被計兩次分（本職 +3／+1 再加兼任 +3）。
+        let completedTasks = tasks.filter { $0.isCompleted && $0.sideRoleLink == nil }.count
+        let completedItems = meetings.flatMap { $0.allItems }
+            .filter { $0.isCompleted && $0.sideRoleLink == nil }.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
@@ -103,8 +106,11 @@ extension Subordinate {
     /// 主動性評分的計算明細（分組條目 + 加減分）
     func proactivityBreakdown(mentionedCount: Int = 0, sideRoleDone: Int) -> [(label: String, points: Int)] {
         var items: [(String, Int)] = [("基礎分", 60)]
-        let completedTasks = tasks.filter { $0.isCompleted }.count
-        let completedItems = meetings.flatMap { $0.allItems }.filter { $0.isCompleted }.count
+        // 連到兼任待辦的紀錄跳過：那是「同一件事的另一面」，已由 sideRoleDone
+        // 以 +3 計過一次。不跳的話同一件事會被計兩次分（本職 +3／+1 再加兼任 +3）。
+        let completedTasks = tasks.filter { $0.isCompleted && $0.sideRoleLink == nil }.count
+        let completedItems = meetings.flatMap { $0.allItems }
+            .filter { $0.isCompleted && $0.sideRoleLink == nil }.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }

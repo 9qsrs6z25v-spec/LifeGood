@@ -407,7 +407,7 @@ enum UnifiedExporter {
             }
 
             csv += "\n## 兼任職務待辦 (Side Role Tasks)\n"
-            csv += "roleId,roleName,content,assignees,dueDate,isCompleted,completedAt,note\n"
+            csv += "roleId,roleName,content,assignees,dueDate,isCompleted,completedAt,note,linkedRecords\n"
             for r in sideRoles {
                 let memberNames = Dictionary(
                     (r.sideRoleMembers ?? []).map { ($0.id, $0.name) },
@@ -417,13 +417,20 @@ enum UnifiedExporter {
                         .compactMap { memberNames[$0] }
                         .filter { !$0.isEmpty }
                         .joined(separator: "、")
+                    // 連結的部屬紀錄：標明是自動建立的分身還是拉進來的既有紀錄，
+                    // 匯出檔看得出「這件事在部屬那邊也有一筆」，不會誤以為重複登錄。
+                    let linked = (t.links ?? []).map { link -> String in
+                        let kind = link.kind == .task ? "任務" : "議程"
+                        let origin = link.isAutoCreated ? "自動" : "連結"
+                        return "\(kind)/\(origin)/\(link.itemId.uuidString)"
+                    }.joined(separator: "、")
                     let fields: [String] = [
                         r.id.uuidString, esc(r.sideRoleName ?? ""), esc(t.content),
                         esc(assignees),
                         t.dueDate.map { iso.string(from: $0) } ?? "",
                         t.isCompleted ? "1" : "0",
                         t.completedAt.map { iso.string(from: $0) } ?? "",
-                        esc(t.note)
+                        esc(t.note), esc(linked)
                     ]
                     csv += fields.joined(separator: ",") + "\n"
                 }

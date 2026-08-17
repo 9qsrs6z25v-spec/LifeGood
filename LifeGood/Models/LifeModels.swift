@@ -764,6 +764,61 @@ enum CareerSubCategory: String, Codable, CaseIterable, Identifiable {
 // 那兩個是 Swift 合成解碼（沒有自訂 init(from:)），缺一個 key 就整筆炸掉。
 // 複用等於把那個脆弱點接到兼任職務上。
 
+/// 兼任待辦 ↔ 部屬紀錄的連結（兼任這一側）。
+///
+/// 兩側都存一份指標，是刻意的：只存單側的話，另一側要找對象就得掃全部人／
+/// 全部兼任職務，而完成狀態同步是在每次打勾時觸發的熱路徑。
+struct SideRoleTaskLink: Codable, Hashable {
+    enum Kind: String, Codable { case task, meetingItem }
+    var kind: Kind
+    var subordinateId: UUID
+    /// SubordinateTask.id 或 MeetingItem.id
+    var itemId: UUID
+    /// kind == .meetingItem 才有值
+    var meetingId: UUID?
+    /// true＝指派時由系統自動建立的部屬任務（刪兼任待辦時一併刪掉）；
+    /// false＝從部屬那邊既有的紀錄拉進來的（刪兼任待辦時只解除連結，
+    /// 那筆紀錄本來就存在，不該替使用者刪掉）。
+    var isAutoCreated: Bool
+
+    init(kind: Kind, subordinateId: UUID, itemId: UUID,
+         meetingId: UUID? = nil, isAutoCreated: Bool) {
+        self.kind = kind; self.subordinateId = subordinateId
+        self.itemId = itemId; self.meetingId = meetingId; self.isAutoCreated = isAutoCreated
+    }
+
+    enum CodingKeys: String, CodingKey { case kind, subordinateId, itemId, meetingId, isAutoCreated }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = (try? c.decodeIfPresent(Kind.self, forKey: .kind)) ?? .task
+        subordinateId = try c.decode(UUID.self, forKey: .subordinateId)
+        itemId = try c.decode(UUID.self, forKey: .itemId)
+        meetingId = try? c.decodeIfPresent(UUID.self, forKey: .meetingId)
+        isAutoCreated = (try? c.decodeIfPresent(Bool.self, forKey: .isAutoCreated)) ?? false
+    }
+}
+
+/// 部屬紀錄 ↔ 兼任待辦的回指（部屬這一側）。
+/// 有值代表「這件事同時是某個兼任職務的待辦」——完成狀態雙向同步，
+/// 而且**評分只算一次**（走兼任那邊的 +3，本職這邊跳過）。
+struct SideRoleBackLink: Codable, Hashable {
+    /// 兼任職務（LifeMilestone）的 id
+    var roleId: UUID
+    /// SideRoleTask 的 id
+    var taskId: UUID
+
+    init(roleId: UUID, taskId: UUID) { self.roleId = roleId; self.taskId = taskId }
+
+    enum CodingKeys: String, CodingKey { case roleId, taskId }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        roleId = try c.decode(UUID.self, forKey: .roleId)
+        taskId = try c.decode(UUID.self, forKey: .taskId)
+    }
+}
+
 /// 兼任職務的待辦事項
 struct SideRoleTask: Identifiable, Codable {
     let id: UUID
@@ -772,6 +827,8 @@ struct SideRoleTask: Identifiable, Codable {
     var isCompleted: Bool
     var completedAt: Date?
     var note: String
+    /// 與部屬任務／會議議程項目的連結（同一件事的另一面）
+    var links: [SideRoleTaskLink]?
     /// 負責這則待辦的成員（對應同一筆兼任職務底下 SideRoleMember.id）。
     /// 用陣列而非單一 id：一件事常常是兩三個人一起扛，而單人只是「陣列長度 1」，
     /// 反過來用單一欄位就表達不了多人。nil／空陣列＝尚未指派。
@@ -779,10 +836,10 @@ struct SideRoleTask: Identifiable, Codable {
 
     init(id: UUID = UUID(), content: String = "", dueDate: Date? = nil,
          isCompleted: Bool = false, completedAt: Date? = nil, note: String = "",
-         assigneeIds: [UUID]? = nil) {
+         assigneeIds: [UUID]? = nil, links: [SideRoleTaskLink]? = nil) {
         self.id = id; self.content = content; self.dueDate = dueDate
         self.isCompleted = isCompleted; self.completedAt = completedAt; self.note = note
-        self.assigneeIds = assigneeIds
+        self.assigneeIds = assigneeIds; self.links = links
     }
 
     init(from decoder: Decoder) throws {
@@ -797,10 +854,11 @@ struct SideRoleTask: Identifiable, Codable {
         completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
         note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
         assigneeIds = try? c.decodeIfPresent([UUID].self, forKey: .assigneeIds)
+        links = try? c.decodeIfPresent([SideRoleTaskLink].self, forKey: .links)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, content, dueDate, isCompleted, completedAt, note, assigneeIds
+        case id, content, dueDate, isCompleted, completedAt, note, assigneeIds, links
     }
 }
 
@@ -1555,16 +1613,20 @@ struct MeetingItem: Identifiable, Codable {
     var completedAt: Date?
     /// 項目層級備註（可 @ 標註人員）
     var note: String
+    /// 連到某筆兼任職務待辦（同一件事）。完成狀態雙向同步，且評分只算一次。
+    var sideRoleLink: SideRoleBackLink?
 
     init(id: UUID = UUID(), content: String = "", assigneeIds: [UUID] = [],
          dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil,
-         note: String = "") {
+         note: String = "", sideRoleLink: SideRoleBackLink? = nil) {
         self.id = id; self.content = content; self.assigneeIds = assigneeIds
         self.dueDate = dueDate; self.isCompleted = isCompleted; self.completedAt = completedAt
-        self.note = note
+        self.note = note; self.sideRoleLink = sideRoleLink
     }
 
-    enum CodingKeys: String, CodingKey { case id, content, assigneeIds, dueDate, isCompleted, completedAt, note }
+    enum CodingKeys: String, CodingKey {
+        case id, content, assigneeIds, dueDate, isCompleted, completedAt, note, sideRoleLink
+    }
 
     /// 舊版單一負責人欄位。刻意放在獨立的 CodingKey，讓 encode 仍可用合成版
     /// （CodingKeys 裡出現沒有對應屬性的 case 會讓合成的 encode 編不過）。
@@ -1588,6 +1650,7 @@ struct MeetingItem: Identifiable, Codable {
         isCompleted = (try? c.decode(Bool.self, forKey: .isCompleted)) ?? false
         completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
         note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+        sideRoleLink = try? c.decodeIfPresent(SideRoleBackLink.self, forKey: .sideRoleLink)
     }
 }
 
@@ -1873,18 +1936,24 @@ struct SubordinateTask: Identifiable, Codable {
     var isCompleted: Bool
     var completedAt: Date?
 
+    /// 連到某筆兼任職務待辦（同一件事）。完成狀態雙向同步，且評分只算一次
+    ///（走兼任那邊的 +3，本職這邊跳過，否則同一件事會被計兩次分）。
+    var sideRoleLink: SideRoleBackLink?
+
     init(id: UUID = UUID(), topic: String = "", content: String = "",
          date: Date = Date(), dueDate: Date? = nil, note: String = "",
-         isCompleted: Bool = false, completedAt: Date? = nil) {
+         isCompleted: Bool = false, completedAt: Date? = nil,
+         sideRoleLink: SideRoleBackLink? = nil) {
         self.id = id; self.topic = topic; self.content = content
         self.date = date; self.dueDate = dueDate; self.note = note
         self.isCompleted = isCompleted; self.completedAt = completedAt
+        self.sideRoleLink = sideRoleLink
     }
 
     // 自訂解碼：isCompleted / completedAt 為後加欄位，舊存檔沒有這兩個 key。
     // 用 decodeIfPresent 容錯，避免單筆缺欄位導致整個 subordinates 陣列解碼失敗、資料消失。
     enum CodingKeys: String, CodingKey {
-        case id, topic, content, date, dueDate, note, isCompleted, completedAt
+        case id, topic, content, date, dueDate, note, isCompleted, completedAt, sideRoleLink
     }
 
     init(from decoder: Decoder) throws {
@@ -1897,6 +1966,7 @@ struct SubordinateTask: Identifiable, Codable {
         note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
         isCompleted = try c.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
+        sideRoleLink = try? c.decodeIfPresent(SideRoleBackLink.self, forKey: .sideRoleLink)
     }
 }
 

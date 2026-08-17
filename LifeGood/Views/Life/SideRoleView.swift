@@ -734,6 +734,17 @@ struct SideRoleWorkspaceView: View {
                             .foregroundStyle(.indigo.opacity(0.85))
                             .lineLimit(1)
                     }
+                    // 與部屬那邊的紀錄連動中：任一邊打勾兩邊都完成
+                    if let n = task.links?.count, n > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "link").font(.system(size: 7))
+                            Text("\(n)")
+                        }
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.indigo.opacity(0.12), in: Capsule())
+                        .foregroundStyle(.indigo)
+                    }
                 }
             }
             Spacer()
@@ -1014,10 +1025,72 @@ struct SideRoleTaskEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
     @State private var hasDue = false
+    @State private var showLinkPicker = false
+    /// 非 nil 時跳刪除確認，數字是會被一併刪掉的自動分身筆數
+    @State private var pendingDeleteAutoCount: Int?
 
     /// 這筆兼任職務底下的成員名單（指派對象）
     private var members: [SideRoleMember] {
         lifeStore.milestones.first { $0.id == roleId }?.sideRoleMembers ?? []
+    }
+
+    /// 這則待辦已經存進 store 了嗎。新待辦要先存檔才有東西可以掛連結。
+    private var isPersisted: Bool {
+        lifeStore.milestones.first { $0.id == roleId }?
+            .sideRoleTasks?.contains { $0.id == task.id } == true
+    }
+
+    /// 目前的連結（一律從 store 讀，不放進本地草稿——連結的建立與解除
+    /// 會同時改動部屬那一側，做成「按儲存才生效」的草稿只會兩邊對不起來）
+    private var links: [SideRoleTaskLink] {
+        lifeStore.milestones.first { $0.id == roleId }?
+            .sideRoleTasks?.first { $0.id == task.id }?.links ?? []
+    }
+
+    @ViewBuilder
+    private var linkSection: some View {
+        Section {
+            if !isPersisted {
+                Text("先按右上角「儲存」，就能把成員既有的任務或會議議程項目接進這則待辦。")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(links, id: \.itemId) { link in
+                    linkRow(link)
+                }
+                Button { showLinkPicker = true } label: {
+                    Label("從成員的紀錄挑選", systemImage: "link.badge.plus")
+                        .foregroundStyle(.indigo)
+                }
+            }
+        } header: {
+            Text("連結的紀錄")
+        } footer: {
+            Text("指派給部屬時，系統會自動在他的任務清單建一筆同樣的事，兩邊任一邊打勾都會同步完成；評分只算一次，不會重複加分。這裡則是把他「已經存在」的任務或會議議程項目接上來。")
+        }
+    }
+
+    private func linkRow(_ link: SideRoleTaskLink) -> some View {
+        let info = lifeStore.sideRoleLinkDescription(link)
+        return HStack(spacing: 10) {
+            Image(systemName: link.kind == .task ? "checklist" : "person.3.fill")
+                .font(.system(size: 13)).foregroundStyle(.indigo)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(info.title).font(.subheadline).lineLimit(1)
+                Text(info.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            Text(link.isAutoCreated ? "自動建立" : "已連結")
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.indigo.opacity(0.12), in: Capsule())
+                .foregroundStyle(.indigo)
+            Button {
+                lifeStore.unlinkSideRoleTaskLink(itemId: link.itemId, taskId: task.id, in: roleId)
+            } label: {
+                Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     var body: some View {
@@ -1061,6 +1134,7 @@ struct SideRoleTaskEditor: View {
             } footer: {
                 Text("可以多選。指派後，在成員頁就看得到他負責哪些事。")
             }
+            linkSection
             Section("截止日") {
                 Toggle("設定截止日", isOn: $hasDue)
                 if hasDue {
@@ -1075,12 +1149,32 @@ struct SideRoleTaskEditor: View {
             }
             Section {
                 Button(role: .destructive) {
-                    lifeStore.deleteSideRoleTask(task.id, in: roleId)
-                    dismiss()
+                    let autoCount = lifeStore.autoCreatedLinkCount(taskId: task.id, in: roleId)
+                    if autoCount > 0 { pendingDeleteAutoCount = autoCount }
+                    else { lifeStore.deleteSideRoleTask(task.id, in: roleId); dismiss() }
                 } label: {
                     Label("刪除此待辦", systemImage: "trash")
                         .frame(maxWidth: .infinity)
                 }
+            }
+        }
+        .alert("刪除待辦？", isPresented: Binding(
+            get: { pendingDeleteAutoCount != nil },
+            set: { if !$0 { pendingDeleteAutoCount = nil } }
+        ), presenting: pendingDeleteAutoCount) { _ in
+            Button("刪除", role: .destructive) {
+                lifeStore.deleteSideRoleTask(task.id, in: roleId)
+                pendingDeleteAutoCount = nil
+                dismiss()
+            }
+            Button("取消", role: .cancel) { pendingDeleteAutoCount = nil }
+        } message: { count in
+            Text("這則待辦在 \(count) 位部屬的任務清單裡各有一筆自動建立的分身，會一併刪除。從部屬那邊拉進來的紀錄只會解除連結，不會被刪掉。")
+        }
+        .sheet(isPresented: $showLinkPicker) {
+            NavigationStack {
+                SideRoleLinkPicker(roleId: roleId, taskId: task.id,
+                                   assigneeIds: task.assigneeIds ?? [])
             }
         }
         .navigationTitle("待辦")
@@ -1095,7 +1189,13 @@ struct SideRoleTaskEditor: View {
                     // 空陣列收成 nil：兩者語意相同，但留著空陣列會讓 JSON 多一個
                     // 沒意義的鍵，也讓 assigneeIds != nil 的判斷變得不可靠。
                     if task.assigneeIds?.isEmpty == true { task.assigneeIds = nil }
-                    lifeStore.upsertSideRoleTask(task, in: roleId)
+                    var toSave = task
+                    // 連結是在 store 上即時生效的（挑選頁與解除按鈕都直接寫 store，
+                    // 因為它們同時改動部屬那一側）。本地草稿手上那份可能是開頁當下的
+                    // 舊值，直接存回去會把剛接上的連結蓋掉——以 store 為準。
+                    let current = links
+                    toSave.links = current.isEmpty ? nil : current
+                    lifeStore.upsertSideRoleTask(toSave, in: roleId)
                     dismiss()
                 }
                 .disabled(task.content.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -1847,6 +1947,125 @@ struct SideRoleMemberDetailView: View {
 /// 這是雙向新增的另一半：原本只能從兼任職務的成員名單挑部屬（SideRolePersonPicker），
 /// 現在從部屬明細頁也能反過來把他掛進某個職務。兩邊寫入的是同一份
 /// SideRoleMember，linkedPersonId 一律填上，所以雙向查詢立刻成立。
+// MARK: - 把成員既有的紀錄接進兼任待辦
+
+/// 從指派成員「已經存在」的任務／會議議程項目裡挑一筆，接成同一件事。
+/// 只列指派到這則待辦、而且身分是部屬的成員——名片與組織人員沒有任務清單。
+/// 已完成的紀錄也列出來（可能是想把已經做完的事補記到兼任職務底下）。
+struct SideRoleLinkPicker: View {
+    let roleId: UUID
+    let taskId: UUID
+    /// SideRoleMember.id 陣列
+    let assigneeIds: [UUID]
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private struct Candidate: Identifiable {
+        let id: UUID
+        let link: SideRoleTaskLink
+        let title: String
+        let subtitle: String
+        let isCompleted: Bool
+        let icon: String
+    }
+
+    /// 指派成員裡真的是部屬的那些人
+    private var targetSubordinates: [Subordinate] {
+        guard let role = lifeStore.milestones.first(where: { $0.id == roleId }) else { return [] }
+        let assigned = Set(assigneeIds)
+        var pids: [UUID] = []
+        for m in role.sideRoleMembers ?? [] where assigned.contains(m.id) {
+            if let pid = m.linkedPersonId { pids.append(pid) }
+        }
+        let wanted = Set(pids)
+        return lifeStore.subordinates.filter { wanted.contains($0.id) }
+    }
+
+    /// 已經連上的紀錄不再列出，避免重複接同一筆
+    private var alreadyLinked: Set<UUID> {
+        let links = lifeStore.milestones.first { $0.id == roleId }?
+            .sideRoleTasks?.first { $0.id == taskId }?.links ?? []
+        return Set(links.map(\.itemId))
+    }
+
+    private func candidates(for sub: Subordinate) -> [Candidate] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        let done = alreadyLinked
+        var out: [Candidate] = []
+        for t in sub.tasks where !done.contains(t.id) && t.sideRoleLink == nil {
+            let title = t.content.isEmpty ? (t.topic.isEmpty ? "未命名任務" : t.topic) : t.content
+            guard q.isEmpty || title.localizedCaseInsensitiveContains(q) else { continue }
+            out.append(Candidate(id: t.id,
+                                 link: SideRoleTaskLink(kind: .task, subordinateId: sub.id,
+                                                        itemId: t.id, isAutoCreated: false),
+                                 title: title,
+                                 subtitle: t.topic.isEmpty ? "任務" : "任務・\(t.topic)",
+                                 isCompleted: t.isCompleted, icon: "checklist"))
+        }
+        for m in sub.meetings {
+            for item in m.allItems where !done.contains(item.id) && item.sideRoleLink == nil {
+                let title = item.content.isEmpty ? "未填內容" : item.content
+                guard q.isEmpty || title.localizedCaseInsensitiveContains(q) else { continue }
+                out.append(Candidate(id: item.id,
+                                     link: SideRoleTaskLink(kind: .meetingItem, subordinateId: sub.id,
+                                                            itemId: item.id, meetingId: m.id,
+                                                            isAutoCreated: false),
+                                     title: title,
+                                     subtitle: "議程・\(m.topic.isEmpty ? "會議" : m.topic)",
+                                     isCompleted: item.isCompleted, icon: "person.3.fill"))
+            }
+        }
+        return out
+    }
+
+    var body: some View {
+        List {
+            if targetSubordinates.isEmpty {
+                Text("這則待辦還沒有指派給任何部屬。先在上一頁勾選負責成員（而且該成員要連結到一位部屬），才有紀錄可以挑。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(targetSubordinates) { sub in
+                let list = candidates(for: sub)
+                Section(sub.name.isEmpty ? "未命名部屬" : sub.name) {
+                    if list.isEmpty {
+                        Text("沒有可連結的紀錄（已連結或已屬於其他兼任待辦的不列出）")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    ForEach(list) { c in
+                        Button {
+                            lifeStore.linkExistingItemToSideRoleTask(c.link, taskId: taskId, in: roleId)
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: c.icon)
+                                    .font(.system(size: 13)).foregroundStyle(.indigo)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(c.title).foregroundStyle(.primary).lineLimit(2)
+                                    Text(c.subtitle).font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if c.isCompleted {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 14)).foregroundStyle(.green)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .searchable(text: $query, prompt: "搜尋內容")
+        .navigationTitle("挑選要連結的紀錄")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+        }
+    }
+}
+
 struct SideRoleJoinPicker: View {
     let personId: UUID
     let personName: String

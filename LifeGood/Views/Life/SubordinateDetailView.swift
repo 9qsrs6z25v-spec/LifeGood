@@ -1161,6 +1161,10 @@ struct SubordinateDetailView: View {
                                         .clipShape(Capsule())
                                         .overlay(Capsule().stroke(dueColor.opacity(0.22), lineWidth: 0.6))
                                     }
+                                    // 與兼任待辦連動：打勾會同步兩邊，評分也只算一次
+                                    if let back = t.sideRoleLink {
+                                        SideRoleLinkBadge(back: back)
+                                    }
                                 }
                                 if t.isCompleted {
                                     CompletionStamp(completedAt: t.completedAt, due: t.dueDate)
@@ -2666,6 +2670,29 @@ struct DateBox: Identifiable { let id: Date }
 ///   1. 不重複會議（項目在 meeting.items）與週期會議的單一場次（項目在
 ///      occurrence.items）要用同一份 UI，否則兩邊會慢慢長歪。
 ///   2. 挑負責人的 sheet 狀態跟著清單走，放在外層會讓兩處各維護一份。
+/// 「這筆同時是某個兼任職務的待辦」徽章。
+/// 使用者看到它才會知道：這裡打勾兼任那邊也會完成，而且評分不會被算兩次。
+struct SideRoleLinkBadge: View {
+    let back: SideRoleBackLink
+    @EnvironmentObject var lifeStore: LifeStore
+
+    var body: some View {
+        let name = lifeStore.milestones.first { $0.id == back.roleId }?
+            .sideRoleName?.trimmingCharacters(in: .whitespaces) ?? ""
+        HStack(spacing: 3) {
+            Image(systemName: "link")
+                .font(.system(size: 7))
+            Text(name.isEmpty ? "兼任職務" : name)
+        }
+        .font(.caption2.weight(.semibold))
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(Color.indigo.opacity(0.12))
+        .foregroundStyle(.indigo)
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
+    }
+}
+
 /// ⚠️ 這是一個「整段 Section」的元件，要直接放在 Form 底下，不要再包一層 Section。
 ///    包在別人的 Section 裡的話，SwiftUI 會把它整組壓成單一列。
 struct MeetingItemsEditor: View {
@@ -3754,6 +3781,7 @@ struct SubordinateItemCard: View {
                     Label(fmtDue(due), systemImage: "clock")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
+                if let back = item.sideRoleLink { SideRoleLinkBadge(back: back) }
                 if !item.note.isEmpty {
                     Text(MentionText.attributed(item.note, people: people))
                         .font(.caption2).tint(.blue).foregroundStyle(.secondary)
