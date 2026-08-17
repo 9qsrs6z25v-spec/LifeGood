@@ -91,7 +91,10 @@ struct StockDetailView: View {
     @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
-    let stockId: UUID
+    /// @State 而非 let：左右滑動可切換上下一檔（同一張卡換內容，不重開 sheet）
+    @State private var stockId: UUID
+    /// 切換方向（+1 下一檔／-1 上一檔），驅動滑動轉場的進出方向
+    @State private var slideDirection: Int = 1
     @State private var showEdit = false
     @State private var shareItem: StockCardSharePayload?   // 分享圖片
     @State private var showPremiumAlert = false
@@ -109,11 +112,37 @@ struct StockDetailView: View {
     @State private var dailyPoints: [StockDailyPoint] = []
 
     init(stock: Stock) {
-        self.stockId = stock.id
+        _stockId = State(initialValue: stock.id)
     }
 
     private var stock: Stock {
         store.stocks.first(where: { $0.id == stockId }) ?? Stock(name: "")
+    }
+
+    /// 可左右切換的同組股票：持有中看持有中、已賣出看已賣出，
+    /// 順序與股票列表一致（store 原始順序）。
+    private var siblings: [Stock] {
+        store.stocks.filter { $0.isSold == stock.isSold }
+    }
+
+    /// 目前在同組裡的位置（1-based；找不到回 nil，指示器就不顯示）
+    private var siblingPosition: (index: Int, count: Int)? {
+        guard let i = siblings.firstIndex(where: { $0.id == stockId }) else { return nil }
+        return (i + 1, siblings.count)
+    }
+
+    /// 切到上一檔（-1）／下一檔（+1）。端點不環繞——滑到底沒反應比
+    /// 突然跳回第一檔更符合預期。切換時重置該股的日線資料，由 task(id:) 重載。
+    private func switchStock(_ delta: Int) {
+        let list = siblings
+        guard let i = list.firstIndex(where: { $0.id == stockId }) else { return }
+        let target = i + delta
+        guard list.indices.contains(target) else { return }
+        slideDirection = delta
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            stockId = list[target].id
+            heroPrices = []; heroVolumes = []; dailyPoints = []
+        }
     }
 
     /// 用市值決定稀有度（已賣出則用最後賣出價市值）
@@ -121,10 +150,38 @@ struct StockDetailView: View {
         CardRarity.stock(value: stock.marketValue)
     }
 
+    /// 「◂ x / N ▸」位置指示器：點左右箭頭也能切換（不只滑動）
+    private func swipeIndicator(_ pos: (index: Int, count: Int)) -> some View {
+        HStack(spacing: 10) {
+            Button { switchStock(-1) } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(pos.index > 1 ? Color.secondary : Color(.quaternaryLabel))
+            }
+            .buttonStyle(.plain)
+            .disabled(pos.index <= 1)
+            Text("\(pos.index) / \(pos.count)")
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.secondary)
+            Button { switchStock(1) } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(pos.index < pos.count ? Color.secondary : Color(.quaternaryLabel))
+            }
+            .buttonStyle(.plain)
+            .disabled(pos.index >= pos.count)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(Color(.secondarySystemBackground), in: Capsule())
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    if let pos = siblingPosition, pos.count > 1 {
+                        swipeIndicator(pos)
+                    }
                     flashCard
                     // 技術線圖：日 K 棒＋MA5/MA20（Yahoo 日線含開高低，本地算均線）
                     if !candlePoints.isEmpty {
@@ -155,9 +212,29 @@ struct StockDetailView: View {
                     if !stock.note.isEmpty { noteCard }
                 }
                 .padding(.vertical)
+                // 換檔時整包內容依方向滑入（id 變更觸發 transition；在一般視圖
+                // 層級的轉場可靠，App 根層那個「轉場不播」的坑不適用於這裡）
+                .id(stockId)
+                .transition(.asymmetric(
+                    insertion: .move(edge: slideDirection > 0 ? .trailing : .leading)
+                        .combined(with: .opacity),
+                    removal: .move(edge: slideDirection > 0 ? .leading : .trailing)
+                        .combined(with: .opacity)
+                ))
             }
             .background(Color(.systemGroupedBackground))
-            .task { await loadDailySeries() }
+            // 水平快掃切換上下一檔。用 ended 時的總位移判斷（水平分量要夠大且
+            // 明顯大於垂直分量），與 ScrollView 的垂直捲動不搶手勢。
+            .gesture(
+                DragGesture(minimumDistance: 30)
+                    .onEnded { g in
+                        let dx = g.translation.width, dy = g.translation.height
+                        guard abs(dx) > 60, abs(dx) > abs(dy) * 1.5 else { return }
+                        switchStock(dx < 0 ? 1 : -1)
+                    }
+            )
+            // stockId 變更即重載該股日線（切換上下一檔用）；首次出現也會跑一次
+            .task(id: stockId) { await loadDailySeries() }
             .navigationTitle("股票卡片")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -315,14 +392,19 @@ struct StockDetailView: View {
     /// v25.199 起 K 棒需要開高低：舊快取（缺 OHLC 欄位）視同過期強制重抓一次。
     private func loadDailySeries() async {
         let symbol = stock.symbol
+        // 快掃切換防串台：await 期間使用者可能又切到別檔，回來時這批資料已過期，
+        // 寫進去會把 A 股的 K 線畫在 B 股卡上
+        let requestedId = stockId
         guard !symbol.isEmpty else { return }
         let cached = await Task.detached(priority: .userInitiated) {
             StockDailyHistory.cached(symbol: symbol)
         }.value
+        guard stockId == requestedId else { return }
         applyDailySeries(cached)
         let lacksOHLC = cached.isEmpty || cached.allSatisfy { $0.open == nil }
         if lacksOHLC || !StockDailyHistory.isFresh(symbol: symbol) {
             let fresh = await StockDailyHistory.fetch(symbol: symbol)
+            guard stockId == requestedId else { return }
             applyDailySeries(fresh)
         }
     }
