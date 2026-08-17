@@ -1721,6 +1721,9 @@ private struct CandleChartCard: View {
                 legendRow
             }
             chartView
+            // 成交量柱狀圖（張）：與上方 K 線同一組日期、同步選取十字線。
+            // X 軸日期標籤只在這裡顯示（上方價格圖隱藏），兩張圖共用一條時間軸的觀感。
+            volumeChart
         }
         .padding(14)
         .background(Color(.systemBackground))
@@ -1872,12 +1875,52 @@ private struct CandleChartCard: View {
             }
         }
         .chartYScale(domain: (minLow * 0.985)...(maxHigh * 1.015))
-        .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+        // 日期標籤移到下方成交量圖，這裡隱藏（保留格線）
+        .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) { _ in AxisGridLine() } }
         .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) }
         .chartLegend(.hidden)
         // 點按／拖曳選取 K 棒：selectedCandle 取最近的那根，明細顯示在圖上方
         .chartXSelection(value: $selectedDate)
         .frame(height: 200)
+    }
+
+    /// 成交量柱狀圖（張）。柱色跟隨當日紅漲綠跌，寬度與 K 棒一致。
+    /// Y 軸標籤用「k 張」縮寫，讓左右兩張圖的軸寬接近、時間軸對得起來。
+    private var volumeChart: some View {
+        let shown = visibleCandles
+        return Chart {
+            if let sel = selectedCandle {
+                RuleMark(x: .value("選取", sel.date))
+                    .foregroundStyle(Color.secondary.opacity(0.35))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
+            ForEach(shown) { c in
+                BarMark(x: .value("日", c.date),
+                        y: .value("張", c.volume / 1000),
+                        width: .fixed(candleWidth(count: shown.count)))
+                    .foregroundStyle((c.isUp ? upColor : downColor).opacity(0.55))
+            }
+        }
+        .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+        .chartYAxis {
+            AxisMarks(position: .trailing, values: .automatic(desiredCount: 2)) { value in
+                AxisGridLine()
+                AxisValueLabel {
+                    if let v = value.as(Double.self) {
+                        Text(Self.volumeLabel(v)).font(.system(size: 8))
+                    }
+                }
+            }
+        }
+        .chartXSelection(value: $selectedDate)
+        .frame(height: 56)
+    }
+
+    /// 量軸縮寫：1234 → 1.2k、成交量小的個股直接顯示張數
+    private static func volumeLabel(_ lots: Double) -> String {
+        if lots >= 10_000 { return String(format: "%.0fk", lots / 1000) }
+        if lots >= 1_000 { return String(format: "%.1fk", lots / 1000) }
+        return String(format: "%.0f", lots)
     }
 
     /// K 棒實體寬度：依顯示窗內的根數縮放（3月≈66 根 3.5pt、1年≈245 根 1.2pt）

@@ -110,8 +110,10 @@ enum InstitutionalHistory {
             let needFetch: Bool
             if existing == nil {
                 needFetch = true
-            } else if back == 0, existing?.net.isEmpty == true {
-                needFetch = true   // 今天先前抓太早（資料未公布），重試
+            } else if existing?.net.isEmpty == true {
+                // 空標記每天重驗一次（今天＝抓太早重試；過去＝可能是網路失敗誤存的
+                // 空標記，也可能是真休市——重驗一次成本一兩個請求，能自癒就值得）
+                needFetch = true
             } else if existing?.net.isEmpty == false,
                       existing?.foreign == nil || existing?.marginBalance == nil {
                 // 升級回補：舊版快照缺分計（v25.239 前）或缺融資券/外資持股
@@ -122,12 +124,15 @@ enum InstitutionalHistory {
                 needFetch = false
             }
             guard needFetch else { continue }
-            let rec = await fetchDay(day)
+            let (rec, definitive) = await fetchDay(day)
             if !rec.net.isEmpty {
                 save(rec)
                 added += 1
-            } else if back > 0 {
-                save(rec)   // 過去的假日/無資料日：存空標記避免每次開 App 重抓
+            } else if back > 0, definitive {
+                // 官方**有回應**且明確說沒資料（休市日）才存空標記。
+                // 網路失敗的空回傳不落地——落了會把那一天永久標成沒資料，
+                // 一次斷網就毒掉整個回看窗（歷來「一直沒有法人資料」的元凶之一）。
+                save(rec)
             }
             try? await Task.sleep(nanoseconds: 1_200_000_000)
         }
@@ -135,8 +140,12 @@ enum InstitutionalHistory {
     }
 
     /// 抓某一天：上市（T86）＋上櫃（TPEx）合併為一份快照，含外資／投信／自營分計
-    static func fetchDay(_ day: Date) async -> InstDailyRecord {
+    /// 回傳 (快照, definitive)。definitive＝至少一個官方來源**成功回應**
+    ///（含「明確說當天沒資料」的休市回應）；純網路失敗為 false，
+    /// 呼叫端據此決定能不能存空標記。
+    static func fetchDay(_ day: Date) async -> (InstDailyRecord, Bool) {
         let key = dayFmt.string(from: day)
+        var definitive = false
         var net: [String: Double] = [:]
         var names: [String: String] = [:]
         var foreign: [String: Double] = [:]
@@ -155,7 +164,9 @@ enum InstitutionalHistory {
                 var req = URLRequest(url: url)
                 req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
                 let (data, _) = try await URLSession.shared.data(for: req)
-                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                if parsed?["stat"] is String { definitive = true }   // 官方有回應（OK 或休市訊息）
+                if let json = parsed,
                    (json["stat"] as? String) == "OK",
                    let fields = json["fields"] as? [String],
                    let rows = json["data"] as? [[Any]],
@@ -200,7 +211,9 @@ enum InstitutionalHistory {
                     var req = URLRequest(url: url)
                     req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
                     let (data, _) = try await URLSession.shared.data(for: req)
-                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                    let parsedT = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    if parsedT?["tables"] != nil { definitive = true }   // 官方有回應
+                    if let json = parsedT,
                        let tables = json["tables"] as? [[String: Any]],
                        let table = tables.first,
                        let fields = table["fields"] as? [String],
@@ -351,13 +364,14 @@ enum InstitutionalHistory {
             } catch {}
         }
 
-        return InstDailyRecord(date: key, net: net, names: names,
-                               foreign: foreign.isEmpty ? nil : foreign,
-                               trust: trust.isEmpty ? nil : trust,
-                               dealer: dealer.isEmpty ? nil : dealer,
-                               marginBalance: marginBal.isEmpty ? nil : marginBal,
-                               shortBalance: shortBal.isEmpty ? nil : shortBal,
-                               foreignPct: fPct.isEmpty ? nil : fPct)
+        let rec = InstDailyRecord(date: key, net: net, names: names,
+                                  foreign: foreign.isEmpty ? nil : foreign,
+                                  trust: trust.isEmpty ? nil : trust,
+                                  dealer: dealer.isEmpty ? nil : dealer,
+                                  marginBalance: marginBal.isEmpty ? nil : marginBal,
+                                  shortBalance: shortBal.isEmpty ? nil : shortBal,
+                                  foreignPct: fPct.isEmpty ? nil : fPct)
+        return (rec, definitive)
     }
 }
 
@@ -590,8 +604,22 @@ struct InstNetBarCard: View {
     private let trustColor = Color.orange
     private let dealerColor = Color.purple
 
+    /// 整個快照庫一筆資料都沒有（收集還沒跑完或一直失敗）——顯示提示卡說明原因
+    @State private var storeIsEmpty = false
+
     var body: some View {
         Group {
+            if points.isEmpty {
+                // ⚠️ 這個佔位不能拿掉：載入前 points 是空的，若這個分支什麼都不畫，
+                // 整張卡是空視圖，掛在下面的 .task 不會被觸發（SwiftUI 對不佔版面的
+                // 視圖不保證跑 onAppear/task）——結果就是永遠載不了資料、卡片永遠不出現。
+                // 這正是本卡上線以來從沒顯示過的原因（使用者回報「沒看到法人資訊」）。
+                if storeIsEmpty {
+                    collectingHint
+                } else {
+                    Color.clear.frame(height: 1)
+                }
+            }
             if points.count >= 1 {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
@@ -704,10 +732,25 @@ struct InstNetBarCard: View {
         }
     }
 
+    /// 收集說明卡：整個快照庫還是空的時候，說清楚為什麼沒有資料、什麼時候會有
+    private var collectingHint: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "tray.and.arrow.down")
+                .font(.system(size: 13)).foregroundStyle(.secondary)
+            Text("法人買賣超資料收集中。官方於收盤後（約 16:30）公布，開 App 時會自動收集近幾個交易日，收到後這裡會出現買賣超圖表。")
+                .font(.caption2).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
     private func load() async {
         let sym = symbol
-        let result = await Task.detached(priority: .userInitiated) { () -> [DayNet] in
-            InstitutionalHistory.tradingRecords().compactMap { rec in
+        let result = await Task.detached(priority: .userInitiated) { () -> ([DayNet], Bool) in
+            let records = InstitutionalHistory.tradingRecords()
+            let pts = records.compactMap { rec -> DayNet? in
                 guard let v = rec.net[sym],
                       let d = InstitutionalHistory.dayFmt.date(from: rec.date) else { return nil }
                 return DayNet(date: d, net: v,
@@ -715,8 +758,10 @@ struct InstNetBarCard: View {
                               trust: rec.trust?[sym],
                               dealer: rec.dealer?[sym])
             }
+            return (pts, records.isEmpty)
         }.value
-        points = result
+        points = result.0
+        storeIsEmpty = result.1
     }
 }
 
@@ -746,6 +791,11 @@ struct MarginChipCard: View {
 
     var body: some View {
         Group {
+            if points.isEmpty {
+                // 佔位讓 .task 一定會觸發（空視圖不保證跑 task，見 InstNetBarCard 註解）。
+                // 收集說明由上方的法人卡負責，這裡不重複顯示。
+                Color.clear.frame(height: 1)
+            }
             if let last = points.last, last.margin != nil || last.foreignPct != nil {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
