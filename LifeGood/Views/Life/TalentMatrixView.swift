@@ -40,7 +40,7 @@ extension Subordinate {
     ///    設成必填的話漏掉就編不過——這裡寧可編譯失敗。
     func proactivityScore(mentionedCount: Int = 0, sideRoleDone: Int) -> Int {
         let completedTasks = tasks.filter { $0.isCompleted }.count
-        let completedItems = meetings.flatMap { $0.items }.filter { $0.isCompleted }.count
+        let completedItems = meetings.flatMap { $0.allItems }.filter { $0.isCompleted }.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
@@ -97,7 +97,7 @@ extension Subordinate {
     func proactivityBreakdown(mentionedCount: Int = 0, sideRoleDone: Int) -> [(label: String, points: Int)] {
         var items: [(String, Int)] = [("基礎分", 60)]
         let completedTasks = tasks.filter { $0.isCompleted }.count
-        let completedItems = meetings.flatMap { $0.items }.filter { $0.isCompleted }.count
+        let completedItems = meetings.flatMap { $0.allItems }.filter { $0.isCompleted }.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }

@@ -1022,7 +1022,7 @@ struct MyCalendarView: View {
     private var subIncompleteMeetingItems: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)] {
         lifeStore.subordinates.flatMap { sub in
             sub.meetings.flatMap { m in
-                m.items.filter { !$0.isCompleted }.map { (sub: sub, meeting: m, item: $0) }
+                m.allItems.filter { !$0.isCompleted }.map { (sub: sub, meeting: m, item: $0) }
             }
         }.sorted { $0.meeting.date > $1.meeting.date }
     }
@@ -1143,7 +1143,7 @@ struct MyCalendarView: View {
                                           onTap: { openTarget = .report(subId: sub.id, report: r) }))
             }
             for m in sub.meetings {
-                for item in m.items where item.isCompleted {
+                for item in m.allItems where item.isCompleted {
                     out.append(CompletedEntry(id: item.id, kind: .meeting, title: item.content,
                                               subtitle: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)",
                                               completedAt: item.completedAt, due: item.dueDate,
@@ -1201,7 +1201,7 @@ struct MyCalendarView: View {
                         snippet: who, date: m.date,
                         target: .meeting(subId: sub.id, meeting: m)))
                 }
-                for item in m.items where hit([item.content, item.note]) {
+                for item in m.allItems where hit([item.content, item.note]) {
                     out.append(SearchHit(id: "mi_\(item.id)", icon: "person.3.sequence.fill", color: .indigo,
                         typeLabel: "會議項目", title: item.content.isEmpty ? "未填內容" : item.content,
                         snippet: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)", date: m.date,

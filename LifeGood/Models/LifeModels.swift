@@ -1591,25 +1591,112 @@ struct MeetingItem: Identifiable, Codable {
     }
 }
 
+/// 週期規則。frequency 沿用舊的 MeetingRecurrence（每日／每週／隔週／每月），
+/// 額外可指定「每週的哪幾天」與「重複到哪一天」。
+struct MeetingRecurrenceRule: Codable, Equatable {
+    var frequency: MeetingRecurrence
+    /// 1=週日 … 7=週六，對齊 Calendar.component(.weekday, from:)。
+    /// 空陣列＝沿用起始日的星期幾（舊資料遷移過來就是這樣）。只有每週／隔週會看這個欄位。
+    var weekdays: [Int]
+    /// 重複到這天（含當天）為止。nil＝無限期，展開時只算到「今天起三個月」。
+    var endDate: Date?
+
+    init(frequency: MeetingRecurrence, weekdays: [Int] = [], endDate: Date? = nil) {
+        self.frequency = frequency; self.weekdays = weekdays; self.endDate = endDate
+    }
+
+    enum CodingKeys: String, CodingKey { case frequency, weekdays, endDate }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        frequency = (try? c.decodeIfPresent(MeetingRecurrence.self, forKey: .frequency)) ?? .weekly
+        weekdays = (try? c.decodeIfPresent([Int].self, forKey: .weekdays)) ?? []
+        endDate = try? c.decodeIfPresent(Date.self, forKey: .endDate)
+    }
+}
+
+/// 單一場次的覆寫。**只存使用者動過的場次**——沒動過的場次由規則即時推導出來，
+/// 不落地。這與 App 既有的固定支出／信用卡／收入週期展開是同一個作法：
+/// 規則是真相，展開結果是畫面。差別在這裡多了「取消」與「改期」兩種覆寫。
+struct MeetingOccurrence: Identifiable, Codable {
+    let id: UUID
+    /// 原定日期時間。這是與規則推導結果配對的鍵，改期後也不會變動，
+    /// 否則改期一次就再也對不回原本那一場、下次展開會多出一場。
+    var scheduledDate: Date
+    /// 改期後的日期時間。nil＝按原定時間。
+    var movedTo: Date?
+    var isCancelled: Bool
+    /// 這一場自己的議程項目
+    var items: [MeetingItem]
+
+    /// 實際開會時間
+    var effectiveDate: Date { movedTo ?? scheduledDate }
+    /// 是否還留著任何「值得存檔」的狀態。全部清空的場次會被回收，避免存檔無限膨脹。
+    var isMeaningful: Bool { isCancelled || movedTo != nil || !items.isEmpty }
+
+    init(id: UUID = UUID(), scheduledDate: Date, movedTo: Date? = nil,
+         isCancelled: Bool = false, items: [MeetingItem] = []) {
+        self.id = id; self.scheduledDate = scheduledDate
+        self.movedTo = movedTo; self.isCancelled = isCancelled; self.items = items
+    }
+
+    enum CodingKeys: String, CodingKey { case id, scheduledDate, movedTo, isCancelled, items }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        scheduledDate = (try? c.decodeIfPresent(Date.self, forKey: .scheduledDate)) ?? Date()
+        movedTo = try? c.decodeIfPresent(Date.self, forKey: .movedTo)
+        isCancelled = (try? c.decodeIfPresent(Bool.self, forKey: .isCancelled)) ?? false
+        items = (try? c.decodeIfPresent([MeetingItem].self, forKey: .items)) ?? []
+    }
+}
+
+/// 展開後的一場會議（規則推導 + 覆寫合併的結果）。純顯示用，不落地。
+struct ResolvedMeetingOccurrence: Identifiable {
+    /// 用原定日期當 id：同一場在多次展開之間 id 要穩定，才不會每次重畫都動畫閃一下
+    var id: Date { scheduledDate }
+    let scheduledDate: Date
+    let date: Date
+    let isCancelled: Bool
+    let isMoved: Bool
+    let items: [MeetingItem]
+    /// 已經落地成覆寫（使用者動過）
+    let isMaterialised: Bool
+}
+
 struct SubordinateMeeting: Identifiable, Codable {
     let id: UUID
     var topic: String
     var date: Date
     var durationMinutes: Int
+    /// 舊的週期欄位。保留是為了讓尚未升級的匯出檔仍讀得懂頻率；
+    /// 真正驅動展開的是 rule；建構子與編輯頁存檔時兩者一起維護。
     var recurrence: MeetingRecurrence?
+    var rule: MeetingRecurrenceRule?
+    /// 不重複的會議：議程項目就放這裡。
+    /// 有週期的會議：議程項目改放各場次自己身上，這裡會是空的
+    ///（切換「設定週期」時由編輯頁負責搬動，見 MeetingEditorSheet 的 onChange）。
     var items: [MeetingItem]
     var note: String
     /// Task 產生時間：這個會議主題「當初是什麼時候立的」，與開會時間分開。
     /// 舊資料沒有這個欄位，解碼時退回 date（開會時間），不會出現 1970 年。
     var createdAt: Date
+    /// 有狀態的場次（被取消／被改期／有議程項目）。沒動過的場次不會出現在這裡。
+    var occurrences: [MeetingOccurrence]
 
     init(id: UUID = UUID(), topic: String = "", date: Date = Date(),
          durationMinutes: Int = 60, recurrence: MeetingRecurrence? = nil,
-         items: [MeetingItem] = [], note: String = "", createdAt: Date? = nil) {
+         rule: MeetingRecurrenceRule? = nil,
+         items: [MeetingItem] = [], note: String = "", createdAt: Date? = nil,
+         occurrences: [MeetingOccurrence] = []) {
         self.id = id; self.topic = topic; self.date = date
-        self.durationMinutes = durationMinutes; self.recurrence = recurrence
+        self.durationMinutes = durationMinutes
+        self.rule = rule
+        self.recurrence = rule?.frequency ?? recurrence
         self.items = items; self.note = note
         self.createdAt = createdAt ?? date
+        self.occurrences = occurrences
     }
 
     /// 依時長推出的結束時間（編輯頁與清單顯示「14:00–15:00」用）
@@ -1617,11 +1704,19 @@ struct SubordinateMeeting: Identifiable, Codable {
         date.addingTimeInterval(TimeInterval(max(0, durationMinutes) * 60))
     }
 
-    enum CodingKeys: String, CodingKey {
-        case id, topic, date, durationMinutes, recurrence, items, note, createdAt
+    var isRecurring: Bool { rule != nil }
+
+    /// 全部議程項目（不分場次）。評分、行事曆待辦、搜尋、匯出一律走這裡——
+    /// 直接用 items 的話，有週期的會議所有項目都會憑空消失。
+    var allItems: [MeetingItem] {
+        isRecurring ? occurrences.flatMap(\.items) : items
     }
 
-    // 自訂解碼：createdAt 為後加欄位。這裡的容錯粒度是「整個部屬」——
+    enum CodingKeys: String, CodingKey {
+        case id, topic, date, durationMinutes, recurrence, rule, items, note, createdAt, occurrences
+    }
+
+    // 自訂解碼：createdAt／rule／occurrences 為後加欄位。這裡的容錯粒度是「整個部屬」——
     // 少一個 key 若讓 SubordinateMeeting 解碼失敗，整位部屬的資料都會消失。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1633,6 +1728,136 @@ struct SubordinateMeeting: Identifiable, Codable {
         items = (try? c.decodeIfPresent([MeetingItem].self, forKey: .items)) ?? []
         note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
         createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? date
+        occurrences = (try? c.decodeIfPresent([MeetingOccurrence].self, forKey: .occurrences)) ?? []
+
+        if let r = try? c.decodeIfPresent(MeetingRecurrenceRule.self, forKey: .rule) {
+            rule = r
+        } else if let legacy = recurrence {
+            // 升級遷移：舊的週期會議沒有 rule，也沒有場次概念——它的議程項目
+            // 是整個系列共用一份。依使用者確認的作法，把那份項目歸到「第一場」，
+            // 之後每一場才各自累積。不搬的話升級後所有項目都會落在沒人看得到的地方。
+            rule = MeetingRecurrenceRule(frequency: legacy)
+            if !items.isEmpty && occurrences.isEmpty {
+                occurrences = [MeetingOccurrence(scheduledDate: date, items: items)]
+                items = []
+            }
+        } else {
+            rule = nil
+        }
+    }
+
+    /// 展開這個系列的場次。
+    ///
+    /// 規則是真相、展開結果是畫面——與固定支出／信用卡／收入的週期展開同一個模式，
+    /// 同樣用 1200 次的上限當失控保險。差別是這裡要把「使用者動過的場次」疊回去，
+    /// 而且改期到規則之外的日期也必須出現在清單上（否則改完期那一場就人間蒸發）。
+    ///
+    /// - Parameters:
+    ///   - from: 只需要這天之後的場次（呼叫端通常給「七天前」）。給了就會依規則
+    ///     大步跳到附近再開始逐一推進——一個開了三年的每日會議若從第一天慢慢走，
+    ///     還沒走到今天就會先撞上保險絲，畫面只剩三年前的場次。
+    ///   - horizon: 沒設結束日時要展開到哪天為止（呼叫端通常給「今天 + 3 個月」）
+    func expandedOccurrences(from: Date? = nil, horizon: Date) -> [ResolvedMeetingOccurrence] {
+        let overrides = Dictionary(occurrences.map { ($0.scheduledDate.timeIntervalSinceReferenceDate, $0) },
+                                   uniquingKeysWith: { a, _ in a })
+        guard let rule else {
+            let o = overrides.values.first
+            return [ResolvedMeetingOccurrence(scheduledDate: date,
+                                              date: o?.effectiveDate ?? date,
+                                              isCancelled: o?.isCancelled ?? false,
+                                              isMoved: o?.movedTo != nil,
+                                              items: o?.items ?? items,
+                                              isMaterialised: o != nil)]
+        }
+
+        let limit = rule.endDate.map { max($0, date) } ?? max(horizon, date)
+        var dates: [Date] = []
+        let cal = Calendar.current
+        var cursor = from.map { fastForward(to: $0, rule: rule, cal: cal) } ?? date
+        var guardIdx = 0
+        while cursor <= limit && guardIdx < 1200 {
+            guardIdx += 1
+            if matchesWeekdayFilter(cursor, rule: rule, cal: cal) { dates.append(cursor) }
+            guard let next = advance(cursor, rule: rule, cal: cal) else { break }
+            cursor = next
+        }
+
+        var out: [ResolvedMeetingOccurrence] = []
+        var seen = Set<TimeInterval>()
+        for d in dates {
+            let key = d.timeIntervalSinceReferenceDate
+            seen.insert(key)
+            let o = overrides[key]
+            out.append(ResolvedMeetingOccurrence(scheduledDate: d,
+                                                 date: o?.effectiveDate ?? d,
+                                                 isCancelled: o?.isCancelled ?? false,
+                                                 isMoved: o?.movedTo != nil,
+                                                 items: o?.items ?? [],
+                                                 isMaterialised: o != nil))
+        }
+        // 落在展開範圍外的覆寫（例如把某場改期到結束日之後，或縮短了結束日）
+        // 仍然要看得到——它承載著使用者親手填的議程項目。
+        for o in occurrences where !seen.contains(o.scheduledDate.timeIntervalSinceReferenceDate) {
+            out.append(ResolvedMeetingOccurrence(scheduledDate: o.scheduledDate,
+                                                 date: o.effectiveDate,
+                                                 isCancelled: o.isCancelled,
+                                                 isMoved: o.movedTo != nil,
+                                                 items: o.items,
+                                                 isMaterialised: true))
+        }
+        return out.sorted { $0.date < $1.date }
+    }
+
+    /// 依規則的節奏「大步跳」到 target 附近，保持與起始日同相位。
+    /// 一律少跳一步（隔週就是少跳兩週），讓落點稍早於 target，
+    /// 免得剛好把 target 當週的場次跳過去。
+    private func fastForward(to target: Date, rule: MeetingRecurrenceRule, cal: Calendar) -> Date {
+        guard target > date else { return date }
+        switch rule.frequency {
+        case .daily:
+            let d = cal.dateComponents([.day], from: date, to: target).day ?? 0
+            return cal.date(byAdding: .day, value: max(0, d - 14), to: date) ?? date
+        case .weekly, .biweekly:
+            let step = rule.frequency == .biweekly ? 2 : 1
+            let w = cal.dateComponents([.weekOfYear], from: date, to: target).weekOfYear ?? 0
+            let n = max(0, ((w - step) / step) * step)
+            return cal.date(byAdding: .weekOfYear, value: n, to: date) ?? date
+        case .monthly:
+            let m = cal.dateComponents([.month], from: date, to: target).month ?? 0
+            return cal.date(byAdding: .month, value: max(0, m - 1), to: date) ?? date
+        }
+    }
+
+    private func matchesWeekdayFilter(_ d: Date, rule: MeetingRecurrenceRule, cal: Calendar) -> Bool {
+        guard rule.frequency == .weekly || rule.frequency == .biweekly,
+              !rule.weekdays.isEmpty else { return true }
+        return rule.weekdays.contains(cal.component(.weekday, from: d))
+    }
+
+    private func advance(_ d: Date, rule: MeetingRecurrenceRule, cal: Calendar) -> Date? {
+        switch rule.frequency {
+        case .daily:
+            return cal.date(byAdding: .day, value: 1, to: d)
+        case .weekly, .biweekly:
+            // 有指定星期幾時逐日前進、由 matchesWeekdayFilter 篩選；
+            // 隔週則在跨過週日換週時多跳一週，維持「隔一週」的語意。
+            if !rule.weekdays.isEmpty {
+                guard let next = cal.date(byAdding: .day, value: 1, to: d) else { return nil }
+                guard rule.frequency == .biweekly else { return next }
+                let wasWeek = cal.component(.weekOfYear, from: d)
+                let nowWeek = cal.component(.weekOfYear, from: next)
+                if wasWeek != nowWeek { return cal.date(byAdding: .day, value: 7, to: next) }
+                return next
+            }
+            return cal.date(byAdding: .day, value: rule.frequency == .biweekly ? 14 : 7, to: d)
+        case .monthly:
+            return cal.date(byAdding: .month, value: 1, to: d)
+        }
+    }
+
+    /// 回收沒有任何狀態的場次覆寫（使用者把改期取消、項目也刪光了）。
+    mutating func pruneOccurrences() {
+        occurrences.removeAll { !$0.isMeaningful }
     }
 }
 

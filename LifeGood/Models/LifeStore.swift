@@ -473,9 +473,13 @@ class LifeStore: ObservableObject {
         // 解除其他部屬會議議程項目指派給此人的負責人連結，避免懸空 id
         for si in subordinates.indices {
             for mi in subordinates[si].meetings.indices {
-                for ii in subordinates[si].meetings[mi].items.indices
-                where subordinates[si].meetings[mi].items[ii].assigneeIds.contains(item.id) {
+                for ii in subordinates[si].meetings[mi].items.indices {
                     subordinates[si].meetings[mi].items[ii].assigneeIds.removeAll { $0 == item.id }
+                }
+                for oi in subordinates[si].meetings[mi].occurrences.indices {
+                    for ii in subordinates[si].meetings[mi].occurrences[oi].items.indices {
+                        subordinates[si].meetings[mi].occurrences[oi].items[ii].assigneeIds.removeAll { $0 == item.id }
+                    }
                 }
             }
         }
@@ -501,13 +505,24 @@ class LifeStore: ObservableObject {
     /// 標記完成時記下 completedAt，取消完成則清空。
     func toggleMeetingItemCompletion(subordinateId: UUID, meetingId: UUID, itemId: UUID) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
-              let mi = subordinates[si].meetings.firstIndex(where: { $0.id == meetingId }),
-              let ii = subordinates[si].meetings[mi].items.firstIndex(where: { $0.id == itemId }) else { return }
+              let mi = subordinates[si].meetings.firstIndex(where: { $0.id == meetingId }) else { return }
         // isLoading 阻斷 didSet → save() 的隱式觸發，確保只有下方的顯式 save() 被執行一次
         isLoading = true
         defer { isLoading = false }
-        subordinates[si].meetings[mi].items[ii].isCompleted.toggle()
-        subordinates[si].meetings[mi].items[ii].completedAt = subordinates[si].meetings[mi].items[ii].isCompleted ? Date() : nil
+        // 有週期的會議，議程項目住在各場次底下；不重複的會議才住在 items。
+        // 只找 items 的話，週期會議上的打勾會靜默失效（按了沒反應）。
+        if let ii = subordinates[si].meetings[mi].items.firstIndex(where: { $0.id == itemId }) {
+            subordinates[si].meetings[mi].items[ii].isCompleted.toggle()
+            subordinates[si].meetings[mi].items[ii].completedAt = subordinates[si].meetings[mi].items[ii].isCompleted ? Date() : nil
+        } else {
+            for oi in subordinates[si].meetings[mi].occurrences.indices {
+                guard let ii = subordinates[si].meetings[mi].occurrences[oi].items.firstIndex(where: { $0.id == itemId }) else { continue }
+                subordinates[si].meetings[mi].occurrences[oi].items[ii].isCompleted.toggle()
+                subordinates[si].meetings[mi].occurrences[oi].items[ii].completedAt =
+                    subordinates[si].meetings[mi].occurrences[oi].items[ii].isCompleted ? Date() : nil
+                break
+            }
+        }
         save()
     }
 

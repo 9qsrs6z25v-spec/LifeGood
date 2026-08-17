@@ -189,7 +189,7 @@ struct SubordinateOverviewView: View {
     private var incompleteMeetingItems: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)] {
         lifeStore.subordinates.flatMap { sub in
             sub.meetings.flatMap { m in
-                m.items.filter { !$0.isCompleted }.map { (sub: sub, meeting: m, item: $0) }
+                m.allItems.filter { !$0.isCompleted }.map { (sub: sub, meeting: m, item: $0) }
             }
         }
         .sorted { $0.meeting.date > $1.meeting.date }
@@ -451,11 +451,11 @@ struct SubordinateOverviewView: View {
             lines.append("・當日無會議")
         } else {
             for it in meetings {
-                let doneCnt = it.meeting.items.filter(\.isCompleted).count
+                let doneCnt = it.meeting.allItems.filter(\.isCompleted).count
                 var head = "• \(it.meeting.topic.isEmpty ? "未命名會議" : it.meeting.topic)｜\(Self.shareTimeFmt.string(from: it.meeting.date))｜\(it.meeting.durationMinutes) 分鐘"
-                if !it.meeting.items.isEmpty { head += "｜議程 \(doneCnt)/\(it.meeting.items.count)" }
+                if !it.meeting.allItems.isEmpty { head += "｜議程 \(doneCnt)/\(it.meeting.allItems.count)" }
                 lines.append(head)
-                for item in it.meeting.items {
+                for item in it.meeting.allItems {
                     var row = "　\(item.isCompleted ? "✅" : "⬜️") \(item.content.isEmpty ? "未填內容" : item.content)"
                     if item.isCompleted, let at = item.completedAt { row += "｜🏁 \(Self.shareShortFmt.string(from: at))" }
                     else if let due = item.dueDate { row += "｜⏰ \(Self.shareShortFmt.string(from: due))" }
@@ -726,7 +726,7 @@ struct SubordinateOverviewView: View {
                                           onTap: { editTarget = .report(subId: sub.id, report: r) }))
             }
             for m in sub.meetings {
-                for item in m.items where item.isCompleted {
+                for item in m.allItems where item.isCompleted {
                     out.append(CompletedEntry(id: item.id, kind: .meeting, title: item.content,
                                               subtitle: "\(who)・\(m.topic.isEmpty ? "會議" : m.topic)",
                                               completedAt: item.completedAt, due: item.dueDate,
@@ -981,9 +981,9 @@ struct SubordinateOverviewView: View {
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(Color(.separator).opacity(0.18), lineWidth: 0.6))
                 }
-                if !meeting.items.isEmpty {
+                if !meeting.allItems.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
-                        ForEach(meeting.items) { item in
+                        ForEach(meeting.allItems) { item in
                             HStack(alignment: .top, spacing: 6) {
                                 Button {
                                     lifeStore.toggleMeetingItemCompletion(subordinateId: sub.id, meetingId: meeting.id, itemId: item.id)

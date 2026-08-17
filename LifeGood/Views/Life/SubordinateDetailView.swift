@@ -751,7 +751,7 @@ struct SubordinateDetailView: View {
                                       onTap: { if subscription.isPremium { previewItem = .report(subId: subordinateId, report: r) } else { showPremiumAlert = true } }))
         }
         for m in subordinate.meetings {
-            for item in m.items where item.isCompleted {
+            for item in m.allItems where item.isCompleted {
                 out.append(CompletedEntry(id: item.id, kind: .meeting, title: item.content,
                                           subtitle: m.topic.isEmpty ? "會議" : m.topic,
                                           completedAt: item.completedAt, due: item.dueDate,
@@ -787,7 +787,7 @@ struct SubordinateDetailView: View {
                 out.append(.task(subId: s.id, task: t))
             }
             for m in s.meetings {
-                let itemsText = m.items.map(\.content).joined(separator: "\n")
+                let itemsText = m.allItems.map(\.content).joined(separator: "\n")
                 if hit(m.note, itemsText) { out.append(.meeting(subId: s.id, meeting: m)) }
             }
             for r in s.weeklyReports where hit(r.note) {
@@ -1009,7 +1009,7 @@ struct SubordinateDetailView: View {
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
                                     }
-                                    let pending = m.items.filter { !$0.isCompleted }
+                                    let pending = m.allItems.filter { !$0.isCompleted }
                                     if !pending.isEmpty {
                                         Text("\(pending.count) 個待辦項目")
                                             .font(.caption2)
@@ -1029,7 +1029,7 @@ struct SubordinateDetailView: View {
                     .buttonStyle(.plain)
 
                     // 議程項目（僅未完成；已完成移至底部「已完成」收合區）
-                    let pendingItems = m.items.filter { !$0.isCompleted }
+                    let pendingItems = m.allItems.filter { !$0.isCompleted }
                     if !pendingItems.isEmpty {
                         VStack(spacing: 0) {
                             ForEach(pendingItems) { item in
@@ -1641,9 +1641,9 @@ struct SubordinateDetailView: View {
             if !sub.meetings.isEmpty {
                 lines.append(""); lines.append("👥 會議")
                 for m in sub.meetings.sorted(by: { $0.date > $1.date }) {
-                    let done = m.items.filter(\.isCompleted).count
-                    lines.append("• \(m.topic.isEmpty ? "未命名會議" : m.topic)｜\(formatDateTime(m.date))\(m.items.isEmpty ? "" : "｜議程 \(done)/\(m.items.count)")")
-                    for item in m.items {
+                    let done = m.allItems.filter(\.isCompleted).count
+                    lines.append("• \(m.topic.isEmpty ? "未命名會議" : m.topic)｜\(formatDateTime(m.date))\(m.allItems.isEmpty ? "" : "｜議程 \(done)/\(m.allItems.count)")")
+                    for item in m.allItems {
                         var row = "　\(item.isCompleted ? "✅" : "⬜️") \(item.content.isEmpty ? "未填內容" : item.content)"
                         if item.isCompleted, let at = item.completedAt { row += "｜🏁 \(formatDate(at))" }
                         else if let due = item.dueDate { row += "｜⏰ \(formatDate(due))" }
@@ -2339,13 +2339,18 @@ struct MeetingEditorSheet: View {
     @State private var createdAt = Date()
     @State private var date = Date()
     @State private var durationText = "60"
-    @State private var recurrence: MeetingRecurrence?
     @State private var hasRecurrence = false
+    @State private var frequency: MeetingRecurrence = .weekly
+    /// 1=週日 … 7=週六
+    @State private var weekdays: Set<Int> = []
+    @State private var hasRuleEnd = false
+    @State private var ruleEndDate = Date()
     @State private var items: [MeetingItem] = []
+    @State private var occurrences: [MeetingOccurrence] = []
     @State private var note = ""
     @State private var isSaving = false
-    /// 正在挑負責人的項目 id。用 .sheet(item:) 開挑人頁——本檔案的 Sheet 一律走這個模式。
-    @State private var pickingAssigneeFor: IDBox?
+    /// 正在編輯的場次（以原定日期為鍵）。用 .sheet(item:) 開——本檔案的 Sheet 一律走這個模式。
+    @State private var editingOccurrence: DateBox?
 
     /// 負責人姓名快取：sideRolePersonCandidates() 每次呼叫都會重建三種來源、做去重與排序，
     /// 直接在每一列裡呼叫會讓打字時每個字元都重算一次全公司名單。
@@ -2405,32 +2410,32 @@ struct MeetingEditorSheet: View {
                     }
                     Toggle("設定週期", isOn: $hasRecurrence)
                     if hasRecurrence {
-                        Picker("週期", selection: $recurrence) {
-                            Text("不重複").tag(nil as MeetingRecurrence?)
-                            ForEach(MeetingRecurrence.allCases) { Text($0.rawValue).tag($0 as MeetingRecurrence?) }
+                        Picker("重複頻率", selection: $frequency) {
+                            ForEach(MeetingRecurrence.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        if frequency == .weekly || frequency == .biweekly {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("星期幾（不選＝沿用開始日的星期）")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                weekdayChips
+                            }
+                        }
+                        Toggle("設定結束日期", isOn: $hasRuleEnd)
+                        if hasRuleEnd {
+                            DatePicker("重複到", selection: $ruleEndDate, displayedComponents: .date)
+                        } else {
+                            Text("未設結束日期時，下方只列出未來三個月的場次。")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
                 } header: {
                     editorSectionHeader("會議時間", icon: "calendar.badge.clock")
                 }
 
-                Section {
-                    if items.isEmpty {
-                        HStack {
-                            Spacer()
-                            Text("尚未新增項目").font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .padding(.vertical, 6)
-                    }
-                    ForEach($items) { $item in
-                        itemEditor($item)
-                    }
-                    Button { items.append(MeetingItem()) } label: {
-                        Label("新增項目", systemImage: "plus.circle").foregroundStyle(.indigo)
-                    }
-                } header: {
-                    editorSectionHeader("會議項目", icon: "checklist")
+                if hasRecurrence {
+                    occurrenceSection
+                } else {
+                    MeetingItemsEditor(items: $items, peopleIndex: peopleIndex)
                 }
 
                 if editing != nil {
@@ -2456,15 +2461,24 @@ struct MeetingEditorSheet: View {
                     }
                 }
             }
-            .sheet(item: $pickingAssigneeFor) { box in
-                NavigationStack {
-                    MeetingAssigneePicker(
-                        initial: items.first { $0.id == box.id }?.assigneeIds ?? [],
-                        onDone: { ids in
-                            guard let idx = items.firstIndex(where: { $0.id == box.id }) else { return }
-                            items[idx].assigneeIds = ids
-                        }
-                    )
+            .sheet(item: $editingOccurrence) { box in
+                MeetingOccurrenceEditor(scheduledDate: box.id,
+                                        durationMinutes: Int(durationText) ?? 60,
+                                        occurrence: occurrences.first { $0.scheduledDate == box.id },
+                                        peopleIndex: peopleIndex,
+                                        onSave: applyOccurrence)
+            }
+            // 切換週期時就把議程項目搬到該去的地方：不重複的會議項目住在 items，
+            // 有週期的會議住在各場次。等到存檔才搬的話，切換後畫面會先變成空的、
+            // 存完又冒回來，使用者會以為資料掉了。
+            .onChange(of: hasRecurrence) { _, on in
+                if on {
+                    guard !items.isEmpty else { return }
+                    occurrences.append(MeetingOccurrence(scheduledDate: date, items: items))
+                    items = []
+                } else {
+                    items.append(contentsOf: occurrences.flatMap(\.items))
+                    occurrences.removeAll()
                 }
             }
             .onAppear {
@@ -2473,19 +2487,241 @@ struct MeetingEditorSheet: View {
                 if let e = editing {
                     topic = e.topic; date = e.date; createdAt = e.createdAt
                     durationText = "\(e.durationMinutes)"
-                    if let r = e.recurrence { hasRecurrence = true; recurrence = r }
-                    items = e.items; note = e.note
+                    if let r = e.rule {
+                        hasRecurrence = true
+                        frequency = r.frequency
+                        weekdays = Set(r.weekdays)
+                        if let end = r.endDate { hasRuleEnd = true; ruleEndDate = end }
+                    }
+                    items = e.items; note = e.note; occurrences = e.occurrences
                 } else {
                     // 新會議：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
                     createdAt = Date()
+                    ruleEndDate = Calendar.current.date(byAdding: .month, value: 3, to: Date()) ?? Date()
                 }
             }
         }
     }
 
-    /// 單一議程項目的編輯區塊。刻意抽成函式：本檔案曾因 ForEach 內大量巢狀
-    /// Binding 轉換撞上 Swift 型別推導逾時。
+    // MARK: 週期規則
+
+    private var currentRule: MeetingRecurrenceRule? {
+        guard hasRecurrence else { return nil }
+        return MeetingRecurrenceRule(frequency: frequency,
+                                     weekdays: weekdays.sorted(),
+                                     endDate: hasRuleEnd ? ruleEndDate : nil)
+    }
+
+    private static let weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"]
+
+    private var weekdayChips: some View {
+        HStack(spacing: 6) {
+            ForEach(1...7, id: \.self) { wd in
+                let on = weekdays.contains(wd)
+                Button {
+                    if on { weekdays.remove(wd) } else { weekdays.insert(wd) }
+                } label: {
+                    Text(Self.weekdayLabels[wd - 1])
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 32, height: 32)
+                        .background(on ? Color.indigo : Color(.tertiarySystemFill), in: Circle())
+                        .foregroundStyle(on ? Color.white : Color.primary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: 場次列表
+
+    /// 用目前編輯中的內容組出一份暫時的會議，借它的展開邏輯算場次。
+    /// 存檔前就要看得到場次，所以不能等寫進 store 才展開。
+    private var draftMeeting: SubordinateMeeting {
+        SubordinateMeeting(id: editing?.id ?? UUID(), topic: topic, date: date,
+                           durationMinutes: Int(durationText) ?? 60,
+                           rule: currentRule, items: items, note: note,
+                           createdAt: createdAt, occurrences: occurrences)
+    }
+
+    /// 場次清單的顯示窗：只列「七天前」之後的場次，最多 40 筆。
+    /// 一個開了兩年的每週會議展開後上百場，全列出來會把編輯頁淹掉。
+    private var visibleOccurrences: [ResolvedMeetingOccurrence] {
+        let cal = Calendar.current
+        let horizon = cal.date(byAdding: .month, value: 3, to: Date()) ?? Date()
+        let floor = cal.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let all = draftMeeting.expandedOccurrences(from: floor, horizon: horizon)
+        let kept = all.filter { $0.date >= floor || $0.isMaterialised }
+        return Array(kept.prefix(40))
+    }
+
+    @ViewBuilder
+    private var occurrenceSection: some View {
+        let list = visibleOccurrences
+        Section {
+            if list.isEmpty {
+                Text("目前的週期設定沒有產生任何場次。若有指定星期幾，請確認開始日期之後有符合的日子。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(list) { occ in
+                Button { editingOccurrence = DateBox(id: occ.scheduledDate) } label: {
+                    occurrenceRow(occ)
+                }
+                .buttonStyle(.plain)
+            }
+        } header: {
+            editorSectionHeader("場次（\(list.count)）", icon: "calendar.day.timeline.left")
+        } footer: {
+            Text("每一場各有自己的議程項目。點一場可以編輯項目、改期或取消那一場，不影響其他場次。")
+                .font(.caption2)
+        }
+    }
+
+    private func occurrenceRow(_ occ: ResolvedMeetingOccurrence) -> some View {
+        let done = occ.items.filter(\.isCompleted).count
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(MeetingTimeFormat.dateTime24.string(from: occ.date))
+                        .font(.subheadline.weight(.medium))
+                        .strikethrough(occ.isCancelled, color: .secondary)
+                        .foregroundStyle(occ.isCancelled ? Color.secondary : Color.primary)
+                    if occ.isCancelled { occurrenceBadge("已取消", .red) }
+                    else if occ.isMoved { occurrenceBadge("已改期", .orange) }
+                }
+                HStack(spacing: 8) {
+                    if occ.isMoved {
+                        Text("原定 \(MeetingTimeFormat.dateTime24.string(from: occ.scheduledDate))")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if occ.items.isEmpty {
+                        Text("尚無議程").font(.caption2).foregroundStyle(.tertiary)
+                    } else {
+                        Text("議程 \(done)/\(occ.items.count)")
+                            .font(.caption2)
+                            .foregroundStyle(done == occ.items.count ? Color.green : Color.secondary)
+                    }
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func occurrenceBadge(_ text: String, _ tint: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(tint.opacity(0.14), in: Capsule())
+            .foregroundStyle(tint)
+    }
+
+    /// 場次編輯完成後寫回。全部清空的場次直接回收，不留空殼在存檔裡。
+    private func applyOccurrence(_ updated: MeetingOccurrence) {
+        if let idx = occurrences.firstIndex(where: { $0.scheduledDate == updated.scheduledDate }) {
+            if updated.isMeaningful { occurrences[idx] = updated }
+            else { occurrences.remove(at: idx) }
+        } else if updated.isMeaningful {
+            occurrences.append(updated)
+        }
+    }
+
+    private func save() {
+        guard !isSaving else { return }
+        guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
+        // items ⇄ 場次的搬動已經在切換「設定週期」的當下就做掉了（見 onChange），
+        // 這裡不再搬一次，否則會搬兩遍。
+        var meeting = SubordinateMeeting(
+            id: editing?.id ?? UUID(),
+            topic: topic.trimmingCharacters(in: .whitespaces),
+            date: date, durationMinutes: Int(durationText) ?? 60,
+            rule: currentRule,
+            items: items, note: note.trimmingCharacters(in: .whitespaces),
+            createdAt: createdAt, occurrences: occurrences
+        )
+        meeting.pruneOccurrences()
+        if let idx = sub.meetings.firstIndex(where: { $0.id == meeting.id }) { sub.meetings[idx] = meeting }
+        else { sub.meetings.append(meeting) }
+        lifeStore.update(sub); dismiss()
+    }
+
+    private func deleteMeeting() {
+        guard !isSaving else { return }
+        guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        isSaving = true
+        sub.meetings.removeAll { $0.id == e.id }
+        lifeStore.update(sub); dismiss()
+    }
+}
+
+// MARK: - 議程項目編輯（會議本身與各場次共用）
+
+/// 以原定日期當 id 的 .sheet(item:) 包裝。UUID 不是 Identifiable，Date 也不是。
+struct DateBox: Identifiable { let id: Date }
+
+/// 議程項目清單的編輯區塊。抽成獨立的 View 有兩個理由：
+///   1. 不重複會議（項目在 meeting.items）與週期會議的單一場次（項目在
+///      occurrence.items）要用同一份 UI，否則兩邊會慢慢長歪。
+///   2. 挑負責人的 sheet 狀態跟著清單走，放在外層會讓兩處各維護一份。
+/// ⚠️ 這是一個「整段 Section」的元件，要直接放在 Form 底下，不要再包一層 Section。
+///    包在別人的 Section 裡的話，SwiftUI 會把它整組壓成單一列。
+struct MeetingItemsEditor: View {
+    @Binding var items: [MeetingItem]
+    var title: String = "會議項目"
+    var icon: String = "checklist"
+    /// 由外層 onAppear 建好傳入：sideRolePersonCandidates() 每次呼叫都會重建
+    /// 三種來源、去重與排序，放在每一列裡呼叫會讓打字時每個字元都重算全公司名單。
+    let peopleIndex: [UUID: SideRolePersonCandidate]
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @State private var pickingAssigneeFor: IDBox?
+
+    var body: some View {
+        Section {
+            if items.isEmpty {
+                HStack {
+                    Spacer()
+                    Text("尚未新增項目").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 6)
+            }
+            ForEach($items) { $item in
+                itemEditor($item)
+            }
+            Button { items.append(MeetingItem()) } label: {
+                Label("新增項目", systemImage: "plus.circle").foregroundStyle(.indigo)
+            }
+        } header: {
+            // 對齊 MeetingEditorSheet.editorSectionHeader 規格（4pt 漸層色條 + 圖示 + 粗體）
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.indigo, .indigo.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.indigo)
+                Text(title).font(.subheadline.weight(.bold))
+            }
+        }
+        .sheet(item: $pickingAssigneeFor) { box in
+            NavigationStack {
+                MeetingAssigneePicker(
+                    initial: items.first { $0.id == box.id }?.assigneeIds ?? [],
+                    onDone: { ids in
+                        guard let idx = items.firstIndex(where: { $0.id == box.id }) else { return }
+                        items[idx].assigneeIds = ids
+                    }
+                )
+            }
+        }
+    }
+
+    /// 單一議程項目。刻意抽成函式：本檔案曾因 ForEach 內大量巢狀 Binding
+    /// 轉換撞上 Swift 型別推導逾時。
     @ViewBuilder
     private func itemEditor(_ item: Binding<MeetingItem>) -> some View {
         let value = item.wrappedValue
@@ -2537,7 +2773,7 @@ struct MeetingEditorSheet: View {
             )) {
                 Label(value.isCompleted ? "已完成" : "未完成",
                       systemImage: value.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(value.isCompleted ? .green : .secondary)
+                    .foregroundStyle(value.isCompleted ? Color.green : Color.secondary)
             }
             MentionTextField(text: item.note, placeholder: "項目備註（可打 @ 標註人員）",
                              people: lifeStore.mentionPeople())
@@ -2565,30 +2801,94 @@ struct MeetingEditorSheet: View {
         }
         .buttonStyle(.plain)
     }
+}
 
-    private func save() {
-        guard !isSaving else { return }
-        guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
-        isSaving = true
-        let meeting = SubordinateMeeting(
-            id: editing?.id ?? UUID(),
-            topic: topic.trimmingCharacters(in: .whitespaces),
-            date: date, durationMinutes: Int(durationText) ?? 60,
-            recurrence: hasRecurrence ? recurrence : nil,
-            items: items, note: note.trimmingCharacters(in: .whitespaces),
-            createdAt: createdAt
-        )
-        if let idx = sub.meetings.firstIndex(where: { $0.id == meeting.id }) { sub.meetings[idx] = meeting }
-        else { sub.meetings.append(meeting) }
-        lifeStore.update(sub); dismiss()
+// MARK: - 單一場次編輯
+
+/// 週期會議中「某一場」的編輯頁：這一場自己的議程項目、改期、取消。
+/// 改動只回寫給呼叫端（編輯頁的暫存陣列），按會議的「儲存」才真的落地，
+/// 所以在會議編輯頁按「取消」時，場次的改動也會一起被丟掉。
+struct MeetingOccurrenceEditor: View {
+    let scheduledDate: Date
+    let durationMinutes: Int
+    /// 既有的覆寫；nil 表示這一場使用者還沒動過
+    let occurrence: MeetingOccurrence?
+    let peopleIndex: [UUID: SideRolePersonCandidate]
+    let onSave: (MeetingOccurrence) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var items: [MeetingItem] = []
+    @State private var isCancelled = false
+    @State private var isMoved = false
+    @State private var movedTo = Date()
+    @State private var loaded = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        Text("原定")
+                        Spacer()
+                        Text(MeetingTimeFormat.dateTime24.string(from: scheduledDate))
+                            .foregroundStyle(.secondary)
+                    }
+                    Toggle("改期", isOn: $isMoved)
+                    if isMoved {
+                        HStack {
+                            Text("改到")
+                            Spacer()
+                            FiveMinuteDateTimePicker(selection: $movedTo).fixedSize()
+                        }
+                    }
+                    HStack {
+                        Text("時間").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(MeetingTimeFormat.rangeText(start: isMoved ? movedTo : scheduledDate,
+                                                         minutes: durationMinutes))
+                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.indigo)
+                    }
+                    Toggle(isOn: $isCancelled) {
+                        Label("取消這一場", systemImage: "calendar.badge.minus")
+                            .foregroundStyle(isCancelled ? Color.red : Color.primary)
+                    }
+                } header: {
+                    Text("這一場")
+                } footer: {
+                    Text("取消或改期只影響這一場，週期本身不變。")
+                }
+
+                MeetingItemsEditor(items: $items, title: "這一場的議程項目",
+                                   peopleIndex: peopleIndex)
+            }
+            .navigationTitle("場次")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { commit() }.bold().foregroundStyle(.green)
+                }
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                items = occurrence?.items ?? []
+                isCancelled = occurrence?.isCancelled ?? false
+                if let m = occurrence?.movedTo { isMoved = true; movedTo = m }
+                else { movedTo = scheduledDate }
+            }
+        }
     }
 
-    private func deleteMeeting() {
-        guard !isSaving else { return }
-        guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
-        isSaving = true
-        sub.meetings.removeAll { $0.id == e.id }
-        lifeStore.update(sub); dismiss()
+    private func commit() {
+        onSave(MeetingOccurrence(id: occurrence?.id ?? UUID(),
+                                 scheduledDate: scheduledDate,
+                                 movedTo: isMoved ? movedTo : nil,
+                                 isCancelled: isCancelled,
+                                 items: items))
+        dismiss()
     }
 }
 
@@ -3113,7 +3413,7 @@ extension LifeStore {
             }
             for m in s.meetings {
                 var ids = MentionText.mentionedIDs(in: m.note, sortedPeople: sortedPeople)
-                for item in m.items {
+                for item in m.allItems {
                     ids.formUnion(MentionText.mentionedIDs(in: item.content, sortedPeople: sortedPeople))
                     ids.formUnion(MentionText.mentionedIDs(in: item.note, sortedPeople: sortedPeople))
                 }
@@ -3371,6 +3671,118 @@ struct SubordinateItemCard: View {
         shareItem = CardSharePayload(items: [shareTextContent()])
     }
 
+    private static let weekdayShort = ["日", "一", "二", "三", "四", "五", "六"]
+
+    private func ruleSummary(_ r: MeetingRecurrenceRule) -> String {
+        var s = r.frequency.rawValue
+        if (r.frequency == .weekly || r.frequency == .biweekly), !r.weekdays.isEmpty {
+            let days = r.weekdays.sorted().compactMap { wd -> String? in
+                guard wd >= 1 && wd <= 7 else { return nil }
+                return "週" + Self.weekdayShort[wd - 1]
+            }
+            if !days.isEmpty { s += "（\(days.joined(separator: "、"))）" }
+        }
+        if let end = r.endDate { s += "，至 \(Self.dateOnlyFmt.string(from: end))" }
+        return s
+    }
+
+    /// 卡片上只列「七天前」之後、最多 12 場——這是預覽卡不是完整清單，
+    /// 開了兩年的每週會議展開後上百場，全塞進來會把卡片拉到看不完。
+    private func displayOccurrences(of m: SubordinateMeeting) -> [ResolvedMeetingOccurrence] {
+        let cal = Calendar.current
+        let horizon = cal.date(byAdding: .month, value: 3, to: Date()) ?? Date()
+        let floor = cal.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let all = m.expandedOccurrences(from: floor, horizon: horizon)
+        let kept = all.filter { $0.date >= floor || !$0.items.isEmpty }
+        return Array(kept.prefix(12))
+    }
+
+    @ViewBuilder
+    private func occurrenceBlock(_ occ: ResolvedMeetingOccurrence,
+                                 meeting: SubordinateMeeting, subId: UUID) -> some View {
+        let head = MeetingTimeFormat.dateTime24.string(from: occ.date)
+            + (occ.isCancelled ? "（已取消）" : occ.isMoved ? "（已改期）" : "")
+        if occ.items.isEmpty {
+            HStack(spacing: 6) {
+                Image(systemName: occ.isCancelled ? "calendar.badge.minus" : "calendar")
+                    .font(.system(size: 11))
+                Text(head).font(.caption)
+                Text("尚無議程").font(.caption2).foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(occ.isCancelled ? Color.red.opacity(0.8) : Color.secondary)
+            .padding(.horizontal, 4)
+        } else {
+            agendaBlock(title: head, items: occ.items, meeting: meeting, subId: subId)
+        }
+    }
+
+    private func agendaBlock(title: String, items: [MeetingItem],
+                             meeting: SubordinateMeeting, subId: UUID) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            ForEach(items) { item in
+                agendaRow(item, meetingId: meeting.id, subId: subId)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding().background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        // [v1] 補 overlay 細邊框，對齊 field()／richBlock() 同批補齊規格
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    private func agendaRow(_ item: MeetingItem, meetingId: UUID, subId: UUID) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Button {
+                lifeStore.toggleMeetingItemCompletion(subordinateId: subId, meetingId: meetingId, itemId: item.id)
+            } label: {
+                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15)).foregroundStyle(item.isCompleted ? Color.green : Color.indigo)
+            }
+            .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(MentionText.attributed(item.content.isEmpty ? "未填內容" : item.content, people: people))
+                    .font(.subheadline).tint(.blue)
+                    .strikethrough(item.isCompleted, color: .secondary)
+                    .foregroundStyle(item.isCompleted ? Color.secondary : Color.primary)
+                if let who = assigneeNames(item.assigneeIds) {
+                    Label(who, systemImage: "person.2.fill")
+                        .font(.caption2).foregroundStyle(.indigo)
+                }
+                if let due = item.dueDate {
+                    Label(fmtDue(due), systemImage: "clock")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                if !item.note.isEmpty {
+                    Text(MentionText.attributed(item.note, people: people))
+                        .font(.caption2).tint(.blue).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+            if item.isCompleted, let at = item.completedAt {
+                Text(fmtDue(at)).font(.caption2).foregroundStyle(.green)
+            }
+        }
+    }
+
+    /// 匯出文字用的議程列（會議本身與各場次共用一份格式）
+    private func agendaLines(_ items: [MeetingItem]) -> [String] {
+        var lines: [String] = []
+        for item in items {
+            var row = "\(item.isCompleted ? "✅" : "⬜️") \(item.content.isEmpty ? "未填內容" : item.content)"
+            if let who = assigneeNames(item.assigneeIds) { row += "｜👤 \(who)" }
+            lines.append(row)
+            if item.isCompleted, let at = item.completedAt {
+                lines.append("　└ 🏁 \(fmtDue(at)) 完成")
+            } else if let due = item.dueDate {
+                lines.append("　└ ⏰ 截止 \(fmtDue(due))")
+            }
+            if !item.note.isEmpty { lines.append("　└ 💬 \(item.note)") }
+        }
+        return lines
+    }
+
     /// 負責人可能來自部屬／名片／組織人員三種來源，統一走挑人清單那份反查。
     private func assigneeNames(_ ids: [UUID]) -> String? {
         let names = ids.compactMap { lifeStore.sideRolePerson($0)?.name }
@@ -3397,21 +3809,22 @@ struct SubordinateItemCard: View {
             lines.append("🕐 會議時間：\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
             lines.append("⏱ 會議長度：\(m.durationMinutes) 分鐘")
             lines.append("🗓 產生時間：\(fmt(m.createdAt))")
-            if !m.items.isEmpty {
-                let done = m.items.filter(\.isCompleted).count
-                lines.append("")
-                lines.append("📌 議程項目（\(done)/\(m.items.count) 完成）")
-                for item in m.items {
-                    var row = "\(item.isCompleted ? "✅" : "⬜️") \(item.content.isEmpty ? "未填內容" : item.content)"
-                    if let who = assigneeNames(item.assigneeIds) { row += "｜👤 \(who)" }
-                    lines.append(row)
-                    if item.isCompleted, let at = item.completedAt {
-                        lines.append("　└ 🏁 \(fmtDue(at)) 完成")
-                    } else if let due = item.dueDate {
-                        lines.append("　└ ⏰ 截止 \(fmtDue(due))")
-                    }
-                    if !item.note.isEmpty { lines.append("　└ 💬 \(item.note)") }
+            if let r = m.rule { lines.append("🔁 週期：\(ruleSummary(r))") }
+            if m.isRecurring {
+                for occ in displayOccurrences(of: m) {
+                    lines.append("")
+                    var head = "📅 \(MeetingTimeFormat.dateTime24.string(from: occ.date))"
+                    if occ.isCancelled { head += "（已取消）" }
+                    else if occ.isMoved { head += "（原定 \(MeetingTimeFormat.dateTime24.string(from: occ.scheduledDate))）" }
+                    lines.append(head)
+                    if occ.items.isEmpty { lines.append("　（尚無議程）") }
+                    else { lines.append(contentsOf: agendaLines(occ.items)) }
                 }
+            } else if !m.allItems.isEmpty {
+                let done = m.allItems.filter(\.isCompleted).count
+                lines.append("")
+                lines.append("📌 議程項目（\(done)/\(m.allItems.count) 完成）")
+                lines.append(contentsOf: agendaLines(m.allItems))
             }
             if !m.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(m.note) }
         case .report(let subId, let snap):
@@ -3528,48 +3941,14 @@ struct SubordinateItemCard: View {
             field("會議時間", "\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
             field("會議長度", "\(m.durationMinutes) 分鐘")
             field("產生時間", fmt(m.createdAt))
-            if !m.items.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("議程項目").font(.caption).foregroundStyle(.secondary)
-                    ForEach(m.items) { item in
-                        HStack(alignment: .top, spacing: 8) {
-                            Button {
-                                lifeStore.toggleMeetingItemCompletion(subordinateId: subId, meetingId: m.id, itemId: item.id)
-                            } label: {
-                                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                                    .font(.system(size: 15)).foregroundStyle(item.isCompleted ? .green : .indigo)
-                            }
-                            .buttonStyle(.plain)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(MentionText.attributed(item.content.isEmpty ? "未填內容" : item.content, people: people))
-                                    .font(.subheadline).tint(.blue)
-                                    .strikethrough(item.isCompleted, color: .secondary)
-                                    .foregroundStyle(item.isCompleted ? .secondary : .primary)
-                                if let who = assigneeNames(item.assigneeIds) {
-                                    Label(who, systemImage: "person.2.fill")
-                                        .font(.caption2).foregroundStyle(.indigo)
-                                }
-                                if let due = item.dueDate {
-                                    Label(fmtDue(due), systemImage: "clock")
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
-                                if !item.note.isEmpty {
-                                    Text(MentionText.attributed(item.note, people: people))
-                                        .font(.caption2).tint(.blue).foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer(minLength: 0)
-                            if item.isCompleted, let at = item.completedAt {
-                                Text(fmtDue(at)).font(.caption2).foregroundStyle(.green)
-                            }
-                        }
-                    }
+            if let r = m.rule { field("週期", ruleSummary(r)) }
+            if m.isRecurring {
+                // 有週期的會議：議程項目屬於各場次，攤平顯示會看不出哪一項是哪一場的
+                ForEach(displayOccurrences(of: m)) { occ in
+                    occurrenceBlock(occ, meeting: m, subId: subId)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding().background(Color(.secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                // [v1] 補 overlay 細邊框，對齊 field()／richBlock() 同批補齊規格
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+            } else if !m.allItems.isEmpty {
+                agendaBlock(title: "議程項目", items: m.allItems, meeting: m, subId: subId)
             }
             richBlock("備註", m.note)
         case .report(let subId, let snap):
