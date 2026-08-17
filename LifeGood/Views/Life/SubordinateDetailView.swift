@@ -3716,7 +3716,10 @@ enum SubordinateItemRef: Identifiable {
     }
 }
 
-private struct IDBox: Identifiable { let id: UUID }
+/// UUID 的 .sheet(item:) 包裝（UUID 不是 Identifiable）。
+/// 不能是 private：MeetingItemsEditor（internal）的 @Binding 屬性用到它，
+/// 屬性的型別存取層級不能比屬性所屬的型別窄，否則編譯錯誤。
+struct IDBox: Identifiable { let id: UUID }
 
 /// 分享項目的 Identifiable 包裝（供 .sheet(item:) 使用）：可裝圖片暫存檔 URL 或純文字
 private struct CardSharePayload: Identifiable { let id = UUID(); let items: [Any] }
