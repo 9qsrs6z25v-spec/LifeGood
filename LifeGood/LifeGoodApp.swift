@@ -68,6 +68,12 @@ struct LifeGoodApp: App {
     // 從背景喚醒不會重播。因此「看到開場動畫＝App 曾被系統終止後重新啟動」，
     // 可直接目視判斷 App 是否在後台被殺（也可順帶確認畫面上顯示的版本號是不是剛裝的 build）。
     @State private var showSplash = true
+    /// 開場謝幕動畫的驅動旗標。
+    /// ⚠️ 謝幕**不走 .transition**：條件移除 + withAnimation 在 App 根層（WindowGroup
+    /// 直下）的移除轉場經實測不會播——v25.234 以前的 .opacity 淡出其實也從來沒動過，
+    /// 使用者一直看到的都是硬切。改為「先用 modifier 動畫把透明度/縮放播完、
+    /// 再卸載」，modifier 動畫不經過轉場系統，在根層一樣可靠。
+    @State private var splashDismissed = false
 
     var body: some Scene {
         WindowGroup {
@@ -113,25 +119,27 @@ struct LifeGoodApp: App {
                         }
                     }
                 }
-                // 開場謝幕的接手動畫：Splash 放大淡出的同時，主畫面從 98% 輕微回正。
-                // 兩個 scale 同向、同一次 withAnimation 驅動，銜接才會像一個連續鏡頭。
-                .scaleEffect(showSplash ? 0.98 : 1)
+                // 開場謝幕的接手動畫：Splash 放大淡出的同時，主畫面從 97% 輕微回正。
+                // 兩個動畫由同一次 withAnimation（splashDismissed）驅動，
+                // 銜接像一個連續鏡頭。冷啟動以外 showSplash 為 false，直接滿版。
+                .scaleEffect(showSplash && !splashDismissed ? 0.97 : 1)
 
             if showSplash {
                 LaunchSplashView()
-                    // 謝幕改成「往觀者方向放大 + 淡出」：配合下方主畫面同時從 98%
-                    // 回正，兩層朝同一個方向運動，觀感是「穿過」開場進到 App，
-                    // 而不是原本單純 opacity 交叉的硬切。
-                    .transition(.asymmetric(
-                        insertion: .identity,
-                        removal: .opacity.combined(with: .scale(scale: 1.08))
-                    ))
+                    // 謝幕：往觀者方向放大 + 淡出（modifier 動畫，不走轉場系統——
+                    // 見 splashDismissed 宣告處的說明）。動畫播完才卸載，
+                    // 卸載瞬間畫面已全透明，看不到任何跳動。
+                    .opacity(splashDismissed ? 0 : 1)
+                    .scaleEffect(splashDismissed ? 1.1 : 1)
+                    .allowsHitTesting(!splashDismissed)
                     .zIndex(10)
                     .task {
-                        // 動畫播 1.4 秒後淡出移除；只擋視覺不擋啟動流程
+                        // 動畫播 1.4 秒後謝幕；只擋視覺不擋啟動流程
                         //（上方 MainTabView 的 task/onAppear 同步照常執行）
                         try? await Task.sleep(nanoseconds: 1_400_000_000)
-                        withAnimation(.easeInOut(duration: 0.55)) { showSplash = false }
+                        withAnimation(.easeInOut(duration: 0.6)) { splashDismissed = true }
+                        try? await Task.sleep(nanoseconds: 700_000_000)
+                        showSplash = false
                     }
             }
             }

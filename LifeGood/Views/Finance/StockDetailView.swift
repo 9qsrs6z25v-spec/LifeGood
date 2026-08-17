@@ -134,6 +134,9 @@ struct StockDetailView: View {
                     // 法人買賣超柱狀圖（每日收集的快照；未收集到該股資料時整卡隱藏）
                     InstNetBarCard(symbol: stock.symbol)
                         .padding(.horizontal, 24)
+                    // 融資融券餘額走勢＋券資比＋外資持股比率（同一批每日快照；無資料整卡隱藏）
+                    MarginChipCard(symbol: stock.symbol)
+                        .padding(.horizontal, 24)
                     infoSection
                     transactionsSection
                     dividendsSection

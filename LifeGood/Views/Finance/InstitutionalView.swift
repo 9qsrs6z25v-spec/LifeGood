@@ -23,6 +23,13 @@ struct InstDailyRecord: Codable {
     var foreign: [String: Double]?   // symbol → 外資買賣超股數
     var trust: [String: Double]?     // symbol → 投信買賣超股數
     var dealer: [String: Double]?    // symbol → 自營商買賣超股數
+    // 籌碼面（v25.240 起收集）。融資融券單位是「張」（官方原始單位，不再換算）；
+    // 外資持股比率單位是 %。融資融券約 21:00 才公布（比 T86 晚），
+    // 當天傍晚抓到 T86 但沒抓到融資券時這三個維持 nil，下次開 App 的
+    // 升級回補分支會重抓補上。
+    var marginBalance: [String: Double]?   // symbol → 融資餘額（張）
+    var shortBalance: [String: Double]?    // symbol → 融券餘額（張）
+    var foreignPct: [String: Double]?      // symbol → 全體外資持股比率（%）
 }
 
 enum InstitutionalHistory {
@@ -105,10 +112,11 @@ enum InstitutionalHistory {
                 needFetch = true
             } else if back == 0, existing?.net.isEmpty == true {
                 needFetch = true   // 今天先前抓太早（資料未公布），重試
-            } else if existing?.net.isEmpty == false, existing?.foreign == nil {
-                // 升級回補：v25.239 前收集的快照只有合計、沒有分計。官方歷史日期
-                // 照樣查得到，回看窗內的舊快照重抓一次補上外資/投信/自營，
-                // 之後 foreign 有值就不會再進到這個分支。
+            } else if existing?.net.isEmpty == false,
+                      existing?.foreign == nil || existing?.marginBalance == nil {
+                // 升級回補：舊版快照缺分計（v25.239 前）或缺融資券/外資持股
+                //（v25.240 前，或當天抓太早融資券還沒公布）。官方歷史日期照樣
+                // 查得到，回看窗內重抓一次補上，補齊後不會再進到這個分支。
                 needFetch = true
             } else {
                 needFetch = false
@@ -224,10 +232,132 @@ enum InstitutionalHistory {
                 } catch {}
             }
         }
+        // 籌碼面：融資融券餘額（上市 MI_MARGN + 上櫃 margin/balance）與外資持股比率
+        //（上市 MI_QFIIS + 上櫃 insti/qfii）。各自獨立失敗——例如融資券當天
+        // 還沒公布（約 21:00）——不影響已抓到的法人資料。
+        var marginBal: [String: Double] = [:]
+        var shortBal: [String: Double] = [:]
+        var fPct: [String: Double] = [:]
+
+        // 上市融資融券：欄名「買進/賣出/前日餘額/今日餘額」融資融券兩組重複，
+        // 用 firstIndex（融資）/lastIndex（融券）取「今日餘額」。
+        if let url = URL(string: "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date=\(ymd)&selectType=STOCK&response=json") {
+            do {
+                var req = URLRequest(url: url)
+                req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+                let (data, _) = try await URLSession.shared.data(for: req)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let tables = json["tables"] as? [[String: Any]],
+                   let table = tables.first(where: { (($0["fields"] as? [String]) ?? []).contains("今日餘額") }),
+                   let fields = table["fields"] as? [String],
+                   let rows = table["data"] as? [[Any]],
+                   let codeIdx = fields.firstIndex(of: "代號"),
+                   let mIdx = fields.firstIndex(of: "今日餘額"),
+                   let sIdx = fields.lastIndex(of: "今日餘額"), sIdx != mIdx {
+                    for row in rows {
+                        guard row.count > sIdx,
+                              let code = (row[codeIdx] as? String)?
+                                  .trimmingCharacters(in: .whitespaces),
+                              !code.isEmpty, code != "合計" else { continue }
+                        if let s = row[mIdx] as? String, let v = parseNumber(s) { marginBal[code] = v }
+                        if let s = row[sIdx] as? String, let v = parseNumber(s) { shortBal[code] = v }
+                    }
+                }
+            } catch {}
+        }
+
+        // 上櫃新版 www 端點的日期參數（2026/08/14 這種西元斜線格式；query 裡的
+        // 斜線不需要編碼，實測可用）
+        let tpexDayArg: String? = {
+            guard let y = comps.year, let m = comps.month, let d = comps.day else { return nil }
+            return String(format: "%04d/%02d/%02d", y, m, d)
+        }()
+
+        // 上櫃融資融券（新版 www 端點；欄名唯一，直接依名找）
+        if let dayArg = tpexDayArg,
+           let url = URL(string: "https://www.tpex.org.tw/www/zh-tw/margin/balance?date=\(dayArg)&response=json") {
+            do {
+                var req = URLRequest(url: url)
+                req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+                let (data, _) = try await URLSession.shared.data(for: req)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let tables = json["tables"] as? [[String: Any]],
+                   let table = tables.first,
+                   let fields = table["fields"] as? [String],
+                   let rows = table["data"] as? [[Any]],
+                   let codeIdx = fields.firstIndex(of: "代號"),
+                   let mIdx = fields.firstIndex(of: "資餘額"),
+                   let sIdx = fields.firstIndex(of: "券餘額") {
+                    for row in rows {
+                        guard row.count > max(mIdx, sIdx),
+                              let code = (row[codeIdx] as? String)?
+                                  .trimmingCharacters(in: .whitespaces), !code.isEmpty else { continue }
+                        if let s = row[mIdx] as? String, let v = parseNumber(s) { marginBal[code] = v }
+                        if let s = row[sIdx] as? String, let v = parseNumber(s) { shortBal[code] = v }
+                    }
+                }
+            } catch {}
+        }
+
+        func parsePct(_ s: String) -> Double? {
+            parseNumber(s.replacingOccurrences(of: "%", with: ""))
+        }
+
+        // 上市外資持股比率
+        if let url = URL(string: "https://www.twse.com.tw/rwd/zh/fund/MI_QFIIS?date=\(ymd)&selectType=ALLBUT0999&response=json") {
+            do {
+                var req = URLRequest(url: url)
+                req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+                let (data, _) = try await URLSession.shared.data(for: req)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   (json["stat"] as? String) == "OK",
+                   let fields = json["fields"] as? [String],
+                   let rows = json["data"] as? [[Any]],
+                   let codeIdx = fields.firstIndex(of: "證券代號"),
+                   let pctIdx = fields.firstIndex(where: { $0.contains("全體外資") && $0.contains("持股比率") }) {
+                    for row in rows {
+                        guard row.count > max(codeIdx, pctIdx),
+                              let code = (row[codeIdx] as? String)?
+                                  .trimmingCharacters(in: .whitespaces), !code.isEmpty,
+                              let s = row[pctIdx] as? String, let v = parsePct(s) else { continue }
+                        fPct[code] = v
+                    }
+                }
+            } catch {}
+        }
+
+        // 上櫃外資持股比率（僑外資及陸資持股比率；排除「尚可投資比率」那欄）
+        if let dayArg = tpexDayArg,
+           let url = URL(string: "https://www.tpex.org.tw/www/zh-tw/insti/qfii?date=\(dayArg)&response=json") {
+            do {
+                var req = URLRequest(url: url)
+                req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+                let (data, _) = try await URLSession.shared.data(for: req)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let tables = json["tables"] as? [[String: Any]],
+                   let table = tables.first,
+                   let fields = table["fields"] as? [String],
+                   let rows = table["data"] as? [[Any]],
+                   let codeIdx = fields.firstIndex(of: "代號"),
+                   let pctIdx = fields.firstIndex(where: { $0.contains("持股比率") && !$0.contains("尚可") }) {
+                    for row in rows {
+                        guard row.count > max(codeIdx, pctIdx),
+                              let code = (row[codeIdx] as? String)?
+                                  .trimmingCharacters(in: .whitespaces), !code.isEmpty,
+                              let s = row[pctIdx] as? String, let v = parsePct(s) else { continue }
+                        fPct[code] = v
+                    }
+                }
+            } catch {}
+        }
+
         return InstDailyRecord(date: key, net: net, names: names,
                                foreign: foreign.isEmpty ? nil : foreign,
                                trust: trust.isEmpty ? nil : trust,
-                               dealer: dealer.isEmpty ? nil : dealer)
+                               dealer: dealer.isEmpty ? nil : dealer,
+                               marginBalance: marginBal.isEmpty ? nil : marginBal,
+                               shortBalance: shortBal.isEmpty ? nil : shortBal,
+                               foreignPct: fPct.isEmpty ? nil : fPct)
     }
 }
 
@@ -584,6 +714,148 @@ struct InstNetBarCard: View {
                               foreign: rec.foreign?[sym],
                               trust: rec.trust?[sym],
                               dealer: rec.dealer?[sym])
+            }
+        }.value
+        points = result
+    }
+}
+
+// MARK: - 籌碼指標卡（融資融券餘額＋券資比＋外資持股比率）
+
+/// 個股的融資融券餘額走勢與最新籌碼指標。資料同 InstitutionalHistory 的每日快照
+///（融資融券約 21:00 公布，比法人買賣超晚；當天缺的隔天開 App 自動回補）。
+/// 沒收集到該股任何資料時整卡隱藏——興櫃與美股沒有這套官方資料。
+struct MarginChipCard: View {
+    let symbol: String
+
+    private struct DayMargin: Identifiable {
+        let date: Date
+        let margin: Double?      // 融資餘額（張）
+        let short: Double?       // 融券餘額（張）
+        let foreignPct: Double?  // 外資持股 %
+        var id: Date { date }
+    }
+    @State private var points: [DayMargin] = []
+
+    private let upColor = Color(red: 0.92, green: 0.26, blue: 0.21)
+    private let downColor = Color(red: 0.13, green: 0.65, blue: 0.37)
+    private let marginColor = Color.orange
+    private let shortColor = Color.purple
+
+    private var chartPoints: [DayMargin] { points.filter { $0.margin != nil } }
+
+    var body: some View {
+        Group {
+            if let last = points.last, last.margin != nil || last.foreignPct != nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(
+                                LinearGradient(colors: [.teal, .teal.opacity(0.55)],
+                                               startPoint: .top, endPoint: .bottom)
+                            )
+                            .frame(width: 4, height: 14)
+                        Text("籌碼指標")
+                            .font(.subheadline.weight(.bold))
+                        Text("融資融券・外資持股")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+
+                    metricsRow(last)
+
+                    if chartPoints.count >= 2 {
+                        Chart(chartPoints) { p in
+                            LineMark(x: .value("日", p.date),
+                                     y: .value("融資（張）", p.margin ?? 0))
+                                .foregroundStyle(marginColor)
+                                .lineStyle(StrokeStyle(lineWidth: 1.8))
+                            AreaMark(x: .value("日", p.date),
+                                     y: .value("融資（張）", p.margin ?? 0))
+                                .foregroundStyle(
+                                    LinearGradient(colors: [marginColor.opacity(0.18), .clear],
+                                                   startPoint: .top, endPoint: .bottom)
+                                )
+                        }
+                        // 融資餘額是「量」不是「價」：軸從資料範圍起跳，
+                        // 從 0 起跳的話多數個股會是一條貼底的平線看不出增減
+                        .chartYScale(domain: yDomain)
+                        .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+                        .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) }
+                        .frame(height: 90)
+                        Text("融資餘額走勢（張）")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(14)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+                )
+                .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+            }
+        }
+        .task { await load() }
+    }
+
+    private var yDomain: ClosedRange<Double> {
+        let vals = chartPoints.compactMap(\.margin)
+        let lo = vals.min() ?? 0, hi = vals.max() ?? 1
+        guard hi > lo else { return (lo * 0.95)...(hi * 1.05 + 1) }
+        let pad = (hi - lo) * 0.15
+        return max(0, lo - pad)...(hi + pad)
+    }
+
+    /// 最新指標列：融資（±增減）、融券（±增減）、券資比、外資持股
+    private func metricsRow(_ last: DayMargin) -> some View {
+        // 增減對「前一個有資料的交易日」算
+        let prev = points.dropLast().last(where: { $0.margin != nil })
+        let mDelta = zip2(last.margin, prev?.margin).map { $0 - $1 }
+        let sDelta = zip2(last.short, prev?.short).map { $0 - $1 }
+        let ratio = zip2(last.short, last.margin).flatMap { s, m in m > 0 ? s / m * 100 : nil }
+        return HStack(spacing: 12) {
+            if let m = last.margin { metric("融資", String(format: "%.0f 張", m), delta: mDelta) }
+            if let s = last.short { metric("融券", String(format: "%.0f 張", s), delta: sDelta) }
+            if let ratio { metric("券資比", String(format: "%.1f%%", ratio), delta: nil) }
+            if let f = last.foreignPct { metric("外資持股", String(format: "%.1f%%", f), delta: nil) }
+            Spacer()
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func zip2(_ a: Double?, _ b: Double?) -> (Double, Double)? {
+        guard let a, let b else { return nil }
+        return (a, b)
+    }
+
+    private func metric(_ label: String, _ value: String, delta: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            HStack(spacing: 3) {
+                Text(value).font(.caption.weight(.semibold).monospacedDigit())
+                if let delta, delta != 0 {
+                    Text(String(format: "%+.0f", delta))
+                        .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(delta > 0 ? upColor : downColor)
+                }
+            }
+        }
+    }
+
+    private func load() async {
+        let sym = symbol
+        let result = await Task.detached(priority: .userInitiated) { () -> [DayMargin] in
+            InstitutionalHistory.tradingRecords().compactMap { rec in
+                guard let d = InstitutionalHistory.dayFmt.date(from: rec.date) else { return nil }
+                let m = rec.marginBalance?[sym]
+                let s = rec.shortBalance?[sym]
+                let f = rec.foreignPct?[sym]
+                guard m != nil || s != nil || f != nil else { return nil }
+                return DayMargin(date: d, margin: m, short: s, foreignPct: f)
             }
         }.value
         points = result
