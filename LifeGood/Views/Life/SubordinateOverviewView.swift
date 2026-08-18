@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 美化紀錄（SubordinateOverviewView）
 // [2026-06 v1] 本次美化方向：
@@ -64,6 +65,9 @@ struct SubordinateOverviewView: View {
     @State private var addPersonalKind: PersonalEventKind?   // 新增我的會議 / 事務
     @State private var subAddKind: SubAddKind?               // 新增部屬任務 / 會議 / 報告
     @State private var sharePayload: OverviewSharePayload?   // 文字匯出分享
+    /// 暫時只看某位部屬（點項目上的人名膠囊設定；點 ✕ 或再點同一人取消）。
+    /// 刻意用 @State 不落地：這是「看一眼」的臨時篩選，關掉頁面就重置。
+    @State private var filterPersonId: UUID?
 
     /// 點擊總覽項目要開啟的編輯目標
     private enum OverviewEditTarget: Identifiable {
@@ -98,8 +102,14 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 當日請假
 
+    /// 各清單共用的部屬來源：套用「只看某人」篩選
+    private var visibleSubordinates: [Subordinate] {
+        guard let pid = filterPersonId else { return lifeStore.subordinates }
+        return lifeStore.subordinates.filter { $0.id == pid }
+    }
+
     private var todayLeaves: [(sub: Subordinate, rec: SubordinateRecord)] {
-        lifeStore.subordinates.flatMap { sub in
+        visibleSubordinates.flatMap { sub in
             sub.records
                 .filter { $0.type == .leave }
                 .filter { rec in
@@ -116,7 +126,7 @@ struct SubordinateOverviewView: View {
     // MARK: - 當日會議
 
     private var todayMeetings: [(sub: Subordinate, meeting: SubordinateMeeting)] {
-        lifeStore.subordinates.flatMap { sub in
+        visibleSubordinates.flatMap { sub in
             sub.meetings
                 .filter { isSameDay($0.date, selectedDate) }
                 .map { (sub, $0) }
@@ -139,7 +149,7 @@ struct SubordinateOverviewView: View {
     /// 排序：未完成優先（逾期最前 → 日期舊到新），其後已完成（日期新到舊）
     private var displayedReports: [(sub: Subordinate, report: WeeklyReport, status: ReportStatus)] {
         let wk = weekInterval
-        return lifeStore.subordinates.flatMap { sub in
+        return visibleSubordinates.flatMap { sub in
             sub.weeklyReports.compactMap { r -> (sub: Subordinate, report: WeeklyReport, status: ReportStatus)? in
                 let inWeek = wk.contains(r.date)
                 if r.isCompleted {
@@ -160,7 +170,7 @@ struct SubordinateOverviewView: View {
     // MARK: - 當日任務（進行中或當日到期）
 
     private var todayTasks: [(sub: Subordinate, task: SubordinateTask)] {
-        lifeStore.subordinates.flatMap { sub in
+        visibleSubordinates.flatMap { sub in
             sub.tasks
                 .filter { t in
                     !t.isCompleted && (
@@ -175,7 +185,7 @@ struct SubordinateOverviewView: View {
 
     /// 所有部屬、所有日期的「未完成」任務總清單（逾期排最前，再依截止日 / 日期）
     private var incompleteTasks: [(sub: Subordinate, task: SubordinateTask)] {
-        lifeStore.subordinates.flatMap { sub in
+        visibleSubordinates.flatMap { sub in
             sub.tasks.filter { !$0.isCompleted }.map { (sub, $0) }
         }
         .sorted { a, b in
@@ -187,7 +197,7 @@ struct SubordinateOverviewView: View {
 
     /// 所有部屬、所有會議的「未完成」議程項目（依會議日期新到舊）
     private var incompleteMeetingItems: [(sub: Subordinate, meeting: SubordinateMeeting, item: MeetingItem)] {
-        lifeStore.subordinates.flatMap { sub in
+        visibleSubordinates.flatMap { sub in
             sub.meetings.flatMap { m in
                 m.allItems.filter { !$0.isCompleted }.map { (sub: sub, meeting: m, item: $0) }
             }
@@ -220,6 +230,8 @@ struct SubordinateOverviewView: View {
                         .animation(.spring(response: 0.52, dampingFraction: 0.80), value: heroAppeared)
 
                     MacaronDatePicker(selectedDate: $selectedDate)
+
+                    filterBanner
 
                     leaveSection(leaves)
                         .opacity(sectionAppeared ? 1 : 0)
@@ -330,7 +342,9 @@ struct SubordinateOverviewView: View {
     }()
 
     /// 把指定區塊渲染成 JPG 並開啟系統分享面板
-    /// （對齊 SubordinateDetailView.exportJPG 既有規格：寬 430、scale ≥3、JPG 0.95）
+    /// （對齊 SubordinateDetailView.exportJPG 既有規格：寬 430、scale ≥3、JPG 0.95）。
+    /// 內容太長時自動切分成多張（每張最高約 1600pt），一次分享全部檔案——
+    /// 單張兩三千 pt 的長圖傳到通訊軟體會被壓到字都糊掉，不如切頁。
     @MainActor
     private func exportImage(_ section: ExportSection) {
         let content = exportImageContent(section)
@@ -340,14 +354,52 @@ struct SubordinateOverviewView: View {
             .environmentObject(lifeStore)
         let renderer = ImageRenderer(content: content)
         renderer.scale = max(UIScreen.main.scale, 3)
-        guard let ui = renderer.uiImage,
-              let data = ui.jpegData(compressionQuality: 0.95) else { return }
-        let name = "部屬總覽_\(section.rawValue)_\(Self.stampFmt.string(from: Date())).jpg"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        do {
-            try data.write(to: url)
-            sharePayload = OverviewSharePayload(items: [url])
-        } catch { }
+        guard let ui = renderer.uiImage else { return }
+        let pages = Self.sliceTallImage(ui, maxPageHeightPt: 1600)
+        let stamp = Self.stampFmt.string(from: Date())
+        var urls: [URL] = []
+        for (i, page) in pages.enumerated() {
+            guard let data = page.jpegData(compressionQuality: 0.95) else { continue }
+            // 多頁才帶頁碼，單頁維持原本的檔名格式
+            let suffix = pages.count > 1 ? "_\(i + 1)之\(pages.count)" : ""
+            let name = "部屬總覽_\(section.rawValue)_\(stamp)\(suffix).jpg"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            do { try data.write(to: url); urls.append(url) } catch { }
+        }
+        guard !urls.isEmpty else { return }
+        sharePayload = OverviewSharePayload(items: urls)
+    }
+
+    /// 長圖切頁：超過 maxPageHeightPt 就依像素座標裁成多張。
+    /// 相鄰兩頁重疊 24pt——切線落在一列文字中間時，那行字在下一頁還能完整看到。
+    private static func sliceTallImage(_ image: UIImage, maxPageHeightPt: CGFloat) -> [UIImage] {
+        guard image.size.height > maxPageHeightPt * 1.2, let cg = image.cgImage else { return [image] }
+        let scale = image.scale
+        let overlapPt: CGFloat = 24
+        let pageHeightPx = Int(maxPageHeightPt * scale)
+        let overlapPx = Int(overlapPt * scale)
+        let totalPx = cg.height
+        var pages: [UIImage] = []
+        var yPx = 0
+        while yPx < totalPx {
+            let h = min(pageHeightPx, totalPx - yPx)
+            // 最後一小截（不足 1/4 頁）併入前一頁，避免尾頁只有兩行
+            if h < pageHeightPx / 4, var last = pages.popLast().flatMap({ $0.cgImage }) {
+                let mergedTop = max(0, totalPx - pageHeightPx)
+                if let merged = cg.cropping(to: CGRect(x: 0, y: mergedTop,
+                                                       width: cg.width,
+                                                       height: totalPx - mergedTop)) {
+                    last = merged
+                }
+                pages.append(UIImage(cgImage: last, scale: scale, orientation: image.imageOrientation))
+                break
+            }
+            guard let slice = cg.cropping(to: CGRect(x: 0, y: yPx, width: cg.width, height: h)) else { break }
+            pages.append(UIImage(cgImage: slice, scale: scale, orientation: image.imageOrientation))
+            if yPx + h >= totalPx { break }
+            yPx += pageHeightPx - overlapPx
+        }
+        return pages.isEmpty ? [image] : pages
     }
 
     /// 供 ImageRenderer 使用的靜態版面：非看板區塊在頂部附「部屬總覽｜日期」標題列，
@@ -622,12 +674,7 @@ struct SubordinateOverviewView: View {
                     }
                 }
                 HStack(spacing: 6) {
-                    Text(sub.name.isEmpty ? "未命名" : sub.name)
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Color.purple.opacity(0.12))
-                        .foregroundStyle(.purple)
-                        .clipShape(Capsule())
+                    personChip(sub, tint: .purple)
                     HStack(spacing: 3) {
                         Image(systemName: "calendar").font(.system(size: 8))
                         Text(reportDateText(report.date))
@@ -718,7 +765,7 @@ struct SubordinateOverviewView: View {
     /// 跨所有部屬的已完成項目（報告 / 會議議程項目 / 任務），供底部收合卡使用
     private var overviewCompletedEntries: [CompletedEntry] {
         var out: [CompletedEntry] = []
-        for sub in lifeStore.subordinates {
+        for sub in visibleSubordinates {
             let who = sub.name.isEmpty ? "未命名" : sub.name
             for r in sub.weeklyReports where r.isCompleted {
                 out.append(CompletedEntry(id: r.id, kind: .report, title: r.topic,
@@ -808,9 +855,7 @@ struct SubordinateOverviewView: View {
                         .background((due < Date() ? Color.red : Color.indigo).opacity(0.12))
                         .clipShape(Capsule())
                     }
-                    Text(sub.name)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    personChip(sub)
                 }
             }
             Spacer(minLength: 4)
@@ -819,6 +864,75 @@ struct SubordinateOverviewView: View {
         .padding(.vertical, 11)
         .contentShape(Rectangle())
         .onTapGesture { editTarget = .meeting(subId: sub.id, meeting: meeting) }
+    }
+
+    /// 請假列的姓名是粗體主標不是膠囊，篩選中在旁邊放一顆獨立的 ✕
+    private var clearFilterX: some View {
+        Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { filterPersonId = nil }
+        } label: {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 13)).foregroundStyle(.indigo)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 人名膠囊：點一下暫時只看這個人，已篩選中顯示 ✕、再點取消。
+    /// 全部清單（請假／報告／會議／任務／議程／已完成）共用同一顆。
+    private func personChip(_ sub: Subordinate, tint: Color = .secondary) -> some View {
+        let active = filterPersonId == sub.id
+        return Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                filterPersonId = active ? nil : sub.id
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(sub.name.isEmpty ? "未命名" : sub.name)
+                    .font(.caption2.weight(.semibold))
+                if active {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                }
+            }
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(active ? Color.indigo.opacity(0.15)
+                               : (tint == .secondary ? Color(.tertiarySystemFill) : tint.opacity(0.12)))
+            .foregroundStyle(active ? Color.indigo : (tint == .secondary ? Color.secondary : tint))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(
+                (active ? Color.indigo : tint).opacity(active ? 0.35 : 0.18), lineWidth: 0.6))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 篩選中橫幅：清單只剩一個人時，最上面要看得出「為什麼別人都不見了」
+    private var filterBanner: some View {
+        Group {
+            if let pid = filterPersonId,
+               let sub = lifeStore.subordinates.first(where: { $0.id == pid }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                        .font(.system(size: 14)).foregroundStyle(.indigo)
+                    Text("只看：\(sub.name.isEmpty ? "未命名" : sub.name)")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            filterPersonId = nil
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16)).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.indigo.opacity(0.20), lineWidth: 0.6))
+                .padding(.horizontal)
+            }
+        }
     }
 
     private func taskGroupCard(title: String, icon: String, color: Color,
@@ -880,6 +994,12 @@ struct SubordinateOverviewView: View {
                     Text(sub.name)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                filterPersonId = filterPersonId == sub.id ? nil : sub.id
+                            }
+                        }
+                    if filterPersonId == sub.id { clearFilterX }
                     if let lt = rec.leaveType {
                         Text(lt.rawValue)
                             .font(.system(size: 10, weight: .semibold))
@@ -973,13 +1093,7 @@ struct SubordinateOverviewView: View {
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(Color.indigo.opacity(0.22), lineWidth: 0.6))
 
-                    Text(sub.name)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color(.tertiarySystemFill))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color(.separator).opacity(0.18), lineWidth: 0.6))
+                    personChip(sub)
                 }
                 if !meeting.allItems.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
@@ -1049,13 +1163,7 @@ struct SubordinateOverviewView: View {
                         .lineLimit(1)
                         .strikethrough(task.isCompleted, color: .secondary)
                         .foregroundStyle(task.isCompleted ? .secondary : .primary)
-                    Text(sub.name)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color(.tertiarySystemFill))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color(.separator).opacity(0.18), lineWidth: 0.6))
+                    personChip(sub)
                 }
                 HStack(spacing: 6) {
                     HStack(spacing: 3) {
