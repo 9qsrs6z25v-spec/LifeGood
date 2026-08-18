@@ -36,6 +36,7 @@ struct UnifiedExport: Codable {
         var businessCards: [BusinessCard]?
         var personalEvents: [PersonalEvent]?
         var orgPeople: [OrgPerson]?
+        var familyTasks: [FamilyTask]?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> UnifiedExport {
@@ -62,7 +63,8 @@ struct UnifiedExport: Codable {
                 healthProfile: life.healthProfile,
                 businessCards: life.businessCards,
                 personalEvents: life.personalEvents,
-                orgPeople: life.orgPeople
+                orgPeople: life.orgPeople,
+                familyTasks: life.familyTasks
             )
         )
     }
@@ -666,6 +668,7 @@ enum UnifiedImporter {
                 if let cards = payload.life.businessCards { life.businessCards = cards }
                 if let events = payload.life.personalEvents { life.personalEvents = events }
                 if let people = payload.life.orgPeople { life.orgPeople = people }
+                if let ft = payload.life.familyTasks { life.familyTasks = ft }
             }
 
             result.expenses = payload.expense.expenses.count
@@ -821,6 +824,11 @@ enum UnifiedImporter {
                     let newPeople = mergeItems(existing: life.orgPeople, incoming: people)
                     life.orgPeople.append(contentsOf: newPeople)
                     result.orgPeople = newPeople.count
+                }
+
+                if let ft = payload.life.familyTasks {
+                    let newTasks = mergeItems(existing: life.familyTasks, incoming: ft)
+                    life.familyTasks.append(contentsOf: newTasks)
                 }
             }
 

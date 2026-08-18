@@ -3256,7 +3256,10 @@ struct TaskEditorSheet: View {
             content: content.trimmingCharacters(in: .whitespaces),
             date: date, dueDate: hasDueDate ? dueDate : nil,
             note: note.trimmingCharacters(in: .whitespaces),
-            isCompleted: isCompleted, completedAt: completedAt
+            isCompleted: isCompleted, completedAt: completedAt,
+            // 重建時保留既有欄位——不帶的話存個檔就把兼任連結/提醒對應洗掉
+            sideRoleLink: editing?.sideRoleLink,
+            reminderId: editing?.reminderId
         )
         let targetId = assignedSubId
         // 換人：先從原持有者移除該任務
@@ -3269,13 +3272,17 @@ struct TaskEditorSheet: View {
         guard var target = lifeStore.subordinates.first(where: { $0.id == targetId }) else { dismiss(); return }
         if let idx = target.tasks.firstIndex(where: { $0.id == task.id }) { target.tasks[idx] = task }
         else { target.tasks.append(task) }
-        lifeStore.update(target); dismiss()
+        lifeStore.update(target)
+        // Apple 提醒事項同步（開啟時才動作）
+        lifeStore.syncReminderForSubordinateTask(subordinateId: targetId, taskId: task.id)
+        dismiss()
     }
 
     private func deleteTask() {
         guard !isSaving else { return }
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
         isSaving = true
+        ReminderBridge.shared.delete(id: e.reminderId)
         sub.tasks.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
     }

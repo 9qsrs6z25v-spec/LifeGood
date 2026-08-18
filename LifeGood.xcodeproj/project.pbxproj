@@ -559,7 +559,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 998;
+				CURRENT_PROJECT_VERSION = 999;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -569,6 +569,8 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
 				INFOPLIST_KEY_NSCameraUsageDescription = "LifeGood 需要使用相機來拍攝裝潢照片或收據。";
 				INFOPLIST_KEY_NSContactsUsageDescription = "LifeGood 需要存取聯絡人，以匯入聯絡人為名片或把名片加入聯絡人。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 需要使用您的位置來推薦附近的餐廳，並在美食地圖上標示您去過的店家。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LifeGood 需要麥克風來錄製語音記帳輸入。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LifeGood 用語音辨識把你說的內容轉成文字，再交給 AI 解析成支出項目。";
@@ -584,7 +586,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.245;
+				MARKETING_VERSION = 25.246;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -600,7 +602,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LifeGood/LifeGood.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 998;
+				CURRENT_PROJECT_VERSION = 999;
 				DEVELOPMENT_ASSET_PATHS = "\"LifeGood/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -610,6 +612,8 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "LifeGood 需要讀取 Apple 行事曆，把您的系統行程併入「我的行事曆」一併顯示。";
 				INFOPLIST_KEY_NSCameraUsageDescription = "LifeGood 需要使用相機來拍攝裝潢照片或收據。";
 				INFOPLIST_KEY_NSContactsUsageDescription = "LifeGood 需要存取聯絡人，以匯入聯絡人為名片或把名片加入聯絡人。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "LifeGood 需要存取提醒事項，把家庭待辦與部屬任務同步到 Apple 提醒事項。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "LifeGood 需要使用您的位置來推薦附近的餐廳，並在美食地圖上標示您去過的店家。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LifeGood 需要麥克風來錄製語音記帳輸入。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LifeGood 用語音辨識把你說的內容轉成文字，再交給 AI 解析成支出項目。";
@@ -625,7 +629,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 25.245;
+				MARKETING_VERSION = 25.246;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

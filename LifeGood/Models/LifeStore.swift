@@ -14,6 +14,7 @@ class LifeStore: ObservableObject {
     @Published var personalEvents: [PersonalEvent] = [] { didSet { if !isLoading { save() } } }
     @Published var orgPeople: [OrgPerson] = [] { didSet { if !isLoading { save() } } }
     @Published var healthProfile: HealthProfile = HealthProfile() { didSet { if !isLoading { save() } } }
+    @Published var familyTasks: [FamilyTask] = [] { didSet { if !isLoading { save() } } }
 
     private var isLoading = false
     private let saveQueue = DispatchQueue(label: "com.lifegood.lifestore.save", qos: .utility)
@@ -28,7 +29,7 @@ class LifeStore: ObservableObject {
         "life_profile", "life_family", "life_milestones", "life_relationships",
         "life_pets", "life_schedules", "life_subordinates", "life_departments",
         "life_grade_titles", "life_business_cards", "life_personal_events",
-        "life_org_people", "life_health_profile"
+        "life_org_people", "life_health_profile", "life_family_tasks"
     ]
 
     init() {
@@ -95,6 +96,10 @@ class LifeStore: ObservableObject {
         if let i = familyMembers.firstIndex(where: { $0.spouseId == item.id }) {
             familyMembers[i].spouseId = nil
         }
+        // 家庭待辦的指派一併解除，避免懸空 id（待辦本身保留——事情還是要做）
+        for i in familyTasks.indices where familyTasks[i].assigneeIds.contains(item.id) {
+            familyTasks[i].assigneeIds.removeAll { $0 == item.id }
+        }
         save()
     }
 
@@ -108,6 +113,99 @@ class LifeStore: ObservableObject {
         for photo in item.familyPhotos {
             if let name = photo.photoFileName { FamilyAlbumPhoto.deletePhoto(name) }
         }
+    }
+
+    // MARK: - 家庭待辦 CRUD（含 Apple 提醒事項同步）
+
+    /// 家庭待辦的提醒事項標題／備註（家庭與部屬兩邊格式一致，方便在提醒事項裡辨識）
+    private func familyTaskReminderPayload(_ t: FamilyTask) -> (title: String, notes: String) {
+        let names = t.assigneeIds.compactMap { id -> String? in
+            guard let m = familyMembers.first(where: { $0.id == id }) else { return nil }
+            return m.chineseName.isEmpty ? m.englishName : m.chineseName
+        }.filter { !$0.isEmpty }
+        var notes = "美好人生・家庭待辦"
+        if !names.isEmpty { notes += "｜指派：\(names.joined(separator: "、"))" }
+        if !t.note.isEmpty { notes += "\n\(t.note)" }
+        return (t.content, notes)
+    }
+
+    @MainActor
+    func upsertFamilyTask(_ task: FamilyTask) {
+        isLoading = true
+        var t = task
+        let payload = familyTaskReminderPayload(t)
+        t.reminderId = ReminderBridge.shared.upsert(id: t.reminderId, title: payload.title,
+                                                    due: t.dueDate, notes: payload.notes,
+                                                    isCompleted: t.isCompleted)
+        if let i = familyTasks.firstIndex(where: { $0.id == t.id }) { familyTasks[i] = t }
+        else { familyTasks.append(t) }
+        isLoading = false
+        save()
+    }
+
+    @MainActor
+    func deleteFamilyTask(_ taskId: UUID) {
+        if let t = familyTasks.first(where: { $0.id == taskId }) {
+            ReminderBridge.shared.delete(id: t.reminderId)
+        }
+        familyTasks.removeAll { $0.id == taskId }
+    }
+
+    @MainActor
+    func toggleFamilyTaskCompletion(_ taskId: UUID) {
+        guard var t = familyTasks.first(where: { $0.id == taskId }) else { return }
+        t.isCompleted.toggle()
+        t.completedAt = t.isCompleted ? Date() : nil
+        upsertFamilyTask(t)
+    }
+
+    // MARK: - 部屬任務 → 提醒事項
+
+    /// 部屬任務的提醒同步（家庭與部屬共用 ReminderBridge；未開同步時整段 no-op）。
+    /// 寫回 reminderId 用 isLoading 批次，一次 save。
+    @MainActor
+    func syncReminderForSubordinateTask(subordinateId: UUID, taskId: UUID) {
+        guard ReminderBridge.shared.isEnabled else { return }
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
+              let ti = subordinates[si].tasks.firstIndex(where: { $0.id == taskId }) else { return }
+        let t = subordinates[si].tasks[ti]
+        let title = t.content.isEmpty ? (t.topic.isEmpty ? "部屬任務" : t.topic) : t.content
+        var notes = "美好人生・部屬任務｜\(subordinates[si].name)"
+        if !t.note.isEmpty { notes += "\n\(t.note)" }
+        let newId = ReminderBridge.shared.upsert(id: t.reminderId, title: title,
+                                                 due: t.dueDate, notes: notes,
+                                                 isCompleted: t.isCompleted)
+        guard newId != t.reminderId else { return }
+        isLoading = true
+        defer { isLoading = false }
+        subordinates[si].tasks[ti].reminderId = newId
+        save()
+    }
+
+    /// 開啟同步時的一次性回補：把現有「未完成」的家庭待辦與部屬任務全部建進提醒事項。
+    /// 已完成的不回補——把幾百筆做完的事塞進提醒事項只會變垃圾山。
+    @MainActor
+    func backfillRemindersForAllTasks() {
+        guard ReminderBridge.shared.isEnabled else { return }
+        isLoading = true
+        for i in familyTasks.indices where !familyTasks[i].isCompleted {
+            let payload = familyTaskReminderPayload(familyTasks[i])
+            familyTasks[i].reminderId = ReminderBridge.shared.upsert(
+                id: familyTasks[i].reminderId, title: payload.title,
+                due: familyTasks[i].dueDate, notes: payload.notes, isCompleted: false)
+        }
+        for si in subordinates.indices {
+            for ti in subordinates[si].tasks.indices where !subordinates[si].tasks[ti].isCompleted {
+                let t = subordinates[si].tasks[ti]
+                let title = t.content.isEmpty ? (t.topic.isEmpty ? "部屬任務" : t.topic) : t.content
+                var notes = "美好人生・部屬任務｜\(subordinates[si].name)"
+                if !t.note.isEmpty { notes += "\n\(t.note)" }
+                subordinates[si].tasks[ti].reminderId = ReminderBridge.shared.upsert(
+                    id: t.reminderId, title: title, due: t.dueDate, notes: notes, isCompleted: false)
+            }
+        }
+        isLoading = false
+        save()
     }
 
     // MARK: - 里程碑 CRUD
@@ -711,6 +809,13 @@ class LifeStore: ObservableObject {
     func deleteSubordinate(_ item: Subordinate) {
         isLoading = true
         defer { isLoading = false }
+        // 刪除其任務對應的 Apple 提醒（先收集 id，人刪了就查不到了）
+        let reminderIds = item.tasks.compactMap(\.reminderId)
+        if !reminderIds.isEmpty {
+            Task { @MainActor in
+                for rid in reminderIds { ReminderBridge.shared.delete(id: rid) }
+            }
+        }
         subordinates.removeAll { $0.id == item.id }
         // 解除與公司組織人員的連結（保留人員資料以維持歷史）
         if let i = orgPeople.firstIndex(where: { $0.linkedSubordinateId == item.id }) {
@@ -760,6 +865,10 @@ class LifeStore: ObservableObject {
             propagateCompletionToSideRole(back, isCompleted: subordinates[si].tasks[ti].isCompleted)
         }
         save()
+        // Apple 提醒事項同步（開啟時）；hop 到 MainActor 是 ReminderBridge 的隔離要求
+        Task { @MainActor in
+            self.syncReminderForSubordinateTask(subordinateId: subordinateId, taskId: taskId)
+        }
     }
 
     /// 切換某場會議底下某個議程項目的完成狀態（部屬詳情頁與總覽頁的打勾共用）。
@@ -1163,7 +1272,7 @@ class LifeStore: ObservableObject {
             relationships: relationships, pets: pets, schedules: schedules,
             subordinates: subordinates, departments: departments, gradeTitles: gradeTitles,
             businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople,
-            healthProfile: healthProfile
+            healthProfile: healthProfile, familyTasks: familyTasks
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -1181,6 +1290,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.personalEvents) { ud.set(d, forKey: "life_personal_events") }
             if let d = try? encoder.encode(snap.orgPeople)      { ud.set(d, forKey: "life_org_people") }
             if let d = try? encoder.encode(snap.healthProfile)  { ud.set(d, forKey: "life_health_profile") }
+            if let d = try? encoder.encode(snap.familyTasks)    { ud.set(d, forKey: "life_family_tasks") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -1206,6 +1316,7 @@ class LifeStore: ObservableObject {
         if let items = lossyDecodeArray([BusinessCard].self, key: "life_business_cards", decoder: decoder) { businessCards = items }
         if let items = lossyDecodeArray([PersonalEvent].self, key: "life_personal_events", decoder: decoder) { personalEvents = items }
         if let items = lossyDecodeArray([OrgPerson].self, key: "life_org_people", decoder: decoder) { orgPeople = items }
+        if let items = lossyDecodeArray([FamilyTask].self, key: "life_family_tasks", decoder: decoder) { familyTasks = items }
         if let data = rawDataIfChanged("life_health_profile"),
            let h = try? decoder.decode(HealthProfile.self, from: data) {
             healthProfile = h

@@ -48,6 +48,9 @@ struct FamilyView: View {
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showAdd = false
     @State private var editingMember: FamilyMember?
+    @State private var editingTask: FamilyTask?
+    @State private var showReminderDeniedAlert = false
+    @ObservedObject private var reminderBridge = ReminderBridge.shared
     @State private var showPremiumAlert = false
     @State private var membersAppeared = false
     @State private var emptyIconPulse = false
@@ -63,18 +66,12 @@ struct FamilyView: View {
             // 用同一個 List 把街道圖跟成員清單放在一起；
             // 列表上滑時，街道圖會自然跟著被推上去，給下方項目更多空間。
             List {
-                Section {
-                    FamilyOverviewMap(
-                        myName: store.profile.chineseName,
-                        members: store.familyMembers
-                    )
-                    .frame(height: 320)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                }
+                // 街道示意圖已移除（使用者：沒有太大意義）——騰出的位置給家庭待辦。
+                // FamilyOverviewMap 元件保留：家人履歷等其他頁還在用。
 
-                // [v2] 統計徽章橫列（地圖下、成員清單前，有成員時才顯示）
+                familyTaskSection
+
+                // [v2] 統計徽章橫列（成員清單前，有成員時才顯示）
                 if !store.familyMembers.isEmpty {
                     Section {
                         statsStrip
@@ -150,7 +147,163 @@ struct FamilyView: View {
             }
             .sheet(isPresented: $showAdd) { AddMilestoneView(initialCategory: .family) }
             .sheet(item: $editingMember) { member in AddMilestoneView(editingFamily: member) }
+            .sheet(item: $editingTask) { task in
+                FamilyTaskEditor(task: task)
+            }
+            .alert("提醒事項權限被拒", isPresented: $showReminderDeniedAlert) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text("請到 設定 > 隱私權與安全性 > 提醒事項 開啟 LifeGood 的存取權，才能同步待辦。")
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+        }
+    }
+
+    // MARK: - 家庭待辦
+
+    private static let taskDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d HH:mm"; return f
+    }()
+
+    private var familyTaskSection: some View {
+        // 未完成在前（依截止日），已完成沉底（劃線灰字）
+        let tasks = store.familyTasks.sorted { a, b in
+            if a.isCompleted != b.isCompleted { return !a.isCompleted }
+            return (a.dueDate ?? .distantFuture) < (b.dueDate ?? .distantFuture)
+        }
+        return Section {
+            ForEach(tasks) { t in
+                familyTaskRow(t)
+            }
+            Button {
+                editingTask = FamilyTask()
+            } label: {
+                Label("新增家庭待辦", systemImage: "plus.circle")
+                    .foregroundStyle(.green)
+            }
+        } header: {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.orange, .orange.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: "checklist")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text("家庭待辦")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                if !tasks.isEmpty {
+                    Text("\(tasks.filter { !$0.isCompleted }.count)")
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.15), in: Capsule())
+                        .foregroundStyle(.orange)
+                }
+                Spacer()
+                reminderSyncToggle
+            }
+            .textCase(nil)
+        } footer: {
+            if reminderBridge.isEnabled {
+                Text("已同步到 Apple 提醒事項的「美好人生」清單（含部屬任務）。單向同步：在這裡打勾/修改會更新過去，在提醒事項那邊的變更不會流回來。")
+            }
+        }
+    }
+
+    /// 提醒事項同步開關（家庭待辦與部屬任務共用同一個總開關）
+    private var reminderSyncToggle: some View {
+        Button {
+            if reminderBridge.isEnabled {
+                reminderBridge.isEnabled = false
+            } else {
+                Task { @MainActor in
+                    let ok = await reminderBridge.requestAccess()
+                    if ok {
+                        reminderBridge.isEnabled = true
+                        store.backfillRemindersForAllTasks()
+                    } else if reminderBridge.isDenied {
+                        showReminderDeniedAlert = true
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: reminderBridge.isEnabled ? "bell.badge.fill" : "bell.slash")
+                    .font(.system(size: 10))
+                Text(reminderBridge.isEnabled ? "提醒事項已同步" : "同步提醒事項")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background((reminderBridge.isEnabled ? Color.orange : Color(.tertiarySystemFill))
+                .opacity(reminderBridge.isEnabled ? 0.15 : 1), in: Capsule())
+            .foregroundStyle(reminderBridge.isEnabled ? Color.orange : Color.secondary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func familyTaskRow(_ t: FamilyTask) -> some View {
+        let assignees = t.assigneeIds.compactMap { id -> String? in
+            guard let m = store.familyMembers.first(where: { $0.id == id }) else { return nil }
+            return m.chineseName.isEmpty ? m.englishName : m.chineseName
+        }.filter { !$0.isEmpty }
+        let overdue = !t.isCompleted && (t.dueDate.map { $0 < Date() } ?? false)
+        return HStack(alignment: .center, spacing: 10) {
+            Button {
+                store.toggleFamilyTaskCompletion(t.id)
+            } label: {
+                Image(systemName: t.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(t.isCompleted ? Color.green : Color.orange)
+            }
+            .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(t.content.isEmpty ? "未命名待辦" : t.content)
+                    .font(.subheadline.weight(.medium))
+                    .strikethrough(t.isCompleted, color: .secondary)
+                    .foregroundStyle(t.isCompleted ? .secondary : .primary)
+                    .lineLimit(2)
+                HStack(spacing: 5) {
+                    if !assignees.isEmpty {
+                        HStack(spacing: 3) {
+                            Image(systemName: "person.fill").font(.system(size: 8))
+                            Text(assignees.joined(separator: "、"))
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.pink.opacity(0.12))
+                        .foregroundStyle(.pink)
+                        .clipShape(Capsule())
+                    }
+                    HStack(spacing: 3) {
+                        Image(systemName: "calendar").font(.system(size: 8))
+                        Text(Self.taskDateFmt.string(from: t.createdAt))
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    if let due = t.dueDate {
+                        HStack(spacing: 3) {
+                            Image(systemName: "flag.fill").font(.system(size: 7))
+                            Text("截止 \(Self.taskDateFmt.string(from: due))")
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background((overdue ? Color.red : Color.orange).opacity(0.12))
+                        .foregroundStyle(overdue ? Color.red : Color.orange)
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+            Spacer()
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { editingTask = t }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                store.deleteFamilyTask(t.id)
+            } label: {
+                Label("刪除", systemImage: "trash")
+            }
         }
     }
 
@@ -542,5 +695,115 @@ struct FamilyView: View {
         guard let id = member.spouseId, let spouse = membersById[id] else { return nil }
         let name = spouse.chineseName.isEmpty ? spouse.englishName : spouse.chineseName
         return name.isEmpty ? nil : name
+    }
+}
+
+// MARK: - 家庭待辦編輯器
+
+/// 家庭待辦的新增／編輯。指派對象＝家庭成員（可多選）；
+/// 建立時間自動記錄（可顯示不可改），截止時間可選。
+/// 存檔經 LifeStore.upsertFamilyTask，開啟提醒事項同步時會一併寫入／更新提醒。
+struct FamilyTaskEditor: View {
+    @State var task: FamilyTask
+
+    @EnvironmentObject var store: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var hasDue = false
+    @State private var loaded = false
+
+    /// 是否為既有待辦（決定刪除鈕與標題）
+    private var isEditing: Bool {
+        store.familyTasks.contains { $0.id == task.id }
+    }
+
+    private static let createdFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
+    }()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("內容") {
+                    TextField("要做什麼事", text: $task.content, axis: .vertical).lineLimit(3)
+                }
+                Section {
+                    if store.familyMembers.isEmpty {
+                        Text("還沒有家庭成員。先到下方「家庭成員」新增，就能指派待辦。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(store.familyMembers) { m in
+                            let isOn = task.assigneeIds.contains(m.id)
+                            Button {
+                                if isOn { task.assigneeIds.removeAll { $0 == m.id } }
+                                else { task.assigneeIds.append(m.id) }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 18))
+                                        .foregroundStyle(isOn ? .orange : .secondary)
+                                    let display = m.chineseName.isEmpty ? m.englishName : m.chineseName
+                                    Text(display.isEmpty ? "未命名" : display)
+                                        .foregroundStyle(.primary)
+                                    Text(m.role.rawValue).font(.caption2).foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } header: {
+                    Text("指派給誰（可多選）")
+                }
+                Section("時間") {
+                    HStack {
+                        Text("建立時間")
+                        Spacer()
+                        Text(Self.createdFmt.string(from: task.createdAt))
+                            .foregroundStyle(.secondary)
+                    }
+                    Toggle("設定截止時間", isOn: $hasDue)
+                    if hasDue {
+                        DatePicker("截止", selection: Binding(
+                            get: { task.dueDate ?? Date() },
+                            set: { task.dueDate = $0 }
+                        ), displayedComponents: [.date, .hourAndMinute])
+                    }
+                }
+                Section("備註") {
+                    TextField("選填備註", text: $task.note, axis: .vertical).lineLimit(3)
+                }
+                if isEditing {
+                    Section {
+                        Button(role: .destructive) {
+                            store.deleteFamilyTask(task.id)
+                            dismiss()
+                        } label: {
+                            Label("刪除此待辦", systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(isEditing ? "編輯待辦" : "新增待辦")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isEditing ? "儲存" : "新增") {
+                        if !hasDue { task.dueDate = nil }
+                        store.upsertFamilyTask(task)
+                        dismiss()
+                    }
+                    .bold().foregroundStyle(.green)
+                    .disabled(task.content.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                hasDue = task.dueDate != nil
+            }
+        }
     }
 }

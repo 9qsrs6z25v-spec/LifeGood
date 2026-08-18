@@ -1959,21 +1959,23 @@ struct SubordinateTask: Identifiable, Codable {
     /// 連到某筆兼任職務待辦（同一件事）。完成狀態雙向同步，且評分只算一次
     ///（走兼任那邊的 +3，本職這邊跳過，否則同一件事會被計兩次分）。
     var sideRoleLink: SideRoleBackLink?
+    /// Apple 提醒事項的對應 id（開啟同步後由 ReminderBridge 寫入；App → 提醒事項單向）
+    var reminderId: String?
 
     init(id: UUID = UUID(), topic: String = "", content: String = "",
          date: Date = Date(), dueDate: Date? = nil, note: String = "",
          isCompleted: Bool = false, completedAt: Date? = nil,
-         sideRoleLink: SideRoleBackLink? = nil) {
+         sideRoleLink: SideRoleBackLink? = nil, reminderId: String? = nil) {
         self.id = id; self.topic = topic; self.content = content
         self.date = date; self.dueDate = dueDate; self.note = note
         self.isCompleted = isCompleted; self.completedAt = completedAt
-        self.sideRoleLink = sideRoleLink
+        self.sideRoleLink = sideRoleLink; self.reminderId = reminderId
     }
 
     // 自訂解碼：isCompleted / completedAt 為後加欄位，舊存檔沒有這兩個 key。
     // 用 decodeIfPresent 容錯，避免單筆缺欄位導致整個 subordinates 陣列解碼失敗、資料消失。
     enum CodingKeys: String, CodingKey {
-        case id, topic, content, date, dueDate, note, isCompleted, completedAt, sideRoleLink
+        case id, topic, content, date, dueDate, note, isCompleted, completedAt, sideRoleLink, reminderId
     }
 
     init(from decoder: Decoder) throws {
@@ -1987,6 +1989,52 @@ struct SubordinateTask: Identifiable, Codable {
         isCompleted = try c.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
         sideRoleLink = try? c.decodeIfPresent(SideRoleBackLink.self, forKey: .sideRoleLink)
+        reminderId = try? c.decodeIfPresent(String.self, forKey: .reminderId)
+    }
+}
+
+/// 家庭待辦事項（家庭頁「家庭成員」上方的待辦區；可指派給家庭成員，
+/// 可選擇同步到 Apple 提醒事項）。
+struct FamilyTask: Identifiable, Codable {
+    let id: UUID
+    var content: String
+    /// 指派的家庭成員（可多位；空＝未指派）
+    var assigneeIds: [UUID]
+    var createdAt: Date
+    var dueDate: Date?
+    var isCompleted: Bool
+    var completedAt: Date?
+    var note: String
+    /// Apple 提醒事項的對應 id（App → 提醒事項單向同步）
+    var reminderId: String?
+
+    init(id: UUID = UUID(), content: String = "", assigneeIds: [UUID] = [],
+         createdAt: Date = Date(), dueDate: Date? = nil,
+         isCompleted: Bool = false, completedAt: Date? = nil,
+         note: String = "", reminderId: String? = nil) {
+        self.id = id; self.content = content; self.assigneeIds = assigneeIds
+        self.createdAt = createdAt; self.dueDate = dueDate
+        self.isCompleted = isCompleted; self.completedAt = completedAt
+        self.note = note; self.reminderId = reminderId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, content, assigneeIds, createdAt, dueDate, isCompleted, completedAt, note, reminderId
+    }
+
+    // 逐欄容錯：這是頂層陣列（lossyDecodeArray 逐筆容錯），單筆內缺欄位
+    // 也不該讓那一筆整個消失
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        content = (try? c.decodeIfPresent(String.self, forKey: .content)) ?? ""
+        assigneeIds = (try? c.decodeIfPresent([UUID].self, forKey: .assigneeIds)) ?? []
+        createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? Date()
+        dueDate = try? c.decodeIfPresent(Date.self, forKey: .dueDate)
+        isCompleted = (try? c.decodeIfPresent(Bool.self, forKey: .isCompleted)) ?? false
+        completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
+        reminderId = try? c.decodeIfPresent(String.self, forKey: .reminderId)
     }
 }
 
