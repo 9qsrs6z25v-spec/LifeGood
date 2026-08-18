@@ -812,7 +812,7 @@ struct SideRoleWorkspaceView: View {
                 }
             }
             let resolutions = (role.sideRoleResolutions ?? [])
-                .filter { matches([$0.title, $0.content, $0.category?.rawValue ?? ""]) }
+                .filter { matches([$0.title, $0.content, $0.category?.rawValue ?? "", $0.initiator]) }
                 .sorted { $0.date > $1.date }
             if !resolutions.isEmpty {
                 exportBox(title: "重大決議（\(resolutions.count)）", icon: "checkmark.seal.fill") {
@@ -820,7 +820,10 @@ struct SideRoleWorkspaceView: View {
                         exportRow(head: "🏷 \(SideRoleFormat.date(r.date))　"
                                     + (r.category.map { "[\($0.rawValue)] " } ?? "")
                                     + (r.title.isEmpty ? "（未填標題）" : r.title),
-                                  lines: [r.content.isEmpty ? nil : r.content])
+                                  lines: [
+                                    r.initiator.isEmpty ? nil : "發起：\(r.initiator)",
+                                    r.content.isEmpty ? nil : r.content
+                                  ])
                     }
                 }
             }
@@ -1166,7 +1169,7 @@ struct SideRoleWorkspaceView: View {
     /// 重大決議（會議紀錄下方）：跨會議、值得單獨列出來查的定案。
     private func resolutionSection(_ role: LifeMilestone) -> some View {
         let resolutions = (role.sideRoleResolutions ?? [])
-            .filter { matches([$0.title, $0.content, $0.category?.rawValue ?? ""]) }
+            .filter { matches([$0.title, $0.content, $0.category?.rawValue ?? "", $0.initiator]) }
             .sorted { $0.date > $1.date }
         return sectionBox(title: "重大決議", icon: "checkmark.seal.fill", color: .indigo,
                           trailing: "\(resolutions.count)",
@@ -1205,6 +1208,10 @@ struct SideRoleWorkspaceView: View {
                     Text(r.title.isEmpty ? "（未填標題）" : r.title)
                         .font(.subheadline.weight(.medium))
                         .lineLimit(1)
+                }
+                if !r.initiator.isEmpty {
+                    Text("發起：\(r.initiator)")
+                        .font(.caption2).foregroundStyle(.indigo.opacity(0.85)).lineLimit(1)
                 }
                 if !r.content.isEmpty {
                     Text(r.content)
@@ -1935,6 +1942,7 @@ struct SideRoleResolutionEditor: View {
 
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
+    @State private var showInitiatorPicker = false
 
     /// 是否為既有決議（決定刪除鈕）
     private var isEditing: Bool {
@@ -1952,6 +1960,16 @@ struct SideRoleResolutionEditor: View {
                     ForEach(SideRoleResolutionCategory.allCases) { c in
                         Text(c.rawValue).tag(c as SideRoleResolutionCategory?)
                     }
+                }
+                // 發起人：可直接打字，也可按放大鏡從人員清單挑（成員優先、可搜尋）
+                HStack(spacing: 8) {
+                    TextField("決議發起人（可輸入或挑選）", text: $resolution.initiator)
+                    Button { showInitiatorPicker = true } label: {
+                        Image(systemName: "person.crop.circle.badge.magnifyingglass")
+                            .font(.system(size: 16))
+                            .foregroundStyle(.indigo)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             Section("內容") {
@@ -1985,6 +2003,110 @@ struct SideRoleResolutionEditor: View {
                 .disabled(resolution.title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
+        .sheet(isPresented: $showInitiatorPicker) {
+            NavigationStack {
+                SideRoleInitiatorPicker(roleId: roleId, selection: $resolution.initiator)
+            }
+        }
+    }
+}
+
+// MARK: - 決議發起人挑選（單選；成員優先，可搜尋）
+
+/// 發起人單選挑人頁：本職務成員排最前，其後是全公司候選（部屬／名片／組織，
+/// 依部門分組）。點一列即選定並關閉；也可以不挑、回編輯頁直接打字。
+struct SideRoleInitiatorPicker: View {
+    let roleId: UUID
+    @Binding var selection: String
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var members: [SideRoleMember] {
+        lifeStore.milestones.first { $0.id == roleId }?.sideRoleMembers ?? []
+    }
+
+    private func matches(_ text: String) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return q.isEmpty || text.localizedCaseInsensitiveContains(q)
+    }
+
+    private var filteredMembers: [SideRoleMember] {
+        members.filter { matches($0.name) || matches($0.dutyInRole) }
+    }
+
+    private var groupedOthers: [(dept: String, people: [SideRolePersonCandidate])] {
+        let memberNames = Set(members.map { $0.name.trimmingCharacters(in: .whitespaces) })
+        let list = lifeStore.sideRolePersonCandidates()
+            .filter { !memberNames.contains($0.name) }
+            .filter { matches($0.name) || matches($0.subtitle) || matches($0.department) }
+        var order: [String] = []
+        var map: [String: [SideRolePersonCandidate]] = [:]
+        for p in list {
+            let key = p.department.isEmpty ? "未分部門" : p.department
+            if map[key] == nil { order.append(key) }
+            map[key, default: []].append(p)
+        }
+        // 明確標型別：本檔案曾因具名 tuple 的鏈式推導撞上 type-check 逾時
+        return order.map { (dept: String) -> (dept: String, people: [SideRolePersonCandidate]) in
+            (dept: dept, people: map[dept] ?? [])
+        }
+    }
+
+    var body: some View {
+        List {
+            if !filteredMembers.isEmpty {
+                Section("本職務成員") {
+                    ForEach(filteredMembers) { m in
+                        pickRow(name: m.name, sub: m.dutyInRole, icon: "person.badge.plus")
+                    }
+                }
+            }
+            ForEach(groupedOthers, id: \.dept) { group in
+                Section(group.dept) {
+                    ForEach(group.people) { p in
+                        pickRow(name: p.name, sub: p.subtitle, icon: p.kind.icon)
+                    }
+                }
+            }
+            if filteredMembers.isEmpty && groupedOthers.isEmpty {
+                Text("找不到符合的人。外部發起人可以回上一頁直接輸入姓名。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .searchable(text: $query, prompt: "搜尋姓名、職稱或部門")
+        .navigationTitle("挑選發起人")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+        }
+    }
+
+    private func pickRow(name: String, sub: String, icon: String) -> some View {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let isCurrent = selection == trimmed
+        return Button {
+            guard !trimmed.isEmpty else { return }
+            selection = trimmed
+            dismiss()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isCurrent ? "checkmark.circle.fill" : icon)
+                    .font(.system(size: isCurrent ? 18 : 12))
+                    .foregroundStyle(isCurrent ? .indigo : .indigo.opacity(0.7))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(trimmed.isEmpty ? "（未填姓名）" : trimmed)
+                        .foregroundStyle(.primary)
+                    if !sub.isEmpty {
+                        Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(trimmed.isEmpty)
     }
 }
 

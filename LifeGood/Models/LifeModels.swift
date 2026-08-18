@@ -956,11 +956,14 @@ struct SideRoleResolution: Identifiable, Codable {
     var content: String
     /// 系統分類；nil＝未分類（舊資料與不想分類的都落在這裡）
     var category: SideRoleResolutionCategory?
+    /// 決議發起人。文字快照（比照出席者）：發起人常是跨部門或外部的人，
+    /// 存 id 的話對方被刪除就變空白；可手動輸入、也可從人員清單挑
+    var initiator: String
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "", content: String = "",
-         category: SideRoleResolutionCategory? = nil) {
+         category: SideRoleResolutionCategory? = nil, initiator: String = "") {
         self.id = id; self.date = date; self.title = title; self.content = content
-        self.category = category
+        self.category = category; self.initiator = initiator
     }
 
     init(from decoder: Decoder) throws {
@@ -970,9 +973,10 @@ struct SideRoleResolution: Identifiable, Codable {
         title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         content = (try? c.decodeIfPresent(String.self, forKey: .content)) ?? ""
         category = try? c.decodeIfPresent(SideRoleResolutionCategory.self, forKey: .category)
+        initiator = (try? c.decodeIfPresent(String.self, forKey: .initiator)) ?? ""
     }
 
-    private enum CodingKeys: String, CodingKey { case id, date, title, content, category }
+    private enum CodingKeys: String, CodingKey { case id, date, title, content, category, initiator }
 }
 
 /// 兼任職務的重要日期（例：尾牙的場勘日、彩排日、正式日）。

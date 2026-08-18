@@ -1260,7 +1260,7 @@ struct MyCalendarView: View {
             }
             // 分類代碼也進索引：搜「CDA」就列出所有 CDA 的決議
             for r in role.sideRoleResolutions ?? []
-            where hit([r.title, r.content, r.category?.rawValue ?? ""]) {
+            where hit([r.title, r.content, r.category?.rawValue ?? "", r.initiator]) {
                 let catPrefix = r.category.map { "[\($0.rawValue)] " } ?? ""
                 out.append(SearchHit(id: "srres_\(r.id)", icon: "checkmark.seal.fill", color: .indigo,
                     typeLabel: "重大決議", title: catPrefix + (r.title.isEmpty ? "未填標題" : r.title),
