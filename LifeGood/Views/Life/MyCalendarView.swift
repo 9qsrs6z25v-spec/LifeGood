@@ -1,6 +1,7 @@
 import SwiftUI
 import EventKit
 import MapKit
+import UIKit
 
 // MARK: - 美化紀錄（MyCalendarView）2026-06
 // ① sectionHeader：漸層膠囊色條 + 計數膠囊，與 OverviewView / IncomeView 設計語言保持均值。
@@ -50,6 +51,8 @@ struct MyCalendarView: View {
     @State private var debouncedSearchText = ""
     @State private var showSubCompleted = false
     @State private var openTarget: CalendarOpenTarget?
+    /// 搜尋結果匯出圖片的分享面板
+    @State private var searchSharePayload: CalendarSharePayload?
 
     /// 從搜尋結果 / 已完成卡片點擊要開啟的編輯目標
     enum CalendarOpenTarget: Identifiable {
@@ -176,6 +179,7 @@ struct MyCalendarView: View {
             .sheet(item: $previewCalendarItem) { item in
                 CalendarEventCard(item: item)
             }
+            .sheet(item: $searchSharePayload) { payload in ShareSheet(items: payload.items) }
             .sheet(item: $openTarget) { target in
                 switch target {
                 // 部屬報告/任務/會議/請假：先顯示預覽卡片，右上角「編輯」才進入編輯
@@ -1267,6 +1271,16 @@ struct MyCalendarView: View {
                 Text("搜尋結果").font(.headline)
                 Spacer()
                 Text("\(hits.count) 筆").font(.caption).foregroundStyle(.secondary)
+                if !hits.isEmpty {
+                    Button {
+                        exportSearchResults(query: query, hits: hits)
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.subheadline)
+                            .foregroundStyle(.green)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal)
 
@@ -1296,6 +1310,59 @@ struct MyCalendarView: View {
             }
         }
     }
+
+    /// 把目前的搜尋結果渲染成 JPG 分享（規格對齊部屬總覽／家庭頁匯出：
+    /// 寬 430、scale ≥3、JPG 0.95、過長自動切頁＋檔名頁碼）。
+    /// 匯出的是「當下這批結果」——搜尋詞與筆數印在標題列，圖片單獨轉傳也看得懂脈絡。
+    @MainActor
+    private func exportSearchResults(query: String, hits: [SearchHit]) {
+        let content = VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("🔍 我的行事曆搜尋「\(query)」")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(hits.count) 筆").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+            VStack(spacing: 0) {
+                ForEach(Array(hits.enumerated()), id: \.element.id) { idx, h in
+                    searchHitRow(h)
+                    if idx < hits.count - 1 { Divider().padding(.leading, 58) }
+                }
+            }
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 16)
+        }
+        .frame(width: 430)
+        .padding(.vertical, 20)
+        .background(Color(.systemGroupedBackground))
+        .environmentObject(lifeStore)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage else { return }
+        let pages = SubordinateOverviewView.sliceTallImage(ui, maxPageHeightPt: 1600)
+        let stamp = Self.searchExportStampFmt.string(from: Date())
+        // 搜尋詞進檔名前先清掉路徑非法字元（「/」會被當成目錄層級、寫檔直接失敗）
+        let safeQuery = query
+            .components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>"))
+            .joined()
+            .prefix(20)
+        var urls: [URL] = []
+        for (i, page) in pages.enumerated() {
+            guard let data = page.jpegData(compressionQuality: 0.95) else { continue }
+            let suffix = pages.count > 1 ? "_\(i + 1)之\(pages.count)" : ""
+            let name = "行事曆搜尋_\(safeQuery)_\(stamp)\(suffix).jpg"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            do { try data.write(to: url); urls.append(url) } catch { }
+        }
+        guard !urls.isEmpty else { return }
+        searchSharePayload = CalendarSharePayload(items: urls)
+    }
+
+    private static let searchExportStampFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
 
     private func searchHitRow(_ h: SearchHit) -> some View {
         HStack(spacing: 11) {
@@ -2416,3 +2483,7 @@ struct CalendarEventCard: View {
         .environmentObject(LifeStore())
         .environmentObject(FinanceStore())
 }
+
+
+/// 分享項目的 Identifiable 包裝（供 .sheet(item:) 使用）
+private struct CalendarSharePayload: Identifiable { let id = UUID(); let items: [Any] }
