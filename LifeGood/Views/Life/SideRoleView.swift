@@ -721,7 +721,7 @@ struct SideRoleWorkspaceView: View {
             + (role.sideRoleMeetings ?? [])
                 .filter { matches([$0.topic, $0.decisions, $0.note, $0.attendees.joined(separator: "、")]) }.count
             + (role.sideRoleResolutions ?? [])
-                .filter { matches([$0.title, $0.content, $0.category?.rawValue ?? "", $0.initiator]) }.count
+                .filter { matches([$0.title, $0.content, $0.categories.map(\.rawValue).joined(separator: " "), $0.initiator]) }.count
         return Button {
             exportImage(role)
         } label: {
@@ -856,13 +856,14 @@ struct SideRoleWorkspaceView: View {
                 }
             }
             let resolutions = (role.sideRoleResolutions ?? [])
-                .filter { matches([$0.title, $0.content, $0.category?.rawValue ?? "", $0.initiator]) }
+                .filter { matches([$0.title, $0.content, $0.categories.map(\.rawValue).joined(separator: " "), $0.initiator]) }
                 .sorted { $0.date > $1.date }
             if !resolutions.isEmpty {
                 exportBox(title: "重大決議（\(resolutions.count)）", icon: "checkmark.seal.fill") {
                     ForEach(resolutions) { r in
                         exportRow(head: "🏷 \(SideRoleFormat.date(r.date))　"
-                                    + (r.category.map { "[\($0.rawValue)] " } ?? "")
+                                    + (r.categories.isEmpty ? ""
+                                       : "[\(r.categories.map(\.rawValue).joined(separator: "/"))] ")
                                     + (r.title.isEmpty ? "（未填標題）" : r.title),
                                   lines: [
                                     r.initiator.isEmpty ? nil : "發起：\(r.initiator)",
@@ -1213,7 +1214,7 @@ struct SideRoleWorkspaceView: View {
     /// 重大決議（會議紀錄下方）：跨會議、值得單獨列出來查的定案。
     private func resolutionSection(_ role: LifeMilestone) -> some View {
         let resolutions = (role.sideRoleResolutions ?? [])
-            .filter { matches([$0.title, $0.content, $0.category?.rawValue ?? "", $0.initiator]) }
+            .filter { matches([$0.title, $0.content, $0.categories.map(\.rawValue).joined(separator: " "), $0.initiator]) }
             .sorted { $0.date > $1.date }
         return sectionBox(title: "重大決議", icon: "checkmark.seal.fill", color: .indigo,
                           trailing: "\(resolutions.count)",
@@ -1240,7 +1241,7 @@ struct SideRoleWorkspaceView: View {
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color.indigo.opacity(0.12))
                         .clipShape(Capsule())
-                    if let cat = r.category {
+                    ForEach(r.categories) { cat in
                         Text(cat.rawValue)
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(cat.color)
@@ -1994,26 +1995,54 @@ struct SideRoleResolutionEditor: View {
             .sideRoleResolutions?.contains { $0.id == resolution.id } == true
     }
 
+    /// 分類膠囊：點一下加入/移除（多選）
+    private func categoryChip(_ c: SideRoleResolutionCategory) -> some View {
+        let on = resolution.categories.contains(c)
+        return Button {
+            if on { resolution.categories.removeAll { $0 == c } }
+            else { resolution.categories.append(c) }
+        } label: {
+            Text(c.rawValue)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(on ? c.color.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(on ? c.color : Color.secondary)
+                .overlay(Capsule().stroke(on ? c.color.opacity(0.4) : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.borderless)
+    }
+
     var body: some View {
         Form {
             Section("重大決議") {
                 TextField("決議標題（例：場地定案：世貿一館）", text: $resolution.title)
                 DatePicker("決議日期", selection: $resolution.date, displayedComponents: .date)
-                Picker("系統分類", selection: $resolution.category) {
-                    Text("未分類").tag(nil as SideRoleResolutionCategory?)
-                    ForEach(SideRoleResolutionCategory.allCases) { c in
-                        Text(c.rawValue).tag(c as SideRoleResolutionCategory?)
+                // 系統分類（可多選；一則決議常橫跨多個系統）：膠囊點選切換
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("系統分類（可多選）")
+                        .font(.caption).foregroundStyle(.secondary)
+                    FlexibleChipWrap(items: SideRoleResolutionCategory.allCases) { c in
+                        categoryChip(c)
                     }
                 }
-                // 發起人：可直接打字，也可按放大鏡從人員清單挑（成員優先、可搜尋）
+                .padding(.vertical, 2)
+                // 發起人：可直接打字，也可按「挑選」從人員清單挑（成員優先、可搜尋）。
+                // 按鈕做成明顯的膠囊——原本只有 16pt 小圖示，太容易點到旁邊的輸入框，
+                // 使用者以為挑選功能沒實裝。
                 HStack(spacing: 8) {
                     TextField("決議發起人（可輸入或挑選）", text: $resolution.initiator)
                     Button { showInitiatorPicker = true } label: {
-                        Image(systemName: "person.crop.circle.badge.magnifyingglass")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.indigo)
+                        HStack(spacing: 3) {
+                            Image(systemName: "person.crop.circle.badge.magnifyingglass")
+                                .font(.system(size: 12))
+                            Text("挑選")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(Color.indigo.opacity(0.12), in: Capsule())
+                        .foregroundStyle(.indigo)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 }
             }
             Section("內容") {
