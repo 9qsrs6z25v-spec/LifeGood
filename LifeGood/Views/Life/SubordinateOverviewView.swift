@@ -372,7 +372,7 @@ struct SubordinateOverviewView: View {
 
     /// 長圖切頁：超過 maxPageHeightPt 就依像素座標裁成多張。
     /// 相鄰兩頁重疊 24pt——切線落在一列文字中間時，那行字在下一頁還能完整看到。
-    private static func sliceTallImage(_ image: UIImage, maxPageHeightPt: CGFloat) -> [UIImage] {
+    static func sliceTallImage(_ image: UIImage, maxPageHeightPt: CGFloat) -> [UIImage] {
         guard image.size.height > maxPageHeightPt * 1.2, let cg = image.cgImage else { return [image] }
         let scale = image.scale
         let overlapPt: CGFloat = 24

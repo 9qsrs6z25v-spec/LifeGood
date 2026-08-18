@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 美化紀錄（FamilyView）
 // [2026-06 v1] 本次美化方向：
@@ -50,6 +51,7 @@ struct FamilyView: View {
     @State private var editingMember: FamilyMember?
     @State private var editingTask: FamilyTask?
     @State private var showReminderDeniedAlert = false
+    @State private var sharePayload: FamilySharePayload?
     @ObservedObject private var reminderBridge = ReminderBridge.shared
     @State private var showPremiumAlert = false
     @State private var membersAppeared = false
@@ -137,11 +139,14 @@ struct FamilyView: View {
             .navigationTitle("家庭")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        if subscription.isPremium { showAdd = true }
-                        else { showPremiumAlert = true }
-                    } label: {
-                        Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                    HStack(spacing: 14) {
+                        exportMenu
+                        Button {
+                            if subscription.isPremium { showAdd = true }
+                            else { showPremiumAlert = true }
+                        } label: {
+                            Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
+                        }
                     }
                 }
             }
@@ -155,8 +160,128 @@ struct FamilyView: View {
             } message: {
                 Text("請到 設定 > 隱私權與安全性 > 提醒事項 開啟 LifeGood 的存取權，才能同步待辦。")
             }
+            .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
+    }
+
+    // MARK: - 匯出圖片
+
+    private enum FamilyExportSection: String {
+        case tasks = "家庭待辦"
+        case members = "家庭成員"
+        case all = "全部"
+    }
+
+    private var exportMenu: some View {
+        Menu {
+            Button { exportImage(.tasks) } label: { Label("家庭待辦", systemImage: "checklist") }
+            Button { exportImage(.members) } label: { Label("家庭成員", systemImage: "person.3.fill") }
+            Button { exportImage(.all) } label: { Label("全部", systemImage: "rectangle.on.rectangle") }
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+                .font(.body)
+                .foregroundStyle(.green)
+        }
+    }
+
+    private static let exportStampFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
+    private static let exportDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E)"; return f
+    }()
+
+    /// 對齊部屬總覽 exportImage 規格：寬 430、scale ≥3、JPG 0.95、
+    /// 過長自動切頁（SubordinateOverviewView.sliceTallImage 共用）
+    @MainActor
+    private func exportImage(_ section: FamilyExportSection) {
+        let membersById = Dictionary(store.familyMembers.map { ($0.id, $0) },
+                                     uniquingKeysWith: { first, _ in first })
+        let content = exportContent(section, membersById: membersById)
+            .frame(width: 430)
+            .padding(.vertical, 20)
+            .background(Color(.systemGroupedBackground))
+            .environmentObject(store)
+            .environmentObject(subscription)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage else { return }
+        let pages = SubordinateOverviewView.sliceTallImage(ui, maxPageHeightPt: 1600)
+        let stamp = Self.exportStampFmt.string(from: Date())
+        var urls: [URL] = []
+        for (i, page) in pages.enumerated() {
+            guard let data = page.jpegData(compressionQuality: 0.95) else { continue }
+            let suffix = pages.count > 1 ? "_\(i + 1)之\(pages.count)" : ""
+            let name = "家庭_\(section.rawValue)_\(stamp)\(suffix).jpg"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            do { try data.write(to: url); urls.append(url) } catch { }
+        }
+        guard !urls.isEmpty else { return }
+        sharePayload = FamilySharePayload(items: urls)
+    }
+
+    @ViewBuilder
+    private func exportContent(_ section: FamilyExportSection,
+                               membersById: [UUID: FamilyMember]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("👨‍👩‍👧‍👦 家庭｜\(Self.exportDateFmt.string(from: Date()))")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+
+            if section == .tasks || section == .all {
+                exportCardWrap(title: "家庭待辦", icon: "checklist", color: .orange) {
+                    let tasks = store.familyTasks.sorted { a, b in
+                        if a.isCompleted != b.isCompleted { return !a.isCompleted }
+                        return (a.dueDate ?? .distantFuture) < (b.dueDate ?? .distantFuture)
+                    }
+                    if tasks.isEmpty {
+                        Text("目前沒有家庭待辦").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(tasks) { t in familyTaskRow(t) }
+                    }
+                }
+            }
+            if section == .members || section == .all {
+                if section == .all { statsStrip.padding(.horizontal, 4) }
+                exportCardWrap(title: "家庭成員", icon: "person.3.fill",
+                               color: Color(red: 1.00, green: 0.35, blue: 0.55)) {
+                    if store.familyMembers.isEmpty {
+                        Text("還沒有家庭成員").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(store.familyMembers) { m in
+                            memberRow(m, membersById: membersById)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 匯出用卡片容器（List 外沒有系統底色，補一層白卡背景）
+    private func exportCardWrap<C: View>(title: String, icon: String, color: Color,
+                                         @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [color, color.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(color)
+                Text(title).font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            content()
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16)
     }
 
     // MARK: - 家庭待辦
@@ -807,3 +932,7 @@ struct FamilyTaskEditor: View {
         }
     }
 }
+
+
+/// 分享項目的 Identifiable 包裝（供 .sheet(item:) 使用）
+private struct FamilySharePayload: Identifiable { let id = UUID(); let items: [Any] }
