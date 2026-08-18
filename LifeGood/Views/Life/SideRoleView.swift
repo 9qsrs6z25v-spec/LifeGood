@@ -598,6 +598,11 @@ struct SideRoleWorkspaceView: View {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     header(role)
+                    // 搜尋中導覽列被系統收合、右上角分享鈕會跟著隱藏（iOS 行為），
+                    // 這裡補一條常駐的匯出列——搜完直接匯出本來就是最常見的動線
+                    if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                        searchExportBar(role)
+                    }
                     taskSection(role)
                     keyDateSection(role)
                     memberSection(role)
@@ -705,6 +710,45 @@ struct SideRoleWorkspaceView: View {
     }
 
     // MARK: 待辦
+
+    /// 搜尋中的匯出列：顯示相符筆數 + 匯出按鈕（右上角分享鈕被搜尋欄收走時的替代入口）
+    private func searchExportBar(_ role: LifeMilestone) -> some View {
+        let count = (role.sideRoleTasks ?? [])
+                .filter { matches([$0.content, $0.note, SideRoleFormat.assigneeNames($0, in: role)]) }.count
+            + (role.sideRoleKeyDates ?? []).filter { matches([$0.title, $0.note]) }.count
+            + (role.sideRoleMembers ?? [])
+                .filter { matches([$0.name, $0.dutyInRole, $0.contact, $0.note]) }.count
+            + (role.sideRoleMeetings ?? [])
+                .filter { matches([$0.topic, $0.decisions, $0.note, $0.attendees.joined(separator: "、")]) }.count
+            + (role.sideRoleResolutions ?? [])
+                .filter { matches([$0.title, $0.content, $0.category?.rawValue ?? "", $0.initiator]) }.count
+        return Button {
+            exportImage(role)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("匯出這批搜尋結果")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(count) 筆相符")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color.white.opacity(0.22), in: Capsule())
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(
+                LinearGradient(colors: [.indigo, .indigo.opacity(0.75)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .disabled(count == 0)
+        .opacity(count == 0 ? 0.5 : 1)
+    }
 
     // MARK: 匯出圖片（完整內容，不截斷）
 
