@@ -464,6 +464,20 @@ enum UnifiedExporter {
                 }
             }
 
+            csv += "\n## 兼任職務重大決議 (Side Role Resolutions)\n"
+            csv += "roleId,roleName,date,category,title,content\n"
+            for r in sideRoles {
+                for res in r.sideRoleResolutions ?? [] {
+                    let fields: [String] = [
+                        r.id.uuidString, esc(r.sideRoleName ?? ""),
+                        iso.string(from: res.date),
+                        res.category?.rawValue ?? "",
+                        esc(res.title), esc(res.content)
+                    ]
+                    csv += fields.joined(separator: ",") + "\n"
+                }
+            }
+
             csv += "\n## 兼任職務重要日期 (Side Role Key Dates)\n"
             csv += "roleId,roleName,date,title,remindDaysBefore,note\n"
             for r in sideRoles {

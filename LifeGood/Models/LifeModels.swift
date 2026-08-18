@@ -929,6 +929,52 @@ struct SideRoleMeeting: Identifiable, Codable {
     }
 }
 
+/// 重大決議的系統分類（使用者指定的廠務系統代碼）。
+/// rawValue 即代碼本身（英文、穩定），顯示直接用代碼——這批本來就是縮寫術語。
+enum SideRoleResolutionCategory: String, Codable, CaseIterable, Identifiable {
+    case cda = "CDA"
+    case bgs = "BGS"
+    case sgs = "SGS"
+    case chm = "CHM"
+    case mix = "MIX"
+    case waste = "Waste"
+    case slurry = "Slurry"
+    case gis = "GIS"
+    case cis = "CIS"
+    case esh = "ESH"
+    case other = "Other"
+    var id: String { rawValue }
+}
+
+/// 兼任職務的重大決議（例：預算核定、場地定案）。
+/// 與會議紀錄裡的「決議事項」不同：這是跨會議、值得單獨列出來查的定案，
+/// 有自己的標題、內容與系統分類，會被「我的行事曆」搜尋索引到（含分類代碼）。
+struct SideRoleResolution: Identifiable, Codable {
+    let id: UUID
+    var date: Date
+    var title: String
+    var content: String
+    /// 系統分類；nil＝未分類（舊資料與不想分類的都落在這裡）
+    var category: SideRoleResolutionCategory?
+
+    init(id: UUID = UUID(), date: Date = Date(), title: String = "", content: String = "",
+         category: SideRoleResolutionCategory? = nil) {
+        self.id = id; self.date = date; self.title = title; self.content = content
+        self.category = category
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        date = (try? c.decodeIfPresent(Date.self, forKey: .date)) ?? Date()
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
+        content = (try? c.decodeIfPresent(String.self, forKey: .content)) ?? ""
+        category = try? c.decodeIfPresent(SideRoleResolutionCategory.self, forKey: .category)
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, date, title, content, category }
+}
+
 /// 兼任職務的重要日期（例：尾牙的場勘日、彩排日、正式日）。
 /// 會同步顯示在「我的行事曆」上。
 struct SideRoleKeyDate: Identifiable, Codable {
@@ -1010,6 +1056,8 @@ struct LifeMilestone: Identifiable, Codable {
     var sideRoleMeetings: [SideRoleMeeting]?
     /// 專屬管理頁：重要日期（會同步到我的行事曆）
     var sideRoleKeyDates: [SideRoleKeyDate]?
+    /// 兼任職務的重大決議（放在會議紀錄下方）
+    var sideRoleResolutions: [SideRoleResolution]?
 
     // 理財專屬欄位
     var financeSubCategory: FinanceSubCategory?
@@ -1134,6 +1182,7 @@ struct LifeMilestone: Identifiable, Codable {
         sideRoleMembers = try? c.decodeIfPresent([SideRoleMember].self, forKey: .sideRoleMembers)
         sideRoleMeetings = try? c.decodeIfPresent([SideRoleMeeting].self, forKey: .sideRoleMeetings)
         sideRoleKeyDates = try? c.decodeIfPresent([SideRoleKeyDate].self, forKey: .sideRoleKeyDates)
+        sideRoleResolutions = try? c.decodeIfPresent([SideRoleResolution].self, forKey: .sideRoleResolutions)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1151,7 +1200,7 @@ struct LifeMilestone: Identifiable, Codable {
         //    JSON，而且完全不會編譯錯，只會在殺掉 App 重開後靜默丟失。
         case sideRoleName, sideRoleOrg, sideRoleEndDate, sideRoleIsLead
         case sideRoleScope, sideRoleWorkspaceEnabled
-        case sideRoleTasks, sideRoleMembers, sideRoleMeetings, sideRoleKeyDates
+        case sideRoleTasks, sideRoleMembers, sideRoleMeetings, sideRoleKeyDates, sideRoleResolutions
     }
 
     // MARK: 兼任職務便利屬性
@@ -1174,14 +1223,15 @@ struct LifeMilestone: Identifiable, Codable {
 
     /// 管理頁裡已經累積了多少內容。用來在關閉開關時據實告訴使用者「保留了什麼」，
     /// 而不是只給一句沒有憑據的「資料會保留」。
-    var sideRoleContentCount: (tasks: Int, members: Int, meetings: Int, keyDates: Int) {
+    var sideRoleContentCount: (tasks: Int, members: Int, meetings: Int, keyDates: Int, resolutions: Int) {
         (sideRoleTasks?.count ?? 0, sideRoleMembers?.count ?? 0,
-         sideRoleMeetings?.count ?? 0, sideRoleKeyDates?.count ?? 0)
+         sideRoleMeetings?.count ?? 0, sideRoleKeyDates?.count ?? 0,
+         sideRoleResolutions?.count ?? 0)
     }
 
     var hasAnySideRoleContent: Bool {
         let c = sideRoleContentCount
-        return c.tasks + c.members + c.meetings + c.keyDates > 0
+        return c.tasks + c.members + c.meetings + c.keyDates + c.resolutions > 0
     }
 
     /// 信用卡實際扣款日：以消費日推算結帳後的繳款日

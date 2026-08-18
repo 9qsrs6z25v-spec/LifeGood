@@ -728,6 +728,20 @@ class LifeStore: ObservableObject {
         mutateSideRole(roleId) { $0.sideRoleKeyDates?.removeAll { $0.id == keyDateId } }
     }
 
+    func upsertSideRoleResolution(_ resolution: SideRoleResolution, in roleId: UUID) {
+        mutateSideRole(roleId) { m in
+            var list = m.sideRoleResolutions ?? []
+            if let i = list.firstIndex(where: { $0.id == resolution.id }) { list[i] = resolution }
+            else { list.append(resolution) }
+            // 新到舊：重大決議通常回頭查最近定案的
+            m.sideRoleResolutions = list.sorted { $0.date > $1.date }
+        }
+    }
+
+    func deleteSideRoleResolution(_ resolutionId: UUID, in roleId: UUID) {
+        mutateSideRole(roleId) { $0.sideRoleResolutions?.removeAll { $0.id == resolutionId } }
+    }
+
     /// 找同名兼任職務的上一屆（例：2026 尾牙負責人的上一屆是 2025 那筆）。
     /// 年度性職務每年一筆，名單通常大同小異，重打十幾個人不合理。
     func previousTermOfSideRole(_ role: LifeMilestone) -> LifeMilestone? {

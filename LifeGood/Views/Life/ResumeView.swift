@@ -503,6 +503,7 @@ struct ResumeView: View {
         if c.tasks > 0 { parts.append("\(c.tasks) 則待辦") }
         if c.members > 0 { parts.append("\(c.members) 位成員") }
         if c.meetings > 0 { parts.append("\(c.meetings) 則會議紀錄") }
+        if c.resolutions > 0 { parts.append("\(c.resolutions) 則重大決議") }
         if c.keyDates > 0 { parts.append("\(c.keyDates) 個重要日期") }
         return "這個職務的 " + parts.joined(separator: "、") + " 也會一併刪除，且無法復原。"
     }
@@ -1916,11 +1917,13 @@ struct AddMilestoneView: View {
         if sideRoleWorkspaceEnabled {
             return "會在「職涯」的功能列出現「兼任職務」入口，裡面可以管待辦、成員名單、會議紀錄與重要日期。"
         }
-        let c = editing?.sideRoleContentCount ?? (tasks: 0, members: 0, meetings: 0, keyDates: 0)
+        let c = editing?.sideRoleContentCount
+            ?? (tasks: 0, members: 0, meetings: 0, keyDates: 0, resolutions: 0)
         var parts: [String] = []
         if c.tasks > 0 { parts.append("\(c.tasks) 則待辦") }
         if c.members > 0 { parts.append("\(c.members) 位成員") }
         if c.meetings > 0 { parts.append("\(c.meetings) 則會議紀錄") }
+        if c.resolutions > 0 { parts.append("\(c.resolutions) 則重大決議") }
         if c.keyDates > 0 { parts.append("\(c.keyDates) 個重要日期") }
         if !parts.isEmpty {
             return "目前保留 " + parts.joined(separator: "、") + "，重新開啟就會看到。關閉只是隱藏入口，不會刪除任何內容。"

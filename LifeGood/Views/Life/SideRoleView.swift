@@ -484,7 +484,7 @@ struct SideRoleHubView: View {
                             Text(SideRoleFormat.displayName(role))
                                 .font(.subheadline)
                                 .lineLimit(1)
-                            Text("保留 \(c.tasks) 待辦 · \(c.members) 成員 · \(c.meetings) 會議 · \(c.keyDates) 日期")
+                            Text("保留 \(c.tasks) 待辦 · \(c.members) 成員 · \(c.meetings) 會議 · \(c.resolutions) 決議 · \(c.keyDates) 日期")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -543,6 +543,7 @@ struct SideRoleWorkspaceView: View {
     @State private var viewingMember: SideRoleMember?
     @State private var editingMeeting: SideRoleMeeting?
     @State private var editingKeyDate: SideRoleKeyDate?
+    @State private var editingResolution: SideRoleResolution?
     @State private var showCopyResult: String?
     @State private var showEditRole = false
 
@@ -593,6 +594,7 @@ struct SideRoleWorkspaceView: View {
                     keyDateSection(role)
                     memberSection(role)
                     meetingSection(role)
+                    resolutionSection(role)
                 }
                 .padding(.vertical, 8)
             }
@@ -626,6 +628,9 @@ struct SideRoleWorkspaceView: View {
         }
         .sheet(item: $editingKeyDate) { k in
             NavigationStack { SideRoleKeyDateEditor(roleId: roleId, keyDate: k) }
+        }
+        .sheet(item: $editingResolution) { r in
+            NavigationStack { SideRoleResolutionEditor(roleId: roleId, resolution: r) }
         }
         .alert("已複製上屆名單", isPresented: Binding(
             get: { showCopyResult != nil },
@@ -958,6 +963,62 @@ struct SideRoleWorkspaceView: View {
         .background(Color(.systemBackground))
         .contentShape(Rectangle())
         .onTapGesture { editingMeeting = mt }
+    }
+
+    // MARK: 重大決議
+
+    /// 重大決議（會議紀錄下方）：跨會議、值得單獨列出來查的定案。
+    private func resolutionSection(_ role: LifeMilestone) -> some View {
+        let resolutions = (role.sideRoleResolutions ?? []).sorted { $0.date > $1.date }
+        return sectionBox(title: "重大決議", icon: "checkmark.seal.fill", color: .indigo,
+                          trailing: "\(resolutions.count)",
+                          onAdd: { editingResolution = SideRoleResolution() }) {
+            if resolutions.isEmpty {
+                emptyRow("還沒有重大決議。定案的事放這裡，之後在「我的行事曆」搜尋得到。")
+            } else {
+                ForEach(resolutions) { r in
+                    SwipeDeleteRow(onDelete: { lifeStore.deleteSideRoleResolution(r.id, in: roleId) }) {
+                        resolutionRow(r)
+                    }
+                }
+            }
+        }
+    }
+
+    private func resolutionRow(_ r: SideRoleResolution) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(SideRoleFormat.date(r.date))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.indigo)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.indigo.opacity(0.12))
+                        .clipShape(Capsule())
+                    if let cat = r.category {
+                        Text(cat.rawValue)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(cat.color)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(cat.color.opacity(0.14))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(cat.color.opacity(0.25), lineWidth: 0.6))
+                    }
+                    Text(r.title.isEmpty ? "（未填標題）" : r.title)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                }
+                if !r.content.isEmpty {
+                    Text(r.content)
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Color(.systemBackground))
+        .contentShape(Rectangle())
+        .onTapGesture { editingResolution = r }
     }
 
     // MARK: 共用外框
@@ -1642,6 +1703,89 @@ struct SideRoleKeyDateEditor: View {
         .onAppear {
             hasRemind = keyDate.remindDaysBefore != nil
             remindDays = keyDate.remindDaysBefore ?? 3
+        }
+    }
+}
+
+// MARK: - 重大決議分類徽章色
+
+extension SideRoleResolutionCategory {
+    /// 分類徽章色（固定表；不用 hash 配色，同一分類在任何裝置上永遠同色）。
+    /// 放 View 層：LifeModels.swift 不 import SwiftUI，Color 進不去模型檔。
+    var color: Color {
+        switch self {
+        case .cda:    return .blue
+        case .bgs:    return .teal
+        case .sgs:    return .cyan
+        case .chm:    return .purple
+        case .mix:    return .orange
+        case .waste:  return .brown
+        case .slurry: return .indigo
+        case .gis:    return .green
+        case .cis:    return .mint
+        case .esh:    return .red
+        case .other:  return .gray
+        }
+    }
+}
+
+// MARK: - 重大決議編輯
+
+struct SideRoleResolutionEditor: View {
+    let roleId: UUID
+    @State var resolution: SideRoleResolution
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    /// 是否為既有決議（決定刪除鈕）
+    private var isEditing: Bool {
+        lifeStore.milestones.first { $0.id == roleId }?
+            .sideRoleResolutions?.contains { $0.id == resolution.id } == true
+    }
+
+    var body: some View {
+        Form {
+            Section("重大決議") {
+                TextField("決議標題（例：場地定案：世貿一館）", text: $resolution.title)
+                DatePicker("決議日期", selection: $resolution.date, displayedComponents: .date)
+                Picker("系統分類", selection: $resolution.category) {
+                    Text("未分類").tag(nil as SideRoleResolutionCategory?)
+                    ForEach(SideRoleResolutionCategory.allCases) { c in
+                        Text(c.rawValue).tag(c as SideRoleResolutionCategory?)
+                    }
+                }
+            }
+            Section("內容") {
+                TextField("決議內容、脈絡、金額等（會被行事曆搜尋索引）",
+                          text: $resolution.content, axis: .vertical)
+                    .lineLimit(4...10)
+            }
+            if isEditing {
+                Section {
+                    Button(role: .destructive) {
+                        lifeStore.deleteSideRoleResolution(resolution.id, in: roleId)
+                        dismiss()
+                    } label: {
+                        Label("刪除此決議", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+        .navigationTitle("重大決議")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("取消") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("儲存") {
+                    lifeStore.upsertSideRoleResolution(resolution, in: roleId)
+                    dismiss()
+                }
+                .disabled(resolution.title.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
         }
     }
 }
