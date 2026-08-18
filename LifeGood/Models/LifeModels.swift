@@ -2351,17 +2351,22 @@ struct Department: Identifiable, Codable {
     var downstreamIds: [UUID]
     /// 同層級部門（peer / 平行單位）
     var peerIds: [UUID]
+    /// 管理人員（OrgPerson id，可多位——主管＋代理人是常態）。
+    /// 在部門詳細頁設定；目錄檢視的部門列會直接顯示管理人姓名。
+    var managerIds: [UUID]
 
     init(id: UUID = UUID(), code: String = "", name: String = "",
          function: String = "",
          upstreamIds: [UUID] = [],
          downstreamIds: [UUID] = [],
-         peerIds: [UUID] = []) {
+         peerIds: [UUID] = [],
+         managerIds: [UUID] = []) {
         self.id = id; self.code = code; self.name = name
         self.function = function
         self.upstreamIds = upstreamIds
         self.downstreamIds = downstreamIds
         self.peerIds = peerIds
+        self.managerIds = managerIds
     }
 
     init(from decoder: Decoder) throws {
@@ -2373,10 +2378,11 @@ struct Department: Identifiable, Codable {
         upstreamIds = (try? c.decode([UUID].self, forKey: .upstreamIds)) ?? []
         downstreamIds = (try? c.decode([UUID].self, forKey: .downstreamIds)) ?? []
         peerIds = (try? c.decode([UUID].self, forKey: .peerIds)) ?? []
+        managerIds = (try? c.decode([UUID].self, forKey: .managerIds)) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, code, name, function, upstreamIds, downstreamIds, peerIds
+        case id, code, name, function, upstreamIds, downstreamIds, peerIds, managerIds
     }
 }
 

@@ -53,6 +53,35 @@ struct GradeTitleView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
     @State private var showPremiumAlert = false
+    @State private var query = ""
+
+    /// 部門依名稱排序（localizedStandardCompare：中文筆劃與「一部/二部/10 部」
+    /// 的數字都排得對），再套搜尋。store 內的原始順序不動——只是顯示排序。
+    private var displayedDepartments: [Department] {
+        let base = lifeStore.departments.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return base }
+        return base.filter {
+            $0.name.localizedCaseInsensitiveContains(q)
+            || $0.code.localizedCaseInsensitiveContains(q)
+            || $0.function.localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    /// 職等依職等文字排序（數字感知：2 排在 10 前面），再套搜尋
+    private var displayedGradeTitles: [GradeTitle] {
+        let base = lifeStore.gradeTitles.sorted {
+            $0.grade.localizedStandardCompare($1.grade) == .orderedAscending
+        }
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return base }
+        return base.filter {
+            $0.grade.localizedCaseInsensitiveContains(q)
+            || $0.title.localizedCaseInsensitiveContains(q)
+        }
+    }
     @State private var editingDepartmentId: UUID?
     @State private var addingDepartment = false
     @State private var heroAppeared = false
@@ -76,7 +105,7 @@ struct GradeTitleView: View {
 
                 // ── 部門名稱 ──
                 Section {
-                    ForEach(Array(lifeStore.departments.enumerated()), id: \.element.id) { idx, dept in
+                    ForEach(Array(displayedDepartments.enumerated()), id: \.element.id) { idx, dept in
                         Button {
                             editingDepartmentId = dept.id
                         } label: {
@@ -117,7 +146,7 @@ struct GradeTitleView: View {
 
                 // ── 職等設定 ──
                 Section {
-                    ForEach(Array(lifeStore.gradeTitles.enumerated()), id: \.element.id) { index, gt in
+                    ForEach(Array(displayedGradeTitles.enumerated()), id: \.element.id) { index, gt in
                         GradeTitleRow(item: gt)
                             .opacity(rowsAppeared ? 1 : 0)
                             .offset(y: rowsAppeared ? 0 : 12)
@@ -143,6 +172,7 @@ struct GradeTitleView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .searchable(text: $query, prompt: "搜尋部門、職等或職稱")
             .navigationTitle("部門職等")
             .disabled(!subscription.isPremium)
             .premiumLockAlert(isPresented: $showPremiumAlert)
@@ -809,7 +839,10 @@ struct DepartmentEditor: View {
             function: function.trimmingCharacters(in: .whitespaces),
             upstreamIds: Array(upstreamIds),
             downstreamIds: Array(downstreamIds),
-            peerIds: Array(peerIds)
+            peerIds: Array(peerIds),
+            // ⚠️ 管理人員在部門詳細頁設定、不在這個編輯器裡——重建時必須帶原值，
+            //    否則改個部門名稱就把管理人員名單洗掉（vaccinations 同型教訓 v25.220）
+            managerIds: existing?.managerIds ?? []
         )
         if isEditing { lifeStore.update(dept) } else { lifeStore.add(dept) }
 

@@ -93,11 +93,17 @@ struct OrganizationView: View {
         return lifeStore.departments
     }
 
+    /// 目錄 ⇄ 樹狀圖 檢視切換。預設目錄——樹狀圖要雙向捲動，
+    /// 部門一多就很難滑（使用者回報）；樹狀保留給想看全貌/匯出比對的時候。
+    @AppStorage("org_view_directory_mode") private var directoryMode = true
+
     var body: some View {
         NavigationStack {
             Group {
                 if lifeStore.departments.isEmpty {
                     emptyState
+                } else if directoryMode {
+                    directoryList
                 } else {
                     ScrollView([.horizontal, .vertical]) {
                         let ctx = makeOrgContext()
@@ -117,11 +123,22 @@ struct OrganizationView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     if !lifeStore.departments.isEmpty {
-                        Button {
-                            pdfURL = generatePDFURL().map { IdentifiableURL(url: $0) }
-                        } label: {
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundStyle(.green)
+                        HStack(spacing: 14) {
+                            Button {
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                                    directoryMode.toggle()
+                                }
+                            } label: {
+                                Image(systemName: directoryMode
+                                      ? "rectangle.3.group" : "list.bullet.indent")
+                                    .foregroundStyle(.indigo)
+                            }
+                            Button {
+                                pdfURL = generatePDFURL().map { IdentifiableURL(url: $0) }
+                            } label: {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundStyle(.green)
+                            }
                         }
                     }
                 }
@@ -304,6 +321,112 @@ struct OrganizationView: View {
     /// 每個節點各自對 departments／orgPeople 全量 filter（O(D²) + O(D×P)），
     /// 部門/人員數一多，每次 render（含任何導致本頁重繪的狀態變化）都會重複整棵樹的全量掃描。
     /// 改為 body 進入樹狀繪製前一次建表，遞迴節點全部改查表 O(1)。
+    // MARK: - 目錄檢視
+
+    /// 目錄樹節點：OutlineGroup 需要 children 為 nil（葉）或子陣列
+    private struct DeptNode: Identifiable {
+        let dept: Department
+        var children: [DeptNode]?
+        var id: UUID { dept.id }
+    }
+
+    private func makeNodes(_ depts: [Department], visited: Set<UUID>, ctx: OrgContext) -> [DeptNode] {
+        depts.compactMap { d in
+            guard !visited.contains(d.id) else { return nil }   // 成環保險
+            let kids = (ctx.childrenByParent[d.id] ?? []).sorted {
+                $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+            let childNodes = makeNodes(kids, visited: visited.union([d.id]), ctx: ctx)
+            return DeptNode(dept: d, children: childNodes.isEmpty ? nil : childNodes)
+        }
+    }
+
+    /// 目錄型組織：List + OutlineGroup 逐層展開，單向捲動好滑；
+    /// 點列開部門詳細頁（人員與管理人員都在裡面設定）。
+    private var directoryList: some View {
+        let ctx = makeOrgContext()
+        let roots = rootDepartments.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        let nodes = makeNodes(roots, visited: [], ctx: ctx)
+        return List {
+            Section {
+                statsHeader
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            }
+            Section {
+                OutlineGroup(nodes, children: \.children) { node in
+                    directoryRow(node.dept, ctx: ctx)
+                }
+            } footer: {
+                Text("點部門名稱進入詳細頁設定人員與管理人員；點箭頭展開下游部門。右上角可切回樹狀圖。")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+    }
+
+    private func directoryRow(_ dept: Department, ctx: OrgContext) -> some View {
+        let managers = dept.managerIds.compactMap { mid in
+            lifeStore.orgPeople.first { $0.id == mid }
+        }
+        return Button {
+            viewingDeptId = dept.id
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(LinearGradient(colors: [.indigo, .purple],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: "building.2.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(dept.name.isEmpty ? "未命名部門" : dept.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        if !dept.code.isEmpty {
+                            Text(dept.code)
+                                .font(.system(size: 10, weight: .medium))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color(.tertiarySystemFill))
+                                .foregroundStyle(.secondary)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    HStack(spacing: 6) {
+                        if !managers.isEmpty {
+                            HStack(spacing: 3) {
+                                Image(systemName: "person.badge.shield.checkmark")
+                                    .font(.system(size: 9))
+                                Text(managers.map(\.name).joined(separator: "、"))
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.indigo)
+                            .lineLimit(1)
+                        }
+                        let count = ctx.peopleCountByDept[dept.id] ?? 0
+                        if count > 0 {
+                            Text("\(count) 人")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private struct OrgContext {
         let byId: [UUID: Department]
         let childrenByParent: [UUID: [Department]]
@@ -451,6 +574,7 @@ struct DepartmentDetailView: View {
     @State private var addingPerson = false
     @State private var viewingPersonId: UUID?
     @State private var showEditDept = false
+    @State private var showManagerPicker = false
     // [v2] 進場動畫旗標
     @State private var peopleAppeared = false
 
@@ -481,6 +605,7 @@ struct DepartmentDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     headerCard
+                    managerSection
                     if !upstreamDepts.isEmpty || !downstreamDepts.isEmpty {
                         relationsCard
                     }
@@ -500,6 +625,11 @@ struct DepartmentDetailView: View {
             .sheet(isPresented: $showEditDept) {
                 DepartmentEditor(editingId: deptId)
             }
+            .sheet(isPresented: $showManagerPicker) {
+                NavigationStack {
+                    DeptManagerPicker(deptId: deptId)
+                }
+            }
             .sheet(isPresented: $addingPerson) {
                 OrgPersonEditor(editingId: nil, defaultDepartmentId: deptId)
             }
@@ -510,6 +640,68 @@ struct DepartmentDetailView: View {
                 OrgPersonDetailView(personId: wrapper.id)
             }
         }
+    }
+
+    /// 管理人員：這個部門的主管／代理人（可多位）。
+    /// 與「部門人員」分開一區——管理人不一定編制在本部門（例如由上級部門主管兼管）。
+    private var managerSection: some View {
+        let managers = dept.managerIds.compactMap { mid in
+            lifeStore.orgPeople.first { $0.id == mid }
+        }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.orange, .orange.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: "person.badge.shield.checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text("管理人員")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Button {
+                    showManagerPicker = true
+                } label: {
+                    Text(managers.isEmpty ? "設定" : "編輯")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
+            }
+            if managers.isEmpty {
+                Text("尚未設定管理人員")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(managers) { m in
+                    Button { viewingPersonId = m.id } label: {
+                        HStack(spacing: 8) {
+                            personAvatar(m)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(m.name.isEmpty ? "未命名" : m.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                let title = lifeStore.gradeTitles.first { $0.id == m.gradeTitleId }?.title ?? m.jobTitle
+                                if !title.isEmpty {
+                                    Text(title).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .padding(.horizontal)
     }
 
     // 美化：加大圖示底圓、Capsule 色條 section 標題、雙層陰影（對齊 LifeRealEstateView detail card）
@@ -787,6 +979,89 @@ struct DepartmentDetailView: View {
 
 // [2026-07 v3] Section header：對齊 ChildDetailView.childEditorSectionHeader / ResumeView.profileEditorSectionHeader
 // 既有共用寫法（4pt 漸層 Capsule 色條 + 圖示 + .subheadline.semibold 標題）。
+// MARK: - 管理人員挑選
+
+/// 部門管理人員挑選（可多選）。候選＝全部在職組織人員——管理人不一定編制在
+/// 本部門；本部門的人排最前面。改動即時寫回 store（勾選當下生效，沒有草稿）。
+struct DeptManagerPicker: View {
+    let deptId: UUID
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var dept: Department? {
+        lifeStore.departments.first { $0.id == deptId }
+    }
+
+    private var candidates: [OrgPerson] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return lifeStore.orgPeople
+            .filter { !$0.isInactive }
+            .filter {
+                q.isEmpty || $0.name.localizedCaseInsensitiveContains(q)
+                || $0.jobTitle.localizedCaseInsensitiveContains(q)
+            }
+            .sorted { a, b in
+                // 本部門的人排前面，其次依姓名
+                let aIn = a.departmentId == deptId, bIn = b.departmentId == deptId
+                if aIn != bIn { return aIn }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+    }
+
+    var body: some View {
+        List {
+            if candidates.isEmpty {
+                Text("沒有可選的人員。先到部門詳細頁新增人員，或確認搜尋條件。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(candidates) { p in
+                let isOn = dept?.managerIds.contains(p.id) == true
+                Button {
+                    guard var d = dept else { return }
+                    if isOn { d.managerIds.removeAll { $0 == p.id } }
+                    else { d.managerIds.append(p.id) }
+                    lifeStore.update(d)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 18))
+                            .foregroundStyle(isOn ? .orange : .secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(p.name.isEmpty ? "未命名" : p.name)
+                                .foregroundStyle(.primary)
+                            let title = lifeStore.gradeTitles.first { $0.id == p.gradeTitleId }?.title ?? p.jobTitle
+                            let deptName = p.departmentId.flatMap { did in
+                                lifeStore.departments.first { $0.id == did }?.name
+                            } ?? ""
+                            let sub = [title, deptName].filter { !$0.isEmpty }.joined(separator: " · ")
+                            if !sub.isEmpty {
+                                Text(sub).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if p.departmentId == deptId {
+                            Text("本部門")
+                                .font(.system(size: 10, weight: .semibold))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.indigo.opacity(0.12), in: Capsule())
+                                .foregroundStyle(.indigo)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .searchable(text: $query, prompt: "搜尋姓名或職稱")
+        .navigationTitle("設定管理人員")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.bold() }
+        }
+    }
+}
+
 private func orgPersonEditorSectionHeader(_ title: String, icon: String, color: Color) -> some View {
     HStack(spacing: 7) {
         Capsule()

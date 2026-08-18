@@ -1003,6 +1003,10 @@ class LifeStore: ObservableObject {
         for i in orgPeople.indices {
             orgPeople[i].relations.removeAll { $0.personId == item.id }
         }
+        // 從各部門的管理人員名單移除，避免懸空 id（部門列會顯示不出名字）
+        for i in departments.indices where departments[i].managerIds.contains(item.id) {
+            departments[i].managerIds.removeAll { $0 == item.id }
+        }
         orgPeople.removeAll { $0.id == item.id }
         save()
     }
