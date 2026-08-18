@@ -62,6 +62,8 @@ struct MyCalendarView: View {
         case leave(subId: UUID, rec: SubordinateRecord)
         case milestone(LifeMilestone)
         case event(PersonalEvent)
+        /// 兼任職務工作區；resolutionId 有值時直接打開那則重大決議
+        case sideRole(roleId: UUID, resolutionId: UUID?)
         var id: String {
             switch self {
             case .report(_, let r):  return "r_\(r.id.uuidString)"
@@ -70,6 +72,7 @@ struct MyCalendarView: View {
             case .leave(_, let rec): return "l_\(rec.id.uuidString)"
             case .milestone(let ms): return "ms_\(ms.id.uuidString)"
             case .event(let e):      return "e_\(e.id.uuidString)"
+            case .sideRole(let rid, let res): return "srw_\(rid.uuidString)_\(res?.uuidString ?? "")"
             }
         }
     }
@@ -195,6 +198,8 @@ struct MyCalendarView: View {
                     CalendarEventCard(item: .milestone(ms))
                 case .event(let ev):
                     CalendarEventCard(item: .personalEvent(ev))
+                case .sideRole(let rid, let resId):
+                    SideRoleWorkspaceView(roleId: rid, initialResolutionId: resId)
                 }
             }
             .task {
@@ -1233,25 +1238,25 @@ struct MyCalendarView: View {
                 out.append(SearchHit(id: "sr_\(role.id)", icon: "person.badge.plus", color: .indigo,
                     typeLabel: "兼任職務", title: roleName,
                     snippet: SideRoleFormat.subtitle(role), date: role.date,
-                    target: .milestone(role)))
+                    target: .sideRole(roleId: role.id, resolutionId: nil)))
             }
             for mt in role.sideRoleMeetings ?? []
             where hit([mt.topic, mt.decisions, mt.note, mt.attendees.joined(separator: "、")]) {
                 out.append(SearchHit(id: "srmt_\(mt.id)", icon: "text.bubble.fill", color: .indigo,
                     typeLabel: "兼任會議", title: mt.topic.isEmpty ? "未命名會議" : mt.topic,
                     snippet: "\(roleName)　" + (mt.decisions.isEmpty ? mt.note : mt.decisions),
-                    date: mt.date, target: .milestone(role)))
+                    date: mt.date, target: .sideRole(roleId: role.id, resolutionId: nil)))
             }
             for tk in role.sideRoleTasks ?? [] where hit([tk.content, tk.note]) {
                 out.append(SearchHit(id: "srtk_\(tk.id)", icon: "checklist", color: .indigo,
                     typeLabel: "兼任待辦", title: tk.content.isEmpty ? "未填內容" : tk.content,
                     snippet: roleName, date: tk.dueDate ?? role.date,
-                    target: .milestone(role)))
+                    target: .sideRole(roleId: role.id, resolutionId: nil)))
             }
             for kd in role.sideRoleKeyDates ?? [] where hit([kd.title, kd.note]) {
                 out.append(SearchHit(id: "srkd_\(kd.id)", icon: "calendar", color: .indigo,
                     typeLabel: "兼任日期", title: kd.title.isEmpty ? "未命名日期" : kd.title,
-                    snippet: roleName, date: kd.date, target: .milestone(role)))
+                    snippet: roleName, date: kd.date, target: .sideRole(roleId: role.id, resolutionId: nil)))
             }
             // 分類代碼也進索引：搜「CDA」就列出所有 CDA 的決議
             for r in role.sideRoleResolutions ?? []
@@ -1260,7 +1265,7 @@ struct MyCalendarView: View {
                 out.append(SearchHit(id: "srres_\(r.id)", icon: "checkmark.seal.fill", color: .indigo,
                     typeLabel: "重大決議", title: catPrefix + (r.title.isEmpty ? "未填標題" : r.title),
                     snippet: "\(roleName)　" + r.content, date: r.date,
-                    target: .milestone(role)))
+                    target: .sideRole(roleId: role.id, resolutionId: r.id)))
             }
         }
         for pe in lifeStore.personalEvents where hit([pe.title, pe.note, pe.location]) {

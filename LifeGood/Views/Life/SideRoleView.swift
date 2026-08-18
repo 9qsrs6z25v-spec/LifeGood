@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 兼任職務管理
 //
@@ -532,6 +533,9 @@ struct SideRoleWorkspaceView: View {
     /// 從部屬明細頁開進來時傳 false——否則會變成
     /// 部屬 → 職務 → 成員 → 部屬 → … 無限往下疊 sheet，而且每一層都要各自關閉。
     var allowSubordinateJump: Bool = true
+    /// 行事曆搜尋點進來時要直接打開的重大決議（開頁即彈編輯器顯示完整內容，
+    /// 不然搜到決議卻只落在工作區頂端，還得自己捲下去找）
+    var initialResolutionId: UUID? = nil
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
@@ -546,6 +550,10 @@ struct SideRoleWorkspaceView: View {
     @State private var editingResolution: SideRoleResolution?
     @State private var showCopyResult: String?
     @State private var showEditRole = false
+    /// 工作區內搜尋：過濾五個區塊的項目（空字串＝不過濾）
+    @State private var query = ""
+    @State private var sharePayload: SideRoleSharePayload?
+    @State private var didOpenInitialResolution = false
 
     /// 資料一律從 store 現查，不快取進 @State——否則在別處編輯後這頁不會更新。
     private var role: LifeMilestone? {
@@ -600,13 +608,26 @@ struct SideRoleWorkspaceView: View {
             }
             .navigationTitle(SideRoleFormat.displayName(role))
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic),
+                        prompt: "搜尋待辦、成員、會議、決議、日期")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("關閉") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showEditRole = true } label: { Image(systemName: "square.and.pencil") }
-                        .disabled(!subscription.isPremium)
+                    HStack(spacing: 14) {
+                        Button { exportImage(role) } label: { Image(systemName: "square.and.arrow.up") }
+                            .foregroundStyle(.green)
+                        Button { showEditRole = true } label: { Image(systemName: "square.and.pencil") }
+                            .disabled(!subscription.isPremium)
+                    }
+                }
+            }
+            .onAppear {
+                // 從行事曆搜尋帶進來的決議：開頁直接彈出，只彈一次
+                if let rid = initialResolutionId, !didOpenInitialResolution {
+                    didOpenInitialResolution = true
+                    editingResolution = role.sideRoleResolutions?.first { $0.id == rid }
                 }
             }
         }
@@ -632,6 +653,7 @@ struct SideRoleWorkspaceView: View {
         .sheet(item: $editingResolution) { r in
             NavigationStack { SideRoleResolutionEditor(roleId: roleId, resolution: r) }
         }
+        .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
         .alert("已複製上屆名單", isPresented: Binding(
             get: { showCopyResult != nil },
             set: { if !$0 { showCopyResult = nil } })) {
@@ -684,8 +706,177 @@ struct SideRoleWorkspaceView: View {
 
     // MARK: 待辦
 
+    // MARK: 匯出圖片（完整內容，不截斷）
+
+    private static let exportStampFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
+
+    /// 把工作區匯成 JPG：**全文輸出，不用 lineLimit**——畫面上的列為了版面
+    /// 會把長內容截成「…」，匯出的圖是要拿去傳閱/存檔的，內容必須完整。
+    /// 搜尋中就匯出過濾後的結果（搜「CDA」再匯出＝一鍵產出 CDA 決議清單圖）。
+    /// 規格對齊全 App 匯出：寬 430、scale ≥3、JPG 0.95、過長自動切頁。
+    @MainActor
+    private func exportImage(_ role: LifeMilestone) {
+        let content = exportContent(role)
+            .frame(width: 430)
+            .padding(.vertical, 20)
+            .background(Color(.systemGroupedBackground))
+            .environmentObject(lifeStore)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage else { return }
+        let pages = SubordinateOverviewView.sliceTallImage(ui, maxPageHeightPt: 1600)
+        let stamp = Self.exportStampFmt.string(from: Date())
+        let roleName = SideRoleFormat.displayName(role)
+            .components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>")).joined().prefix(20)
+        var urls: [URL] = []
+        for (i, page) in pages.enumerated() {
+            guard let data = page.jpegData(compressionQuality: 0.95) else { continue }
+            let suffix = pages.count > 1 ? "_\(i + 1)之\(pages.count)" : ""
+            let name = "兼任職務_\(roleName)_\(stamp)\(suffix).jpg"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            do { try data.write(to: url); urls.append(url) } catch { }
+        }
+        guard !urls.isEmpty else { return }
+        sharePayload = SideRoleSharePayload(items: urls)
+    }
+
+    @ViewBuilder
+    private func exportContent(_ role: LifeMilestone) -> some View {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("📋 \(SideRoleFormat.displayName(role))")
+                    .font(.headline)
+                Text(SideRoleFormat.subtitle(role))
+                    .font(.caption).foregroundStyle(.secondary)
+                if !q.isEmpty {
+                    Text("搜尋「\(q)」的結果")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.indigo)
+                }
+            }
+            .padding(.horizontal, 20)
+
+            let tasks = (role.sideRoleTasks ?? [])
+                .filter { matches([$0.content, $0.note, SideRoleFormat.assigneeNames($0, in: role)]) }
+            if !tasks.isEmpty {
+                exportBox(title: "待辦（\(tasks.count)）", icon: "checklist") {
+                    ForEach(tasks) { t in
+                        exportRow(head: "\(t.isCompleted ? "✅" : "⬜️") \(t.content.isEmpty ? "未填內容" : t.content)",
+                                  lines: [
+                                    SideRoleFormat.assigneeNames(t, in: role).isEmpty ? nil
+                                        : "負責：\(SideRoleFormat.assigneeNames(t, in: role))",
+                                    t.dueDate.map { "截止：\(SideRoleFormat.date($0))" },
+                                    t.note.isEmpty ? nil : t.note
+                                  ])
+                    }
+                }
+            }
+            let dates = (role.sideRoleKeyDates ?? [])
+                .filter { matches([$0.title, $0.note]) }.sorted { $0.date < $1.date }
+            if !dates.isEmpty {
+                exportBox(title: "重要日期（\(dates.count)）", icon: "calendar") {
+                    ForEach(dates) { k in
+                        exportRow(head: "📅 \(SideRoleFormat.date(k.date))　\(k.title)",
+                                  lines: [k.note.isEmpty ? nil : k.note])
+                    }
+                }
+            }
+            let members = (role.sideRoleMembers ?? [])
+                .filter { matches([$0.name, $0.dutyInRole, $0.contact, $0.note]) }
+            if !members.isEmpty {
+                exportBox(title: "成員名單（\(members.count)）", icon: "person.2.fill") {
+                    ForEach(members) { m in
+                        exportRow(head: "👤 \(m.name)" + (m.dutyInRole.isEmpty ? "" : "｜\(m.dutyInRole)"),
+                                  lines: [
+                                    m.contact.isEmpty ? nil : "聯絡：\(m.contact)",
+                                    m.note.isEmpty ? nil : m.note
+                                  ])
+                    }
+                }
+            }
+            let meetings = (role.sideRoleMeetings ?? [])
+                .filter { matches([$0.topic, $0.decisions, $0.note, $0.attendees.joined(separator: "、")]) }
+                .sorted { $0.date > $1.date }
+            if !meetings.isEmpty {
+                exportBox(title: "會議紀錄（\(meetings.count)）", icon: "text.bubble.fill") {
+                    ForEach(meetings) { mt in
+                        exportRow(head: "🗓 \(SideRoleFormat.date(mt.date))　\(mt.topic.isEmpty ? "（未填主題）" : mt.topic)",
+                                  lines: [
+                                    mt.attendees.isEmpty ? nil : "出席：\(mt.attendees.joined(separator: "、"))",
+                                    mt.decisions.isEmpty ? nil : "決議：\(mt.decisions)",
+                                    mt.note.isEmpty ? nil : mt.note
+                                  ])
+                    }
+                }
+            }
+            let resolutions = (role.sideRoleResolutions ?? [])
+                .filter { matches([$0.title, $0.content, $0.category?.rawValue ?? ""]) }
+                .sorted { $0.date > $1.date }
+            if !resolutions.isEmpty {
+                exportBox(title: "重大決議（\(resolutions.count)）", icon: "checkmark.seal.fill") {
+                    ForEach(resolutions) { r in
+                        exportRow(head: "🏷 \(SideRoleFormat.date(r.date))　"
+                                    + (r.category.map { "[\($0.rawValue)] " } ?? "")
+                                    + (r.title.isEmpty ? "（未填標題）" : r.title),
+                                  lines: [r.content.isEmpty ? nil : r.content])
+                    }
+                }
+            }
+        }
+    }
+
+    private func exportBox<C: View>(title: String, icon: String,
+                                    @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.indigo, .indigo.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.indigo)
+                Text(title).font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            content()
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16)
+    }
+
+    /// 匯出列：主行 + 縮排的完整內文行。刻意**沒有任何 lineLimit**。
+    private func exportRow(head: String, lines: [String?]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(head)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(Array(lines.compactMap { $0 }.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 14)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 3)
+    }
+
+    /// 工作區內搜尋的比對（空查詢一律通過）
+    private func matches(_ fields: [String]) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return true }
+        return fields.contains { $0.localizedCaseInsensitiveContains(q) }
+    }
+
     private func taskSection(_ role: LifeMilestone) -> some View {
-        let tasks = (role.sideRoleTasks ?? []).sorted { a, b in
+        let tasks = (role.sideRoleTasks ?? [])
+            .filter { matches([$0.content, $0.note, SideRoleFormat.assigneeNames($0, in: role)]) }
+            .sorted { a, b in
             if a.isCompleted != b.isCompleted { return !a.isCompleted }
             return (a.dueDate ?? .distantFuture) < (b.dueDate ?? .distantFuture)
         }
@@ -763,7 +954,9 @@ struct SideRoleWorkspaceView: View {
     // MARK: 重要日期
 
     private func keyDateSection(_ role: LifeMilestone) -> some View {
-        let dates = (role.sideRoleKeyDates ?? []).sorted { $0.date < $1.date }
+        let dates = (role.sideRoleKeyDates ?? [])
+            .filter { matches([$0.title, $0.note]) }
+            .sorted { $0.date < $1.date }
         return sectionBox(title: "重要日期", icon: "calendar", color: .indigo,
                           trailing: "\(dates.count)",
                           onAdd: { editingKeyDate = SideRoleKeyDate() }) {
@@ -819,7 +1012,8 @@ struct SideRoleWorkspaceView: View {
     // MARK: 成員
 
     private func memberSection(_ role: LifeMilestone) -> some View {
-        let members = role.sideRoleMembers ?? []
+        let members = (role.sideRoleMembers ?? [])
+            .filter { matches([$0.name, $0.dutyInRole, $0.contact, $0.note]) }
         let hasPrevious = lifeStore.previousTermOfSideRole(role) != nil
         // 人員對照表只建一次往下傳。放在 memberRow 裡就是每一列各建一次
         // 完整清單（部屬 + 名片）並排序——15 位成員等於在 body 裡跑 15 次，
@@ -918,7 +1112,9 @@ struct SideRoleWorkspaceView: View {
     // MARK: 會議
 
     private func meetingSection(_ role: LifeMilestone) -> some View {
-        let meetings = (role.sideRoleMeetings ?? []).sorted { $0.date > $1.date }
+        let meetings = (role.sideRoleMeetings ?? [])
+            .filter { matches([$0.topic, $0.decisions, $0.note, $0.attendees.joined(separator: "、")]) }
+            .sorted { $0.date > $1.date }
         return sectionBox(title: "會議紀錄", icon: "text.bubble.fill", color: .indigo,
                           trailing: "\(meetings.count)",
                           onAdd: { editingMeeting = SideRoleMeeting() }) {
@@ -969,7 +1165,9 @@ struct SideRoleWorkspaceView: View {
 
     /// 重大決議（會議紀錄下方）：跨會議、值得單獨列出來查的定案。
     private func resolutionSection(_ role: LifeMilestone) -> some View {
-        let resolutions = (role.sideRoleResolutions ?? []).sorted { $0.date > $1.date }
+        let resolutions = (role.sideRoleResolutions ?? [])
+            .filter { matches([$0.title, $0.content, $0.category?.rawValue ?? ""]) }
+            .sorted { $0.date > $1.date }
         return sectionBox(title: "重大決議", icon: "checkmark.seal.fill", color: .indigo,
                           trailing: "\(resolutions.count)",
                           onAdd: { editingResolution = SideRoleResolution() }) {
@@ -2480,3 +2678,7 @@ private struct ChipFlowLayout: Layout {
         }
     }
 }
+
+
+/// 分享項目的 Identifiable 包裝（供 .sheet(item:) 使用）
+private struct SideRoleSharePayload: Identifiable { let id = UUID(); let items: [Any] }
