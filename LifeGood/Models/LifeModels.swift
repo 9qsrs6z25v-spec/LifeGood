@@ -2042,21 +2042,32 @@ struct SubordinateTask: Identifiable, Codable {
     var sideRoleLink: SideRoleBackLink?
     /// Apple 提醒事項的對應 id（開啟同步後由 ReminderBridge 寫入；App → 提醒事項單向）
     var reminderId: String?
+    /// 機台警報任務連結（警報發生自動掛到負責人任務）；nil＝一般任務
+    var equipmentLink: EquipmentAlarmLink?
+    /// 警報處理措施（機台警報任務需回報；一般任務不顯示此欄位）
+    var responseAction: String
+    /// 回復結果（機台警報任務需回報）
+    var responseResult: String
 
     init(id: UUID = UUID(), topic: String = "", content: String = "",
          date: Date = Date(), dueDate: Date? = nil, note: String = "",
          isCompleted: Bool = false, completedAt: Date? = nil,
-         sideRoleLink: SideRoleBackLink? = nil, reminderId: String? = nil) {
+         sideRoleLink: SideRoleBackLink? = nil, reminderId: String? = nil,
+         equipmentLink: EquipmentAlarmLink? = nil,
+         responseAction: String = "", responseResult: String = "") {
         self.id = id; self.topic = topic; self.content = content
         self.date = date; self.dueDate = dueDate; self.note = note
         self.isCompleted = isCompleted; self.completedAt = completedAt
         self.sideRoleLink = sideRoleLink; self.reminderId = reminderId
+        self.equipmentLink = equipmentLink
+        self.responseAction = responseAction; self.responseResult = responseResult
     }
 
     // 自訂解碼：isCompleted / completedAt 為後加欄位，舊存檔沒有這兩個 key。
     // 用 decodeIfPresent 容錯，避免單筆缺欄位導致整個 subordinates 陣列解碼失敗、資料消失。
     enum CodingKeys: String, CodingKey {
-        case id, topic, content, date, dueDate, note, isCompleted, completedAt, sideRoleLink, reminderId
+        case id, topic, content, date, dueDate, note, isCompleted, completedAt, sideRoleLink, reminderId,
+             equipmentLink, responseAction, responseResult
     }
 
     init(from decoder: Decoder) throws {
@@ -2071,7 +2082,20 @@ struct SubordinateTask: Identifiable, Codable {
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
         sideRoleLink = try? c.decodeIfPresent(SideRoleBackLink.self, forKey: .sideRoleLink)
         reminderId = try? c.decodeIfPresent(String.self, forKey: .reminderId)
+        equipmentLink = try? c.decodeIfPresent(EquipmentAlarmLink.self, forKey: .equipmentLink)
+        responseAction = (try? c.decodeIfPresent(String.self, forKey: .responseAction)) ?? ""
+        responseResult = (try? c.decodeIfPresent(String.self, forKey: .responseResult)) ?? ""
     }
+}
+
+/// 任務 ↔ 機台警報連結：機台發生警報時自動掛到負責人的任務欄位。
+/// equipmentName／system 為建立當下的快照（機台之後被刪除仍能顯示來源）；
+/// 顯示時優先以 equipmentId 現查機台池（改名／改系統會跟著更新）。
+struct EquipmentAlarmLink: Codable, Equatable {
+    var equipmentId: UUID
+    var alarmId: UUID
+    var equipmentName: String
+    var system: String
 }
 
 /// 家庭待辦事項（家庭頁「家庭成員」上方的待辦區；可指派給家庭成員，

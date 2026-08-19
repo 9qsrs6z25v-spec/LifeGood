@@ -251,6 +251,9 @@ struct SubordinateDetailView: View {
     @State private var editingMeeting: SubordinateMeeting?
     @State private var addingTask = false
     @State private var editingTask: SubordinateTask?
+    /// 任務清單暫時篩選：點機台膠囊只看該機台的警報任務、點系統別膠囊只看該系統（可疊加）
+    @State private var taskFilterEquipmentId: UUID?
+    @State private var taskFilterSystem: String?
     @State private var addingReport = false
     @State private var editingReport: WeeklyReport?
     @State private var showPremiumAlert = false
@@ -1107,7 +1110,13 @@ struct SubordinateDetailView: View {
 
     private var taskSection: some View {
         // 僅顯示未完成；已完成移至底部「已完成」收合區
-        let items = subordinate.tasks.filter { !$0.isCompleted }.sorted { $0.date > $1.date }
+        let all = subordinate.tasks.filter { !$0.isCompleted }.sorted { $0.date > $1.date }
+        // 機台／系統別篩選（點任務列上的膠囊設定；可疊加）
+        let items = all.filter { t in
+            if let eid = taskFilterEquipmentId, t.equipmentLink?.equipmentId != eid { return false }
+            if let sys = taskFilterSystem, taskLinkInfo(t)?.system != sys { return false }
+            return true
+        }
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("任務", icon: "checklist", color: .cyan, count: items.count) {
                 Button {
@@ -1119,8 +1128,18 @@ struct SubordinateDetailView: View {
                         .foregroundStyle(.cyan)
                 }
             }
+            taskFilterBanner
             if items.isEmpty {
-                emptyHint
+                if all.isEmpty {
+                    emptyHint
+                } else {
+                    HStack(spacing: 8) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.system(size: 13, weight: .medium)).foregroundStyle(.tertiary)
+                        Text("沒有符合篩選的任務").font(.caption).foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16).padding(.bottom, 14)
+                }
             } else {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, t in
                     HStack(alignment: .center, spacing: 10) {
@@ -1134,11 +1153,9 @@ struct SubordinateDetailView: View {
                         }
                         .buttonStyle(.plain)
 
-                        Button {
-                            if subscription.isPremium { previewItem = .task(subId: subordinateId, task: t) }
-                            else { showPremiumAlert = true }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
+                        // 主體點按開任務詳情（onTapGesture 而非 Button，讓內層機台／系統
+                        // 膠囊 Button 可以各自吃掉自己的點擊——比照部門所屬設備清單寫法）
+                        VStack(alignment: .leading, spacing: 4) {
                                 Text(t.topic.isEmpty ? "未命名任務" : t.topic)
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(t.isCompleted ? .secondary : .primary)
@@ -1175,15 +1192,24 @@ struct SubordinateDetailView: View {
                                     if let back = t.sideRoleLink {
                                         SideRoleLinkBadge(back: back)
                                     }
+                                    // 機台警報任務：機台與系統別膠囊，點一下暫時篩選
+                                    if let info = taskLinkInfo(t) {
+                                        taskEquipmentChip(equipmentId: info.equipmentId, name: info.name)
+                                        if !info.system.isEmpty {
+                                            taskSystemChip(info.system)
+                                        }
+                                    }
                                 }
                                 if t.isCompleted {
                                     CompletionStamp(completedAt: t.completedAt, due: t.dueDate)
                                 }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if subscription.isPremium { previewItem = .task(subId: subordinateId, task: t) }
+                            else { showPremiumAlert = true }
+                        }
 
                         Image(systemName: "chevron.right")
                             .font(.caption2.weight(.semibold))
@@ -1207,6 +1233,94 @@ struct SubordinateDetailView: View {
         )
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
+    }
+
+    /// 機台警報任務的來源機台資訊（優先現查機台池——改名/改系統跟著更新；
+    /// 機台被刪則退回連結建立當下的快照）
+    private func taskLinkInfo(_ t: SubordinateTask) -> (equipmentId: UUID, name: String, system: String)? {
+        guard let link = t.equipmentLink else { return nil }
+        if let eq = lifeStore.equipmentPool.first(where: { $0.id == link.equipmentId }) {
+            return (link.equipmentId, eq.name.isEmpty ? "未命名設備" : eq.name, eq.system)
+        }
+        return (link.equipmentId, link.equipmentName, link.system)
+    }
+
+    /// 機台膠囊：點一下只看該機台的警報任務、已篩選中顯示 ✕、再點取消
+    private func taskEquipmentChip(equipmentId: UUID, name: String) -> some View {
+        let active = taskFilterEquipmentId == equipmentId
+        return Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                taskFilterEquipmentId = active ? nil : equipmentId
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "gearshape.2.fill").font(.system(size: 7))
+                Text(name)
+                if active { Image(systemName: "xmark").font(.system(size: 7, weight: .bold)) }
+            }
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color.teal.opacity(active ? 0.20 : 0.12))
+            .foregroundStyle(.teal)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.teal.opacity(active ? 0.4 : 0), lineWidth: 0.8))
+            .lineLimit(1)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 系統別膠囊：點一下只看該系統的警報任務、已篩選中顯示 ✕、再點取消
+    private func taskSystemChip(_ system: String) -> some View {
+        let active = taskFilterSystem == system
+        return Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                taskFilterSystem = active ? nil : system
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(system)
+                if active { Image(systemName: "xmark").font(.system(size: 7, weight: .bold)) }
+            }
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color.cyan.opacity(active ? 0.20 : 0.12))
+            .foregroundStyle(.cyan)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.cyan.opacity(active ? 0.4 : 0), lineWidth: 0.8))
+            .lineLimit(1)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 任務機台／系統篩選中橫幅：說明目前條件、點 ✕ 全部清除
+    @ViewBuilder
+    private var taskFilterBanner: some View {
+        if taskFilterEquipmentId != nil || taskFilterSystem != nil {
+            let eqName: String? = taskFilterEquipmentId.map { eid in
+                let n = lifeStore.equipmentPool.first { $0.id == eid }?.name ?? ""
+                return n.isEmpty ? "未命名設備" : n
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    .font(.system(size: 14)).foregroundStyle(.teal)
+                Text("只看：" + [eqName, taskFilterSystem].compactMap { $0 }.joined(separator: "・"))
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        taskFilterEquipmentId = nil; taskFilterSystem = nil
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(Color.teal.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 12).padding(.bottom, 6)
+        }
     }
 
     // MARK: - 優缺點
@@ -3158,6 +3272,17 @@ struct TaskEditorSheet: View {
     @State private var isCompleted = false
     @State private var assignedSubId = UUID()   // 指派給哪位部屬（可換人處理）
     @State private var isSaving = false
+    /// 機台警報任務的回報欄位（一般任務不顯示）
+    @State private var responseAction = ""
+    @State private var responseResult = ""
+
+    /// 機台警報任務的來源機台顯示（優先現查機台池，機台被刪則用連結快照）
+    private func equipmentDisplay(_ link: EquipmentAlarmLink) -> (name: String, system: String) {
+        if let eq = lifeStore.equipmentPool.first(where: { $0.id == link.equipmentId }) {
+            return (eq.name.isEmpty ? "未命名設備" : eq.name, eq.system)
+        }
+        return (link.equipmentName, link.system)
+    }
 
     /// 統一 Section 標題：4pt 漸層色條 + 圖示 + 粗體文字，對齊 RecordEditorSheet.editorSectionHeader 規格。
     private func editorSectionHeader(_ title: String, icon: String, tint: Color = .cyan) -> some View {
@@ -3210,6 +3335,33 @@ struct TaskEditorSheet: View {
                         Text("儲存後此任務會移交給所選人員。")
                     }
                 }
+                // 機台警報任務：顯示來源機台並要求回報處理措施與回復結果
+                if let link = editing?.equipmentLink {
+                    Section {
+                        let info = equipmentDisplay(link)
+                        HStack(spacing: 8) {
+                            Image(systemName: "gearshape.2.fill")
+                                .font(.system(size: 13, weight: .semibold)).foregroundStyle(.teal)
+                            Text(info.name).font(.subheadline.weight(.medium))
+                            if !info.system.isEmpty {
+                                Text(info.system)
+                                    .font(.system(size: 10, weight: .bold))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.cyan.opacity(0.12)).foregroundStyle(.cyan)
+                                    .clipShape(Capsule())
+                            }
+                            Spacer()
+                        }
+                        TextField("處理措施（做了什麼處置）", text: $responseAction, axis: .vertical)
+                            .lineLimit(1...4)
+                        TextField("回復結果（處置後狀況如何）", text: $responseResult, axis: .vertical)
+                            .lineLimit(1...4)
+                    } header: {
+                        editorSectionHeader("警報處理回報", icon: "bell.badge.fill", tint: .red)
+                    } footer: {
+                        Text("這是機台警報自動掛上的任務：請回報處理措施與回復結果，完成後照常打勾關閉任務。")
+                    }
+                }
                 Section {
                     Toggle(isOn: $isCompleted) {
                         Label("標記為已完成", systemImage: isCompleted ? "checkmark.circle.fill" : "circle")
@@ -3252,6 +3404,7 @@ struct TaskEditorSheet: View {
                 if let e = editing {
                     topic = e.topic; content = e.content; date = e.date; note = e.note
                     isCompleted = e.isCompleted
+                    responseAction = e.responseAction; responseResult = e.responseResult
                     if let d = e.dueDate { hasDueDate = true; dueDate = d }
                 } else {
                     // 新任務：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
@@ -3274,9 +3427,12 @@ struct TaskEditorSheet: View {
             date: date, dueDate: hasDueDate ? dueDate : nil,
             note: note.trimmingCharacters(in: .whitespaces),
             isCompleted: isCompleted, completedAt: completedAt,
-            // 重建時保留既有欄位——不帶的話存個檔就把兼任連結/提醒對應洗掉
+            // 重建時保留既有欄位——不帶的話存個檔就把兼任連結/提醒對應/機台連結洗掉
             sideRoleLink: editing?.sideRoleLink,
-            reminderId: editing?.reminderId
+            reminderId: editing?.reminderId,
+            equipmentLink: editing?.equipmentLink,
+            responseAction: responseAction.trimmingCharacters(in: .whitespacesAndNewlines),
+            responseResult: responseResult.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         let targetId = assignedSubId
         // 換人：先從原持有者移除該任務
@@ -4034,10 +4190,19 @@ struct SubordinateItemCard: View {
             let t = lifeStore.subordinates.first { $0.id == subId }?.tasks.first { $0.id == snap.id } ?? snap
             lines.append("📋 任務｜\(t.topic.isEmpty ? "未命名任務" : t.topic)")
             lines.append(divider)
+            if let info = cardEquipmentInfo(t.equipmentLink) {
+                lines.append("⚙️ 來源機台：\(info.name)" + (info.system.isEmpty ? "" : "（\(info.system)）"))
+            }
             lines.append("🗓 任務日期：\(fmt(t.date))")
             if let due = t.dueDate { lines.append("⏰ 截止日期：\(fmt(due))") }
             if t.isCompleted, let at = t.completedAt { lines.append("✅ 完成時間：\(fmt(at))") }
             if !t.content.isEmpty { lines.append(""); lines.append("📝 內容"); lines.append(t.content) }
+            if t.equipmentLink != nil {
+                lines.append(""); lines.append("🛠 處理措施")
+                lines.append(t.responseAction.isEmpty ? "（尚未回報）" : t.responseAction)
+                lines.append(""); lines.append("📣 回復結果")
+                lines.append(t.responseResult.isEmpty ? "（尚未回報）" : t.responseResult)
+            }
             if !t.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(t.note) }
         case .meeting(let subId, let snap):
             let m = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
@@ -4169,10 +4334,17 @@ struct SubordinateItemCard: View {
             titleBlock(icon: "checklist", color: .cyan, title: t.topic.isEmpty ? "未命名任務" : t.topic)
             ownerBlock(subId: subId, accent: .cyan)
             taskStatusRow(t)
+            if let info = cardEquipmentInfo(t.equipmentLink) {
+                field("來源機台", info.name + (info.system.isEmpty ? "" : "（\(info.system)）"))
+            }
             field("任務日期", fmt(t.date))
             if let due = t.dueDate { field("截止日期", fmt(due)) }
             if t.isCompleted, let at = t.completedAt { field("完成時間", fmt(at)) }
             richBlock("內容", t.content)
+            if t.equipmentLink != nil {
+                richBlock("處理措施", t.responseAction.isEmpty ? "（尚未回報）" : t.responseAction)
+                richBlock("回復結果", t.responseResult.isEmpty ? "（尚未回報）" : t.responseResult)
+            }
             richBlock("備註", t.note)
         case .meeting(let subId, let snap):
             let m = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
@@ -4297,6 +4469,15 @@ struct SubordinateItemCard: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    /// 機台警報任務的來源機台（優先現查機台池，機台被刪則用連結快照）
+    private func cardEquipmentInfo(_ link: EquipmentAlarmLink?) -> (name: String, system: String)? {
+        guard let link else { return nil }
+        if let eq = lifeStore.equipmentPool.first(where: { $0.id == link.equipmentId }) {
+            return (eq.name.isEmpty ? "未命名設備" : eq.name, eq.system)
+        }
+        return (link.equipmentName, link.system)
     }
 
     /// 任務狀態列：已完成（綠）／逾期 N 天（紅）／進行中（青）

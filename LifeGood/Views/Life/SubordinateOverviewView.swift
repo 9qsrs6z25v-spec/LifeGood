@@ -1200,6 +1200,30 @@ struct SubordinateOverviewView: View {
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(taskAccent.opacity(0.22), lineWidth: 0.6))
                     }
+
+                    // 機台警報任務：來源機台＋系統別（顯示用；篩選在部屬明細頁）
+                    if let link = task.equipmentLink {
+                        let eq = lifeStore.equipmentPool.first { $0.id == link.equipmentId }
+                        let eqName = eq.map { $0.name.isEmpty ? "未命名設備" : $0.name } ?? link.equipmentName
+                        let sys = eq?.system ?? link.system
+                        HStack(spacing: 3) {
+                            Image(systemName: "gearshape.2.fill").font(.system(size: 7))
+                            Text(eqName)
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.teal.opacity(0.12)).foregroundStyle(.teal)
+                        .clipShape(Capsule())
+                        .lineLimit(1)
+                        if !sys.isEmpty {
+                            Text(sys)
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.cyan.opacity(0.12)).foregroundStyle(.cyan)
+                                .clipShape(Capsule())
+                                .lineLimit(1)
+                        }
+                    }
                 }
                 if !task.content.isEmpty {
                     Text(task.content)

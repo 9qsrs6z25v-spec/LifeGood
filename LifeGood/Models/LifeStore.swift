@@ -1184,6 +1184,37 @@ class LifeStore: ObservableObject {
         equipmentPool[i].ownerId = ownerId
     }
 
+    /// 機台警報自動掛任務：設備儲存時對「這次新增的警報」呼叫。
+    /// 機台要有負責人才建立；同一筆警報全 App 只掛一次（跨部屬掃描防重複——
+    /// 例如换過負責人後再開舊警報存檔，不會再掛給新人一次）。
+    /// 任務預設截止時間＝警報發生後 3 天，內容帶警報內容，可再編輯；
+    /// 關閉任務（打勾完成）與一般任務完全相同。
+    func createTasksForNewAlarms(equipment: ManagedEquipment, newAlarms: [EquipmentAlarm]) {
+        guard let ownerId = equipment.ownerId, !newAlarms.isEmpty,
+              let si = subordinates.firstIndex(where: { $0.id == ownerId }) else { return }
+        let linkedAlarmIds = Set(subordinates.flatMap(\.tasks).compactMap { $0.equipmentLink?.alarmId })
+        var createdIds: [UUID] = []
+        isLoading = true
+        let name = equipment.name.isEmpty ? "未命名設備" : equipment.name
+        for al in newAlarms where !linkedAlarmIds.contains(al.id) {
+            let task = SubordinateTask(
+                topic: "機台警報處理：\(name)",
+                content: al.content.isEmpty ? "警報（未填內容）" : al.content,
+                date: al.date,
+                dueDate: Calendar.current.date(byAdding: .day, value: 3, to: al.date),
+                equipmentLink: EquipmentAlarmLink(equipmentId: equipment.id, alarmId: al.id,
+                                                  equipmentName: name, system: equipment.system)
+            )
+            subordinates[si].tasks.append(task)
+            createdIds.append(task.id)
+        }
+        isLoading = false
+        guard !createdIds.isEmpty else { return }
+        save()
+        // Apple 提醒事項同步（開啟時才動作），與手動新增任務一致
+        for tid in createdIds { syncReminderForSubordinateTask(subordinateId: ownerId, taskId: tid) }
+    }
+
     /// 一次性搬遷：把舊版存在各部屬身上的執掌設備搬進共用機台池。
     /// 機台的生老病死（PM／警報）跟著機台不跟著人；搬遷後部屬只以 ownerId 連結機台。
     /// 冪等：部屬身上清空後不再觸發。呼叫端需自行處理 isLoading 批次與 save()。

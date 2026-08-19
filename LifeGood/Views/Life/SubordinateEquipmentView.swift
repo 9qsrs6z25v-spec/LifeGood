@@ -632,6 +632,8 @@ struct EquipmentEditorSheet: View {
                     }
                 } header: {
                     editorSectionHeader("警報記錄", icon: "bell.badge.fill", tint: .red)
+                } footer: {
+                    Text("機台有負責人時，新增的警報會自動掛到負責人的任務欄位（預設 3 天內處理，可再調整截止時間，並需回報處理措施與回復結果）。")
                 }
 
                 if editing != nil {
@@ -702,7 +704,11 @@ struct EquipmentEditorSheet: View {
             ownerId: ownerId,
             system: system.trimmingCharacters(in: .whitespaces)
         )
+        // 這次編輯新加的警報（編輯前不存在的 id）→ 自動掛到負責人的任務欄位
+        let previousAlarmIds = Set((editing?.alarms ?? []).map(\.id))
+        let newAlarms = alarms.filter { !previousAlarmIds.contains($0.id) }
         lifeStore.upsertEquipment(eq)
+        lifeStore.createTasksForNewAlarms(equipment: eq, newAlarms: newAlarms)
         dismiss()
     }
 
