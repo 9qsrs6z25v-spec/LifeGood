@@ -2129,12 +2129,22 @@ struct WeeklyReport: Identifiable, Codable {
     var note: String
     var isCompleted: Bool
     var completedAt: Date?
+    /// 報告分類（自由文字；空＝未分類）。內建 周報/月報/新人報/PM 四種常用膠囊，
+    /// 也可自訂——key 過的自訂分類會變成膠囊供下次點選（比照重大決議的廠區）。
+    /// 刻意不做列舉：報告種類是會長的（使用者第一版就要求「可新增」）。
+    var reportType: String
 
-    init(id: UUID = UUID(), topic: String = "", date: Date = Date(), note: String = "", isCompleted: Bool = false, completedAt: Date? = nil) {
-        self.id = id; self.topic = topic; self.date = date; self.note = note; self.isCompleted = isCompleted; self.completedAt = completedAt
+    init(id: UUID = UUID(), topic: String = "", date: Date = Date(), note: String = "",
+         isCompleted: Bool = false, completedAt: Date? = nil, reportType: String = "") {
+        self.id = id; self.topic = topic; self.date = date; self.note = note
+        self.isCompleted = isCompleted; self.completedAt = completedAt
+        self.reportType = reportType
     }
 
-    enum CodingKeys: String, CodingKey { case id, topic, date, note, isCompleted, completedAt }
+    /// 內建常用分類（顯示順序即此順序）
+    static let builtinTypes = ["周報", "月報", "新人報", "PM"]
+
+    enum CodingKeys: String, CodingKey { case id, topic, date, note, isCompleted, completedAt, reportType }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -2143,6 +2153,7 @@ struct WeeklyReport: Identifiable, Codable {
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         isCompleted = (try? c.decode(Bool.self, forKey: .isCompleted)) ?? false
         completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
+        reportType = (try? c.decodeIfPresent(String.self, forKey: .reportType)) ?? ""
     }
 }
 

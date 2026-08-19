@@ -1191,9 +1191,10 @@ struct MyCalendarView: View {
         var out: [SearchHit] = []
         for sub in lifeStore.subordinates {
             let who = sub.name.isEmpty ? "未命名" : sub.name
-            for r in sub.weeklyReports where hit([r.topic, r.note]) {
+            for r in sub.weeklyReports where hit([r.topic, r.note, r.reportType]) {
                 out.append(SearchHit(id: "r_\(r.id)", icon: "doc.text.fill", color: .purple,
-                    typeLabel: "報告", title: r.topic.isEmpty ? "未命名報告" : r.topic,
+                    typeLabel: r.reportType.isEmpty ? "報告" : "報告・\(r.reportType)",
+                    title: r.topic.isEmpty ? "未命名報告" : r.topic,
                     snippet: r.note.isEmpty ? who : "\(who)・\(r.note)", date: r.date,
                     target: .report(subId: sub.id, report: r)))
             }

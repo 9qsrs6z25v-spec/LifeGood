@@ -703,11 +703,21 @@ struct SubordinateDetailView: View {
                             if subscription.isPremium { previewItem = .report(subId: subordinateId, report: r) } else { showPremiumAlert = true }
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(r.topic.isEmpty ? "未命名報告" : r.topic)
-                                    .font(.subheadline.weight(.medium))
-                                    .strikethrough(r.isCompleted, color: .secondary)
-                                    .foregroundStyle(r.isCompleted ? .secondary : .primary)
-                                    .lineLimit(1)
+                                HStack(spacing: 6) {
+                                    Text(r.topic.isEmpty ? "未命名報告" : r.topic)
+                                        .font(.subheadline.weight(.medium))
+                                        .strikethrough(r.isCompleted, color: .secondary)
+                                        .foregroundStyle(r.isCompleted ? .secondary : .primary)
+                                        .lineLimit(1)
+                                    if !r.reportType.isEmpty {
+                                        Text(r.reportType)
+                                            .font(.caption2.weight(.bold))
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Color.purple.opacity(0.14))
+                                            .foregroundStyle(.purple)
+                                            .clipShape(Capsule())
+                                    }
+                                }
                                 HStack(spacing: 3) {
                                     Image(systemName: "calendar").font(.system(size: 8))
                                     Text(formatDate(r.date))
@@ -1637,7 +1647,9 @@ struct SubordinateDetailView: View {
                 let done = reports.filter(\.isCompleted).count
                 lines.append(""); lines.append("📄 報告（\(done)/\(reports.count) 完成）")
                 for r in reports.sorted(by: { $0.date > $1.date }) {
-                    var row = "\(r.isCompleted ? "✅" : "⬜️") \(r.topic.isEmpty ? "未命名報告" : r.topic)｜\(formatDate(r.date))"
+                    var row = "\(r.isCompleted ? "✅" : "⬜️") \(r.topic.isEmpty ? "未命名報告" : r.topic)"
+                    if !r.reportType.isEmpty { row += "［\(r.reportType)］" }
+                    row += "｜\(formatDate(r.date))"
                     if r.isCompleted, let at = r.completedAt { row += "｜🏁 \(formatDate(at))" }
                     lines.append(row)
                 }
@@ -3302,6 +3314,26 @@ struct WeeklyReportEditorSheet: View {
     @State private var note = ""
     @State private var isCompleted = false
     @State private var isSaving = false
+    /// 報告分類（空＝未分類）
+    @State private var reportType = ""
+    /// 自訂分類的輸入暫存
+    @State private var customTypeInput = ""
+
+    /// 分類膠囊清單：內建四種 + 全部部屬報告裡 key 過的自訂分類（新到舊、去重、上限 8）
+    private var typeSuggestions: [String] {
+        var out = WeeklyReport.builtinTypes
+        var seen = Set(out)
+        let customs = lifeStore.subordinates
+            .flatMap(\.weeklyReports)
+            .sorted { $0.date > $1.date }
+            .map { $0.reportType.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !seen.contains($0) }
+        for c in customs where !seen.contains(c) {
+            seen.insert(c); out.append(c)
+            if out.count >= WeeklyReport.builtinTypes.count + 8 { break }
+        }
+        return out
+    }
 
     /// 統一 Section 標題：4pt 漸層色條 + 圖示 + 粗體文字，對齊 RecordEditorSheet.editorSectionHeader 規格。
     private func editorSectionHeader(_ title: String, icon: String, tint: Color = .purple) -> some View {
@@ -3329,6 +3361,26 @@ struct WeeklyReportEditorSheet: View {
                     }
                 } header: {
                     editorSectionHeader("報告", icon: "doc.text.fill")
+                }
+                Section {
+                    FlexibleChipWrap(items: typeSuggestions) { t in
+                        reportTypeChip(t)
+                    }
+                    .padding(.vertical, 2)
+                    HStack(spacing: 8) {
+                        TextField("自訂分類（例：季報、專案結案）", text: $customTypeInput)
+                            .onSubmit { addCustomType() }
+                        Button { addCustomType() } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 18)).foregroundStyle(.green)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(customTypeInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                } header: {
+                    editorSectionHeader("分類", icon: "tag.fill")
+                } footer: {
+                    Text("點膠囊選擇（再點取消）。自訂過的分類會自動出現在膠囊列，下次直接點選。")
                 }
                 Section {
                     Toggle(isOn: $isCompleted) {
@@ -3370,11 +3422,35 @@ struct WeeklyReportEditorSheet: View {
             .onAppear {
                 if let e = editing {
                     topic = e.topic; date = e.date; note = e.note; isCompleted = e.isCompleted
+                    reportType = e.reportType
                 } else {
                     date = FiveMinuteDateTimePicker.defaultSchedulingTime()
                 }
             }
         }
+    }
+
+    /// 分類膠囊：點選/取消（單選——一份報告就是一種報告）
+    private func reportTypeChip(_ t: String) -> some View {
+        let on = reportType == t
+        return Button {
+            reportType = on ? "" : t
+        } label: {
+            Text(t)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(on ? Color.purple.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(on ? Color.purple : Color.secondary)
+                .overlay(Capsule().stroke(on ? Color.purple.opacity(0.4) : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func addCustomType() {
+        let t = customTypeInput.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        reportType = t
+        customTypeInput = ""
     }
 
     private func save() {
@@ -3388,7 +3464,8 @@ struct WeeklyReportEditorSheet: View {
             note: note.trimmingCharacters(in: .whitespaces),
             isCompleted: isCompleted,
             // 由切換保留／補上完成時間：仍完成→沿用既有戳記（首次完成則記為現在）；取消完成→清空
-            completedAt: isCompleted ? (editing?.completedAt ?? Date()) : nil
+            completedAt: isCompleted ? (editing?.completedAt ?? Date()) : nil,
+            reportType: reportType.trimmingCharacters(in: .whitespaces)
         )
         if let idx = sub.weeklyReports.firstIndex(where: { $0.id == report.id }) { sub.weeklyReports[idx] = report }
         else { sub.weeklyReports.append(report) }
@@ -3988,6 +4065,7 @@ struct SubordinateItemCard: View {
             let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
             lines.append("📄 報告｜\(r.topic.isEmpty ? "未命名報告" : r.topic)")
             lines.append(divider)
+            if !r.reportType.isEmpty { lines.append("🏷 分類：\(r.reportType)") }
             lines.append("🗓 報告日期：\(fmt(r.date))")
             if r.isCompleted, let at = r.completedAt { lines.append("✅ 完成時間：\(fmt(at))") }
             if !r.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(r.note) }
@@ -4113,6 +4191,7 @@ struct SubordinateItemCard: View {
             let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic)
             ownerBlock(subId: subId, accent: .purple)
+            if !r.reportType.isEmpty { field("分類", r.reportType) }
             field("報告日期", fmt(r.date))
             if r.isCompleted, let at = r.completedAt { field("完成時間", fmt(at)) }
             richBlock("備註", r.note)
