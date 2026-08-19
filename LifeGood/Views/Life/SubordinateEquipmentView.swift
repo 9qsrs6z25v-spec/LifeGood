@@ -537,7 +537,6 @@ struct EquipmentEditorSheet: View {
                             .padding(.bottom, 2)
                         }
                     }
-                    TextField("備註（位置、型號等，選填）", text: $note)
                     Picker("所屬部門", selection: $departmentId) {
                         Text("未指定").tag(UUID?.none)
                         ForEach(sortedDepartments) { d in
@@ -634,6 +633,13 @@ struct EquipmentEditorSheet: View {
                     editorSectionHeader("警報記錄", icon: "bell.badge.fill", tint: .red)
                 } footer: {
                     Text("機台有負責人時，新增的警報會自動掛到負責人的任務欄位（預設 3 天內處理，可再調整截止時間，並需回報處理措施與回復結果）。")
+                }
+
+                Section {
+                    TextField("位置、型號、保養注意事項等（選填）", text: $note, axis: .vertical)
+                        .lineLimit(2...8)
+                } header: {
+                    editorSectionHeader("備註", icon: "note.text", tint: Color(.systemGray2))
                 }
 
                 if editing != nil {
