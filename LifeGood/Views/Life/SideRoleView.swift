@@ -69,13 +69,13 @@ enum SideRoleFormat {
     /// 指派到已被刪除的成員時該筆自動略過（刪成員時本來就會清掉指派，
     /// 這裡只是多一層保險，避免舊資料留下的懸空 id 印出空字串）。
     static func assigneeNames(_ task: SideRoleTask, in role: LifeMilestone) -> String {
-        guard let ids = task.assigneeIds, !ids.isEmpty else { return "" }
         let members = role.sideRoleMembers ?? []
-        return ids.compactMap { id in
+        var names = (task.assigneeIds ?? []).compactMap { id in
             members.first { $0.id == id }?.name.trimmingCharacters(in: .whitespaces)
         }
-        .filter { !$0.isEmpty }
-        .joined(separator: "、")
+        // 成員之外的負責人（手動輸入／從人員名單挑的文字快照）接在後面
+        names.append(contentsOf: task.extraAssignees ?? [])
+        return names.filter { !$0.isEmpty }.joined(separator: "、")
     }
 
     /// 待辦完成度
@@ -552,6 +552,12 @@ struct SideRoleWorkspaceView: View {
     @State private var showEditRole = false
     /// 工作區內搜尋：過濾五個區塊的項目（空字串＝不過濾）
     @State private var query = ""
+    /// 點分類膠囊設定的篩選（nil＝不過濾）。作用於待辦與重大決議；
+    /// 沒有分類概念的區塊（日期/成員/會議）在分類篩選中整區暫時收起。
+    @State private var filterCategory: SideRoleResolutionCategory?
+    /// 點人名設定的篩選（nil＝不過濾）。作用於待辦負責人、會議出席者、
+    /// 成員名單、決議發起人；重要日期沒有人的概念，人名篩選中整區收起。
+    @State private var filterPerson: String?
     @State private var sharePayload: SideRoleSharePayload?
     @State private var didOpenInitialResolution = false
 
@@ -598,15 +604,21 @@ struct SideRoleWorkspaceView: View {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     header(role)
-                    // 搜尋中導覽列被系統收合、右上角分享鈕會跟著隱藏（iOS 行為），
-                    // 這裡補一條常駐的匯出列——搜完直接匯出本來就是最常見的動線
-                    if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    // 搜尋/篩選中補常駐匯出列（搜尋時導覽列被系統收合、右上角分享鈕會隱藏）
+                    if hasActiveFilter {
+                        filterBanner
                         searchExportBar(role)
                     }
                     taskSection(role)
-                    keyDateSection(role)
-                    memberSection(role)
-                    meetingSection(role)
+                    // 分類/人名篩選中，沒有該概念的區塊整區收起（不是顯示空狀態——
+                    // 「還沒有會議紀錄」在篩選情境下是誤導，明明有、只是被濾掉）
+                    if filterCategory == nil && filterPerson == nil {
+                        keyDateSection(role)
+                    }
+                    if filterCategory == nil {
+                        memberSection(role)
+                        meetingSection(role)
+                    }
                     resolutionSection(role)
                 }
                 .padding(.vertical, 8)
@@ -713,15 +725,11 @@ struct SideRoleWorkspaceView: View {
 
     /// 搜尋中的匯出列：顯示相符筆數 + 匯出按鈕（右上角分享鈕被搜尋欄收走時的替代入口）
     private func searchExportBar(_ role: LifeMilestone) -> some View {
-        let count = (role.sideRoleTasks ?? [])
-                .filter { matches([$0.content, $0.note, SideRoleFormat.assigneeNames($0, in: role)]) }.count
-            + (role.sideRoleKeyDates ?? []).filter { matches([$0.title, $0.note]) }.count
-            + (role.sideRoleMembers ?? [])
-                .filter { matches([$0.name, $0.dutyInRole, $0.contact, $0.note]) }.count
-            + (role.sideRoleMeetings ?? [])
-                .filter { matches([$0.topic, $0.decisions, $0.note, $0.attendees.joined(separator: "、")]) }.count
-            + (role.sideRoleResolutions ?? [])
-                .filter { matches([$0.title, $0.content, $0.categories.map(\.rawValue).joined(separator: " "), $0.initiator]) }.count
+        let count = (role.sideRoleTasks ?? []).filter { taskPasses($0, in: role) }.count
+            + (role.sideRoleKeyDates ?? []).filter { keyDatePasses($0) }.count
+            + (role.sideRoleMembers ?? []).filter { memberPasses($0) }.count
+            + (role.sideRoleMeetings ?? []).filter { meetingPasses($0) }.count
+            + (role.sideRoleResolutions ?? []).filter { resolutionPasses($0) }.count
         return Button {
             exportImage(role)
         } label: {
@@ -803,7 +811,7 @@ struct SideRoleWorkspaceView: View {
             .padding(.horizontal, 20)
 
             let tasks = (role.sideRoleTasks ?? [])
-                .filter { matches([$0.content, $0.note, SideRoleFormat.assigneeNames($0, in: role)]) }
+                .filter { taskPasses($0, in: role) }
             if !tasks.isEmpty {
                 exportBox(title: "待辦（\(tasks.count)）", icon: "checklist") {
                     ForEach(tasks) { t in
@@ -818,7 +826,7 @@ struct SideRoleWorkspaceView: View {
                 }
             }
             let dates = (role.sideRoleKeyDates ?? [])
-                .filter { matches([$0.title, $0.note]) }.sorted { $0.date < $1.date }
+                .filter { keyDatePasses($0) }.sorted { $0.date < $1.date }
             if !dates.isEmpty {
                 exportBox(title: "重要日期（\(dates.count)）", icon: "calendar") {
                     ForEach(dates) { k in
@@ -828,7 +836,7 @@ struct SideRoleWorkspaceView: View {
                 }
             }
             let members = (role.sideRoleMembers ?? [])
-                .filter { matches([$0.name, $0.dutyInRole, $0.contact, $0.note]) }
+                .filter { memberPasses($0) }
             if !members.isEmpty {
                 exportBox(title: "成員名單（\(members.count)）", icon: "person.2.fill") {
                     ForEach(members) { m in
@@ -841,7 +849,7 @@ struct SideRoleWorkspaceView: View {
                 }
             }
             let meetings = (role.sideRoleMeetings ?? [])
-                .filter { matches([$0.topic, $0.decisions, $0.note, $0.attendees.joined(separator: "、")]) }
+                .filter { meetingPasses($0) }
                 .sorted { $0.date > $1.date }
             if !meetings.isEmpty {
                 exportBox(title: "會議紀錄（\(meetings.count)）", icon: "text.bubble.fill") {
@@ -856,7 +864,7 @@ struct SideRoleWorkspaceView: View {
                 }
             }
             let resolutions = (role.sideRoleResolutions ?? [])
-                .filter { matches([$0.title, $0.content, $0.categories.map(\.rawValue).joined(separator: " "), $0.initiator]) }
+                .filter { resolutionPasses($0) }
                 .sorted { $0.date > $1.date }
             if !resolutions.isEmpty {
                 exportBox(title: "重大決議（\(resolutions.count)）", icon: "checkmark.seal.fill") {
@@ -914,6 +922,133 @@ struct SideRoleWorkspaceView: View {
         .padding(.vertical, 3)
     }
 
+    // MARK: 可點選的篩選膠囊（分類／人名；比照部屬總覽的人名篩選）
+
+    private func categoryFilterChip(_ c: SideRoleResolutionCategory) -> some View {
+        let active = filterCategory == c
+        return Button { toggleCategoryFilter(c) } label: {
+            HStack(spacing: 3) {
+                Text(c.rawValue)
+                if active {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                }
+            }
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(c.color)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(c.color.opacity(active ? 0.25 : 0.14))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(c.color.opacity(active ? 0.5 : 0.25), lineWidth: 0.6))
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func personFilterChip(_ name: String) -> some View {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        let active = filterPerson == n
+        return Button { togglePersonFilter(n) } label: {
+            HStack(spacing: 3) {
+                Text(n)
+                if active {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                }
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(active ? Color.white : Color.indigo)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(active ? Color.indigo : Color.indigo.opacity(0.10))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.borderless)
+        .lineLimit(1)
+    }
+
+    /// 篩選中橫幅：顯示目前的分類/人名篩選，各附 ✕；說明哪些區塊被暫時收起
+    @ViewBuilder
+    private var filterBanner: some View {
+        if filterCategory != nil || filterPerson != nil {
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    .font(.system(size: 14)).foregroundStyle(.indigo)
+                if let c = filterCategory { categoryFilterChip(c) }
+                if let p = filterPerson { personFilterChip(p) }
+                Text(filterCategory != nil ? "無分類的區塊已暫時收起" : "無人員的區塊已暫時收起")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        filterCategory = nil; filterPerson = nil
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Color.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 16)
+        }
+    }
+
+    // MARK: 篩選判定（搜尋字 + 分類膠囊 + 人名，三者同時成立才通過）
+
+    private var hasActiveFilter: Bool {
+        filterCategory != nil || filterPerson != nil
+            || !query.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private func taskPasses(_ t: SideRoleTask, in role: LifeMilestone) -> Bool {
+        let names = SideRoleFormat.assigneeNames(t, in: role)
+        guard matches([t.content, t.note, names,
+                       t.categories.map(\.rawValue).joined(separator: " ")]) else { return false }
+        if let c = filterCategory, !t.categories.contains(c) { return false }
+        if let p = filterPerson, !names.contains(p) { return false }
+        return true
+    }
+
+    private func resolutionPasses(_ r: SideRoleResolution) -> Bool {
+        guard matches([r.title, r.content,
+                       r.categories.map(\.rawValue).joined(separator: " "), r.initiator]) else { return false }
+        if let c = filterCategory, !r.categories.contains(c) { return false }
+        if let p = filterPerson, r.initiator != p { return false }
+        return true
+    }
+
+    private func meetingPasses(_ mt: SideRoleMeeting) -> Bool {
+        guard filterCategory == nil else { return false }   // 會議沒有分類
+        guard matches([mt.topic, mt.decisions, mt.note,
+                       mt.attendees.joined(separator: "、")]) else { return false }
+        if let p = filterPerson, !mt.attendees.contains(p) { return false }
+        return true
+    }
+
+    private func memberPasses(_ m: SideRoleMember) -> Bool {
+        guard filterCategory == nil else { return false }   // 成員沒有分類
+        guard matches([m.name, m.dutyInRole, m.contact, m.note]) else { return false }
+        if let p = filterPerson, m.name.trimmingCharacters(in: .whitespaces) != p { return false }
+        return true
+    }
+
+    private func keyDatePasses(_ k: SideRoleKeyDate) -> Bool {
+        guard filterCategory == nil, filterPerson == nil else { return false }   // 日期沒有分類也沒有人
+        return matches([k.title, k.note])
+    }
+
+    /// 點分類膠囊／人名膠囊：同值再點一次＝取消
+    private func toggleCategoryFilter(_ c: SideRoleResolutionCategory) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            filterCategory = filterCategory == c ? nil : c
+        }
+    }
+    private func togglePersonFilter(_ name: String) {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        guard !n.isEmpty else { return }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            filterPerson = filterPerson == n ? nil : n
+        }
+    }
+
     /// 工作區內搜尋的比對（空查詢一律通過）
     private func matches(_ fields: [String]) -> Bool {
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -923,7 +1058,7 @@ struct SideRoleWorkspaceView: View {
 
     private func taskSection(_ role: LifeMilestone) -> some View {
         let tasks = (role.sideRoleTasks ?? [])
-            .filter { matches([$0.content, $0.note, SideRoleFormat.assigneeNames($0, in: role)]) }
+            .filter { taskPasses($0, in: role) }
             .sorted { a, b in
             if a.isCompleted != b.isCompleted { return !a.isCompleted }
             return (a.dueDate ?? .distantFuture) < (b.dueDate ?? .distantFuture)
@@ -972,11 +1107,12 @@ struct SideRoleWorkspaceView: View {
                             .font(.caption2)
                             .foregroundStyle(overdue ? .red : .secondary)
                     }
-                    if !assigneeNames.isEmpty {
-                        Text(assigneeNames)
-                            .font(.caption2)
-                            .foregroundStyle(.indigo.opacity(0.85))
-                            .lineLimit(1)
+                    // 分類與人名都可點：點一下暫時只看該分類/該負責人（再點取消）
+                    ForEach(task.categories) { c in
+                        categoryFilterChip(c)
+                    }
+                    ForEach(assigneeNames.split(separator: "、").map(String.init), id: \.self) { name in
+                        personFilterChip(name)
                     }
                     // 與部屬那邊的紀錄連動中：任一邊打勾兩邊都完成
                     if let n = task.links?.count, n > 0 {
@@ -1003,7 +1139,7 @@ struct SideRoleWorkspaceView: View {
 
     private func keyDateSection(_ role: LifeMilestone) -> some View {
         let dates = (role.sideRoleKeyDates ?? [])
-            .filter { matches([$0.title, $0.note]) }
+            .filter { keyDatePasses($0) }
             .sorted { $0.date < $1.date }
         return sectionBox(title: "重要日期", icon: "calendar", color: .indigo,
                           trailing: "\(dates.count)",
@@ -1061,7 +1197,7 @@ struct SideRoleWorkspaceView: View {
 
     private func memberSection(_ role: LifeMilestone) -> some View {
         let members = (role.sideRoleMembers ?? [])
-            .filter { matches([$0.name, $0.dutyInRole, $0.contact, $0.note]) }
+            .filter { memberPasses($0) }
         let hasPrevious = lifeStore.previousTermOfSideRole(role) != nil
         // 人員對照表只建一次往下傳。放在 memberRow 裡就是每一列各建一次
         // 完整清單（部屬 + 名片）並排序——15 位成員等於在 body 裡跑 15 次，
@@ -1161,7 +1297,7 @@ struct SideRoleWorkspaceView: View {
 
     private func meetingSection(_ role: LifeMilestone) -> some View {
         let meetings = (role.sideRoleMeetings ?? [])
-            .filter { matches([$0.topic, $0.decisions, $0.note, $0.attendees.joined(separator: "、")]) }
+            .filter { meetingPasses($0) }
             .sorted { $0.date > $1.date }
         return sectionBox(title: "會議紀錄", icon: "text.bubble.fill", color: .indigo,
                           trailing: "\(meetings.count)",
@@ -1214,7 +1350,7 @@ struct SideRoleWorkspaceView: View {
     /// 重大決議（會議紀錄下方）：跨會議、值得單獨列出來查的定案。
     private func resolutionSection(_ role: LifeMilestone) -> some View {
         let resolutions = (role.sideRoleResolutions ?? [])
-            .filter { matches([$0.title, $0.content, $0.categories.map(\.rawValue).joined(separator: " "), $0.initiator]) }
+            .filter { resolutionPasses($0) }
             .sorted { $0.date > $1.date }
         return sectionBox(title: "重大決議", icon: "checkmark.seal.fill", color: .indigo,
                           trailing: "\(resolutions.count)",
@@ -1242,21 +1378,17 @@ struct SideRoleWorkspaceView: View {
                         .background(Color.indigo.opacity(0.12))
                         .clipShape(Capsule())
                     ForEach(r.categories) { cat in
-                        Text(cat.rawValue)
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(cat.color)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(cat.color.opacity(0.14))
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(cat.color.opacity(0.25), lineWidth: 0.6))
+                        categoryFilterChip(cat)
                     }
                     Text(r.title.isEmpty ? "（未填標題）" : r.title)
                         .font(.subheadline.weight(.medium))
                         .lineLimit(1)
                 }
                 if !r.initiator.isEmpty {
-                    Text("發起：\(r.initiator)")
-                        .font(.caption2).foregroundStyle(.indigo.opacity(0.85)).lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text("發起：").font(.caption2).foregroundStyle(.secondary)
+                        personFilterChip(r.initiator)
+                    }
                 }
                 if !r.content.isEmpty {
                     Text(r.content)
@@ -1339,6 +1471,14 @@ struct SideRoleTaskEditor: View {
     @State private var showLinkPicker = false
     /// 非 nil 時跳刪除確認，數字是會被一併刪掉的自動分身筆數
     @State private var pendingDeleteAutoCount: Int?
+    /// 手動輸入其他負責人的暫存字串
+    @State private var extraAssigneeInput = ""
+    /// 從全公司人員名單挑其他負責人
+    @State private var showExtraPicker = false
+    /// 其他負責人的本地草稿。挑人頁吃 @Binding [String]——用 Binding(get:set:)
+    /// 現組會踩「勾選後畫面不刷新」的舊坑（MeetingAssigneePicker 教訓），
+    /// 改用真正的 @State 傳入、onChange 寫回 task。
+    @State private var draftExtras: [String] = []
 
     /// 這筆兼任職務底下的成員名單（指派對象）
     private var members: [SideRoleMember] {
@@ -1445,6 +1585,52 @@ struct SideRoleTaskEditor: View {
             } footer: {
                 Text("可以多選。指派後，在成員頁就看得到他負責哪些事。")
             }
+            Section {
+                if !draftExtras.isEmpty {
+                    FlexibleChipWrap(items: draftExtras) { name in
+                        Button {
+                            draftExtras.removeAll { $0 == name }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(name).font(.caption)
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Color.indigo.opacity(0.12), in: Capsule())
+                            .foregroundStyle(.indigo)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                HStack(spacing: 8) {
+                    TextField("手動輸入負責人姓名", text: $extraAssigneeInput)
+                        .onSubmit { addExtraAssignee() }
+                    Button { addExtraAssignee() } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 18)).foregroundStyle(.green)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(extraAssigneeInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                Button { showExtraPicker = true } label: {
+                    Label("從人員名單挑選", systemImage: "person.crop.circle.badge.magnifyingglass")
+                        .foregroundStyle(.indigo)
+                }
+                .buttonStyle(.borderless)
+            } header: {
+                Text("其他負責人")
+            } footer: {
+                Text("成員名單以外的人：直接輸入姓名，或從全公司人員清單（部屬／名片／組織）搜尋挑選。這裡的人以文字記錄，不參與部屬任務自動建立與評分。")
+            }
+            Section {
+                FlexibleChipWrap(items: SideRoleResolutionCategory.allCases) { c in
+                    taskCategoryChip(c)
+                }
+                .padding(.vertical, 2)
+            } header: {
+                Text("系統分類（可多選）")
+            }
             linkSection
             Section("截止日") {
                 Toggle("設定截止日", isOn: $hasDue)
@@ -1488,6 +1674,14 @@ struct SideRoleTaskEditor: View {
                                    assigneeIds: task.assigneeIds ?? [])
             }
         }
+        .sheet(isPresented: $showExtraPicker) {
+            NavigationStack {
+                SideRoleAttendeePicker(roleId: roleId, selected: $draftExtras)
+            }
+        }
+        .onChange(of: draftExtras) { _, list in
+            task.extraAssignees = list.isEmpty ? nil : list
+        }
         .navigationTitle("待辦")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -1512,7 +1706,10 @@ struct SideRoleTaskEditor: View {
                 .disabled(task.content.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .onAppear { hasDue = task.dueDate != nil }
+        .onAppear {
+            hasDue = task.dueDate != nil
+            draftExtras = task.extraAssignees ?? []
+        }
     }
 
     private func isAssigned(_ id: UUID) -> Bool {
@@ -1523,6 +1720,30 @@ struct SideRoleTaskEditor: View {
         var ids = task.assigneeIds ?? []
         if let i = ids.firstIndex(of: id) { ids.remove(at: i) } else { ids.append(id) }
         task.assigneeIds = ids.isEmpty ? nil : ids
+    }
+
+    private func addExtraAssignee() {
+        let name = extraAssigneeInput.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        if !draftExtras.contains(name) { draftExtras.append(name) }
+        extraAssigneeInput = ""
+    }
+
+    /// 分類膠囊（與重大決議編輯器同款；點選切換多選）
+    private func taskCategoryChip(_ c: SideRoleResolutionCategory) -> some View {
+        let on = task.categories.contains(c)
+        return Button {
+            if on { task.categories.removeAll { $0 == c } }
+            else { task.categories.append(c) }
+        } label: {
+            Text(c.rawValue)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(on ? c.color.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(on ? c.color : Color.secondary)
+                .overlay(Capsule().stroke(on ? c.color.opacity(0.4) : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.borderless)
     }
 }
 

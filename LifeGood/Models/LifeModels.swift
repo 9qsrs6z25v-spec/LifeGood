@@ -833,13 +833,21 @@ struct SideRoleTask: Identifiable, Codable {
     /// 用陣列而非單一 id：一件事常常是兩三個人一起扛，而單人只是「陣列長度 1」，
     /// 反過來用單一欄位就表達不了多人。nil／空陣列＝尚未指派。
     var assigneeIds: [UUID]?
+    /// 成員名單之外的負責人（文字快照，比照出席者）：手動輸入或從全公司
+    /// 人員清單挑進來的人。**不參與**部屬任務自動建立與評分——那條管線
+    /// 靠成員的 linkedPersonId，文字快照連不回本人。
+    var extraAssignees: [String]?
+    /// 系統分類（與重大決議共用同一組代碼；空＝未分類）
+    var categories: [SideRoleResolutionCategory]
 
     init(id: UUID = UUID(), content: String = "", dueDate: Date? = nil,
          isCompleted: Bool = false, completedAt: Date? = nil, note: String = "",
-         assigneeIds: [UUID]? = nil, links: [SideRoleTaskLink]? = nil) {
+         assigneeIds: [UUID]? = nil, links: [SideRoleTaskLink]? = nil,
+         extraAssignees: [String]? = nil, categories: [SideRoleResolutionCategory] = []) {
         self.id = id; self.content = content; self.dueDate = dueDate
         self.isCompleted = isCompleted; self.completedAt = completedAt; self.note = note
         self.assigneeIds = assigneeIds; self.links = links
+        self.extraAssignees = extraAssignees; self.categories = categories
     }
 
     init(from decoder: Decoder) throws {
@@ -855,10 +863,13 @@ struct SideRoleTask: Identifiable, Codable {
         note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? ""
         assigneeIds = try? c.decodeIfPresent([UUID].self, forKey: .assigneeIds)
         links = try? c.decodeIfPresent([SideRoleTaskLink].self, forKey: .links)
+        extraAssignees = try? c.decodeIfPresent([String].self, forKey: .extraAssignees)
+        categories = (try? c.decodeIfPresent([SideRoleResolutionCategory].self, forKey: .categories)) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, content, dueDate, isCompleted, completedAt, note, assigneeIds, links
+        case id, content, dueDate, isCompleted, completedAt, note, assigneeIds, links,
+             extraAssignees, categories
     }
 }
 
