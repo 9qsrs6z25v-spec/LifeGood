@@ -576,7 +576,10 @@ struct DepartmentDetailView: View {
     @State private var showEditDept = false
     @State private var showManagerPicker = false
     @State private var addingEquipment = false
-    @State private var editingEquipment: ManagedEquipment?
+    @State private var viewingEquipment: ManagedEquipment?
+    /// 設備清單暫時篩選：點負責人膠囊只看那個人、點系統膠囊只看該系統（可同時）
+    @State private var eqFilterOwnerId: UUID?
+    @State private var eqFilterSystem: String?
     // [v2] 進場動畫旗標
     @State private var peopleAppeared = false
 
@@ -639,8 +642,8 @@ struct DepartmentDetailView: View {
             .sheet(isPresented: $addingEquipment) {
                 EquipmentEditorSheet(editing: nil, defaultDepartmentId: deptId)
             }
-            .sheet(item: $editingEquipment) { eq in
-                EquipmentEditorSheet(editing: eq)
+            .sheet(item: $viewingEquipment) { eq in
+                EquipmentDetailCard(equipmentId: eq.id)
             }
             .sheet(item: Binding(
                 get: { viewingPersonId.map { IdentifiableUUID(id: $0) } },
@@ -844,11 +847,16 @@ struct DepartmentDetailView: View {
     }
 
     /// 部門所屬設備（機台池中 departmentId 為本部門者）。機台屬於部門、
-    /// 生老病死（PM／警報）跟著機台；點列可編輯並指定負責人（部屬）。
+    /// 生老病死（PM／警報）跟著機台；點列開機台詳情卡片，點負責人／系統膠囊暫時篩選。
     private var equipmentSection: some View {
-        let equipments = lifeStore.equipmentPool
+        let all = lifeStore.equipmentPool
             .filter { $0.departmentId == deptId }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let equipments = all.filter { eq in
+            if let oid = eqFilterOwnerId, eq.ownerId != oid { return false }
+            if let sys = eqFilterSystem, eq.system != sys { return false }
+            return true
+        }
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Capsule()
@@ -860,7 +868,8 @@ struct DepartmentDetailView: View {
                 Text("部門所屬設備")
                     .font(.subheadline.weight(.bold))
                 Spacer()
-                Text("\(equipments.count) 台")
+                Text(eqFilterOwnerId != nil || eqFilterSystem != nil
+                     ? "\(equipments.count)/\(all.count) 台" : "\(all.count) 台")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.teal)
                     .padding(.horizontal, 7).padding(.vertical, 2.5)
@@ -875,22 +884,21 @@ struct DepartmentDetailView: View {
             }
             .padding(.horizontal).padding(.top, 14).padding(.bottom, 10)
 
+            equipmentFilterBanner
+
             if equipments.isEmpty {
                 HStack(spacing: 8) {
                     Image(systemName: "gearshape.2")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.tertiary)
-                    Text("尚無設備，按右側 + 新增機台")
+                    Text(all.isEmpty ? "尚無設備，按右側 + 新增機台" : "沒有符合篩選的機台")
                         .font(.caption).foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal).padding(.bottom, 14)
             } else {
                 let lastId = equipments.last?.id
                 ForEach(equipments) { eq in
-                    Button { editingEquipment = eq } label: {
-                        equipmentRow(eq)
-                    }
-                    .buttonStyle(.plain)
+                    equipmentRow(eq)
                     if eq.id != lastId {
                         Rectangle().fill(Color(.separator).opacity(0.20))
                             .frame(height: 0.5).padding(.leading, 60)
@@ -904,12 +912,41 @@ struct DepartmentDetailView: View {
         .padding(.horizontal)
     }
 
-    private func equipmentRow(_ eq: ManagedEquipment) -> some View {
-        let ownerName: String? = eq.ownerId.map { oid in
-            let n = lifeStore.subordinates.first { $0.id == oid }?.name ?? ""
-            return n.isEmpty ? "未命名" : n
+    /// 篩選中橫幅（比照部屬總覽）：說明目前只看誰／哪個系統，點 ✕ 全部清除
+    @ViewBuilder
+    private var equipmentFilterBanner: some View {
+        if eqFilterOwnerId != nil || eqFilterSystem != nil {
+            let ownerName: String? = eqFilterOwnerId.map { oid in
+                let n = lifeStore.subordinates.first { $0.id == oid }?.name ?? ""
+                return n.isEmpty ? "未命名" : n
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    .font(.system(size: 14)).foregroundStyle(.teal)
+                Text("只看：" + [ownerName, eqFilterSystem].compactMap { $0 }.joined(separator: "・"))
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        eqFilterOwnerId = nil; eqFilterSystem = nil
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(Color.teal.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal).padding(.bottom, 8)
         }
-        return HStack(spacing: 12) {
+    }
+
+    // 主體點按開機台詳情卡片（onTapGesture 而非整列 Button，讓內層負責人／系統
+    // 膠囊 Button 可以各自吃掉自己的點擊——比照部屬總覽 personChip 的巢狀寫法）
+    private func equipmentRow(_ eq: ManagedEquipment) -> some View {
+        HStack(spacing: 12) {
             ZStack {
                 Circle()
                     .fill(LinearGradient(colors: [Color.teal.opacity(0.22), Color.teal.opacity(0.09)],
@@ -935,13 +972,11 @@ struct DepartmentDetailView: View {
                         .background(eq.alarms.isEmpty ? Color(.tertiarySystemFill) : Color.red.opacity(0.12))
                         .foregroundStyle(eq.alarms.isEmpty ? Color.secondary : Color.red)
                         .clipShape(Capsule())
-                    if let ownerName {
-                        Label(ownerName, systemImage: "person.fill")
-                            .font(.system(size: 9, weight: .bold))
-                            .padding(.horizontal, 5).padding(.vertical, 1.5)
-                            .background(Color.purple.opacity(0.12)).foregroundStyle(.purple)
-                            .clipShape(Capsule())
-                            .lineLimit(1)
+                    if !eq.system.isEmpty {
+                        equipmentSystemChip(eq.system)
+                    }
+                    if let oid = eq.ownerId {
+                        equipmentOwnerChip(oid)
                     } else {
                         Text("未指派負責人")
                             .font(.system(size: 9, weight: .bold))
@@ -960,6 +995,59 @@ struct DepartmentDetailView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
         .contentShape(Rectangle())
+        .onTapGesture { viewingEquipment = eq }
+    }
+
+    /// 系統別膠囊：點一下只看該系統、已篩選中顯示 ✕、再點取消
+    private func equipmentSystemChip(_ system: String) -> some View {
+        let active = eqFilterSystem == system
+        return Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                eqFilterSystem = active ? nil : system
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(system)
+                if active {
+                    Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+                }
+            }
+            .font(.system(size: 9, weight: .bold))
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(Color.cyan.opacity(active ? 0.20 : 0.12))
+            .foregroundStyle(.cyan)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.cyan.opacity(active ? 0.4 : 0), lineWidth: 0.8))
+            .lineLimit(1)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 負責人膠囊：點一下只看這個人負責的機台、已篩選中顯示 ✕、再點取消
+    private func equipmentOwnerChip(_ ownerId: UUID) -> some View {
+        let n = lifeStore.subordinates.first { $0.id == ownerId }?.name ?? ""
+        let name = n.isEmpty ? "未命名" : n
+        let active = eqFilterOwnerId == ownerId
+        return Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                eqFilterOwnerId = active ? nil : ownerId
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Label(name, systemImage: "person.fill")
+                if active {
+                    Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+                }
+            }
+            .font(.system(size: 9, weight: .bold))
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(Color.purple.opacity(active ? 0.20 : 0.12))
+            .foregroundStyle(.purple)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.purple.opacity(active ? 0.4 : 0), lineWidth: 0.8))
+            .lineLimit(1)
+        }
+        .buttonStyle(.plain)
     }
 
     // [v2] section header 從裸 Text 升級為 Capsule 側條 + 計數膠囊；加入交錯進場動畫

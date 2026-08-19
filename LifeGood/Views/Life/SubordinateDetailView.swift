@@ -1710,6 +1710,7 @@ struct SubordinateDetailView: View {
                 lines.append(""); lines.append("🛠 執掌設備（\(equipments.count) 台）")
                 for eq in equipments {
                     var row = "• \(eq.name.isEmpty ? "未命名設備" : eq.name)｜🔧 PM \(eq.pmRecords.count)｜🚨 警報 \(eq.alarms.count)"
+                    if !eq.system.isEmpty { row += "｜⚙️ \(eq.system)" }
                     if let deptName = lifeStore.departments.first(where: { $0.id == eq.departmentId })?.name,
                        !deptName.isEmpty { row += "｜🏭 \(deptName)" }
                     if let last = eq.pmRecords.map(\.date).max() { row += "｜上次 PM \(formatDate(last))" }

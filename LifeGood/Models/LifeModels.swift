@@ -2252,13 +2252,17 @@ struct ManagedEquipment: Identifiable, Codable {
     var departmentId: UUID?
     /// 目前負責人（部屬 id）；nil＝未指派。換人只改這個欄位，機台歷史記錄不動。
     var ownerId: UUID?
+    /// 系統別（自由文字，例：CDA、冰水、廢水；空＝未填）。
+    /// 填過的系統別會變成膠囊供快速選擇，並可在部門設備清單點選篩選。
+    var system: String
 
     init(id: UUID = UUID(), name: String = "", note: String = "",
          pmRecords: [EquipmentPMRecord] = [], alarms: [EquipmentAlarm] = [],
-         departmentId: UUID? = nil, ownerId: UUID? = nil) {
+         departmentId: UUID? = nil, ownerId: UUID? = nil, system: String = "") {
         self.id = id; self.name = name; self.note = note
         self.pmRecords = pmRecords; self.alarms = alarms
         self.departmentId = departmentId; self.ownerId = ownerId
+        self.system = system
     }
 
     init(from decoder: Decoder) throws {
@@ -2270,8 +2274,9 @@ struct ManagedEquipment: Identifiable, Codable {
         alarms = (try? c.decode(LossyArray<EquipmentAlarm>.self, forKey: .alarms))?.elements ?? []
         departmentId = try? c.decodeIfPresent(UUID.self, forKey: .departmentId)
         ownerId = try? c.decodeIfPresent(UUID.self, forKey: .ownerId)
+        system = (try? c.decodeIfPresent(String.self, forKey: .system)) ?? ""
     }
-    private enum CodingKeys: String, CodingKey { case id, name, note, pmRecords, alarms, departmentId, ownerId }
+    private enum CodingKeys: String, CodingKey { case id, name, note, pmRecords, alarms, departmentId, ownerId, system }
 }
 
 /// 單筆預防保養（PM）記錄。

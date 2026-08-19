@@ -155,7 +155,8 @@ struct SubordinateEquipmentSection: View {
                                  defaultOwnerId: subordinateId)
         }
         .sheet(item: $editingEquipment) { eq in
-            EquipmentEditorSheet(editing: eq)
+            // 點開一律先看機台詳情卡片（編輯在卡片右上），與部門所屬設備清單行為一致
+            EquipmentDetailCard(equipmentId: eq.id)
         }
         .sheet(isPresented: $pickingExisting) {
             EquipmentClaimPicker(subordinateId: subordinateId)
@@ -247,6 +248,14 @@ struct SubordinateEquipmentSection: View {
                                 .padding(.horizontal, 5).padding(.vertical, 1.5)
                                 .background(Color.red.opacity(0.12)).foregroundStyle(.red)
                                 .clipShape(Capsule())
+                        }
+                        if !eq.system.isEmpty {
+                            Text(eq.system)
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color.cyan.opacity(0.12)).foregroundStyle(.cyan)
+                                .clipShape(Capsule())
+                                .lineLimit(1)
                         }
                         if let deptName = lifeStore.departments.first(where: { $0.id == eq.departmentId })?.name,
                            !deptName.isEmpty {
@@ -468,11 +477,23 @@ struct EquipmentEditorSheet: View {
 
     @State private var name = ""
     @State private var note = ""
+    @State private var system = ""
     @State private var departmentId: UUID?
     @State private var ownerId: UUID?
     @State private var pmRecords: [EquipmentPMRecord] = []
     @State private var alarms: [EquipmentAlarm] = []
     @State private var isSaving = false
+
+    /// 填寫過的系統別膠囊（全機台池去重、依名稱排序、上限 12）
+    private var systemSuggestions: [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for s in lifeStore.equipmentPool.map({ $0.system.trimmingCharacters(in: .whitespaces) })
+        where !s.isEmpty && !seen.contains(s) {
+            seen.insert(s); out.append(s)
+        }
+        return Array(out.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.prefix(12))
+    }
 
     private var sortedDepartments: [Department] {
         lifeStore.departments.sorted {
@@ -506,6 +527,16 @@ struct EquipmentEditorSheet: View {
             Form {
                 Section {
                     TextField("設備名稱（如：CVD-01）", text: $name)
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("系統別（如：CDA、冰水、廢水，選填）", text: $system)
+                        // 填過的系統別變膠囊：點一下帶入、再點取消（比照重大決議廠區）
+                        if !systemSuggestions.isEmpty {
+                            FlexibleChipWrap(items: systemSuggestions) { s in
+                                systemChip(s)
+                            }
+                            .padding(.bottom, 2)
+                        }
+                    }
                     TextField("備註（位置、型號等，選填）", text: $note)
                     Picker("所屬部門", selection: $departmentId) {
                         Text("未指定").tag(UUID?.none)
@@ -630,7 +661,7 @@ struct EquipmentEditorSheet: View {
             }
             .onAppear {
                 if let e = editing {
-                    name = e.name; note = e.note
+                    name = e.name; note = e.note; system = e.system
                     departmentId = e.departmentId; ownerId = e.ownerId
                     pmRecords = e.pmRecords.sorted { $0.date > $1.date }
                     alarms = e.alarms.sorted { $0.date > $1.date }
@@ -640,6 +671,22 @@ struct EquipmentEditorSheet: View {
                 }
             }
         }
+    }
+
+    /// 系統別膠囊：點一下帶入輸入框、再點清空
+    private func systemChip(_ s: String) -> some View {
+        let on = system.trimmingCharacters(in: .whitespaces) == s
+        return Button {
+            system = on ? "" : s
+        } label: {
+            Text(s)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(on ? Color.cyan.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(on ? Color.cyan : Color.secondary)
+                .overlay(Capsule().stroke(on ? Color.cyan.opacity(0.4) : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.borderless)
     }
 
     private func save() {
@@ -652,7 +699,8 @@ struct EquipmentEditorSheet: View {
             pmRecords: pmRecords,
             alarms: alarms,
             departmentId: departmentId,
-            ownerId: ownerId
+            ownerId: ownerId,
+            system: system.trimmingCharacters(in: .whitespaces)
         )
         lifeStore.upsertEquipment(eq)
         dismiss()
@@ -683,7 +731,9 @@ struct EquipmentClaimPicker: View {
     private var grouped: [(deptName: String, items: [ManagedEquipment])] {
         let q = query.trimmingCharacters(in: .whitespaces)
         let pool = lifeStore.equipmentPool
-            .filter { q.isEmpty || $0.name.localizedCaseInsensitiveContains(q) || $0.note.localizedCaseInsensitiveContains(q) }
+            .filter { q.isEmpty || $0.name.localizedCaseInsensitiveContains(q)
+                || $0.note.localizedCaseInsensitiveContains(q)
+                || $0.system.localizedCaseInsensitiveContains(q) }
         var buckets: [UUID?: [ManagedEquipment]] = [:]
         for eq in pool { buckets[eq.departmentId, default: []].append(eq) }
         func deptName(_ id: UUID?) -> String {
@@ -710,7 +760,7 @@ struct EquipmentClaimPicker: View {
         NavigationStack {
             List {
                 Section {
-                    TextField("搜尋機台名稱／備註", text: $query)
+                    TextField("搜尋機台名稱／系統別／備註", text: $query)
                 }
                 if grouped.isEmpty {
                     Section {
@@ -756,6 +806,13 @@ struct EquipmentClaimPicker: View {
                     HStack(spacing: 6) {
                         Text("PM \(eq.pmRecords.count)・警報 \(eq.alarms.count)")
                             .font(.caption2).foregroundStyle(.secondary)
+                        if !eq.system.isEmpty {
+                            Text(eq.system)
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color.cyan.opacity(0.12)).foregroundStyle(.cyan)
+                                .clipShape(Capsule())
+                        }
                         if !mine, let owner = ownerName(eq.ownerId) {
                             Text("目前：\(owner)")
                                 .font(.system(size: 9, weight: .bold))
@@ -770,5 +827,319 @@ struct EquipmentClaimPicker: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 機台詳情卡片
+
+/// 部門所屬設備點開的檢視卡片（非編輯畫面）：
+/// 名稱＋系統/部門/負責人膠囊 → 四格 KPI（PM 總數/距上次 PM/警報總數/30 天警報）
+/// → 備註 → PM／警報時間軸（警報標示距同機台上次 PM 天數）。右上「編輯」才進編輯表單。
+struct EquipmentDetailCard: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let equipmentId: UUID
+
+    @State private var showEditor = false
+
+    private var equipment: ManagedEquipment? {
+        lifeStore.equipmentPool.first { $0.id == equipmentId }
+    }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private static let dateTimeFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let eq = equipment {
+                    ScrollView {
+                        VStack(spacing: 14) {
+                            heroCard(eq)
+                            kpiRow(eq)
+                            if !eq.note.isEmpty { noteCard(eq) }
+                            timelineCard(eq)
+                        }
+                        .padding(.vertical)
+                    }
+                } else {
+                    // 機台已被刪除（例如編輯表單裡刪除）→ 自動關閉卡片
+                    Color.clear.onAppear { dismiss() }
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("機台詳情")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("編輯") { showEditor = true }.bold()
+                }
+            }
+            .sheet(isPresented: $showEditor) {
+                if let eq = equipment {
+                    EquipmentEditorSheet(editing: eq)
+                }
+            }
+        }
+    }
+
+    // MARK: 標頭
+
+    private func heroCard(_ eq: ManagedEquipment) -> some View {
+        let deptName = lifeStore.departments.first { $0.id == eq.departmentId }?.name
+        let ownerName: String? = eq.ownerId.map { oid in
+            let n = lifeStore.subordinates.first { $0.id == oid }?.name ?? ""
+            return n.isEmpty ? "未命名" : n
+        }
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 13) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(LinearGradient(colors: [.teal, .cyan],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 50, height: 50)
+                        .shadow(color: Color.teal.opacity(0.30), radius: 6, x: 0, y: 3)
+                    Image(systemName: "gearshape.2.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                        .font(.title3.bold())
+                        .fixedSize(horizontal: false, vertical: true)
+                    FlexibleChipWrap(items: heroChips(eq, deptName: deptName, ownerName: ownerName)) { chip in
+                        Label(chip.text, systemImage: chip.icon)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(chip.color.opacity(0.12))
+                            .foregroundStyle(chip.color)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(chip.color.opacity(0.22), lineWidth: 0.6))
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .shadow(color: Color.teal.opacity(0.10), radius: 12, x: 0, y: 5)
+        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 1)
+        .padding(.horizontal)
+    }
+
+    private struct HeroChip: Hashable { let text: String; let icon: String; let colorTag: Int
+        var color: Color {
+            switch colorTag {
+            case 0: return .cyan
+            case 1: return .indigo
+            case 2: return .purple
+            default: return .secondary
+            }
+        }
+    }
+
+    private func heroChips(_ eq: ManagedEquipment, deptName: String?, ownerName: String?) -> [HeroChip] {
+        var chips: [HeroChip] = []
+        if !eq.system.isEmpty {
+            chips.append(HeroChip(text: eq.system, icon: "circle.hexagongrid.fill", colorTag: 0))
+        }
+        if let deptName, !deptName.isEmpty {
+            chips.append(HeroChip(text: deptName, icon: "building.2.fill", colorTag: 1))
+        }
+        chips.append(ownerName.map { HeroChip(text: "負責人 \($0)", icon: "person.fill", colorTag: 2) }
+                     ?? HeroChip(text: "未指派負責人", icon: "person.slash", colorTag: 3))
+        return chips
+    }
+
+    // MARK: 四格 KPI
+
+    private func kpiRow(_ eq: ManagedEquipment) -> some View {
+        let lastPM = eq.pmRecords.map(\.date).max()
+        let daysSincePM = lastPM.flatMap {
+            Calendar.current.dateComponents([.day], from: $0, to: Date()).day
+        }
+        let recentAlarms = eq.alarms.filter {
+            $0.date > (Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date())
+        }.count
+        return HStack(spacing: 10) {
+            kpiCell(value: "\(eq.pmRecords.count)", label: "PM 總數", color: .green)
+            kpiCell(value: daysSincePM.map { "\($0) 天" } ?? "—",
+                    label: "距上次 PM", color: (daysSincePM ?? 0) >= 90 ? .orange : .teal)
+            kpiCell(value: "\(eq.alarms.count)", label: "警報總數",
+                    color: eq.alarms.isEmpty ? .secondary : .red)
+            kpiCell(value: "\(recentAlarms)", label: "30天警報",
+                    color: recentAlarms == 0 ? .secondary : .red)
+        }
+        .padding(.horizontal)
+    }
+
+    private func kpiCell(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.14), lineWidth: 0.75))
+    }
+
+    // MARK: 備註
+
+    private func noteCard(_ eq: ManagedEquipment) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [Color(.systemGray2), Color(.systemGray2).opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: "note.text")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                Text("備註").font(.subheadline.weight(.bold))
+            }
+            Text(eq.note)
+                .font(.subheadline).foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    // MARK: 時間軸（PM 綠／警報紅，警報標示距上次 PM 天數）
+
+    private struct CardEntry: Identifiable {
+        let id: UUID
+        let isPM: Bool
+        let date: Date
+        let text: String
+        let daysSincePM: Int?
+    }
+
+    private func entries(_ eq: ManagedEquipment) -> [CardEntry] {
+        var out: [CardEntry] = []
+        let pmDates = eq.pmRecords.map(\.date).sorted()
+        for pm in eq.pmRecords {
+            out.append(CardEntry(id: pm.id, isPM: true, date: pm.date, text: pm.note, daysSincePM: nil))
+        }
+        for al in eq.alarms {
+            let prior = pmDates.last(where: { $0 <= al.date })
+            let days = prior.flatMap {
+                Calendar.current.dateComponents([.day], from: $0, to: al.date).day
+            }
+            out.append(CardEntry(id: al.id, isPM: false, date: al.date, text: al.content, daysSincePM: days))
+        }
+        return out.sorted { $0.date > $1.date }
+    }
+
+    @ViewBuilder
+    private func timelineCard(_ eq: ManagedEquipment) -> some View {
+        let all = entries(eq)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.indigo, Color.indigo.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: "chart.xyaxis.line")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.indigo)
+                Text("PM／警報時間軸").font(.subheadline.weight(.bold))
+                Spacer()
+                HStack(spacing: 8) {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.green).frame(width: 7, height: 7)
+                        Text("PM").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.red).frame(width: 7, height: 7)
+                        Text("警報").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
+
+            if all.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(.tertiary)
+                    Text("尚無 PM／警報記錄，按右上「編輯」新增")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 14).padding(.bottom, 14)
+            } else {
+                ForEach(Array(all.enumerated()), id: \.element.id) { idx, e in
+                    cardTimelineRow(e, isLast: idx == all.count - 1)
+                }
+                .padding(.bottom, 6)
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private func cardTimelineRow(_ e: CardEntry, isLast: Bool) -> some View {
+        let color: Color = e.isPM ? .green : .red
+        return HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0.09)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 22, height: 22)
+                    Circle().stroke(color.opacity(0.28), lineWidth: 0.75).frame(width: 22, height: 22)
+                    Image(systemName: e.isPM ? "wrench.fill" : "bell.fill")
+                        .font(.system(size: 9, weight: .bold)).foregroundStyle(color)
+                }
+                if !isLast {
+                    Rectangle().fill(Color(.separator).opacity(0.35))
+                        .frame(width: 1.5)
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(e.isPM ? "PM 保養" : "警報")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(color.opacity(0.12)).foregroundStyle(color)
+                        .clipShape(Capsule())
+                    if !e.isPM, let days = e.daysSincePM {
+                        Text("PM 後 \(days) 天")
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(Color.orange.opacity(0.12)).foregroundStyle(.orange)
+                            .clipShape(Capsule())
+                    }
+                    Spacer()
+                    Text(e.isPM ? Self.dateFmt.string(from: e.date) : Self.dateTimeFmt.string(from: e.date))
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+                if !e.text.isEmpty {
+                    // 檢視卡片以完整內容為主，不做行數截斷
+                    Text(e.text).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.bottom, isLast ? 4 : 12)
+        }
+        .padding(.horizontal, 14)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
