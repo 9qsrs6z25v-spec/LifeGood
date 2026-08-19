@@ -15,6 +15,9 @@ class LifeStore: ObservableObject {
     @Published var orgPeople: [OrgPerson] = [] { didSet { if !isLoading { save() } } }
     @Published var healthProfile: HealthProfile = HealthProfile() { didSet { if !isLoading { save() } } }
     @Published var familyTasks: [FamilyTask] = [] { didSet { if !isLoading { save() } } }
+    /// 機台池：全公司的設備（機台）共用清單。機台屬於部門（departmentId）、
+    /// 由部屬擔任負責人（ownerId）；PM／警報等生老病死記錄跟著機台，換負責人不搬記錄。
+    @Published var equipmentPool: [ManagedEquipment] = [] { didSet { if !isLoading { save() } } }
 
     private var isLoading = false
     private let saveQueue = DispatchQueue(label: "com.lifegood.lifestore.save", qos: .utility)
@@ -29,7 +32,8 @@ class LifeStore: ObservableObject {
         "life_profile", "life_family", "life_milestones", "life_relationships",
         "life_pets", "life_schedules", "life_subordinates", "life_departments",
         "life_grade_titles", "life_business_cards", "life_personal_events",
-        "life_org_people", "life_health_profile", "life_family_tasks"
+        "life_org_people", "life_health_profile", "life_family_tasks",
+        "life_equipment_pool"
     ]
 
     init() {
@@ -39,7 +43,8 @@ class LifeStore: ObservableObject {
         defer { isLoading = false }
         let didBackfill = backfillOrgPeopleFromSubordinates()
         let didRepair = repairSideRoleMemberLinks()
-        if didBackfill || didRepair { save() }
+        let didMigrateEq = migrateLegacyEquipmentsToPool()
+        if didBackfill || didRepair || didMigrateEq { save() }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(reloadFromCloud),
@@ -67,8 +72,10 @@ class LifeStore: ObservableObject {
         defer { isLoading = false }
         let didBackfill = backfillOrgPeopleFromSubordinates()
         let didRepair = repairSideRoleMemberLinks()
+        // 雲端另一台裝置若仍是舊版（機台存在部屬身上），拉下來後在這裡搬進機台池
+        let didMigrateEq = migrateLegacyEquipmentsToPool()
         // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
-        if didBackfill || didRepair { save() }
+        if didBackfill || didRepair || didMigrateEq { save() }
     }
 
     // MARK: - 個人檔案
@@ -875,6 +882,10 @@ class LifeStore: ObservableObject {
         let reminderIds = item.tasks.compactMap(\.reminderId)
         for rid in reminderIds { ReminderBridge.shared.deleteAsync(id: rid) }
         subordinates.removeAll { $0.id == item.id }
+        // 機台留在池中（生老病死跟著機台），只解除這個人的負責人身分
+        for i in equipmentPool.indices where equipmentPool[i].ownerId == item.id {
+            equipmentPool[i].ownerId = nil
+        }
         // 解除與公司組織人員的連結（保留人員資料以維持歷史）
         if let i = orgPeople.firstIndex(where: { $0.linkedSubordinateId == item.id }) {
             orgPeople[i].linkedSubordinateId = nil
@@ -1142,7 +1153,61 @@ class LifeStore: ObservableObject {
     func update(_ item: Department) {
         if let i = departments.firstIndex(where: { $0.id == item.id }) { departments[i] = item }
     }
-    func deleteDepartment(_ item: Department) { departments.removeAll { $0.id == item.id } }
+    func deleteDepartment(_ item: Department) {
+        isLoading = true
+        defer { isLoading = false }
+        departments.removeAll { $0.id == item.id }
+        // 機台留在池中（歷史跟著機台），只解除部門歸屬避免懸空 id
+        for i in equipmentPool.indices where equipmentPool[i].departmentId == item.id {
+            equipmentPool[i].departmentId = nil
+        }
+        save()
+    }
+
+    // MARK: - 機台池（部門所屬設備）CRUD
+
+    func upsertEquipment(_ eq: ManagedEquipment) {
+        isLoading = true
+        defer { isLoading = false }
+        if let i = equipmentPool.firstIndex(where: { $0.id == eq.id }) { equipmentPool[i] = eq }
+        else { equipmentPool.append(eq) }
+        save()
+    }
+
+    func deleteEquipment(id: UUID) {
+        equipmentPool.removeAll { $0.id == id }
+    }
+
+    /// 指派／解除機台負責人（ownerId 為 nil 即解除）。只動負責人欄位，PM／警報記錄不動。
+    func assignEquipmentOwner(equipmentId: UUID, ownerId: UUID?) {
+        guard let i = equipmentPool.firstIndex(where: { $0.id == equipmentId }) else { return }
+        equipmentPool[i].ownerId = ownerId
+    }
+
+    /// 一次性搬遷：把舊版存在各部屬身上的執掌設備搬進共用機台池。
+    /// 機台的生老病死（PM／警報）跟著機台不跟著人；搬遷後部屬只以 ownerId 連結機台。
+    /// 冪等：部屬身上清空後不再觸發。呼叫端需自行處理 isLoading 批次與 save()。
+    @discardableResult
+    func migrateLegacyEquipmentsToPool() -> Bool {
+        var changed = false
+        for si in subordinates.indices where !subordinates[si].equipments.isEmpty {
+            for eq in subordinates[si].equipments {
+                if let pi = equipmentPool.firstIndex(where: { $0.id == eq.id }) {
+                    // 已在池中（例如另一台裝置已搬遷過）：只補負責人／部門，不覆蓋既有記錄
+                    if equipmentPool[pi].ownerId == nil { equipmentPool[pi].ownerId = subordinates[si].id }
+                    if equipmentPool[pi].departmentId == nil { equipmentPool[pi].departmentId = subordinates[si].departmentId }
+                } else {
+                    var moved = eq
+                    moved.ownerId = subordinates[si].id
+                    if moved.departmentId == nil { moved.departmentId = subordinates[si].departmentId }
+                    equipmentPool.append(moved)
+                }
+            }
+            subordinates[si].equipments = []
+            changed = true
+        }
+        return changed
+    }
 
     // MARK: - 職等對應職稱 CRUD
 
@@ -1330,7 +1395,7 @@ class LifeStore: ObservableObject {
             relationships: relationships, pets: pets, schedules: schedules,
             subordinates: subordinates, departments: departments, gradeTitles: gradeTitles,
             businessCards: businessCards, personalEvents: personalEvents, orgPeople: orgPeople,
-            healthProfile: healthProfile, familyTasks: familyTasks
+            healthProfile: healthProfile, familyTasks: familyTasks, equipmentPool: equipmentPool
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -1349,6 +1414,7 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.orgPeople)      { ud.set(d, forKey: "life_org_people") }
             if let d = try? encoder.encode(snap.healthProfile)  { ud.set(d, forKey: "life_health_profile") }
             if let d = try? encoder.encode(snap.familyTasks)    { ud.set(d, forKey: "life_family_tasks") }
+            if let d = try? encoder.encode(snap.equipmentPool)  { ud.set(d, forKey: "life_equipment_pool") }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -1375,6 +1441,7 @@ class LifeStore: ObservableObject {
         if let items = lossyDecodeArray([PersonalEvent].self, key: "life_personal_events", decoder: decoder) { personalEvents = items }
         if let items = lossyDecodeArray([OrgPerson].self, key: "life_org_people", decoder: decoder) { orgPeople = items }
         if let items = lossyDecodeArray([FamilyTask].self, key: "life_family_tasks", decoder: decoder) { familyTasks = items }
+        if let items = lossyDecodeArray([ManagedEquipment].self, key: "life_equipment_pool", decoder: decoder) { equipmentPool = items }
         if let data = rawDataIfChanged("life_health_profile"),
            let h = try? decoder.decode(HealthProfile.self, from: data) {
             healthProfile = h

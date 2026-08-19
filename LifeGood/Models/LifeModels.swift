@@ -2248,11 +2248,17 @@ struct ManagedEquipment: Identifiable, Codable {
     var pmRecords: [EquipmentPMRecord]
     /// 警報記錄
     var alarms: [EquipmentAlarm]
+    /// 所屬部門（課）；nil＝未指定部門。機台的生老病死（PM／警報）跟著機台，不跟著人。
+    var departmentId: UUID?
+    /// 目前負責人（部屬 id）；nil＝未指派。換人只改這個欄位，機台歷史記錄不動。
+    var ownerId: UUID?
 
     init(id: UUID = UUID(), name: String = "", note: String = "",
-         pmRecords: [EquipmentPMRecord] = [], alarms: [EquipmentAlarm] = []) {
+         pmRecords: [EquipmentPMRecord] = [], alarms: [EquipmentAlarm] = [],
+         departmentId: UUID? = nil, ownerId: UUID? = nil) {
         self.id = id; self.name = name; self.note = note
         self.pmRecords = pmRecords; self.alarms = alarms
+        self.departmentId = departmentId; self.ownerId = ownerId
     }
 
     init(from decoder: Decoder) throws {
@@ -2262,8 +2268,10 @@ struct ManagedEquipment: Identifiable, Codable {
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         pmRecords = (try? c.decode(LossyArray<EquipmentPMRecord>.self, forKey: .pmRecords))?.elements ?? []
         alarms = (try? c.decode(LossyArray<EquipmentAlarm>.self, forKey: .alarms))?.elements ?? []
+        departmentId = try? c.decodeIfPresent(UUID.self, forKey: .departmentId)
+        ownerId = try? c.decodeIfPresent(UUID.self, forKey: .ownerId)
     }
-    private enum CodingKeys: String, CodingKey { case id, name, note, pmRecords, alarms }
+    private enum CodingKeys: String, CodingKey { case id, name, note, pmRecords, alarms, departmentId, ownerId }
 }
 
 /// 單筆預防保養（PM）記錄。

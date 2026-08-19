@@ -575,6 +575,8 @@ struct DepartmentDetailView: View {
     @State private var viewingPersonId: UUID?
     @State private var showEditDept = false
     @State private var showManagerPicker = false
+    @State private var addingEquipment = false
+    @State private var editingEquipment: ManagedEquipment?
     // [v2] 進場動畫旗標
     @State private var peopleAppeared = false
 
@@ -609,6 +611,7 @@ struct DepartmentDetailView: View {
                     if !upstreamDepts.isEmpty || !downstreamDepts.isEmpty {
                         relationsCard
                     }
+                    equipmentSection
                     peopleSection
                 }
                 .padding(.vertical)
@@ -632,6 +635,12 @@ struct DepartmentDetailView: View {
             }
             .sheet(isPresented: $addingPerson) {
                 OrgPersonEditor(editingId: nil, defaultDepartmentId: deptId)
+            }
+            .sheet(isPresented: $addingEquipment) {
+                EquipmentEditorSheet(editing: nil, defaultDepartmentId: deptId)
+            }
+            .sheet(item: $editingEquipment) { eq in
+                EquipmentEditorSheet(editing: eq)
             }
             .sheet(item: Binding(
                 get: { viewingPersonId.map { IdentifiableUUID(id: $0) } },
@@ -832,6 +841,125 @@ struct DepartmentDetailView: View {
             .foregroundStyle(color)
             .clipShape(Capsule())
             .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+    }
+
+    /// 部門所屬設備（機台池中 departmentId 為本部門者）。機台屬於部門、
+    /// 生老病死（PM／警報）跟著機台；點列可編輯並指定負責人（部屬）。
+    private var equipmentSection: some View {
+        let equipments = lifeStore.equipmentPool
+            .filter { $0.departmentId == deptId }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [.teal, .teal.opacity(0.50)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 3, height: 16)
+                Image(systemName: "wrench.and.screwdriver.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.teal)
+                Text("部門所屬設備")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("\(equipments.count) 台")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.teal)
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(Color.teal.opacity(0.10))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.teal.opacity(0.22), lineWidth: 0.6))
+                Button {
+                    addingEquipment = true
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.teal)
+                }
+            }
+            .padding(.horizontal).padding(.top, 14).padding(.bottom, 10)
+
+            if equipments.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "gearshape.2")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                    Text("尚無設備，按右側 + 新增機台")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal).padding(.bottom, 14)
+            } else {
+                let lastId = equipments.last?.id
+                ForEach(equipments) { eq in
+                    Button { editingEquipment = eq } label: {
+                        equipmentRow(eq)
+                    }
+                    .buttonStyle(.plain)
+                    if eq.id != lastId {
+                        Rectangle().fill(Color(.separator).opacity(0.20))
+                            .frame(height: 0.5).padding(.leading, 60)
+                    }
+                }
+                Spacer().frame(height: 4)
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+    }
+
+    private func equipmentRow(_ eq: ManagedEquipment) -> some View {
+        let ownerName: String? = eq.ownerId.map { oid in
+            let n = lifeStore.subordinates.first { $0.id == oid }?.name ?? ""
+            return n.isEmpty ? "未命名" : n
+        }
+        return HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [Color.teal.opacity(0.22), Color.teal.opacity(0.09)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 36, height: 36)
+                Circle().stroke(Color.teal.opacity(0.22), lineWidth: 1).frame(width: 36, height: 36)
+                Image(systemName: "gearshape.2.fill")
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(.teal)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                    .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                HStack(spacing: 6) {
+                    Label("PM \(eq.pmRecords.count)", systemImage: "wrench.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(Color.green.opacity(0.12)).foregroundStyle(.green)
+                        .clipShape(Capsule())
+                    Label("警報 \(eq.alarms.count)", systemImage: "bell.badge.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(eq.alarms.isEmpty ? Color(.tertiarySystemFill) : Color.red.opacity(0.12))
+                        .foregroundStyle(eq.alarms.isEmpty ? Color.secondary : Color.red)
+                        .clipShape(Capsule())
+                    if let ownerName {
+                        Label(ownerName, systemImage: "person.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(Color.purple.opacity(0.12)).foregroundStyle(.purple)
+                            .clipShape(Capsule())
+                            .lineLimit(1)
+                    } else {
+                        Text("未指派負責人")
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(Color(.tertiarySystemFill)).foregroundStyle(.secondary)
+                            .clipShape(Capsule())
+                    }
+                }
+                if !eq.note.isEmpty {
+                    Text(eq.note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .contentShape(Rectangle())
     }
 
     // [v2] section header 從裸 Text 升級為 Capsule 側條 + 計數膠囊；加入交錯進場動畫

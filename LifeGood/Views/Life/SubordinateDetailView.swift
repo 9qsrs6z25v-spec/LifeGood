@@ -1566,7 +1566,7 @@ struct SubordinateDetailView: View {
         switch tab {
         case .daily: return subordinate.proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done)
         case .rating: return subordinate.potentialScore
-        case .duty: return subordinate.equipments.count
+        case .duty: return lifeStore.equipmentPool.filter { $0.ownerId == subordinateId }.count
         }
     }
 
@@ -1704,17 +1704,21 @@ struct SubordinateDetailView: View {
                 }
             }
         case .duty:
-            if !sub.equipments.isEmpty {
-                lines.append(""); lines.append("🛠 執掌設備（\(sub.equipments.count) 台）")
-                for eq in sub.equipments {
+            let equipments = lifeStore.equipmentPool.filter { $0.ownerId == sub.id }
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            if !equipments.isEmpty {
+                lines.append(""); lines.append("🛠 執掌設備（\(equipments.count) 台）")
+                for eq in equipments {
                     var row = "• \(eq.name.isEmpty ? "未命名設備" : eq.name)｜🔧 PM \(eq.pmRecords.count)｜🚨 警報 \(eq.alarms.count)"
+                    if let deptName = lifeStore.departments.first(where: { $0.id == eq.departmentId })?.name,
+                       !deptName.isEmpty { row += "｜🏭 \(deptName)" }
                     if let last = eq.pmRecords.map(\.date).max() { row += "｜上次 PM \(formatDate(last))" }
                     lines.append(row)
                 }
                 // 時間軸（新到舊）：PM 與警報合併，警報標示距同設備上次 PM 天數
                 struct Entry { let date: Date; let text: String }
                 var entries: [Entry] = []
-                for eq in sub.equipments {
+                for eq in equipments {
                     let name = eq.name.isEmpty ? "未命名設備" : eq.name
                     let pmDates = eq.pmRecords.map(\.date).sorted()
                     for pm in eq.pmRecords {

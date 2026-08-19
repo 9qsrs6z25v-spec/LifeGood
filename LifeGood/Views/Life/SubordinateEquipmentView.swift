@@ -56,6 +56,7 @@ struct SubordinateEquipmentSection: View {
 
     @State private var addingEquipment = false
     @State private var editingEquipment: ManagedEquipment?
+    @State private var pickingExisting = false
     @State private var showPremiumAlert = false
     @State private var rowsAppeared = false
     @State private var rowsAppearedTask: Task<Void, Never>?
@@ -73,9 +74,11 @@ struct SubordinateEquipmentSection: View {
     }()
 
     var body: some View {
-        // subordinate 需線性掃描 lifeStore.subordinates 才能取得，body 內原本各自呼叫
-        // subordinate.equipments 五次，單次 render 重複掃描五次；改為單次取值後共用
-        let equipments = subordinate.equipments
+        // 機台存放於共用機台池（機台屬於部門、生老病死跟著機台）；
+        // 這裡只列出「這位部屬目前擔任負責人」的機台
+        let equipments = lifeStore.equipmentPool
+            .filter { $0.ownerId == subordinateId }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         return VStack(alignment: .leading, spacing: 0) {
             // 段落標題（對齊本頁其他章節規格：漸層側條 + 圖示 + 標題 + 計數 + 新增鈕）
             HStack(spacing: 10) {
@@ -93,9 +96,19 @@ struct SubordinateEquipmentSection: View {
                         .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
                 }
                 Spacer()
-                Button {
-                    if subscription.isPremium { addingEquipment = true }
-                    else { showPremiumAlert = true }
+                Menu {
+                    Button {
+                        if subscription.isPremium { addingEquipment = true }
+                        else { showPremiumAlert = true }
+                    } label: {
+                        Label("新增機台", systemImage: "plus")
+                    }
+                    Button {
+                        if subscription.isPremium { pickingExisting = true }
+                        else { showPremiumAlert = true }
+                    } label: {
+                        Label("選取現有機台", systemImage: "checklist")
+                    }
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 18, weight: .semibold)).foregroundStyle(accent)
@@ -137,10 +150,15 @@ struct SubordinateEquipmentSection: View {
             rowsAppeared = false
         }
         .sheet(isPresented: $addingEquipment) {
-            EquipmentEditorSheet(subordinateId: subordinateId, editing: nil)
+            EquipmentEditorSheet(editing: nil,
+                                 defaultDepartmentId: subordinate.departmentId,
+                                 defaultOwnerId: subordinateId)
         }
         .sheet(item: $editingEquipment) { eq in
-            EquipmentEditorSheet(subordinateId: subordinateId, editing: eq)
+            EquipmentEditorSheet(editing: eq)
+        }
+        .sheet(isPresented: $pickingExisting) {
+            EquipmentClaimPicker(subordinateId: subordinateId)
         }
     }
 
@@ -180,8 +198,8 @@ struct SubordinateEquipmentSection: View {
                 emptyPulseTask?.cancel()
                 emptyIconPulse = false
             }
-            Text("尚未新增設備").font(.caption).foregroundStyle(.secondary)
-            Text("記錄部屬管理的設備、PM 保養與警報").font(.caption2).foregroundStyle(.tertiary)
+            Text("尚未執掌任何機台").font(.caption).foregroundStyle(.secondary)
+            Text("可新增機台，或從部門機台池選取現有機台").font(.caption2).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
@@ -230,6 +248,15 @@ struct SubordinateEquipmentSection: View {
                                 .background(Color.red.opacity(0.12)).foregroundStyle(.red)
                                 .clipShape(Capsule())
                         }
+                        if let deptName = lifeStore.departments.first(where: { $0.id == eq.departmentId })?.name,
+                           !deptName.isEmpty {
+                            Text(deptName)
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
+                                .clipShape(Capsule())
+                                .lineLimit(1)
+                        }
                     }
                     if !eq.note.isEmpty {
                         Text(eq.note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -261,10 +288,6 @@ struct SubordinateEquipmentTimelineSection: View {
     @State private var rowsAppeared = false
     @State private var rowsAppearedTask: Task<Void, Never>?
 
-    private var subordinate: Subordinate {
-        lifeStore.subordinates.first { $0.id == subordinateId } ?? Subordinate(name: "")
-    }
-
     private enum EntryKind { case pm, alarm }
     private struct TimelineEntry: Identifiable {
         let id: UUID
@@ -278,7 +301,7 @@ struct SubordinateEquipmentTimelineSection: View {
 
     private var entries: [TimelineEntry] {
         var result: [TimelineEntry] = []
-        for eq in subordinate.equipments {
+        for eq in lifeStore.equipmentPool where eq.ownerId == subordinateId {
             let name = eq.name.isEmpty ? "未命名設備" : eq.name
             let pmDates = eq.pmRecords.map(\.date).sorted()
             for pm in eq.pmRecords {
@@ -438,14 +461,33 @@ struct EquipmentEditorSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
-    let subordinateId: UUID
     var editing: ManagedEquipment?
+    /// 新增時預帶的所屬部門／負責人（從部門頁開＝該部門；從部屬執掌頁開＝該部屬與其部門）
+    var defaultDepartmentId: UUID? = nil
+    var defaultOwnerId: UUID? = nil
 
     @State private var name = ""
     @State private var note = ""
+    @State private var departmentId: UUID?
+    @State private var ownerId: UUID?
     @State private var pmRecords: [EquipmentPMRecord] = []
     @State private var alarms: [EquipmentAlarm] = []
     @State private var isSaving = false
+
+    private var sortedDepartments: [Department] {
+        lifeStore.departments.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    /// 負責人候選：全部部屬，機台所屬部門的成員排最前，其餘依姓名排序
+    private var ownerCandidates: [Subordinate] {
+        let sorted = lifeStore.subordinates.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        guard let did = departmentId else { return sorted }
+        return sorted.filter { $0.departmentId == did } + sorted.filter { $0.departmentId != did }
+    }
 
     /// 統一 Section 標題（對齊 MeetingEditorSheet.editorSectionHeader 規格）
     private func editorSectionHeader(_ title: String, icon: String, tint: Color) -> some View {
@@ -465,8 +507,22 @@ struct EquipmentEditorSheet: View {
                 Section {
                     TextField("設備名稱（如：CVD-01）", text: $name)
                     TextField("備註（位置、型號等，選填）", text: $note)
+                    Picker("所屬部門", selection: $departmentId) {
+                        Text("未指定").tag(UUID?.none)
+                        ForEach(sortedDepartments) { d in
+                            Text(d.name.isEmpty ? "未命名部門" : d.name).tag(UUID?.some(d.id))
+                        }
+                    }
+                    Picker("負責人", selection: $ownerId) {
+                        Text("未指派").tag(UUID?.none)
+                        ForEach(ownerCandidates) { s in
+                            Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                        }
+                    }
                 } header: {
                     editorSectionHeader("設備資訊", icon: "gearshape.2.fill", tint: .teal)
+                } footer: {
+                    Text("機台屬於部門；PM／警報等歷史記錄跟著機台，換負責人不會搬動記錄。")
                 }
 
                 Section {
@@ -575,8 +631,12 @@ struct EquipmentEditorSheet: View {
             .onAppear {
                 if let e = editing {
                     name = e.name; note = e.note
+                    departmentId = e.departmentId; ownerId = e.ownerId
                     pmRecords = e.pmRecords.sorted { $0.date > $1.date }
                     alarms = e.alarms.sorted { $0.date > $1.date }
+                } else {
+                    departmentId = defaultDepartmentId
+                    ownerId = defaultOwnerId
                 }
             }
         }
@@ -584,27 +644,131 @@ struct EquipmentEditorSheet: View {
 
     private func save() {
         guard !isSaving else { return }
-        guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
         isSaving = true
         let eq = ManagedEquipment(
             id: editing?.id ?? UUID(),
             name: name.trimmingCharacters(in: .whitespaces),
             note: note.trimmingCharacters(in: .whitespaces),
             pmRecords: pmRecords,
-            alarms: alarms
+            alarms: alarms,
+            departmentId: departmentId,
+            ownerId: ownerId
         )
-        if let idx = sub.equipments.firstIndex(where: { $0.id == eq.id }) { sub.equipments[idx] = eq }
-        else { sub.equipments.append(eq) }
-        lifeStore.update(sub)
+        lifeStore.upsertEquipment(eq)
         dismiss()
     }
 
     private func deleteEquipment() {
         guard !isSaving else { return }
-        guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
+        guard let e = editing else { dismiss(); return }
         isSaving = true
-        sub.equipments.removeAll { $0.id == e.id }
-        lifeStore.update(sub)
+        lifeStore.deleteEquipment(id: e.id)
         dismiss()
+    }
+}
+
+// MARK: - 選取現有機台（部屬執掌頁）
+
+/// 從機台池挑選機台給這位部屬執掌：點一下接手（成為負責人）、再點一下釋回。
+/// 直接寫回 store（比照 DeptManagerPicker 立即寫入模式），關閉即生效。
+struct EquipmentClaimPicker: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let subordinateId: UUID
+
+    @State private var query = ""
+
+    /// 依部門分組（依部門名排序，未指定部門排最後），組內依機台名排序
+    private var grouped: [(deptName: String, items: [ManagedEquipment])] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        let pool = lifeStore.equipmentPool
+            .filter { q.isEmpty || $0.name.localizedCaseInsensitiveContains(q) || $0.note.localizedCaseInsensitiveContains(q) }
+        var buckets: [UUID?: [ManagedEquipment]] = [:]
+        for eq in pool { buckets[eq.departmentId, default: []].append(eq) }
+        func deptName(_ id: UUID?) -> String {
+            guard let id, let d = lifeStore.departments.first(where: { $0.id == id }) else { return "未指定部門" }
+            return d.name.isEmpty ? "未命名部門" : d.name
+        }
+        return buckets
+            .map { (deptName($0.key), $0.value.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+                    $0.key == nil) }
+            .sorted { a, b in
+                if a.2 != b.2 { return !a.2 }   // 未指定部門排最後
+                return a.0.localizedStandardCompare(b.0) == .orderedAscending
+            }
+            .map { (deptName: $0.0, items: $0.1) }
+    }
+
+    private func ownerName(_ id: UUID?) -> String? {
+        guard let id else { return nil }
+        let n = lifeStore.subordinates.first { $0.id == id }?.name ?? ""
+        return n.isEmpty ? "未命名" : n
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    TextField("搜尋機台名稱／備註", text: $query)
+                }
+                if grouped.isEmpty {
+                    Section {
+                        HStack(spacing: 6) {
+                            Spacer()
+                            Image(systemName: "gearshape.2").font(.caption).foregroundStyle(.tertiary)
+                            Text(query.isEmpty ? "機台池是空的，先在部門頁或執掌頁新增機台" : "找不到符合的機台")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                ForEach(grouped, id: \.deptName) { group in
+                    Section(group.deptName) {
+                        ForEach(group.items) { eq in
+                            claimRow(eq)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("選取機台")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("完成") { dismiss() }.bold() }
+            }
+        }
+    }
+
+    private func claimRow(_ eq: ManagedEquipment) -> some View {
+        let mine = eq.ownerId == subordinateId
+        return Button {
+            // 點選接手／釋回：立即寫回（只改負責人欄位，機台記錄不動）
+            lifeStore.assignEquipmentOwner(equipmentId: eq.id, ownerId: mine ? nil : subordinateId)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: mine ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(mine ? Color.teal : Color(.systemGray3))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(eq.name.isEmpty ? "未命名設備" : eq.name)
+                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        Text("PM \(eq.pmRecords.count)・警報 \(eq.alarms.count)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        if !mine, let owner = ownerName(eq.ownerId) {
+                            Text("目前：\(owner)")
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Color.orange.opacity(0.12)).foregroundStyle(.orange)
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

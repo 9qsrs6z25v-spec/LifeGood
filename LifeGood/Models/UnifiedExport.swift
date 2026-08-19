@@ -37,6 +37,9 @@ struct UnifiedExport: Codable {
         var personalEvents: [PersonalEvent]?
         var orgPeople: [OrgPerson]?
         var familyTasks: [FamilyTask]?
+        /// 機台池（部門所屬設備）；舊備份沒有此欄位，其機台仍在各部屬的 equipments 裡，
+        /// 匯入後由 migrateLegacyEquipmentsToPool() 搬遷
+        var equipmentPool: [ManagedEquipment]?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore) -> UnifiedExport {
@@ -64,7 +67,8 @@ struct UnifiedExport: Codable {
                 businessCards: life.businessCards,
                 personalEvents: life.personalEvents,
                 orgPeople: life.orgPeople,
-                familyTasks: life.familyTasks
+                familyTasks: life.familyTasks,
+                equipmentPool: life.equipmentPool
             )
         )
     }
@@ -685,6 +689,9 @@ enum UnifiedImporter {
                 if let events = payload.life.personalEvents { life.personalEvents = events }
                 if let people = payload.life.orgPeople { life.orgPeople = people }
                 if let ft = payload.life.familyTasks { life.familyTasks = ft }
+                if let pool = payload.life.equipmentPool { life.equipmentPool = pool }
+                // 舊格式備份的機台在各部屬身上——覆蓋匯入後立刻搬進機台池
+                life.migrateLegacyEquipmentsToPool()
             }
 
             result.expenses = payload.expense.expenses.count
@@ -846,6 +853,13 @@ enum UnifiedImporter {
                     let newTasks = mergeItems(existing: life.familyTasks, incoming: ft)
                     life.familyTasks.append(contentsOf: newTasks)
                 }
+
+                if let pool = payload.life.equipmentPool {
+                    let newEq = mergeItems(existing: life.equipmentPool, incoming: pool)
+                    life.equipmentPool.append(contentsOf: newEq)
+                }
+                // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
+                life.migrateLegacyEquipmentsToPool()
             }
 
             let newIns = mergeItems(existing: finance.insurances, incoming: payload.finance.insurances)
@@ -1047,6 +1061,8 @@ enum SubordinateImporter {
                 }
                 life.subordinates = subs   // withBatch 內：與其餘 department/gradeTitle 變更合併只存檔一次
             }
+            // 匯入資料若帶有舊格式的部屬機台（equipments），搬進機台池
+            life.migrateLegacyEquipmentsToPool()
         }
         return r
     }
