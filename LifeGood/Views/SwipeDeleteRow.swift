@@ -20,6 +20,9 @@ struct SwipeDeleteRow<Content: View>: View {
 
     @State private var offsetX: CGFloat = 0
     @State private var isOpen = false
+    /// 這次拖曳的方向鎖：nil＝未判定、true＝水平（本列處理）、false＝垂直（整段交給捲動）。
+    /// 在第一次 onChanged（約 18pt）就判定並鎖住，避免捲動中途軌跡偏水平時列跟著抖動。
+    @State private var dragLockHorizontal: Bool?
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -56,17 +59,30 @@ struct SwipeDeleteRow<Content: View>: View {
                             .onTapGesture { close() }
                     }
                 }
-                .gesture(
+                // simultaneousGesture 而非 .gesture：.gesture 會與外層 ScrollView 的捲動
+                // 手勢「競爭」——快速垂直滑動落在列上時，列的 DragGesture 先搶到觸控、
+                // onChanged 又因偏垂直而不處理，整個觸控被吃掉 → 頁面不捲動；
+                // 慢慢拖曳則是 ScrollView 先贏所以一定會動（使用者回報的症狀）。
+                // 改成 simultaneous 讓兩者同時辨識：垂直滑動由 ScrollView 捲動、
+                // 列的手勢靠下方「明顯偏水平才處理」的守衛不動作；水平左滑則照常開刪除鈕。
+                .simultaneousGesture(
                     DragGesture(minimumDistance: 18)
                         .onChanged { value in
                             // 只吃「明顯偏水平」的拖曳，垂直捲動交還給 ScrollView
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            if dragLockHorizontal == nil {
+                                dragLockHorizontal =
+                                    abs(value.translation.width) > abs(value.translation.height)
+                            }
+                            guard dragLockHorizontal == true else { return }
                             let base: CGFloat = isOpen ? -(deleteWidth + 8) : 0
                             let proposed = base + value.translation.width
                             // 左界：刪除鈕寬 + 一點橡皮筋；右界 0
                             offsetX = min(0, max(proposed, -(deleteWidth + 28)))
                         }
                         .onEnded { value in
+                            let wasHorizontal = dragLockHorizontal == true
+                            dragLockHorizontal = nil
+                            guard wasHorizontal else { return }
                             let shouldOpen = offsetX < -(deleteWidth * 0.5)
                             withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
                                 offsetX = shouldOpen ? -(deleteWidth + 8) : 0
