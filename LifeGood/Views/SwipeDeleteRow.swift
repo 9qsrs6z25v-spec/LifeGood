@@ -68,10 +68,13 @@ struct SwipeDeleteRow<Content: View>: View {
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 18)
                         .onChanged { value in
-                            // 只吃「明顯偏水平」的拖曳，垂直捲動交還給 ScrollView
+                            // 只吃「明顯偏水平」的拖曳，垂直捲動交還給 ScrollView。
+                            // 門檻取 2 倍（約偏離垂直 63° 以上才算水平）而非 1 倍：
+                            // 使用者回饋捲動優先級要更高——斜斜的快速滑動一律當捲動，
+                            // 想開刪除鈕就水平地滑，判定寧可保守也不要吃掉捲動。
                             if dragLockHorizontal == nil {
                                 dragLockHorizontal =
-                                    abs(value.translation.width) > abs(value.translation.height)
+                                    abs(value.translation.width) > abs(value.translation.height) * 2
                             }
                             guard dragLockHorizontal == true else { return }
                             let base: CGFloat = isOpen ? -(deleteWidth + 8) : 0
