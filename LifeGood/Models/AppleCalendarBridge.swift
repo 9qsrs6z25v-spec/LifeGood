@@ -242,8 +242,73 @@ final class ReminderBridge: ObservableObject {
         return hasAccess
     }
 
-    /// 「美好人生」提醒清單（找不到就建一個；建立失敗回傳預設清單）
-    private func appCalendar() -> EKCalendar? {
+    /// 新增或更新一則提醒。回傳提醒 id（呼叫端存回 task.reminderId）；失敗回傳原 id。
+    /// EventKit 工作佇列。**所有查詢/寫入都在這裡跑，不佔主執行緒**——
+    /// calendarItem(withIdentifier:)／save(commit:) 是對系統 remindd 服務的
+    /// 同步往返，直接在主執行緒呼叫會讓「新增任務」按下去卡零點幾秒
+    ///（v25.246 的教訓：使用者回報按新增比以前頓很多）。
+    /// EKEventStore 本身跨執行緒安全；取出的物件只在同一個佇列裡用完就丟。
+    private static let workQueue = DispatchQueue(label: "lifegood.reminder.bridge", qos: .utility)
+
+    /// 開關＋權限的快速判斷（nonisolated：背景佇列與呼叫端都要能問）
+    nonisolated static var enabledAndAuthorized: Bool {
+        guard UserDefaults.standard.bool(forKey: enabledKey) else { return false }
+        let status = EKEventStore.authorizationStatus(for: .reminder)
+        if #available(iOS 17.0, *) { return status == .fullAccess }
+        return status == .authorized
+    }
+
+    /// 新增或更新一則提醒（背景佇列執行）。回傳提醒 id；失敗回傳原 id。
+    /// 未開同步或沒權限時不動作（回原 id），呼叫端不必自行判斷。
+    nonisolated func upsertAsync(id existingId: String?, title: String, due: Date?,
+                                 notes: String?, isCompleted: Bool) async -> String? {
+        guard Self.enabledAndAuthorized else { return existingId }
+        let store = self.store
+        return await withCheckedContinuation { cont in
+            Self.workQueue.async {
+                let reminder: EKReminder
+                if let existingId,
+                   let found = store.calendarItem(withIdentifier: existingId) as? EKReminder {
+                    reminder = found
+                } else {
+                    reminder = EKReminder(eventStore: store)
+                    guard let cal = Self.appCalendar(in: store) else {
+                        cont.resume(returning: existingId); return
+                    }
+                    reminder.calendar = cal
+                }
+                reminder.title = title.isEmpty ? "未命名待辦" : title
+                reminder.notes = notes
+                if let due {
+                    // 帶時分的截止時間；整點的鬧鈴提醒交給提醒事項本身的規則
+                    reminder.dueDateComponents = Calendar.current.dateComponents(
+                        [.year, .month, .day, .hour, .minute], from: due)
+                } else {
+                    reminder.dueDateComponents = nil
+                }
+                reminder.isCompleted = isCompleted
+                do {
+                    try store.save(reminder, commit: true)
+                    cont.resume(returning: reminder.calendarItemIdentifier)
+                } catch {
+                    cont.resume(returning: existingId)
+                }
+            }
+        }
+    }
+
+    /// 刪除提醒（背景佇列、射後不理；找不到就當作已刪，不報錯）
+    nonisolated func deleteAsync(id: String?) {
+        guard let id, Self.enabledAndAuthorized else { return }
+        let store = self.store
+        Self.workQueue.async {
+            guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else { return }
+            try? store.remove(reminder, commit: true)
+        }
+    }
+
+    /// 「美好人生」提醒清單（背景佇列版；找不到就建一個，失敗退預設清單）
+    nonisolated private static func appCalendar(in store: EKEventStore) -> EKCalendar? {
         let all = store.calendars(for: .reminder)
         if let mine = all.first(where: { $0.title == "美好人生" }) { return mine }
         let cal = EKCalendar(for: .reminder, eventStore: store)
@@ -255,45 +320,5 @@ final class ReminderBridge: ObservableObject {
         } catch {
             return store.defaultCalendarForNewReminders()
         }
-    }
-
-    /// 新增或更新一則提醒。回傳提醒 id（呼叫端存回 task.reminderId）；失敗回傳原 id。
-    /// 未開同步或沒權限時不動作（回原 id），呼叫端不必自行判斷。
-    @discardableResult
-    func upsert(id existingId: String?, title: String, due: Date?,
-                notes: String?, isCompleted: Bool) -> String? {
-        guard isEnabled, hasAccess else { return existingId }
-        let reminder: EKReminder
-        if let existingId,
-           let found = store.calendarItem(withIdentifier: existingId) as? EKReminder {
-            reminder = found
-        } else {
-            reminder = EKReminder(eventStore: store)
-            guard let cal = appCalendar() else { return existingId }
-            reminder.calendar = cal
-        }
-        reminder.title = title.isEmpty ? "未命名待辦" : title
-        reminder.notes = notes
-        if let due {
-            // 帶時分的截止時間；整點的鬧鈴提醒交給提醒事項本身的規則
-            reminder.dueDateComponents = Calendar.current.dateComponents(
-                [.year, .month, .day, .hour, .minute], from: due)
-        } else {
-            reminder.dueDateComponents = nil
-        }
-        reminder.isCompleted = isCompleted
-        do {
-            try store.save(reminder, commit: true)
-            return reminder.calendarItemIdentifier
-        } catch {
-            return existingId
-        }
-    }
-
-    /// 刪除提醒（App 端刪待辦時呼叫；找不到就當作已刪，不報錯）
-    func delete(id: String?) {
-        guard let id, isEnabled, hasAccess,
-              let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else { return }
-        try? store.remove(reminder, commit: true)
     }
 }

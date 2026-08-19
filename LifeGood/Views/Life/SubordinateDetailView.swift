@@ -3282,7 +3282,7 @@ struct TaskEditorSheet: View {
         guard !isSaving else { return }
         guard let e = editing, var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
         isSaving = true
-        ReminderBridge.shared.delete(id: e.reminderId)
+        ReminderBridge.shared.deleteAsync(id: e.reminderId)
         sub.tasks.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
     }

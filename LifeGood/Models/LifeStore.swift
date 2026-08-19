@@ -131,22 +131,35 @@ class LifeStore: ObservableObject {
 
     @MainActor
     func upsertFamilyTask(_ task: FamilyTask) {
-        isLoading = true
-        var t = task
+        // 先落地（按鈕立即有反應），提醒事項在背景補——EventKit 是對系統服務的
+        // 同步往返，放在儲存路徑上會讓每次按「新增」卡零點幾秒（v25.246 教訓）
+        if let i = familyTasks.firstIndex(where: { $0.id == task.id }) { familyTasks[i] = task }
+        else { familyTasks.append(task) }
+        scheduleFamilyTaskReminderSync(task.id)
+    }
+
+    /// 家庭待辦的提醒同步（背景執行，完成後寫回 reminderId）
+    @MainActor
+    private func scheduleFamilyTaskReminderSync(_ taskId: UUID) {
+        guard ReminderBridge.enabledAndAuthorized,
+              let t = familyTasks.first(where: { $0.id == taskId }) else { return }
         let payload = familyTaskReminderPayload(t)
-        t.reminderId = ReminderBridge.shared.upsert(id: t.reminderId, title: payload.title,
-                                                    due: t.dueDate, notes: payload.notes,
-                                                    isCompleted: t.isCompleted)
-        if let i = familyTasks.firstIndex(where: { $0.id == t.id }) { familyTasks[i] = t }
-        else { familyTasks.append(t) }
-        isLoading = false
-        save()
+        Task { [weak self] in
+            let newId = await ReminderBridge.shared.upsertAsync(
+                id: t.reminderId, title: payload.title,
+                due: t.dueDate, notes: payload.notes, isCompleted: t.isCompleted)
+            guard let self, newId != t.reminderId else { return }
+            await MainActor.run {
+                guard let i = self.familyTasks.firstIndex(where: { $0.id == taskId }) else { return }
+                self.familyTasks[i].reminderId = newId
+            }
+        }
     }
 
     @MainActor
     func deleteFamilyTask(_ taskId: UUID) {
         if let t = familyTasks.first(where: { $0.id == taskId }) {
-            ReminderBridge.shared.delete(id: t.reminderId)
+            ReminderBridge.shared.deleteAsync(id: t.reminderId)
         }
         familyTasks.removeAll { $0.id == taskId }
     }
@@ -162,50 +175,85 @@ class LifeStore: ObservableObject {
     // MARK: - 部屬任務 → 提醒事項
 
     /// 部屬任務的提醒同步（家庭與部屬共用 ReminderBridge；未開同步時整段 no-op）。
-    /// 寫回 reminderId 用 isLoading 批次，一次 save。
+    /// EventKit 在背景佇列執行、完成後回主執行緒寫回 reminderId——
+    /// 同步版本曾讓「新增任務」按鈕卡零點幾秒（使用者回報）。
     @MainActor
     func syncReminderForSubordinateTask(subordinateId: UUID, taskId: UUID) {
-        guard ReminderBridge.shared.isEnabled else { return }
+        guard ReminderBridge.enabledAndAuthorized else { return }
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
               let ti = subordinates[si].tasks.firstIndex(where: { $0.id == taskId }) else { return }
         let t = subordinates[si].tasks[ti]
         let title = t.content.isEmpty ? (t.topic.isEmpty ? "部屬任務" : t.topic) : t.content
         var notes = "美好人生・部屬任務｜\(subordinates[si].name)"
         if !t.note.isEmpty { notes += "\n\(t.note)" }
-        let newId = ReminderBridge.shared.upsert(id: t.reminderId, title: title,
-                                                 due: t.dueDate, notes: notes,
-                                                 isCompleted: t.isCompleted)
-        guard newId != t.reminderId else { return }
-        isLoading = true
-        defer { isLoading = false }
-        subordinates[si].tasks[ti].reminderId = newId
-        save()
+        Task { [weak self] in
+            let newId = await ReminderBridge.shared.upsertAsync(
+                id: t.reminderId, title: title, due: t.dueDate,
+                notes: notes, isCompleted: t.isCompleted)
+            guard let self, newId != t.reminderId else { return }
+            await MainActor.run {
+                guard let si = self.subordinates.firstIndex(where: { $0.id == subordinateId }),
+                      let ti = self.subordinates[si].tasks.firstIndex(where: { $0.id == taskId })
+                else { return }
+                self.isLoading = true
+                self.subordinates[si].tasks[ti].reminderId = newId
+                self.isLoading = false
+                self.save()
+            }
+        }
     }
 
     /// 開啟同步時的一次性回補：把現有「未完成」的家庭待辦與部屬任務全部建進提醒事項。
     /// 已完成的不回補——把幾百筆做完的事塞進提醒事項只會變垃圾山。
+    /// 整批在背景逐筆執行（幾十筆＝幾十次系統服務往返，同步跑會凍住 UI 好幾秒），
+    /// 全部完成後一次寫回 reminderId。
     @MainActor
     func backfillRemindersForAllTasks() {
-        guard ReminderBridge.shared.isEnabled else { return }
-        isLoading = true
-        for i in familyTasks.indices where !familyTasks[i].isCompleted {
-            let payload = familyTaskReminderPayload(familyTasks[i])
-            familyTasks[i].reminderId = ReminderBridge.shared.upsert(
-                id: familyTasks[i].reminderId, title: payload.title,
-                due: familyTasks[i].dueDate, notes: payload.notes, isCompleted: false)
+        guard ReminderBridge.enabledAndAuthorized else { return }
+        // 先在主執行緒收集工作清單（值型別快照，背景用不到 @Published）
+        struct Job { let kind: Int; let ownerId: UUID; let taskId: UUID
+                     let existingId: String?; let title: String; let due: Date?; let notes: String }
+        var jobs: [Job] = []
+        for t in familyTasks where !t.isCompleted {
+            let p = familyTaskReminderPayload(t)
+            jobs.append(Job(kind: 0, ownerId: t.id, taskId: t.id,
+                            existingId: t.reminderId, title: p.title, due: t.dueDate, notes: p.notes))
         }
-        for si in subordinates.indices {
-            for ti in subordinates[si].tasks.indices where !subordinates[si].tasks[ti].isCompleted {
-                let t = subordinates[si].tasks[ti]
+        for sub in subordinates {
+            for t in sub.tasks where !t.isCompleted {
                 let title = t.content.isEmpty ? (t.topic.isEmpty ? "部屬任務" : t.topic) : t.content
-                var notes = "美好人生・部屬任務｜\(subordinates[si].name)"
+                var notes = "美好人生・部屬任務｜\(sub.name)"
                 if !t.note.isEmpty { notes += "\n\(t.note)" }
-                subordinates[si].tasks[ti].reminderId = ReminderBridge.shared.upsert(
-                    id: t.reminderId, title: title, due: t.dueDate, notes: notes, isCompleted: false)
+                jobs.append(Job(kind: 1, ownerId: sub.id, taskId: t.id,
+                                existingId: t.reminderId, title: title, due: t.dueDate, notes: notes))
             }
         }
-        isLoading = false
-        save()
+        guard !jobs.isEmpty else { return }
+        Task { [weak self] in
+            var results: [(Job, String?)] = []
+            for job in jobs {
+                let newId = await ReminderBridge.shared.upsertAsync(
+                    id: job.existingId, title: job.title, due: job.due,
+                    notes: job.notes, isCompleted: false)
+                if newId != job.existingId { results.append((job, newId)) }
+            }
+            guard let self, !results.isEmpty else { return }
+            await MainActor.run {
+                self.isLoading = true
+                for (job, newId) in results {
+                    if job.kind == 0 {
+                        if let i = self.familyTasks.firstIndex(where: { $0.id == job.taskId }) {
+                            self.familyTasks[i].reminderId = newId
+                        }
+                    } else if let si = self.subordinates.firstIndex(where: { $0.id == job.ownerId }),
+                              let ti = self.subordinates[si].tasks.firstIndex(where: { $0.id == job.taskId }) {
+                        self.subordinates[si].tasks[ti].reminderId = newId
+                    }
+                }
+                self.isLoading = false
+                self.save()
+            }
+        }
     }
 
     // MARK: - 里程碑 CRUD
@@ -825,11 +873,7 @@ class LifeStore: ObservableObject {
         defer { isLoading = false }
         // 刪除其任務對應的 Apple 提醒（先收集 id，人刪了就查不到了）
         let reminderIds = item.tasks.compactMap(\.reminderId)
-        if !reminderIds.isEmpty {
-            Task { @MainActor in
-                for rid in reminderIds { ReminderBridge.shared.delete(id: rid) }
-            }
-        }
+        for rid in reminderIds { ReminderBridge.shared.deleteAsync(id: rid) }
         subordinates.removeAll { $0.id == item.id }
         // 解除與公司組織人員的連結（保留人員資料以維持歷史）
         if let i = orgPeople.firstIndex(where: { $0.linkedSubordinateId == item.id }) {
