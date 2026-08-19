@@ -965,6 +965,9 @@ struct SideRoleResolution: Identifiable, Codable {
     var date: Date
     var title: String
     var content: String
+    /// 廠區（自由文字；例：F1、F2、竹科、南科）。編輯頁會把 key 過的值
+    /// 做成膠囊供快速選用，所以不做成列舉——每家公司的廠區叫法都不同。
+    var site: String
     /// 系統分類（可多選；空陣列＝未分類）。一則決議常橫跨多個系統
     ///（例：廢水處理動到 Waste + CHM），單選表達不了。
     var categories: [SideRoleResolutionCategory]
@@ -973,9 +976,9 @@ struct SideRoleResolution: Identifiable, Codable {
     var initiator: String
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "", content: String = "",
-         categories: [SideRoleResolutionCategory] = [], initiator: String = "") {
+         site: String = "", categories: [SideRoleResolutionCategory] = [], initiator: String = "") {
         self.id = id; self.date = date; self.title = title; self.content = content
-        self.categories = categories; self.initiator = initiator
+        self.site = site; self.categories = categories; self.initiator = initiator
     }
 
     init(from decoder: Decoder) throws {
@@ -994,9 +997,10 @@ struct SideRoleResolution: Identifiable, Codable {
             categories = []
         }
         initiator = (try? c.decodeIfPresent(String.self, forKey: .initiator)) ?? ""
+        site = (try? c.decodeIfPresent(String.self, forKey: .site)) ?? ""
     }
 
-    private enum CodingKeys: String, CodingKey { case id, date, title, content, categories, initiator }
+    private enum CodingKeys: String, CodingKey { case id, date, title, content, site, categories, initiator }
     /// 舊版單選分類。獨立 CodingKey 讓 encode 仍可用合成版
     ///（CodingKeys 出現沒有對應屬性的 case 會讓合成的 encode 編不過）。
     private enum LegacyKeys: String, CodingKey { case category }

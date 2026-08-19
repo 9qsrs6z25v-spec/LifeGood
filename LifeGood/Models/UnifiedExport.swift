@@ -465,12 +465,13 @@ enum UnifiedExporter {
             }
 
             csv += "\n## 兼任職務重大決議 (Side Role Resolutions)\n"
-            csv += "roleId,roleName,date,categories,initiator,title,content\n"
+            csv += "roleId,roleName,date,site,categories,initiator,title,content\n"
             for r in sideRoles {
                 for res in r.sideRoleResolutions ?? [] {
                     let fields: [String] = [
                         r.id.uuidString, esc(r.sideRoleName ?? ""),
                         iso.string(from: res.date),
+                        esc(res.site),
                         res.categories.map(\.rawValue).joined(separator: "/"),
                         esc(res.initiator),
                         esc(res.title), esc(res.content)

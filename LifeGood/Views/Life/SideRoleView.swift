@@ -874,6 +874,7 @@ struct SideRoleWorkspaceView: View {
                                        : "[\(r.categories.map(\.rawValue).joined(separator: "/"))] ")
                                     + (r.title.isEmpty ? "（未填標題）" : r.title),
                                   lines: [
+                                    r.site.isEmpty ? nil : "廠區：\(r.site)",
                                     r.initiator.isEmpty ? nil : "發起：\(r.initiator)",
                                     r.content.isEmpty ? nil : r.content
                                   ])
@@ -1008,7 +1009,7 @@ struct SideRoleWorkspaceView: View {
     }
 
     private func resolutionPasses(_ r: SideRoleResolution) -> Bool {
-        guard matches([r.title, r.content,
+        guard matches([r.title, r.content, r.site,
                        r.categories.map(\.rawValue).joined(separator: " "), r.initiator]) else { return false }
         if let c = filterCategory, !r.categories.contains(c) { return false }
         if let p = filterPerson, r.initiator != p { return false }
@@ -1377,6 +1378,15 @@ struct SideRoleWorkspaceView: View {
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color.indigo.opacity(0.12))
                         .clipShape(Capsule())
+                    if !r.site.isEmpty {
+                        Text(r.site)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.teal)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.teal.opacity(0.14))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.teal.opacity(0.25), lineWidth: 0.6))
+                    }
                     ForEach(r.categories) { cat in
                         categoryFilterChip(cat)
                     }
@@ -2216,6 +2226,41 @@ struct SideRoleResolutionEditor: View {
             .sideRoleResolutions?.contains { $0.id == resolution.id } == true
     }
 
+    /// 歷史值建議：全部兼任職務的重大決議按日期新到舊去重，最多 12 個。
+    /// 跨職務共享——廠區與發起人本來就不是單一職務的概念，
+    /// 換一個職務還要重 key 一輪就失去建議的意義。
+    private func recentValues(_ pick: (SideRoleResolution) -> String) -> [String] {
+        let all = lifeStore.sideRoles
+            .flatMap { $0.sideRoleResolutions ?? [] }
+            .sorted { $0.date > $1.date }
+            .map(pick)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        var seen = Set<String>()
+        var out: [String] = []
+        for v in all where !seen.contains(v) {
+            seen.insert(v); out.append(v)
+            if out.count >= 12 { break }
+        }
+        return out
+    }
+
+    private var siteSuggestions: [String] { recentValues { $0.site } }
+    private var initiatorSuggestions: [String] { recentValues { $0.initiator } }
+
+    /// 歷史值膠囊（廠區/發起人共用）：點一下帶入、再點取消
+    private func suggestionChip(_ text: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(isOn ? Color.indigo.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(isOn ? Color.indigo : Color.secondary)
+                .overlay(Capsule().stroke(isOn ? Color.indigo.opacity(0.4) : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.borderless)
+    }
+
     /// 分類膠囊：點一下加入/移除（多選）
     private func categoryChip(_ c: SideRoleResolutionCategory) -> some View {
         let on = resolution.categories.contains(c)
@@ -2238,6 +2283,18 @@ struct SideRoleResolutionEditor: View {
             Section("重大決議") {
                 TextField("決議標題（例：場地定案：世貿一館）", text: $resolution.title)
                 DatePicker("決議日期", selection: $resolution.date, displayedComponents: .date)
+                // 廠區：自由文字 + 歷史值膠囊（key 過一次之後直接點選）
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("廠區（例：F1、竹科）", text: $resolution.site)
+                    if !siteSuggestions.isEmpty {
+                        FlexibleChipWrap(items: siteSuggestions) { site in
+                            suggestionChip(site, isOn: resolution.site == site) {
+                                resolution.site = resolution.site == site ? "" : site
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
                 // 系統分類（可多選；一則決議常橫跨多個系統）：膠囊點選切換
                 VStack(alignment: .leading, spacing: 6) {
                     Text("系統分類（可多選）")
@@ -2250,20 +2307,30 @@ struct SideRoleResolutionEditor: View {
                 // 發起人：可直接打字，也可按「挑選」從人員清單挑（成員優先、可搜尋）。
                 // 按鈕做成明顯的膠囊——原本只有 16pt 小圖示，太容易點到旁邊的輸入框，
                 // 使用者以為挑選功能沒實裝。
-                HStack(spacing: 8) {
-                    TextField("決議發起人（可輸入或挑選）", text: $resolution.initiator)
-                    Button { showInitiatorPicker = true } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "person.crop.circle.badge.magnifyingglass")
-                                .font(.system(size: 12))
-                            Text("挑選")
-                                .font(.caption.weight(.semibold))
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        TextField("決議發起人（可輸入或挑選）", text: $resolution.initiator)
+                        Button { showInitiatorPicker = true } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "person.crop.circle.badge.magnifyingglass")
+                                    .font(.system(size: 12))
+                                Text("挑選")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .padding(.horizontal, 9).padding(.vertical, 5)
+                            .background(Color.indigo.opacity(0.12), in: Capsule())
+                            .foregroundStyle(.indigo)
                         }
-                        .padding(.horizontal, 9).padding(.vertical, 5)
-                        .background(Color.indigo.opacity(0.12), in: Capsule())
-                        .foregroundStyle(.indigo)
+                        .buttonStyle(.borderless)
                     }
-                    .buttonStyle(.borderless)
+                    // key 過的發起人做成膠囊，下一次直接點選
+                    if !initiatorSuggestions.isEmpty {
+                        FlexibleChipWrap(items: initiatorSuggestions) { name in
+                            suggestionChip(name, isOn: resolution.initiator == name) {
+                                resolution.initiator = resolution.initiator == name ? "" : name
+                            }
+                        }
+                    }
                 }
             }
             Section("內容") {
