@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.264", build: 1017, date: "2026/08/19", notes: [
+            "【修正】25.262 引入的編譯錯誤（LifeStore.swift:1215 main actor 隔離呼叫）：警報自動掛任務的函式補上 @MainActor 標註，與其尾端呼叫的提醒事項同步函式一致。功能行為不變。"
+        ]),
         ChangelogEntry(version: "25.263", build: 1016, date: "2026/08/19", notes: [
             "【調整】設備編輯頁的備註改為多行輸入（可換行、隨內容長高），並從「設備資訊」移到最下面、警報記錄之下的獨立「備註」章節——位置、型號、保養注意事項等長文字不再擠在一行裡。"
         ]),

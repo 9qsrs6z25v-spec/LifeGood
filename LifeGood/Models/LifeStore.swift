@@ -1189,6 +1189,9 @@ class LifeStore: ObservableObject {
     /// 例如换過負責人後再開舊警報存檔，不會再掛給新人一次）。
     /// 任務預設截止時間＝警報發生後 3 天，內容帶警報內容，可再編輯；
     /// 關閉任務（打勾完成）與一般任務完全相同。
+    /// @MainActor：尾端呼叫的 syncReminderForSubordinateTask 是 main actor 隔離；
+    /// 呼叫端（EquipmentEditorSheet.save）本來就在主執行緒。
+    @MainActor
     func createTasksForNewAlarms(equipment: ManagedEquipment, newAlarms: [EquipmentAlarm]) {
         guard let ownerId = equipment.ownerId, !newAlarms.isEmpty,
               let si = subordinates.firstIndex(where: { $0.id == ownerId }) else { return }
