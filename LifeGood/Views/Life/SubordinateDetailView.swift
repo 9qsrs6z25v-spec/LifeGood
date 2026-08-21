@@ -3665,6 +3665,8 @@ struct BirthdayReminderSheet: View {
 
     @State private var daysBeforeText = "1"
     @State private var yearsText = "5"
+    /// 無限期：不設迄日，每年提醒直到手動移除
+    @State private var noEndDate = false
     /// 寫入哪個行事曆（比照新增會議的可寫入行事曆 Picker）
     @State private var selectedCalendarId: String?
     /// 上次選過的行事曆：下次開設定頁直接預填
@@ -3700,14 +3702,17 @@ struct BirthdayReminderSheet: View {
                                 .frame(width: 60)
                             Text("天").foregroundStyle(.secondary)
                         }
-                        HStack {
-                            Text("連續提醒")
-                            Spacer()
-                            TextField("5", text: $yearsText)
-                                .keyboardType(.numberPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 60)
-                            Text("年").foregroundStyle(.secondary)
+                        Toggle("無限期提醒", isOn: $noEndDate)
+                        if !noEndDate {
+                            HStack {
+                                Text("連續提醒")
+                                Spacer()
+                                TextField("5", text: $yearsText)
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 60)
+                                Text("年").foregroundStyle(.secondary)
+                            }
                         }
                         // 寫入哪個行事曆（比照新增會議：色點＋名稱，可寫入的才列出）
                         if appleCal.hasAccess, !appleCal.writableCalendars.isEmpty {
@@ -3727,7 +3732,9 @@ struct BirthdayReminderSheet: View {
                     } header: {
                         Text("生日提醒")
                     } footer: {
-                        Text("寫入 Apple 行事曆：從下一次生日起、每年重複連續 \(Int(yearsText) ?? 5) 年的全日事件，提前 \(Int(daysBeforeText) ?? 1) 天的上午 9:00 跳提醒。")
+                        Text(noEndDate
+                             ? "寫入 Apple 行事曆：從下一次生日起、每年重複（無限期，直到手動移除），提前 \(Int(daysBeforeText) ?? 1) 天的上午 9:00 跳提醒。"
+                             : "寫入 Apple 行事曆：從下一次生日起、每年重複連續 \(Int(yearsText) ?? 5) 年的全日事件，提前 \(Int(daysBeforeText) ?? 1) 天的上午 9:00 跳提醒。")
                     }
 
                     Section {
@@ -3741,7 +3748,8 @@ struct BirthdayReminderSheet: View {
                                     .frame(maxWidth: .infinity)
                             }
                         }
-                        .disabled(isWorking || (Int(daysBeforeText) ?? -1) < 0 || (Int(yearsText) ?? 0) < 1)
+                        .disabled(isWorking || (Int(daysBeforeText) ?? -1) < 0
+                                  || (!noEndDate && (Int(yearsText) ?? 0) < 1))
 
                         if sub.birthdayEventId != nil {
                             Button(role: .destructive) {
@@ -3805,7 +3813,7 @@ struct BirthdayReminderSheet: View {
         isWorking = true
         resultMessage = nil
         let days = max(0, Int(daysBeforeText) ?? 1)
-        let years = max(1, Int(yearsText) ?? 5)
+        let years: Int? = noEndDate ? nil : max(1, Int(yearsText) ?? 5)
         Task { @MainActor in
             let bridge = AppleCalendarBridge.shared
             if !bridge.hasAccess { await bridge.requestAccess() }
@@ -3825,7 +3833,8 @@ struct BirthdayReminderSheet: View {
                 var updated = sub
                 updated.birthdayEventId = id
                 lifeStore.update(updated)
-                resultMessage = "已建立：每年提醒連續 \(years) 年、提前 \(days) 天上午 9:00。"
+                resultMessage = years.map { "已建立：每年提醒連續 \($0) 年、提前 \(days) 天上午 9:00。" }
+                    ?? "已建立：每年提醒（無限期）、提前 \(days) 天上午 9:00。"
             } else {
                 resultMessage = "建立失敗：寫入行事曆時發生問題。"
             }

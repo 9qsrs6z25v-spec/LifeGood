@@ -181,22 +181,26 @@ final class AppleCalendarBridge: ObservableObject {
         }
     }
 
-    /// 建立（或更新）部屬生日提醒：全日事件、每年重複連續 years 年，
-    /// 提前 daysBefore 天的上午 9:00 跳提醒。回傳 eventIdentifier（失敗 nil）。
+    /// 建立（或更新）部屬生日提醒：全日事件、每年重複，提前 daysBefore 天的上午 9:00
+    /// 跳提醒。years＝連續幾年（nil＝無限期，不設迄日）。回傳 eventIdentifier（失敗 nil）。
     /// 首次發生日取「下一次生日」（今年生日已過則從明年起算）。
+    ///
+    /// 兩個刻意的做法：
+    /// 1. 循環迄止用 **明確迄日（UNTIL）** 而非次數（COUNT）——部分行事曆來源
+    ///    （Google／Exchange）對 COUNT 規則的展開顯示不一致，曾造成「設 5 年
+    ///    只看得到前兩年」；迄日行為在所有來源一致。
+    /// 2. 更新走 **先建新、成功後刪舊**——反覆改同一個循環事件的規則在部分來源
+    ///    會殘留舊佔位；建立失敗時舊提醒保留不動。
     func writeBirthdayReminder(existingId: String?, name: String, birthday: Date,
-                               daysBefore: Int, years: Int, calendarId: String? = nil) -> String? {
+                               daysBefore: Int, years: Int?, calendarId: String? = nil) -> String? {
         guard hasAccess else { return nil }
-        let event: EKEvent = {
-            if let existingId, let found = eventStore.event(withIdentifier: existingId) { return found }
-            return EKEvent(eventStore: eventStore)
-        }()
-        // 指定行事曆（設定頁 Picker 選的）優先；沒選或已失效才 fallback 既有／預設
+        let event = EKEvent(eventStore: eventStore)
+        // 指定行事曆（設定頁 Picker 選的）優先；沒選或已失效 fallback 預設
         if let id = calendarId,
            let target = eventStore.calendar(withIdentifier: id),
            target.allowsContentModifications {
             event.calendar = target
-        } else if event.calendar == nil {
+        } else {
             event.calendar = eventStore.defaultCalendarForNewEvents
         }
         guard event.calendar != nil else { return nil }
@@ -218,10 +222,19 @@ final class AppleCalendarBridge: ObservableObject {
         event.isAllDay = true
         // 全日事件的 alarm 以當天 00:00 為基準：提前 N 天的上午 9:00 提醒
         event.alarms = [EKAlarm(relativeOffset: TimeInterval(-daysBefore * 86400 + 9 * 3600))]
-        event.recurrenceRules = [EKRecurrenceRule(recurrenceWith: .yearly, interval: 1,
-                                                  end: EKRecurrenceEnd(occurrenceCount: max(1, years)))]
+        let end: EKRecurrenceEnd? = years.map { y in
+            // 連續 N 年＝首次發生日起含當年共 N 個生日；迄日取最後一個生日的隔天
+            let lastBirthday = cal.date(byAdding: .year, value: max(1, y) - 1, to: startOfDay) ?? startOfDay
+            let until = cal.date(byAdding: .day, value: 1, to: lastBirthday) ?? lastBirthday
+            return EKRecurrenceEnd(end: until)
+        }
+        event.recurrenceRules = [EKRecurrenceRule(recurrenceWith: .yearly, interval: 1, end: end)]
         do {
             try eventStore.save(event, span: .futureEvents, commit: true)
+            // 新的建立成功才刪舊的（避免失敗時提醒直接消失）
+            if let existingId, existingId != event.eventIdentifier {
+                delete(eventIdentifier: existingId)
+            }
             return event.eventIdentifier
         } catch {
             return nil
