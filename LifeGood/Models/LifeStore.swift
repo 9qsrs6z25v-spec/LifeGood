@@ -881,6 +881,10 @@ class LifeStore: ObservableObject {
         // 刪除其任務對應的 Apple 提醒（先收集 id，人刪了就查不到了）
         let reminderIds = item.tasks.compactMap(\.reminderId)
         for rid in reminderIds { ReminderBridge.shared.deleteAsync(id: rid) }
+        // 生日提醒的行事曆事件一併刪除（bridge 是 main actor 隔離，繞主執行緒呼叫）
+        if let bid = item.birthdayEventId {
+            Task { @MainActor in AppleCalendarBridge.shared.delete(eventIdentifier: bid) }
+        }
         subordinates.removeAll { $0.id == item.id }
         // 機台留在池中（生老病死跟著機台），只解除這個人的負責人身分
         for i in equipmentPool.indices where equipmentPool[i].ownerId == item.id {

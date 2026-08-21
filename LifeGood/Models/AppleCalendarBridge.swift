@@ -181,6 +181,46 @@ final class AppleCalendarBridge: ObservableObject {
         }
     }
 
+    /// 建立（或更新）部屬生日提醒：全日事件、每年重複連續 years 年，
+    /// 提前 daysBefore 天的上午 9:00 跳提醒。回傳 eventIdentifier（失敗 nil）。
+    /// 首次發生日取「下一次生日」（今年生日已過則從明年起算）。
+    func writeBirthdayReminder(existingId: String?, name: String, birthday: Date,
+                               daysBefore: Int, years: Int) -> String? {
+        guard hasAccess else { return nil }
+        let event: EKEvent = {
+            if let existingId, let found = eventStore.event(withIdentifier: existingId) { return found }
+            return EKEvent(eventStore: eventStore)
+        }()
+        if event.calendar == nil { event.calendar = eventStore.defaultCalendarForNewEvents }
+        guard event.calendar != nil else { return nil }
+
+        let cal = Calendar.current
+        var comps = cal.dateComponents([.month, .day], from: birthday)
+        comps.year = cal.component(.year, from: Date())
+        var next = cal.date(from: comps) ?? birthday
+        if cal.startOfDay(for: next) < cal.startOfDay(for: Date()) {
+            comps.year = (comps.year ?? 0) + 1
+            next = cal.date(from: comps) ?? next
+        }
+        let startOfDay = cal.startOfDay(for: next)
+
+        event.title = "🎂 \(name) 生日"
+        event.notes = "美好人生・部屬生日提醒"
+        event.startDate = startOfDay
+        event.endDate = cal.date(byAdding: .day, value: 1, to: startOfDay)?.addingTimeInterval(-1) ?? startOfDay
+        event.isAllDay = true
+        // 全日事件的 alarm 以當天 00:00 為基準：提前 N 天的上午 9:00 提醒
+        event.alarms = [EKAlarm(relativeOffset: TimeInterval(-daysBefore * 86400 + 9 * 3600))]
+        event.recurrenceRules = [EKRecurrenceRule(recurrenceWith: .yearly, interval: 1,
+                                                  end: EKRecurrenceEnd(occurrenceCount: max(1, years)))]
+        do {
+            try eventStore.save(event, span: .futureEvents, commit: true)
+            return event.eventIdentifier
+        } catch {
+            return nil
+        }
+    }
+
     /// 刪除指定 EKEvent
     func delete(eventIdentifier: String) {
         guard hasAccess,

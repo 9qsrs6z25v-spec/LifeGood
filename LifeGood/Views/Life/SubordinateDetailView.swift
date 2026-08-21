@@ -243,6 +243,12 @@ struct SubordinateDetailView: View {
     let subordinateId: UUID
     @State private var showEdit = false
     @State private var showPromotion = false   // 升職表單
+    @State private var showBirthdayReminder = false   // 生日提醒設定（看板鈴鐺）
+
+    /// 生日徽章的月/日顯示
+    static let birthdayFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d"; return f
+    }()
     @State private var showCompleted = false
     @State private var previewItem: SubordinateItemRef?
     @State private var addingType: SubordinateRecordType?
@@ -471,6 +477,9 @@ struct SubordinateDetailView: View {
                 }
             }
             .sheet(isPresented: $showEdit) { AddSubordinateView(editing: subordinate) }
+            .sheet(isPresented: $showBirthdayReminder) {
+                BirthdayReminderSheet(subordinateId: subordinateId)
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
             .sheet(item: $addingType) { type in
                 RecordEditorSheet(subordinateId: subordinateId, type: type, editing: nil)
@@ -574,20 +583,49 @@ struct SubordinateDetailView: View {
             }
 
             // [v3] 入職日期 Capsule 徽章（對齊 CareerView / OverviewView.recentRow 規格）
-            if let jd = subordinate.joinDate {
-                HStack(spacing: 0) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "calendar.badge.clock")
-                            .font(.system(size: 9))
-                        Text("入職 \(formatDate(jd))")
-                            .font(.caption2.weight(.medium))
+            // [v25.275] 同一列補上生日＋星座徽章（入職右邊）與生日提醒鈴鐺（最右）
+            if subordinate.joinDate != nil || subordinate.birthday != nil {
+                HStack(spacing: 6) {
+                    if let jd = subordinate.joinDate {
+                        HStack(spacing: 4) {
+                            Image(systemName: "calendar.badge.clock")
+                                .font(.system(size: 9))
+                            Text("入職 \(formatDate(jd))")
+                                .font(.caption2.weight(.medium))
+                        }
+                        .foregroundStyle(.white.opacity(0.88))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.white.opacity(0.16))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 0.6))
                     }
-                    .foregroundStyle(.white.opacity(0.88))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(.white.opacity(0.16))
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 0.6))
+                    if let bd = subordinate.birthday {
+                        HStack(spacing: 4) {
+                            Image(systemName: "birthday.cake.fill")
+                                .font(.system(size: 9))
+                            Text("\(Self.birthdayFmt.string(from: bd))・\(zodiacSign(for: bd))")
+                                .font(.caption2.weight(.medium))
+                        }
+                        .foregroundStyle(.white.opacity(0.88))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.white.opacity(0.16))
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 0.6))
+                    }
                     Spacer()
+                    if subordinate.birthday != nil {
+                        // 生日提醒鈴鐺：已建立提醒時亮黃色
+                        Button { showBirthdayReminder = true } label: {
+                            Image(systemName: subordinate.birthdayEventId != nil ? "bell.fill" : "bell")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(subordinate.birthdayEventId != nil
+                                                 ? Color.yellow : Color.white.opacity(0.88))
+                                .padding(6)
+                                .background(.white.opacity(0.16), in: Circle())
+                                .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.6))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 .padding(.top, 10)
             }
@@ -3610,6 +3648,154 @@ struct TaskEditorSheet: View {
         ReminderBridge.shared.deleteAsync(id: e.reminderId)
         sub.tasks.removeAll { $0.id == e.id }
         lifeStore.update(sub); dismiss()
+    }
+}
+
+// MARK: - 生日提醒設定（Apple 行事曆）
+
+/// 部屬看板鈴鐺開啟的生日提醒設定：提前 N 天提醒（數字輸入）、連續提醒 N 年，
+/// 寫入 Apple 行事曆為「每年重複」的全日事件（提前 N 天上午 9:00 跳提醒）。
+/// 已建立過則更新同一個事件（birthdayEventId 對應），不會重複建立。
+struct BirthdayReminderSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let subordinateId: UUID
+
+    @State private var daysBeforeText = "1"
+    @State private var yearsText = "5"
+    @State private var resultMessage: String?
+    @State private var isWorking = false
+
+    private var subordinate: Subordinate? {
+        lifeStore.subordinates.first { $0.id == subordinateId }
+    }
+
+    private static let fullDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let sub = subordinate, let bd = sub.birthday {
+                    Section {
+                        HStack {
+                            Text("生日")
+                            Spacer()
+                            Text("\(Self.fullDateFmt.string(from: bd))・\(zodiacSign(for: bd))")
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Text("提前提醒")
+                            Spacer()
+                            TextField("1", text: $daysBeforeText)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 60)
+                            Text("天").foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Text("連續提醒")
+                            Spacer()
+                            TextField("5", text: $yearsText)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 60)
+                            Text("年").foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("生日提醒")
+                    } footer: {
+                        Text("寫入 Apple 行事曆：從下一次生日起、每年重複連續 \(Int(yearsText) ?? 5) 年的全日事件，提前 \(Int(daysBeforeText) ?? 1) 天的上午 9:00 跳提醒。")
+                    }
+
+                    Section {
+                        Button {
+                            createReminder(sub: sub, birthday: bd)
+                        } label: {
+                            HStack {
+                                if isWorking { ProgressView().scaleEffect(0.8) }
+                                Label(sub.birthdayEventId != nil ? "更新提醒" : "建立提醒",
+                                      systemImage: "bell.badge.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .disabled(isWorking || (Int(daysBeforeText) ?? -1) < 0 || (Int(yearsText) ?? 0) < 1)
+
+                        if sub.birthdayEventId != nil {
+                            Button(role: .destructive) {
+                                removeReminder(sub: sub)
+                            } label: {
+                                Label("移除提醒", systemImage: "bell.slash")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .disabled(isWorking)
+                        }
+                    }
+
+                    if let msg = resultMessage {
+                        Section {
+                            Label(msg, systemImage: msg.contains("失敗") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(msg.contains("失敗") ? .red : .green)
+                        }
+                    }
+                } else {
+                    Text("請先在編輯部屬填入生日。")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("生日提醒")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func createReminder(sub: Subordinate, birthday: Date) {
+        isWorking = true
+        resultMessage = nil
+        let days = max(0, Int(daysBeforeText) ?? 1)
+        let years = max(1, Int(yearsText) ?? 5)
+        Task { @MainActor in
+            let bridge = AppleCalendarBridge.shared
+            if !bridge.hasAccess { await bridge.requestAccess() }
+            guard bridge.hasAccess else {
+                resultMessage = "建立失敗：沒有行事曆存取權限，請到 iOS 設定開啟。"
+                isWorking = false
+                return
+            }
+            let id = bridge.writeBirthdayReminder(existingId: sub.birthdayEventId,
+                                                  name: sub.name.isEmpty ? "部屬" : sub.name,
+                                                  birthday: birthday,
+                                                  daysBefore: days, years: years)
+            if let id {
+                var updated = sub
+                updated.birthdayEventId = id
+                lifeStore.update(updated)
+                resultMessage = "已建立：每年提醒連續 \(years) 年、提前 \(days) 天上午 9:00。"
+            } else {
+                resultMessage = "建立失敗：寫入行事曆時發生問題。"
+            }
+            isWorking = false
+        }
+    }
+
+    private func removeReminder(sub: Subordinate) {
+        guard let id = sub.birthdayEventId else { return }
+        isWorking = true
+        Task { @MainActor in
+            AppleCalendarBridge.shared.delete(eventIdentifier: id)
+            var updated = sub
+            updated.birthdayEventId = nil
+            lifeStore.update(updated)
+            resultMessage = "已移除生日提醒。"
+            isWorking = false
+        }
     }
 }
 

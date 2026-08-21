@@ -872,6 +872,8 @@ struct AddSubordinateView: View {
     @State private var name = ""
     @State private var hasJoinDate = false
     @State private var joinDate = Date()
+    @State private var hasBirthday = false
+    @State private var birthday = Date()
     @State private var selectedGradeTitleId: UUID?
     @State private var selectedDepartmentId: UUID?
     @State private var department = ""
@@ -892,6 +894,17 @@ struct AddSubordinateView: View {
                     Toggle("填入入職日期", isOn: $hasJoinDate)
                     if hasJoinDate {
                         DatePicker("入職日期", selection: $joinDate, displayedComponents: .date)
+                    }
+                    Toggle("填入生日", isOn: $hasBirthday)
+                    if hasBirthday {
+                        DatePicker("生日", selection: $birthday, displayedComponents: .date)
+                        HStack {
+                            Text("星座").foregroundStyle(.secondary)
+                            Spacer()
+                            Text(zodiacSign(for: birthday))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.purple)
+                        }
                     }
                     gradeTitlePicker
                     departmentPicker
@@ -1030,7 +1043,12 @@ struct AddSubordinateView: View {
             plantArea: hasPlantArea ? plantArea.trimmingCharacters(in: .whitespaces) : "",
             weeklyReports: editing?.weeklyReports ?? [],
             // 帶回既有執掌設備（PM/警報記錄），避免編輯基本資料時被空陣列覆蓋
-            equipments: editing?.equipments ?? []
+            equipments: editing?.equipments ?? [],
+            // 升職歷程原本漏帶——編輯基本資料就會被空陣列洗掉（潛在 bug，本次補上）
+            promotions: editing?.promotions ?? [],
+            birthday: hasBirthday ? birthday : nil,
+            // 生日提醒事件對應也要帶回，否則存個檔就會重複建立提醒
+            birthdayEventId: editing?.birthdayEventId
         )
         if editing != nil { lifeStore.update(item) } else { lifeStore.add(item) }
         dismiss()
@@ -1048,6 +1066,10 @@ struct AddSubordinateView: View {
         if let jd = e.joinDate {
             hasJoinDate = true
             joinDate = jd
+        }
+        if let bd = e.birthday {
+            hasBirthday = true
+            birthday = bd
         }
     }
 }

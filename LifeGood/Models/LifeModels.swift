@@ -2207,13 +2207,18 @@ struct Subordinate: Identifiable, Codable {
     var equipments: [ManagedEquipment]
     /// 升職歷程（新到舊不強制，顯示時再排序）
     var promotions: [PromotionRecord]
+    /// 生日（選填）：明細頁看板顯示生日與星座，並可建立 Apple 行事曆年度提醒
+    var birthday: Date?
+    /// 生日提醒對應的 Apple 行事曆事件 id（重建提醒時先更新既有事件，不重複建立）
+    var birthdayEventId: String?
 
     init(id: UUID = UUID(), name: String, jobTitle: String = "",
          department: String = "", note: String = "", gradeTitleId: UUID? = nil,
          departmentId: UUID? = nil, records: [SubordinateRecord] = [], joinDate: Date? = nil,
          meetings: [SubordinateMeeting] = [], tasks: [SubordinateTask] = [],
          shifts: [SubordinateShift] = [], plantArea: String = "", weeklyReports: [WeeklyReport] = [],
-         equipments: [ManagedEquipment] = [], promotions: [PromotionRecord] = []) {
+         equipments: [ManagedEquipment] = [], promotions: [PromotionRecord] = [],
+         birthday: Date? = nil, birthdayEventId: String? = nil) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.department = department; self.note = note; self.gradeTitleId = gradeTitleId
         self.departmentId = departmentId; self.records = records; self.joinDate = joinDate
@@ -2221,6 +2226,7 @@ struct Subordinate: Identifiable, Codable {
         self.plantArea = plantArea; self.weeklyReports = weeklyReports
         self.equipments = equipments
         self.promotions = promotions
+        self.birthday = birthday; self.birthdayEventId = birthdayEventId
     }
 
     init(from decoder: Decoder) throws {
@@ -2243,6 +2249,28 @@ struct Subordinate: Identifiable, Codable {
         weeklyReports = (try? c.decode(LossyArray<WeeklyReport>.self, forKey: .weeklyReports))?.elements ?? []
         equipments = (try? c.decode(LossyArray<ManagedEquipment>.self, forKey: .equipments))?.elements ?? []
         promotions = (try? c.decode(LossyArray<PromotionRecord>.self, forKey: .promotions))?.elements ?? []
+        birthday = try? c.decodeIfPresent(Date.self, forKey: .birthday)
+        birthdayEventId = try? c.decodeIfPresent(String.self, forKey: .birthdayEventId)
+    }
+}
+
+/// 星座（依西洋十二星座的月/日區間）
+func zodiacSign(for date: Date) -> String {
+    let c = Calendar.current.dateComponents([.month, .day], from: date)
+    let m = c.month ?? 1, d = c.day ?? 1
+    switch (m, d) {
+    case (1, 1...19), (12, 22...31):  return "摩羯座"
+    case (1, _), (2, 1...18):         return "水瓶座"
+    case (2, _), (3, 1...20):         return "雙魚座"
+    case (3, _), (4, 1...19):         return "牡羊座"
+    case (4, _), (5, 1...20):         return "金牛座"
+    case (5, _), (6, 1...21):         return "雙子座"
+    case (6, _), (7, 1...22):         return "巨蟹座"
+    case (7, _), (8, 1...22):         return "獅子座"
+    case (8, _), (9, 1...22):         return "處女座"
+    case (9, _), (10, 1...23):        return "天秤座"
+    case (10, _), (11, 1...22):       return "天蠍座"
+    default:                          return "射手座"
     }
 }
 
