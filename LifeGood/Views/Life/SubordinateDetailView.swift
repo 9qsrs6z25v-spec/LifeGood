@@ -2491,6 +2491,12 @@ struct MeetingEditorSheet: View {
     /// 正在挑負責人的項目 id。狀態放這裡、.sheet 掛在 Form 根層——
     /// 掛在 Form 的 Section 上會讓外層編輯頁被一併收掉（見 MeetingItemsEditor 註解）。
     @State private var pickingAssigneeFor: IDBox?
+    /// 有加開場次時，主場次（原本的會議時間＋議程）收進場次清單的第一個子項目，
+    /// 點它開這個子頁編輯（使用者需求：版面與加開場次一致）
+    @State private var showBaseSessionEditor = false
+
+    /// 沒開週期但有加開場次 → 場次清單模式（主場次＋加開場次並列）
+    private var hasAdHoc: Bool { occurrences.contains(where: \.isAdHoc) }
 
     /// 負責人姓名快取：sideRolePersonCandidates() 每次呼叫都會重建三種來源、做去重與排序，
     /// 直接在每一列裡呼叫會讓打字時每個字元都重算一次全公司名單。
@@ -2531,53 +2537,48 @@ struct MeetingEditorSheet: View {
                     editorSectionHeader("會議資訊", icon: "person.badge.clock")
                 }
 
-                Section {
-                    HStack {
-                        Text("開始時間")
-                        Spacer()
-                        FiveMinuteDateTimePicker(selection: $date).fixedSize()
+                // 沒開週期但有加開場次：主場次（原本的會議時間＋議程）與加開場次
+                // 收進同一個「場次」清單，主場次列第一個子項目，版面一致；
+                // 其餘情況維持原本的攤平版面（時間與議程直接顯示，不多一層）。
+                if !hasRecurrence && hasAdHoc {
+                    unifiedSessionSection
+                    Section {
+                        Toggle("設定週期", isOn: $hasRecurrence)
+                        recurrenceControls
+                    } header: {
+                        editorSectionHeader("週期", icon: "repeat")
                     }
-                    HStack {
-                        TextField("會議長度", text: $durationText).keyboardType(.numberPad)
-                        Text("分鐘").foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("結束時間").foregroundStyle(.secondary)
-                        Spacer()
-                        Text(MeetingTimeFormat.rangeText(start: date, minutes: Int(durationText) ?? 60))
-                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                            .foregroundStyle(.indigo)
-                    }
-                    Toggle("設定週期", isOn: $hasRecurrence)
-                    if hasRecurrence {
-                        Picker("重複頻率", selection: $frequency) {
-                            ForEach(MeetingRecurrence.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        if frequency == .weekly || frequency == .biweekly {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("星期幾（不選＝沿用開始日的星期）")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                weekdayChips
-                            }
-                        }
-                        Toggle("設定結束日期", isOn: $hasRuleEnd)
-                        if hasRuleEnd {
-                            DatePicker("重複到", selection: $ruleEndDate, displayedComponents: .date)
-                        } else {
-                            Text("未設結束日期時，下方只列出未來三個月的場次。")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                } header: {
-                    editorSectionHeader("會議時間", icon: "calendar.badge.clock")
-                }
-
-                if hasRecurrence {
-                    occurrenceSection
                 } else {
-                    MeetingItemsEditor(items: $items, peopleIndex: peopleIndex,
-                                       pickingAssigneeFor: $pickingAssigneeFor)
-                    adHocSection
+                    Section {
+                        HStack {
+                            Text("開始時間")
+                            Spacer()
+                            FiveMinuteDateTimePicker(selection: $date).fixedSize()
+                        }
+                        HStack {
+                            TextField("會議長度", text: $durationText).keyboardType(.numberPad)
+                            Text("分鐘").foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Text("結束時間").foregroundStyle(.secondary)
+                            Spacer()
+                            Text(MeetingTimeFormat.rangeText(start: date, minutes: Int(durationText) ?? 60))
+                                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                                .foregroundStyle(.indigo)
+                        }
+                        Toggle("設定週期", isOn: $hasRecurrence)
+                        recurrenceControls
+                    } header: {
+                        editorSectionHeader("會議時間", icon: "calendar.badge.clock")
+                    }
+
+                    if hasRecurrence {
+                        occurrenceSection
+                    } else {
+                        MeetingItemsEditor(items: $items, peopleIndex: peopleIndex,
+                                           pickingAssigneeFor: $pickingAssigneeFor)
+                        adHocSection
+                    }
                 }
 
                 if editing != nil {
@@ -2617,6 +2618,10 @@ struct MeetingEditorSheet: View {
                                         peopleIndex: peopleIndex,
                                         isAdHoc: true,
                                         onSave: applyOccurrence)
+            }
+            .sheet(isPresented: $showBaseSessionEditor) {
+                MeetingBaseSessionEditor(date: $date, durationText: $durationText,
+                                         items: $items, peopleIndex: peopleIndex)
             }
             .sheet(item: $pickingAssigneeFor) { box in
                 NavigationStack {
@@ -2675,6 +2680,31 @@ struct MeetingEditorSheet: View {
         return MeetingRecurrenceRule(frequency: frequency,
                                      weekdays: weekdays.sorted(),
                                      endDate: hasRuleEnd ? ruleEndDate : nil)
+    }
+
+    /// 週期設定控制（頻率／星期幾／結束日期）。攤平版面與場次清單版面共用，
+    /// 抽出來避免兩邊各長一份慢慢歪掉。
+    @ViewBuilder
+    private var recurrenceControls: some View {
+        if hasRecurrence {
+            Picker("重複頻率", selection: $frequency) {
+                ForEach(MeetingRecurrence.allCases) { Text($0.rawValue).tag($0) }
+            }
+            if frequency == .weekly || frequency == .biweekly {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("星期幾（不選＝沿用開始日的星期）")
+                        .font(.caption).foregroundStyle(.secondary)
+                    weekdayChips
+                }
+            }
+            Toggle("設定結束日期", isOn: $hasRuleEnd)
+            if hasRuleEnd {
+                DatePicker("重複到", selection: $ruleEndDate, displayedComponents: .date)
+            } else {
+                Text("未設結束日期時，下方只列出未來三個月的場次。")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
     }
 
     private static let weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"]
@@ -2812,6 +2842,58 @@ struct MeetingEditorSheet: View {
             Text("臨時需要多開一場時用這裡，不必設定週期。每一場有自己的時間與議程項目。")
                 .font(.caption2)
         }
+    }
+
+    /// 場次清單模式（沒開週期但有加開場次）：主場次列第一個子項目，
+    /// 點開子頁編輯原本的會議時間與議程；加開場次接在後面，版面一致。
+    @ViewBuilder
+    private var unifiedSessionSection: some View {
+        let list = occurrences.filter(\.isAdHoc).sorted { $0.effectiveDate < $1.effectiveDate }
+        Section {
+            Button { showBaseSessionEditor = true } label: { baseSessionRow }
+                .buttonStyle(.plain)
+            ForEach(list) { occ in
+                Button { editingOccurrence = DateBox(id: occ.scheduledDate) } label: {
+                    occurrenceRow(resolvedAdHoc(occ))
+                }
+                .buttonStyle(.plain)
+            }
+            Button {
+                creatingAdHoc = DateBox(id: FiveMinuteDateTimePicker.defaultSchedulingTime())
+            } label: {
+                Label("加開一場", systemImage: "calendar.badge.plus").foregroundStyle(.indigo)
+            }
+        } header: {
+            editorSectionHeader("場次（\(list.count + 1)）", icon: "calendar.day.timeline.left")
+        } footer: {
+            Text("主場次是這個會議原本的時間與議程；每一場（含加開）各有自己的時間與議程項目，點一場進入編輯。")
+                .font(.caption2)
+        }
+    }
+
+    /// 主場次列：外觀比照 occurrenceRow（時間＋議程進度＋徽章）
+    private var baseSessionRow: some View {
+        let done = items.filter(\.isCompleted).count
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(MeetingTimeFormat.dateTime24.string(from: date))
+                        .font(.subheadline.weight(.medium))
+                    occurrenceBadge("主場次", .teal)
+                }
+                if items.isEmpty {
+                    Text("尚無議程").font(.caption2).foregroundStyle(.tertiary)
+                } else {
+                    Text("議程 \(done)/\(items.count)")
+                        .font(.caption2)
+                        .foregroundStyle(done == items.count ? Color.green : Color.secondary)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
     }
 
     /// 把原始覆寫包成顯示用的展開結果（加開場次列共用 occurrenceRow 的外觀）
@@ -3163,6 +3245,75 @@ struct MeetingOccurrenceEditor: View {
                                  items: items,
                                  isAdHoc: isAdHoc || (occurrence?.isAdHoc ?? false)))
         dismiss()
+    }
+}
+
+// MARK: - 主場次編輯（場次清單模式）
+
+/// 主場次子頁：編輯會議原本的開始時間／長度與議程項目。
+/// 只在「沒開週期但有加開場次」的場次清單模式使用——主場次收成第一個子項目後，
+/// 原本攤平顯示的會議時間與議程改到這裡編輯。直接綁外層 @State（$date/$items），
+/// 改了就是改到外層草稿，「完成」只是關頁。
+struct MeetingBaseSessionEditor: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @Binding var date: Date
+    @Binding var durationText: String
+    @Binding var items: [MeetingItem]
+    let peopleIndex: [UUID: SideRolePersonCandidate]
+
+    /// 挑負責人 sheet 狀態；掛在本頁 Form 根層（掛 Section 會收掉外層，見 MeetingItemsEditor 註解）
+    @State private var pickingAssigneeFor: IDBox?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        Text("開始時間")
+                        Spacer()
+                        FiveMinuteDateTimePicker(selection: $date).fixedSize()
+                    }
+                    HStack {
+                        TextField("會議長度", text: $durationText).keyboardType(.numberPad)
+                        Text("分鐘").foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("結束時間").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(MeetingTimeFormat.rangeText(start: date, minutes: Int(durationText) ?? 60))
+                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.indigo)
+                    }
+                } header: {
+                    Text("這一場")
+                } footer: {
+                    Text("主場次是這個會議原本的時間；改這裡就是改會議本身的時間。")
+                }
+
+                MeetingItemsEditor(items: $items, title: "這一場的議程項目",
+                                   peopleIndex: peopleIndex,
+                                   pickingAssigneeFor: $pickingAssigneeFor)
+            }
+            .navigationTitle("主場次")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }.bold().foregroundStyle(.green)
+                }
+            }
+            .sheet(item: $pickingAssigneeFor) { box in
+                NavigationStack {
+                    MeetingAssigneePicker(
+                        initial: items.first { $0.id == box.id }?.assigneeIds ?? [],
+                        onDone: { ids in
+                            guard let idx = items.firstIndex(where: { $0.id == box.id }) else { return }
+                            items[idx].assigneeIds = ids
+                        }
+                    )
+                }
+            }
+        }
     }
 }
 

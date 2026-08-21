@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.265", build: 1018, date: "2026/08/19", notes: [
+            "【改版】會議編輯的場次版面統一：有加開場次時，原本直接攤在編輯頁上的「會議時間＋議程項目」收進場次清單，變成第一個子項目「主場次」（teal 徽章），與加開場次並列、同樣點開子頁編輯——不再一半攤平一半子頁。沒有加開場次（也沒設週期）時維持原本的直接顯示，不多一層。週期設定在場次清單模式下移到獨立「週期」區。"
+        ]),
         ChangelogEntry(version: "25.264", build: 1017, date: "2026/08/19", notes: [
             "【修正】25.262 引入的編譯錯誤（LifeStore.swift:1215 main actor 隔離呼叫）：警報自動掛任務的函式補上 @MainActor 標註，與其尾端呼叫的提醒事項同步函式一致。功能行為不變。"
         ]),
