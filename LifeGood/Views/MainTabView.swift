@@ -1436,8 +1436,15 @@ struct MainTabView: View {
 
     // MARK: - 浮動新增按鈕
 
+    /// 進階設定可整顆隱藏（部分使用者反映不需要；預設顯示）。
+    /// key 與 SettingsView 進階設定的開關共用。
+    @AppStorage("show_floating_add_button") private var showFloatingAddButton = true
+
+    @ViewBuilder
     private var floatingActionButton: some View {
-        FloatingActionButtonView(showAddIncome: $showAddIncome, showAddExpense: $showAddExpense)
+        if showFloatingAddButton {
+            FloatingActionButtonView(showAddIncome: $showAddIncome, showAddExpense: $showAddExpense)
+        }
     }
 
     // MARK: - 內容區

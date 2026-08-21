@@ -2353,8 +2353,22 @@ struct CloudSharingSheet: UIViewControllerRepresentable {
 /// 之後其他模板要開放的參數，依同樣的樹狀分類往下掛新頁。
 /// （注意：依 FamilySharingRow 教訓，子頁抽成獨立 struct，避免型別深度爆棧。）
 struct AdvancedSettingsView: View {
+    /// 首頁浮動「新增收支」按鈕顯示開關（與 MainTabView 共用同一 key；預設顯示）
+    @AppStorage("show_floating_add_button") private var showFloatingAddButton = true
+
     var body: some View {
         Form {
+            Section {
+                Toggle(isOn: $showFloatingAddButton) {
+                    advancedRow(icon: "plus.circle.fill", color: .green,
+                                title: "浮動新增收支按鈕",
+                                note: "首頁右下角的「＋ 新增收支」")
+                }
+            } header: {
+                Text("介面")
+            } footer: {
+                Text("關閉後不再顯示浮動按鈕；仍可從收入頁與各總覽頁的 ＋ 新增收支。")
+            }
             Section {
                 NavigationLink {
                     TrendCurveSettingsView()
