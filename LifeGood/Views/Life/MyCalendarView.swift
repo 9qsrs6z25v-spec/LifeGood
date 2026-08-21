@@ -1077,8 +1077,10 @@ struct MyCalendarView: View {
                     let detail = [meta.label.map { "\($0) · \(dateStr)" } ?? dateStr,
                                   it.report.note.isEmpty ? nil : it.report.note]
                         .compactMap { $0 }.joined(separator: " · ")
+                    // 分類放在標題前面（【周報】xxx）——放後面不醒目（使用者回饋）
                     subAgendaCheckRow(name: it.sub.name,
-                                      text: it.report.topic.isEmpty ? "未命名報告" : it.report.topic,
+                                      text: (it.report.reportType.isEmpty ? "" : "【\(it.report.reportType)】")
+                                          + (it.report.topic.isEmpty ? "未命名報告" : it.report.topic),
                                       detail: detail,
                                       done: it.report.isCompleted, accent: meta.color,
                                       completedAt: it.report.completedAt, due: it.report.date,

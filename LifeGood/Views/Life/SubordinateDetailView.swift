@@ -707,11 +707,7 @@ struct SubordinateDetailView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack(spacing: 6) {
-                                    Text(r.topic.isEmpty ? "未命名報告" : r.topic)
-                                        .font(.subheadline.weight(.medium))
-                                        .strikethrough(r.isCompleted, color: .secondary)
-                                        .foregroundStyle(r.isCompleted ? .secondary : .primary)
-                                        .lineLimit(1)
+                                    // 分類膠囊放在標題前面——放後面不醒目（使用者回饋）
                                     if !r.reportType.isEmpty {
                                         Text(r.reportType)
                                             .font(.caption2.weight(.bold))
@@ -720,6 +716,11 @@ struct SubordinateDetailView: View {
                                             .foregroundStyle(.purple)
                                             .clipShape(Capsule())
                                     }
+                                    Text(r.topic.isEmpty ? "未命名報告" : r.topic)
+                                        .font(.subheadline.weight(.medium))
+                                        .strikethrough(r.isCompleted, color: .secondary)
+                                        .foregroundStyle(r.isCompleted ? .secondary : .primary)
+                                        .lineLimit(1)
                                 }
                                 HStack(spacing: 3) {
                                     Image(systemName: "calendar").font(.system(size: 8))
@@ -1761,9 +1762,9 @@ struct SubordinateDetailView: View {
                 let done = reports.filter(\.isCompleted).count
                 lines.append(""); lines.append("📄 報告（\(done)/\(reports.count) 完成）")
                 for r in reports.sorted(by: { $0.date > $1.date }) {
-                    var row = "\(r.isCompleted ? "✅" : "⬜️") \(r.topic.isEmpty ? "未命名報告" : r.topic)"
-                    if !r.reportType.isEmpty { row += "［\(r.reportType)］" }
-                    row += "｜\(formatDate(r.date))"
+                    var row = "\(r.isCompleted ? "✅" : "⬜️") "
+                    if !r.reportType.isEmpty { row += "【\(r.reportType)】" }
+                    row += "\(r.topic.isEmpty ? "未命名報告" : r.topic)｜\(formatDate(r.date))"
                     if r.isCompleted, let at = r.completedAt { row += "｜🏁 \(formatDate(at))" }
                     lines.append(row)
                 }

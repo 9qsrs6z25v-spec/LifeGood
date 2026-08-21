@@ -484,9 +484,9 @@ struct SubordinateOverviewView: View {
             lines.append("📄 報告（\(done)/\(reports.count) 完成）")
             for it in reports {
                 let who = it.sub.name.isEmpty ? "未命名" : it.sub.name
-                var row = "\(it.report.isCompleted ? "✅" : "⬜️") \(it.report.topic.isEmpty ? "未命名報告" : it.report.topic)"
-                if !it.report.reportType.isEmpty { row += "［\(it.report.reportType)］" }
-                row += "｜\(who)"
+                var row = "\(it.report.isCompleted ? "✅" : "⬜️") "
+                if !it.report.reportType.isEmpty { row += "【\(it.report.reportType)】" }
+                row += "\(it.report.topic.isEmpty ? "未命名報告" : it.report.topic)｜\(who)"
                 switch it.status {
                 case .overdue: row += "｜⚠️ 逾期 \(Self.shareShortFmt.string(from: it.report.date))"
                 case .thisWeek, .pending: row += "｜\(Self.shareShortFmt.string(from: it.report.date))"
@@ -661,11 +661,7 @@ struct SubordinateOverviewView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(report.topic.isEmpty ? "未命名報告" : report.topic)
-                        .font(.subheadline.weight(.semibold))
-                        .strikethrough(report.isCompleted, color: .secondary)
-                        .foregroundStyle(report.isCompleted ? .secondary : .primary)
-                        .lineLimit(1)
+                    // 分類膠囊放在標題前面——放後面不醒目（使用者回饋）
                     if !report.reportType.isEmpty {
                         Text(report.reportType)
                             .font(.caption2.weight(.bold))
@@ -674,6 +670,11 @@ struct SubordinateOverviewView: View {
                             .foregroundStyle(.purple)
                             .clipShape(Capsule())
                     }
+                    Text(report.topic.isEmpty ? "未命名報告" : report.topic)
+                        .font(.subheadline.weight(.semibold))
+                        .strikethrough(report.isCompleted, color: .secondary)
+                        .foregroundStyle(report.isCompleted ? .secondary : .primary)
+                        .lineLimit(1)
                     if let badge {
                         Text(badge.text)
                             .font(.caption2.weight(.bold))

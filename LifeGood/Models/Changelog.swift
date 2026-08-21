@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.269", build: 1022, date: "2026/08/19", notes: [
+            "【調整】報告分類改顯示在標題前面（原本在後面不醒目）：我的行事曆「部屬報告」列改為【周報】標題格式；部屬總覽與同仁明細的報告列，紫色分類膠囊移到標題前；文字匯出同步改為分類在前。"
+        ]),
         ChangelogEntry(version: "25.268", build: 1021, date: "2026/08/19", notes: [
             "【調整】部屬請假的主動性評分：病假不再扣分——生病不是個人意願，與喪假、公假同列免扣假別。請假編輯頁選病假時會顯示「不列入主動性扣分」提示；已存在的病假紀錄立即適用（評分即時重算），人才九宮格與評分明細同步。"
         ]),
