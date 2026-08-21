@@ -3659,11 +3659,16 @@ struct TaskEditorSheet: View {
 struct BirthdayReminderSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var appleCal = AppleCalendarBridge.shared
 
     let subordinateId: UUID
 
     @State private var daysBeforeText = "1"
     @State private var yearsText = "5"
+    /// 寫入哪個行事曆（比照新增會議的可寫入行事曆 Picker）
+    @State private var selectedCalendarId: String?
+    /// 上次選過的行事曆：下次開設定頁直接預填
+    @AppStorage("birthday_reminder_last_calendar_id") private var lastCalendarIdRaw = ""
     @State private var resultMessage: String?
     @State private var isWorking = false
 
@@ -3703,6 +3708,21 @@ struct BirthdayReminderSheet: View {
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 60)
                             Text("年").foregroundStyle(.secondary)
+                        }
+                        // 寫入哪個行事曆（比照新增會議：色點＋名稱，可寫入的才列出）
+                        if appleCal.hasAccess, !appleCal.writableCalendars.isEmpty {
+                            Picker("寫入行事曆", selection: $selectedCalendarId) {
+                                ForEach(appleCal.writableCalendars, id: \.calendarIdentifier) { c in
+                                    HStack {
+                                        Circle().fill(Color(cgColor: c.cgColor)).frame(width: 10, height: 10)
+                                        Text(c.title)
+                                    }
+                                    .tag(c.calendarIdentifier as String?)
+                                }
+                            }
+                        } else if appleCal.authorizationStatus == .notDetermined {
+                            Text("建立時將跳出 Apple 行事曆授權，授權後可選擇寫入的行事曆。")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
                     } header: {
                         Text("生日提醒")
@@ -3751,9 +3771,34 @@ struct BirthdayReminderSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
             }
+            .task {
+                // 開頁即請求授權（notDetermined 才會跳系統框），拿到後才有行事曆可選
+                if appleCal.authorizationStatus == .notDetermined {
+                    await appleCal.requestAccess()
+                }
+                prefillCalendarSelection()
+            }
+            .onChange(of: selectedCalendarId) { _, newValue in
+                if let id = newValue { lastCalendarIdRaw = id }
+            }
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+    }
+
+    /// 預填行事曆選擇：既有提醒所在的行事曆 → 上次選過的 → 系統預設
+    private func prefillCalendarSelection() {
+        guard appleCal.hasAccess, selectedCalendarId == nil else { return }
+        let writableIds = appleCal.writableCalendars.map { $0.calendarIdentifier }
+        if let eid = subordinate?.birthdayEventId,
+           let current = appleCal.calendarId(ofEvent: eid),
+           writableIds.contains(current) {
+            selectedCalendarId = current
+        } else if !lastCalendarIdRaw.isEmpty, writableIds.contains(lastCalendarIdRaw) {
+            selectedCalendarId = lastCalendarIdRaw
+        } else {
+            selectedCalendarId = appleCal.defaultCalendarId
+        }
     }
 
     private func createReminder(sub: Subordinate, birthday: Date) {
@@ -3769,10 +3814,13 @@ struct BirthdayReminderSheet: View {
                 isWorking = false
                 return
             }
+            // 剛拿到授權的情況：Picker 還沒預填過，這裡補一次（用預設/上次選的行事曆）
+            if selectedCalendarId == nil { prefillCalendarSelection() }
             let id = bridge.writeBirthdayReminder(existingId: sub.birthdayEventId,
                                                   name: sub.name.isEmpty ? "部屬" : sub.name,
                                                   birthday: birthday,
-                                                  daysBefore: days, years: years)
+                                                  daysBefore: days, years: years,
+                                                  calendarId: selectedCalendarId)
             if let id {
                 var updated = sub
                 updated.birthdayEventId = id

@@ -185,13 +185,20 @@ final class AppleCalendarBridge: ObservableObject {
     /// 提前 daysBefore 天的上午 9:00 跳提醒。回傳 eventIdentifier（失敗 nil）。
     /// 首次發生日取「下一次生日」（今年生日已過則從明年起算）。
     func writeBirthdayReminder(existingId: String?, name: String, birthday: Date,
-                               daysBefore: Int, years: Int) -> String? {
+                               daysBefore: Int, years: Int, calendarId: String? = nil) -> String? {
         guard hasAccess else { return nil }
         let event: EKEvent = {
             if let existingId, let found = eventStore.event(withIdentifier: existingId) { return found }
             return EKEvent(eventStore: eventStore)
         }()
-        if event.calendar == nil { event.calendar = eventStore.defaultCalendarForNewEvents }
+        // 指定行事曆（設定頁 Picker 選的）優先；沒選或已失效才 fallback 既有／預設
+        if let id = calendarId,
+           let target = eventStore.calendar(withIdentifier: id),
+           target.allowsContentModifications {
+            event.calendar = target
+        } else if event.calendar == nil {
+            event.calendar = eventStore.defaultCalendarForNewEvents
+        }
         guard event.calendar != nil else { return nil }
 
         let cal = Calendar.current
@@ -219,6 +226,12 @@ final class AppleCalendarBridge: ObservableObject {
         } catch {
             return nil
         }
+    }
+
+    /// 既有事件目前所屬的行事曆 id（生日提醒設定頁預填用）
+    func calendarId(ofEvent id: String) -> String? {
+        guard hasAccess, let e = eventStore.event(withIdentifier: id) else { return nil }
+        return e.calendar?.calendarIdentifier
     }
 
     /// 刪除指定 EKEvent
