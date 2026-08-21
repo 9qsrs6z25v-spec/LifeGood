@@ -2371,6 +2371,17 @@ struct AdvancedSettingsView: View {
             }
             Section {
                 NavigationLink {
+                    ScoreWeightSettingsView()
+                } label: {
+                    advancedRow(icon: "star.leadinghalf.filled", color: .indigo,
+                                title: "評分權重",
+                                note: "部屬主動性／潛力的加減分與逾期扣分")
+                }
+            } header: {
+                Text("部屬評分")
+            }
+            Section {
+                NavigationLink {
                     TrendCurveSettingsView()
                 } label: {
                     advancedRow(icon: "waveform.path", color: .blue,
@@ -2429,6 +2440,113 @@ struct AdvancedSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+// MARK: - 評分權重設定
+
+/// 進階設定 → 評分權重：部屬主動性／潛力的加減分開放調整。
+/// key 與 TalentMatrixView 的 ScoreWeights 一一對應（評分函式直接讀 UserDefaults，
+/// 這裡改完所有畫面下次重繪即套用新權重）；「恢復預設值」清掉全部 key 回到出廠值。
+struct ScoreWeightSettingsView: View {
+    // 主動性
+    @AppStorage("score_act_base") private var actBase = 60
+    @AppStorage("score_act_task") private var actTask = 3
+    @AppStorage("score_act_item") private var actItem = 1
+    @AppStorage("score_act_report") private var actReport = 3
+    @AppStorage("score_act_mention") private var actMention = 2
+    @AppStorage("score_act_side_role") private var actSideRole = 3
+    @AppStorage("score_act_leave_per8h") private var actLeavePer8h = 2
+    @AppStorage("score_act_overdue") private var actOverdue = 0
+    // 潛力
+    @AppStorage("score_pot_base") private var potBase = 80
+    @AppStorage("score_pot_ach") private var potAch = 3
+    @AppStorage("score_pot_pro") private var potPro = 2
+    @AppStorage("score_pot_imp") private var potImp = 1
+    @AppStorage("score_pot_con") private var potCon = 2
+    @AppStorage("score_pot_fault") private var potFault = 3
+    @AppStorage("score_pot_miss_minor") private var potMissMinor = 1
+    @AppStorage("score_pot_miss_normal") private var potMissNormal = 2
+    @AppStorage("score_pot_miss_severe") private var potMissSevere = 4
+
+    var body: some View {
+        Form {
+            Section {
+                weightRow("基礎分", value: $actBase, range: 0...200, sign: "")
+                weightRow("完成任務", value: $actTask, range: 0...20, sign: "+")
+                weightRow("完成議程項目", value: $actItem, range: 0...20, sign: "+")
+                weightRow("完成報告", value: $actReport, range: 0...20, sign: "+")
+                weightRow("被 @ 標註", value: $actMention, range: 0...20, sign: "+")
+                weightRow("完成兼任待辦", value: $actSideRole, range: 0...20, sign: "+")
+                weightRow("請假每 8 小時", value: $actLeavePer8h, range: 0...20, sign: "−")
+            } header: {
+                Text("主動性")
+            } footer: {
+                Text("喪假／公假／病假不列入請假扣分。")
+            }
+            Section {
+                weightRow("每項逾期未完成", value: $actOverdue, range: 0...20, sign: "−")
+            } header: {
+                Text("逾期 Offset")
+            } footer: {
+                Text("每一項逾期未完成（過截止日的任務＋過報告日的報告）固定扣這個分數，逾期影響一目了然。0＝不扣（預設）。")
+            }
+            Section {
+                weightRow("基礎分", value: $potBase, range: 0...200, sign: "")
+                weightRow("成就", value: $potAch, range: 0...20, sign: "+")
+                weightRow("優點", value: $potPro, range: 0...20, sign: "+")
+                weightRow("進步", value: $potImp, range: 0...20, sign: "+")
+                weightRow("缺點", value: $potCon, range: 0...20, sign: "−")
+                weightRow("缺失", value: $potFault, range: 0...20, sign: "−")
+                weightRow("疏失（輕微）", value: $potMissMinor, range: 0...20, sign: "−")
+                weightRow("疏失（一般）", value: $potMissNormal, range: 0...20, sign: "−")
+                weightRow("疏失（嚴重）", value: $potMissSevere, range: 0...20, sign: "−")
+            } header: {
+                Text("潛力")
+            }
+            Section {
+                Button(role: .destructive) {
+                    resetAll()
+                } label: {
+                    Label("恢復預設值", systemImage: "arrow.counterclockwise")
+                        .frame(maxWidth: .infinity)
+                }
+            } footer: {
+                Text("調整後所有畫面（部屬列表、人才九宮格、評分明細）立即以新權重重算，既有紀錄不需重新輸入。")
+            }
+        }
+        .navigationTitle("評分權重")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func weightRow(_ title: String, value: Binding<Int>,
+                           range: ClosedRange<Int>, sign: String) -> some View {
+        Stepper(value: value, in: range) {
+            HStack {
+                Text(title).font(.subheadline)
+                Spacer()
+                Text(sign.isEmpty ? "\(value.wrappedValue)" : "\(sign)\(value.wrappedValue)")
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundStyle(sign == "−" ? (value.wrappedValue > 0 ? .red : .secondary)
+                                     : (sign == "+" ? .green : .indigo))
+                    .frame(minWidth: 36, alignment: .trailing)
+            }
+        }
+    }
+
+    private func resetAll() {
+        let keys = ["score_act_base", "score_act_task", "score_act_item", "score_act_report",
+                    "score_act_mention", "score_act_side_role", "score_act_leave_per8h",
+                    "score_act_overdue",
+                    "score_pot_base", "score_pot_ach", "score_pot_pro", "score_pot_imp",
+                    "score_pot_con", "score_pot_fault", "score_pot_miss_minor",
+                    "score_pot_miss_normal", "score_pot_miss_severe"]
+        for k in keys { UserDefaults.standard.removeObject(forKey: k) }
+        // @AppStorage 已快取的值也要拉回出廠值，畫面才會即時跳回
+        actBase = 60; actTask = 3; actItem = 1; actReport = 3
+        actMention = 2; actSideRole = 3; actLeavePer8h = 2; actOverdue = 0
+        potBase = 80; potAch = 3; potPro = 2; potImp = 1
+        potCon = 2; potFault = 3; potMissMinor = 1; potMissNormal = 2; potMissSevere = 4
     }
 }
 

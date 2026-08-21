@@ -2,6 +2,40 @@ import SwiftUI
 import Charts
 import UIKit
 
+// MARK: - 評分權重（進階設定可調）
+
+/// 部屬評分的加減分權重：進階設定 → 評分權重 可調整，未調整時用出廠值。
+/// 存 UserDefaults（key 與 ScoreWeightSettingsView 的 @AppStorage 共用）——
+/// Subordinate 的評分函式在模型層拿不到 store／environment，直接讀 UserDefaults。
+/// 全部存「幅度」（正整數），扣分項套用時取負。
+enum ScoreWeights {
+    static func intValue(_ key: String, _ def: Int) -> Int {
+        UserDefaults.standard.object(forKey: key) == nil
+            ? def : UserDefaults.standard.integer(forKey: key)
+    }
+    // 潛力（記錄式）
+    static var potBase: Int       { intValue("score_pot_base", 80) }
+    static var potPro: Int        { intValue("score_pot_pro", 2) }
+    static var potCon: Int        { intValue("score_pot_con", 2) }
+    static var potAch: Int        { intValue("score_pot_ach", 3) }
+    static var potImp: Int        { intValue("score_pot_imp", 1) }
+    static var potFault: Int      { intValue("score_pot_fault", 3) }
+    static var potMissMinor: Int  { intValue("score_pot_miss_minor", 1) }
+    static var potMissNormal: Int { intValue("score_pot_miss_normal", 2) }
+    static var potMissSevere: Int { intValue("score_pot_miss_severe", 4) }
+    // 主動性（日常）
+    static var actBase: Int       { intValue("score_act_base", 60) }
+    static var actTask: Int       { intValue("score_act_task", 3) }
+    static var actItem: Int       { intValue("score_act_item", 1) }
+    static var actReport: Int     { intValue("score_act_report", 3) }
+    static var actMention: Int    { intValue("score_act_mention", 2) }
+    static var actSideRole: Int   { intValue("score_act_side_role", 3) }
+    static var actLeavePer8h: Int { intValue("score_act_leave_per8h", 2) }
+    /// 逾期 Offset：每一項逾期未完成（任務＋報告）固定扣 X 分。
+    /// 預設 0＝不扣（維持既有行為）；設了之後逾期的影響一目了然，不用另外算。
+    static var actOverdue: Int    { intValue("score_act_overdue", 0) }
+}
+
 // MARK: - 部屬評分（潛力 / 主動性）
 
 extension Subordinate {
@@ -14,26 +48,39 @@ extension Subordinate {
     ///    依實際最大最小值自動縮放，scoreColor 的 `case 90...` 也是開放區間，
     ///    所以破百不會撐破任何畫面。下限仍保留 0。
     var potentialScore: Int {
-        var score: Double = 80
+        // 權重走 ScoreWeights（進階設定可調；未調整＝出廠值 80／+2／-2／+3／+1／-3／-1/-2/-4）
+        var score = Double(ScoreWeights.potBase)
         for rec in records {
             switch rec.type {
-            case .pro:         score += 2
-            case .con:         score -= 2
-            case .achievement: score += 3
-            case .improvement: score += 1
-            case .fault:       score -= 3
+            case .pro:         score += Double(ScoreWeights.potPro)
+            case .con:         score -= Double(ScoreWeights.potCon)
+            case .achievement: score += Double(ScoreWeights.potAch)
+            case .improvement: score += Double(ScoreWeights.potImp)
+            case .fault:       score -= Double(ScoreWeights.potFault)
             case .missOperation:
                 switch rec.severity {
-                case .minor:  score -= 1
-                case .normal: score -= 2
-                case .severe: score -= 4
-                case .none:   score -= 2
+                case .minor:  score -= Double(ScoreWeights.potMissMinor)
+                case .normal: score -= Double(ScoreWeights.potMissNormal)
+                case .severe: score -= Double(ScoreWeights.potMissSevere)
+                case .none:   score -= Double(ScoreWeights.potMissNormal)
                 }
             case .leave:
                 break   // 請假不計入潛力（已反映在主動性）
             }
         }
         return max(0, Int(score.rounded()))
+    }
+
+    /// 逾期未完成數（逾期 Offset 用）：
+    /// 任務——有截止日且已過、未完成、未連兼任（連結的那份由兼任側計）；
+    /// 報告——報告日已過、未完成。
+    var overdueOpenCount: Int {
+        let now = Date()
+        let t = tasks.filter {
+            !$0.isCompleted && $0.sideRoleLink == nil && ($0.dueDate.map { $0 < now } ?? false)
+        }.count
+        let r = weeklyReports.filter { !$0.isCompleted && $0.date < now }.count
+        return t + r
     }
 
     /// 主動性分數（日常）：完成任務 / 完成會議議程項目 / 報告加分、被標註加分，請假時數扣分。
@@ -54,13 +101,16 @@ extension Subordinate {
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假／病假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
-        var score = 60.0
-        score += Double(completedTasks) * 3      // 每完成一項任務 +3
-        score += Double(completedItems)          // 每完成一個議程項目 +1（顆粒最小，且週期會議每場各有一份，權重刻意壓低）
-        score += Double(completedReports) * 3    // 每完成一份報告 +3
-        score += Double(mentionedCount) * 2      // 每被標註一項 +2
-        score += Double(sideRoleDone) * 3        // 每完成一項兼任待辦 +3（與本職任務同權重）
-        score -= leaveHours / 8 * 2              // 每請假 8 小時 -2
+        // 權重走 ScoreWeights（進階設定可調；出廠值同原本：60／+3／+1／+3／+2／+3／每 8h -2）
+        var score = Double(ScoreWeights.actBase)
+        score += Double(completedTasks * ScoreWeights.actTask)       // 每完成一項任務
+        score += Double(completedItems * ScoreWeights.actItem)       // 每完成一個議程項目（顆粒最小，權重刻意壓低）
+        score += Double(completedReports * ScoreWeights.actReport)   // 每完成一份報告
+        score += Double(mentionedCount * ScoreWeights.actMention)    // 每被標註一項
+        score += Double(sideRoleDone * ScoreWeights.actSideRole)     // 每完成一項兼任待辦（與本職任務同權重）
+        score -= leaveHours / 8 * Double(ScoreWeights.actLeavePer8h) // 每請假 8 小時
+        // 逾期 Offset：每項逾期未完成固定扣 X 分（預設 0＝不扣）
+        score -= Double(overdueOpenCount * ScoreWeights.actOverdue)
         return max(0, Int(score.rounded()))
     }
 
@@ -73,7 +123,7 @@ extension Subordinate {
 
     /// 潛力評分的計算明細（分組條目 + 加減分）
     var potentialBreakdown: [(label: String, points: Int)] {
-        var items: [(String, Int)] = [("基礎分", 80)]
+        var items: [(String, Int)] = [("基礎分", ScoreWeights.potBase)]
         var pro = 0, con = 0, ach = 0, imp = 0, fault = 0
         var mMinor = 0, mNormal = 0, mSevere = 0
         for r in records {
@@ -92,20 +142,20 @@ extension Subordinate {
             case .leave:       break   // 不計入潛力
             }
         }
-        if ach > 0   { items.append(("成就 ×\(ach)", ach * 3)) }
-        if pro > 0   { items.append(("優點 ×\(pro)", pro * 2)) }
-        if imp > 0   { items.append(("進步 ×\(imp)", imp)) }
-        if con > 0   { items.append(("缺點 ×\(con)", -con * 2)) }
-        if fault > 0 { items.append(("缺失 ×\(fault)", -fault * 3)) }
-        if mMinor > 0  { items.append(("疏失·輕微 ×\(mMinor)", -mMinor)) }
-        if mNormal > 0 { items.append(("疏失·一般 ×\(mNormal)", -mNormal * 2)) }
-        if mSevere > 0 { items.append(("疏失·嚴重 ×\(mSevere)", -mSevere * 4)) }
+        if ach > 0   { items.append(("成就 ×\(ach)", ach * ScoreWeights.potAch)) }
+        if pro > 0   { items.append(("優點 ×\(pro)", pro * ScoreWeights.potPro)) }
+        if imp > 0   { items.append(("進步 ×\(imp)", imp * ScoreWeights.potImp)) }
+        if con > 0   { items.append(("缺點 ×\(con)", -con * ScoreWeights.potCon)) }
+        if fault > 0 { items.append(("缺失 ×\(fault)", -fault * ScoreWeights.potFault)) }
+        if mMinor > 0  { items.append(("疏失·輕微 ×\(mMinor)", -mMinor * ScoreWeights.potMissMinor)) }
+        if mNormal > 0 { items.append(("疏失·一般 ×\(mNormal)", -mNormal * ScoreWeights.potMissNormal)) }
+        if mSevere > 0 { items.append(("疏失·嚴重 ×\(mSevere)", -mSevere * ScoreWeights.potMissSevere)) }
         return items
     }
 
     /// 主動性評分的計算明細（分組條目 + 加減分）
     func proactivityBreakdown(mentionedCount: Int = 0, sideRoleDone: Int) -> [(label: String, points: Int)] {
-        var items: [(String, Int)] = [("基礎分", 60)]
+        var items: [(String, Int)] = [("基礎分", ScoreWeights.actBase)]
         // 連到兼任待辦的紀錄跳過：那是「同一件事的另一面」，已由 sideRoleDone
         // 以 +3 計過一次。不跳的話同一件事會被計兩次分（本職 +3／+1 再加兼任 +3）。
         let completedTasks = tasks.filter { $0.isCompleted && $0.sideRoleLink == nil }.count
@@ -114,14 +164,19 @@ extension Subordinate {
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假／病假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
-        if completedTasks > 0 { items.append(("完成任務 ×\(completedTasks)", completedTasks * 3)) }
-        if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems)) }
-        if completedReports > 0 { items.append(("完成報告 ×\(completedReports)", completedReports * 3)) }
-        if mentionedCount > 0 { items.append(("被標註 ×\(mentionedCount)", mentionedCount * 2)) }
-        if sideRoleDone > 0 { items.append(("完成兼任待辦 ×\(sideRoleDone)", sideRoleDone * 3)) }
+        if completedTasks > 0 { items.append(("完成任務 ×\(completedTasks)", completedTasks * ScoreWeights.actTask)) }
+        if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems * ScoreWeights.actItem)) }
+        if completedReports > 0 { items.append(("完成報告 ×\(completedReports)", completedReports * ScoreWeights.actReport)) }
+        if mentionedCount > 0 { items.append(("被標註 ×\(mentionedCount)", mentionedCount * ScoreWeights.actMention)) }
+        if sideRoleDone > 0 { items.append(("完成兼任待辦 ×\(sideRoleDone)", sideRoleDone * ScoreWeights.actSideRole)) }
         if leaveHours > 0 {
             let h = leaveHours.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(leaveHours))" : String(format: "%.1f", leaveHours)
-            items.append(("請假 \(h) 小時", -Int((leaveHours / 8 * 2).rounded())))
+            items.append(("請假 \(h) 小時", -Int((leaveHours / 8 * Double(ScoreWeights.actLeavePer8h)).rounded())))
+        }
+        // 逾期 Offset（設定 > 0 時才顯示這一列）
+        let overdue = overdueOpenCount
+        if ScoreWeights.actOverdue > 0 && overdue > 0 {
+            items.append(("逾期未完成 ×\(overdue)", -overdue * ScoreWeights.actOverdue))
         }
         return items
     }
