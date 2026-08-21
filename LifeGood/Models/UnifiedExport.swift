@@ -476,7 +476,7 @@ enum UnifiedExporter {
                         r.id.uuidString, esc(r.sideRoleName ?? ""),
                         iso.string(from: res.date),
                         esc(res.site),
-                        res.categories.map(\.rawValue).joined(separator: "/"),
+                        res.categories.joined(separator: "/"),
                         esc(res.initiator),
                         esc(res.title), esc(res.content)
                     ]

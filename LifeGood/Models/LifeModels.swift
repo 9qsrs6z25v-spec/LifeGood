@@ -837,13 +837,15 @@ struct SideRoleTask: Identifiable, Codable {
     /// 人員清單挑進來的人。**不參與**部屬任務自動建立與評分——那條管線
     /// 靠成員的 linkedPersonId，文字快照連不回本人。
     var extraAssignees: [String]?
-    /// 系統分類（與重大決議共用同一組代碼；空＝未分類）
-    var categories: [SideRoleResolutionCategory]
+    /// 系統分類（與重大決議共用；自由文字、可多選，空＝未分類）。
+    /// v25.267 起改為開放式字串：使用者不一定是氣化專業，固定代碼列舉表達不了；
+    /// key 過的分類會變成膠囊記憶。舊版列舉存檔編碼即 rawValue 字串，直接相容。
+    var categories: [String]
 
     init(id: UUID = UUID(), content: String = "", dueDate: Date? = nil,
          isCompleted: Bool = false, completedAt: Date? = nil, note: String = "",
          assigneeIds: [UUID]? = nil, links: [SideRoleTaskLink]? = nil,
-         extraAssignees: [String]? = nil, categories: [SideRoleResolutionCategory] = []) {
+         extraAssignees: [String]? = nil, categories: [String] = []) {
         self.id = id; self.content = content; self.dueDate = dueDate
         self.isCompleted = isCompleted; self.completedAt = completedAt; self.note = note
         self.assigneeIds = assigneeIds; self.links = links
@@ -864,7 +866,7 @@ struct SideRoleTask: Identifiable, Codable {
         assigneeIds = try? c.decodeIfPresent([UUID].self, forKey: .assigneeIds)
         links = try? c.decodeIfPresent([SideRoleTaskLink].self, forKey: .links)
         extraAssignees = try? c.decodeIfPresent([String].self, forKey: .extraAssignees)
-        categories = (try? c.decodeIfPresent([SideRoleResolutionCategory].self, forKey: .categories)) ?? []
+        categories = (try? c.decodeIfPresent([String].self, forKey: .categories)) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -940,23 +942,6 @@ struct SideRoleMeeting: Identifiable, Codable {
     }
 }
 
-/// 重大決議的系統分類（使用者指定的廠務系統代碼）。
-/// rawValue 即代碼本身（英文、穩定），顯示直接用代碼——這批本來就是縮寫術語。
-enum SideRoleResolutionCategory: String, Codable, CaseIterable, Identifiable {
-    case cda = "CDA"
-    case bgs = "BGS"
-    case sgs = "SGS"
-    case chm = "CHM"
-    case mix = "MIX"
-    case waste = "Waste"
-    case slurry = "Slurry"
-    case gis = "GIS"
-    case cis = "CIS"
-    case esh = "ESH"
-    case other = "Other"
-    var id: String { rawValue }
-}
-
 /// 兼任職務的重大決議（例：預算核定、場地定案）。
 /// 與會議紀錄裡的「決議事項」不同：這是跨會議、值得單獨列出來查的定案，
 /// 有自己的標題、內容與系統分類，會被「我的行事曆」搜尋索引到（含分類代碼）。
@@ -970,13 +955,15 @@ struct SideRoleResolution: Identifiable, Codable {
     var site: String
     /// 系統分類（可多選；空陣列＝未分類）。一則決議常橫跨多個系統
     ///（例：廢水處理動到 Waste + CHM），單選表達不了。
-    var categories: [SideRoleResolutionCategory]
+    /// v25.267 起為開放式字串（比照廠區/發起人：自由輸入＋歷史膠囊）；
+    /// 舊版列舉存檔編碼即 rawValue 字串，直接相容。
+    var categories: [String]
     /// 決議發起人。文字快照（比照出席者）：發起人常是跨部門或外部的人，
     /// 存 id 的話對方被刪除就變空白；可手動輸入、也可從人員清單挑
     var initiator: String
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "", content: String = "",
-         site: String = "", categories: [SideRoleResolutionCategory] = [], initiator: String = "") {
+         site: String = "", categories: [String] = [], initiator: String = "") {
         self.id = id; self.date = date; self.title = title; self.content = content
         self.site = site; self.categories = categories; self.initiator = initiator
     }
@@ -987,11 +974,11 @@ struct SideRoleResolution: Identifiable, Codable {
         date = (try? c.decodeIfPresent(Date.self, forKey: .date)) ?? Date()
         title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         content = (try? c.decodeIfPresent(String.self, forKey: .content)) ?? ""
-        if let list = try? c.decodeIfPresent([SideRoleResolutionCategory].self, forKey: .categories) {
+        if let list = try? c.decodeIfPresent([String].self, forKey: .categories) {
             categories = list
         } else if let legacy = try? decoder.container(keyedBy: LegacyKeys.self),
-                  let single = try? legacy.decodeIfPresent(SideRoleResolutionCategory.self, forKey: .category) {
-            // 升級遷移：v25.249~251 的單選分類收進多選陣列
+                  let single = try? legacy.decodeIfPresent(String.self, forKey: .category) {
+            // 升級遷移：v25.249~251 的單選分類（列舉 rawValue 字串）收進多選陣列
             categories = [single]
         } else {
             categories = []

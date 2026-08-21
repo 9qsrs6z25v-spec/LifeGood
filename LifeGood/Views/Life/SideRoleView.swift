@@ -554,7 +554,7 @@ struct SideRoleWorkspaceView: View {
     @State private var query = ""
     /// 點分類膠囊設定的篩選（nil＝不過濾）。作用於待辦與重大決議；
     /// 沒有分類概念的區塊（日期/成員/會議）在分類篩選中整區暫時收起。
-    @State private var filterCategory: SideRoleResolutionCategory?
+    @State private var filterCategory: String?
     /// 點人名設定的篩選（nil＝不過濾）。作用於待辦負責人、會議出席者、
     /// 成員名單、決議發起人；重要日期沒有人的概念，人名篩選中整區收起。
     @State private var filterPerson: String?
@@ -871,7 +871,7 @@ struct SideRoleWorkspaceView: View {
                     ForEach(resolutions) { r in
                         exportRow(head: "🏷 \(SideRoleFormat.date(r.date))　"
                                     + (r.categories.isEmpty ? ""
-                                       : "[\(r.categories.map(\.rawValue).joined(separator: "/"))] ")
+                                       : "[\(r.categories.joined(separator: "/"))] ")
                                     + (r.title.isEmpty ? "（未填標題）" : r.title),
                                   lines: [
                                     r.site.isEmpty ? nil : "廠區：\(r.site)",
@@ -925,21 +925,22 @@ struct SideRoleWorkspaceView: View {
 
     // MARK: 可點選的篩選膠囊（分類／人名；比照部屬總覽的人名篩選）
 
-    private func categoryFilterChip(_ c: SideRoleResolutionCategory) -> some View {
+    private func categoryFilterChip(_ c: String) -> some View {
         let active = filterCategory == c
+        let color = sideRoleCategoryColor(c)
         return Button { toggleCategoryFilter(c) } label: {
             HStack(spacing: 3) {
-                Text(c.rawValue)
+                Text(c)
                 if active {
                     Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
                 }
             }
             .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(c.color)
+            .foregroundStyle(color)
             .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(c.color.opacity(active ? 0.25 : 0.14))
+            .background(color.opacity(active ? 0.25 : 0.14))
             .clipShape(Capsule())
-            .overlay(Capsule().stroke(c.color.opacity(active ? 0.5 : 0.25), lineWidth: 0.6))
+            .overlay(Capsule().stroke(color.opacity(active ? 0.5 : 0.25), lineWidth: 0.6))
         }
         .buttonStyle(.borderless)
     }
@@ -1002,7 +1003,7 @@ struct SideRoleWorkspaceView: View {
     private func taskPasses(_ t: SideRoleTask, in role: LifeMilestone) -> Bool {
         let names = SideRoleFormat.assigneeNames(t, in: role)
         guard matches([t.content, t.note, names,
-                       t.categories.map(\.rawValue).joined(separator: " ")]) else { return false }
+                       t.categories.joined(separator: " ")]) else { return false }
         if let c = filterCategory, !t.categories.contains(c) { return false }
         if let p = filterPerson, !names.contains(p) { return false }
         return true
@@ -1010,7 +1011,7 @@ struct SideRoleWorkspaceView: View {
 
     private func resolutionPasses(_ r: SideRoleResolution) -> Bool {
         guard matches([r.title, r.content, r.site,
-                       r.categories.map(\.rawValue).joined(separator: " "), r.initiator]) else { return false }
+                       r.categories.joined(separator: " "), r.initiator]) else { return false }
         if let c = filterCategory, !r.categories.contains(c) { return false }
         if let p = filterPerson, r.initiator != p { return false }
         return true
@@ -1037,7 +1038,7 @@ struct SideRoleWorkspaceView: View {
     }
 
     /// 點分類膠囊／人名膠囊：同值再點一次＝取消
-    private func toggleCategoryFilter(_ c: SideRoleResolutionCategory) {
+    private func toggleCategoryFilter(_ c: String) {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
             filterCategory = filterCategory == c ? nil : c
         }
@@ -1109,7 +1110,7 @@ struct SideRoleWorkspaceView: View {
                             .foregroundStyle(overdue ? .red : .secondary)
                     }
                     // 分類與人名都可點：點一下暫時只看該分類/該負責人（再點取消）
-                    ForEach(task.categories) { c in
+                    ForEach(task.categories, id: \.self) { c in
                         categoryFilterChip(c)
                     }
                     ForEach(assigneeNames.split(separator: "、").map(String.init), id: \.self) { name in
@@ -1387,7 +1388,7 @@ struct SideRoleWorkspaceView: View {
                             .clipShape(Capsule())
                             .overlay(Capsule().stroke(Color.teal.opacity(0.25), lineWidth: 0.6))
                     }
-                    ForEach(r.categories) { cat in
+                    ForEach(r.categories, id: \.self) { cat in
                         categoryFilterChip(cat)
                     }
                     Text(r.title.isEmpty ? "（未填標題）" : r.title)
@@ -1483,6 +1484,8 @@ struct SideRoleTaskEditor: View {
     @State private var pendingDeleteAutoCount: Int?
     /// 手動輸入其他負責人的暫存字串
     @State private var extraAssigneeInput = ""
+    /// 自訂系統分類的輸入暫存（開放式分類）
+    @State private var categoryInput = ""
     /// 從全公司人員名單挑其他負責人
     @State private var showExtraPicker = false
     /// 其他負責人的本地草稿。挑人頁吃 @Binding [String]——用 Binding(get:set:)
@@ -1634,12 +1637,27 @@ struct SideRoleTaskEditor: View {
                 Text("成員名單以外的人：直接輸入姓名，或從全公司人員清單（部屬／名片／組織）搜尋挑選。這裡的人以文字記錄，不參與部屬任務自動建立與評分。")
             }
             Section {
-                FlexibleChipWrap(items: SideRoleResolutionCategory.allCases) { c in
-                    taskCategoryChip(c)
+                let sugg = categorySuggestions
+                if !sugg.isEmpty {
+                    FlexibleChipWrap(items: sugg) { c in
+                        taskCategoryChip(c)
+                    }
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 2)
+                HStack(spacing: 8) {
+                    TextField("自訂分類（例：CDA、冰水、消防）", text: $categoryInput)
+                        .onSubmit { addCategory() }
+                    Button { addCategory() } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 18)).foregroundStyle(.green)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(categoryInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
             } header: {
                 Text("系統分類（可多選）")
+            } footer: {
+                Text("自由輸入你的專業領域分類；key 過的分類會變成膠囊供下次點選（與重大決議共用、全部兼任職務共享）。")
             }
             linkSection
             Section("截止日") {
@@ -1739,19 +1757,44 @@ struct SideRoleTaskEditor: View {
         extraAssigneeInput = ""
     }
 
+    /// 分類膠囊清單：已選的排最前，接著是全部兼任職務（待辦＋重大決議）key 過的
+    /// 歷史分類，去重、上限已選 + 12（開放式分類——不再用固定代碼列舉）
+    private var categorySuggestions: [String] {
+        var out = task.categories
+        var seen = Set(out)
+        let history = lifeStore.sideRoles.flatMap { role in
+            (role.sideRoleTasks ?? []).flatMap(\.categories)
+                + (role.sideRoleResolutions ?? []).flatMap(\.categories)
+        }
+        for c in history.map({ $0.trimmingCharacters(in: .whitespaces) })
+        where !c.isEmpty && !seen.contains(c) {
+            seen.insert(c); out.append(c)
+            if out.count >= task.categories.count + 12 { break }
+        }
+        return out
+    }
+
+    private func addCategory() {
+        let c = categoryInput.trimmingCharacters(in: .whitespaces)
+        guard !c.isEmpty else { return }
+        if !task.categories.contains(c) { task.categories.append(c) }
+        categoryInput = ""
+    }
+
     /// 分類膠囊（與重大決議編輯器同款；點選切換多選）
-    private func taskCategoryChip(_ c: SideRoleResolutionCategory) -> some View {
+    private func taskCategoryChip(_ c: String) -> some View {
         let on = task.categories.contains(c)
+        let color = sideRoleCategoryColor(c)
         return Button {
             if on { task.categories.removeAll { $0 == c } }
             else { task.categories.append(c) }
         } label: {
-            Text(c.rawValue)
+            Text(c)
                 .font(.system(size: 12, weight: .semibold))
                 .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(on ? c.color.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
-                .foregroundStyle(on ? c.color : Color.secondary)
-                .overlay(Capsule().stroke(on ? c.color.opacity(0.4) : .clear, lineWidth: 1))
+                .background(on ? color.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(on ? color : Color.secondary)
+                .overlay(Capsule().stroke(on ? color.opacity(0.4) : .clear, lineWidth: 1))
         }
         .buttonStyle(.borderless)
     }
@@ -2188,26 +2231,16 @@ struct SideRoleKeyDateEditor: View {
     }
 }
 
-// MARK: - 重大決議分類徽章色
+// MARK: - 系統分類徽章色
 
-extension SideRoleResolutionCategory {
-    /// 分類徽章色（固定表；不用 hash 配色，同一分類在任何裝置上永遠同色）。
-    /// 放 View 層：LifeModels.swift 不 import SwiftUI，Color 進不去模型檔。
-    var color: Color {
-        switch self {
-        case .cda:    return .blue
-        case .bgs:    return .teal
-        case .sgs:    return .cyan
-        case .chm:    return .purple
-        case .mix:    return .orange
-        case .waste:  return .brown
-        case .slurry: return .indigo
-        case .gis:    return .green
-        case .cis:    return .mint
-        case .esh:    return .red
-        case .other:  return .gray
-        }
-    }
+/// 開放式字串分類的徽章色：以字元 scalar 總和對調色盤取模——同一字串在任何裝置、
+/// 任何一次啟動永遠同色（刻意不用 hashValue，它每次啟動都換種子）。
+/// 放 View 層：LifeModels.swift 不 import SwiftUI，Color 進不去模型檔。
+func sideRoleCategoryColor(_ s: String) -> Color {
+    let palette: [Color] = [.blue, .teal, .cyan, .purple, .orange,
+                            .brown, .indigo, .green, .mint, .red, .pink]
+    let sum = s.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
+    return palette[sum % palette.count]
 }
 
 // MARK: - 重大決議編輯
@@ -2219,6 +2252,8 @@ struct SideRoleResolutionEditor: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
     @State private var showInitiatorPicker = false
+    /// 自訂系統分類的輸入暫存（開放式分類）
+    @State private var categoryInput = ""
 
     /// 是否為既有決議（決定刪除鈕）
     private var isEditing: Bool {
@@ -2261,19 +2296,44 @@ struct SideRoleResolutionEditor: View {
         .buttonStyle(.borderless)
     }
 
+    /// 分類膠囊清單：已選的排最前，接著是全部兼任職務（重大決議＋待辦）key 過的
+    /// 歷史分類，去重、上限已選 + 12（開放式分類——不再用固定代碼列舉）
+    private var categorySuggestions: [String] {
+        var out = resolution.categories
+        var seen = Set(out)
+        let history = lifeStore.sideRoles.flatMap { role in
+            (role.sideRoleResolutions ?? []).flatMap(\.categories)
+                + (role.sideRoleTasks ?? []).flatMap(\.categories)
+        }
+        for c in history.map({ $0.trimmingCharacters(in: .whitespaces) })
+        where !c.isEmpty && !seen.contains(c) {
+            seen.insert(c); out.append(c)
+            if out.count >= resolution.categories.count + 12 { break }
+        }
+        return out
+    }
+
+    private func addCategory() {
+        let c = categoryInput.trimmingCharacters(in: .whitespaces)
+        guard !c.isEmpty else { return }
+        if !resolution.categories.contains(c) { resolution.categories.append(c) }
+        categoryInput = ""
+    }
+
     /// 分類膠囊：點一下加入/移除（多選）
-    private func categoryChip(_ c: SideRoleResolutionCategory) -> some View {
+    private func categoryChip(_ c: String) -> some View {
         let on = resolution.categories.contains(c)
+        let color = sideRoleCategoryColor(c)
         return Button {
             if on { resolution.categories.removeAll { $0 == c } }
             else { resolution.categories.append(c) }
         } label: {
-            Text(c.rawValue)
+            Text(c)
                 .font(.system(size: 12, weight: .semibold))
                 .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(on ? c.color.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
-                .foregroundStyle(on ? c.color : Color.secondary)
-                .overlay(Capsule().stroke(on ? c.color.opacity(0.4) : .clear, lineWidth: 1))
+                .background(on ? color.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(on ? color : Color.secondary)
+                .overlay(Capsule().stroke(on ? color.opacity(0.4) : .clear, lineWidth: 1))
         }
         .buttonStyle(.borderless)
     }
@@ -2295,12 +2355,26 @@ struct SideRoleResolutionEditor: View {
                     }
                 }
                 .padding(.vertical, 2)
-                // 系統分類（可多選；一則決議常橫跨多個系統）：膠囊點選切換
+                // 系統分類（可多選；一則決議常橫跨多個系統）：開放式——
+                // 自由輸入＋key 過的歷史膠囊（比照廠區/發起人；使用者不一定是氣化專業）
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("系統分類（可多選）")
+                    Text("系統分類（可多選，自由輸入；key 過的會變膠囊）")
                         .font(.caption).foregroundStyle(.secondary)
-                    FlexibleChipWrap(items: SideRoleResolutionCategory.allCases) { c in
-                        categoryChip(c)
+                    let sugg = categorySuggestions
+                    if !sugg.isEmpty {
+                        FlexibleChipWrap(items: sugg) { c in
+                            categoryChip(c)
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        TextField("自訂分類（例：CDA、冰水、消防）", text: $categoryInput)
+                            .onSubmit { addCategory() }
+                        Button { addCategory() } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 18)).foregroundStyle(.green)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(categoryInput.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
                 .padding(.vertical, 2)
