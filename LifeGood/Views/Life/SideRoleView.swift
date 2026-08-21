@@ -548,6 +548,8 @@ struct SideRoleWorkspaceView: View {
     @State private var editingMeeting: SideRoleMeeting?
     @State private var editingKeyDate: SideRoleKeyDate?
     @State private var editingResolution: SideRoleResolution?
+    /// 點決議列先開檢視卡片（分享用）；編輯是卡片右上的動作
+    @State private var viewingResolution: SideRoleResolution?
     @State private var showCopyResult: String?
     @State private var showEditRole = false
     /// 工作區內搜尋：過濾五個區塊的項目（空字串＝不過濾）
@@ -644,7 +646,7 @@ struct SideRoleWorkspaceView: View {
                 // 從行事曆搜尋帶進來的決議：開頁直接彈出，只彈一次
                 if let rid = initialResolutionId, !didOpenInitialResolution {
                     didOpenInitialResolution = true
-                    editingResolution = role.sideRoleResolutions?.first { $0.id == rid }
+                    viewingResolution = role.sideRoleResolutions?.first { $0.id == rid }
                 }
             }
         }
@@ -669,6 +671,9 @@ struct SideRoleWorkspaceView: View {
         }
         .sheet(item: $editingResolution) { r in
             NavigationStack { SideRoleResolutionEditor(roleId: roleId, resolution: r) }
+        }
+        .sheet(item: $viewingResolution) { r in
+            SideRoleResolutionCard(roleId: roleId, resolutionId: r.id)
         }
         .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
         .alert("已複製上屆名單", isPresented: Binding(
@@ -1411,7 +1416,7 @@ struct SideRoleWorkspaceView: View {
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(Color(.systemBackground))
         .contentShape(Rectangle())
-        .onTapGesture { editingResolution = r }
+        .onTapGesture { viewingResolution = r }
     }
 
     // MARK: 共用外框
@@ -2241,6 +2246,249 @@ func sideRoleCategoryColor(_ s: String) -> Color {
                             .brown, .indigo, .green, .mint, .red, .pink]
     let sum = s.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
     return palette[sum % palette.count]
+}
+
+// MARK: - 重大決議詳情卡片（分享用）
+
+struct ResolutionSharePayload: Identifiable { let id = UUID(); let items: [Any] }
+
+/// 重大決議點開的檢視卡片：為「匯出分享」設計——職務、標題、決議日期、廠區、
+/// 系統分類、發起人、決議內容全文一次帶齊；右上可匯出圖片／文字或進編輯表單。
+/// 決議內容用 InlineEditBlock 就地編輯；匯出版本為靜態全文＋匯出戳記（不帶鉛筆鈕）。
+struct SideRoleResolutionCard: View {
+    let roleId: UUID
+    let resolutionId: UUID
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var showEdit = false
+    @State private var shareItem: ResolutionSharePayload?
+    @State private var cardAppeared = false
+
+    private var role: LifeMilestone? { lifeStore.milestones.first { $0.id == roleId } }
+    private var resolution: SideRoleResolution? {
+        role?.sideRoleResolutions?.first { $0.id == resolutionId }
+    }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E)"; return f
+    }()
+    private static let stampFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let role, let r = resolution {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            cardBody(role: role, r: r, forExport: false)
+                        }
+                        .padding()
+                        .opacity(cardAppeared ? 1 : 0)
+                        .offset(y: cardAppeared ? 0 : 12)
+                    }
+                } else {
+                    // 決議在編輯表單裡被刪除 → 自動關閉卡片
+                    Color.clear.onAppear { dismiss() }
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("重大決議")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 16) {
+                        Menu {
+                            Button { shareJPG() } label: { Label("匯出圖片", systemImage: "photo") }
+                            Button { shareText() } label: { Label("匯出文字", systemImage: "text.alignleft") }
+                        } label: { Image(systemName: "square.and.arrow.up") }
+                        Button("編輯") { showEdit = true }.bold().foregroundStyle(.green)
+                    }
+                }
+            }
+            .sheet(isPresented: $showEdit) {
+                if let r = resolution {
+                    NavigationStack { SideRoleResolutionEditor(roleId: roleId, resolution: r) }
+                }
+            }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .onAppear {
+                withAnimation(.spring(response: 0.46, dampingFraction: 0.82)) { cardAppeared = true }
+            }
+        }
+    }
+
+    // MARK: 卡片內容（畫面與匯出共用；forExport 時內容為靜態全文＋匯出戳記，不帶鉛筆鈕）
+
+    @ViewBuilder
+    private func cardBody(role: LifeMilestone, r: SideRoleResolution, forExport: Bool) -> some View {
+        headerBlock(role: role, r: r)
+        metaBlock(r)
+        if !r.categories.isEmpty { categoryBlock(r) }
+        if forExport {
+            staticBlock("決議內容", r.content.isEmpty ? "（未填內容）" : r.content)
+            Text("美好人生・\(Self.dateFmt.string(from: Date())) 匯出")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        } else {
+            InlineEditBlock(title: "決議內容", text: r.content,
+                            emptyHint: "（未填，點筆直接補）", accent: .indigo) { new in
+                var updated = r
+                updated.content = new
+                lifeStore.upsertSideRoleResolution(updated, in: roleId)
+            }
+        }
+    }
+
+    private func headerBlock(role: LifeMilestone, r: SideRoleResolution) -> some View {
+        HStack(alignment: .top, spacing: 13) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(LinearGradient(colors: [.indigo, .purple],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 50, height: 50)
+                    .shadow(color: Color.indigo.opacity(0.30), radius: 6, x: 0, y: 3)
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("重大決議")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
+                        .clipShape(Capsule())
+                    Text(SideRoleFormat.displayName(role))
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Text(r.title.isEmpty ? "（未填標題）" : r.title)
+                    .font(.title3.bold())
+                    .fixedSize(horizontal: false, vertical: true)   // 分享用：標題不截斷
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.indigo.opacity(0.08), radius: 10, x: 0, y: 4)
+    }
+
+    private func metaBlock(_ r: SideRoleResolution) -> some View {
+        VStack(spacing: 0) {
+            metaRow(label: "決議日期", value: Self.dateFmt.string(from: r.date))
+            if !r.site.isEmpty {
+                Divider().padding(.leading, 14)
+                metaRow(label: "廠區", value: r.site, tint: .teal)
+            }
+            if !r.initiator.isEmpty {
+                Divider().padding(.leading, 14)
+                metaRow(label: "發起人", value: r.initiator, tint: .indigo)
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    private func metaRow(label: String, value: String, tint: Color = .primary) -> some View {
+        HStack {
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.subheadline.weight(.medium))
+                .foregroundStyle(tint)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    private func categoryBlock(_ r: SideRoleResolution) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("系統分類").font(.caption).foregroundStyle(.secondary)
+            FlexibleChipWrap(items: r.categories) { c in
+                Text(c)
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(sideRoleCategoryColor(c).opacity(0.14), in: Capsule())
+                    .foregroundStyle(sideRoleCategoryColor(c))
+                    .overlay(Capsule().stroke(sideRoleCategoryColor(c).opacity(0.28), lineWidth: 0.6))
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    /// 匯出用靜態內容區塊（全文、不截斷、不帶鉛筆鈕）
+    private func staticBlock(_ label: String, _ content: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(content)
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+    }
+
+    // MARK: 分享（圖片＝分享設計版卡片；文字＝Emoji 排版，LINE／訊息可直接貼）
+
+    private func sanitizedFileName(_ s: String) -> String {
+        var out = s
+        for ch in ["/", "\\", ":", "?", "%", "*", "|", "\"", "<", ">"] {
+            out = out.replacingOccurrences(of: ch, with: "_")
+        }
+        return out
+    }
+
+    @MainActor
+    private func shareJPG() {
+        guard let role, let r = resolution else { return }
+        let content = VStack(alignment: .leading, spacing: 14) {
+            cardBody(role: role, r: r, forExport: true)
+        }
+        .frame(width: 420)
+        .padding(20)
+        .background(Color(.systemGroupedBackground))
+        .environmentObject(lifeStore)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage, let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        let title = r.title.isEmpty ? "重大決議" : sanitizedFileName(r.title)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("重大決議_\(title)_\(Self.stampFmt.string(from: Date())).jpg")
+        do {
+            try data.write(to: url)
+            shareItem = ResolutionSharePayload(items: [url])
+        } catch { }
+    }
+
+    private func shareText() {
+        guard let role, let r = resolution else { return }
+        var lines: [String] = []
+        lines.append("📌 重大決議｜\(r.title.isEmpty ? "（未填標題）" : r.title)")
+        lines.append("──────────")
+        lines.append("🏷 職務：\(SideRoleFormat.displayName(role))")
+        lines.append("🗓 決議日期：\(Self.dateFmt.string(from: r.date))")
+        if !r.site.isEmpty { lines.append("🏭 廠區：\(r.site)") }
+        if !r.categories.isEmpty { lines.append("⚙️ 系統分類：\(r.categories.joined(separator: "、"))") }
+        if !r.initiator.isEmpty { lines.append("🙋 發起人：\(r.initiator)") }
+        lines.append("")
+        lines.append("📝 決議內容")
+        lines.append(r.content.isEmpty ? "（未填內容）" : r.content)
+        shareItem = ResolutionSharePayload(items: [lines.joined(separator: "\n")])
+    }
 }
 
 // MARK: - 重大決議編輯
