@@ -1508,8 +1508,9 @@ enum LeaveType: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// 不列入主動性扣分的假別（非個人意願的假：喪假／公假）
-    var isScoreExempt: Bool { self == .funeral || self == .official }
+    /// 不列入主動性扣分的假別（非個人意願的假：喪假／公假／病假——
+    /// 生病不是自己選的，v25.268 起病假也不扣）
+    var isScoreExempt: Bool { self == .funeral || self == .official || self == .sick }
 }
 
 // MARK: - 班別（部屬班表）

@@ -2050,7 +2050,7 @@ struct RecordEditorSheet: View {
                         editorSectionHeader("請假資訊", icon: "calendar.badge.clock")
                     } footer: {
                         if leaveType.isScoreExempt {
-                            Label("此假別（喪假／公假）不列入主動性扣分", systemImage: "checkmark.shield")
+                            Label("此假別（喪假／公假／病假）不列入主動性扣分", systemImage: "checkmark.shield")
                                 .foregroundStyle(.teal)
                         }
                     }

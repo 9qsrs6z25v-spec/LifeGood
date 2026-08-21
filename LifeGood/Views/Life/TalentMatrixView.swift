@@ -52,7 +52,7 @@ extension Subordinate {
         let completedItems = meetings.flatMap { $0.allItems }
             .filter { $0.isCompleted && $0.sideRoleLink == nil }.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
-        // 喪假／公假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
+        // 喪假／公假／病假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         var score = 60.0
         score += Double(completedTasks) * 3      // 每完成一項任務 +3
@@ -112,7 +112,7 @@ extension Subordinate {
         let completedItems = meetings.flatMap { $0.allItems }
             .filter { $0.isCompleted && $0.sideRoleLink == nil }.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
-        // 喪假／公假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
+        // 喪假／公假／病假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         if completedTasks > 0 { items.append(("完成任務 ×\(completedTasks)", completedTasks * 3)) }
         if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems)) }
