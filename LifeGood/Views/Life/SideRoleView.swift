@@ -563,6 +563,20 @@ struct SideRoleWorkspaceView: View {
     @State private var sharePayload: SideRoleSharePayload?
     @State private var didOpenInitialResolution = false
 
+    // 各區塊收合狀態：AppStorage 持久化——收起來下次打開還是收著（全職務共用同一偏好）。
+    // 搜尋/篩選中一律強制展開，不然命中的項目會被收合藏住。
+    @AppStorage("sideRole_collapse_tasks") private var collapseTasks = false
+    @AppStorage("sideRole_collapse_dates") private var collapseDates = false
+    @AppStorage("sideRole_collapse_members") private var collapseMembers = false
+    @AppStorage("sideRole_collapse_meetings") private var collapseMeetings = false
+    @AppStorage("sideRole_collapse_resolutions") private var collapseResolutions = false
+    // 展開時每區先列 10 項，「顯示其他」每按一次再多 10 項；只是顯示窗，不持久化
+    @State private var taskLimit = 10
+    @State private var dateLimit = 10
+    @State private var memberLimit = 10
+    @State private var meetingLimit = 10
+    @State private var resolutionLimit = 10
+
     /// 資料一律從 store 現查，不快取進 @State——否則在別處編輯後這頁不會更新。
     private var role: LifeMilestone? {
         lifeStore.milestones.first { $0.id == roleId }
@@ -1073,14 +1087,19 @@ struct SideRoleWorkspaceView: View {
         let progress = SideRoleFormat.taskProgress(role)
         return sectionBox(title: "待辦", icon: "checklist", color: .indigo,
                           trailing: "\(progress.done)/\(progress.total)",
-                          onAdd: { editingTask = SideRoleTask() }) {
+                          onAdd: { editingTask = SideRoleTask() },
+                          isCollapsed: hasActiveFilter ? nil : $collapseTasks) {
             if tasks.isEmpty {
                 emptyRow("還沒有待辦事項")
             } else {
-                ForEach(tasks) { task in
+                let shown = hasActiveFilter ? tasks : Array(tasks.prefix(taskLimit))
+                ForEach(shown) { task in
                     SwipeDeleteRow(onDelete: { lifeStore.deleteSideRoleTask(task.id, in: roleId) }) {
                         taskRow(task, assigneeNames: SideRoleFormat.assigneeNames(task, in: role))
                     }
+                }
+                if !hasActiveFilter {
+                    showMoreRow(total: tasks.count, limit: $taskLimit, color: .indigo)
                 }
             }
         }
@@ -1150,14 +1169,19 @@ struct SideRoleWorkspaceView: View {
             .sorted { $0.date < $1.date }
         return sectionBox(title: "重要日期", icon: "calendar", color: .indigo,
                           trailing: "\(dates.count)",
-                          onAdd: { editingKeyDate = SideRoleKeyDate() }) {
+                          onAdd: { editingKeyDate = SideRoleKeyDate() },
+                          isCollapsed: hasActiveFilter ? nil : $collapseDates) {
             if dates.isEmpty {
                 emptyRow("還沒有重要日期。加進來的日期會同時顯示在「我的行事曆」上。")
             } else {
-                ForEach(dates) { kd in
+                let shown = hasActiveFilter ? dates : Array(dates.prefix(dateLimit))
+                ForEach(shown) { kd in
                     SwipeDeleteRow(onDelete: { lifeStore.deleteSideRoleKeyDate(kd.id, in: roleId) }) {
                         keyDateRow(kd)
                     }
+                }
+                if !hasActiveFilter {
+                    showMoreRow(total: dates.count, limit: $dateLimit, color: .indigo)
                 }
             }
         }
@@ -1213,7 +1237,8 @@ struct SideRoleWorkspaceView: View {
                                      uniquingKeysWith: { a, _ in a })
         return sectionBox(title: "成員名單", icon: "person.2.fill", color: .indigo,
                           trailing: "\(members.count)",
-                          onAdd: { editingMember = SideRoleMember() }) {
+                          onAdd: { editingMember = SideRoleMember() },
+                          isCollapsed: hasActiveFilter ? nil : $collapseMembers) {
             if hasPrevious && subscription.isPremium {
                 Button {
                     let n = lifeStore.copyMembersFromPreviousTerm(into: role)
@@ -1231,11 +1256,15 @@ struct SideRoleWorkspaceView: View {
             if members.isEmpty {
                 emptyRow("還沒有成員")
             } else {
-                ForEach(members) { m in
+                let shown = hasActiveFilter ? members : Array(members.prefix(memberLimit))
+                ForEach(shown) { m in
                     SwipeDeleteRow(onDelete: { lifeStore.deleteSideRoleMember(m.id, in: roleId) }) {
                         memberRow(m, peopleIndex: peopleIndex,
                                   taskStat: memberTaskStat(of: m.id, in: role))
                     }
+                }
+                if !hasActiveFilter {
+                    showMoreRow(total: members.count, limit: $memberLimit, color: .indigo)
                 }
             }
         }
@@ -1308,14 +1337,19 @@ struct SideRoleWorkspaceView: View {
             .sorted { $0.date > $1.date }
         return sectionBox(title: "會議紀錄", icon: "text.bubble.fill", color: .indigo,
                           trailing: "\(meetings.count)",
-                          onAdd: { editingMeeting = SideRoleMeeting() }) {
+                          onAdd: { editingMeeting = SideRoleMeeting() },
+                          isCollapsed: hasActiveFilter ? nil : $collapseMeetings) {
             if meetings.isEmpty {
                 emptyRow("還沒有會議紀錄")
             } else {
-                ForEach(meetings) { mt in
+                let shown = hasActiveFilter ? meetings : Array(meetings.prefix(meetingLimit))
+                ForEach(shown) { mt in
                     SwipeDeleteRow(onDelete: { lifeStore.deleteSideRoleMeeting(mt.id, in: roleId) }) {
                         meetingRow(mt)
                     }
+                }
+                if !hasActiveFilter {
+                    showMoreRow(total: meetings.count, limit: $meetingLimit, color: .indigo)
                 }
             }
         }
@@ -1361,14 +1395,19 @@ struct SideRoleWorkspaceView: View {
             .sorted { $0.date > $1.date }
         return sectionBox(title: "重大決議", icon: "checkmark.seal.fill", color: .indigo,
                           trailing: "\(resolutions.count)",
-                          onAdd: { editingResolution = SideRoleResolution() }) {
+                          onAdd: { editingResolution = SideRoleResolution() },
+                          isCollapsed: hasActiveFilter ? nil : $collapseResolutions) {
             if resolutions.isEmpty {
                 emptyRow("還沒有重大決議。定案的事放這裡，之後在「我的行事曆」搜尋得到。")
             } else {
-                ForEach(resolutions) { r in
+                let shown = hasActiveFilter ? resolutions : Array(resolutions.prefix(resolutionLimit))
+                ForEach(shown) { r in
                     SwipeDeleteRow(onDelete: { lifeStore.deleteSideRoleResolution(r.id, in: roleId) }) {
                         resolutionRow(r)
                     }
+                }
+                if !hasActiveFilter {
+                    showMoreRow(total: resolutions.count, limit: $resolutionLimit, color: .indigo)
                 }
             }
         }
@@ -1426,8 +1465,10 @@ struct SideRoleWorkspaceView: View {
     @ViewBuilder
     private func sectionBox<Content: View>(title: String, icon: String, color: Color,
                                            trailing: String, onAdd: @escaping () -> Void,
+                                           isCollapsed: Binding<Bool>? = nil,
                                            @ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) {
+        let collapsed = isCollapsed?.wrappedValue ?? false
+        return VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Capsule()
                     .fill(LinearGradient(colors: [color, color.opacity(0.55)],
@@ -1445,6 +1486,19 @@ struct SideRoleWorkspaceView: View {
                     .background(color.opacity(0.12))
                     .clipShape(Capsule())
                 Spacer()
+                // 收合／展開（狀態持久化；搜尋/篩選中外層不傳 binding＝強制展開）
+                if let isCollapsed {
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            isCollapsed.wrappedValue.toggle()
+                        }
+                    } label: {
+                        Image(systemName: collapsed ? "chevron.down.circle" : "chevron.up.circle")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(color.opacity(0.65))
+                    }
+                    .buttonStyle(.plain)
+                }
                 Button(action: onAdd) {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 18))
@@ -1455,11 +1509,39 @@ struct SideRoleWorkspaceView: View {
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
 
-            content()
+            if !collapsed {
+                content()
+            }
         }
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .padding(.horizontal, 16)
+    }
+
+    /// 「顯示其他 N 項」：展開狀態下每區先列 10 項，按一次再多 10 項。
+    /// 搜尋/篩選中不套顯示窗（外層直接不呼叫），命中的都要看得到。
+    @ViewBuilder
+    private func showMoreRow(total: Int, limit: Binding<Int>, color: Color) -> some View {
+        if total > limit.wrappedValue {
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    limit.wrappedValue += 10
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.down.circle.fill")
+                        .font(.system(size: 13))
+                    Text("顯示其他 \(total - limit.wrappedValue) 項")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(color)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(Color(.systemBackground))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private func emptyRow(_ text: String) -> some View {
