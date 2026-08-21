@@ -204,6 +204,8 @@ struct AddIncomeView: View {
                             .onChange(of: amountText) { _, _ in
                                 showError = false
                             }
+                        // 計算機：先算再填，結果直接帶入金額
+                        CalcFieldButton(text: $amountText, accent: .green)
                     }
 
                     if !bankMilestones.isEmpty {

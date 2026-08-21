@@ -568,6 +568,8 @@ struct AddExpenseView: View {
                 }
                 TextField(isMortgage ? "每月房貸金額" : (isCarLoan ? "每月車貸金額" : (isSavingsInsurance ? "保費金額" : "金額")), text: $amountText)
                     .keyboardType(.decimalPad)
+                // 計算機：先算再填（例：多筆發票加總、帳單分攤），結果直接帶入金額
+                CalcFieldButton(text: $amountText, accent: expenseType == .variable ? .orange : .blue)
             }
 
             if showLoanCalcFields {
@@ -575,6 +577,7 @@ struct AddExpenseView: View {
                     Text("NT$").foregroundStyle(.secondary)
                     TextField("總貸款金額", text: $loanTotalAmountText)
                         .keyboardType(.decimalPad)
+                    CalcFieldButton(text: $loanTotalAmountText, accent: .blue)
                 }
             }
 
