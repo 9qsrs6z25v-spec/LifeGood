@@ -4491,12 +4491,22 @@ struct SubordinateItemCard: View {
             field("任務日期", fmt(t.date))
             if let due = t.dueDate { field("截止日期", fmt(due)) }
             if t.isCompleted, let at = t.completedAt { field("完成時間", fmt(at)) }
-            richBlock("內容", t.content)
-            if t.equipmentLink != nil {
-                richBlock("處理措施", t.responseAction.isEmpty ? "（尚未回報）" : t.responseAction)
-                richBlock("回復結果", t.responseResult.isEmpty ? "（尚未回報）" : t.responseResult)
+            editBlock("內容", t.content, accent: .cyan) { new in
+                lifeStore.mutateSubordinateTaskFields(subordinateId: subId, taskId: t.id) { $0.content = new }
+                // 內容是提醒事項的標題來源，一併更新（開啟同步時才動作）
+                lifeStore.syncReminderForSubordinateTask(subordinateId: subId, taskId: t.id)
             }
-            richBlock("備註", t.note)
+            if t.equipmentLink != nil {
+                editBlock("處理措施", t.responseAction, accent: .red, emptyHint: "（尚未回報，點筆直接填）") { new in
+                    lifeStore.mutateSubordinateTaskFields(subordinateId: subId, taskId: t.id) { $0.responseAction = new }
+                }
+                editBlock("回復結果", t.responseResult, accent: .red, emptyHint: "（尚未回報，點筆直接填）") { new in
+                    lifeStore.mutateSubordinateTaskFields(subordinateId: subId, taskId: t.id) { $0.responseResult = new }
+                }
+            }
+            editBlock("備註", t.note, accent: .cyan) { new in
+                lifeStore.mutateSubordinateTaskFields(subordinateId: subId, taskId: t.id) { $0.note = new }
+            }
         case .meeting(let subId, let snap):
             let m = lifeStore.subordinates.first { $0.id == subId }?.meetings.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "person.3.fill", color: .indigo, title: m.topic.isEmpty ? "未命名會議" : m.topic)
@@ -4514,7 +4524,9 @@ struct SubordinateItemCard: View {
             } else if !m.allItems.isEmpty {
                 agendaBlock(title: "議程項目", items: m.allItems, meeting: m, subId: subId)
             }
-            richBlock("備註", m.note)
+            editBlock("備註", m.note, accent: .indigo) { new in
+                lifeStore.mutateSubordinateMeetingFields(subordinateId: subId, meetingId: m.id) { $0.note = new }
+            }
         case .report(let subId, let snap):
             let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic)
@@ -4522,7 +4534,9 @@ struct SubordinateItemCard: View {
             if !r.reportType.isEmpty { field("分類", r.reportType) }
             field("報告日期", fmt(r.date))
             if r.isCompleted, let at = r.completedAt { field("完成時間", fmt(at)) }
-            richBlock("備註", r.note)
+            editBlock("備註", r.note, accent: .purple) { new in
+                lifeStore.mutateWeeklyReportFields(subordinateId: subId, reportId: r.id) { $0.note = new }
+            }
         case .leave(let subId, let snap):
             let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "calendar.badge.minus", color: .teal, title: rec.leaveType?.rawValue ?? "請假")
@@ -4530,8 +4544,12 @@ struct SubordinateItemCard: View {
             field("開始", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
             if let h = rec.leaveHours { field("請假時數", String(format: "%.1f 小時", h)) }
-            richBlock("事由", rec.content)
-            richBlock("備註", rec.note)
+            editBlock("事由", rec.content, accent: .teal) { new in
+                lifeStore.mutateSubordinateRecordFields(subordinateId: subId, recordId: rec.id) { $0.content = new }
+            }
+            editBlock("備註", rec.note, accent: .teal) { new in
+                lifeStore.mutateSubordinateRecordFields(subordinateId: subId, recordId: rec.id) { $0.note = new }
+            }
         case .record(let subId, let snap):
             let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
             titleBlock(icon: rec.type.icon, color: recordColor(rec.type), title: rec.type.rawValue)
@@ -4539,8 +4557,12 @@ struct SubordinateItemCard: View {
             field("日期", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
             if let sev = rec.severity { field("嚴重度", sev.rawValue) }
-            richBlock("內容", rec.content)
-            richBlock("備註", rec.note)
+            editBlock("內容", rec.content, accent: recordColor(rec.type)) { new in
+                lifeStore.mutateSubordinateRecordFields(subordinateId: subId, recordId: rec.id) { $0.content = new }
+            }
+            editBlock("備註", rec.note, accent: recordColor(rec.type)) { new in
+                lifeStore.mutateSubordinateRecordFields(subordinateId: subId, recordId: rec.id) { $0.note = new }
+            }
         }
     }
 
@@ -4692,20 +4714,14 @@ struct SubordinateItemCard: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
     }
 
-    @ViewBuilder
-    private func richBlock(_ label: String, _ content: String) -> some View {
-        if !content.trimmingCharacters(in: .whitespaces).isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(label).font(.caption).foregroundStyle(.secondary)
-                Text(MentionText.attributed(content, people: people))
-                    .font(.subheadline).foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tint(.blue)
-            }
-            .padding().background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
-        }
+    /// 就地編輯區塊：InlineEditBlock 模板＋@ 標註渲染＋各實體的寫回閉包。
+    /// 取代原本唯讀的 richBlock——改一小格字不必再進完整編輯頁（點右上鉛筆、存檔即回寫）。
+    private func editBlock(_ label: String, _ content: String, accent: Color = .blue,
+                           emptyHint: String = "（未填，點筆直接補）",
+                           onSave: @escaping (String) -> Void) -> some View {
+        InlineEditBlock(title: label, text: content, emptyHint: emptyHint, accent: accent,
+                        displayText: { Text(MentionText.attributed($0, people: people)) },
+                        onSave: onSave)
     }
 
     @ViewBuilder

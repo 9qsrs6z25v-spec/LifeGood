@@ -874,7 +874,7 @@ struct EquipmentDetailCard: View {
                         VStack(spacing: 14) {
                             heroCard(eq)
                             kpiRow(eq)
-                            if !eq.note.isEmpty { noteCard(eq) }
+                            noteCard(eq)
                             timelineCard(eq)
                         }
                         .padding(.vertical)
@@ -1008,27 +1008,14 @@ struct EquipmentDetailCard: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.14), lineWidth: 0.75))
     }
 
-    // MARK: 備註
+    // MARK: 備註（就地編輯：點鉛筆直接改，不必進編輯表單）
 
     private func noteCard(_ eq: ManagedEquipment) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Capsule()
-                    .fill(LinearGradient(colors: [Color(.systemGray2), Color(.systemGray2).opacity(0.55)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: 4, height: 16)
-                Image(systemName: "note.text")
-                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                Text("備註").font(.subheadline.weight(.bold))
-            }
-            Text(eq.note)
-                .font(.subheadline).foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+        InlineEditBlock(title: "備註", text: eq.note,
+                        emptyHint: "（未填，點筆直接補：位置、型號、保養注意事項等）",
+                        accent: .teal) { new in
+            lifeStore.mutateEquipmentFields(equipmentId: eq.id) { $0.note = new }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
     }
 

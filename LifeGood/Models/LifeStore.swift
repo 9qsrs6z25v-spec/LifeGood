@@ -1243,6 +1243,59 @@ class LifeStore: ObservableObject {
         return changed
     }
 
+    // MARK: - 檢視卡片就地編輯寫回（InlineEditBlock）
+    // 只改單一文字欄位（備註/內容/處理措施/回復結果…）不必經過完整編輯頁的重建流程，
+    // 也就不會碰到「重建漏帶欄位」那一類風險；閉包就地修改，isLoading 批次後存檔一次。
+
+    func mutateSubordinateTaskFields(subordinateId: UUID, taskId: UUID,
+                                     _ mutate: (inout SubordinateTask) -> Void) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
+              let ti = subordinates[si].tasks.firstIndex(where: { $0.id == taskId }) else { return }
+        isLoading = true
+        defer { isLoading = false }
+        mutate(&subordinates[si].tasks[ti])
+        save()
+    }
+
+    func mutateSubordinateMeetingFields(subordinateId: UUID, meetingId: UUID,
+                                        _ mutate: (inout SubordinateMeeting) -> Void) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
+              let mi = subordinates[si].meetings.firstIndex(where: { $0.id == meetingId }) else { return }
+        isLoading = true
+        defer { isLoading = false }
+        mutate(&subordinates[si].meetings[mi])
+        save()
+    }
+
+    func mutateWeeklyReportFields(subordinateId: UUID, reportId: UUID,
+                                  _ mutate: (inout WeeklyReport) -> Void) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
+              let ri = subordinates[si].weeklyReports.firstIndex(where: { $0.id == reportId }) else { return }
+        isLoading = true
+        defer { isLoading = false }
+        mutate(&subordinates[si].weeklyReports[ri])
+        save()
+    }
+
+    func mutateSubordinateRecordFields(subordinateId: UUID, recordId: UUID,
+                                       _ mutate: (inout SubordinateRecord) -> Void) {
+        guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }),
+              let ri = subordinates[si].records.firstIndex(where: { $0.id == recordId }) else { return }
+        isLoading = true
+        defer { isLoading = false }
+        mutate(&subordinates[si].records[ri])
+        save()
+    }
+
+    /// 機台備註就地編輯（機台詳情卡片）
+    func mutateEquipmentFields(equipmentId: UUID, _ mutate: (inout ManagedEquipment) -> Void) {
+        guard let i = equipmentPool.firstIndex(where: { $0.id == equipmentId }) else { return }
+        isLoading = true
+        defer { isLoading = false }
+        mutate(&equipmentPool[i])
+        save()
+    }
+
     // MARK: - 職等對應職稱 CRUD
 
     func add(_ item: GradeTitle) { gradeTitles.append(item) }
