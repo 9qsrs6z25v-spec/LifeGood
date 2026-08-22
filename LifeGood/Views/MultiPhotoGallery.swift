@@ -383,6 +383,8 @@ struct PhotoLightbox: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
     @State private var image: UIImage?
     @State private var imageAppeared = false
 
@@ -401,23 +403,50 @@ struct PhotoLightbox: View {
                     .ignoresSafeArea()
                     .opacity(imageAppeared ? 1 : 0)
 
-                // 前景：原圖
+                // 前景：原圖。預設 scaledToFit＋明確以可視範圍為邊界——
+                // 打開就是「最長邊貼齊、完整看得到、不出血」（使用者回報 v25.288）。
+                // 雙指縮放（可暫時縮小於 fit、放開回彈）、放大後可拖曳平移、雙擊切換。
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .scaleEffect(scale)
+                    .offset(offset)
                     .opacity(imageAppeared ? 1 : 0)
                     .gesture(
                         MagnificationGesture()
                             .onChanged { value in
-                                scale = max(1, min(5, lastScale * value))
+                                // 進行中允許 0.5～8（縮小於 fit 有橡皮筋感），放開再夾回 1～5
+                                scale = max(0.5, min(8, lastScale * value))
                             }
                             .onEnded { _ in
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                                    scale = max(1, min(5, scale))
+                                    if scale <= 1 { offset = .zero; lastOffset = .zero }
+                                }
                                 lastScale = scale
                             }
+                            .simultaneously(with:
+                                DragGesture()
+                                    .onChanged { v in
+                                        guard scale > 1 else { return }   // fit 狀態不平移
+                                        offset = CGSize(width: lastOffset.width + v.translation.width,
+                                                        height: lastOffset.height + v.translation.height)
+                                    }
+                                    .onEnded { _ in
+                                        lastOffset = offset
+                                    }
+                            )
                     )
                     .onTapGesture(count: 2) {
-                        withAnimation { scale = scale > 1 ? 1 : 2; lastScale = scale }
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                            if scale > 1 {
+                                scale = 1; offset = .zero; lastOffset = .zero
+                            } else {
+                                scale = 2.5
+                            }
+                            lastScale = scale
+                        }
                     }
                     .onAppear {
                         withAnimation(.easeOut(duration: 0.28)) { imageAppeared = true }

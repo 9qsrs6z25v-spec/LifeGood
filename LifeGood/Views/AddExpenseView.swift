@@ -2100,7 +2100,25 @@ struct AddExpenseView: View {
     // MARK: - 美化 v2：即時金額預覽卡
 
     /// 萬/億格式化輔助（預覽卡專用）
+    private static let previewDecimalFmt: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 2; return f
+    }()
+
     private func previewAmountString(_ value: Double) -> String {
+        // 外幣：看板以所選幣別顯示原幣金額，不再硬掛 NT$（使用者回報）；
+        // 有匯率時附 NT$ 等值換算
+        if selectedCurrencyCode != "NT$", !selectedCurrencyCode.isEmpty {
+            let s = Self.previewDecimalFmt.string(from: NSNumber(value: value)) ?? "0"
+            if let rate = store.currencyRates.first(where: { $0.code == selectedCurrencyCode }),
+               rate.rate > 0 {
+                let twd = value * rate.rate
+                let twdStr = abs(twd) >= 10_000
+                    ? String(format: "%.1f 萬", twd / 10_000)
+                    : (Self.previewDecimalFmt.string(from: NSNumber(value: twd)) ?? "0")
+                return "\(selectedCurrencyCode) \(s) ≈ NT$\(twdStr)"
+            }
+            return "\(selectedCurrencyCode) \(s)"
+        }
         let absVal = abs(value)
         if absVal >= 100_000_000 { return String(format: "%.1f 億", value / 100_000_000) }
         if absVal >= 10_000      { return String(format: "%.1f 萬", value / 10_000) }

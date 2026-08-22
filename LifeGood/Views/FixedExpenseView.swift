@@ -1064,6 +1064,11 @@ private struct FixedExpenseCard: View {
                                 Label(photoCount > 0 ? "匯出圖片（含帳單照片 \(photoCount) 張）" : "匯出圖片",
                                       systemImage: "photo")
                             }
+                            if photoCount > 0 {
+                                Button { sharePhotosOnly() } label: {
+                                    Label("只匯出帳單照片（\(photoCount) 張）", systemImage: "photo.stack")
+                                }
+                            }
                             Button { shareText() } label: { Label("匯出文字", systemImage: "text.alignleft") }
                         } label: { Image(systemName: "square.and.arrow.up") }
                         Button("編輯") { showEdit = true }.bold()
@@ -1123,6 +1128,15 @@ private struct FixedExpenseCard: View {
             }
             shareItem = FinanceCardSharePayload(items: items)
         } catch { }
+    }
+
+    /// 只分享上傳的帳單照片原檔（不含卡片圖）
+    private func sharePhotosOnly() {
+        let urls: [Any] = current.photoFileNames
+            .map { Expense.photoURL(for: $0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !urls.isEmpty else { return }
+        shareItem = FinanceCardSharePayload(items: urls)
     }
 
     private func shareText() {
