@@ -973,13 +973,30 @@ private struct RosterCellDetailSheet: View {
             } label: {
                 Label("設為假日值班（單日）", systemImage: "sun.horizon.fill")
             }
-            Button {
-                lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: selectedDate)
-                dismiss()
-            } label: {
-                // 大夜輪班邏輯：週日晚上到週五早上，時差落在週六（假日）要補一天，
-                // 所以週五＋週六都標時差假
-                Label("套用大夜班輪班（該週日～四大夜、五六時差）", systemImage: "arrow.triangle.2.circlepath")
+            // 大夜輪班（8 天）：點選日時差、隔天起大夜 6 晚、第 8 天休。
+            // 週五是分岔點——有兩種輪法，兩顆按鈕都給（使用者規則 v25.281）。
+            if Calendar.current.component(.weekday, from: selectedDate) == 6 {
+                Button {
+                    lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: selectedDate)
+                    dismiss()
+                } label: {
+                    Label("大夜輪班：五時差、六起大夜、下週五休", systemImage: "arrow.triangle.2.circlepath")
+                }
+                Button {
+                    lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: selectedDate,
+                                                      skipSaturday: true)
+                    dismiss()
+                } label: {
+                    Label("大夜輪班：五時差、六休、日起大夜", systemImage: "arrow.triangle.2.circlepath")
+                }
+            } else {
+                Button {
+                    lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: selectedDate)
+                    dismiss()
+                } label: {
+                    Label("套用大夜班輪班（這天時差、隔天起大夜 6 晚、第 8 天休）",
+                          systemImage: "arrow.triangle.2.circlepath")
+                }
             }
             Button {
                 lifeStore.applyEveningShiftWeekdays(subordinateId: cell.subId, startDate: selectedDate)
