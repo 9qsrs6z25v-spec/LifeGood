@@ -140,7 +140,11 @@ struct FinanceItemCard: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
                         Menu {
-                            Button { shareJPG() } label: { Label("匯出圖片", systemImage: "photo") }
+                            let photoCount = expense?.photoFileNames.count ?? 0
+                            Button { shareJPG() } label: {
+                                Label(photoCount > 0 ? "匯出圖片（含帳單照片 \(photoCount) 張）" : "匯出圖片",
+                                      systemImage: "photo")
+                            }
                             Button { shareText() } label: { Label("匯出文字", systemImage: "text.alignleft") }
                         } label: { Image(systemName: "square.and.arrow.up") }
                         Button("編輯") { showEdit = true }.bold().foregroundStyle(.green)
@@ -314,7 +318,17 @@ struct FinanceItemCard: View {
             .appendingPathComponent("\(navTitle)_\(safeTitle)_\(Self.stampFmt.string(from: Date())).jpg")
         do {
             try data.write(to: url)
-            shareItem = FinanceCardSharePayload(items: [url])
+            // 上傳過的帳單照片原檔一併附進分享（卡片圖 + 全部照片一次分享）
+            var items: [Any] = [url]
+            if let e = expense {
+                for name in e.photoFileNames {
+                    let photoURL = Expense.photoURL(for: name)
+                    if FileManager.default.fileExists(atPath: photoURL.path) {
+                        items.append(photoURL)
+                    }
+                }
+            }
+            shareItem = FinanceCardSharePayload(items: items)
         } catch { }
     }
 
