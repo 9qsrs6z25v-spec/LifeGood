@@ -4435,7 +4435,7 @@ struct SubordinateItemCard: View {
     /// 把卡片內容渲染成 JPG 並開啟系統分享面板（對齊 TalentMatrixView.exportJPG 既有寫法）。
     @MainActor
     private func shareJPG() {
-        let content = VStack(alignment: .leading, spacing: 16) { cardBody }
+        let content = VStack(alignment: .leading, spacing: 16) { cardBody(forExport: true) }
             .frame(width: 420)
             .padding(20)
             .background(Color(.systemBackground))
@@ -4605,7 +4605,6 @@ struct SubordinateItemCard: View {
             lines.append(divider)
             lines.append("🕐 會議時間：\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
             lines.append("⏱ 會議長度：\(m.durationMinutes) 分鐘")
-            lines.append("🗓 產生時間：\(fmt(m.createdAt))")
             if let r = m.rule { lines.append("🔁 週期：\(ruleSummary(r))") }
             if m.isRecurring || !m.occurrences.isEmpty {
                 // 有週期、或不開週期但有加開場次：都依場次分段
@@ -4626,6 +4625,7 @@ struct SubordinateItemCard: View {
                 lines.append(contentsOf: agendaLines(m.allItems))
             }
             if !m.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(m.note) }
+            lines.append(""); lines.append("🗓 會議產生：\(fmt(m.createdAt))")
         case .report(let subId, let snap):
             let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
             lines.append("📄 報告｜\(r.topic.isEmpty ? "未命名報告" : r.topic)")
@@ -4660,7 +4660,7 @@ struct SubordinateItemCard: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    cardBody
+                    cardBody(forExport: false)
                 }
                 .padding()
                 // [v1] 淡入 + 向上進場動畫，對齊本檔案其餘卡片規格
@@ -4721,8 +4721,9 @@ struct SubordinateItemCard: View {
     }
 
     @ViewBuilder
-    private var cardBody: some View {
-        // 每個 case 都從 lifeStore 取最新資料（編輯儲存後即時反映），找不到才退回快照
+    private func cardBody(forExport: Bool) -> some View {
+        // 每個 case 都從 lifeStore 取最新資料（編輯儲存後即時反映），找不到才退回快照。
+        // forExport：匯出圖片模式——editBlock 空欄位整塊隱藏、有內容也不帶鉛筆鈕
         switch ref {
         case .task(let subId, let snap):
             let t = lifeStore.subordinates.first { $0.id == subId }?.tasks.first { $0.id == snap.id } ?? snap
@@ -4735,20 +4736,20 @@ struct SubordinateItemCard: View {
             field("任務日期", fmt(t.date))
             if let due = t.dueDate { field("截止日期", fmt(due)) }
             if t.isCompleted, let at = t.completedAt { field("完成時間", fmt(at)) }
-            editBlock("內容", t.content, accent: .cyan) { new in
+            editBlock("內容", t.content, accent: .cyan, forExport: forExport) { new in
                 lifeStore.mutateSubordinateTaskFields(subordinateId: subId, taskId: t.id) { $0.content = new }
                 // 內容是提醒事項的標題來源，一併更新（開啟同步時才動作）
                 lifeStore.syncReminderForSubordinateTask(subordinateId: subId, taskId: t.id)
             }
             if t.equipmentLink != nil {
-                editBlock("處理措施", t.responseAction, accent: .red, emptyHint: "（尚未回報，點筆直接填）") { new in
+                editBlock("處理措施", t.responseAction, accent: .red, emptyHint: "（尚未回報）", forExport: forExport) { new in
                     lifeStore.mutateSubordinateTaskFields(subordinateId: subId, taskId: t.id) { $0.responseAction = new }
                 }
-                editBlock("回復結果", t.responseResult, accent: .red, emptyHint: "（尚未回報，點筆直接填）") { new in
+                editBlock("回復結果", t.responseResult, accent: .red, emptyHint: "（尚未回報）", forExport: forExport) { new in
                     lifeStore.mutateSubordinateTaskFields(subordinateId: subId, taskId: t.id) { $0.responseResult = new }
                 }
             }
-            editBlock("備註", t.note, accent: .cyan) { new in
+            editBlock("備註", t.note, accent: .cyan, forExport: forExport) { new in
                 lifeStore.mutateSubordinateTaskFields(subordinateId: subId, taskId: t.id) { $0.note = new }
             }
         case .meeting(let subId, let snap):
@@ -4757,7 +4758,6 @@ struct SubordinateItemCard: View {
             ownerBlock(subId: subId, accent: .indigo)
             field("會議時間", "\(fmt(m.date)) – \(MeetingTimeFormat.time24.string(from: m.endDate))")
             field("會議長度", "\(m.durationMinutes) 分鐘")
-            field("產生時間", fmt(m.createdAt))
             if let r = m.rule { field("週期", ruleSummary(r)) }
             if m.isRecurring || !m.occurrences.isEmpty {
                 // 有週期、或不開週期但有加開場次：議程項目屬於各場次，
@@ -4768,9 +4768,11 @@ struct SubordinateItemCard: View {
             } else if !m.allItems.isEmpty {
                 agendaBlock(title: "議程項目", items: m.allItems, meeting: m, subId: subId)
             }
-            editBlock("備註", m.note, accent: .indigo) { new in
+            editBlock("備註", m.note, accent: .indigo, forExport: forExport) { new in
                 lifeStore.mutateSubordinateMeetingFields(subordinateId: subId, meetingId: m.id) { $0.note = new }
             }
+            // 會議產生時間放最下面（使用者需求：匯出時押在底部，字樣「會議產生」）
+            field("會議產生", fmt(m.createdAt))
         case .report(let subId, let snap):
             let r = lifeStore.subordinates.first { $0.id == subId }?.weeklyReports.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic)
@@ -4778,7 +4780,7 @@ struct SubordinateItemCard: View {
             if !r.reportType.isEmpty { field("分類", r.reportType) }
             field("報告日期", fmt(r.date))
             if r.isCompleted, let at = r.completedAt { field("完成時間", fmt(at)) }
-            editBlock("備註", r.note, accent: .purple) { new in
+            editBlock("備註", r.note, accent: .purple, forExport: forExport) { new in
                 lifeStore.mutateWeeklyReportFields(subordinateId: subId, reportId: r.id) { $0.note = new }
             }
         case .leave(let subId, let snap):
@@ -4788,10 +4790,10 @@ struct SubordinateItemCard: View {
             field("開始", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
             if let h = rec.leaveHours { field("請假時數", String(format: "%.1f 小時", h)) }
-            editBlock("事由", rec.content, accent: .teal) { new in
+            editBlock("事由", rec.content, accent: .teal, forExport: forExport) { new in
                 lifeStore.mutateSubordinateRecordFields(subordinateId: subId, recordId: rec.id) { $0.content = new }
             }
-            editBlock("備註", rec.note, accent: .teal) { new in
+            editBlock("備註", rec.note, accent: .teal, forExport: forExport) { new in
                 lifeStore.mutateSubordinateRecordFields(subordinateId: subId, recordId: rec.id) { $0.note = new }
             }
         case .record(let subId, let snap):
@@ -4801,10 +4803,10 @@ struct SubordinateItemCard: View {
             field("日期", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
             if let sev = rec.severity { field("嚴重度", sev.rawValue) }
-            editBlock("內容", rec.content, accent: recordColor(rec.type)) { new in
+            editBlock("內容", rec.content, accent: recordColor(rec.type), forExport: forExport) { new in
                 lifeStore.mutateSubordinateRecordFields(subordinateId: subId, recordId: rec.id) { $0.content = new }
             }
-            editBlock("備註", rec.note, accent: recordColor(rec.type)) { new in
+            editBlock("備註", rec.note, accent: recordColor(rec.type), forExport: forExport) { new in
                 lifeStore.mutateSubordinateRecordFields(subordinateId: subId, recordId: rec.id) { $0.note = new }
             }
         }
@@ -4960,12 +4962,30 @@ struct SubordinateItemCard: View {
 
     /// 就地編輯區塊：InlineEditBlock 模板＋@ 標註渲染＋各實體的寫回閉包。
     /// 取代原本唯讀的 richBlock——改一小格字不必再進完整編輯頁（點右上鉛筆、存檔即回寫）。
+    /// forExport＝匯出圖片模式：空欄位整塊隱藏（匯出不需要「未填」佔位與鉛筆），
+    /// 有內容則靜態全文顯示。
+    @ViewBuilder
     private func editBlock(_ label: String, _ content: String, accent: Color = .blue,
-                           emptyHint: String = "（未填，點筆直接補）",
+                           emptyHint: String = "（未填）", forExport: Bool = false,
                            onSave: @escaping (String) -> Void) -> some View {
-        InlineEditBlock(title: label, text: content, emptyHint: emptyHint, accent: accent,
-                        displayText: { Text(MentionText.attributed($0, people: people)) },
-                        onSave: onSave)
+        if forExport {
+            if !content.trimmingCharacters(in: .whitespaces).isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(label).font(.caption).foregroundStyle(.secondary)
+                    Text(MentionText.attributed(content, people: people))
+                        .font(.subheadline).foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .tint(.blue)
+                }
+                .padding().background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+            }
+        } else {
+            InlineEditBlock(title: label, text: content, emptyHint: emptyHint, accent: accent,
+                            displayText: { Text(MentionText.attributed($0, people: people)) },
+                            onSave: onSave)
+        }
     }
 
     @ViewBuilder

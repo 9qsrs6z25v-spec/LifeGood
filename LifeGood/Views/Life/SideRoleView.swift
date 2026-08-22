@@ -2418,7 +2418,7 @@ struct SideRoleResolutionCard: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
             InlineEditBlock(title: "決議內容", text: r.content,
-                            emptyHint: "（未填，點筆直接補）", accent: .indigo) { new in
+                            emptyHint: "（未填）", accent: .indigo) { new in
                 var updated = r
                 updated.content = new
                 lifeStore.upsertSideRoleResolution(updated, in: roleId)

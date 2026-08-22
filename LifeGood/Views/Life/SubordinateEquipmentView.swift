@@ -1012,7 +1012,7 @@ struct EquipmentDetailCard: View {
 
     private func noteCard(_ eq: ManagedEquipment) -> some View {
         InlineEditBlock(title: "備註", text: eq.note,
-                        emptyHint: "（未填，點筆直接補：位置、型號、保養注意事項等）",
+                        emptyHint: "（未填）",
                         accent: .teal) { new in
             lifeStore.mutateEquipmentFields(equipmentId: eq.id) { $0.note = new }
         }

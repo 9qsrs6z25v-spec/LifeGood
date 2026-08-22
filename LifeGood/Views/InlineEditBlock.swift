@@ -19,7 +19,7 @@ struct InlineEditBlock: View {
     let title: String
     let text: String
     /// 空內容時的佔位提示（顯示模式）；編輯模式亦作為輸入框 placeholder
-    var emptyHint: String = "（未填，點筆直接補）"
+    var emptyHint: String = "（未填）"
     /// 鉛筆與儲存鈕的主色
     var accent: Color = .blue
     /// 顯示模式的文字渲染（預設純文字；可帶 MentionText.attributed 之類的自訂渲染）
