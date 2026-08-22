@@ -998,6 +998,18 @@ class LifeStore: ObservableObject {
 
     /// 套用大夜班輪班範本（一次 8 天、不循環）：
     /// 第 1 天時差假 → 第 2–7 天大夜班（6 天）→ 第 8 天休息。
+    /// 該廠區在指定日期是否已有「其他」部屬排大夜班。
+    /// 週五套大夜輪班時的自動分岔判斷（v25.282）：週六晚上該廠已有人輪
+    /// （代表對方的輪班到週日結尾、週日交接重疊）→ 本人週六休、週日起大夜；
+    /// 週六沒人 → 本人週六就要上、標準序列。
+    func plantHasNightShift(on date: Date, plantArea: String, excluding subId: UUID) -> Bool {
+        let cal = Calendar.current
+        return subordinates.contains { s in
+            s.id != subId && s.plantArea == plantArea
+                && s.shifts.contains { cal.isDate($0.date, inSameDayAs: date) && $0.type == .nightShift }
+        }
+    }
+
     /// 套用大夜班輪班（8 天序列；使用者規則 v25.281 逐日確認版）。
     ///
     /// 標準型（skipSaturday = false）：**點選日＝時差、隔天起大夜 6 晚、第 8 天休**——

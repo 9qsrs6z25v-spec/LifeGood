@@ -974,20 +974,23 @@ private struct RosterCellDetailSheet: View {
                 Label("設為假日值班（單日）", systemImage: "sun.horizon.fill")
             }
             // 大夜輪班（8 天）：點選日時差、隔天起大夜 6 晚、第 8 天休。
-            // 週五是分岔點——有兩種輪法，兩顆按鈕都給（使用者規則 v25.281）。
+            // 週五自動分岔（使用者規則 v25.282）：看同廠區週六晚上有沒有人輪大夜——
+            // 有人（對方輪班週日結尾、週日交接重疊）→ 五時差、六休、日起大夜；
+            // 週六沒人 → 五時差、六起大夜、下週五休（標準序列）。
             if Calendar.current.component(.weekday, from: selectedDate) == 6 {
-                Button {
-                    lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: selectedDate)
-                    dismiss()
-                } label: {
-                    Label("大夜輪班：五時差、六起大夜、下週五休", systemImage: "arrow.triangle.2.circlepath")
-                }
+                let saturday = Calendar.current.date(byAdding: .day, value: 1, to: selectedDate) ?? selectedDate
+                let plant = lifeStore.subordinates.first { $0.id == cell.subId }?.plantArea ?? ""
+                let saturdayCovered = lifeStore.plantHasNightShift(on: saturday, plantArea: plant,
+                                                                   excluding: cell.subId)
                 Button {
                     lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: selectedDate,
-                                                      skipSaturday: true)
+                                                      skipSaturday: saturdayCovered)
                     dismiss()
                 } label: {
-                    Label("大夜輪班：五時差、六休、日起大夜", systemImage: "arrow.triangle.2.circlepath")
+                    Label(saturdayCovered
+                          ? "大夜輪班：五時差、六休（該廠週六已有人）、日起大夜"
+                          : "大夜輪班：五時差、六起大夜（該廠週六無人）、下週五休",
+                          systemImage: "arrow.triangle.2.circlepath")
                 }
             } else {
                 Button {
