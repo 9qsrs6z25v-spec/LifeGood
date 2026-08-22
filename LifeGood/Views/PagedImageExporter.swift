@@ -180,8 +180,9 @@ enum PagedImageExporter {
 
 // MARK: - 每頁項目數選擇（匯出前詢問）
 
-/// 匯出前的「每頁項目數」選擇：confirmationDialog 的標準包裝。
-/// 上次的選擇以 @AppStorage 記住，下次對話框把它排最前面。
+/// 匯出前的「每頁項目數」選擇：兩個選項——自行輸入數字、或全部一頁
+///（使用者需求 v25.285：不用預設清單挑，直接打數字最快）。
+/// 上次輸入的數字以 @AppStorage 記住並預填。
 /// 用法：
 ///   .exportPageSizeDialog(isPresented: $askPageSize, itemCount: hits.count) { per in
 ///       runExport(perPage: per)
@@ -191,27 +192,27 @@ struct ExportPageSizeDialog: ViewModifier {
     let itemCount: Int
     let onPick: (Int) -> Void
     @AppStorage("export_items_per_page") private var lastPick = 15
-
-    private var options: [Int] {
-        // 上次選的排最前，其餘依序；只列出小於總數的選項（等於/超過就直接「全部一頁」）
-        var base = [lastPick, 10, 15, 20, 30]
-        var seen = Set<Int>()
-        base = base.filter { seen.insert($0).inserted && $0 < itemCount }
-        return base
-    }
+    @State private var countText = ""
 
     func body(content: Content) -> some View {
-        content.confirmationDialog("每頁項目數（共 \(itemCount) 項）",
-                                   isPresented: $isPresented, titleVisibility: .visible) {
-            ForEach(options, id: \.self) { n in
-                Button("每頁 \(n) 項（共 \((itemCount + n - 1) / n) 頁）") {
+        content
+            .alert("每頁項目數（共 \(itemCount) 項）", isPresented: $isPresented) {
+                TextField("每頁項目數", text: $countText)
+                    .keyboardType(.numberPad)
+                Button("產生分頁") {
+                    let entered = Int(countText.trimmingCharacters(in: .whitespaces)) ?? lastPick
+                    let n = min(max(1, entered), max(1, itemCount))
                     lastPick = n
                     onPick(n)
                 }
+                Button("全部一頁") { onPick(max(1, itemCount)) }
+                Button("取消", role: .cancel) { }
+            } message: {
+                Text("輸入每頁要放幾個項目（上次：\(lastPick)），或選擇全部一頁。")
             }
-            Button("全部一頁") { onPick(itemCount) }
-            Button("取消", role: .cancel) { }
-        }
+            .onChange(of: isPresented) { _, showing in
+                if showing { countText = "\(lastPick)" }   // 開框預填上次的數字
+            }
     }
 }
 
