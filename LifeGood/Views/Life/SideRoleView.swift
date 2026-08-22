@@ -562,6 +562,8 @@ struct SideRoleWorkspaceView: View {
     @State private var filterPerson: String?
     @State private var sharePayload: SideRoleSharePayload?
     @State private var didOpenInitialResolution = false
+    /// 匯出前的每頁項目數選擇（PagedImageExporter 模組）
+    @State private var askExportPageSize = false
 
     // 各區塊收合狀態：AppStorage 持久化——收起來下次打開還是收著（全職務共用同一偏好）。
     // 搜尋/篩選中一律強制展開，不然命中的項目會被收合藏住。
@@ -649,7 +651,9 @@ struct SideRoleWorkspaceView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 14) {
-                        Button { exportImage(role) } label: { Image(systemName: "square.and.arrow.up") }
+                        Button {
+                            if exportRowCount(role) > 0 { askExportPageSize = true }
+                        } label: { Image(systemName: "square.and.arrow.up") }
                             .foregroundStyle(.green)
                         Button { showEditRole = true } label: { Image(systemName: "square.and.pencil") }
                             .disabled(!subscription.isPremium)
@@ -688,6 +692,9 @@ struct SideRoleWorkspaceView: View {
         }
         .sheet(item: $viewingResolution) { r in
             SideRoleResolutionCard(roleId: roleId, resolutionId: r.id)
+        }
+        .exportPageSizeDialog(isPresented: $askExportPageSize, itemCount: exportRowCount(role)) { per in
+            exportImage(role, perPage: per)
         }
         .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
         .alert("已複製上屆名單", isPresented: Binding(
@@ -750,7 +757,7 @@ struct SideRoleWorkspaceView: View {
             + (role.sideRoleMeetings ?? []).filter { meetingPasses($0) }.count
             + (role.sideRoleResolutions ?? []).filter { resolutionPasses($0) }.count
         return Button {
-            exportImage(role)
+            if count > 0 { askExportPageSize = true }
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "square.and.arrow.up")
@@ -788,35 +795,20 @@ struct SideRoleWorkspaceView: View {
     /// 搜尋中就匯出過濾後的結果（搜「CDA」再匯出＝一鍵產出 CDA 決議清單圖）。
     /// 規格對齊全 App 匯出：寬 430、scale ≥3、JPG 0.95、過長自動切頁。
     @MainActor
-    private func exportImage(_ role: LifeMilestone) {
-        let content = exportContent(role)
-            .frame(width: 430)
-            .padding(.vertical, 20)
-            .background(Color(.systemGroupedBackground))
-            .environmentObject(lifeStore)
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = max(UIScreen.main.scale, 3)
-        guard let ui = renderer.uiImage else { return }
-        let pages = SubordinateOverviewView.sliceTallImage(ui, maxPageHeightPt: 1600)
-        let stamp = Self.exportStampFmt.string(from: Date())
-        let roleName = SideRoleFormat.displayName(role)
-            .components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>")).joined().prefix(20)
-        var urls: [URL] = []
-        for (i, page) in pages.enumerated() {
-            guard let data = page.jpegData(compressionQuality: 0.95) else { continue }
-            let suffix = pages.count > 1 ? "_\(i + 1)之\(pages.count)" : ""
-            let name = "兼任職務_\(roleName)_\(stamp)\(suffix).jpg"
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-            do { try data.write(to: url); urls.append(url) } catch { }
-        }
-        guard !urls.isEmpty else { return }
-        sharePayload = SideRoleSharePayload(items: urls)
+    /// 匯出的項目總數（每頁項目數選單用；跟 exportImage 用同一套過濾）
+    private func exportRowCount(_ role: LifeMilestone) -> Int {
+        (role.sideRoleTasks ?? []).filter { taskPasses($0, in: role) }.count
+        + (role.sideRoleKeyDates ?? []).filter { keyDatePasses($0) }.count
+        + (role.sideRoleMembers ?? []).filter { memberPasses($0) }.count
+        + (role.sideRoleMeetings ?? []).filter { meetingPasses($0) }.count
+        + (role.sideRoleResolutions ?? []).filter { resolutionPasses($0) }.count
     }
 
-    @ViewBuilder
-    private func exportContent(_ role: LifeMilestone) -> some View {
+    /// 分頁產圖（PagedImageExporter 模組，v25.284）：每頁重複抬頭（職務名＋期間＋搜尋條件），
+    /// 以項目為單位分頁、跨頁自動重複區塊標題；每頁項目數由匯出前的選單決定。
+    private func exportImage(_ role: LifeMilestone, perPage: Int) {
         let q = query.trimmingCharacters(in: .whitespaces)
-        VStack(alignment: .leading, spacing: 12) {
+        let header = AnyView(
             VStack(alignment: .leading, spacing: 3) {
                 Text("📋 \(SideRoleFormat.displayName(role))")
                     .font(.headline)
@@ -827,101 +819,100 @@ struct SideRoleWorkspaceView: View {
                         .font(.caption2.weight(.semibold)).foregroundStyle(.indigo)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
+        )
 
-            let tasks = (role.sideRoleTasks ?? [])
-                .filter { taskPasses($0, in: role) }
-            if !tasks.isEmpty {
-                exportBox(title: "待辦（\(tasks.count)）", icon: "checklist") {
-                    ForEach(tasks) { t in
-                        exportRow(head: "\(t.isCompleted ? "✅" : "⬜️") \(t.content.isEmpty ? "未填內容" : t.content)",
-                                  lines: [
-                                    SideRoleFormat.assigneeNames(t, in: role).isEmpty ? nil
-                                        : "負責：\(SideRoleFormat.assigneeNames(t, in: role))",
-                                    t.dueDate.map { "截止：\(SideRoleFormat.date($0))" },
-                                    t.note.isEmpty ? nil : t.note
-                                  ])
-                    }
-                }
-            }
-            let dates = (role.sideRoleKeyDates ?? [])
-                .filter { keyDatePasses($0) }.sorted { $0.date < $1.date }
-            if !dates.isEmpty {
-                exportBox(title: "重要日期（\(dates.count)）", icon: "calendar") {
-                    ForEach(dates) { k in
-                        exportRow(head: "📅 \(SideRoleFormat.date(k.date))　\(k.title)",
-                                  lines: [k.note.isEmpty ? nil : k.note])
-                    }
-                }
-            }
-            let members = (role.sideRoleMembers ?? [])
-                .filter { memberPasses($0) }
-            if !members.isEmpty {
-                exportBox(title: "成員名單（\(members.count)）", icon: "person.2.fill") {
-                    ForEach(members) { m in
-                        exportRow(head: "👤 \(m.name)" + (m.dutyInRole.isEmpty ? "" : "｜\(m.dutyInRole)"),
-                                  lines: [
-                                    m.contact.isEmpty ? nil : "聯絡：\(m.contact)",
-                                    m.note.isEmpty ? nil : m.note
-                                  ])
-                    }
-                }
-            }
-            let meetings = (role.sideRoleMeetings ?? [])
-                .filter { meetingPasses($0) }
-                .sorted { $0.date > $1.date }
-            if !meetings.isEmpty {
-                exportBox(title: "會議紀錄（\(meetings.count)）", icon: "text.bubble.fill") {
-                    ForEach(meetings) { mt in
-                        exportRow(head: "🗓 \(SideRoleFormat.date(mt.date))　\(mt.topic.isEmpty ? "（未填主題）" : mt.topic)",
-                                  lines: [
-                                    mt.attendees.isEmpty ? nil : "出席：\(mt.attendees.joined(separator: "、"))",
-                                    mt.decisions.isEmpty ? nil : "決議：\(mt.decisions)",
-                                    mt.note.isEmpty ? nil : mt.note
-                                  ])
-                    }
-                }
-            }
-            let resolutions = (role.sideRoleResolutions ?? [])
-                .filter { resolutionPasses($0) }
-                .sorted { $0.date > $1.date }
-            if !resolutions.isEmpty {
-                exportBox(title: "重大決議（\(resolutions.count)）", icon: "checkmark.seal.fill") {
-                    ForEach(resolutions) { r in
-                        exportRow(head: "🏷 \(SideRoleFormat.date(r.date))　"
-                                    + (r.categories.isEmpty ? ""
-                                       : "[\(r.categories.joined(separator: "/"))] ")
-                                    + (r.title.isEmpty ? "（未填標題）" : r.title),
-                                  lines: [
-                                    r.site.isEmpty ? nil : "廠區：\(r.site)",
-                                    r.initiator.isEmpty ? nil : "發起：\(r.initiator)",
-                                    r.content.isEmpty ? nil : r.content
-                                  ])
-                    }
-                }
+        func row<V: View>(_ v: V) -> PagedExportItem {
+            .row(AnyView(v.padding(.horizontal, 14).padding(.vertical, 6)))
+        }
+        var items: [PagedExportItem] = []
+
+        let tasks = (role.sideRoleTasks ?? []).filter { taskPasses($0, in: role) }
+        if !tasks.isEmpty {
+            items.append(.sectionHeader(AnyView(exportSectionTitle(title: "待辦（\(tasks.count)）", icon: "checklist"))))
+            for t in tasks {
+                items.append(row(exportRow(head: "\(t.isCompleted ? "✅" : "⬜️") \(t.content.isEmpty ? "未填內容" : t.content)",
+                                           lines: [
+                                             SideRoleFormat.assigneeNames(t, in: role).isEmpty ? nil
+                                                 : "負責：\(SideRoleFormat.assigneeNames(t, in: role))",
+                                             t.dueDate.map { "截止：\(SideRoleFormat.date($0))" },
+                                             t.note.isEmpty ? nil : t.note
+                                           ])))
             }
         }
+        let dates = (role.sideRoleKeyDates ?? []).filter { keyDatePasses($0) }.sorted { $0.date < $1.date }
+        if !dates.isEmpty {
+            items.append(.sectionHeader(AnyView(exportSectionTitle(title: "重要日期（\(dates.count)）", icon: "calendar"))))
+            for k in dates {
+                items.append(row(exportRow(head: "📅 \(SideRoleFormat.date(k.date))　\(k.title)",
+                                           lines: [k.note.isEmpty ? nil : k.note])))
+            }
+        }
+        let members = (role.sideRoleMembers ?? []).filter { memberPasses($0) }
+        if !members.isEmpty {
+            items.append(.sectionHeader(AnyView(exportSectionTitle(title: "成員名單（\(members.count)）", icon: "person.2.fill"))))
+            for m in members {
+                items.append(row(exportRow(head: "👤 \(m.name)" + (m.dutyInRole.isEmpty ? "" : "｜\(m.dutyInRole)"),
+                                           lines: [
+                                             m.contact.isEmpty ? nil : "聯絡：\(m.contact)",
+                                             m.note.isEmpty ? nil : m.note
+                                           ])))
+            }
+        }
+        let meetings = (role.sideRoleMeetings ?? []).filter { meetingPasses($0) }.sorted { $0.date > $1.date }
+        if !meetings.isEmpty {
+            items.append(.sectionHeader(AnyView(exportSectionTitle(title: "會議紀錄（\(meetings.count)）", icon: "text.bubble.fill"))))
+            for mt in meetings {
+                items.append(row(exportRow(head: "🗓 \(SideRoleFormat.date(mt.date))　\(mt.topic.isEmpty ? "（未填主題）" : mt.topic)",
+                                           lines: [
+                                             mt.attendees.isEmpty ? nil : "出席：\(mt.attendees.joined(separator: "、"))",
+                                             mt.decisions.isEmpty ? nil : "決議：\(mt.decisions)",
+                                             mt.note.isEmpty ? nil : mt.note
+                                           ])))
+            }
+        }
+        let resolutions = (role.sideRoleResolutions ?? []).filter { resolutionPasses($0) }.sorted { $0.date > $1.date }
+        if !resolutions.isEmpty {
+            items.append(.sectionHeader(AnyView(exportSectionTitle(title: "重大決議（\(resolutions.count)）", icon: "checkmark.seal.fill"))))
+            for r in resolutions {
+                items.append(row(exportRow(head: "🏷 \(SideRoleFormat.date(r.date))　"
+                                             + (r.categories.isEmpty ? ""
+                                                : "[\(r.categories.joined(separator: "/"))] ")
+                                             + (r.title.isEmpty ? "（未填標題）" : r.title),
+                                           lines: [
+                                             r.site.isEmpty ? nil : "廠區：\(r.site)",
+                                             r.initiator.isEmpty ? nil : "發起：\(r.initiator)",
+                                             r.content.isEmpty ? nil : r.content
+                                           ])))
+            }
+        }
+
+        let roleName = String(SideRoleFormat.displayName(role).prefix(20))
+        let urls = PagedImageExporter.exportSections(
+            baseName: "兼任職務_\(roleName)",
+            itemsPerPage: perPage,
+            header: header,
+            items: items,
+            decorate: { AnyView($0.environmentObject(lifeStore)) }
+        )
+        guard !urls.isEmpty else { return }
+        sharePayload = SideRoleSharePayload(items: urls)
     }
 
-    private func exportBox<C: View>(title: String, icon: String,
-                                    @ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Capsule()
-                    .fill(LinearGradient(colors: [.indigo, .indigo.opacity(0.55)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: 4, height: 16)
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.indigo)
-                Text(title).font(.subheadline.weight(.bold))
-                Spacer()
-            }
-            content()
+    /// 模組分頁用的區塊標題（原 exportBox 標題列樣式；exportBox 本體已由
+    /// PagedImageExporter 的分頁白卡取代，v25.284）
+    private func exportSectionTitle(title: String, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(LinearGradient(colors: [.indigo, .indigo.opacity(0.55)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.indigo)
+            Text(title).font(.subheadline.weight(.bold))
+            Spacer()
         }
-        .padding(14)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
     }
 
     /// 匯出列：主行 + 縮排的完整內文行。刻意**沒有任何 lineLimit**。

@@ -65,6 +65,9 @@ struct SubordinateOverviewView: View {
     @State private var addPersonalKind: PersonalEventKind?   // 新增我的會議 / 事務
     @State private var subAddKind: SubAddKind?               // 新增部屬任務 / 會議 / 報告
     @State private var sharePayload: OverviewSharePayload?   // 文字匯出分享
+    /// 匯出前的每頁項目數選擇（PagedImageExporter 模組）
+    @State private var askExportPageSize = false
+    @State private var pendingExportSection: ExportSection = .leaves
     /// 暫時只看某位部屬（點項目上的人名膠囊設定；點 ✕ 或再點同一人取消）。
     /// 刻意用 @State 不落地：這是「看一眼」的臨時篩選，關掉頁面就重置。
     @State private var filterPersonId: UUID?
@@ -280,6 +283,10 @@ struct SubordinateOverviewView: View {
                 }
             }
             .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
+            .exportPageSizeDialog(isPresented: $askExportPageSize,
+                                  itemCount: exportRowCount(pendingExportSection)) { per in
+                exportImagePaged(pendingExportSection, perPage: per)
+            }
             .sheet(item: $addPersonalKind) { kind in
                 PersonalEventEditor(initialDate: selectedDate, editing: nil, initialKind: kind)
             }
@@ -294,13 +301,13 @@ struct SubordinateOverviewView: View {
         Menu {
             Button { exportText() } label: { Label("完整文字", systemImage: "text.alignleft") }
             Section("圖片匯出") {
-                Button { exportImage(.hero) } label: { Label("總覽看板", systemImage: "rectangle.on.rectangle") }
-                Button { exportImage(.leaves) } label: { Label("請假", systemImage: "calendar.badge.minus") }
-                Button { exportImage(.reports) } label: { Label("報告", systemImage: "doc.text.fill") }
-                Button { exportImage(.meetings) } label: { Label("會議", systemImage: "person.3.fill") }
-                Button { exportImage(.dayTasks) } label: { Label("當日任務", systemImage: "checklist") }
-                Button { exportImage(.meetingItems) } label: { Label("未完成會議條目", systemImage: "person.3.sequence.fill") }
-                Button { exportImage(.tasks) } label: { Label("未完成任務", systemImage: "tray.full.fill") }
+                Button { startExport(.hero) } label: { Label("總覽看板", systemImage: "rectangle.on.rectangle") }
+                Button { startExport(.leaves) } label: { Label("請假", systemImage: "calendar.badge.minus") }
+                Button { startExport(.reports) } label: { Label("報告", systemImage: "doc.text.fill") }
+                Button { startExport(.meetings) } label: { Label("會議", systemImage: "person.3.fill") }
+                Button { startExport(.dayTasks) } label: { Label("當日任務", systemImage: "checklist") }
+                Button { startExport(.meetingItems) } label: { Label("未完成會議條目", systemImage: "person.3.sequence.fill") }
+                Button { startExport(.tasks) } label: { Label("未完成任務", systemImage: "tray.full.fill") }
             }
         } label: {
             Image(systemName: "square.and.arrow.up")
@@ -341,10 +348,104 @@ struct SubordinateOverviewView: View {
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
     }()
 
-    /// 把指定區塊渲染成 JPG 並開啟系統分享面板
-    /// （對齊 SubordinateDetailView.exportJPG 既有規格：寬 430、scale ≥3、JPG 0.95）。
-    /// 內容太長時自動切分成多張（每張最高約 1600pt），一次分享全部檔案——
-    /// 單張兩三千 pt 的長圖傳到通訊軟體會被壓到字都糊掉，不如切頁。
+    /// 匯出入口（v25.284）：看板（單卡）與空區塊走整張渲染；
+    /// 有項目的區塊先跳「每頁項目數」選單，再用 PagedImageExporter 分頁產圖。
+    private func startExport(_ section: ExportSection) {
+        if section == .hero || exportRowCount(section) == 0 {
+            exportImage(section)
+        } else {
+            pendingExportSection = section
+            askExportPageSize = true
+        }
+    }
+
+    /// 各區塊的項目數（每頁項目數選單用）
+    private func exportRowCount(_ section: ExportSection) -> Int {
+        switch section {
+        case .hero: return 0
+        case .leaves: return todayLeaves.count
+        case .reports: return displayedReports.count
+        case .meetings: return todayMeetings.count
+        case .dayTasks: return todayTasks.count
+        case .meetingItems: return incompleteMeetingItems.count
+        case .tasks: return incompleteTasks.count
+        }
+    }
+
+    /// 分頁產圖（PagedImageExporter 模組）：每頁重複「📊 部屬總覽｜日期」抬頭與
+    /// 區塊標題，以項目為單位分頁；每頁項目數由匯出前的選單決定。
+    @MainActor
+    private func exportImagePaged(_ section: ExportSection, perPage: Int) {
+        let header = AnyView(
+            HStack {
+                Text("📊 部屬總覽｜\(Self.shareDateFmt.string(from: selectedDate))")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+        )
+        func title(_ t: String, icon: String, color: Color, count: Int) -> PagedExportItem {
+            .sectionHeader(AnyView(exportSectionTitle(t, icon: icon, color: color, count: count)))
+        }
+        var items: [PagedExportItem] = []
+        switch section {
+        case .hero:
+            return
+        case .leaves:
+            items.append(title("當日請假", icon: "calendar.badge.minus", color: .teal, count: todayLeaves.count))
+            for it in todayLeaves { items.append(.row(AnyView(leaveRow(it.sub, it.rec)))) }
+        case .reports:
+            items.append(title("報告", icon: "doc.text.fill", color: .purple, count: displayedReports.count))
+            for it in displayedReports { items.append(.row(AnyView(reportRow(it.sub, it.report, status: it.status)))) }
+        case .meetings:
+            items.append(title("當日會議", icon: "person.3.fill", color: .indigo, count: todayMeetings.count))
+            for it in todayMeetings { items.append(.row(AnyView(meetingRow(it.sub, it.meeting)))) }
+        case .dayTasks:
+            items.append(title("當日任務", icon: "checklist", color: .cyan, count: todayTasks.count))
+            for it in todayTasks { items.append(.row(AnyView(taskRow(it.sub, it.task)))) }
+        case .meetingItems:
+            items.append(title("未完成會議條目", icon: "person.3.sequence.fill", color: .indigo,
+                               count: incompleteMeetingItems.count))
+            for it in incompleteMeetingItems {
+                items.append(.row(AnyView(meetingItemOverviewRow(it.sub, it.meeting, it.item))))
+            }
+        case .tasks:
+            items.append(title("未完成任務", icon: "tray.full.fill", color: .orange, count: incompleteTasks.count))
+            for it in incompleteTasks { items.append(.row(AnyView(taskRow(it.sub, it.task)))) }
+        }
+        let urls = PagedImageExporter.exportSections(
+            baseName: "部屬總覽_\(section.rawValue)",
+            itemsPerPage: perPage,
+            header: header,
+            items: items,
+            decorate: { AnyView($0.environmentObject(lifeStore)) }
+        )
+        guard !urls.isEmpty else { return }
+        sharePayload = OverviewSharePayload(items: urls)
+    }
+
+    /// 模組分頁用的區塊標題：sectionHeader 的無內距版（模組自己會加水平內距）
+    private func exportSectionTitle(_ title: String, icon: String, color: Color, count: Int) -> some View {
+        HStack(spacing: 10) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.55)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 18)
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title).font(.subheadline.weight(.bold))
+            Spacer()
+            Text("\(count) 筆")
+                .font(.caption2.weight(.semibold)).foregroundStyle(color)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(color.opacity(0.10)).clipShape(Capsule())
+                .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.75))
+        }
+    }
+
+    /// 整張渲染路徑（總覽看板與空區塊用）：寬 430、scale ≥3、JPG 0.95、
+    /// 過長仍以 sliceTallImage 保底切頁。
     @MainActor
     private func exportImage(_ section: ExportSection) {
         let content = exportImageContent(section)

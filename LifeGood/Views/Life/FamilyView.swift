@@ -52,6 +52,9 @@ struct FamilyView: View {
     @State private var editingTask: FamilyTask?
     @State private var showReminderDeniedAlert = false
     @State private var sharePayload: FamilySharePayload?
+    /// 匯出前的每頁項目數選擇（PagedImageExporter 模組）
+    @State private var askExportPageSize = false
+    @State private var pendingExportSection: FamilyExportSection = .all
     @ObservedObject private var reminderBridge = ReminderBridge.shared
     @State private var showPremiumAlert = false
     @State private var membersAppeared = false
@@ -161,6 +164,10 @@ struct FamilyView: View {
                 Text("請到 設定 > 隱私權與安全性 > 提醒事項 開啟 LifeGood 的存取權，才能同步待辦。")
             }
             .sheet(item: $sharePayload) { payload in ShareSheet(items: payload.items) }
+            .exportPageSizeDialog(isPresented: $askExportPageSize,
+                                  itemCount: exportRowCount(pendingExportSection)) { per in
+                exportImage(pendingExportSection, perPage: per)
+            }
             .premiumLockAlert(isPresented: $showPremiumAlert)
         }
     }
@@ -175,14 +182,27 @@ struct FamilyView: View {
 
     private var exportMenu: some View {
         Menu {
-            Button { exportImage(.tasks) } label: { Label("家庭待辦", systemImage: "checklist") }
-            Button { exportImage(.members) } label: { Label("家庭成員", systemImage: "person.3.fill") }
-            Button { exportImage(.all) } label: { Label("全部", systemImage: "rectangle.on.rectangle") }
+            Button { startExport(.tasks) } label: { Label("家庭待辦", systemImage: "checklist") }
+            Button { startExport(.members) } label: { Label("家庭成員", systemImage: "person.3.fill") }
+            Button { startExport(.all) } label: { Label("全部", systemImage: "rectangle.on.rectangle") }
         } label: {
             Image(systemName: "square.and.arrow.up")
                 .font(.body)
                 .foregroundStyle(.green)
         }
+    }
+
+    /// 匯出前先選每頁項目數（PagedImageExporter 模組）
+    private func startExport(_ section: FamilyExportSection) {
+        guard exportRowCount(section) > 0 else { return }
+        pendingExportSection = section
+        askExportPageSize = true
+    }
+
+    private func exportRowCount(_ section: FamilyExportSection) -> Int {
+        let tasks = (section == .tasks || section == .all) ? store.familyTasks.count : 0
+        let members = (section == .members || section == .all) ? store.familyMembers.count : 0
+        return tasks + members
     }
 
     private static let exportStampFmt: DateFormatter = {
@@ -192,97 +212,74 @@ struct FamilyView: View {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E)"; return f
     }()
 
-    /// 對齊部屬總覽 exportImage 規格：寬 430、scale ≥3、JPG 0.95、
-    /// 過長自動切頁（SubordinateOverviewView.sliceTallImage 共用）
+    /// 分頁產圖（PagedImageExporter 模組，v25.284）：每頁重複抬頭，
+    /// 以項目為單位分頁、跨頁自動重複區塊標題；每頁項目數由匯出前的選單決定。
     @MainActor
-    private func exportImage(_ section: FamilyExportSection) {
+    private func exportImage(_ section: FamilyExportSection, perPage: Int) {
         let membersById = Dictionary(store.familyMembers.map { ($0.id, $0) },
                                      uniquingKeysWith: { first, _ in first })
-        let content = exportContent(section, membersById: membersById)
-            .frame(width: 430)
-            .padding(.vertical, 20)
-            .background(Color(.systemGroupedBackground))
-            .environmentObject(store)
-            .environmentObject(subscription)
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = max(UIScreen.main.scale, 3)
-        guard let ui = renderer.uiImage else { return }
-        let pages = SubordinateOverviewView.sliceTallImage(ui, maxPageHeightPt: 1600)
-        let stamp = Self.exportStampFmt.string(from: Date())
-        var urls: [URL] = []
-        for (i, page) in pages.enumerated() {
-            guard let data = page.jpegData(compressionQuality: 0.95) else { continue }
-            let suffix = pages.count > 1 ? "_\(i + 1)之\(pages.count)" : ""
-            let name = "家庭_\(section.rawValue)_\(stamp)\(suffix).jpg"
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-            do { try data.write(to: url); urls.append(url) } catch { }
-        }
-        guard !urls.isEmpty else { return }
-        sharePayload = FamilySharePayload(items: urls)
-    }
-
-    @ViewBuilder
-    private func exportContent(_ section: FamilyExportSection,
-                               membersById: [UUID: FamilyMember]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let header = AnyView(
             HStack {
                 Text("👨‍👩‍👧‍👦 家庭｜\(Self.exportDateFmt.string(from: Date()))")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
             }
             .padding(.horizontal, 20)
-
-            if section == .tasks || section == .all {
-                exportCardWrap(title: "家庭待辦", icon: "checklist", color: .orange) {
-                    let tasks = store.familyTasks.sorted { a, b in
-                        if a.isCompleted != b.isCompleted { return !a.isCompleted }
-                        return (a.dueDate ?? .distantFuture) < (b.dueDate ?? .distantFuture)
-                    }
-                    if tasks.isEmpty {
-                        Text("目前沒有家庭待辦").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        ForEach(tasks) { t in familyTaskRow(t) }
-                    }
+        )
+        func sectionTitle(_ title: String, icon: String, color: Color) -> PagedExportItem {
+            .sectionHeader(AnyView(
+                HStack(spacing: 8) {
+                    Capsule()
+                        .fill(LinearGradient(colors: [color, color.opacity(0.55)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .frame(width: 4, height: 16)
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(color)
+                    Text(title).font(.subheadline.weight(.bold))
+                    Spacer()
                 }
+            ))
+        }
+        var items: [PagedExportItem] = []
+        if section == .tasks || section == .all {
+            let tasks = store.familyTasks.sorted { a, b in
+                if a.isCompleted != b.isCompleted { return !a.isCompleted }
+                return (a.dueDate ?? .distantFuture) < (b.dueDate ?? .distantFuture)
             }
-            if section == .members || section == .all {
-                if section == .all { statsStrip.padding(.horizontal, 4) }
-                exportCardWrap(title: "家庭成員", icon: "person.3.fill",
-                               color: Color(red: 1.00, green: 0.35, blue: 0.55)) {
-                    if store.familyMembers.isEmpty {
-                        Text("還沒有家庭成員").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        ForEach(store.familyMembers) { m in
-                            memberRow(m, membersById: membersById)
-                        }
-                    }
+            if !tasks.isEmpty {
+                items.append(sectionTitle("家庭待辦（\(tasks.count)）", icon: "checklist", color: .orange))
+                for t in tasks {
+                    items.append(.row(AnyView(familyTaskRow(t)
+                        .padding(.horizontal, 14).padding(.vertical, 6))))
                 }
             }
         }
+        if section == .members || section == .all {
+            if section == .all {
+                items.append(.sectionHeader(AnyView(statsStrip.padding(.horizontal, 4))))
+            }
+            if !store.familyMembers.isEmpty {
+                items.append(sectionTitle("家庭成員（\(store.familyMembers.count)）", icon: "person.3.fill",
+                                          color: Color(red: 1.00, green: 0.35, blue: 0.55)))
+                for m in store.familyMembers {
+                    items.append(.row(AnyView(memberRow(m, membersById: membersById)
+                        .padding(.horizontal, 14).padding(.vertical, 6))))
+                }
+            }
+        }
+        let urls = PagedImageExporter.exportSections(
+            baseName: "家庭_\(section.rawValue)",
+            itemsPerPage: perPage,
+            header: header,
+            items: items,
+            decorate: { AnyView($0.environmentObject(store).environmentObject(subscription)) }
+        )
+        guard !urls.isEmpty else { return }
+        sharePayload = FamilySharePayload(items: urls)
     }
 
-    /// 匯出用卡片容器（List 外沒有系統底色，補一層白卡背景）
-    private func exportCardWrap<C: View>(title: String, icon: String, color: Color,
-                                         @ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Capsule()
-                    .fill(LinearGradient(colors: [color, color.opacity(0.55)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: 4, height: 16)
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(color)
-                Text(title).font(.subheadline.weight(.bold))
-                Spacer()
-            }
-            content()
-        }
-        .padding(14)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, 16)
-    }
+    // exportCardWrap 已由 PagedImageExporter 模組的分頁白卡取代（v25.284）
 
     // MARK: - 家庭待辦
 

@@ -19,6 +19,13 @@ import UIKit
 //       items: hits.map { AnyView(row($0)) },
 //       decorate: { AnyView($0.environmentObject(lifeStore)) })   // 環境物件由呼叫端補
 
+/// 分頁匯出的內容單位：多區塊匯出（部屬總覽／家庭／兼任工作區）用。
+/// sectionHeader 不計入每頁項目數；跨頁切在區塊中段時，下一頁開頭自動重複該區塊標題。
+enum PagedExportItem {
+    case sectionHeader(AnyView)
+    case row(AnyView)
+}
+
 enum PagedImageExporter {
     private static let fileStampFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
@@ -33,6 +40,7 @@ enum PagedImageExporter {
         s.components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>")).joined()
     }
 
+    /// 單一清單版：全部都是項目列（行事曆搜尋等）
     @MainActor
     static func export(baseName: String,
                        width: CGFloat = 430,
@@ -40,27 +48,65 @@ enum PagedImageExporter {
                        header: AnyView,
                        items: [AnyView],
                        decorate: (AnyView) -> AnyView = { $0 }) -> [URL] {
-        guard !items.isEmpty else { return [] }
-        let per = max(1, min(itemsPerPage, items.count))
-        let pageCount = (items.count + per - 1) / per
+        exportSections(baseName: baseName, width: width, itemsPerPage: itemsPerPage,
+                       header: header, items: items.map { PagedExportItem.row($0) },
+                       decorate: decorate)
+    }
+
+    /// 多區塊版：sectionHeader＋row 混排。分頁只數 row；
+    /// 切頁落在區塊中段時，下一頁開頭自動重複該區塊標題（不會沒頭沒尾）；
+    /// 懸在頁底、後面沒有列的區塊標題會搬到下一頁開頭。
+    @MainActor
+    static func exportSections(baseName: String,
+                               width: CGFloat = 430,
+                               itemsPerPage: Int,
+                               header: AnyView,
+                               items: [PagedExportItem],
+                               decorate: (AnyView) -> AnyView = { $0 }) -> [URL] {
+        let rowTotal = items.reduce(0) { if case .row = $1 { return $0 + 1 }; return $0 }
+        guard rowTotal > 0 else { return [] }
+        let per = max(1, min(itemsPerPage, rowTotal))
+
+        // 分頁
+        var pages: [[PagedExportItem]] = []
+        var current: [PagedExportItem] = []
+        var rowsInPage = 0
+        var currentSection: AnyView?
+        for item in items {
+            switch item {
+            case .sectionHeader(let v):
+                currentSection = v
+                current.append(item)
+            case .row:
+                if rowsInPage >= per {
+                    // 頁底懸空的區塊標題（後面沒有列）搬到下一頁開頭
+                    var carried: [PagedExportItem] = []
+                    while case .some(.sectionHeader) = current.last {
+                        carried.append(current.removeLast())
+                    }
+                    pages.append(current)
+                    current = carried.reversed()
+                    if carried.isEmpty, let cs = currentSection {
+                        current = [.sectionHeader(cs)]   // 區塊中段換頁：重複標題維持脈絡
+                    }
+                    rowsInPage = 0
+                }
+                current.append(item)
+                rowsInPage += 1
+            }
+        }
+        if !current.isEmpty { pages.append(current) }
+
+        // 逐頁渲染
         let fileStamp = fileStampFmt.string(from: Date())
         let displayStamp = displayStampFmt.string(from: Date())
         let safeBase = sanitizeFileName(baseName)
+        let pageCount = pages.count
         var urls: [URL] = []
-
-        for p in 0..<pageCount {
-            let range = (p * per)..<min(items.count, (p + 1) * per)
+        for (p, pageItems) in pages.enumerated() {
             let page = VStack(alignment: .leading, spacing: 12) {
                 header
-                VStack(spacing: 0) {
-                    ForEach(Array(range), id: \.self) { i in
-                        items[i]
-                        if i < range.upperBound - 1 { Divider().padding(.leading, 58) }
-                    }
-                }
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .padding(.horizontal, 16)
+                pageBody(pageItems)
                 HStack {
                     Spacer()
                     Text(pageCount > 1
@@ -84,6 +130,51 @@ enum PagedImageExporter {
             do { try data.write(to: url); urls.append(url) } catch { }
         }
         return urls
+    }
+
+    /// 一頁的內容：連續的 row 聚成一張白卡（列間分隔線），sectionHeader 獨立成行
+    @ViewBuilder
+    private static func pageBody(_ items: [PagedExportItem]) -> some View {
+        let blocks = makeBlocks(items)
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .header(let v):
+                    v.padding(.horizontal, 20)
+                case .rows(let rows):
+                    VStack(spacing: 0) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { i, r in
+                            r
+                            if i < rows.count - 1 { Divider().padding(.leading, 58) }
+                        }
+                    }
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal, 16)
+                }
+            }
+        }
+    }
+
+    private enum Block {
+        case header(AnyView)
+        case rows([AnyView])
+    }
+
+    private static func makeBlocks(_ items: [PagedExportItem]) -> [Block] {
+        var out: [Block] = []
+        var pendingRows: [AnyView] = []
+        for item in items {
+            switch item {
+            case .sectionHeader(let v):
+                if !pendingRows.isEmpty { out.append(.rows(pendingRows)); pendingRows = [] }
+                out.append(.header(v))
+            case .row(let v):
+                pendingRows.append(v)
+            }
+        }
+        if !pendingRows.isEmpty { out.append(.rows(pendingRows)) }
+        return out
     }
 }
 
