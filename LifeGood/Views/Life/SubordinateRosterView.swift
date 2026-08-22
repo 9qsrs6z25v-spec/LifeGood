@@ -968,10 +968,18 @@ private struct RosterCellDetailSheet: View {
                 Label("設定 / 變更班別", systemImage: "calendar.badge.clock")
             }
             Button {
+                lifeStore.setShift(subordinateId: cell.subId, date: selectedDate, type: .holidayDuty)
+                dismiss()
+            } label: {
+                Label("設為假日值班（單日）", systemImage: "sun.horizon.fill")
+            }
+            Button {
                 lifeStore.applyNightShiftRotation(subordinateId: cell.subId, startDate: selectedDate)
                 dismiss()
             } label: {
-                Label("從這天套用大夜班輪班（8 天）", systemImage: "arrow.triangle.2.circlepath")
+                // 大夜輪班邏輯：週日晚上到週五早上，時差落在週六（假日）要補一天，
+                // 所以週五＋週六都標時差假
+                Label("套用大夜班輪班（該週日～四大夜、五六時差）", systemImage: "arrow.triangle.2.circlepath")
             }
             Button {
                 lifeStore.applyEveningShiftWeekdays(subordinateId: cell.subId, startDate: selectedDate)

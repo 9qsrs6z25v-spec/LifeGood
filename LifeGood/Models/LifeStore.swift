@@ -998,21 +998,31 @@ class LifeStore: ObservableObject {
 
     /// 套用大夜班輪班範本（一次 8 天、不循環）：
     /// 第 1 天時差假 → 第 2–7 天大夜班（6 天）→ 第 8 天休息。
+    /// 套用大夜班輪班：一律對齊 startDate 所在的「週日起七天」——
+    /// 週日〜週四＝大夜（最後一晚於週五早上下班）、週五＋週六＝時差假。
+    ///
+    /// 排班邏輯（使用者規則 v25.280）：大夜輪班是週日晚上到（下）週五早上，
+    /// 時差本來落在週六——但週六本來就是假日，等於沒補到，要補一天還他，
+    /// 所以週五也標時差假；不論點到該週哪一天，套用的都是同一週的這個型。
     func applyNightShiftRotation(subordinateId: UUID, startDate: Date) {
         guard let si = subordinates.firstIndex(where: { $0.id == subordinateId }) else { return }
         let cal = Calendar.current
         // 以中午為錨點往後加天數，避開午夜 / 時區邊界造成的整天位移
-        let start = cal.date(bySettingHour: 12, minute: 0, second: 0,
-                             of: cal.startOfDay(for: startDate)) ?? startDate
-        var plan: [(Int, ShiftType)] = [(0, .jetLagLeave)]
-        for d in 1...6 { plan.append((d, .nightShift)) }
-        plan.append((7, .restDay))
-        // 以 isLoading 批次保護整個迴圈：8 次 removeAll+append 否則每次都觸發 didSet → save()，
-        // 共產生 16 次不必要的背景序列化，且各次中間態（部分班別已寫、部分尚未）也會被持久化。
+        let anchor = cal.date(bySettingHour: 12, minute: 0, second: 0,
+                              of: cal.startOfDay(for: startDate)) ?? startDate
+        // 找到該七天段的週日：weekday 1=日…7=六
+        let wd = cal.component(.weekday, from: anchor)
+        guard let sunday = cal.date(byAdding: .day, value: -(wd - 1), to: anchor) else { return }
+        var plan: [(Int, ShiftType)] = []
+        for d in 0...4 { plan.append((d, .nightShift)) }   // 日〜四：大夜
+        plan.append((5, .jetLagLeave))                     // 五：時差（補還週六）
+        plan.append((6, .jetLagLeave))                     // 六：時差
+        // 以 isLoading 批次保護整個迴圈：7 次 removeAll+append 否則每次都觸發 didSet → save()，
+        // 產生多次不必要的背景序列化，且各次中間態（部分班別已寫、部分尚未）也會被持久化。
         isLoading = true
         defer { isLoading = false }
         for (offset, type) in plan {
-            guard let noon = cal.date(byAdding: .day, value: offset, to: start) else { continue }
+            guard let noon = cal.date(byAdding: .day, value: offset, to: sunday) else { continue }
             let day = cal.startOfDay(for: noon)
             subordinates[si].shifts.removeAll { cal.isDate($0.date, inSameDayAs: day) }
             subordinates[si].shifts.append(SubordinateShift(date: day, type: type))
