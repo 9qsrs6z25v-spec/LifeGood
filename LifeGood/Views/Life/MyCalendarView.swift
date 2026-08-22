@@ -53,6 +53,9 @@ struct MyCalendarView: View {
     @State private var openTarget: CalendarOpenTarget?
     /// 搜尋結果匯出圖片的分享面板
     @State private var searchSharePayload: CalendarSharePayload?
+    /// 匯出前的每頁項目數選擇（PagedImageExporter 模組）
+    @State private var askExportPageSize = false
+    @State private var pendingExportQuery = ""
 
     /// 從搜尋結果 / 已完成卡片點擊要開啟的編輯目標
     enum CalendarOpenTarget: Identifiable {
@@ -1292,7 +1295,9 @@ struct MyCalendarView: View {
                 Text("\(hits.count) 筆").font(.caption).foregroundStyle(.secondary)
                 if !hits.isEmpty {
                     Button {
-                        exportSearchResults(query: query, hits: hits)
+                        // 匯出前先選每頁項目數（PagedImageExporter 模組）
+                        pendingExportQuery = query
+                        askExportPageSize = true
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                             .font(.subheadline)
@@ -1302,6 +1307,10 @@ struct MyCalendarView: View {
                 }
             }
             .padding(.horizontal)
+            .exportPageSizeDialog(isPresented: $askExportPageSize, itemCount: hits.count) { per in
+                exportSearchResults(query: pendingExportQuery,
+                                    hits: searchHits(pendingExportQuery), perPage: per)
+            }
 
             if hits.isEmpty {
                 VStack(spacing: 10) {
@@ -1330,12 +1339,13 @@ struct MyCalendarView: View {
         }
     }
 
-    /// 把目前的搜尋結果渲染成 JPG 分享（規格對齊部屬總覽／家庭頁匯出：
-    /// 寬 430、scale ≥3、JPG 0.95、過長自動切頁＋檔名頁碼）。
-    /// 匯出的是「當下這批結果」——搜尋詞與筆數印在標題列，圖片單獨轉傳也看得懂脈絡。
+    /// 把目前的搜尋結果分頁產圖分享（PagedImageExporter 模組，v25.283）：
+    /// 每一頁都重複抬頭（搜尋詞＋筆數），依使用者選的每頁項目數分頁、
+    /// 頁尾帶頁碼與匯出戳記——不再用長圖硬切，第二頁不再沒頭沒尾。
     @MainActor
-    private func exportSearchResults(query: String, hits: [SearchHit]) {
-        let content = VStack(alignment: .leading, spacing: 12) {
+    private func exportSearchResults(query: String, hits: [SearchHit], perPage: Int) {
+        guard !hits.isEmpty else { return }
+        let header = AnyView(
             HStack {
                 Text("🔍 我的行事曆搜尋「\(query)」")
                     .font(.subheadline.weight(.semibold))
@@ -1343,45 +1353,17 @@ struct MyCalendarView: View {
                 Text("\(hits.count) 筆").font(.caption).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 20)
-            VStack(spacing: 0) {
-                ForEach(Array(hits.enumerated()), id: \.element.id) { idx, h in
-                    searchHitRow(h)
-                    if idx < hits.count - 1 { Divider().padding(.leading, 58) }
-                }
-            }
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .padding(.horizontal, 16)
-        }
-        .frame(width: 430)
-        .padding(.vertical, 20)
-        .background(Color(.systemGroupedBackground))
-        .environmentObject(lifeStore)
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = max(UIScreen.main.scale, 3)
-        guard let ui = renderer.uiImage else { return }
-        let pages = SubordinateOverviewView.sliceTallImage(ui, maxPageHeightPt: 1600)
-        let stamp = Self.searchExportStampFmt.string(from: Date())
-        // 搜尋詞進檔名前先清掉路徑非法字元（「/」會被當成目錄層級、寫檔直接失敗）
-        let safeQuery = query
-            .components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>"))
-            .joined()
-            .prefix(20)
-        var urls: [URL] = []
-        for (i, page) in pages.enumerated() {
-            guard let data = page.jpegData(compressionQuality: 0.95) else { continue }
-            let suffix = pages.count > 1 ? "_\(i + 1)之\(pages.count)" : ""
-            let name = "行事曆搜尋_\(safeQuery)_\(stamp)\(suffix).jpg"
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-            do { try data.write(to: url); urls.append(url) } catch { }
-        }
+        )
+        let urls = PagedImageExporter.export(
+            baseName: "行事曆搜尋_\(String(query.prefix(20)))",
+            itemsPerPage: perPage,
+            header: header,
+            items: hits.map { h in AnyView(searchHitRow(h)) },
+            decorate: { AnyView($0.environmentObject(lifeStore)) }
+        )
         guard !urls.isEmpty else { return }
         searchSharePayload = CalendarSharePayload(items: urls)
     }
-
-    private static let searchExportStampFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
-    }()
 
     private func searchHitRow(_ h: SearchHit) -> some View {
         HStack(spacing: 11) {
