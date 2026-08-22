@@ -1001,6 +1001,7 @@ private struct FixedExpenseCard: View {
     @Environment(\.dismiss) private var dismiss
     let expense: Expense
     @State private var showEdit = false
+    @State private var shareItem: FinanceCardSharePayload?
 
     /// 讀取 store 最新版本，編輯儲存後即時反映（找不到才退回快照）
     private var current: Expense { store.expenses.first { $0.id == expense.id } ?? expense }
@@ -1056,13 +1057,90 @@ private struct FixedExpenseCard: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("編輯") { showEdit = true }.bold()
+                    HStack(spacing: 16) {
+                        Menu {
+                            Button { shareJPG() } label: { Label("匯出圖片", systemImage: "photo") }
+                            Button { shareText() } label: { Label("匯出文字", systemImage: "text.alignleft") }
+                        } label: { Image(systemName: "square.and.arrow.up") }
+                        Button("編輯") { showEdit = true }.bold()
+                    }
                 }
             }
             .sheet(isPresented: $showEdit) {
                 AddExpenseView(expenseType: .fixed, editingExpense: current)
             }
+            .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
         }
+    }
+
+    // MARK: 分享（v25.286：圖片＝靜態分享版含戳記、照片不入圖；文字＝Emoji 排版）
+
+    private static let displayStampFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
+    private static let fileStampFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
+
+    @MainActor
+    private func shareJPG() {
+        let content = VStack(alignment: .leading, spacing: 16) {
+            titleBlock
+            infoCard
+            if linkedSavings != nil { savingsSection }
+            loanSection
+            if !current.note.isEmpty { noteBlock }
+            Text("美好人生・\(Self.displayStampFmt.string(from: Date())) 匯出")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .frame(width: 420)
+        .padding(20)
+        .background(Color(.systemGroupedBackground))
+        .environmentObject(store)
+        .environmentObject(lifeStore)
+        .environmentObject(financeStore)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage, let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        let safeTitle = PagedImageExporter.sanitizeFileName(String(
+            (current.title.isEmpty ? "未命名項目" : current.title).prefix(20)))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("固定支出_\(safeTitle)_\(Self.fileStampFmt.string(from: Date())).jpg")
+        do {
+            try data.write(to: url)
+            shareItem = FinanceCardSharePayload(items: [url])
+        } catch { }
+    }
+
+    private func shareText() {
+        var lines: [String] = []
+        lines.append("📌 固定支出｜\(current.title.isEmpty ? "未命名項目" : current.title)")
+        lines.append("━━━━━━━━━━")
+        lines.append("💵 金額：\(formattedAmount)")
+        lines.append("🏷 類別：\(current.fixedCategory?.rawValue ?? "未分類")")
+        if let recurrence = current.recurrence { lines.append("🔁 週期：\(recurrence.rawValue)") }
+        lines.append("🗓 起始日期：\(Self.dateFmt.string(from: current.date))")
+        if current.effectivelyTaxDeductible { lines.append("🧾 節稅：列入節稅追蹤") }
+        if let target = deductionTargetLabel { lines.append("🏦 扣款目標：\(target)") }
+        if let ins = linkedSavings {
+            let rate = current.insuranceRate ?? ins.annualRate
+            lines.append("")
+            lines.append("💰 儲蓄險")
+            if rate > 0 { lines.append("・複利年利率：\(String(format: "%.2f%%", rate))") }
+            lines.append("・已繳 / 總期數：\(ins.elapsedPeriods) / \(ins.totalPeriods) 期")
+            lines.append("・起訖：\(Self.dateFmt.string(from: ins.startDate)) → \(Self.dateFmt.string(from: ins.maturityDate))")
+        }
+        if let lp = loanCardInfo {
+            lines.append("")
+            lines.append("🏠 貸款")
+            if let rate = current.loanRate, rate > 0 { lines.append("・利率：\(String(format: "%.2f%%", rate))") }
+            lines.append("・進度：\(lp.periodText)")
+            lines.append("・貸款總額：NT$ \(fmtShort(lp.totalAmount))｜剩餘：NT$ \(fmtShort(max(lp.totalAmount - lp.paid, 0)))")
+            lines.append("・預計繳清：\(Self.dateFmt.string(from: lp.endDate))")
+        }
+        if !current.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(current.note) }
+        shareItem = FinanceCardSharePayload(items: [lines.joined(separator: "\n")])
     }
 
     private var titleBlock: some View {

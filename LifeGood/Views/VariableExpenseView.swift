@@ -45,6 +45,8 @@ struct VariableExpenseView: View {
     @State private var showingAddSheet = false
     @State private var selectedCategory: VariableCategory?
     @State private var expenseToEdit: Expense?
+    /// 點列先開詳情卡片（FinanceItemCard 模組）；編輯是卡片右上的動作
+    @State private var previewExpense: Expense?
     @State private var visibleWeeks = 1
     @State private var searchText: String = ""
     @State private var listRowsAppeared = false
@@ -172,6 +174,9 @@ struct VariableExpenseView: View {
             }
             .sheet(item: $expenseToEdit) { expense in
                 AddExpenseView(expenseType: .variable, editingExpense: expense)
+            }
+            .sheet(item: $previewExpense) { expense in
+                FinanceItemCard(target: .variableExpense(expense.id))
             }
             .searchable(
                 text: $searchText,
@@ -609,7 +614,7 @@ struct VariableExpenseView: View {
                 ForEach(Array(expenses.enumerated()), id: \.element.id) { rowIdx, expense in
                     ExpenseRow(expense: expense)
                         .contentShape(Rectangle())
-                        .onTapGesture { expenseToEdit = expense }
+                        .onTapGesture { previewExpense = expense }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
                                 if let idx = expenses.firstIndex(where: { $0.id == expense.id }) {

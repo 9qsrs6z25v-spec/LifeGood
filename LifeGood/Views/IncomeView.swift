@@ -46,6 +46,8 @@ struct IncomeView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var showAdd = false
     @State private var editingItem: Income?
+    /// 點列先開詳情卡片（FinanceItemCard 模組）；編輯是卡片右上的動作
+    @State private var viewingItem: Income?
     @State private var selectedCategory: IncomeCategory?
     @State private var searchText: String = ""
     @State private var headerAppeared = false
@@ -167,6 +169,7 @@ struct IncomeView: View {
             }
             .sheet(isPresented: $showAdd) { AddIncomeView() }
             .sheet(item: $editingItem) { item in AddIncomeView(editing: item) }
+            .sheet(item: $viewingItem) { item in FinanceItemCard(target: .income(item.id)) }
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),
@@ -694,7 +697,7 @@ struct IncomeView: View {
                 ForEach(Array(incomes.enumerated()), id: \.element.id) { rowIdx, income in
                     incomeRow(income)
                         .contentShape(Rectangle())
-                        .onTapGesture { editingItem = income }
+                        .onTapGesture { viewingItem = income }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
                                 if let idx = incomes.firstIndex(where: { $0.id == income.id }) {
