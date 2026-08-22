@@ -231,26 +231,53 @@ final class AppleCalendarBridge: ObservableObject {
         event.recurrenceRules = [EKRecurrenceRule(recurrenceWith: .yearly, interval: 1, end: end)]
         do {
             try eventStore.save(event, span: .futureEvents, commit: true)
-            // 新的建立成功才刪舊的（避免失敗時提醒直接消失）
-            if let existingId, existingId != event.eventIdentifier {
-                delete(eventIdentifier: existingId)
-            }
-            return event.eventIdentifier
+            // ⚠️ eventIdentifier 在部分來源（iCloud 同步中／Google／Exchange）save 後
+            // 當下可能是 nil（EventKit 已知怪癖）——事件建成功了、id 卻拿不到，
+            // 造成「行事曆有事件但鈴鐺不亮」。calendarItemIdentifier 一定拿得到，
+            // 當備援存起來；查找/刪除端兩種 id 都認得（resolveEvent）。
+            let newId = event.eventIdentifier ?? event.calendarItemIdentifier
+            // 掃掉這個人其餘的生日提醒（含先前 id 沒記到的孤兒與被取代的舊提醒）
+            removeBirthdayEvents(named: event.title ?? "", excludingItemId: event.calendarItemIdentifier)
+            return newId
         } catch {
             return nil
         }
     }
 
+    /// 用儲存的 id 找回事件：先當 eventIdentifier 查，查不到再當 calendarItemIdentifier 查
+    ///（生日提醒的 id 兩種都可能，見 writeBirthdayReminder 註解）。
+    private func resolveEvent(_ id: String) -> EKEvent? {
+        if let e = eventStore.event(withIdentifier: id) { return e }
+        return eventStore.calendarItem(withIdentifier: id) as? EKEvent
+    }
+
+    /// 清掉同名的生日提醒事件（標題＋App 備註標記辨識；排除剛建立的那一個）。
+    /// 往後掃 400 天必含每年循環的下一次發生，從該發生以 futureEvents 移除即砍掉整串。
+    private func removeBirthdayEvents(named title: String, excludingItemId: String) {
+        guard !title.isEmpty else { return }
+        let start = Date()
+        guard let end = Calendar.current.date(byAdding: .day, value: 400, to: start) else { return }
+        let pred = eventStore.predicateForEvents(withStart: start, end: end, calendars: nil)
+        var removed = false
+        for e in eventStore.events(matching: pred)
+        where e.title == title && e.notes == "美好人生・部屬生日提醒"
+            && e.calendarItemIdentifier != excludingItemId {
+            try? eventStore.remove(e, span: .futureEvents, commit: false)
+            removed = true
+        }
+        if removed { try? eventStore.commit() }
+    }
+
     /// 既有事件目前所屬的行事曆 id（生日提醒設定頁預填用）
     func calendarId(ofEvent id: String) -> String? {
-        guard hasAccess, let e = eventStore.event(withIdentifier: id) else { return nil }
+        guard hasAccess, let e = resolveEvent(id) else { return nil }
         return e.calendar?.calendarIdentifier
     }
 
-    /// 刪除指定 EKEvent
+    /// 刪除指定 EKEvent（id 可為 eventIdentifier 或 calendarItemIdentifier，見 resolveEvent）
     func delete(eventIdentifier: String) {
         guard hasAccess,
-              let event = eventStore.event(withIdentifier: eventIdentifier) else { return }
+              let event = resolveEvent(eventIdentifier) else { return }
         do {
             try eventStore.remove(event, span: .futureEvents, commit: true)
         } catch {
