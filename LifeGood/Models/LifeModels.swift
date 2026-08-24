@@ -961,11 +961,17 @@ struct SideRoleResolution: Identifiable, Codable {
     /// 決議發起人。文字快照（比照出席者）：發起人常是跨部門或外部的人，
     /// 存 id 的話對方被刪除就變空白；可手動輸入、也可從人員清單挑
     var initiator: String
+    /// 流水號（同一職務內遞增；顯示為 #003）。舊資料由一次性遷移依日期補號
+    var serial: Int?
+    /// 參照的前案決議 id（可多選；決議常參照前案持續更新）
+    var references: [UUID]
 
     init(id: UUID = UUID(), date: Date = Date(), title: String = "", content: String = "",
-         site: String = "", categories: [String] = [], initiator: String = "") {
+         site: String = "", categories: [String] = [], initiator: String = "",
+         serial: Int? = nil, references: [UUID] = []) {
         self.id = id; self.date = date; self.title = title; self.content = content
         self.site = site; self.categories = categories; self.initiator = initiator
+        self.serial = serial; self.references = references
     }
 
     init(from decoder: Decoder) throws {
@@ -985,9 +991,14 @@ struct SideRoleResolution: Identifiable, Codable {
         }
         initiator = (try? c.decodeIfPresent(String.self, forKey: .initiator)) ?? ""
         site = (try? c.decodeIfPresent(String.self, forKey: .site)) ?? ""
+        serial = try? c.decodeIfPresent(Int.self, forKey: .serial)
+        references = (try? c.decodeIfPresent([UUID].self, forKey: .references)) ?? []
     }
 
-    private enum CodingKeys: String, CodingKey { case id, date, title, content, site, categories, initiator }
+    private enum CodingKeys: String, CodingKey { case id, date, title, content, site, categories, initiator, serial, references }
+
+    /// 流水號顯示文字（#003）；舊資料尚未補號時為空字串
+    var serialLabel: String { serial.map { String(format: "#%03d", $0) } ?? "" }
     /// 舊版單選分類。獨立 CodingKey 讓 encode 仍可用合成版
     ///（CodingKeys 出現沒有對應屬性的 case 會讓合成的 encode 編不過）。
     private enum LegacyKeys: String, CodingKey { case category }

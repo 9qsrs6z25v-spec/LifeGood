@@ -1408,6 +1408,15 @@ struct SideRoleWorkspaceView: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
+                    // [v25.299] 流水號徽章
+                    if !r.serialLabel.isEmpty {
+                        Text(r.serialLabel)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.purple)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.purple.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
                     Text(SideRoleFormat.date(r.date))
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.indigo)
@@ -2338,6 +2347,8 @@ struct SideRoleResolutionCard: View {
     @State private var showEdit = false
     @State private var shareItem: ResolutionSharePayload?
     @State private var cardAppeared = false
+    /// [v25.299] 點參照超連結時開啟的前案卡片
+    @State private var viewingReferenceId: UUID?
 
     private var role: LifeMilestone? { lifeStore.milestones.first { $0.id == roleId } }
     private var resolution: SideRoleResolution? {
@@ -2346,6 +2357,9 @@ struct SideRoleResolutionCard: View {
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E)"; return f
+    }()
+    private static let refDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
     }()
     private static let stampFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
@@ -2389,6 +2403,12 @@ struct SideRoleResolutionCard: View {
                 }
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .sheet(item: Binding(
+                get: { viewingReferenceId.map { IdentifiableUUID(id: $0) } },
+                set: { viewingReferenceId = $0?.id }
+            )) { wrapper in
+                SideRoleResolutionCard(roleId: roleId, resolutionId: wrapper.id)
+            }
             .onAppear {
                 withAnimation(.spring(response: 0.46, dampingFraction: 0.82)) { cardAppeared = true }
             }
@@ -2404,6 +2424,9 @@ struct SideRoleResolutionCard: View {
         if !r.categories.isEmpty { categoryBlock(r) }
         if forExport {
             staticBlock("決議內容", r.content.isEmpty ? "（未填內容）" : r.content)
+            if !r.references.isEmpty {
+                referenceBlock(r, forExport: true)
+            }
             Text("美好人生・\(Self.dateFmt.string(from: Date())) 匯出")
                 .font(.caption2).foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -2414,7 +2437,72 @@ struct SideRoleResolutionCard: View {
                 updated.content = new
                 lifeStore.upsertSideRoleResolution(updated, in: roleId)
             }
+            // [v25.299] 參照前案超連結：點一列跳到該前案的決議卡片
+            if !r.references.isEmpty {
+                referenceBlock(r, forExport: false)
+            }
         }
+    }
+
+    /// 參照前案區塊：畫面上是可點的超連結列（跳到前案卡片）；匯出為靜態清單
+    private func referenceBlock(_ r: SideRoleResolution, forExport: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("參照前案").font(.caption).foregroundStyle(.secondary)
+            ForEach(r.references, id: \.self) { rid in
+                if let ref = role?.sideRoleResolutions?.first(where: { $0.id == rid }) {
+                    if forExport {
+                        HStack(spacing: 6) {
+                            Image(systemName: "link")
+                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(.indigo)
+                            Text("\(ref.serialLabel.isEmpty ? "" : "\(ref.serialLabel)｜")\(Self.refDateFmt.string(from: ref.date))｜\(ref.title.isEmpty ? "（未填標題）" : ref.title)")
+                                .font(.caption.weight(.medium))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        Button { viewingReferenceId = rid } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "link")
+                                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.indigo)
+                                if !ref.serialLabel.isEmpty {
+                                    Text(ref.serialLabel)
+                                        .font(.system(size: 10, weight: .bold))
+                                        .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                        .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
+                                        .clipShape(Capsule())
+                                }
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(ref.title.isEmpty ? "（未填標題）" : ref.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.indigo)
+                                        .underline()
+                                        .lineLimit(1)
+                                    Text(Self.refDateFmt.string(from: ref.date))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.up.forward.app")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.indigo.opacity(0.7))
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "link")
+                            .font(.system(size: 10)).foregroundStyle(.tertiary)
+                        Text("（前案已被刪除）")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
     }
 
     private func headerBlock(role: LifeMilestone, r: SideRoleResolution) -> some View {
@@ -2435,6 +2523,14 @@ struct SideRoleResolutionCard: View {
                         .padding(.horizontal, 7).padding(.vertical, 2)
                         .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
                         .clipShape(Capsule())
+                    // [v25.299] 流水號徽章（#003）
+                    if !r.serialLabel.isEmpty {
+                        Text(r.serialLabel)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Color.purple.opacity(0.12)).foregroundStyle(.purple)
+                            .clipShape(Capsule())
+                    }
                     Text(SideRoleFormat.displayName(role))
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -2550,7 +2646,7 @@ struct SideRoleResolutionCard: View {
     private func shareText() {
         guard let role, let r = resolution else { return }
         var lines: [String] = []
-        lines.append("📌 重大決議｜\(r.title.isEmpty ? "（未填標題）" : r.title)")
+        lines.append("📌 重大決議\(r.serialLabel.isEmpty ? "" : " \(r.serialLabel)")｜\(r.title.isEmpty ? "（未填標題）" : r.title)")
         lines.append("──────────")
         lines.append("🏷 職務：\(SideRoleFormat.displayName(role))")
         lines.append("🗓 決議日期：\(Self.dateFmt.string(from: r.date))")
@@ -2560,6 +2656,16 @@ struct SideRoleResolutionCard: View {
         lines.append("")
         lines.append("📝 決議內容")
         lines.append(r.content.isEmpty ? "（未填內容）" : r.content)
+        let refs = r.references.compactMap { rid in
+            role.sideRoleResolutions?.first { $0.id == rid }
+        }
+        if !refs.isEmpty {
+            lines.append("")
+            lines.append("🔗 參照前案")
+            for ref in refs {
+                lines.append("• \(ref.serialLabel.isEmpty ? "" : "\(ref.serialLabel)｜")\(Self.refDateFmt.string(from: ref.date))｜\(ref.title.isEmpty ? "（未填標題）" : ref.title)")
+            }
+        }
         shareItem = ResolutionSharePayload(items: [lines.joined(separator: "\n")])
     }
 }
@@ -2575,6 +2681,8 @@ struct SideRoleResolutionEditor: View {
     @State private var showInitiatorPicker = false
     /// 自訂系統分類的輸入暫存（開放式分類）
     @State private var categoryInput = ""
+    /// [v25.299] 參照前案挑選頁
+    @State private var showReferencePicker = false
 
     /// 是否為既有決議（決定刪除鈕）
     private var isEditing: Bool {
@@ -2728,6 +2836,59 @@ struct SideRoleResolutionEditor: View {
                     }
                 }
             }
+            // [v25.299] 參照前案（可多選）：決議常參照前案持續更新。
+            // 加入時把前案的日期＋標題＋內容帶進內容欄位，接著在下方寫本次內容；
+            // 決議卡片會有超連結列可跳到前案。
+            Section {
+                if resolution.references.isEmpty {
+                    Text("未參照任何前案")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(resolution.references, id: \.self) { rid in
+                    HStack(spacing: 8) {
+                        if let ref = findReference(rid) {
+                            Image(systemName: "link")
+                                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.indigo)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    if !ref.serialLabel.isEmpty {
+                                        Text(ref.serialLabel)
+                                            .font(.system(size: 10, weight: .bold))
+                                            .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                            .background(Color.indigo.opacity(0.12))
+                                            .foregroundStyle(.indigo)
+                                            .clipShape(Capsule())
+                                    }
+                                    Text(ref.title.isEmpty ? "（未填標題）" : ref.title)
+                                        .font(.subheadline.weight(.medium)).lineLimit(1)
+                                }
+                                Text(Self.refDateFmt.string(from: ref.date))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Image(systemName: "link.badge.plus")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                            Text("（前案已被刪除）")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            resolution.references.removeAll { $0 == rid }
+                        } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                Button { showReferencePicker = true } label: {
+                    Label("加入參照（可多選）", systemImage: "link.badge.plus")
+                        .foregroundStyle(.indigo)
+                }
+            } header: {
+                Text("參照前案")
+            } footer: {
+                Text("加入參照時會把前案的決議日期、標題與內容帶進下方內容欄位，接著寫本次的內容即可；決議卡片會出現可點的超連結跳到前案。")
+            }
             Section("內容") {
                 TextField("決議內容、脈絡、金額等（會被行事曆搜尋索引）",
                           text: $resolution.content, axis: .vertical)
@@ -2763,6 +2924,123 @@ struct SideRoleResolutionEditor: View {
             NavigationStack {
                 SideRoleInitiatorPicker(roleId: roleId, selection: $resolution.initiator)
             }
+        }
+        .sheet(isPresented: $showReferencePicker) {
+            NavigationStack {
+                ResolutionReferencePicker(roleId: roleId, resolution: $resolution)
+            }
+        }
+    }
+
+    private static let refDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    /// 依 id 找本職務內的前案決議
+    private func findReference(_ id: UUID) -> SideRoleResolution? {
+        lifeStore.milestones.first { $0.id == roleId }?
+            .sideRoleResolutions?.first { $0.id == id }
+    }
+}
+
+// MARK: - 參照前案挑選（可多選）
+
+/// 挑選要參照的前案決議：列出本職務其他決議（新到舊、可搜尋、多選勾選）。
+/// 勾選時自動把前案的日期＋標題＋內容以引用區塊帶進內容欄位（已帶過不重複帶）；
+/// 取消勾選只移除參照連結，不動已寫進內容的文字（可能已被使用者改寫）。
+struct ResolutionReferencePicker: View {
+    let roleId: UUID
+    @Binding var resolution: SideRoleResolution
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    /// 候選＝本職務的其他決議（排除自己），新到舊
+    private var candidates: [SideRoleResolution] {
+        let all = lifeStore.milestones.first { $0.id == roleId }?.sideRoleResolutions ?? []
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return all
+            .filter { $0.id != resolution.id }
+            .filter {
+                q.isEmpty || $0.title.localizedCaseInsensitiveContains(q)
+                    || $0.content.localizedCaseInsensitiveContains(q)
+                    || $0.serialLabel.localizedCaseInsensitiveContains(q)
+            }
+            .sorted { $0.date > $1.date }
+    }
+
+    var body: some View {
+        List {
+            if candidates.isEmpty {
+                Text(query.isEmpty ? "這個職務還沒有其他決議可參照" : "找不到符合的決議")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(candidates) { ref in
+                let on = resolution.references.contains(ref.id)
+                Button { toggle(ref, currentlyOn: on) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 18))
+                            .foregroundStyle(on ? Color.indigo : Color(.systemGray3))
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                if !ref.serialLabel.isEmpty {
+                                    Text(ref.serialLabel)
+                                        .font(.system(size: 10, weight: .bold))
+                                        .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                        .background(Color.indigo.opacity(0.12))
+                                        .foregroundStyle(.indigo)
+                                        .clipShape(Capsule())
+                                }
+                                Text(ref.title.isEmpty ? "（未填標題）" : ref.title)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                            }
+                            Text("\(Self.dateFmt.string(from: ref.date))\(ref.content.isEmpty ? "" : "｜\(ref.content)")")
+                                .font(.caption2).foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .searchable(text: $query, prompt: "搜尋標題、內容或流水號")
+        .navigationTitle("參照前案")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") { dismiss() }.bold()
+            }
+        }
+    }
+
+    private func toggle(_ ref: SideRoleResolution, currentlyOn: Bool) {
+        if currentlyOn {
+            resolution.references.removeAll { $0 == ref.id }
+        } else {
+            resolution.references.append(ref.id)
+            insertQuote(ref)
+        }
+    }
+
+    /// 把前案的日期＋標題＋內容以引用區塊帶進內容欄位頂端群（已帶過不重複）
+    private func insertQuote(_ ref: SideRoleResolution) {
+        let header = "── 參照前案 \(ref.serialLabel.isEmpty ? "" : "\(ref.serialLabel)｜")\(Self.dateFmt.string(from: ref.date))｜\(ref.title.isEmpty ? "（未填標題）" : ref.title) ──"
+        guard !resolution.content.contains(header) else { return }
+        let quote = "\(header)\n\(ref.content.isEmpty ? "（未填內容）" : ref.content)"
+        if resolution.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            resolution.content = quote + "\n\n"
+        } else {
+            resolution.content = quote + "\n\n" + resolution.content
         }
     }
 }

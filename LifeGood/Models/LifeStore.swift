@@ -44,7 +44,8 @@ class LifeStore: ObservableObject {
         let didBackfill = backfillOrgPeopleFromSubordinates()
         let didRepair = repairSideRoleMemberLinks()
         let didMigrateEq = migrateLegacyEquipmentsToPool()
-        if didBackfill || didRepair || didMigrateEq { save() }
+        let didSerial = migrateResolutionSerials()
+        if didBackfill || didRepair || didMigrateEq || didSerial { save() }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(reloadFromCloud),
@@ -74,8 +75,9 @@ class LifeStore: ObservableObject {
         let didRepair = repairSideRoleMemberLinks()
         // 雲端另一台裝置若仍是舊版（機台存在部屬身上），拉下來後在這裡搬進機台池
         let didMigrateEq = migrateLegacyEquipmentsToPool()
+        let didSerial = migrateResolutionSerials()
         // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
-        if didBackfill || didRepair || didMigrateEq { save() }
+        if didBackfill || didRepair || didMigrateEq || didSerial { save() }
     }
 
     // MARK: - 個人檔案
@@ -786,11 +788,37 @@ class LifeStore: ObservableObject {
     func upsertSideRoleResolution(_ resolution: SideRoleResolution, in roleId: UUID) {
         mutateSideRole(roleId) { m in
             var list = m.sideRoleResolutions ?? []
-            if let i = list.firstIndex(where: { $0.id == resolution.id }) { list[i] = resolution }
-            else { list.append(resolution) }
+            var item = resolution
+            // [v25.299] 流水號：沒有就補（同職務內接續最大號；已有則沿用，不重編）
+            if item.serial == nil {
+                item.serial = (list.compactMap(\.serial).max() ?? 0) + 1
+            }
+            if let i = list.firstIndex(where: { $0.id == item.id }) { list[i] = item }
+            else { list.append(item) }
             // 新到舊：重大決議通常回頭查最近定案的
             m.sideRoleResolutions = list.sorted { $0.date > $1.date }
         }
+    }
+
+    /// [v25.299] 一次性遷移：舊有重大決議補流水號（同職務內依日期舊到新編號，
+    /// 已有流水號的沿用並從最大號接續）。冪等：沒有缺號直接回 false。
+    @discardableResult
+    func migrateResolutionSerials() -> Bool {
+        var changed = false
+        for mi in milestones.indices {
+            guard var list = milestones[mi].sideRoleResolutions,
+                  list.contains(where: { $0.serial == nil }) else { continue }
+            var next = (list.compactMap(\.serial).max() ?? 0) + 1
+            // 依日期舊到新補號，讓早期決議拿到小號
+            let orderedIds = list.sorted { $0.date < $1.date }.map(\.id)
+            for id in orderedIds {
+                guard let i = list.firstIndex(where: { $0.id == id }), list[i].serial == nil else { continue }
+                list[i].serial = next; next += 1
+            }
+            milestones[mi].sideRoleResolutions = list
+            changed = true
+        }
+        return changed
     }
 
     func deleteSideRoleResolution(_ resolutionId: UUID, in roleId: UUID) {
