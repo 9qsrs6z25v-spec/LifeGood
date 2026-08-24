@@ -1016,6 +1016,8 @@ private struct FixedExpenseCard: View {
     /// [v25.300] 更新金額對話框
     @State private var showAmountUpdate = false
     @State private var newAmountText = ""
+    /// [v25.301] 走勢圖手指選取的 X（日期）；有值時顯示該點細項
+    @State private var trendSelection: Date?
 
     /// 讀取 store 最新版本，編輯儲存後即時反映（找不到才退回快照）
     private var current: Expense { store.expenses.first { $0.id == expense.id } ?? expense }
@@ -1325,36 +1327,7 @@ private struct FixedExpenseCard: View {
                     }
                 }
                 if actual.count >= 2 {
-                    Chart {
-                        ForEach(actual) { p in
-                            LineMark(x: .value("日期", p.date), y: .value("金額", p.amount),
-                                     series: .value("系列", "實際"))
-                                .foregroundStyle(accent)
-                                .interpolationMethod(.catmullRom)
-                            PointMark(x: .value("日期", p.date), y: .value("金額", p.amount))
-                                .foregroundStyle(accent)
-                                .symbolSize(30)
-                        }
-                        ForEach(forecastPoints) { p in
-                            LineMark(x: .value("日期", p.date), y: .value("金額", p.amount),
-                                     series: .value("系列", "預測"))
-                                .foregroundStyle(accent.opacity(0.55))
-                                .lineStyle(StrokeStyle(lineWidth: 1.6, dash: [5, 4]))
-                                .interpolationMethod(.linear)
-                        }
-                    }
-                    .chartYAxis {
-                        AxisMarks(position: .leading) { value in
-                            AxisGridLine(); AxisTick()
-                            AxisValueLabel {
-                                if let v = value.as(Double.self) {
-                                    Text(Self.decimalFmt.string(from: NSNumber(value: v)) ?? "")
-                                        .font(.system(size: 8))
-                                }
-                            }
-                        }
-                    }
-                    .frame(height: 150)
+                    trendChart(actual: actual, forExport: forExport)
                     HStack(spacing: 12) {
                         HStack(spacing: 4) {
                             Rectangle().fill(accent).frame(width: 14, height: 2)
@@ -1377,6 +1350,110 @@ private struct FixedExpenseCard: View {
             .padding()
             .background(Color(.secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    /// [v25.301] 手指滑到圖上時，取距離選取日期最近的一個點（實際＋預測合併；
+    /// 預測系列的首點與最後實際點重複，略過）。prev＝序列中前一點金額，供增減細項。
+    private func nearestTrendPoint(to sel: Date?) -> (date: Date, amount: Double, isForecast: Bool, prev: Double?)? {
+        guard let sel else { return nil }
+        var series: [(date: Date, amount: Double, isForecast: Bool)] =
+            actualPoints.map { ($0.date, $0.amount, false) }
+        series += forecastPoints.dropFirst().map { ($0.date, $0.amount, true) }
+        guard !series.isEmpty else { return nil }
+        var bestIdx = 0
+        var bestDist = Double.greatestFiniteMagnitude
+        for (i, p) in series.enumerated() {
+            let d = abs(p.date.timeIntervalSince(sel))
+            if d < bestDist { bestDist = d; bestIdx = i }
+        }
+        let hit = series[bestIdx]
+        let prev = bestIdx > 0 ? series[bestIdx - 1].amount : nil
+        return (hit.date, hit.amount, hit.isForecast, prev)
+    }
+
+    /// 走勢圖本體：匯出版為靜態；畫面版可用手指滑選，顯示該點細項
+    ///（日期、金額、實際/預測、與前一筆的增減金額與百分比）。
+    @ViewBuilder
+    private func trendChart(actual: [AmountSnapshot], forExport: Bool) -> some View {
+        let selected = forExport ? nil : nearestTrendPoint(to: trendSelection)
+        let base = Chart {
+            ForEach(actual) { p in
+                LineMark(x: .value("日期", p.date), y: .value("金額", p.amount),
+                         series: .value("系列", "實際"))
+                    .foregroundStyle(accent)
+                    .interpolationMethod(.catmullRom)
+                PointMark(x: .value("日期", p.date), y: .value("金額", p.amount))
+                    .foregroundStyle(accent)
+                    .symbolSize(30)
+            }
+            ForEach(forecastPoints) { p in
+                LineMark(x: .value("日期", p.date), y: .value("金額", p.amount),
+                         series: .value("系列", "預測"))
+                    .foregroundStyle(accent.opacity(0.55))
+                    .lineStyle(StrokeStyle(lineWidth: 1.6, dash: [5, 4]))
+                    .interpolationMethod(.linear)
+            }
+            if let sel = selected {
+                RuleMark(x: .value("選取", sel.date))
+                    .foregroundStyle(Color(.systemGray3).opacity(0.6))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                PointMark(x: .value("選取", sel.date), y: .value("金額", sel.amount))
+                    .foregroundStyle(sel.isForecast ? accent.opacity(0.7) : accent)
+                    .symbolSize(70)
+                    .annotation(position: .top, spacing: 6,
+                                overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 4) {
+                                Text(Self.dateFmt.string(from: sel.date))
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                if sel.isForecast {
+                                    Text("預測")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .padding(.horizontal, 4).padding(.vertical, 1)
+                                        .background(accent.opacity(0.14))
+                                        .foregroundStyle(accent)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                            Text("NT$\(Self.decimalFmt.string(from: NSNumber(value: sel.amount)) ?? "")")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundStyle(sel.isForecast ? accent.opacity(0.8) : accent)
+                            if let prev = sel.prev, prev > 0 {
+                                let diff = sel.amount - prev
+                                let pct = diff / prev * 100
+                                Text("\(diff >= 0 ? "▲" : "▼") \(Self.decimalFmt.string(from: NSNumber(value: abs(diff))) ?? "")（\(String(format: "%+.1f", pct))%）")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(diff > 0 ? Color.red : diff < 0 ? Color.green : Color.secondary)
+                            }
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8)
+                            .stroke(accent.opacity(0.25), lineWidth: 0.75))
+                        .shadow(color: .black.opacity(0.10), radius: 4, x: 0, y: 2)
+                    }
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading) { value in
+                AxisGridLine(); AxisTick()
+                AxisValueLabel {
+                    if let v = value.as(Double.self) {
+                        Text(Self.decimalFmt.string(from: NSNumber(value: v)) ?? "")
+                            .font(.system(size: 8))
+                    }
+                }
+            }
+        }
+        .frame(height: 150)
+        if forExport {
+            base
+        } else {
+            base
+                .chartXSelection(value: $trendSelection)
+                .padding(.top, 34)   // 留給註解卡的空間，選到最高點也不會被裁掉
         }
     }
 
