@@ -2494,7 +2494,7 @@ struct AddExpenseView: View {
         }
 
         let savedCurrencyCode = isSavingsInsurance ? insCurrencyCode : selectedCurrencyCode
-        let expense = Expense(
+        var expense = Expense(
             id: expenseId,
             title: trimmedTitle,
             amount: amount,
@@ -2530,6 +2530,8 @@ struct AddExpenseView: View {
             placeLongitude: supportsPlacePicker ? placeLongitude : nil,
             photoFileNames: photoFileNames
         )
+        // 金額歷史（不在 memberwise init）：編輯重建時帶回，不然存個檔走勢就被清空
+        expense.amountHistory = editingExpense?.amountHistory ?? []
 
         if isEditing { store.update(expense) } else { store.add(expense) }
         syncBankWithdrawal(for: expense, previous: editingExpense)

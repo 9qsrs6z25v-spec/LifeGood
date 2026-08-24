@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 // MARK: - 美化紀錄（FixedExpenseView）
 // [2026-06 v1] 本次美化方向：
@@ -994,6 +995,16 @@ struct FixedExpenseRow: View {
 
 // MARK: - 固定支出預覽卡片（點項目先看卡片，右上角「編輯」才進入編輯）
 
+/// 圖例用的短橫線 Shape（可套 dash StrokeStyle 畫虛線圖例）
+private struct Line: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: rect.midY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return p
+    }
+}
+
 private struct FixedExpenseCard: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var lifeStore: LifeStore
@@ -1002,6 +1013,9 @@ private struct FixedExpenseCard: View {
     let expense: Expense
     @State private var showEdit = false
     @State private var shareItem: FinanceCardSharePayload?
+    /// [v25.300] 更新金額對話框
+    @State private var showAmountUpdate = false
+    @State private var newAmountText = ""
 
     /// 讀取 store 最新版本，編輯儲存後即時反映（找不到才退回快照）
     private var current: Expense { store.expenses.first { $0.id == expense.id } ?? expense }
@@ -1046,6 +1060,8 @@ private struct FixedExpenseCard: View {
                     infoCard
                     if linkedSavings != nil { savingsSection }
                     loanSection
+                    // [v25.300] 金額走勢：更新金額累積歷史，備註上方畫曲線＋虛線預測
+                    amountTrendBlock(forExport: false)
                     if !current.note.isEmpty { noteBlock }
                     photoSection
                 }
@@ -1079,6 +1095,16 @@ private struct FixedExpenseCard: View {
                 AddExpenseView(expenseType: .fixed, editingExpense: current)
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .alert("更新金額", isPresented: $showAmountUpdate) {
+                TextField("新一期金額（目前 \(Self.decimalFmt.string(from: NSNumber(value: current.amount)) ?? "")）",
+                          text: $newAmountText)
+                    .keyboardType(.decimalPad)
+                Button("更新") { applyAmountUpdate() }
+                    .disabled((Double(newAmountText.replacingOccurrences(of: ",", with: "")) ?? 0) <= 0)
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("記錄新一期的金額（例：今年續保的乙式險保費）。舊金額會保留成走勢曲線的歷史點。")
+            }
         }
     }
 
@@ -1098,6 +1124,7 @@ private struct FixedExpenseCard: View {
             infoCard
             if linkedSavings != nil { savingsSection }
             loanSection
+            amountTrendBlock(forExport: true)
             if !current.note.isEmpty { noteBlock }
             Text("美好人生・\(Self.displayStampFmt.string(from: Date())) 匯出")
                 .font(.caption2).foregroundStyle(.tertiary)
@@ -1165,6 +1192,13 @@ private struct FixedExpenseCard: View {
             lines.append("・貸款總額：NT$ \(fmtShort(lp.totalAmount))｜剩餘：NT$ \(fmtShort(max(lp.totalAmount - lp.paid, 0)))")
             lines.append("・預計繳清：\(Self.dateFmt.string(from: lp.endDate))")
         }
+        let history = actualPoints
+        if history.count >= 2 {
+            lines.append(""); lines.append("📈 金額走勢")
+            for p in history {
+                lines.append("• \(Self.dateFmt.string(from: p.date))：NT$\(Self.decimalFmt.string(from: NSNumber(value: p.amount)) ?? "")")
+            }
+        }
         if !current.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(current.note) }
         shareItem = FinanceCardSharePayload(items: [lines.joined(separator: "\n")])
     }
@@ -1224,6 +1258,139 @@ private struct FixedExpenseCard: View {
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: - 金額走勢（v25.300：更新金額累積歷史 → 曲線＋虛線預測）
+
+    /// 走勢資料點：實際（更新過的金額）與預測（線性回歸外推 3 年）
+    private struct TrendPoint: Identifiable {
+        let id = UUID()
+        let date: Date
+        let amount: Double
+        let isForecast: Bool
+    }
+
+    /// 實際點：歷史快照依日期排序（更新金額時已保證含最初一筆）
+    private var actualPoints: [AmountSnapshot] {
+        current.amountHistory.sorted { $0.date < $1.date }
+    }
+
+    /// 預測點：對實際點做最小平方法線性回歸，往後外推 3 年（每年一點，下限 0）。
+    /// 首點帶入最後一筆實際值讓虛線與實線相接。至少要 2 筆實際點才有得預測。
+    private var forecastPoints: [TrendPoint] {
+        let pts = actualPoints
+        guard pts.count >= 2, let last = pts.last else { return [] }
+        let base = pts[0].date.timeIntervalSince1970
+        let xs = pts.map { ($0.date.timeIntervalSince1970 - base) / 86400 }
+        let ys = pts.map(\.amount)
+        let n = Double(pts.count)
+        let sumX = xs.reduce(0, +), sumY = ys.reduce(0, +)
+        let sumXY = zip(xs, ys).reduce(0) { $0 + $1.0 * $1.1 }
+        let sumXX = xs.reduce(0) { $0 + $1 * $1 }
+        let denom = n * sumXX - sumX * sumX
+        guard abs(denom) > 0.0001 else { return [] }
+        let slope = (n * sumXY - sumX * sumY) / denom
+        let intercept = (sumY - slope * sumX) / n
+        var out: [TrendPoint] = [TrendPoint(date: last.date, amount: last.amount, isForecast: true)]
+        let cal = Calendar.current
+        for yr in 1...3 {
+            guard let d = cal.date(byAdding: .year, value: yr, to: last.date) else { continue }
+            let x = (d.timeIntervalSince1970 - base) / 86400
+            out.append(TrendPoint(date: d, amount: max(0, slope * x + intercept), isForecast: true))
+        }
+        return out
+    }
+
+    @ViewBuilder
+    private func amountTrendBlock(forExport: Bool) -> some View {
+        let actual = actualPoints
+        // 匯出版沒有累積歷史就整塊不畫；畫面版永遠顯示（至少有「更新金額」入口）
+        if !forExport || actual.count >= 2 {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("金額走勢").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if !forExport {
+                        Button { newAmountText = ""; showAmountUpdate = true } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("更新金額").font(.caption.weight(.semibold))
+                            }
+                            .padding(.horizontal, 9).padding(.vertical, 4)
+                            .background(accent.opacity(0.12), in: Capsule())
+                            .foregroundStyle(accent)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                if actual.count >= 2 {
+                    Chart {
+                        ForEach(actual) { p in
+                            LineMark(x: .value("日期", p.date), y: .value("金額", p.amount),
+                                     series: .value("系列", "實際"))
+                                .foregroundStyle(accent)
+                                .interpolationMethod(.catmullRom)
+                            PointMark(x: .value("日期", p.date), y: .value("金額", p.amount))
+                                .foregroundStyle(accent)
+                                .symbolSize(30)
+                        }
+                        ForEach(forecastPoints) { p in
+                            LineMark(x: .value("日期", p.date), y: .value("金額", p.amount),
+                                     series: .value("系列", "預測"))
+                                .foregroundStyle(accent.opacity(0.55))
+                                .lineStyle(StrokeStyle(lineWidth: 1.6, dash: [5, 4]))
+                                .interpolationMethod(.linear)
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks(position: .leading) { value in
+                            AxisGridLine(); AxisTick()
+                            AxisValueLabel {
+                                if let v = value.as(Double.self) {
+                                    Text(Self.decimalFmt.string(from: NSNumber(value: v)) ?? "")
+                                        .font(.system(size: 8))
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 150)
+                    HStack(spacing: 12) {
+                        HStack(spacing: 4) {
+                            Rectangle().fill(accent).frame(width: 14, height: 2)
+                            Text("實際").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 4) {
+                            Line().stroke(accent.opacity(0.55), style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                                .frame(width: 14, height: 2)
+                            Text("預測（往後 3 年）").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                } else if !forExport {
+                    Text(actual.isEmpty
+                         ? "按「更新金額」記錄新一期金額（例：每年續保的乙式險）。首次更新會把目前金額列為起點，累積兩筆就會畫出走勢曲線與虛線預測。"
+                         : "已記錄 1 筆，再更新一次金額就會畫出走勢曲線與虛線預測。")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding()
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    /// 更新金額：追加歷史快照並改寫目前金額。首次更新先把原金額（起始日期）補為起點。
+    private func applyAmountUpdate() {
+        guard let value = Double(newAmountText.replacingOccurrences(of: ",", with: "")),
+              value > 0 else { return }
+        var updated = current
+        if updated.amountHistory.isEmpty {
+            updated.amountHistory.append(AmountSnapshot(date: updated.date, amount: updated.amount))
+        }
+        updated.amountHistory.append(AmountSnapshot(date: Date(), amount: value))
+        updated.amount = value
+        store.update(updated)
     }
 
     /// 儲蓄險明細：顯示連結理財儲蓄險的複利年利率、繳費週期、起訖日與期滿預估

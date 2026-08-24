@@ -237,6 +237,18 @@ enum LoanSubCategory: String, Codable, CaseIterable, Identifiable {
 }
 
 // MARK: - 支出資料模型
+/// 固定支出的金額歷史快照（例：乙式險每年續保金額都變）。
+/// 卡片的「更新金額」會補一筆快照，走勢圖據此畫實線＋虛線預測。
+struct AmountSnapshot: Identifiable, Codable, Equatable {
+    let id: UUID
+    var date: Date
+    var amount: Double
+
+    init(id: UUID = UUID(), date: Date = Date(), amount: Double) {
+        self.id = id; self.date = date; self.amount = amount
+    }
+}
+
 struct Expense: Identifiable, Codable {
     let id: UUID
     var title: String
@@ -280,6 +292,9 @@ struct Expense: Identifiable, Codable {
     var placeLongitude: Double?
     /// 此筆支出附帶的照片檔名（多張）
     var photoFileNames: [String]
+    /// 金額歷史快照（固定支出「更新金額」累積；刻意不進 memberwise init——
+    /// 那個 init 已 30+ 參數，編輯重建時由呼叫端帶回，比照 bankDeposits 慣例）
+    var amountHistory: [AmountSnapshot] = []
 
     init(
         id: UUID = UUID(),
@@ -390,6 +405,7 @@ struct Expense: Identifiable, Codable {
         placeLatitude = try? c.decodeIfPresent(Double.self, forKey: .placeLatitude)
         placeLongitude = try? c.decodeIfPresent(Double.self, forKey: .placeLongitude)
         photoFileNames = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
+        amountHistory = (try? c.decodeIfPresent([AmountSnapshot].self, forKey: .amountHistory)) ?? []
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
@@ -399,7 +415,7 @@ struct Expense: Identifiable, Codable {
         case socialSubCategory, socialRecipient, taxDeductibleOverride, note, currencyCode, diningMember
         case loanTotalAmount, loanYears, loanRate, insuranceRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
-        case placeAddress, placeLatitude, placeLongitude, photoFileNames
+        case placeAddress, placeLatitude, placeLongitude, photoFileNames, amountHistory
     }
 
     var categoryName: String {
