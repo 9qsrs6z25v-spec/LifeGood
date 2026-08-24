@@ -1022,12 +1022,14 @@ struct MyCalendarView: View {
         Self.subReportDateFormatter.string(from: date)
     }
 
+    /// 即將逾期任務：截止日「壓在當日」的未完成任務（使用者需求 v25.290）。
+    /// 任務日期落在當日但截止日不在當日的，部屬總覽的「當日任務」已涵蓋——
+    /// 行事曆這個區塊只管「今天非處理不可」的緊急項目。
     private func subTasks(on date: Date) -> [(sub: Subordinate, task: SubordinateTask)] {
         lifeStore.subordinates.flatMap { sub in
             sub.tasks.filter { t in
-                guard !t.isCompleted else { return false }
-                if let due = t.dueDate, calendar.isDate(due, inSameDayAs: date) { return true }
-                return calendar.isDate(t.date, inSameDayAs: date)
+                guard !t.isCompleted, let due = t.dueDate else { return false }
+                return calendar.isDate(due, inSameDayAs: date)
             }.map { (sub: sub, task: $0) }
         }
     }
@@ -1099,7 +1101,8 @@ struct MyCalendarView: View {
                                  onOpen: { openTarget = .meeting(subId: it.sub.id, meeting: it.meeting) })
                 }
             }
-            subAgendaCard("部屬任務", "checklist", .cyan, count: tasks.count, empty: "當日無任務") {
+            subAgendaCard("即將逾期任務", "exclamationmark.circle.fill", .cyan,
+                          count: tasks.count, empty: "當日沒有壓截止日的任務") {
                 ForEach(Array(tasks.enumerated()), id: \.offset) { _, it in
                     subAgendaCheckRow(name: it.sub.name,
                                       text: it.task.topic.isEmpty ? "未命名任務" : it.task.topic,
