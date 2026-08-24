@@ -722,7 +722,9 @@ struct CareerView: View {
                             .lineLimit(1)
                         if item.isManagerial == true {
                             // [v3] 管理職徽章補 stroke 細邊框，對齊全 App 膠囊設計語言
-                            Text("管理職")
+                            // [v25.293] 有填管理單位時一併顯示（管理職・製造一課）
+                            Text((item.managedUnit?.isEmpty == false)
+                                 ? "管理職・\(item.managedUnit!)" : "管理職")
                                 .font(.caption2.bold())
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(Color.orange.opacity(0.18))

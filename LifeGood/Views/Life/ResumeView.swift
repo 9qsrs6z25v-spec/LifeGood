@@ -1393,6 +1393,8 @@ struct AddMilestoneView: View {
     @State private var mood = ""
     @State private var futurePlan = ""
     @State private var isManagerial = false
+    /// 管理職的管理單位（單選文字；可 key 或點部門膠囊帶入）
+    @State private var managedUnit = ""
     @State private var salaryText = ""
     @State private var salaryBeforeText = ""
     @State private var salaryAfterText = ""
@@ -1702,7 +1704,43 @@ struct AddMilestoneView: View {
 
         if careerSub == .join || careerSub == .promote || careerSub == .transfer {
             Toggle("是否為管理職", isOn: $isManagerial)
+            // [v25.293] 管理職打開才長出管理單位（單選）：可自己 key，也可點下方
+            // 公司組織的部門膠囊快速帶入；名稱與組織部門相符時，該部門的
+            // 管理人員名單會自動顯示「我」。
+            if isManagerial {
+                TextField("管理單位（例：製造一課，選填）", text: $managedUnit)
+                if !store.departments.isEmpty {
+                    FlexibleChipWrap(items: managedUnitSuggestions) { name in
+                        managedUnitChip(name)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
         }
+    }
+
+    /// 部門膠囊候選：公司組織的部門名稱（去空白、去重、保留原順序）
+    private var managedUnitSuggestions: [String] {
+        var seen = Set<String>()
+        return store.departments
+            .map { $0.name.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// 管理單位膠囊：點選帶入（再點取消）——單選，一個管理職一個單位
+    private func managedUnitChip(_ name: String) -> some View {
+        let on = managedUnit.trimmingCharacters(in: .whitespaces) == name
+        return Button {
+            managedUnit = on ? "" : name
+        } label: {
+            Text(name)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(on ? Color.orange.opacity(0.18) : Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(on ? Color.orange : Color.secondary)
+                .overlay(Capsule().stroke(on ? Color.orange.opacity(0.4) : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.borderless)
     }
 
     /// 「NT$」前綴金額輸入列，供薪水／調薪前後薪水／年費／保費共用，統一前綴文字樣式與鍵盤類型。
@@ -2241,6 +2279,8 @@ struct AddMilestoneView: View {
                 salaryBefore: careerSub == .salaryAdjust ? Double(salaryBeforeText) : nil,
                 salaryAfter: careerSub == .salaryAdjust ? Double(salaryAfterText) : nil
             )
+            // 管理單位：只在「是管理職」時存（比照 trimmedOrNil 的子分類條件化原則）
+            item.managedUnit = trimmedOrNil(managedUnit, when: managerial == true)
             // 兼任職務欄位（不在 memberwise init 裡，逐一指派）
             item.sideRoleName = trimmedOrNil(sideRoleName, when: isSide)
             item.sideRoleOrg = trimmedOrNil(sideRoleOrg, when: isSide)
@@ -2259,6 +2299,9 @@ struct AddMilestoneView: View {
             item.sideRoleMembers = editing?.sideRoleMembers
             item.sideRoleMeetings = editing?.sideRoleMeetings
             item.sideRoleKeyDates = editing?.sideRoleKeyDates
+            // [修正 v25.293] 重大決議先前漏在這份帶回清單——編輯兼任職務里程碑
+            // 存檔會把累積的重大決議整批清空
+            item.sideRoleResolutions = editing?.sideRoleResolutions
             if editing != nil { store.update(item) } else { store.add(item) }
         } else if isFinance {
             let autoTitle = generateFinanceTitle()
@@ -2383,6 +2426,7 @@ struct AddMilestoneView: View {
             mood = e.mood ?? ""
             futurePlan = e.futurePlan ?? ""
             isManagerial = e.isManagerial ?? false
+            managedUnit = e.managedUnit ?? ""
             if let s = e.salary, s > 0 { salaryText = String(format: "%.0f", s) }
             if let sb = e.salaryBefore, sb > 0 { salaryBeforeText = String(format: "%.0f", sb) }
             if let sa = e.salaryAfter, sa > 0 { salaryAfterText = String(format: "%.0f", sa) }

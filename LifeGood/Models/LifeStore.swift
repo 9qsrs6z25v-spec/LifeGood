@@ -1111,6 +1111,28 @@ class LifeStore: ObservableObject {
         return profile.company.trimmingCharacters(in: .whitespaces)
     }
 
+    /// 我目前的管理單位：最近一筆「入職／升職／調轉／降職」里程碑為管理職時，
+    /// 取其管理單位名稱；不是管理職、已離職或沒填單位則 nil。
+    /// 公司組織的部門詳細頁以名稱比對，把「我」列進該部門的管理人員名單。
+    var myCurrentManagedUnit: String? {
+        let positionSubs: Set<CareerSubCategory> = [.join, .promote, .transfer, .demote]
+        let employmentSubs: Set<CareerSubCategory> = [.join, .promote, .salaryAdjust,
+                                                      .transfer, .demote, .resign]
+        let careers = milestones
+            .filter { m in
+                guard m.category == .career, let sub = m.careerSubCategory else { return false }
+                return employmentSubs.contains(sub)
+            }
+            .sorted { $0.date > $1.date }
+        // 最近事件為離職 → 目前無業，沒有管理單位
+        if careers.first?.careerSubCategory == .resign { return nil }
+        // 最近一筆「職位異動」決定目前是否管理職（調薪不影響職位）
+        guard let latest = careers.first(where: { positionSubs.contains($0.careerSubCategory ?? .join) }),
+              latest.isManagerial == true else { return nil }
+        let unit = (latest.managedUnit ?? "").trimmingCharacters(in: .whitespaces)
+        return unit.isEmpty ? nil : unit
+    }
+
     private func syncOrgPersonFor(subordinate sub: Subordinate) {
         // 解析職稱：若有 gradeTitleId 用 GradeTitle.title，沒有則用 sub.jobTitle
         let resolvedTitle: String = {

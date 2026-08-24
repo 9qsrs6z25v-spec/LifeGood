@@ -1039,6 +1039,10 @@ struct LifeMilestone: Identifiable, Codable {
     var mood: String?
     var futurePlan: String?
     var isManagerial: Bool?
+    /// 管理職的管理單位（單選；isManagerial == true 時才有意義）。
+    /// 存單位名稱文字而非部門 id——允許填組織裡還沒建的單位；
+    /// 公司組織端以名稱比對，把「我」顯示進該部門的管理人員名單。
+    var managedUnit: String?
     var salary: Double?
     var salaryBefore: Double?
     var salaryAfter: Double?
@@ -1162,6 +1166,7 @@ struct LifeMilestone: Identifiable, Codable {
         mood = try? c.decode(String.self, forKey: .mood)
         futurePlan = try? c.decode(String.self, forKey: .futurePlan)
         isManagerial = try? c.decode(Bool.self, forKey: .isManagerial)
+        managedUnit = try? c.decodeIfPresent(String.self, forKey: .managedUnit)
         salary = try? c.decode(Double.self, forKey: .salary)
         salaryBefore = try? c.decode(Double.self, forKey: .salaryBefore)
         salaryAfter = try? c.decode(Double.self, forKey: .salaryAfter)
@@ -1206,7 +1211,7 @@ struct LifeMilestone: Identifiable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, title, date, category, note
         case careerSubCategory, companyName, department, jobTitle, jobGrade
-        case mood, futurePlan, isManagerial, salary, salaryBefore, salaryAfter
+        case mood, futurePlan, isManagerial, managedUnit, salary, salaryBefore, salaryAfter
         case financeSubCategory, bankName, branchName, accountNumber, bankAccountType
         case cardName, cardLastFour, creditLimit, annualFee, billingDay, paymentDay, expiryDate
         case securitiesAccountType, insuranceCompany, policyNumber, insuranceType, premiumAmount, beneficiary, bankDeposits, linkedBankMilestoneId

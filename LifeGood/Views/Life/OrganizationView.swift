@@ -654,6 +654,20 @@ struct DepartmentDetailView: View {
         }
     }
 
+    /// 我是否為本部門的管理職：履歷里程碑的「管理職＋管理單位」名稱與本部門相符
+    private var iAmManagerHere: Bool {
+        guard let unit = lifeStore.myCurrentManagedUnit else { return false }
+        return unit == dept.name.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 「我」在管理人員名單的顯示名：個資的中文名 → 英文名 → 「我」
+    private var myDisplayName: String {
+        let zh = lifeStore.profile.chineseName.trimmingCharacters(in: .whitespaces)
+        if !zh.isEmpty { return zh }
+        let en = lifeStore.profile.englishName.trimmingCharacters(in: .whitespaces)
+        return en.isEmpty ? "我" : en
+    }
+
     /// 管理人員：這個部門的主管／代理人（可多位）。
     /// 與「部門人員」分開一區——管理人不一定編制在本部門（例如由上級部門主管兼管）。
     private var managerSection: some View {
@@ -680,7 +694,36 @@ struct DepartmentDetailView: View {
                         .foregroundStyle(.orange)
                 }
             }
-            if managers.isEmpty {
+            // [v25.293] 我的履歷里程碑填了「管理職＋管理單位」且名稱與本部門相符
+            // → 自動把「我」列進管理人員名單（衍生顯示，不寫進 managerIds）
+            if iAmManagerHere {
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(colors: [.orange, .orange.opacity(0.6)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(myDisplayName)
+                            .font(.subheadline.weight(.medium))
+                        Text("依我的履歷里程碑（管理職）自動帶入")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("我")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.18))
+                        .foregroundStyle(.orange)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.28), lineWidth: 0.6))
+                }
+            }
+            if managers.isEmpty && !iAmManagerHere {
                 Text("尚未設定管理人員")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
