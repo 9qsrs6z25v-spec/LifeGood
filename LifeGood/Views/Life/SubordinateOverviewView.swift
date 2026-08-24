@@ -59,6 +59,8 @@ struct SubordinateOverviewView: View {
     @EnvironmentObject var lifeStore: LifeStore
     @State private var selectedDate = Date()
     @State private var heroAppeared = false
+    /// 看板蛋糕鈕開啟的生日名單視窗
+    @State private var showBirthdaySheet = false
     @State private var sectionAppeared = false
     @State private var showCompleted = false
     @State private var editTarget: OverviewEditTarget?
@@ -293,6 +295,22 @@ struct SubordinateOverviewView: View {
             .sheet(item: $subAddKind) { kind in
                 AddSubItemSheet(kind: kind)
             }
+            .sheet(isPresented: $showBirthdaySheet) {
+                BirthdayOverviewSheet()
+            }
+        }
+    }
+
+    /// 今天或明天是否有人生日（部屬＋公司組織人員，看板蛋糕鈕亮燈判斷）
+    private var hasBirthdaySoon: Bool {
+        let cal = Calendar.current
+        let today = Date()
+        guard let tomorrow = cal.date(byAdding: .day, value: 1, to: today) else { return false }
+        let keys = [cal.dateComponents([.month, .day], from: today),
+                    cal.dateComponents([.month, .day], from: tomorrow)]
+        return BirthdayOverviewSheet.birthdayPeople(in: lifeStore).contains { p in
+            let c = cal.dateComponents([.month, .day], from: p.birthday)
+            return keys.contains { $0.month == c.month && $0.day == c.day }
         }
     }
 
@@ -520,7 +538,8 @@ struct SubordinateOverviewView: View {
             case .hero:
                 summaryHeroCard(leaveCnt: todayLeaves.count,
                                 meetCnt: todayMeetings.count,
-                                taskCnt: incompleteTasks.count)
+                                taskCnt: incompleteTasks.count,
+                                forExport: true)
             case .leaves:
                 leaveSection(todayLeaves)
             case .reports:
@@ -1348,7 +1367,8 @@ struct SubordinateOverviewView: View {
 
     // MARK: - 英雄摘要卡
 
-    private func summaryHeroCard(leaveCnt: Int, meetCnt: Int, taskCnt: Int) -> some View {
+    private func summaryHeroCard(leaveCnt: Int, meetCnt: Int, taskCnt: Int,
+                                 forExport: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // 標題列
             HStack(spacing: 8) {
@@ -1364,6 +1384,22 @@ struct SubordinateOverviewView: View {
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
                 Spacer()
+                // [v25.295] 生日蛋糕鈕：今天或明天有人生日就亮起來（粉紅），
+                // 否則黑白（半透明白）；點開生日名單視窗。匯出圖不畫按鈕。
+                if !forExport {
+                    Button { showBirthdaySheet = true } label: {
+                        Image(systemName: "birthday.cake.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(hasBirthdaySoon ? Color.pink : Color.white.opacity(0.45))
+                            .padding(7)
+                            .background(hasBirthdaySoon ? Color.white.opacity(0.92)
+                                        : Color.white.opacity(0.16), in: Circle())
+                            .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 0.75))
+                            .shadow(color: hasBirthdaySoon ? Color.pink.opacity(0.45) : .clear,
+                                    radius: 5, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                }
                 Text("共 \(lifeStore.subordinates.count) 人")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.88))
@@ -1490,3 +1526,167 @@ struct SubordinateOverviewView: View {
 
 /// 文字匯出分享項目的 Identifiable 包裝（供 .sheet(item:) 使用）
 private struct OverviewSharePayload: Identifiable { let id = UUID(); let items: [Any] }
+
+// MARK: - 生日名單視窗（看板蛋糕鈕）
+
+/// 看板蛋糕鈕彈出的生日名單：今天／明天生日的人（部屬＋公司組織人員，去重），
+/// 並附未來 30 天內即將到來的生日。顯示姓名、星座、日期。
+struct BirthdayOverviewSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    struct Person: Identifiable {
+        let id: UUID
+        let name: String
+        let birthday: Date
+        /// 身分描述（部屬・職稱／組織人員・部門）
+        let roleLine: String
+    }
+
+    /// 全部有填生日的人：部屬＋在職組織人員；已連動到「有生日的部屬」的
+    /// 組織人員跳過（同一個人不重複列）。
+    static func birthdayPeople(in store: LifeStore) -> [Person] {
+        var out: [Person] = []
+        var subIdsWithBirthday = Set<UUID>()
+        for s in store.subordinates {
+            guard let bd = s.birthday else { continue }
+            subIdsWithBirthday.insert(s.id)
+            let role = ["部屬", s.jobTitle].filter { !$0.isEmpty }.joined(separator: "・")
+            out.append(Person(id: s.id, name: s.name.isEmpty ? "未命名" : s.name,
+                              birthday: bd, roleLine: role))
+        }
+        for p in store.orgPeople where !p.isInactive {
+            guard let bd = p.birthday else { continue }
+            if let linked = p.linkedSubordinateId, subIdsWithBirthday.contains(linked) { continue }
+            let dept = p.departmentId.flatMap { id in
+                store.departments.first { $0.id == id }?.name
+            } ?? ""
+            let role = ["組織人員", dept].filter { !$0.isEmpty }.joined(separator: "・")
+            out.append(Person(id: p.id, name: p.name.isEmpty ? "未命名" : p.name,
+                              birthday: bd, roleLine: role))
+        }
+        return out
+    }
+
+    /// 距離下一次生日還有幾天（0＝今天、1＝明天；只比月日、跨年自動進位）
+    private func daysUntilNextBirthday(_ bd: Date) -> Int {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var comps = cal.dateComponents([.month, .day], from: bd)
+        comps.year = cal.component(.year, from: today)
+        guard var next = cal.date(from: comps) else { return .max }
+        if next < today {
+            comps.year = (comps.year ?? 0) + 1
+            next = cal.date(from: comps) ?? next
+        }
+        return cal.dateComponents([.day], from: today, to: cal.startOfDay(for: next)).day ?? .max
+    }
+
+    private var grouped: (today: [Person], tomorrow: [Person], upcoming: [(Person, Int)]) {
+        let all = Self.birthdayPeople(in: lifeStore)
+        var today: [Person] = [], tomorrow: [Person] = []
+        var upcoming: [(Person, Int)] = []
+        for p in all {
+            switch daysUntilNextBirthday(p.birthday) {
+            case 0: today.append(p)
+            case 1: tomorrow.append(p)
+            case let d where d <= 30: upcoming.append((p, d))
+            default: break
+            }
+        }
+        upcoming.sort { $0.1 < $1.1 }
+        return (today, tomorrow, Array(upcoming.prefix(10)))
+    }
+
+    private static let mdFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d"; return f
+    }()
+
+    var body: some View {
+        let g = grouped
+        NavigationStack {
+            List {
+                if g.today.isEmpty && g.tomorrow.isEmpty && g.upcoming.isEmpty {
+                    Section {
+                        HStack(spacing: 10) {
+                            Image(systemName: "birthday.cake")
+                                .foregroundStyle(.secondary)
+                            Text("30 天內沒有人生日")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.subheadline)
+                    }
+                }
+                if !g.today.isEmpty {
+                    Section("🎂 今天生日") {
+                        ForEach(g.today) { personRow($0, highlight: true) }
+                    }
+                }
+                if !g.tomorrow.isEmpty {
+                    Section("🎁 明天生日") {
+                        ForEach(g.tomorrow) { personRow($0, highlight: true) }
+                    }
+                }
+                if !g.upcoming.isEmpty {
+                    Section("即將到來（30 天內）") {
+                        ForEach(g.upcoming, id: \.0.id) { pair in
+                            personRow(pair.0, highlight: false, daysLeft: pair.1)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("生日名單")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func personRow(_ p: Person, highlight: Bool, daysLeft: Int? = nil) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(highlight
+                          ? LinearGradient(colors: [.pink, .orange],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                          : LinearGradient(colors: [Color(.systemGray4), Color(.systemGray5)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 32, height: 32)
+                Image(systemName: "birthday.cake.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(p.name)
+                    .font(.subheadline.weight(.semibold))
+                if !p.roleLine.isEmpty {
+                    Text(p.roleLine)
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(zodiacSign(for: p.birthday))
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color.purple.opacity(0.12))
+                    .foregroundStyle(.purple)
+                    .clipShape(Capsule())
+                HStack(spacing: 4) {
+                    Text(Self.mdFmt.string(from: p.birthday))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    if let d = daysLeft {
+                        Text("\(d) 天後")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
