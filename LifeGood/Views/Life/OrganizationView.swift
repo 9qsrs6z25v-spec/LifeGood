@@ -1003,29 +1003,34 @@ struct DepartmentDetailView: View {
                 Text(eq.name.isEmpty ? "未命名設備" : eq.name)
                     .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                     .lineLimit(1).minimumScaleFactor(0.8)
-                HStack(spacing: 6) {
+                // [v25.296] 膠囊改用自動換行容器：系統別／負責人名稱字多時
+                // 換到下一行，不再擠在同一行互相壓縮變形（篩選點擊行為不變）
+                ChipFlowLayout(spacing: 6) {
                     Label("PM \(eq.pmRecords.count)", systemImage: "wrench.fill")
                         .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 5).padding(.vertical, 1.5)
                         .background(Color.green.opacity(0.12)).foregroundStyle(.green)
                         .clipShape(Capsule())
+                        .fixedSize()
                     Label("警報 \(eq.alarms.count)", systemImage: "bell.badge.fill")
                         .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 5).padding(.vertical, 1.5)
                         .background(eq.alarms.isEmpty ? Color(.tertiarySystemFill) : Color.red.opacity(0.12))
                         .foregroundStyle(eq.alarms.isEmpty ? Color.secondary : Color.red)
                         .clipShape(Capsule())
+                        .fixedSize()
                     if !eq.system.isEmpty {
-                        equipmentSystemChip(eq.system)
+                        equipmentSystemChip(eq.system).fixedSize()
                     }
                     if let oid = eq.ownerId {
-                        equipmentOwnerChip(oid)
+                        equipmentOwnerChip(oid).fixedSize()
                     } else {
                         Text("未指派負責人")
                             .font(.system(size: 9, weight: .bold))
                             .padding(.horizontal, 5).padding(.vertical, 1.5)
                             .background(Color(.tertiarySystemFill)).foregroundStyle(.secondary)
                             .clipShape(Capsule())
+                            .fixedSize()
                     }
                 }
                 if !eq.note.isEmpty {

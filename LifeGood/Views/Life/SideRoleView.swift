@@ -3521,7 +3521,9 @@ struct FlexibleChipWrap<Item: Hashable, Content: View>: View {
     }
 }
 
-private struct ChipFlowLayout: Layout {
+/// [v25.296] 開放給其他頁面直接當容器用（如部門所屬設備列的混合膠囊：
+/// 一般膠囊＋可點篩選按鈕混排，無法用 FlexibleChipWrap 的單一 Item 泛型表達）
+struct ChipFlowLayout: Layout {
     var spacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {

@@ -206,6 +206,48 @@ struct SubordinateEquipmentSection: View {
         .padding(.vertical, 20)
     }
 
+    /// 機台列膠囊的描述（icon 可無；dimmed＝灰色弱化，如警報 0 次）
+    private struct RowChip: Hashable {
+        let icon: String?
+        let text: String
+        let tint: Color
+        let dimmed: Bool
+    }
+
+    /// 機台列的膠囊清單：PM 數／警報數／30 天內警報／系統別／部門
+    private func rowChips(_ eq: ManagedEquipment, recentAlarms: Int) -> [RowChip] {
+        var chips: [RowChip] = [
+            RowChip(icon: "wrench.fill", text: "PM \(eq.pmRecords.count)", tint: .green, dimmed: false),
+            RowChip(icon: "bell.badge.fill", text: "警報 \(eq.alarms.count)", tint: .red, dimmed: eq.alarms.isEmpty)
+        ]
+        if recentAlarms > 0 {
+            chips.append(RowChip(icon: nil, text: "30天內 \(recentAlarms) 次", tint: .red, dimmed: false))
+        }
+        if !eq.system.isEmpty {
+            chips.append(RowChip(icon: nil, text: eq.system, tint: .cyan, dimmed: false))
+        }
+        if let deptName = lifeStore.departments.first(where: { $0.id == eq.departmentId })?.name,
+           !deptName.isEmpty {
+            chips.append(RowChip(icon: nil, text: deptName, tint: .indigo, dimmed: false))
+        }
+        return chips
+    }
+
+    private func rowChipView(_ chip: RowChip) -> some View {
+        HStack(spacing: 3) {
+            if let icon = chip.icon {
+                Image(systemName: icon).font(.system(size: 8, weight: .bold))
+            }
+            Text(chip.text)
+        }
+        .font(.system(size: 9, weight: .bold))
+        .padding(.horizontal, 5).padding(.vertical, 1.5)
+        .background(chip.dimmed ? Color(.tertiarySystemFill) : chip.tint.opacity(0.12))
+        .foregroundStyle(chip.dimmed ? Color.secondary : chip.tint)
+        .clipShape(Capsule())
+        .fixedSize()
+    }
+
     @ViewBuilder
     private func equipmentRow(_ eq: ManagedEquipment) -> some View {
         let lastPM = eq.pmRecords.map(\.date).max()
@@ -230,42 +272,10 @@ struct SubordinateEquipmentSection: View {
                     Text(eq.name.isEmpty ? "未命名設備" : eq.name)
                         .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                         .lineLimit(1).minimumScaleFactor(0.8)
-                    HStack(spacing: 6) {
-                        Label("PM \(eq.pmRecords.count)", systemImage: "wrench.fill")
-                            .font(.system(size: 9, weight: .bold))
-                            .padding(.horizontal, 5).padding(.vertical, 1.5)
-                            .background(Color.green.opacity(0.12)).foregroundStyle(.green)
-                            .clipShape(Capsule())
-                        Label("警報 \(eq.alarms.count)", systemImage: "bell.badge.fill")
-                            .font(.system(size: 9, weight: .bold))
-                            .padding(.horizontal, 5).padding(.vertical, 1.5)
-                            .background(eq.alarms.isEmpty ? Color(.tertiarySystemFill) : Color.red.opacity(0.12))
-                            .foregroundStyle(eq.alarms.isEmpty ? Color.secondary : Color.red)
-                            .clipShape(Capsule())
-                        if recentAlarms > 0 {
-                            Text("30天內 \(recentAlarms) 次")
-                                .font(.system(size: 9, weight: .bold))
-                                .padding(.horizontal, 5).padding(.vertical, 1.5)
-                                .background(Color.red.opacity(0.12)).foregroundStyle(.red)
-                                .clipShape(Capsule())
-                        }
-                        if !eq.system.isEmpty {
-                            Text(eq.system)
-                                .font(.system(size: 9, weight: .bold))
-                                .padding(.horizontal, 5).padding(.vertical, 1.5)
-                                .background(Color.cyan.opacity(0.12)).foregroundStyle(.cyan)
-                                .clipShape(Capsule())
-                                .lineLimit(1)
-                        }
-                        if let deptName = lifeStore.departments.first(where: { $0.id == eq.departmentId })?.name,
-                           !deptName.isEmpty {
-                            Text(deptName)
-                                .font(.system(size: 9, weight: .bold))
-                                .padding(.horizontal, 5).padding(.vertical, 1.5)
-                                .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
-                                .clipShape(Capsule())
-                                .lineLimit(1)
-                        }
+                    // [v25.296] 膠囊改用自動換行容器：系統別／部門名稱字多時
+                    // 換到下一行，不再擠在同一行互相壓縮變形
+                    FlexibleChipWrap(items: rowChips(eq, recentAlarms: recentAlarms)) { chip in
+                        rowChipView(chip)
                     }
                     if !eq.note.isEmpty {
                         Text(eq.note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
