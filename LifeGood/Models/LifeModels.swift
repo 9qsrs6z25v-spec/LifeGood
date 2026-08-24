@@ -2041,26 +2041,31 @@ struct SubordinateTask: Identifiable, Codable {
     var responseAction: String
     /// 回復結果（機台警報任務需回報）
     var responseResult: String
+    /// 這個任務完成時的自訂分數（可正可負）；nil＝跟隨全域預設（ScoreWeights.actTask）。
+    /// 存 nil 而不是把預設值寫死進來——進階設定日後調整權重，未自訂的任務要跟著變。
+    var customScore: Int?
 
     init(id: UUID = UUID(), topic: String = "", content: String = "",
          date: Date = Date(), dueDate: Date? = nil, note: String = "",
          isCompleted: Bool = false, completedAt: Date? = nil,
          sideRoleLink: SideRoleBackLink? = nil, reminderId: String? = nil,
          equipmentLink: EquipmentAlarmLink? = nil,
-         responseAction: String = "", responseResult: String = "") {
+         responseAction: String = "", responseResult: String = "",
+         customScore: Int? = nil) {
         self.id = id; self.topic = topic; self.content = content
         self.date = date; self.dueDate = dueDate; self.note = note
         self.isCompleted = isCompleted; self.completedAt = completedAt
         self.sideRoleLink = sideRoleLink; self.reminderId = reminderId
         self.equipmentLink = equipmentLink
         self.responseAction = responseAction; self.responseResult = responseResult
+        self.customScore = customScore
     }
 
     // 自訂解碼：isCompleted / completedAt 為後加欄位，舊存檔沒有這兩個 key。
     // 用 decodeIfPresent 容錯，避免單筆缺欄位導致整個 subordinates 陣列解碼失敗、資料消失。
     enum CodingKeys: String, CodingKey {
         case id, topic, content, date, dueDate, note, isCompleted, completedAt, sideRoleLink, reminderId,
-             equipmentLink, responseAction, responseResult
+             equipmentLink, responseAction, responseResult, customScore
     }
 
     init(from decoder: Decoder) throws {
@@ -2078,6 +2083,7 @@ struct SubordinateTask: Identifiable, Codable {
         equipmentLink = try? c.decodeIfPresent(EquipmentAlarmLink.self, forKey: .equipmentLink)
         responseAction = (try? c.decodeIfPresent(String.self, forKey: .responseAction)) ?? ""
         responseResult = (try? c.decodeIfPresent(String.self, forKey: .responseResult)) ?? ""
+        customScore = try? c.decodeIfPresent(Int.self, forKey: .customScore)
     }
 }
 

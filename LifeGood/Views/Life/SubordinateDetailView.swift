@@ -1227,6 +1227,17 @@ struct SubordinateDetailView: View {
                                         .clipShape(Capsule())
                                         .overlay(Capsule().stroke(dueColor.opacity(0.22), lineWidth: 0.6))
                                     }
+                                    // [v25.294] 自訂分數任務：顯示分數膠囊（正綠負紅）
+                                    if let cs = t.customScore {
+                                        let csColor: Color = cs >= 0 ? .green : .red
+                                        Text(cs > 0 ? "+\(cs)分" : "\(cs)分")
+                                            .font(.caption2.weight(.bold))
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(csColor.opacity(0.12))
+                                            .foregroundStyle(csColor)
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(csColor.opacity(0.22), lineWidth: 0.6))
+                                    }
                                     // 與兼任待辦連動：打勾會同步兩邊，評分也只算一次
                                     if let back = t.sideRoleLink {
                                         SideRoleLinkBadge(back: back)
@@ -3465,6 +3476,8 @@ struct TaskEditorSheet: View {
     /// 機台警報任務的回報欄位（一般任務不顯示）
     @State private var responseAction = ""
     @State private var responseResult = ""
+    /// 任務分數（onAppear 帶入自訂值或全域預設；等於預設值時存檔存 nil＝跟隨預設）
+    @State private var scoreValue = ScoreWeights.actTask
 
     /// 機台警報任務的來源機台顯示（優先現查機台池，機台被刪則用連結快照）
     private func equipmentDisplay(_ link: EquipmentAlarmLink) -> (name: String, system: String) {
@@ -3507,8 +3520,42 @@ struct TaskEditorSheet: View {
                             FiveMinuteDateTimePicker(selection: $dueDate).fixedSize()
                         }
                     }
+                    // [v25.294] 任務自訂分數：右側加減調整，可正可負；等於全域預設值
+                    // 時存 nil（跟隨進階設定的「完成任務」權重，日後調整會跟著變）
+                    HStack(spacing: 10) {
+                        Text("任務分數")
+                        if scoreValue == ScoreWeights.actTask {
+                            Text("預設")
+                                .font(.system(size: 10, weight: .semibold))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color(.tertiarySystemFill))
+                                .foregroundStyle(.secondary)
+                                .clipShape(Capsule())
+                        }
+                        Spacer()
+                        Button { scoreValue -= 1 } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(Color(.systemGray3))
+                        }
+                        .buttonStyle(.borderless)
+                        Text(scoreValue > 0 ? "+\(scoreValue)" : "\(scoreValue)")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(scoreValue > 0 ? Color.green
+                                             : scoreValue < 0 ? Color.red : Color.secondary)
+                            .frame(minWidth: 36)
+                            .monospacedDigit()
+                        Button { scoreValue += 1 } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(.green)
+                        }
+                        .buttonStyle(.borderless)
+                    }
                 } header: {
                     editorSectionHeader("任務資訊", icon: "checklist")
+                } footer: {
+                    Text("完成這個任務時計入主動性評分的分數（可正可負）。沒有調整就跟隨進階設定的「完成任務」權重（目前 +\(ScoreWeights.actTask)）。")
                 }
                 Section {
                     Picker(selection: $assignedSubId) {
@@ -3595,6 +3642,7 @@ struct TaskEditorSheet: View {
                     topic = e.topic; content = e.content; date = e.date; note = e.note
                     isCompleted = e.isCompleted
                     responseAction = e.responseAction; responseResult = e.responseResult
+                    scoreValue = e.customScore ?? ScoreWeights.actTask
                     if let d = e.dueDate { hasDueDate = true; dueDate = d }
                 } else {
                     // 新任務：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
@@ -3622,7 +3670,9 @@ struct TaskEditorSheet: View {
             reminderId: editing?.reminderId,
             equipmentLink: editing?.equipmentLink,
             responseAction: responseAction.trimmingCharacters(in: .whitespacesAndNewlines),
-            responseResult: responseResult.trimmingCharacters(in: .whitespacesAndNewlines)
+            responseResult: responseResult.trimmingCharacters(in: .whitespacesAndNewlines),
+            // 等於全域預設＝視同沒自訂（存 nil，進階設定調整權重時跟著變）
+            customScore: scoreValue == ScoreWeights.actTask ? nil : scoreValue
         )
         let targetId = assignedSubId
         // 換人：先從原持有者移除該任務

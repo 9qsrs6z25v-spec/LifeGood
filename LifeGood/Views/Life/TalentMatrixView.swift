@@ -95,7 +95,9 @@ extension Subordinate {
     func proactivityScore(mentionedCount: Int = 0, sideRoleDone: Int) -> Int {
         // 連到兼任待辦的紀錄跳過：那是「同一件事的另一面」，已由 sideRoleDone
         // 以 +3 計過一次。不跳的話同一件事會被計兩次分（本職 +3／+1 再加兼任 +3）。
-        let completedTasks = tasks.filter { $0.isCompleted && $0.sideRoleLink == nil }.count
+        // [v25.294] 任務可帶自訂分數（可正可負）；沒自訂的跟隨全域權重
+        let taskPoints = tasks.filter { $0.isCompleted && $0.sideRoleLink == nil }
+            .reduce(0) { $0 + ($1.customScore ?? ScoreWeights.actTask) }
         let completedItems = meetings.flatMap { $0.allItems }
             .filter { $0.isCompleted && $0.sideRoleLink == nil }.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
@@ -103,7 +105,7 @@ extension Subordinate {
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         // 權重走 ScoreWeights（進階設定可調；出廠值同原本：60／+3／+1／+3／+2／+3／每 8h -2）
         var score = Double(ScoreWeights.actBase)
-        score += Double(completedTasks * ScoreWeights.actTask)       // 每完成一項任務
+        score += Double(taskPoints)                                  // 完成任務（含每題自訂分）
         score += Double(completedItems * ScoreWeights.actItem)       // 每完成一個議程項目（顆粒最小，權重刻意壓低）
         score += Double(completedReports * ScoreWeights.actReport)   // 每完成一份報告
         score += Double(mentionedCount * ScoreWeights.actMention)    // 每被標註一項
@@ -158,13 +160,17 @@ extension Subordinate {
         var items: [(String, Int)] = [("基礎分", ScoreWeights.actBase)]
         // 連到兼任待辦的紀錄跳過：那是「同一件事的另一面」，已由 sideRoleDone
         // 以 +3 計過一次。不跳的話同一件事會被計兩次分（本職 +3／+1 再加兼任 +3）。
-        let completedTasks = tasks.filter { $0.isCompleted && $0.sideRoleLink == nil }.count
+        // [v25.294] 自訂分數的任務獨立成一列（金額＝各任務自訂分加總），與預設分任務分開看
+        let doneTasks = tasks.filter { $0.isCompleted && $0.sideRoleLink == nil }
+        let defaultTasks = doneTasks.filter { $0.customScore == nil }.count
+        let customTasks = doneTasks.compactMap(\.customScore)
         let completedItems = meetings.flatMap { $0.allItems }
             .filter { $0.isCompleted && $0.sideRoleLink == nil }.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假／病假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
         let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
-        if completedTasks > 0 { items.append(("完成任務 ×\(completedTasks)", completedTasks * ScoreWeights.actTask)) }
+        if defaultTasks > 0 { items.append(("完成任務 ×\(defaultTasks)", defaultTasks * ScoreWeights.actTask)) }
+        if !customTasks.isEmpty { items.append(("完成任務（自訂分）×\(customTasks.count)", customTasks.reduce(0, +))) }
         if completedItems > 0 { items.append(("完成議程項目 ×\(completedItems)", completedItems * ScoreWeights.actItem)) }
         if completedReports > 0 { items.append(("完成報告 ×\(completedReports)", completedReports * ScoreWeights.actReport)) }
         if mentionedCount > 0 { items.append(("被標註 ×\(mentionedCount)", mentionedCount * ScoreWeights.actMention)) }
