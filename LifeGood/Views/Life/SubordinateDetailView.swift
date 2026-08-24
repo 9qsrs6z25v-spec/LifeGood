@@ -3653,15 +3653,26 @@ struct TaskEditorSheet: View {
 
 // MARK: - 生日提醒設定（Apple 行事曆）
 
-/// 部屬看板鈴鐺開啟的生日提醒設定：提前 N 天提醒（數字輸入）、連續提醒 N 年，
+/// 生日提醒的對象：部屬看板鈴鐺、公司組織人員卡片鈴鐺共用同一張設定頁
+enum BirthdayReminderTarget {
+    case subordinate(UUID)
+    case orgPerson(UUID)
+}
+
+/// 鈴鐺開啟的生日提醒設定：提前 N 天提醒（數字輸入）、連續提醒 N 年，
 /// 寫入 Apple 行事曆為「每年重複」的全日事件（提前 N 天上午 9:00 跳提醒）。
 /// 已建立過則更新同一個事件（birthdayEventId 對應），不會重複建立。
+/// [v25.292] 通用化：部屬與公司組織人員都可用（target 決定讀寫哪個集合），
+/// 並把部門／職稱等身分資訊寫進行事曆事件的標題與內容。
 struct BirthdayReminderSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var appleCal = AppleCalendarBridge.shared
 
-    let subordinateId: UUID
+    let target: BirthdayReminderTarget
+
+    init(subordinateId: UUID) { self.target = .subordinate(subordinateId) }
+    init(orgPersonId: UUID) { self.target = .orgPerson(orgPersonId) }
 
     @State private var daysBeforeText = "1"
     @State private var yearsText = "5"
@@ -3674,8 +3685,51 @@ struct BirthdayReminderSheet: View {
     @State private var resultMessage: String?
     @State private var isWorking = false
 
-    private var subordinate: Subordinate? {
-        lifeStore.subordinates.first { $0.id == subordinateId }
+    /// 依 target 解出目前這個人的顯示資料與行事曆事件內容素材。
+    /// roleLine 進事件標題（🎂 姓名 生日｜部門 職稱）；extraNotes 進事件內容補充行。
+    private var info: (name: String, birthday: Date?, eventId: String?,
+                       roleLine: String?, extraNotes: [String], key: String)? {
+        switch target {
+        case .subordinate(let id):
+            guard let s = lifeStore.subordinates.first(where: { $0.id == id }) else { return nil }
+            let dept = departmentName(id: s.departmentId, fallback: s.department)
+            let role = [dept, s.jobTitle].filter { !$0.isEmpty }.joined(separator: " ")
+            var lines = ["身分：我的部屬"]
+            if !dept.isEmpty { lines.append("部門：\(dept)") }
+            if !s.jobTitle.isEmpty { lines.append("職稱：\(s.jobTitle)") }
+            if let jd = s.joinDate { lines.append("到職：\(Self.fullDateFmt.string(from: jd))") }
+            return (s.name, s.birthday, s.birthdayEventId,
+                    role.isEmpty ? nil : role, lines, id.uuidString)
+        case .orgPerson(let id):
+            guard let p = lifeStore.orgPeople.first(where: { $0.id == id }) else { return nil }
+            let dept = departmentName(id: p.departmentId, fallback: "")
+            let role = [dept, p.jobTitle].filter { !$0.isEmpty }.joined(separator: " ")
+            var lines = ["身分：公司組織人員"]
+            if !dept.isEmpty { lines.append("部門：\(dept)") }
+            if !p.jobTitle.isEmpty { lines.append("職稱：\(p.jobTitle)") }
+            return (p.name, p.birthday, p.birthdayEventId,
+                    role.isEmpty ? nil : role, lines, id.uuidString)
+        }
+    }
+
+    private func departmentName(id: UUID?, fallback: String) -> String {
+        if let id, let d = lifeStore.departments.first(where: { $0.id == id }),
+           !d.name.isEmpty { return d.name }
+        return fallback
+    }
+
+    /// 事件 id 寫回對應集合（建立成功／移除後）
+    private func storeEventId(_ id: String?) {
+        switch target {
+        case .subordinate(let sid):
+            if var s = lifeStore.subordinates.first(where: { $0.id == sid }) {
+                s.birthdayEventId = id; lifeStore.update(s)
+            }
+        case .orgPerson(let pid):
+            if var p = lifeStore.orgPeople.first(where: { $0.id == pid }) {
+                p.birthdayEventId = id; lifeStore.update(p)
+            }
+        }
     }
 
     private static let fullDateFmt: DateFormatter = {
@@ -3685,7 +3739,7 @@ struct BirthdayReminderSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                if let sub = subordinate, let bd = sub.birthday {
+                if let person = info, let bd = person.birthday {
                     Section {
                         HStack {
                             Text("生日")
@@ -3739,11 +3793,11 @@ struct BirthdayReminderSheet: View {
 
                     Section {
                         Button {
-                            createReminder(sub: sub, birthday: bd)
+                            createReminder(person: person, birthday: bd)
                         } label: {
                             HStack {
                                 if isWorking { ProgressView().scaleEffect(0.8) }
-                                Label(sub.birthdayEventId != nil ? "更新提醒" : "建立提醒",
+                                Label(person.eventId != nil ? "更新提醒" : "建立提醒",
                                       systemImage: "bell.badge.fill")
                                     .frame(maxWidth: .infinity)
                             }
@@ -3751,9 +3805,9 @@ struct BirthdayReminderSheet: View {
                         .disabled(isWorking || (Int(daysBeforeText) ?? -1) < 0
                                   || (!noEndDate && (Int(yearsText) ?? 0) < 1))
 
-                        if sub.birthdayEventId != nil {
+                        if let eid = person.eventId {
                             Button(role: .destructive) {
-                                removeReminder(sub: sub)
+                                removeReminder(eventId: eid)
                             } label: {
                                 Label("移除提醒", systemImage: "bell.slash")
                                     .frame(maxWidth: .infinity)
@@ -3770,7 +3824,7 @@ struct BirthdayReminderSheet: View {
                         }
                     }
                 } else {
-                    Text("請先在編輯部屬填入生日。")
+                    Text("請先在編輯畫面填入生日。")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -3798,7 +3852,7 @@ struct BirthdayReminderSheet: View {
     private func prefillCalendarSelection() {
         guard appleCal.hasAccess, selectedCalendarId == nil else { return }
         let writableIds = appleCal.writableCalendars.map { $0.calendarIdentifier }
-        if let eid = subordinate?.birthdayEventId,
+        if let eid = info?.eventId,
            let current = appleCal.calendarId(ofEvent: eid),
            writableIds.contains(current) {
             selectedCalendarId = current
@@ -3809,7 +3863,9 @@ struct BirthdayReminderSheet: View {
         }
     }
 
-    private func createReminder(sub: Subordinate, birthday: Date) {
+    private func createReminder(person: (name: String, birthday: Date?, eventId: String?,
+                                         roleLine: String?, extraNotes: [String], key: String),
+                                birthday: Date) {
         isWorking = true
         resultMessage = nil
         let days = max(0, Int(daysBeforeText) ?? 1)
@@ -3824,15 +3880,16 @@ struct BirthdayReminderSheet: View {
             }
             // 剛拿到授權的情況：Picker 還沒預填過，這裡補一次（用預設/上次選的行事曆）
             if selectedCalendarId == nil { prefillCalendarSelection() }
-            let id = bridge.writeBirthdayReminder(existingId: sub.birthdayEventId,
-                                                  name: sub.name.isEmpty ? "部屬" : sub.name,
+            let id = bridge.writeBirthdayReminder(existingId: person.eventId,
+                                                  name: person.name.isEmpty ? "同仁" : person.name,
                                                   birthday: birthday,
                                                   daysBefore: days, years: years,
-                                                  calendarId: selectedCalendarId)
+                                                  calendarId: selectedCalendarId,
+                                                  roleLine: person.roleLine,
+                                                  extraNotes: person.extraNotes,
+                                                  personKey: person.key)
             if let id {
-                var updated = sub
-                updated.birthdayEventId = id
-                lifeStore.update(updated)
+                storeEventId(id)
                 resultMessage = years.map { "已建立：每年提醒連續 \($0) 年、提前 \(days) 天上午 9:00。" }
                     ?? "已建立：每年提醒（無限期）、提前 \(days) 天上午 9:00。"
             } else {
@@ -3842,14 +3899,11 @@ struct BirthdayReminderSheet: View {
         }
     }
 
-    private func removeReminder(sub: Subordinate) {
-        guard let id = sub.birthdayEventId else { return }
+    private func removeReminder(eventId: String) {
         isWorking = true
         Task { @MainActor in
-            AppleCalendarBridge.shared.delete(eventIdentifier: id)
-            var updated = sub
-            updated.birthdayEventId = nil
-            lifeStore.update(updated)
+            AppleCalendarBridge.shared.delete(eventIdentifier: eventId)
+            storeEventId(nil)
             resultMessage = "已移除生日提醒。"
             isWorking = false
         }

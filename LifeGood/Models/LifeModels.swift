@@ -2632,6 +2632,8 @@ struct OrgPerson: Identifiable, Codable {
     var departmentId: UUID?
     var photoFileName: String?
     var birthday: Date?
+    /// 生日提醒對應的 Apple 行事曆事件 id（比照 Subordinate：重建提醒時更新既有事件）
+    var birthdayEventId: String?
     /// 我與他的利害關係描述
     var relationship: String
     /// 相關記事
@@ -2651,7 +2653,8 @@ struct OrgPerson: Identifiable, Codable {
 
     init(id: UUID = UUID(), name: String = "", jobTitle: String = "",
          departmentId: UUID? = nil, photoFileName: String? = nil,
-         birthday: Date? = nil, relationship: String = "", note: String = "",
+         birthday: Date? = nil, birthdayEventId: String? = nil,
+         relationship: String = "", note: String = "",
          children: [OrgPersonChild] = [], relations: [OrgPersonRelation] = [],
          dateAdded: Date = Date(),
          isInactive: Bool = false, leftDate: Date? = nil,
@@ -2660,7 +2663,8 @@ struct OrgPerson: Identifiable, Codable {
          gradeTitleId: UUID? = nil) {
         self.id = id; self.name = name; self.jobTitle = jobTitle
         self.departmentId = departmentId; self.photoFileName = photoFileName
-        self.birthday = birthday; self.relationship = relationship
+        self.birthday = birthday; self.birthdayEventId = birthdayEventId
+        self.relationship = relationship
         self.note = note; self.children = children; self.relations = relations
         self.dateAdded = dateAdded
         self.isInactive = isInactive; self.leftDate = leftDate
@@ -2677,6 +2681,7 @@ struct OrgPerson: Identifiable, Codable {
         departmentId = try? c.decodeIfPresent(UUID.self, forKey: .departmentId)
         photoFileName = try? c.decodeIfPresent(String.self, forKey: .photoFileName)
         birthday = try? c.decodeIfPresent(Date.self, forKey: .birthday)
+        birthdayEventId = try? c.decodeIfPresent(String.self, forKey: .birthdayEventId)
         relationship = (try? c.decode(String.self, forKey: .relationship)) ?? ""
         note = (try? c.decode(String.self, forKey: .note)) ?? ""
         children = (try? c.decode([OrgPersonChild].self, forKey: .children)) ?? []
@@ -2690,7 +2695,7 @@ struct OrgPerson: Identifiable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, jobTitle, departmentId, photoFileName, birthday
+        case id, name, jobTitle, departmentId, photoFileName, birthday, birthdayEventId
         case relationship, note, children, relations, dateAdded
         case isInactive, leftDate, linkedBusinessCardId, linkedSubordinateId, gradeTitleId
     }

@@ -191,8 +191,15 @@ final class AppleCalendarBridge: ObservableObject {
     ///    只看得到前兩年」；迄日行為在所有來源一致。
     /// 2. 更新走 **先建新、成功後刪舊**——反覆改同一個循環事件的規則在部分來源
     ///    會殘留舊佔位；建立失敗時舊提醒保留不動。
+    /// [v25.292] 標題／內容完整化：
+    /// ・標題＝「🎂 {姓名} 生日｜{部門 職稱}」（roleLine 有值時），行事曆一眼認得出是誰
+    /// ・內容＝出生日期＋星座、身分／部門／職稱等補充行（extraNotes）、提醒設定摘要，
+    ///   最後帶 App 標記與人員識別碼（personKey）——孤兒掃除改認識別碼，人名/部門
+    ///   改了也不會漏掃（舊版「標題＋固定備註」格式仍相容）。
     func writeBirthdayReminder(existingId: String?, name: String, birthday: Date,
-                               daysBefore: Int, years: Int?, calendarId: String? = nil) -> String? {
+                               daysBefore: Int, years: Int?, calendarId: String? = nil,
+                               roleLine: String? = nil, extraNotes: [String] = [],
+                               personKey: String? = nil) -> String? {
         guard hasAccess else { return nil }
         let event = EKEvent(eventStore: eventStore)
         // 指定行事曆（設定頁 Picker 選的）優先；沒選或已失效 fallback 預設
@@ -215,8 +222,35 @@ final class AppleCalendarBridge: ObservableObject {
         }
         let startOfDay = cal.startOfDay(for: next)
 
-        event.title = "🎂 \(name) 生日"
-        event.notes = "美好人生・部屬生日提醒"
+        var title = "🎂 \(name) 生日"
+        if let role = roleLine?.trimmingCharacters(in: .whitespaces), !role.isEmpty {
+            title += "｜\(role)"
+        }
+        event.title = title
+
+        let birthFmt = DateFormatter()
+        birthFmt.locale = Locale(identifier: "zh_Hant_TW")
+        birthFmt.dateFormat = "yyyy/M/d"
+        let alarmDesc = daysBefore == 0
+            ? "生日當天上午 9:00 通知"
+            : "提前 \(daysBefore) 天上午 9:00 通知"
+        var noteLines: [String] = ["🎂 \(name) 生日提醒"]
+        noteLines += extraNotes.filter { !$0.isEmpty }
+        noteLines.append("出生日期：\(birthFmt.string(from: birthday))（\(zodiacSign(for: birthday))）")
+        if let y = years {
+            let lastYear = cal.component(.year, from: startOfDay) + max(1, y) - 1
+            noteLines.append("提醒設定：\(alarmDesc)・每年重複至 \(lastYear) 年")
+        } else {
+            noteLines.append("提醒設定：\(alarmDesc)・每年重複（無限期）")
+        }
+        noteLines.append("")
+        noteLines.append("────────")
+        noteLines.append("美好人生・生日提醒")
+        if let key = personKey, !key.isEmpty {
+            noteLines.append("識別碼：\(key)")
+        }
+        event.notes = noteLines.joined(separator: "\n")
+
         event.startDate = startOfDay
         event.endDate = cal.date(byAdding: .day, value: 1, to: startOfDay)?.addingTimeInterval(-1) ?? startOfDay
         event.isAllDay = true
@@ -237,7 +271,8 @@ final class AppleCalendarBridge: ObservableObject {
             // 當備援存起來；查找/刪除端兩種 id 都認得（resolveEvent）。
             let newId = event.eventIdentifier ?? event.calendarItemIdentifier
             // 掃掉這個人其餘的生日提醒（含先前 id 沒記到的孤兒與被取代的舊提醒）
-            removeBirthdayEvents(named: event.title ?? "", excludingItemId: event.calendarItemIdentifier)
+            removeBirthdayEvents(name: name, personKey: personKey,
+                                 excludingItemId: event.calendarItemIdentifier)
             return newId
         } catch {
             return nil
@@ -251,17 +286,25 @@ final class AppleCalendarBridge: ObservableObject {
         return eventStore.calendarItem(withIdentifier: id) as? EKEvent
     }
 
-    /// 清掉同名的生日提醒事件（標題＋App 備註標記辨識；排除剛建立的那一個）。
+    /// 清掉同一個人的其餘生日提醒事件（排除剛建立的那一個）。
+    /// 認法兩種並行：
+    /// ・新版（v25.292 起）：備註含「美好人生・生日提醒」標記＋「識別碼：{personKey}」——
+    ///   人名／部門改了照樣掃得到
+    /// ・舊版相容：標題「🎂 {name} 生日」＋備註恰為「美好人生・部屬生日提醒」
     /// 往後掃 400 天必含每年循環的下一次發生，從該發生以 futureEvents 移除即砍掉整串。
-    private func removeBirthdayEvents(named title: String, excludingItemId: String) {
-        guard !title.isEmpty else { return }
+    private func removeBirthdayEvents(name: String, personKey: String?, excludingItemId: String) {
+        guard !name.isEmpty || !(personKey ?? "").isEmpty else { return }
         let start = Date()
         guard let end = Calendar.current.date(byAdding: .day, value: 400, to: start) else { return }
+        let legacyTitle = "🎂 \(name) 生日"
         let pred = eventStore.predicateForEvents(withStart: start, end: end, calendars: nil)
         var removed = false
-        for e in eventStore.events(matching: pred)
-        where e.title == title && e.notes == "美好人生・部屬生日提醒"
-            && e.calendarItemIdentifier != excludingItemId {
+        for e in eventStore.events(matching: pred) where e.calendarItemIdentifier != excludingItemId {
+            let notes = e.notes ?? ""
+            let isLegacy = e.title == legacyTitle && notes == "美好人生・部屬生日提醒"
+            let isMine = notes.contains("美好人生・生日提醒")
+                && (personKey.map { notes.contains("識別碼：\($0)") } ?? false)
+            guard isLegacy || isMine else { continue }
             try? eventStore.remove(e, span: .futureEvents, commit: false)
             removed = true
         }

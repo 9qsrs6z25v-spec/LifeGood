@@ -1656,6 +1656,13 @@ struct OrgPersonEditor: View {
             return jobTitle.trimmingCharacters(in: .whitespaces)
         }()
 
+        // [v25.292] 生日提醒事件 id 必須跟著帶（比照部屬編輯的 promotions 教訓：
+        // 重建整個物件時漏帶欄位＝資料被清空）；生日被拿掉時連動刪除行事曆事件
+        var keptEventId = existing?.birthdayEventId
+        if !hasBirthday, let bid = keptEventId {
+            Task { @MainActor in AppleCalendarBridge.shared.delete(eventIdentifier: bid) }
+            keptEventId = nil
+        }
         let person = OrgPerson(
             id: id,
             name: name.trimmingCharacters(in: .whitespaces),
@@ -1663,6 +1670,7 @@ struct OrgPersonEditor: View {
             departmentId: departmentId,
             photoFileName: newPhoto,
             birthday: hasBirthday ? birthday : nil,
+            birthdayEventId: keptEventId,
             relationship: relationship.trimmingCharacters(in: .whitespaces),
             note: note.trimmingCharacters(in: .whitespaces),
             children: children,
@@ -1739,6 +1747,7 @@ struct OrgPersonDetailView: View {
     let personId: UUID
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
+    @State private var showBirthdayReminder = false
     @State private var viewingRelatedPersonId: UUID?
     @State private var viewingLinkedCardId: UUID?
     // [v2] 英雄卡進場動畫旗標
@@ -1814,6 +1823,9 @@ struct OrgPersonDetailView: View {
             }
             .sheet(isPresented: $showEdit) {
                 OrgPersonEditor(editingId: personId, defaultDepartmentId: nil)
+            }
+            .sheet(isPresented: $showBirthdayReminder) {
+                BirthdayReminderSheet(orgPersonId: personId)
             }
             .sheet(item: Binding(
                 get: { viewingRelatedPersonId.map { IdentifiableUUID(id: $0) } },
@@ -2043,17 +2055,31 @@ struct OrgPersonDetailView: View {
                 }
 
                 if let bd = person.birthday {
-                    HStack(spacing: 5) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.75))
-                        Text("生日：\(formatDate(bd))")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.82))
+                    // [v25.292] 補星座＋生日提醒鈴鐺（比照部屬看板：已建立提醒時亮黃色）
+                    HStack(spacing: 8) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "birthday.cake.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.75))
+                            Text("生日：\(formatDate(bd))・\(zodiacSign(for: bd))")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.82))
+                        }
+                        .padding(.horizontal, 9).padding(.vertical, 3)
+                        .background(.white.opacity(0.12))
+                        .clipShape(Capsule())
+                        Button { showBirthdayReminder = true } label: {
+                            Image(systemName: person.birthdayEventId != nil ? "bell.fill" : "bell")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(person.birthdayEventId != nil
+                                                 ? Color.yellow : Color.white.opacity(0.88))
+                                .padding(6)
+                                .background(.white.opacity(0.16), in: Circle())
+                                .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.6))
+                        }
+                        .buttonStyle(.plain)
+                        Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 9).padding(.vertical, 3)
-                    .background(.white.opacity(0.12))
-                    .clipShape(Capsule())
                 }
             }
             .padding(20)

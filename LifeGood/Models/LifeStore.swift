@@ -1345,6 +1345,10 @@ class LifeStore: ObservableObject {
         if let name = item.photoFileName { OrgPerson.deletePhoto(name) }
         isLoading = true
         defer { isLoading = false }
+        // 生日提醒的行事曆事件一併刪除（比照 deleteSubordinate；bridge 是 main actor 隔離）
+        if let bid = item.birthdayEventId {
+            Task { @MainActor in AppleCalendarBridge.shared.delete(eventIdentifier: bid) }
+        }
         // 解除名片反向連結
         if let cid = item.linkedBusinessCardId,
            let i = businessCards.firstIndex(where: { $0.id == cid }),
