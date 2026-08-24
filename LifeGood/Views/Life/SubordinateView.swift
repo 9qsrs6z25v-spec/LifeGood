@@ -96,10 +96,21 @@ struct SubordinateView: View {
     @State private var showTalentMatrix = false
     @AppStorage("subordinateSortOption") private var sortOptionRaw = SubordinateSortOption.dateAdded.rawValue
     @AppStorage("subordinateSortAscending") private var sortAscending = false
-    @AppStorage("subordinateFilterDeptRaw") private var filterDeptRaw = ""   // "" = 全部部門
+    @AppStorage("subordinateFilterDeptRaw") private var filterDeptRaw = ""   // 舊版單選（保留供遷移）
+    /// [v25.298] 部門篩選改多選：逗號串接的部門 id；"" = 全部部門
+    @AppStorage("subordinateFilterDeptsRaw") private var filterDeptsRaw = ""
 
-    private var selectedDeptId: UUID? {
-        filterDeptRaw.isEmpty ? nil : UUID(uuidString: filterDeptRaw)
+    /// 目前勾選的部門集合（空＝全部部門）。新 key 沒值時沿用舊版單選設定。
+    private var selectedDeptIds: Set<UUID> {
+        let ids = filterDeptsRaw.split(separator: ",").compactMap { UUID(uuidString: String($0)) }
+        if !ids.isEmpty { return Set(ids) }
+        if !filterDeptRaw.isEmpty, let legacy = UUID(uuidString: filterDeptRaw) { return [legacy] }
+        return []
+    }
+
+    private func setSelectedDeptIds(_ ids: Set<UUID>) {
+        filterDeptsRaw = ids.map(\.uuidString).sorted().joined(separator: ",")
+        filterDeptRaw = ""   // 舊 key 清空，之後只認新 key
     }
 
     // 進場動畫旗標
@@ -165,10 +176,11 @@ struct SubordinateView: View {
         return dept.name.isEmpty ? dept.code : "\(dept.code) \(dept.name)"
     }
 
-    /// 套用部門篩選後的清單（保留排序）
+    /// 套用部門篩選後的清單（保留排序；多選＝任一勾選部門即入列）
     private var filteredSubordinates: [Subordinate] {
-        guard let id = selectedDeptId else { return sortedSubordinates }
-        return sortedSubordinates.filter { $0.departmentId == id }
+        let ids = selectedDeptIds
+        guard !ids.isEmpty else { return sortedSubordinates }
+        return sortedSubordinates.filter { $0.departmentId.map(ids.contains) ?? false }
     }
 
     /// 列表顯示列：依廠區分組（標題 + 人員）；手動排序時維持平面以便拖曳。
@@ -260,7 +272,7 @@ struct SubordinateView: View {
             .onMove { from, to in
                 guard subscription.isPremium else { showPremiumAlert = true; return }
                 // 僅在「手動排序 + 全部部門」的平面清單下允許拖曳，offset 才與底層陣列一致
-                guard sortOption == .manual, selectedDeptId == nil else { return }
+                guard sortOption == .manual, selectedDeptIds.isEmpty else { return }
                 lifeStore.subordinates.move(fromOffsets: from, toOffset: to)
             }
         }
@@ -387,10 +399,9 @@ struct SubordinateView: View {
                 }
             }
             .onChange(of: lifeStore.departments.map(\.id)) { _, ids in
-                // 所選部門被刪除時，篩選回復為「全部部門」（用 id 陣列觀察，避免 Department 需 Equatable）
-                if let id = selectedDeptId, !ids.contains(id) {
-                    filterDeptRaw = ""
-                }
+                // 勾選中的部門被刪除時，從篩選集合剔除（全刪光＝回復「全部部門」）
+                let alive = selectedDeptIds.filter { ids.contains($0) }
+                if alive != selectedDeptIds { setSelectedDeptIds(alive) }
             }
             .sheet(isPresented: $showAdd) { AddSubordinateView() }
             .sheet(item: $editingItem) { item in AddSubordinateView(editing: item) }
@@ -497,32 +508,77 @@ struct SubordinateView: View {
 
     // MARK: - 部門篩選列 / 廠區分組標題
 
+    /// [v25.298] 部門篩選改為下拉選單＋可多選：勾選期間選單不收合（一次勾好幾個），
+    /// 「全部部門」一鍵清空。選擇摘要顯示在按鈕上。
     private var departmentFilterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                filterChip(title: "全部部門", active: selectedDeptId == nil) { filterDeptRaw = "" }
-                ForEach(lifeStore.departments) { dept in
-                    filterChip(title: deptLabel(dept), active: selectedDeptId == dept.id) {
-                        filterDeptRaw = dept.id.uuidString
-                    }
+        Menu {
+            Button {
+                setSelectedDeptIds([])
+            } label: {
+                if selectedDeptIds.isEmpty {
+                    Label("全部部門", systemImage: "checkmark")
+                } else {
+                    Text("全部部門")
                 }
             }
-            .padding(.horizontal, 4).padding(.vertical, 2)
+            Divider()
+            ForEach(lifeStore.departments) { dept in
+                Toggle(deptLabel(dept), isOn: deptToggleBinding(dept.id))
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(selectedDeptIds.isEmpty ? Color.secondary : Color.blue)
+                Text(deptFilterSummary)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(selectedDeptIds.isEmpty ? Color.primary : Color.blue)
+                    .lineLimit(1)
+                if !selectedDeptIds.isEmpty {
+                    Text("\(selectedDeptIds.count)")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 6).padding(.vertical, 1.5)
+                        .background(Color.blue.opacity(0.14))
+                        .foregroundStyle(.blue)
+                        .clipShape(Capsule())
+                }
+                Spacer()
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .stroke(selectedDeptIds.isEmpty ? Color(.separator).opacity(0.3) : Color.blue.opacity(0.35),
+                        lineWidth: 0.75))
+            .contentShape(Rectangle())
         }
+        .menuActionDismissBehavior(.disabled)
     }
 
-    private func filterChip(title: String, active: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(active ? Color.blue : Color(.secondarySystemBackground))
-                .foregroundStyle(active ? .white : .primary)
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(active ? Color.blue : Color(.separator).opacity(0.3), lineWidth: 0.75))
-        }
-        .buttonStyle(.plain)
+    /// 單一部門的勾選 Binding（供 Menu 內 Toggle 使用）
+    private func deptToggleBinding(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { selectedDeptIds.contains(id) },
+            set: { on in
+                var ids = selectedDeptIds
+                if on { ids.insert(id) } else { ids.remove(id) }
+                setSelectedDeptIds(ids)
+            }
+        )
+    }
+
+    /// 下拉按鈕上的選擇摘要：全部部門／部門名（最多列 2 個，其餘以「等 N 個部門」帶過）
+    private var deptFilterSummary: String {
+        let ids = selectedDeptIds
+        guard !ids.isEmpty else { return "全部部門" }
+        let names = lifeStore.departments
+            .filter { ids.contains($0.id) }
+            .map { deptLabel($0) }
+        if names.count <= 2 { return names.joined(separator: "、") }
+        return "\(names.prefix(2).joined(separator: "、")) 等 \(names.count) 個部門"
     }
 
     /// 廠區分組標題列（對齊部屬班表的廠區分段樣式）
@@ -537,8 +593,7 @@ struct SubordinateView: View {
 
     private func activeSubordinatesSectionHeader(count: Int) -> some View {
         let accent = Color(red: 0.22, green: 0.53, blue: 0.98)
-        let title = selectedDeptId.flatMap { id in lifeStore.departments.first { $0.id == id } }
-            .map { deptLabel($0) } ?? "部屬成員"
+        let title = selectedDeptIds.isEmpty ? "部屬成員" : deptFilterSummary
         return HStack(spacing: 8) {
             // 4pt Capsule 漸層側條（對齊 StockView.activeStocksSectionHeader 規格）
             Capsule()
