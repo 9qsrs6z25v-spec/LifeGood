@@ -511,13 +511,30 @@ struct EquipmentEditorSheet: View {
         }
     }
 
-    /// 負責人候選：全部部屬，機台所屬部門的成員排最前，其餘依姓名排序
-    private var ownerCandidates: [Subordinate] {
+    /// 部屬的有效部門：優先看連動的公司組織人員的部門（組織頁調過部門、
+    /// 部屬端還沒同步到的舊資料也對得上），沒有連動才用部屬自己的 departmentId。
+    private func effectiveDeptId(_ s: Subordinate) -> UUID? {
+        lifeStore.orgPeople.first(where: { $0.linkedSubordinateId == s.id })?.departmentId
+            ?? s.departmentId
+    }
+
+    /// 負責人候選：依所選部門分成「部門成員」與「其他部屬」兩組（各依姓名排序）；
+    /// 未指定部門則全部一組
+    private var ownerGroups: (members: [Subordinate], others: [Subordinate]) {
         let sorted = lifeStore.subordinates.sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
-        guard let did = departmentId else { return sorted }
-        return sorted.filter { $0.departmentId == did } + sorted.filter { $0.departmentId != did }
+        guard let did = departmentId else { return (sorted, []) }
+        return (sorted.filter { effectiveDeptId($0) == did },
+                sorted.filter { effectiveDeptId($0) != did })
+    }
+
+    /// 負責人 Picker 的部門成員分組標題（「實驗室 成員」）
+    private var deptSectionTitle: String {
+        let name = departmentId.flatMap { did in
+            lifeStore.departments.first { $0.id == did }?.name
+        } ?? ""
+        return name.isEmpty ? "部門成員" : "\(name) 成員"
     }
 
     /// 統一 Section 標題（對齊 MeetingEditorSheet.editorSectionHeader 規格）
@@ -553,10 +570,28 @@ struct EquipmentEditorSheet: View {
                             Text(d.name.isEmpty ? "未命名部門" : d.name).tag(UUID?.some(d.id))
                         }
                     }
+                    // [v25.297] 依所選部門分組：部門成員一組在前、其他部屬一組在後，
+                    // 成員判定含公司組織頁設定的部門（組織人員連動），不再對不上
                     Picker("負責人", selection: $ownerId) {
                         Text("未指派").tag(UUID?.none)
-                        ForEach(ownerCandidates) { s in
-                            Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                        let groups = ownerGroups
+                        if departmentId != nil {
+                            Section(deptSectionTitle) {
+                                ForEach(groups.members) { s in
+                                    Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                                }
+                            }
+                            if !groups.others.isEmpty {
+                                Section("其他部屬") {
+                                    ForEach(groups.others) { s in
+                                        Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                                    }
+                                }
+                            }
+                        } else {
+                            ForEach(groups.members) { s in
+                                Text(s.name.isEmpty ? "未命名" : s.name).tag(UUID?.some(s.id))
+                            }
                         }
                     }
                 } header: {

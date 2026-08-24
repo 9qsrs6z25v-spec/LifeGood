@@ -1362,6 +1362,17 @@ class LifeStore: ObservableObject {
     func add(_ item: OrgPerson) { orgPeople.append(item) }
     func update(_ item: OrgPerson) {
         if let i = orgPeople.firstIndex(where: { $0.id == item.id }) { orgPeople[i] = item }
+        // [v25.297] 部門反向同步：組織人員改了部門，連動的部屬也要跟著搬。
+        // 原本只有部屬→組織人員的單向同步，從公司組織頁調部門時部屬端
+        // 停在舊部門，設備編輯器等依部屬 departmentId 篩選的地方就對不上。
+        if let sid = item.linkedSubordinateId,
+           let si = subordinates.firstIndex(where: { $0.id == sid }),
+           subordinates[si].departmentId != item.departmentId {
+            subordinates[si].departmentId = item.departmentId
+            subordinates[si].department = item.departmentId.flatMap { did in
+                departments.first { $0.id == did }?.name
+            } ?? ""
+        }
     }
     func deleteOrgPerson(_ item: OrgPerson) {
         if let name = item.photoFileName { OrgPerson.deletePhoto(name) }
