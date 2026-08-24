@@ -3875,10 +3875,16 @@ struct WeeklyReportEditorSheet: View {
     /// 自訂分類的輸入暫存
     @State private var customTypeInput = ""
 
-    /// 分類膠囊清單：內建四種 + 全部部屬報告裡 key 過的自訂分類（新到舊、去重、上限 8）
+    /// 分類膠囊清單：內建四種 + 全部部屬報告裡 key 過的自訂分類（新到舊、去重、上限 8）。
+    /// [修正 v25.291] 目前選取中的分類（例如剛按 + 新增、還沒存檔的自訂分類）一定要出現在
+    /// 膠囊列，否則按 + 後畫面毫無變化，使用者會以為文字被吃掉。
     private var typeSuggestions: [String] {
         var out = WeeklyReport.builtinTypes
         var seen = Set(out)
+        let current = reportType.trimmingCharacters(in: .whitespaces)
+        if !current.isEmpty && !seen.contains(current) {
+            seen.insert(current); out.append(current)
+        }
         let customs = lifeStore.subordinates
             .flatMap(\.weeklyReports)
             .sorted { $0.date > $1.date }
@@ -4013,6 +4019,10 @@ struct WeeklyReportEditorSheet: View {
         guard !isSaving else { return }
         guard var sub = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { dismiss(); return }
         isSaving = true
+        // [修正 v25.291] 若自訂分類輸入框還有沒按 + 的文字，儲存時直接視同已確認，
+        // 避免使用者 key 完直接按儲存導致分類遺失。
+        let pendingType = customTypeInput.trimmingCharacters(in: .whitespaces)
+        let finalType = pendingType.isEmpty ? reportType.trimmingCharacters(in: .whitespaces) : pendingType
         let report = WeeklyReport(
             id: editing?.id ?? UUID(),
             topic: topic.trimmingCharacters(in: .whitespaces),
@@ -4021,7 +4031,7 @@ struct WeeklyReportEditorSheet: View {
             isCompleted: isCompleted,
             // 由切換保留／補上完成時間：仍完成→沿用既有戳記（首次完成則記為現在）；取消完成→清空
             completedAt: isCompleted ? (editing?.completedAt ?? Date()) : nil,
-            reportType: reportType.trimmingCharacters(in: .whitespaces)
+            reportType: finalType
         )
         if let idx = sub.weeklyReports.firstIndex(where: { $0.id == report.id }) { sub.weeklyReports[idx] = report }
         else { sub.weeklyReports.append(report) }
