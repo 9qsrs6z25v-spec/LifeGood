@@ -71,15 +71,29 @@ extension Subordinate {
         return max(0, Int(score.rounded()))
     }
 
-    /// 逾期未完成數（逾期 Offset 用）：
-    /// 任務——有截止日且已過、未完成、未連兼任（連結的那份由兼任側計）；
-    /// 報告——報告日已過、未完成。
+    /// 逾期件數（逾期 Offset 用）。
+    /// [v25.302 使用者指定] 一旦逾期，扣分就**定案**——事後補完成不會拿回逾期扣分
+    ///（逾期任務補打勾＝完成 +3、逾期 -3，淨 0 分），所以計數包含兩種：
+    /// ・逾期未完成：截止日已過、還沒完成
+    /// ・逾期才完成：完成時間晚於截止日（舊資料沒記完成時間的從寬不計）
+    /// 任務需未連兼任（連結的那份由兼任側計）；報告以報告日為截止。
     var overdueOpenCount: Int {
         let now = Date()
-        let t = tasks.filter {
-            !$0.isCompleted && $0.sideRoleLink == nil && ($0.dueDate.map { $0 < now } ?? false)
+        let t = tasks.filter { t in
+            guard t.sideRoleLink == nil, let due = t.dueDate else { return false }
+            if t.isCompleted {
+                guard let done = t.completedAt else { return false }
+                return done > due
+            }
+            return due < now
         }.count
-        let r = weeklyReports.filter { !$0.isCompleted && $0.date < now }.count
+        let r = weeklyReports.filter { r in
+            if r.isCompleted {
+                guard let done = r.completedAt else { return false }
+                return done > r.date
+            }
+            return r.date < now
+        }.count
         return t + r
     }
 
@@ -179,10 +193,10 @@ extension Subordinate {
             let h = leaveHours.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(leaveHours))" : String(format: "%.1f", leaveHours)
             items.append(("請假 \(h) 小時", -Int((leaveHours / 8 * Double(ScoreWeights.actLeavePer8h)).rounded())))
         }
-        // 逾期 Offset（設定 > 0 時才顯示這一列）
+        // 逾期 Offset（設定 > 0 時才顯示這一列；含逾期未完成＋逾期才完成）
         let overdue = overdueOpenCount
         if ScoreWeights.actOverdue > 0 && overdue > 0 {
-            items.append(("逾期未完成 ×\(overdue)", -overdue * ScoreWeights.actOverdue))
+            items.append(("逾期（含補完成）×\(overdue)", -overdue * ScoreWeights.actOverdue))
         }
         return items
     }

@@ -2485,11 +2485,11 @@ struct ScoreWeightSettingsView: View {
                 Text("喪假／公假／病假不列入請假扣分。")
             }
             Section {
-                weightRow("每項逾期未完成", value: $actOverdue, range: 0...20, sign: "−")
+                weightRow("每項逾期", value: $actOverdue, range: 0...20, sign: "−")
             } header: {
                 Text("逾期 Offset")
             } footer: {
-                Text("每一項逾期未完成（過截止日的任務＋過報告日的報告）固定扣這個分數，逾期影響一目了然。0＝不扣（預設）。")
+                Text("每一項逾期（過截止日的任務＋過報告日的報告）固定扣這個分數；逾期後才補完成的照樣扣——完成加分與逾期扣分互抵（預設值下等於 0 分）。0＝不扣（預設）。")
             }
             Section {
                 weightRow("基礎分", value: $potBase, range: 0...200, sign: "")
