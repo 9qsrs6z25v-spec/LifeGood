@@ -2342,14 +2342,23 @@ struct ManagedEquipment: Identifiable, Codable {
 }
 
 /// 單筆預防保養（PM）記錄。
+/// PM 階段：停機（開始保養、機台停轉）／完成復機（保養結束、機台恢復運轉）。
+/// 一次 PM 記兩筆（停機一筆、復機一筆），時間軸就能直觀切分「保養中」的區間。
+enum PMPhase: String, Codable, CaseIterable {
+    case shutdown = "停機"
+    case restored = "完成復機"
+}
+
 struct EquipmentPMRecord: Identifiable, Codable {
     let id: UUID
     var date: Date
     /// 保養內容／項目（選填）
     var note: String
+    /// PM 階段（nil＝未標註的一般 PM，舊資料相容）
+    var phase: PMPhase?
 
-    init(id: UUID = UUID(), date: Date = Date(), note: String = "") {
-        self.id = id; self.date = date; self.note = note
+    init(id: UUID = UUID(), date: Date = Date(), note: String = "", phase: PMPhase? = nil) {
+        self.id = id; self.date = date; self.note = note; self.phase = phase
     }
 }
 

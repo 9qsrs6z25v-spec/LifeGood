@@ -316,6 +316,7 @@ struct SubordinateEquipmentTimelineSection: View {
         let text: String
         /// 警報：距同設備上一次 PM 的天數（無 PM 紀錄則 nil）
         let daysSincePM: Int?
+        var phase: PMPhase? = nil
     }
 
     private var entries: [TimelineEntry] {
@@ -325,7 +326,8 @@ struct SubordinateEquipmentTimelineSection: View {
             let pmDates = eq.pmRecords.map(\.date).sorted()
             for pm in eq.pmRecords {
                 result.append(TimelineEntry(id: pm.id, kind: .pm, date: pm.date,
-                                            equipmentName: name, text: pm.note, daysSincePM: nil))
+                                            equipmentName: name, text: pm.note, daysSincePM: nil,
+                                            phase: pm.phase))
             }
             for al in eq.alarms {
                 // 該設備在警報發生前最近的一次 PM（pmDates 已排序，二分搜尋取代線性掃描）
@@ -363,7 +365,9 @@ struct SubordinateEquipmentTimelineSection: View {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
     }()
     private func fmt(_ e: TimelineEntry) -> String {
-        e.kind == .alarm ? Self.dateTimeFmt.string(from: e.date) : Self.dateFmt.string(from: e.date)
+        // 警報與有標階段的 PM（停機/復機）帶時間，同日順序才分得出來
+        (e.kind == .alarm || e.phase != nil)
+            ? Self.dateTimeFmt.string(from: e.date) : Self.dateFmt.string(from: e.date)
     }
 
     var body: some View {
@@ -381,8 +385,12 @@ struct SubordinateEquipmentTimelineSection: View {
                     // 圖例
                     HStack(spacing: 8) {
                         HStack(spacing: 3) {
+                            Circle().fill(Color.orange).frame(width: 7, height: 7)
+                            Text("停機").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 3) {
                             Circle().fill(Color.green).frame(width: 7, height: 7)
-                            Text("PM").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                            Text("PM／復機").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
                         }
                         HStack(spacing: 3) {
                             Circle().fill(Color.red).frame(width: 7, height: 7)
@@ -422,7 +430,8 @@ struct SubordinateEquipmentTimelineSection: View {
 
     @ViewBuilder
     private func timelineRow(_ e: TimelineEntry, isLast: Bool) -> some View {
-        let color: Color = e.kind == .pm ? .green : .red
+        // [v25.303] PM 依階段配色：停機橘、復機/一般 PM 綠、警報紅
+        let color: Color = e.kind == .pm ? (e.phase == .shutdown ? .orange : .green) : .red
         HStack(alignment: .top, spacing: 12) {
             // 左側：節點 + 連接線
             VStack(spacing: 0) {
@@ -432,7 +441,9 @@ struct SubordinateEquipmentTimelineSection: View {
                                              startPoint: .topLeading, endPoint: .bottomTrailing))
                         .frame(width: 22, height: 22)
                     Circle().stroke(color.opacity(0.28), lineWidth: 0.75).frame(width: 22, height: 22)
-                    Image(systemName: e.kind == .pm ? "wrench.fill" : "bell.fill")
+                    Image(systemName: e.kind == .pm
+                          ? (e.phase == .shutdown ? "pause.fill" : e.phase == .restored ? "checkmark" : "wrench.fill")
+                          : "bell.fill")
                         .font(.system(size: 9, weight: .bold)).foregroundStyle(color)
                 }
                 if !isLast {
@@ -448,7 +459,9 @@ struct SubordinateEquipmentTimelineSection: View {
                     Text(e.equipmentName)
                         .font(.caption.weight(.semibold)).foregroundStyle(.primary)
                         .lineLimit(1).minimumScaleFactor(0.8)
-                    Text(e.kind == .pm ? "PM 保養" : "警報")
+                    Text(e.kind == .pm
+                         ? (e.phase == .shutdown ? "PM 停機" : e.phase == .restored ? "PM 完成復機" : "PM 保養")
+                         : "警報")
                         .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 5).padding(.vertical, 1.5)
                         .background(color.opacity(0.12)).foregroundStyle(color)
@@ -624,6 +637,13 @@ struct EquipmentEditorSheet: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+                            // [v25.303] PM 階段：停機／完成復機（時間軸依此切分停機區間）
+                            Picker("階段", selection: $pm.phase) {
+                                Text("一般").tag(PMPhase?.none)
+                                Text("停機").tag(PMPhase?.some(.shutdown))
+                                Text("復機").tag(PMPhase?.some(.restored))
+                            }
+                            .pickerStyle(.segmented)
                             TextField("保養內容（選填）", text: $pm.note)
                         }
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -899,6 +919,8 @@ struct EquipmentDetailCard: View {
     let equipmentId: UUID
 
     @State private var showEditor = false
+    /// [v25.303] 時間軸右上＋的快速新增（免進編輯畫面）
+    @State private var quickAddKind: TimelineQuickAddKind?
 
     private var equipment: ManagedEquipment? {
         lifeStore.equipmentPool.first { $0.id == equipmentId }
@@ -942,6 +964,9 @@ struct EquipmentDetailCard: View {
                 if let eq = equipment {
                     EquipmentEditorSheet(editing: eq)
                 }
+            }
+            .sheet(item: $quickAddKind) { kind in
+                EquipmentTimelineQuickAddSheet(equipmentId: equipmentId, kind: kind)
             }
         }
     }
@@ -1072,13 +1097,15 @@ struct EquipmentDetailCard: View {
         let date: Date
         let text: String
         let daysSincePM: Int?
+        var phase: PMPhase? = nil
     }
 
     private func entries(_ eq: ManagedEquipment) -> [CardEntry] {
         var out: [CardEntry] = []
         let pmDates = eq.pmRecords.map(\.date).sorted()
         for pm in eq.pmRecords {
-            out.append(CardEntry(id: pm.id, isPM: true, date: pm.date, text: pm.note, daysSincePM: nil))
+            out.append(CardEntry(id: pm.id, isPM: true, date: pm.date, text: pm.note,
+                                 daysSincePM: nil, phase: pm.phase))
         }
         for al in eq.alarms {
             let prior = pmDates.last(where: { $0 <= al.date })
@@ -1105,13 +1132,32 @@ struct EquipmentDetailCard: View {
                 Spacer()
                 HStack(spacing: 8) {
                     HStack(spacing: 3) {
+                        Circle().fill(Color.orange).frame(width: 7, height: 7)
+                        Text("停機").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 3) {
                         Circle().fill(Color.green).frame(width: 7, height: 7)
-                        Text("PM").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                        Text("PM／復機").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
                     }
                     HStack(spacing: 3) {
                         Circle().fill(Color.red).frame(width: 7, height: 7)
                         Text("警報").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
                     }
+                }
+                // [v25.303] 免進編輯畫面的快速新增：PM 停機／PM 完成復機／警報
+                Menu {
+                    Button { quickAddKind = .pmShutdown } label: {
+                        Label("PM 停機", systemImage: "pause.circle.fill")
+                    }
+                    Button { quickAddKind = .pmRestored } label: {
+                        Label("PM 完成復機", systemImage: "checkmark.circle.fill")
+                    }
+                    Button { quickAddKind = .alarm } label: {
+                        Label("警報", systemImage: "bell.badge.fill")
+                    }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 17, weight: .semibold)).foregroundStyle(.indigo)
                 }
             }
             .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
@@ -1120,7 +1166,7 @@ struct EquipmentDetailCard: View {
                 HStack(spacing: 8) {
                     Image(systemName: "clock")
                         .font(.system(size: 13, weight: .medium)).foregroundStyle(.tertiary)
-                    Text("尚無 PM／警報記錄，按右上「編輯」新增")
+                    Text("尚無 PM／警報記錄，按右上「＋」直接新增")
                         .font(.caption).foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 14).padding(.bottom, 14)
@@ -1137,7 +1183,14 @@ struct EquipmentDetailCard: View {
     }
 
     private func cardTimelineRow(_ e: CardEntry, isLast: Bool) -> some View {
-        let color: Color = e.isPM ? .green : .red
+        // [v25.303] PM 依階段配色：停機橘（機台停轉）、復機/一般 PM 綠、警報紅
+        let color: Color = e.isPM ? (e.phase == .shutdown ? .orange : .green) : .red
+        let icon: String = e.isPM
+            ? (e.phase == .shutdown ? "pause.fill" : e.phase == .restored ? "checkmark" : "wrench.fill")
+            : "bell.fill"
+        let label: String = e.isPM
+            ? (e.phase == .shutdown ? "PM 停機" : e.phase == .restored ? "PM 完成復機" : "PM 保養")
+            : "警報"
         return HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 0) {
                 ZStack {
@@ -1146,7 +1199,7 @@ struct EquipmentDetailCard: View {
                                              startPoint: .topLeading, endPoint: .bottomTrailing))
                         .frame(width: 22, height: 22)
                     Circle().stroke(color.opacity(0.28), lineWidth: 0.75).frame(width: 22, height: 22)
-                    Image(systemName: e.isPM ? "wrench.fill" : "bell.fill")
+                    Image(systemName: icon)
                         .font(.system(size: 9, weight: .bold)).foregroundStyle(color)
                 }
                 if !isLast {
@@ -1159,7 +1212,7 @@ struct EquipmentDetailCard: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(e.isPM ? "PM 保養" : "警報")
+                    Text(label)
                         .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 5).padding(.vertical, 1.5)
                         .background(color.opacity(0.12)).foregroundStyle(color)
@@ -1172,7 +1225,10 @@ struct EquipmentDetailCard: View {
                             .clipShape(Capsule())
                     }
                     Spacer()
-                    Text(e.isPM ? Self.dateFmt.string(from: e.date) : Self.dateTimeFmt.string(from: e.date))
+                    // 有標階段的 PM（停機/復機）連時間一起顯示，同日停機→復機順序才分得出來
+                    Text(e.isPM && e.phase == nil
+                         ? Self.dateFmt.string(from: e.date)
+                         : Self.dateTimeFmt.string(from: e.date))
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
                 if !e.text.isEmpty {
@@ -1187,3 +1243,108 @@ struct EquipmentDetailCard: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 }
+
+// MARK: - 時間軸快速新增（v25.303：機台詳情右上＋，免進編輯畫面）
+
+/// 快速新增的種類：PM 停機／PM 完成復機／警報
+enum TimelineQuickAddKind: String, Identifiable {
+    case pmShutdown, pmRestored, alarm
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .pmShutdown: return "PM 停機"
+        case .pmRestored: return "PM 完成復機"
+        case .alarm:      return "警報"
+        }
+    }
+    var tint: Color {
+        switch self {
+        case .pmShutdown: return .orange
+        case .pmRestored: return .green
+        case .alarm:      return .red
+        }
+    }
+}
+
+/// 機台詳情時間軸的快速新增表單：日期時間＋內容，一鍵寫入機台池。
+/// 警報照走「警報→負責人任務」自動掛任務的既有流程。
+struct EquipmentTimelineQuickAddSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let equipmentId: UUID
+    let kind: TimelineQuickAddKind
+
+    @State private var date = Date()
+    @State private var text = ""
+
+    private var equipmentName: String {
+        let n = lifeStore.equipmentPool.first { $0.id == equipmentId }?.name ?? ""
+        return n.isEmpty ? "未命名設備" : n
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "gearshape.2.fill")
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(.teal)
+                        Text(equipmentName).font(.subheadline.weight(.medium))
+                        Spacer()
+                        Text(kind.title)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(kind.tint.opacity(0.12)).foregroundStyle(kind.tint)
+                            .clipShape(Capsule())
+                    }
+                    DatePicker(kind == .alarm ? "發生時間" : "時間",
+                               selection: $date, displayedComponents: [.date, .hourAndMinute])
+                    TextField(kind == .alarm ? "警報內容（如：高溫警報、壓力異常）"
+                              : "保養內容／項目（選填）",
+                              text: $text, axis: .vertical)
+                        .lineLimit(1...4)
+                } footer: {
+                    switch kind {
+                    case .pmShutdown: Text("記錄機台停機開始保養的時間點；保養結束後再快速新增一筆「PM 完成復機」，時間軸就能直觀切分停機區間。")
+                    case .pmRestored: Text("記錄保養完成、機台恢復運轉的時間點。")
+                    case .alarm:      Text("警報會照既有流程自動掛任務給機台負責人。")
+                    }
+                }
+            }
+            .navigationTitle("新增\(kind.title)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("新增") { save() }.bold()
+                        .disabled(kind == .alarm && text.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func save() {
+        guard var eq = lifeStore.equipmentPool.first(where: { $0.id == equipmentId }) else { dismiss(); return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch kind {
+        case .pmShutdown:
+            eq.pmRecords.append(EquipmentPMRecord(date: date, note: trimmed, phase: .shutdown))
+            lifeStore.upsertEquipment(eq)
+        case .pmRestored:
+            eq.pmRecords.append(EquipmentPMRecord(date: date, note: trimmed, phase: .restored))
+            lifeStore.upsertEquipment(eq)
+        case .alarm:
+            let alarm = EquipmentAlarm(date: date, content: trimmed)
+            eq.alarms.append(alarm)
+            lifeStore.upsertEquipment(eq)
+            // 警報→負責人任務（與編輯表單同一條路）
+            lifeStore.createTasksForNewAlarms(equipment: eq, newAlarms: [alarm])
+        }
+        dismiss()
+    }
+}
+
