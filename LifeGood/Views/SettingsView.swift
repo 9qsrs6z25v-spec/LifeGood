@@ -2183,6 +2183,19 @@ private struct FamilySharingRow: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                // [v25.305] 退出失敗的保底出口：伺服器端已把我移出時，本機可直接
+                // 強制切回私有模式（資料保留、推回自己的雲端），不再卡死在參與者模式
+                if isParticipant {
+                    Button {
+                        CloudKitManager.shared.forceExitShareLocally()
+                        shareErrorText = nil
+                        isParticipant = CloudKitManager.shared.isShareParticipant
+                    } label: {
+                        Label("強制退出（僅本機切回自己的資料庫）", systemImage: "arrow.uturn.backward.circle")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
             }
         }
         .sheet(item: $sharePayload) { payload in

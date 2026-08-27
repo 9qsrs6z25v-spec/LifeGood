@@ -352,6 +352,11 @@ final class CloudKitManager {
                         // 例如 Xcode 開發版建過 Development zone、TestFlight/App Store 版
                         // 讀到同一個旗標而跳過 Production zone 建立）→ 清旗標重建後重推一次
                         guard let self else { completion?(false); return }
+                        // [v25.305] 參與者模式＝擁有者的 zone 不是我能重建的：
+                        // zone 不見代表被移出或停止共享，直接自動退回私有模式
+                        if self.autoExitShareIfRemoved(error) {
+                            completion?(false); return
+                        }
                         self.defaults.removeObject(forKey: self.zoneCreatedKey)
                         self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
                         self.defaults.removeObject(forKey: self.uploadLedgerKey)   // zone 重建＝雲端照片全沒了，帳本作廢
@@ -636,6 +641,12 @@ final class CloudKitManager {
                                 userInfo: ["pulled": Array(pulledPhotos), "deletedRecords": Array(deletedPhotos)]
                             )
                         }
+                        // [v25.305] 參與者收到 zone 不見＝擁有者停止共享或把我移出
+                        // → 自動切回私有模式（不再需要手動按退出、也不會卡在讀寫全掛）
+                        if self.autoExitShareIfRemoved(err) {
+                            completion?(false)
+                            return
+                        }
                         self.defaults.removeObject(forKey: self.zoneCreatedKey)
                         self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
                         self.clearChangeToken()
@@ -654,6 +665,11 @@ final class CloudKitManager {
                                 name: Self.didPullPhotoChangesNotification, object: nil,
                                 userInfo: ["pulled": Array(pulledPhotos), "deletedRecords": Array(deletedPhotos)]
                             )
+                        }
+                        // [v25.305] 被移出時拉取常回權限錯誤而非 zoneNotFound，這裡也要認
+                        if self.autoExitShareIfRemoved(err) {
+                            completion?(false)
+                            return
                         }
                         self.report(err, context: "拉取雲端變更")
                         completion?(false)
@@ -1012,13 +1028,19 @@ final class CloudKitManager {
 
     /// 參與者：退出共享（從共享資料庫移除整個 zone＝Apple 定義的參與者退出方式）。
     /// 退出後切回自己的私有庫；目前本機資料保留，下輪同步會推進自己的 zone。
+    ///
+    /// [修正 v25.305] 「已經在共享之外」的錯誤一律視同退出成功——擁有者先把我移出
+    /// 後，我這台的 zone 刪除會回 zoneNotFound 以外的錯誤（permissionFailure／
+    /// unknownItem 等），先前只認 zoneNotFound，導致「按退出→退出失敗」無限卡住，
+    /// 本機一直停在參與者模式（讀寫全掛、退出鈕也按不掉）。目標是離開共享；
+    /// 伺服器已經不讓我碰那個 zone＝實質上已離開，本機直接收尾切回私有模式。
     func leaveShare(completion: ((Bool) -> Void)? = nil) {
         guard isShareParticipant else { completion?(true); return }
         let zid = zoneID
         container.sharedCloudDatabase.delete(withRecordZoneID: zid) { [weak self] _, error in
             DispatchQueue.main.async {
                 guard let self else { completion?(false); return }
-                if let error, (error as? CKError)?.code != .zoneNotFound {
+                if let error, !Self.isAlreadyOutOfShareError(error) {
                     self.report(error, context: "退出共享")
                     completion?(false)
                     return
@@ -1032,6 +1054,49 @@ final class CloudKitManager {
                 completion?(true)
             }
         }
+    }
+
+    /// 「其實已經不在共享裡」的錯誤碼：zone 不見（擁有者停止共享）、權限失敗／
+    /// 項目不明（擁有者把我移出）、參與者需驗證。真正的網路／帳號錯誤不在此列，
+    /// 那些情況退出應該失敗重試，不能誤清本機狀態。
+    private static func isAlreadyOutOfShareError(_ error: Error) -> Bool {
+        guard let ck = error as? CKError else { return false }
+        let outCodes: Set<CKError.Code> = [.zoneNotFound, .userDeletedZone, .unknownItem,
+                                           .permissionFailure, .participantMayNeedVerification]
+        if outCodes.contains(ck.code) { return true }
+        if ck.code == .partialFailure, let subs = ck.partialErrorsByItemID, !subs.isEmpty {
+            return subs.values.allSatisfy { sub in
+                (sub as? CKError).map { outCodes.contains($0.code) } ?? false
+            }
+        }
+        return false
+    }
+
+    /// 退出共享的本機保底：不打伺服器、直接清參與者旗標切回私有模式。
+    /// 給「按退出一直失敗」（伺服器端其實早已把我移出）時的手動出口；
+    /// 本機資料保留，下輪同步推進自己的 zone。
+    func forceExitShareLocally() {
+        defaults.removeObject(forKey: shareOwnerKey)
+        resetLocalState()
+        NotificationCenter.default.post(
+            name: Self.sharingStateDidChangeNotification, object: nil,
+            userInfo: ["joined": false, "forced": true]
+        )
+    }
+
+    /// 參與者模式下收到「zone 不見／沒權限」＝擁有者已停止共享或把我移出
+    /// → 自動切回私有模式（清參與者旗標＋本機同步狀態＋廣播），回傳是否有處理。
+    /// 這讓被移出的那台不必手動按退出：下一輪同步就自動恢復成自己的資料庫。
+    @discardableResult
+    private func autoExitShareIfRemoved(_ error: Error?) -> Bool {
+        guard isShareParticipant, let error, Self.isAlreadyOutOfShareError(error) else { return false }
+        defaults.removeObject(forKey: shareOwnerKey)
+        resetLocalState()
+        NotificationCenter.default.post(
+            name: Self.sharingStateDidChangeNotification, object: nil,
+            userInfo: ["joined": false, "removedByOwner": true]
+        )
+        return true
     }
 
     // MARK: - 重置（測試 / 切換帳號用）
