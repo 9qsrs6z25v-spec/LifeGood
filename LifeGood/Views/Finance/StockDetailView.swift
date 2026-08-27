@@ -97,6 +97,8 @@ struct StockDetailView: View {
     @State private var slideDirection: Int = 1
     @State private var showEdit = false
     @State private var shareItem: StockCardSharePayload?   // 分享圖片
+    /// [v25.304] 匯出前的「每頁項目數」對話框（共用 ExportPageSizeDialog）
+    @State private var askExportPageSize = false
     @State private var showPremiumAlert = false
     @State private var addingTransaction = false
     @State private var editingTransaction: StockTransaction?
@@ -243,8 +245,13 @@ struct StockDetailView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
-                        // 分享（使用者指定）：閃卡＋技術線圖渲染成圖片開分享面板
-                        Button { exportCardImage() } label: {
+                        // 分享：改走共用分頁匯出模板（v25.304）——閃卡＋K線＋基本資訊
+                        // ＋交易/配息逐筆列，先跳「每頁項目數」（可選全部一頁）。
+                        // 沒有任何交易/配息時維持舊的單張閃卡＋K線匯出。
+                        Button {
+                            if exportRowCount == 0 { exportCardImage() }
+                            else { askExportPageSize = true }
+                        } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
                         Button {
@@ -275,6 +282,10 @@ struct StockDetailView: View {
                 StockDividendEditor(stockId: stockId, editing: div)
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+            .exportPageSizeDialog(isPresented: $askExportPageSize,
+                                  itemCount: exportRowCount) { per in
+                exportPaged(perPage: per)
+            }
         }
     }
 
@@ -383,6 +394,142 @@ struct StockDetailView: View {
             try data.write(to: url)
             shareItem = StockCardSharePayload(items: [url])
         } catch { }
+    }
+
+    // MARK: - 分頁匯出（v25.304：改接 PagedImageExporter 共用模板）
+
+    /// 可分頁的列數＝交易紀錄＋配息紀錄
+    private var exportRowCount: Int {
+        stock.transactions.count + stock.dividends.count
+    }
+
+    private static let exportDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+    private static let exportNumFmt: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 2; return f
+    }()
+    private static func num(_ v: Double) -> String {
+        exportNumFmt.string(from: NSNumber(value: v)) ?? "\(v)"
+    }
+
+    /// 每頁重複的抬頭：📈 股票｜名稱（代號）
+    private var exportPageHeader: AnyView {
+        AnyView(
+            HStack {
+                Text("📈 股票｜\(stock.name.isEmpty ? "未命名" : stock.name)\(stock.symbol.isEmpty ? "" : "（\(stock.symbol)）")")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+        )
+    }
+
+    /// 匯出用區塊標題（膠囊側條＋圖示＋計數，對齊 App 內 section header 樣式）
+    private func exportSectionTitle(_ title: String, icon: String, color: Color, count: Int) -> AnyView {
+        AnyView(
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [color, color.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(color)
+                Text(title).font(.subheadline.weight(.bold))
+                Text("\(count) 筆")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(color)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(color.opacity(0.10)).clipShape(Capsule())
+                Spacer()
+            }
+        )
+    }
+
+    private func exportTransactionRow(_ tx: StockTransaction) -> AnyView {
+        let color: Color = tx.kind == .buy ? .green : .red
+        return AnyView(
+            HStack(spacing: 10) {
+                Text(tx.kind.rawValue)
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(color.opacity(0.12)).foregroundStyle(color)
+                    .clipShape(Capsule())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(Self.num(tx.lots)) 張 × \(Self.num(tx.price))")
+                        .font(.subheadline.weight(.medium))
+                    Text(Self.exportDateFmt.string(from: tx.date))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("NT$\(Self.num(tx.amount.rounded()))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(color)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+        )
+    }
+
+    private func exportDividendRow(_ d: StockDividend) -> AnyView {
+        let isCash = d.kind == .cash
+        let color: Color = isCash ? .orange : .teal
+        return AnyView(
+            HStack(spacing: 10) {
+                Text(isCash ? "配息" : "配股")
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 7).padding(.vertical, 2.5)
+                    .background(color.opacity(0.12)).foregroundStyle(color)
+                    .clipShape(Capsule())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isCash
+                         ? "每股 \(Self.num(d.perShare))・持股 \(Self.num(d.sharesAtEvent)) 股"
+                         : "配發 \(Self.num(d.lots)) 張")
+                        .font(.subheadline.weight(.medium))
+                    Text(Self.exportDateFmt.string(from: d.date))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(isCash ? "NT$\(Self.num(d.cashTotal.rounded()))" : "+\(Self.num(d.sharesEarned)) 股")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(color)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+        )
+    }
+
+    /// 分頁匯出：閃卡＋K線＋交易/配息逐筆列（每頁重複抬頭與區塊標題、頁尾頁碼）
+    @MainActor
+    private func exportPaged(perPage: Int) {
+        var items: [PagedExportItem] = []
+        // 閃卡與 K 線當非分頁的開頭區塊（只出現在第一頁）
+        items.append(.sectionHeader(AnyView(
+            flashCardContent(animated: false).environmentObject(store)
+        )))
+        if !candlePoints.isEmpty {
+            items.append(.sectionHeader(AnyView(
+                CandleChartCard(candles: candlePoints).padding(.horizontal, 4)
+            )))
+        }
+        let txs = stock.transactions.sorted { $0.date > $1.date }
+        if !txs.isEmpty {
+            items.append(.sectionHeader(exportSectionTitle("交易紀錄", icon: "arrow.left.arrow.right",
+                                                           color: .orange, count: txs.count)))
+            items += txs.map { .row(exportTransactionRow($0)) }
+        }
+        let divs = stock.dividends.sorted { $0.date > $1.date }
+        if !divs.isEmpty {
+            items.append(.sectionHeader(exportSectionTitle("股利紀錄", icon: "gift.fill",
+                                                           color: .pink, count: divs.count)))
+            items += divs.map { .row(exportDividendRow($0)) }
+        }
+        let urls = PagedImageExporter.exportSections(
+            baseName: "股票_\(stock.name.isEmpty ? "未命名" : stock.name)",
+            itemsPerPage: perPage,
+            header: exportPageHeader,
+            items: items,
+            decorate: { AnyView($0.environmentObject(store)) }
+        )
+        guard !urls.isEmpty else { return }
+        shareItem = StockCardSharePayload(items: urls)
     }
 
     // MARK: - 閃卡背景日線載入
