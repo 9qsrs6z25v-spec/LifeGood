@@ -113,7 +113,7 @@ class FinanceStore: ObservableObject {
             for name in rp.photoFileNames { RenovationPhoto.deletePhoto(name) }
         }
         for em in item.elevatorMaintenances {
-            if let name = em.photoFileName { ElevatorMaintenance.deletePhoto(name) }
+            em.photoFileNames.forEach { ElevatorMaintenance.deletePhoto($0) }
         }
         for doc in item.documents {
             RealEstateDocument.deleteDocument(doc.fileName)

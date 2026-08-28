@@ -883,15 +883,41 @@ enum BuildingType: String, Codable, CaseIterable, Identifiable {
 struct ElevatorMaintenance: Identifiable, Codable {
     let id: UUID
     var date: Date
+    /// 舊版單張照片欄位（保留供舊版本讀取；恆同步為 photoFileNames.first）
     var photoFileName: String?
+    /// [v25.308] 保養照片（可多張；共用 MultiPhotoGallery——拍照連拍/相簿多選/燈箱）。
+    /// 遷移模式完全比照 UtilityPayment：舊單張解碼時自動併入陣列。
+    var photoFileNames: [String]
 
-    init(id: UUID = UUID(), date: Date = Date(), photoFileName: String? = nil) {
-        self.id = id; self.date = date; self.photoFileName = photoFileName
+    init(id: UUID = UUID(), date: Date = Date(),
+         photoFileName: String? = nil, photoFileNames: [String] = []) {
+        self.id = id; self.date = date
+        // 兩欄位互補：只給單張就放進多張陣列；只給多張就把第一張回填舊欄位
+        var names = photoFileNames
+        if names.isEmpty, let single = photoFileName { names = [single] }
+        self.photoFileNames = names
+        self.photoFileName = photoFileName ?? names.first
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = (try? c.decode(Date.self, forKey: .date)) ?? Date()
+        photoFileName = try? c.decodeIfPresent(String.self, forKey: .photoFileName)
+        var names = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
+        // 舊資料只有單張欄位：升級為多張陣列
+        if names.isEmpty, let single = photoFileName { names = [single] }
+        photoFileNames = names
+    }
+    private enum CodingKeys: String, CodingKey { case id, date, photoFileName, photoFileNames }
+
     var photoURL: URL? {
-        guard let name = photoFileName else { return nil }
+        guard let name = photoFileNames.first ?? photoFileName else { return nil }
         return Self.photosDirectory.appendingPathComponent(name)
+    }
+
+    static func photoURL(for fileName: String) -> URL {
+        photosDirectory.appendingPathComponent(fileName)
     }
 
     static var photosDirectory: URL {

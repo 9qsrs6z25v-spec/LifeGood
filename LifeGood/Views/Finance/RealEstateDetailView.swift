@@ -1011,7 +1011,7 @@ struct RealEstateDetailView: View {
         let expensePhotoCount = expensePhotos.reduce(0) { $0 + $1.photoFileNames.count }
         let docCount = estate.documents.count
         let utilityPhotoCount = estate.utilityPayments.reduce(0) { $0 + $1.photoFileNames.count }
-        let elevatorPhotoCount = estate.elevatorMaintenances.filter { $0.photoFileName != nil }.count
+        let elevatorPhotoCount = estate.elevatorMaintenances.reduce(0) { $0 + $1.photoFileNames.count }
         let total = photoCount + expensePhotoCount + docCount + utilityPhotoCount + elevatorPhotoCount
         return total > 0 ? "\(total) 筆" : "尚無"
     }
@@ -1050,16 +1050,21 @@ struct RealEstateDetailView: View {
                                 .overlay(Capsule().stroke(Color.teal.opacity(0.22), lineWidth: 0.6))
                         }
                         Spacer(minLength: 4)
-                        if m.photoFileName != nil {
+                        if !m.photoFileNames.isEmpty {
                             Button {
                                 if let url = m.photoURL { viewingPhotoURL = url }
                             } label: {
-                                Image(systemName: "photo.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.teal)
-                                    .padding(5)
-                                    .background(Color.teal.opacity(0.10))
-                                    .clipShape(Circle())
+                                HStack(spacing: 3) {
+                                    Image(systemName: "photo.fill").font(.caption2)
+                                    if m.photoFileNames.count > 1 {
+                                        Text("\(m.photoFileNames.count)")
+                                            .font(.system(size: 9, weight: .bold))
+                                    }
+                                }
+                                .foregroundStyle(.teal)
+                                .padding(5)
+                                .background(Color.teal.opacity(0.10))
+                                .clipShape(Capsule())
                             }
                             .buttonStyle(.plain)
                         }
@@ -1500,7 +1505,7 @@ struct RealEstateDetailView: View {
             .filter { $0.photoFileName != nil }
             .map { HousePhotoItem.utility($0) }
         let elevatorItems = estate.elevatorMaintenances
-            .filter { $0.photoFileName != nil }
+            .filter { !$0.photoFileNames.isEmpty }
             .map { HousePhotoItem.elevator($0) }
         let allItems = (renovationItems + expenseItems + documentItems + utilityItems + elevatorItems)
             .sorted { $0.date > $1.date }
@@ -1605,13 +1610,13 @@ struct RealEstateDetailView: View {
                 kind: .utility(u.type)
             )
         case .elevator(let m):
-            guard let name = m.photoFileName else {
+            guard !m.photoFileNames.isEmpty else {
                 editingElevatorMaintenance = m
                 return
             }
-            let url = ElevatorMaintenance.photosDirectory.appendingPathComponent(name)
+            let urls = m.photoFileNames.map { ElevatorMaintenance.photoURL(for: $0) }
             cutePhotoDraft = CutePhotoDraft(
-                urls: [url],
+                urls: urls,
                 title: "電梯保養",
                 note: "",
                 date: m.date,
@@ -2264,7 +2269,7 @@ struct RealEstateDetailView: View {
         }
         // 清除電梯保養照片、附件文件檔案（先前遺漏，會永久留在磁碟上並被反覆重傳 CloudKit）
         for em in estate.elevatorMaintenances {
-            if let name = em.photoFileName { ElevatorMaintenance.deletePhoto(name) }
+            em.photoFileNames.forEach { ElevatorMaintenance.deletePhoto($0) }
         }
         for doc in estate.documents {
             RealEstateDocument.deleteDocument(doc.fileName)
@@ -2647,15 +2652,10 @@ struct ElevatorMaintenanceEditor: View {
     let editing: ElevatorMaintenance?
 
     @State private var date = Date()
-    @State private var photoFileName: String?
-    @State private var photoItem: PhotosPickerItem?
-    /// [v25.307] 拍照（先前只能從相簿選，保養現場拍照要先出去拍完再回來選，太繞）
-    @State private var showCamera = false
+    /// [v25.308] 多張照片：共用 MultiPhotoGallery 模組（拍照連拍/相簿多選/燈箱/刪除），
+    /// 取代手刻的單張 PhotosPicker＋CameraPicker
+    @State private var photoFileNames: [String] = []
     @State private var showDeleteConfirm = false
-    // 防止連續選兩張照片時新舊 Task 並行：後選的載入較快先完成會把 photoFileName
-    // 指向它自己，先選的隨後完成又讀到已更新的 photoFileName 當作「舊檔」誤刪，
-    // 兩個 Task 互相刪對方剛存好的檔案。改為每次選擇先取消前一個未完成的載入。
-    @State private var photoLoadTask: Task<Void, Never>?
     // 儲存/刪除已 dismiss + 延後一個 runloop 才寫回 store，快速連點會讓兩次呼叫
     // 各自讀到同一份舊 estate 快照、後寫回者蓋掉先寫回者；比照 UtilityPaymentEditor
     // 既有修法補上忙碌守衛。
@@ -2667,34 +2667,18 @@ struct ElevatorMaintenanceEditor: View {
                 Section {
                     DatePicker("保養日期", selection: $date, displayedComponents: .date)
 
-                    // [v25.307] 補「拍照」：保養單當場拍最順手（先前只能從相簿選）
-                    Button { showCamera = true } label: {
-                        HStack {
-                            Image(systemName: "camera.fill")
-                            Text(photoFileName == nil ? "拍照" : "重拍照片")
-                            Spacer()
-                        }
-                    }
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        HStack {
-                            Image(systemName: "photo")
-                            Text(photoFileName == nil ? "從相簿選擇" : "更換照片（相簿）")
-                            Spacer()
-                            if photoFileName != nil {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                            }
-                        }
-                    }
-                    if photoFileName != nil {
-                        Button(role: .destructive) {
-                            if let name = photoFileName { ElevatorMaintenance.deletePhoto(name) }
-                            photoFileName = nil
-                        } label: {
-                            Label("移除照片", systemImage: "xmark.circle")
-                        }
-                    }
+                    MultiPhotoGallery(
+                        fileNames: $photoFileNames,
+                        urlFor: { ElevatorMaintenance.photoURL(for: $0) },
+                        onSaveImage: { ElevatorMaintenance.savePhoto($0, id: UUID()) },
+                        onDeleteFile: { ElevatorMaintenance.deletePhoto($0) },
+                        title: "保養照片"
+                    )
+                    .padding(.vertical, 4)
                 } header: {
                     realEstateEditorSectionHeader("保養記錄", icon: "wrench.and.screwdriver.fill", color: .teal)
+                } footer: {
+                    Text("可拍照連拍或從相簿多選（保養單、銘板、現場照）。")
                 }
 
                 if editing != nil {
@@ -2716,39 +2700,8 @@ struct ElevatorMaintenanceEditor: View {
             .onAppear {
                 if let e = editing {
                     date = e.date
-                    photoFileName = e.photoFileName
+                    photoFileNames = e.photoFileNames
                 }
-            }
-            .onChange(of: photoItem) { _, item in
-                photoLoadTask?.cancel()
-                photoLoadTask = Task {
-                    if let item, let data = try? await item.loadTransferable(type: Data.self) {
-                        guard !Task.isCancelled else { return }
-                        if let oldName = photoFileName {
-                            ElevatorMaintenance.deletePhoto(oldName)
-                        }
-                        // 檔名用全新 UUID（而非沿用編輯中記錄不變的 id），避免同路徑覆寫
-                        // 造成縮圖快取的舊圖不更新，對齊 BusinessCardView.save() 同型修復。
-                        photoFileName = ElevatorMaintenance.savePhoto(data, id: UUID())
-                    }
-                }
-            }
-            // [v25.307] 相機（全螢幕；比照 MultiPhotoGallery——sheet 卡片會截掉快門）
-            .fullScreenCover(isPresented: $showCamera) {
-                CameraPicker { image in
-                    // JPEG 編碼＋壓縮寫檔走背景，不卡相機收合動畫；只在主執行緒換檔名
-                    Task.detached(priority: .userInitiated) {
-                        guard let data = image.jpegData(compressionQuality: 0.85) else { return }
-                        let newName = ElevatorMaintenance.savePhoto(data, id: UUID())
-                        await MainActor.run {
-                            if let oldName = photoFileName {
-                                ElevatorMaintenance.deletePhoto(oldName)
-                            }
-                            photoFileName = newName
-                        }
-                    }
-                }
-                .ignoresSafeArea()
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) { deleteRecord() }
@@ -2762,7 +2715,7 @@ struct ElevatorMaintenanceEditor: View {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
         isSaving = true
         let recordId = editing?.id ?? UUID()
-        let record = ElevatorMaintenance(id: recordId, date: date, photoFileName: photoFileName)
+        let record = ElevatorMaintenance(id: recordId, date: date, photoFileNames: photoFileNames)
         if let idx = estate.elevatorMaintenances.firstIndex(where: { $0.id == recordId }) {
             estate.elevatorMaintenances[idx] = record
         } else {
@@ -2780,7 +2733,7 @@ struct ElevatorMaintenanceEditor: View {
         guard var estate = store.realEstates.first(where: { $0.id == estateId }),
               let e = editing else { return }
         isSaving = true
-        if let name = e.photoFileName { ElevatorMaintenance.deletePhoto(name) }
+        e.photoFileNames.forEach { ElevatorMaintenance.deletePhoto($0) }
         estate.elevatorMaintenances.removeAll { $0.id == e.id }
         let financeStore = store
         dismiss()
@@ -3180,7 +3133,7 @@ fileprivate enum HousePhotoItem: Identifiable {
         case .expense(let e): return e.photoFileNames
         case .document: return []
         case .utility(let u): return u.photoFileNames
-        case .elevator(let m): return m.photoFileName.map { [$0] } ?? []
+        case .elevator(let m): return m.photoFileNames
         }
     }
 
