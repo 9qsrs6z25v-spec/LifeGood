@@ -2649,6 +2649,8 @@ struct ElevatorMaintenanceEditor: View {
     @State private var date = Date()
     @State private var photoFileName: String?
     @State private var photoItem: PhotosPickerItem?
+    /// [v25.307] 拍照（先前只能從相簿選，保養現場拍照要先出去拍完再回來選，太繞）
+    @State private var showCamera = false
     @State private var showDeleteConfirm = false
     // 防止連續選兩張照片時新舊 Task 並行：後選的載入較快先完成會把 photoFileName
     // 指向它自己，先選的隨後完成又讀到已更新的 photoFileName 當作「舊檔」誤刪，
@@ -2665,10 +2667,18 @@ struct ElevatorMaintenanceEditor: View {
                 Section {
                     DatePicker("保養日期", selection: $date, displayedComponents: .date)
 
+                    // [v25.307] 補「拍照」：保養單當場拍最順手（先前只能從相簿選）
+                    Button { showCamera = true } label: {
+                        HStack {
+                            Image(systemName: "camera.fill")
+                            Text(photoFileName == nil ? "拍照" : "重拍照片")
+                            Spacer()
+                        }
+                    }
                     PhotosPicker(selection: $photoItem, matching: .images) {
                         HStack {
                             Image(systemName: "photo")
-                            Text(photoFileName == nil ? "選擇照片" : "更換照片")
+                            Text(photoFileName == nil ? "從相簿選擇" : "更換照片（相簿）")
                             Spacer()
                             if photoFileName != nil {
                                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
@@ -2722,6 +2732,23 @@ struct ElevatorMaintenanceEditor: View {
                         photoFileName = ElevatorMaintenance.savePhoto(data, id: UUID())
                     }
                 }
+            }
+            // [v25.307] 相機（全螢幕；比照 MultiPhotoGallery——sheet 卡片會截掉快門）
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraPicker { image in
+                    // JPEG 編碼＋壓縮寫檔走背景，不卡相機收合動畫；只在主執行緒換檔名
+                    Task.detached(priority: .userInitiated) {
+                        guard let data = image.jpegData(compressionQuality: 0.85) else { return }
+                        let newName = ElevatorMaintenance.savePhoto(data, id: UUID())
+                        await MainActor.run {
+                            if let oldName = photoFileName {
+                                ElevatorMaintenance.deletePhoto(oldName)
+                            }
+                            photoFileName = newName
+                        }
+                    }
+                }
+                .ignoresSafeArea()
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) { deleteRecord() }

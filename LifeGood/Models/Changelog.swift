@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.307", build: 1060, date: "2026/08/19", notes: [
+            "【修正】房地產電梯資料的「新增保養記錄」補上拍照功能：先前只能從相簿選照片，保養現場得先退出去拍完再回來選。現在表單裡直接有「拍照」（全螢幕相機）與「從相簿選擇」兩個選項，重拍會自動換掉舊照片。"
+        ]),
         ChangelogEntry(version: "25.306", build: 1059, date: "2026/08/19", notes: [
             "【新增】帳單附件支援 PDF：收支的照片區（固定支出、變動支出、收入，編輯表單與卡片都適用）＋選單多了「選取 PDF 檔案」——從檔案 App 選 PDF 帳單原檔（可多選），與照片並排顯示。",
             "【新增】PDF 縮圖顯示第 1 頁預覽＋紅色 PDF 徽章；點開用 PDF 檢視器整份閱讀（可捲頁、雙指縮放），右上角可直接分享 PDF 原檔。刪除、iCloud 同步、匯出附檔與照片走同一套流程。"
