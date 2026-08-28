@@ -2395,6 +2395,17 @@ struct AdvancedSettingsView: View {
             }
             Section {
                 NavigationLink {
+                    InstSnapshotSettingsView()
+                } label: {
+                    advancedRow(icon: "internaldrive.fill", color: .orange,
+                                title: "法人快照儲存",
+                                note: "保留天數、容量統計與容量反推")
+                }
+            } header: {
+                Text("法人資料")
+            }
+            Section {
+                NavigationLink {
                     TrendCurveSettingsView()
                 } label: {
                     advancedRow(icon: "waveform.path", color: .blue,
@@ -2461,6 +2472,117 @@ struct AdvancedSettingsView: View {
 /// 進階設定 → 評分權重：部屬主動性／潛力的加減分開放調整。
 /// key 與 TalentMatrixView 的 ScoreWeights 一一對應（評分函式直接讀 UserDefaults，
 /// 這裡改完所有畫面下次重繪即套用新權重）；「恢復預設值」清掉全部 key 回到出廠值。
+// MARK: - 法人快照儲存設定（v25.310）
+
+/// 法人買賣超每日快照的保留天數設定：顯示目前檔案數與佔用容量，
+/// 可用「天數」直接調、也可輸入「容量上限」由平均每日大小反推可存天數。
+struct InstSnapshotSettingsView: View {
+    @AppStorage(InstitutionalHistory.maxDaysKey) private var maxDays = 30
+    @State private var fileCount = 0
+    @State private var totalBytes: Int64 = 0
+    @State private var capacityText = ""
+
+    /// 平均每個快照檔大小（位元組）；還沒有檔案時用 500KB 概估
+    private var avgBytesPerDay: Int64 {
+        fileCount > 0 ? max(1, totalBytes / Int64(fileCount)) : 500_000
+    }
+
+    /// 容量輸入反推的可存天數（5~365 夾住）
+    private var capacityDays: Int? {
+        guard let mb = Double(capacityText), mb > 0 else { return nil }
+        let days = Int((mb * 1_048_576 / Double(avgBytesPerDay)).rounded(.down))
+        return min(max(days, 5), 365)
+    }
+
+    private static let byteFmt: ByteCountFormatter = {
+        let f = ByteCountFormatter(); f.countStyle = .file; return f
+    }()
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("已存快照", value: "\(fileCount) 份")
+                LabeledContent("佔用容量", value: Self.byteFmt.string(fromByteCount: totalBytes))
+                LabeledContent("平均每日", value: Self.byteFmt.string(fromByteCount: avgBytesPerDay))
+                LabeledContent("目前設定可存",
+                               value: Self.byteFmt.string(fromByteCount: avgBytesPerDay * Int64(maxDays)) + "（\(maxDays) 天）")
+            } header: {
+                Text("容量統計")
+            } footer: {
+                Text("每個交易日一個 JSON 檔（整市場數千檔的買賣超、融資券與外資持股）；假日只存極小的空標記檔。")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("保留天數")
+                        Spacer()
+                        Text("\(maxDays) 天")
+                            .font(.subheadline.weight(.bold)).foregroundStyle(.orange).monospacedDigit()
+                    }
+                    Slider(value: Binding(get: { Double(maxDays) },
+                                          set: { maxDays = Int($0.rounded()) }),
+                           in: 5...365, step: 5)
+                        .tint(.orange)
+                }
+                .padding(.vertical, 2)
+            } header: {
+                Text("以天數設定")
+            } footer: {
+                Text("天數越多，法人訊號追蹤能回測的區間越長。調小會立刻刪除最舊的快照（不可復原）。")
+            }
+
+            Section {
+                HStack {
+                    Text("容量上限")
+                    TextField("例：50", text: $capacityText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                    Text("MB").foregroundStyle(.secondary)
+                }
+                if let days = capacityDays {
+                    HStack {
+                        Text("反推可存")
+                        Spacer()
+                        Text("約 \(days) 天")
+                            .font(.subheadline.weight(.bold)).foregroundStyle(.indigo).monospacedDigit()
+                    }
+                    Button {
+                        maxDays = days
+                        capacityText = ""
+                    } label: {
+                        Label("套用為保留 \(days) 天", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .foregroundStyle(.indigo)
+                }
+            } header: {
+                Text("以容量設定")
+            } footer: {
+                Text("用「平均每日 \(Self.byteFmt.string(fromByteCount: avgBytesPerDay))」反推：容量上限 ÷ 平均每日 ＝ 可存天數（範圍 5～365 天）。")
+            }
+        }
+        .navigationTitle("法人快照儲存")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { refreshInfo() }
+        .onChange(of: maxDays) { _, _ in
+            // 調小立即套用刪舊檔；調大無需動作（之後每天自然累積）
+            Task.detached(priority: .utility) {
+                InstitutionalHistory.applyRetentionNow()
+                let info = InstitutionalHistory.storageInfo()
+                await MainActor.run { fileCount = info.files; totalBytes = info.bytes }
+            }
+        }
+    }
+
+    private func refreshInfo() {
+        Task.detached(priority: .utility) {
+            let info = InstitutionalHistory.storageInfo()
+            await MainActor.run { fileCount = info.files; totalBytes = info.bytes }
+        }
+    }
+}
+
 struct ScoreWeightSettingsView: View {
     // 主動性
     @AppStorage("score_act_base") private var actBase = 60

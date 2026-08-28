@@ -33,7 +33,30 @@ struct InstDailyRecord: Codable {
 }
 
 enum InstitutionalHistory {
-    static let maxDays = 30
+    /// [v25.310] 保留天數改可調（進階設定；預設 30、範圍 5~365）。
+    /// 天數越多，訊號追蹤能回測的區間越長，代價是磁碟容量（每個交易日一個 JSON 檔）。
+    static let maxDaysKey = "inst_history_max_days"
+    static var maxDays: Int {
+        let v = UserDefaults.standard.integer(forKey: maxDaysKey)
+        return v == 0 ? 30 : min(max(v, 5), 365)
+    }
+
+    /// 快照佔用統計（進階設定顯示與容量反推用）：檔案數＋總位元組
+    static func storageInfo() -> (files: Int, bytes: Int64) {
+        let fm = FileManager.default
+        var bytes: Int64 = 0
+        let dates = storedDates()
+        for d in dates {
+            let path = dirURL.appendingPathComponent(d + ".json").path
+            if let size = (try? fm.attributesOfItem(atPath: path))?[.size] as? Int64 {
+                bytes += size
+            }
+        }
+        return (dates.count, bytes)
+    }
+
+    /// 立即套用保留天數（進階設定調小天數時呼叫，馬上刪最舊的快照）
+    static func applyRetentionNow() { prune() }
 
     static let dayFmt: DateFormatter = {
         let f = DateFormatter()
@@ -379,7 +402,7 @@ enum InstitutionalHistory {
 
 struct InstitutionalBuyView: View {
     @Environment(\.dismiss) private var dismiss
-    /// 連續買超天數門檻（1~30；實際上限受已收集天數限制）
+    /// 連續買超天數門檻（上限受保留天數與已收集天數限制）
     @AppStorage("inst_streak_days") private var streakDays: Int = 3
     @State private var records: [InstDailyRecord] = []   // 交易日、時間升冪
     @State private var rows: [StreakRow] = []
@@ -446,7 +469,7 @@ struct InstitutionalBuyView: View {
         }
     }
 
-    private var maxSelectableDays: Int { max(1, min(30, records.count)) }
+    private var maxSelectableDays: Int { max(1, min(InstitutionalHistory.maxDays, records.count)) }
 
     private var resultList: some View {
         List {
@@ -472,7 +495,7 @@ struct InstitutionalBuyView: View {
                 }
                 .padding(.vertical, 2)
             } footer: {
-                Text("已收集 \(records.count) 個交易日（\(records.first?.date ?? "—") ～ \(records.last?.date ?? "—")）；每天開 App 自動累積，最多 30 天。資料含上市＋上櫃，收盤後約 16:30 公布。")
+                Text("已收集 \(records.count) 個交易日（\(records.first?.date ?? "—") ～ \(records.last?.date ?? "—")）；每天開 App 自動累積，最多 \(InstitutionalHistory.maxDays) 天（進階設定可調）。資料含上市＋上櫃，收盤後約 16:30 公布。")
             }
 
             Section {
