@@ -385,6 +385,8 @@ struct InstitutionalBuyView: View {
     @State private var rows: [StreakRow] = []
     @State private var loading = true
     @State private var collecting = false
+    /// [v25.309] 分頁：0＝連買統計（既有）、1＝訊號追蹤（連買完成後 N 天漲幅回測）
+    @State private var tab = 0
 
     private let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
 
@@ -398,14 +400,25 @@ struct InstitutionalBuyView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if loading {
-                    ProgressView("讀取法人資料中…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if records.isEmpty {
-                    emptyState
-                } else {
-                    resultList
+            VStack(spacing: 0) {
+                Picker("頁面", selection: $tab) {
+                    Text("連買統計").tag(0)
+                    Text("訊號追蹤").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal).padding(.top, 8).padding(.bottom, 4)
+
+                Group {
+                    if loading {
+                        ProgressView("讀取法人資料中…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if records.isEmpty {
+                        emptyState
+                    } else if tab == 0 {
+                        resultList
+                    } else {
+                        InstSignalTrackView(records: records)
+                    }
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -575,6 +588,285 @@ struct InstitutionalBuyView: View {
             }
             .prefix(200)
         )
+    }
+}
+
+// MARK: - 訊號追蹤頁（v25.309：連買完成後 N 天漲幅回測）
+
+/// 法人連買「訊號」的事後表現追蹤：在已收集的快照裡找出「連續買超達門檻」的
+/// 完成日（例：8/15 完成連買 5 天），抓該股日線計算完成日收盤 → N 個交易日後
+/// 收盤的漲跌幅；還沒滿 N 天的標示「追蹤中（第 X 天）」用最新收盤先算。
+/// 頂部附已完訓訊號的勝率與平均漲幅——回測這個訊號到底準不準。
+struct InstSignalTrackView: View {
+    let records: [InstDailyRecord]   // 交易日、時間升冪（父頁載入）
+
+    /// 連買達幾天算一個訊號（與統計頁門檻各自獨立）
+    @AppStorage("inst_track_threshold") private var threshold = 5
+    /// 訊號完成後追蹤幾個交易日（使用者指定可設定；例：10 天、20 天）
+    @AppStorage("inst_track_horizon") private var horizonDays = 10
+
+    @State private var events: [SignalEvent] = []
+    @State private var priceMap: [String: [StockDailyPoint]] = [:]
+    @State private var pricingProgress: (done: Int, total: Int)?
+    @State private var priceTask: Task<Void, Never>?
+
+    private let accent = Color(red: 1.00, green: 0.62, blue: 0.22)
+    /// 事件上限：需要逐檔抓日線，限量控制網路與快取成本（依累計買超取大者）
+    private static let maxEvents = 40
+
+    struct SignalEvent: Identifiable {
+        let symbol: String
+        let name: String
+        let signalDate: String   // 連買達門檻那天（yyyy-MM-dd）
+        let runLength: Int       // 該段連買最終天數（可能 > 門檻）
+        let totalShares: Double  // 整段連買累計買超股數
+        var id: String { "\(symbol)_\(signalDate)" }
+    }
+
+    var body: some View {
+        List {
+            controlSection
+            summarySection
+            eventSection
+        }
+        .onAppear { recompute() }
+        .onChange(of: threshold) { _, _ in recompute() }
+        .onChange(of: horizonDays) { _, _ in recompute() }
+        .onDisappear { priceTask?.cancel() }
+    }
+
+    // MARK: 控制列
+
+    private var maxThreshold: Int { max(2, min(15, records.count)) }
+
+    private var controlSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("連買達").font(.subheadline)
+                    Spacer()
+                    Text("\(threshold) 天＝訊號")
+                        .font(.subheadline.weight(.bold)).foregroundStyle(accent).monospacedDigit()
+                }
+                Slider(value: Binding(get: { Double(min(threshold, maxThreshold)) },
+                                      set: { threshold = Int($0.rounded()) }),
+                       in: 2...Double(maxThreshold), step: 1)
+                    .tint(accent)
+                HStack {
+                    Text("追蹤").font(.subheadline)
+                    Spacer()
+                    Text("\(horizonDays) 個交易日後")
+                        .font(.subheadline.weight(.bold)).foregroundStyle(.indigo).monospacedDigit()
+                }
+                Slider(value: Binding(get: { Double(horizonDays) },
+                                      set: { horizonDays = Int($0.rounded()) }),
+                       in: 3...40, step: 1)
+                    .tint(.indigo)
+            }
+            .padding(.vertical, 2)
+        } footer: {
+            Text("在已收集的 \(records.count) 個交易日內，找出「連續買超達 \(threshold) 天」的完成日，顯示完成日收盤 → \(horizonDays) 個交易日後收盤的漲跌幅；未滿 \(horizonDays) 天的先以最新收盤計算並標示追蹤中。")
+        }
+    }
+
+    // MARK: 勝率摘要
+
+    private var summarySection: some View {
+        let done = events.compactMap { e -> Double? in
+            guard let c = change(for: e), c.done else { return nil }
+            return c.pct
+        }
+        return Section {
+            if done.isEmpty {
+                Text(pricingProgress != nil
+                     ? "股價載入中…（\(pricingProgress!.done)/\(pricingProgress!.total)）"
+                     : "尚無已滿 \(horizonDays) 天的訊號可統計")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                let wins = done.filter { $0 > 0 }.count
+                let avg = done.reduce(0, +) / Double(done.count)
+                HStack(spacing: 0) {
+                    statCell("已完成追蹤", "\(done.count) 筆", .secondary)
+                    Divider()
+                    statCell("上漲比例", String(format: "%.0f%%", Double(wins) / Double(done.count) * 100),
+                             wins * 2 >= done.count ? .red : .green)
+                    Divider()
+                    statCell("平均漲跌", String(format: "%+.1f%%", avg), avg >= 0 ? .red : .green)
+                }
+            }
+        } header: {
+            Text("\(horizonDays) 日後表現統計（台股慣例：漲紅跌綠）")
+        }
+    }
+
+    private func statCell(_ label: String, _ value: String, _ color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value).font(.subheadline.weight(.bold)).foregroundStyle(color).monospacedDigit()
+            Text(label).font(.system(size: 10)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: 事件清單
+
+    private var eventSection: some View {
+        Section {
+            if events.isEmpty {
+                Text("已收集的資料裡沒有「連買達 \(threshold) 天」的訊號")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(events) { e in
+                    eventRow(e)
+                }
+            }
+        } header: {
+            Text("訊號 \(events.count) 筆（新到舊；量能前 \(Self.maxEvents) 筆）")
+        }
+    }
+
+    private func eventRow(_ e: SignalEvent) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(e.symbol).font(.subheadline.weight(.semibold))
+                    Text(e.name).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                HStack(spacing: 5) {
+                    Text("\(shortDate(e.signalDate)) 完成連買 \(threshold) 天")
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(accent.opacity(0.12)).foregroundStyle(accent)
+                        .clipShape(Capsule())
+                    if e.runLength > threshold {
+                        Text("共連買 \(e.runLength) 天")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.red.opacity(0.10)).foregroundStyle(.red)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+            Spacer()
+            changeBadge(e)
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func changeBadge(_ e: SignalEvent) -> some View {
+        if let c = change(for: e) {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(String(format: "%+.1f%%", c.pct))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(c.pct >= 0 ? Color.red : Color.green)
+                    .monospacedDigit()
+                Text(c.done ? "\(horizonDays) 日後" : "追蹤中（第 \(c.elapsed) 天）")
+                    .font(.system(size: 9))
+                    .foregroundStyle(c.done ? Color.secondary : accent)
+            }
+        } else if pricingProgress != nil {
+            ProgressView().controlSize(.small)
+        } else {
+            Text("無股價")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
+    private func shortDate(_ key: String) -> String {
+        // yyyy-MM-dd → M/d
+        let parts = key.split(separator: "-")
+        guard parts.count == 3, let m = Int(parts[1]), let d = Int(parts[2]) else { return key }
+        return "\(m)/\(d)"
+    }
+
+    // MARK: 計算
+
+    /// 訊號完成日 → N 交易日後的漲跌幅。done＝已滿 N 天；未滿用最新收盤（elapsed＝已過交易日數）
+    private func change(for e: SignalEvent) -> (pct: Double, elapsed: Int, done: Bool)? {
+        guard let pts = priceMap[e.symbol], !pts.isEmpty else { return nil }
+        guard let startIdx = pts.firstIndex(where: {
+            InstitutionalHistory.dayFmt.string(from: $0.date) == e.signalDate
+        }) else { return nil }
+        let base = pts[startIdx].close
+        guard base > 0 else { return nil }
+        let targetIdx = startIdx + horizonDays
+        if targetIdx < pts.count {
+            return ((pts[targetIdx].close - base) / base * 100, horizonDays, true)
+        }
+        let lastIdx = pts.count - 1
+        guard lastIdx > startIdx else { return nil }
+        return ((pts[lastIdx].close - base) / base * 100, lastIdx - startIdx, false)
+    }
+
+    /// 掃描快照找訊號事件，再逐檔載入日線
+    private func recompute() {
+        let thr = min(threshold, maxThreshold)
+        var found: [SignalEvent] = []
+        // 每檔的逐日買超序列：缺當日資料或 ≤0 視為中斷
+        var allSymbols = Set<String>()
+        for rec in records { for (s, v) in rec.net where v > 0 { allSymbols.insert(s) } }
+        let latestNames = records.last?.names ?? [:]
+        for sym in allSymbols {
+            var runStart = -1, runCount = 0
+            var runTotal = 0.0
+            func closeRun(endIndex: Int) {
+                if runCount >= thr {
+                    let signalDate = records[runStart + thr - 1].date
+                    let name = latestNames[sym] ?? records[endIndex].names[sym] ?? sym
+                    found.append(SignalEvent(symbol: sym, name: name, signalDate: signalDate,
+                                             runLength: runCount, totalShares: runTotal))
+                }
+                runStart = -1; runCount = 0; runTotal = 0
+            }
+            for (i, rec) in records.enumerated() {
+                if let v = rec.net[sym], v > 0 {
+                    if runCount == 0 { runStart = i }
+                    runCount += 1; runTotal += v
+                } else if runCount > 0 {
+                    closeRun(endIndex: i - 1)
+                }
+            }
+            if runCount > 0 { closeRun(endIndex: records.count - 1) }
+        }
+        // 新到舊；同日依累計買超大者；限量（要逐檔抓日線）
+        events = Array(
+            found.sorted {
+                $0.signalDate != $1.signalDate ? $0.signalDate > $1.signalDate
+                                               : $0.totalShares > $1.totalShares
+            }
+            .prefix(Self.maxEvents)
+        )
+        loadPrices()
+    }
+
+    /// 逐檔抓日線（快取新鮮直接用；間隔 0.25 秒不轟炸），完成一檔更新一檔
+    private func loadPrices() {
+        priceTask?.cancel()
+        let symbols = Array(Set(events.map(\.symbol)))
+        let need = symbols.filter { priceMap[$0] == nil }
+        guard !need.isEmpty else { pricingProgress = nil; return }
+        pricingProgress = (0, need.count)
+        priceTask = Task {
+            var done = 0
+            for sym in need {
+                guard !Task.isCancelled else { return }
+                if StockDailyHistory.isFresh(symbol: sym) {
+                    let pts = StockDailyHistory.cached(symbol: sym)
+                    await MainActor.run { priceMap[sym] = pts }
+                } else {
+                    let pts = await StockDailyHistory.fetch(symbol: sym)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run { priceMap[sym] = pts }
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
+                done += 1
+                let progress = (done, need.count)
+                await MainActor.run { pricingProgress = progress }
+            }
+            await MainActor.run { pricingProgress = nil }
+        }
     }
 }
 
