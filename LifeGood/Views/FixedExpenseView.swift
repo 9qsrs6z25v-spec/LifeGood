@@ -1613,6 +1613,7 @@ private struct FixedExpenseCard: View {
             urlFor: { Expense.photoURL(for: $0) },
             onSaveImage: { Expense.savePhoto($0, expenseId: expense.id) },
             onDeleteFile: { Expense.deletePhoto($0) },
+            onSavePDF: { Expense.savePDF($0, expenseId: expense.id) },
             title: "帳單照片"
         )
         .padding()

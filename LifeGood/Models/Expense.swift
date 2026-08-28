@@ -509,6 +509,16 @@ extension Expense {
         return name
     }
 
+    /// [v25.306] 將 PDF 帳單原檔寫入並回傳檔名（原檔保留不壓縮；同步推送 CloudKit）。
+    /// 與照片共用同一個資料夾與檔名規則，只差副檔名——刪除／雲端同步走同一條路。
+    static func savePDF(_ data: Data, expenseId: UUID, fileId: UUID = UUID()) -> String? {
+        let name = "\(expenseId.uuidString)_\(fileId.uuidString).pdf"
+        let url = photosDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url)) != nil else { return nil }
+        PhotoCloudSync.upload(directory: "ExpensePhotos", fileName: name)
+        return name
+    }
+
     static func deletePhoto(_ fileName: String) {
         let url = photosDirectory.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)

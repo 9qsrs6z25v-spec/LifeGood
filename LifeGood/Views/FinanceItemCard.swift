@@ -276,6 +276,7 @@ struct FinanceItemCard: View {
             urlFor: { Expense.photoURL(for: $0) },
             onSaveImage: { Expense.savePhoto($0, expenseId: e.id) },
             onDeleteFile: { Expense.deletePhoto($0) },
+            onSavePDF: { Expense.savePDF($0, expenseId: e.id) },
             title: "帳單照片"
         )
         .padding()

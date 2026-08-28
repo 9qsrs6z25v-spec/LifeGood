@@ -3,6 +3,8 @@ import PhotosUI
 import UIKit
 import ImageIO
 import Combine
+import PDFKit
+import UniformTypeIdentifiers
 
 // MARK: - 美化紀錄（v1 · 2026-06-11）
 // • Header：標題升級 .bold、數量改為綠色 Capsule 膠囊徽章（fill opacity 0.13），
@@ -41,6 +43,8 @@ struct MultiPhotoGallery: View {
     let onSaveImage: (Data) -> String?
     /// 刪除單一檔名
     let onDeleteFile: (String) -> Void
+    /// [v25.306] 寫入 PDF 原檔後回傳檔名；nil＝此畫面不開放選 PDF（例：不支援 PDF 的相片廊）
+    var onSavePDF: ((Data) -> String?)? = nil
 
     /// 顯示標題（例：「照片」「裝潢照片」）
     var title: String = "照片"
@@ -52,6 +56,7 @@ struct MultiPhotoGallery: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var showCamera: Bool = false
     @State private var showPhotosPicker: Bool = false
+    @State private var showPDFImporter: Bool = false
     @State private var viewingURL: IdentifiableURL?
     @State private var pendingDeleteName: String?
     @State private var photoLoadTask: Task<Void, Never>?
@@ -83,6 +88,14 @@ struct MultiPhotoGallery: View {
                             showPhotosPicker = true
                         } label: {
                             Label("從相簿多選", systemImage: "photo.on.rectangle.angled")
+                        }
+                        // [v25.306] PDF 帳單：從檔案 App 選 PDF 原檔（可多選）
+                        if onSavePDF != nil {
+                            Button {
+                                showPDFImporter = true
+                            } label: {
+                                Label("選取 PDF 檔案", systemImage: "doc.fill")
+                            }
                         }
                     } label: {
                         Image(systemName: "plus.circle.fill")
@@ -167,8 +180,27 @@ struct MultiPhotoGallery: View {
         .onDisappear {
             photoLoadTask?.cancel()
         }
+        // [v25.306] 選取 PDF：security-scoped 讀取原檔資料後交給呼叫端寫入
+        .fileImporter(isPresented: $showPDFImporter,
+                      allowedContentTypes: [.pdf],
+                      allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result, let save = onSavePDF else { return }
+            var added: [String] = []
+            for url in urls {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                guard let data = try? Data(contentsOf: url), let name = save(data) else { continue }
+                added.append(name)
+            }
+            fileNames.append(contentsOf: added)
+        }
         .sheet(item: $viewingURL) { wrapper in
-            PhotoLightbox(url: wrapper.url)
+            // PDF 走 PDFKit 檢視器（可捲頁、雙指縮放）；圖片維持原本的燈箱
+            if wrapper.url.pathExtension.lowercased() == "pdf" {
+                PDFLightbox(url: wrapper.url)
+            } else {
+                PhotoLightbox(url: wrapper.url)
+            }
         }
         .alert("移除這張照片？", isPresented: Binding(
             get: { pendingDeleteName != nil },
@@ -206,7 +238,9 @@ struct MultiPhotoGallery: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Color.green.opacity(0.70))
             }
-            Text("尚無照片，按右上角 ＋ 拍照或從相簿選取")
+            Text(onSavePDF != nil
+                 ? "尚無檔案，按右上角 ＋ 拍照、選相簿照片或 PDF 帳單"
+                 : "尚無照片，按右上角 ＋ 拍照或從相簿選取")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -223,7 +257,11 @@ struct MultiPhotoGallery: View {
             Button {
                 viewingURL = IdentifiableURL(url: url)
             } label: {
-                AsyncThumbnailView(url: url, size: thumbnailSize)
+                if name.lowercased().hasSuffix(".pdf") {
+                    PDFThumbView(url: url, size: thumbnailSize)
+                } else {
+                    AsyncThumbnailView(url: url, size: thumbnailSize)
+                }
             }
             .buttonStyle(PressableScaleStyle())
             .shadow(color: .black.opacity(0.10), radius: 6, x: 0, y: 3)
@@ -241,6 +279,99 @@ struct MultiPhotoGallery: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+}
+
+// MARK: - PDF 縮圖與檢視（v25.306：帳單支援 PDF 原檔）
+
+/// PDF 縮圖：背景渲染第 1 頁當縮圖，左下角帶紅色「PDF」徽章。
+/// 渲染走 detached task，不在 view body 阻塞主執行緒（比照 AsyncThumbnailView）。
+struct PDFThumbView: View {
+    let url: URL
+    let size: CGSize
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Group {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    ZStack {
+                        LinearGradient(colors: [Color(.systemGray5), Color(.systemGray6)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                        Image(systemName: "doc.fill")
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .frame(width: size.width, height: size.height)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.white.opacity(0.20), lineWidth: 1))
+
+            Text("PDF")
+                .font(.system(size: 9, weight: .heavy))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.red, in: RoundedRectangle(cornerRadius: 5))
+                .foregroundStyle(.white)
+                .padding(5)
+        }
+        .task(id: url) {
+            guard image == nil else { return }
+            let target = CGSize(width: size.width * 2, height: size.height * 2)
+            let rendered = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+                guard let doc = PDFDocument(url: url), let page = doc.page(at: 0) else { return nil }
+                return page.thumbnail(of: target, for: .mediaBox)
+            }.value
+            image = rendered
+        }
+    }
+}
+
+/// PDF 檢視器：PDFKit 全文檢視（可捲頁、雙指縮放），左上關閉、右上分享原檔。
+struct PDFLightbox: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            PDFKitView(url: url)
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("PDF 帳單")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                    }
+                }
+        }
+    }
+}
+
+/// PDFView 的 SwiftUI 包裝（autoScales 打開＝開檔即整頁貼合）
+private struct PDFKitView: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.displayDirection = .vertical
+        view.backgroundColor = .systemGroupedBackground
+        view.document = PDFDocument(url: url)
+        return view
+    }
+
+    func updateUIView(_ view: PDFView, context: Context) {
+        if view.document?.documentURL != url {
+            view.document = PDFDocument(url: url)
         }
     }
 }

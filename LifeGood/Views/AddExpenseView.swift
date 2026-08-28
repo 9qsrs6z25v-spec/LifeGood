@@ -748,13 +748,16 @@ struct AddExpenseView: View {
                 onDeleteFile: { name in
                     Expense.deletePhoto(name)
                 },
+                onSavePDF: { data in
+                    Expense.savePDF(data, expenseId: expenseId)
+                },
                 title: "照片"
             )
             .padding(.vertical, 4)
         } header: {
             Text("照片")
         } footer: {
-            Text("可拍照或從相簿一次選多張，會跟著本筆支出儲存。儲存後會在美食地圖等頁面顯示。")
+            Text("可拍照、從相簿一次選多張，或從檔案選 PDF 帳單原檔，會跟著本筆支出儲存。儲存後會在美食地圖等頁面顯示。")
         }
     }
 
