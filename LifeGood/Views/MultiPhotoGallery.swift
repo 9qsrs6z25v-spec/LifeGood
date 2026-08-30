@@ -5,6 +5,7 @@ import ImageIO
 import Combine
 import PDFKit
 import UniformTypeIdentifiers
+import VisionKit
 
 // MARK: - 美化紀錄（v1 · 2026-06-11）
 // • Header：標題升級 .bold、數量改為綠色 Capsule 膠囊徽章（fill opacity 0.13），
@@ -57,6 +58,8 @@ struct MultiPhotoGallery: View {
     @State private var showCamera: Bool = false
     @State private var showPhotosPicker: Bool = false
     @State private var showPDFImporter: Bool = false
+    /// [v25.311] 文件掃描（VisionKit：自動偵測文件邊框、透視校正拉成長方形）
+    @State private var showDocScanner: Bool = false
     @State private var viewingURL: IdentifiableURL?
     @State private var pendingDeleteName: String?
     @State private var photoLoadTask: Task<Void, Never>?
@@ -83,6 +86,15 @@ struct MultiPhotoGallery: View {
                             showCamera = true
                         } label: {
                             Label("拍照", systemImage: "camera.fill")
+                        }
+                        // [v25.311] 掃描文件：拍帳單/文件時自動偵測形狀、
+                        // 透視校正拉成長方形（與名片掃描同一套系統掃描器，可連拍多頁）
+                        if VNDocumentCameraViewController.isSupported {
+                            Button {
+                                showDocScanner = true
+                            } label: {
+                                Label("掃描文件（自動裁切）", systemImage: "doc.viewfinder")
+                            }
                         }
                         Button {
                             showPhotosPicker = true
@@ -179,6 +191,26 @@ struct MultiPhotoGallery: View {
         }
         .onDisappear {
             photoLoadTask?.cancel()
+        }
+        // [v25.311] 文件掃描：系統掃描器自動偵測邊框＋透視校正，可一次掃多頁；
+        // 拍完逐頁存檔（JPEG 編碼與寫入走背景，比照相簿多選的做法）
+        .fullScreenCover(isPresented: $showDocScanner) {
+            BusinessCardScannerView(onCapture: { images in
+                showDocScanner = false
+                Task.detached(priority: .userInitiated) {
+                    var added: [String] = []
+                    for img in images {
+                        guard let data = img.jpegData(compressionQuality: 0.85),
+                              let name = onSaveImage(data) else { continue }
+                        added.append(name)
+                    }
+                    let names = added
+                    await MainActor.run { fileNames.append(contentsOf: names) }
+                }
+            }, onCancel: {
+                showDocScanner = false
+            })
+            .ignoresSafeArea()
         }
         // [v25.306] 選取 PDF：security-scoped 讀取原檔資料後交給呼叫端寫入
         .fileImporter(isPresented: $showPDFImporter,
