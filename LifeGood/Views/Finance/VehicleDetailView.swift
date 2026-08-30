@@ -581,6 +581,22 @@ struct VehicleDetailView: View {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d"; return f
     }()
 
+    /// [v25.313] 電耗區間：連續兩筆都有里程錶讀數時，
+    /// 行駛距離＝里程差、耗能≈後一筆充入度數（充電樁法）。
+    /// 里程差 ≤0（誤填）或 >2000km（跨太多次沒記）的區間剔除。
+    private var efficiencyIntervals: [(date: Date, kmPerKwh: Double, costPerKm: Double, km: Double)] {
+        let withOdo = chargeSessions.filter { ($0.evOdometer ?? 0) > 0 }
+        guard withOdo.count >= 2 else { return [] }
+        var out: [(Date, Double, Double, Double)] = []
+        for i in 1..<withOdo.count {
+            let prev = withOdo[i - 1], cur = withOdo[i]
+            let km = (cur.evOdometer ?? 0) - (prev.evOdometer ?? 0)
+            guard km > 0, km <= 2000, let kwh = cur.evKwh, kwh > 0 else { continue }
+            out.append((cur.date, km / kwh, cur.amount / km, km))
+        }
+        return out.map { (date: $0.0, kmPerKwh: $0.1, costPerKm: $0.2, km: $0.3) }
+    }
+
     @ViewBuilder
     private var chargingSection: some View {
         let sessions = chargeSessions
@@ -608,6 +624,26 @@ struct VehicleDetailView: View {
                 }
                 .padding(.vertical, 6)
 
+                // [v25.313] 電耗 KPI 列：連續兩筆有里程錶才有資料
+                let intervals = efficiencyIntervals
+                if !intervals.isEmpty {
+                    let totalKm = intervals.reduce(0) { $0 + $1.km }
+                    let intervalKwh = intervals.reduce(0) { $0 + $1.km / $1.kmPerKwh }
+                    let intervalCost = intervals.reduce(0) { $0 + $1.costPerKm * $1.km }
+                    HStack(spacing: 0) {
+                        chargeKpiCell("平均電耗",
+                                      intervalKwh > 0 ? String(format: "%.1f", totalKm / intervalKwh) : "—",
+                                      unit: "km/kWh")
+                        Divider().frame(height: 30)
+                        chargeKpiCell("每公里電費",
+                                      totalKm > 0 ? String(format: "%.2f", intervalCost / totalKm) : "—",
+                                      unit: "元/km")
+                        Divider().frame(height: 30)
+                        chargeKpiCell("統計里程", String(format: "%.0f", totalKm), unit: "km")
+                    }
+                    .padding(.vertical, 6)
+                }
+
                 // 每度電價走勢（每筆充電一點）
                 if sessions.count >= 2 {
                     Text("每度電價走勢").font(.caption).foregroundStyle(.secondary)
@@ -622,6 +658,25 @@ struct VehicleDetailView: View {
                             .symbolSize(24)
                     }
                     .frame(height: 110)
+                }
+
+                // [v25.313] 電耗走勢（每個里程區間一點；高＝省電、低＝耗電）
+                if intervals.count >= 2 {
+                    Text("電耗走勢（km/kWh，越高越省）")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Chart(Array(intervals.enumerated()), id: \.offset) { _, p in
+                        LineMark(x: .value("日期", p.date), y: .value("km/kWh", p.kmPerKwh))
+                            .foregroundStyle(.blue)
+                            .interpolationMethod(.catmullRom)
+                        PointMark(x: .value("日期", p.date), y: .value("km/kWh", p.kmPerKwh))
+                            .foregroundStyle(.blue)
+                            .symbolSize(24)
+                    }
+                    .chartYScale(domain: .automatic(includesZero: false))
+                    .frame(height: 110)
+                } else if intervals.count == 1 {
+                    Text("電耗：\(String(format: "%.1f", intervals[0].kmPerKwh)) km/kWh（再累積一個里程區間就會畫出走勢）")
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
 
                 // 推估電池容量走勢（充電區間 ≥15% 的樣本才收；下滑＝老化觀察）

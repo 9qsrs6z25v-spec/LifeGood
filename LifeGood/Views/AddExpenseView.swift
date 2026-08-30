@@ -165,7 +165,8 @@ struct AddExpenseView: View {
     // [v25.312] 電動車充電資訊（電費類別才顯示；皆選填）
     @State private var evKwhText = ""
     @State private var evFromText = ""
-    @State private var evToText = 
+    @State private var evToText = ""
+    @State private var evOdoText = ""
 
     // 股票（新增投資）
     @State private var stockName = ""
@@ -1836,6 +1837,15 @@ struct AddExpenseView: View {
                             .frame(width: 52)
                         Text("%").foregroundStyle(.secondary)
                     }
+                    HStack {
+                        Text("里程錶")
+                        Spacer()
+                        TextField("充電當下讀數（選填）", text: $evOdoText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 130)
+                        Text("km").foregroundStyle(.secondary)
+                    }
                     if let kwh = Double(evKwhText), kwh > 0,
                        let amt = Double(amountText), amt > 0 {
                         HStack {
@@ -1852,7 +1862,7 @@ struct AddExpenseView: View {
             sectionHeader(title: "汽車資訊（連動理財模式）", accentColor: .teal)
         } footer: {
             if selectedVehicleExpenseCategory == .electricity {
-                Text("充電度數與電量 % 皆選填；填了之後，車輛卡片會多出充電 KPI（每度電價、平均度數、推估電池容量）與趨勢圖。")
+                Text("充電度數、電量 % 與里程錶皆選填。填度數→每度電價；填電量 %→推估電池容量；連續兩筆都填里程錶→電耗（km/kWh）與每公里電費。車輛卡片會顯示 KPI 與趨勢圖。")
             } else {
                 Text("選擇後分類自動設為「汽車」並隱藏分類區塊，名稱自動生成為「項目 N：型號-支出類別」並轉為唯讀。支出類別會依照車輛動力類型自動篩選。")
             }
@@ -2589,6 +2599,7 @@ struct AddExpenseView: View {
         expense.evKwh = isEVCharge ? Double(evKwhText).flatMap { $0 > 0 ? $0 : nil } : nil
         expense.evFromPct = isEVCharge ? Double(evFromText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
         expense.evToPct = isEVCharge ? Double(evToText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
+        expense.evOdometer = isEVCharge ? Double(evOdoText).flatMap { $0 > 0 ? $0 : nil } : nil
 
         if isEditing { store.update(expense) } else { store.add(expense) }
         syncBankWithdrawal(for: expense, previous: editingExpense)
@@ -3075,6 +3086,7 @@ struct AddExpenseView: View {
                     if let kwh = expense.evKwh { evKwhText = String(format: "%g", kwh) }
                     if let f = expense.evFromPct { evFromText = String(format: "%g", f) }
                     if let t = expense.evToPct { evToText = String(format: "%g", t) }
+                    if let odo = expense.evOdometer { evOdoText = String(format: "%g", odo) }
                 }
             } else if let linkedId = expense.linkedStockId,
                       let linked = financeStore.stocks.first(where: { $0.id == linkedId }) {

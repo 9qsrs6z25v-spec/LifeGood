@@ -303,6 +303,8 @@ struct Expense: Identifiable, Codable {
     var evFromPct: Double? = nil
     /// 充電結束電量（%）
     var evToPct: Double? = nil
+    /// [v25.313] 充電當下的里程錶讀數（km）；連續兩筆都有里程時可算電耗（km/kWh）
+    var evOdometer: Double? = nil
 
     init(
         id: UUID = UUID(),
@@ -417,6 +419,7 @@ struct Expense: Identifiable, Codable {
         evKwh = try? c.decodeIfPresent(Double.self, forKey: .evKwh)
         evFromPct = try? c.decodeIfPresent(Double.self, forKey: .evFromPct)
         evToPct = try? c.decodeIfPresent(Double.self, forKey: .evToPct)
+        evOdometer = try? c.decodeIfPresent(Double.self, forKey: .evOdometer)
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
@@ -427,7 +430,7 @@ struct Expense: Identifiable, Codable {
         case loanTotalAmount, loanYears, loanRate, insuranceRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
         case placeAddress, placeLatitude, placeLongitude, photoFileNames, amountHistory
-        case evKwh, evFromPct, evToPct
+        case evKwh, evFromPct, evToPct, evOdometer
     }
 
     var categoryName: String {
