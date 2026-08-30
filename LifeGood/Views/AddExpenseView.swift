@@ -162,6 +162,10 @@ struct AddExpenseView: View {
     // 汽車
     @State private var selectedVehicleId: UUID?
     @State private var selectedVehicleExpenseCategory: VehicleVariableCategory = .fuel
+    // [v25.312] 電動車充電資訊（電費類別才顯示；皆選填）
+    @State private var evKwhText = ""
+    @State private var evFromText = ""
+    @State private var evToText = 
 
     // 股票（新增投資）
     @State private var stockName = ""
@@ -1803,11 +1807,55 @@ struct AddExpenseView: View {
                         selectedVehicleExpenseCategory = fallback
                     }
                 }
+
+                // [v25.312] 電費類別的充電資訊：度數＋電量 %（皆選填），
+                // 供車輛卡片算每度電價、推估電池容量等 KPI 與趨勢圖
+                if selectedVehicleExpenseCategory == .electricity {
+                    HStack {
+                        Text("充電度數")
+                        Spacer()
+                        TextField("選填", text: $evKwhText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 90)
+                        Text("kWh").foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("電量")
+                        Spacer()
+                        TextField("從", text: $evFromText)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 52)
+                        Text("%").foregroundStyle(.secondary)
+                        Image(systemName: "arrow.right")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                        TextField("到", text: $evToText)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 52)
+                        Text("%").foregroundStyle(.secondary)
+                    }
+                    if let kwh = Double(evKwhText), kwh > 0,
+                       let amt = Double(amountText), amt > 0 {
+                        HStack {
+                            Text("每度電價").foregroundStyle(.secondary)
+                            Spacer()
+                            Text(String(format: "NT$%.2f／kWh", amt * currencyMultiplier / kwh))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.teal)
+                        }
+                    }
+                }
             }
         } header: {
             sectionHeader(title: "汽車資訊（連動理財模式）", accentColor: .teal)
         } footer: {
-            Text("選擇後分類自動設為「汽車」並隱藏分類區塊，名稱自動生成為「項目 N：型號-支出類別」並轉為唯讀。支出類別會依照車輛動力類型自動篩選。")
+            if selectedVehicleExpenseCategory == .electricity {
+                Text("充電度數與電量 % 皆選填；填了之後，車輛卡片會多出充電 KPI（每度電價、平均度數、推估電池容量）與趨勢圖。")
+            } else {
+                Text("選擇後分類自動設為「汽車」並隱藏分類區塊，名稱自動生成為「項目 N：型號-支出類別」並轉為唯讀。支出類別會依照車輛動力類型自動篩選。")
+            }
         }
     }
 
@@ -2535,6 +2583,12 @@ struct AddExpenseView: View {
         )
         // 金額歷史（不在 memberwise init）：編輯重建時帶回，不然存個檔走勢就被清空
         expense.amountHistory = editingExpense?.amountHistory ?? []
+        // 充電資訊：只在「變動＋關聯汽車＋電費」時存（比照子分類條件化原則）
+        let isEVCharge = expenseType == .variable && selectedAssetLink == .vehicle
+            && selectedVehicleExpenseCategory == .electricity
+        expense.evKwh = isEVCharge ? Double(evKwhText).flatMap { $0 > 0 ? $0 : nil } : nil
+        expense.evFromPct = isEVCharge ? Double(evFromText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
+        expense.evToPct = isEVCharge ? Double(evToText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
 
         if isEditing { store.update(expense) } else { store.add(expense) }
         syncBankWithdrawal(for: expense, previous: editingExpense)
@@ -3018,6 +3072,9 @@ struct AddExpenseView: View {
                 selectedVehicleId = expense.linkedVehicleId
                 if let veCat = expense.vehicleExpenseCategory {
                     selectedVehicleExpenseCategory = veCat
+                    if let kwh = expense.evKwh { evKwhText = String(format: "%g", kwh) }
+                    if let f = expense.evFromPct { evFromText = String(format: "%g", f) }
+                    if let t = expense.evToPct { evToText = String(format: "%g", t) }
                 }
             } else if let linkedId = expense.linkedStockId,
                       let linked = financeStore.stocks.first(where: { $0.id == linkedId }) {

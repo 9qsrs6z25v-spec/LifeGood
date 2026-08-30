@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 // CardRarity 與 SoldStamp 已移至 FlashCardView.swift（閃卡標準模板）
 
@@ -102,6 +103,7 @@ struct VehicleDetailView: View {
                                 kpiStripAppeared = true
                             }
                         }
+                    chargingSection
                     infoSection
                     photoSection
                 }
@@ -552,6 +554,112 @@ struct VehicleDetailView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(width: 120)
+    }
+
+    // MARK: - 充電統計（v25.312：度數＋電量 % → KPI 與趨勢圖）
+
+    /// 這輛車有填度數的充電紀錄（時間升冪）
+    private var chargeSessions: [Expense] {
+        expenseStore.expenses
+            .filter { $0.linkedVehicleId == vehicleId
+                && $0.vehicleExpenseCategory == .electricity
+                && ($0.evKwh ?? 0) > 0 }
+            .sorted { $0.date < $1.date }
+    }
+
+    /// 推估電池容量樣本：kWh ÷ 充電區間 %。區間太小（<15%）誤差放大，不取；
+    /// 這條趨勢往下走＝電池老化的近似觀察
+    private var batteryEstimates: [(date: Date, kwh: Double)] {
+        chargeSessions.compactMap { e in
+            guard let kwh = e.evKwh, let f = e.evFromPct, let t = e.evToPct,
+                  t - f >= 15 else { return nil }
+            return (e.date, kwh / (t - f) * 100)
+        }
+    }
+
+    private static let chargeDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "M/d"; return f
+    }()
+
+    @ViewBuilder
+    private var chargingSection: some View {
+        let sessions = chargeSessions
+        if !sessions.isEmpty {
+            let totalKwh = sessions.reduce(0) { $0 + ($1.evKwh ?? 0) }
+            let totalCost = sessions.reduce(0) { $0 + $1.amount }
+            let avgPrice = totalKwh > 0 ? totalCost / totalKwh : 0
+            let avgKwh = totalKwh / Double(sessions.count)
+            let estimates = batteryEstimates
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("充電統計", color: .green, count: sessions.count)
+
+                // KPI 四格：平均每度電價／平均每次度數／累計度數／推估電池容量（最新）
+                HStack(spacing: 0) {
+                    chargeKpiCell("平均電價", String(format: "%.2f", avgPrice), unit: "元/度")
+                    Divider().frame(height: 30)
+                    chargeKpiCell("平均每次", String(format: "%.1f", avgKwh), unit: "kWh")
+                    Divider().frame(height: 30)
+                    chargeKpiCell("累計", totalKwh >= 1000
+                                  ? String(format: "%.0f", totalKwh) : String(format: "%.1f", totalKwh),
+                                  unit: "kWh")
+                    Divider().frame(height: 30)
+                    chargeKpiCell("推估容量", estimates.last.map { String(format: "%.1f", $0.kwh) } ?? "—",
+                                  unit: "kWh")
+                }
+                .padding(.vertical, 6)
+
+                // 每度電價走勢（每筆充電一點）
+                if sessions.count >= 2 {
+                    Text("每度電價走勢").font(.caption).foregroundStyle(.secondary)
+                    Chart(sessions) { e in
+                        LineMark(x: .value("日期", e.date),
+                                 y: .value("元/度", e.amount / (e.evKwh ?? 1)))
+                            .foregroundStyle(.teal)
+                            .interpolationMethod(.catmullRom)
+                        PointMark(x: .value("日期", e.date),
+                                  y: .value("元/度", e.amount / (e.evKwh ?? 1)))
+                            .foregroundStyle(.teal)
+                            .symbolSize(24)
+                    }
+                    .frame(height: 110)
+                }
+
+                // 推估電池容量走勢（充電區間 ≥15% 的樣本才收；下滑＝老化觀察）
+                if estimates.count >= 2 {
+                    Text("推估電池容量走勢（度數 ÷ 充電區間 %）")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Chart(Array(estimates.enumerated()), id: \.offset) { _, p in
+                        LineMark(x: .value("日期", p.date), y: .value("kWh", p.kwh))
+                            .foregroundStyle(.green)
+                            .interpolationMethod(.catmullRom)
+                        PointMark(x: .value("日期", p.date), y: .value("kWh", p.kwh))
+                            .foregroundStyle(.green)
+                            .symbolSize(24)
+                    }
+                    .chartYScale(domain: .automatic(includesZero: false))
+                    .frame(height: 110)
+                } else if estimates.count == 1 {
+                    Text("推估電池容量：\(String(format: "%.1f", estimates[0].kwh)) kWh（充電區間 ≥15% 的紀錄累積 2 筆後畫出走勢）")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(14)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal)
+        }
+    }
+
+    private func chargeKpiCell(_ label: String, _ value: String, unit: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Text(unit).font(.system(size: 8)).foregroundStyle(.tertiary)
+            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 定期支出列（38pt 藍色漸層圖示圓 + 月均輔助）

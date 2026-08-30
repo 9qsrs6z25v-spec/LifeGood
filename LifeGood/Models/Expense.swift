@@ -295,6 +295,14 @@ struct Expense: Identifiable, Codable {
     /// 金額歷史快照（固定支出「更新金額」累積；刻意不進 memberwise init——
     /// 那個 init 已 30+ 參數，編輯重建時由呼叫端帶回，比照 bankDeposits 慣例）
     var amountHistory: [AmountSnapshot] = []
+    // [v25.312] 電動車充電資訊（變動支出＋關聯汽車＋分類=電費才有意義；
+    // 同樣不進 memberwise init，儲存端條件化指派）
+    /// 充電度數（kWh）
+    var evKwh: Double? = nil
+    /// 充電起始電量（%）
+    var evFromPct: Double? = nil
+    /// 充電結束電量（%）
+    var evToPct: Double? = nil
 
     init(
         id: UUID = UUID(),
@@ -406,6 +414,9 @@ struct Expense: Identifiable, Codable {
         placeLongitude = try? c.decodeIfPresent(Double.self, forKey: .placeLongitude)
         photoFileNames = (try? c.decodeIfPresent([String].self, forKey: .photoFileNames)) ?? []
         amountHistory = (try? c.decodeIfPresent([AmountSnapshot].self, forKey: .amountHistory)) ?? []
+        evKwh = try? c.decodeIfPresent(Double.self, forKey: .evKwh)
+        evFromPct = try? c.decodeIfPresent(Double.self, forKey: .evFromPct)
+        evToPct = try? c.decodeIfPresent(Double.self, forKey: .evToPct)
     }
     private enum CodingKeys: String, CodingKey {
         case id, title, amount, date, expenseType, variableCategory, fixedCategory, recurrence
@@ -416,6 +427,7 @@ struct Expense: Identifiable, Codable {
         case loanTotalAmount, loanYears, loanRate, insuranceRate
         case linkedBankMilestoneId, linkedBankCurrency, linkedCreditCardMilestoneId
         case placeAddress, placeLatitude, placeLongitude, photoFileNames, amountHistory
+        case evKwh, evFromPct, evToPct
     }
 
     var categoryName: String {
