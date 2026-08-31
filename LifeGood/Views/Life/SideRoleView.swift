@@ -1749,6 +1749,12 @@ struct SideRoleTaskEditor: View {
             linkSection
             Section("截止日") {
                 Toggle("設定截止日", isOn: $hasDue)
+                    // [修正 v25.318] 開關打開就把預設日期寫進資料：DatePicker 顯示的
+                    // 「今天」只是畫面預設值，使用者沒動過選擇器 task.dueDate 仍是 nil，
+                    // 按儲存截止日就默默消失（回報情境：替已完成項目補截止日）。
+                    .onChange(of: hasDue) { _, on in
+                        if on, task.dueDate == nil { task.dueDate = Date() }
+                    }
                 if hasDue {
                     DatePicker("截止日", selection: Binding(
                         get: { task.dueDate ?? Date() },
@@ -1806,10 +1812,19 @@ struct SideRoleTaskEditor: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("儲存") {
                     if !hasDue { task.dueDate = nil }
+                    // [修正 v25.318] 截止日雙保險：開了開關但 DatePicker 沒被動過
+                    //（dueDate 仍 nil）→ 存畫面上顯示的預設值（今天）
+                    if hasDue, task.dueDate == nil { task.dueDate = Date() }
                     // 空陣列收成 nil：兩者語意相同，但留著空陣列會讓 JSON 多一個
                     // 沒意義的鍵，也讓 assigneeIds != nil 的判斷變得不可靠。
                     if task.assigneeIds?.isEmpty == true { task.assigneeIds = nil }
                     var toSave = task
+                    // [修正 v25.318] 自訂分類輸入框還有沒按 + 的文字（例：key 完「尾牙」
+                    // 直接按儲存）→ 視同已確認加入，不再默默遺失（比照報告分類 v25.291）
+                    let pendingCategory = categoryInput.trimmingCharacters(in: .whitespaces)
+                    if !pendingCategory.isEmpty, !toSave.categories.contains(pendingCategory) {
+                        toSave.categories.append(pendingCategory)
+                    }
                     // 連結是在 store 上即時生效的（挑選頁與解除按鈕都直接寫 store，
                     // 因為它們同時改動部屬那一側）。本地草稿手上那份可能是開頁當下的
                     // 舊值，直接存回去會把剛接上的連結蓋掉——以 store 為準。
@@ -2914,7 +2929,14 @@ struct SideRoleResolutionEditor: View {
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("儲存") {
-                    lifeStore.upsertSideRoleResolution(resolution, in: roleId)
+                    // [修正 v25.318] 自訂分類輸入框還有沒按 + 的文字 → 視同已確認加入
+                    //（比照待辦與報告分類；key 完直接按儲存不再默默遺失）
+                    var toSave = resolution
+                    let pending = categoryInput.trimmingCharacters(in: .whitespaces)
+                    if !pending.isEmpty, !toSave.categories.contains(pending) {
+                        toSave.categories.append(pending)
+                    }
+                    lifeStore.upsertSideRoleResolution(toSave, in: roleId)
                     dismiss()
                 }
                 .disabled(resolution.title.trimmingCharacters(in: .whitespaces).isEmpty)
