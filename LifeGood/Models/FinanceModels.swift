@@ -306,12 +306,20 @@ struct SavingsInsurance: Identifiable, Codable {
         return payment * ((pow(1 + r, n) - 1) / r) * (1 + r)
     }
 
-    /// 總繳費期數
+    /// 總繳費期數。
+    /// [修正 v25.314] 繳款發生在**每期期初**（起始日當天就扣第一期），所以期數＝
+    /// 「起始日到到期日之間有幾個期初」。到期日常見寫法是「差一天滿整數年」
+    ///（例：2018/08/11 生效、2028/08/10 到期＝119 個月又 30 天），原本
+    /// 取整除直接砍成 9 期，實際繳了 10 期（2018～2027 每年 8/11 各一筆）。
+    /// 未整除的餘月代表「最後一個期初已扣款、只是該期未走完」→ 進位補 1；
+    /// 恰好整除（8/11 到 8/11）時最後一天是領回日不再扣款，維持整除值。
     var totalPeriods: Int {
+        guard maturityDate > startDate else { return 0 }
         let calendar = Calendar.current
         let totalMonths = calendar.dateComponents([.month], from: startDate, to: maturityDate).month ?? 0
         let monthsPerPeriod: Int = paymentPeriod == .monthly ? 1 : (paymentPeriod == .quarterly ? 3 : 12)
-        return max(0, totalMonths / monthsPerPeriod)
+        let full = totalMonths / monthsPerPeriod
+        return totalMonths % monthsPerPeriod == 0 ? max(1, full) : full + 1
     }
 
     /// 已繳期數（起始日即繳第一期，故 +1）
