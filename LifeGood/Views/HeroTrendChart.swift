@@ -78,6 +78,34 @@ enum HeroTrendSeries {
         out.append(last)
         return out
     }
+
+    /// [v25.317] 泛型「頭尾保留＋中間分桶平均」壓縮（財富卡片柱狀圖等共用）：
+    /// 首點與末點保留**真實值**，中間均分為 maxCount-2 桶、各取平均——
+    /// 取代「每 30 筆切一頁左右滑」的分頁式圖表，一張圖看完整段歷史，
+    /// 每一筆資料都貢獻到圖上而不是被丟掉。傳入需已依時間排序。
+    static func compressKeepingEnds<T>(_ items: [T], maxCount: Int,
+                                       date: (T) -> Date, value: (T) -> Double,
+                                       make: (Date, Double, T) -> T) -> [T] {
+        guard items.count > maxCount, maxCount >= 3 else { return items }
+        let first = items[0]
+        let last = items[items.count - 1]
+        let middle = items[1..<(items.count - 1)]
+        let buckets = maxCount - 2
+        var out: [T] = [first]
+        let n = middle.count
+        let base = middle.startIndex
+        for b in 0..<buckets {
+            let lo = base + n * b / buckets
+            let hi = base + n * (b + 1) / buckets
+            guard hi > lo else { continue }
+            let slice = middle[lo..<hi]
+            let avgV = slice.reduce(0.0) { $0 + value($1) } / Double(slice.count)
+            let avgT = slice.reduce(0.0) { $0 + date($1).timeIntervalSince1970 } / Double(slice.count)
+            out.append(make(Date(timeIntervalSince1970: avgT), avgV, slice.first!))
+        }
+        out.append(last)
+        return out
+    }
 }
 
 /// 英雄卡背景趨勢曲線（白色半透明，適用任何深色漸層底卡）。

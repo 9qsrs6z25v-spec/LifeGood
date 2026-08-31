@@ -1761,58 +1761,26 @@ struct FinanceCardView: View {
         .padding(.horizontal)
     }
 
-    /// 把整串資料切成每頁 30 筆（由舊到新，最後一頁可能不足 30 筆）
-    private func creditCardChartPages(_ data: [CreditCardDailyTotal]) -> [[CreditCardDailyTotal]] {
-        guard !data.isEmpty else { return [] }
-        let pageSize = 30
-        var pages: [[CreditCardDailyTotal]] = []
-        var i = 0
-        while i < data.count {
-            let end = min(i + pageSize, data.count)
-            pages.append(Array(data[i..<end]))
-            i = end
-        }
-        return pages
-    }
-
-    @State private var chartCurrentPage: Int = 0
 
     @ViewBuilder
     private func creditCardChart(_ dailyTotals: [CreditCardDailyTotal]) -> some View {
-        let pages = creditCardChartPages(dailyTotals)
-        if pages.isEmpty {
-            EmptyView()
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                GeometryReader { geo in
-                    let pageWidth = geo.size.width
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 0) {
-                            ForEach(Array(pages.enumerated()), id: \.offset) { idx, pageData in
-                                creditCardChartPage(data: pageData)
-                                    .frame(width: pageWidth)
-                                    .id(idx)
-                            }
-                        }
-                        .scrollTargetLayout()
-                    }
-                    .scrollTargetBehavior(.paging)
-                    .scrollPosition(id: Binding<Int?>(
-                        get: { chartCurrentPage },
-                        set: { if let v = $0 { chartCurrentPage = v } }
-                    ))
-                }
-                .frame(height: 150)
-
-                if pages.count > 1 {
-                    HStack(spacing: 6) {
-                        Spacer()
-                        ForEach(0..<pages.count, id: \.self) { i in
-                            Circle()
-                                .fill(i == chartCurrentPage ? Color.orange : Color.secondary.opacity(0.3))
-                                .frame(width: 6, height: 6)
-                        }
-                        Spacer()
+        // [v25.317] 分頁式改為共用趨勢模板壓縮法（頭尾真實、中間分桶平均，見 depositChart）
+        let sampled = HeroTrendSeries.compressKeepingEnds(
+            dailyTotals, maxCount: 30,
+            date: { $0.date }, value: { $0.amount },
+            make: { d, v, rep in CreditCardDailyTotal(id: "avg-\(rep.id)", date: d, amount: v) }
+        )
+        Group {
+            if sampled.isEmpty {
+                EmptyView()
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    creditCardChartPage(data: sampled)
+                        .frame(height: 150)
+                    if dailyTotals.count > sampled.count {
+                        Text("已壓縮顯示：首末為真實值，中間為區段平均（共 \(dailyTotals.count) 筆）")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .padding(.horizontal, 4)
                     }
                 }
             }
@@ -2150,8 +2118,6 @@ struct FinanceCardView: View {
         return amount
     }
 
-    @State private var depositChartPage: Int = 0
-
     /// 接收呼叫端（depositSection）已算好的 deposits，避免各自獨立重算一次 deposits
     /// （expensesById／incomesById 建表 + 固定支出／週期性收入展開，屬於較重的計算）。
     private func depositChart(_ data: [BankDeposit]) -> some View {
@@ -2167,48 +2133,22 @@ struct FinanceCardView: View {
             if dep.isWithdrawal { running -= amt } else { running += amt }
             balances.append((dep.date, running, dep.id))
         }
-        // 每頁 30 筆，由舊到新切頁；超過 30 筆可左右滑動
-        let pageSize = 30
-        var pages: [[(date: Date, balance: Double, id: UUID)]] = []
-        var i = 0
-        while i < balances.count {
-            let end = min(i + pageSize, balances.count)
-            pages.append(Array(balances[i..<end]))
-            i = end
-        }
+        // [v25.317] 分頁式（每 30 筆一頁左右滑）改為共用趨勢模板的壓縮法：
+        // 頭尾保留真實值、中間分桶平均壓到固定 30 根，一張圖看完整段歷史
+        let sampled = HeroTrendSeries.compressKeepingEnds(
+            balances, maxCount: 30,
+            date: { $0.date }, value: { $0.balance },
+            make: { d, v, rep in (date: d, balance: v, id: rep.id) }
+        )
 
         return VStack(alignment: .leading, spacing: 6) {
-            if !pages.isEmpty {
-                GeometryReader { geo in
-                    let pageWidth = geo.size.width
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 0) {
-                            ForEach(Array(pages.enumerated()), id: \.offset) { idx, pageData in
-                                depositChartPageView(pageData)
-                                    .frame(width: pageWidth)
-                                    .id(idx)
-                            }
-                        }
-                        .scrollTargetLayout()
-                    }
-                    .scrollTargetBehavior(.paging)
-                    .scrollPosition(id: Binding<Int?>(
-                        get: { depositChartPage },
-                        set: { if let v = $0 { depositChartPage = v } }
-                    ))
-                }
-                .frame(height: 150)
-
-                if pages.count > 1 {
-                    HStack(spacing: 6) {
-                        Spacer()
-                        ForEach(0..<pages.count, id: \.self) { p in
-                            Circle()
-                                .fill(p == depositChartPage ? Color.blue : Color.secondary.opacity(0.3))
-                                .frame(width: 6, height: 6)
-                        }
-                        Spacer()
-                    }
+            if !sampled.isEmpty {
+                depositChartPageView(sampled)
+                    .frame(height: 150)
+                if balances.count > sampled.count {
+                    Text("已壓縮顯示：首末為真實餘額，中間為區段平均（共 \(balances.count) 筆）")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .padding(.horizontal, 4)
                 }
             }
 
