@@ -1402,7 +1402,8 @@ struct StockTransactionEditor: View {
             list.append(BankDeposit(
                 id: UUID(),
                 date: tx.settlementDate,
-                amount: tx.amount,
+                // 美股＝USD 金額，台幣帳戶按匯率換算（v25.316）
+                amount: stockAmountForAccount(tx.amount, stock: stock, accountCurrency: currency),
                 currencyCode: currency,
                 isWithdrawal: tx.kind == .buy,
                 linkedExpenseId: nil,
@@ -1764,10 +1765,12 @@ struct StockDividendEditor: View {
     ) -> UUID {
         let id = existingId ?? UUID()
         let stockHasBank = stock?.linkedBankMilestoneId
+        // 收入帳本以 NT$ 統計：美股配息（USD）一律換算成台幣入帳（v25.316）
+        let ntdAmount = (stock?.isUSStock == true) ? amount * Stock.usdTwdRate : amount
         let income = Income(
             id: id,
             title: "\(stockName) 配息",
-            amount: amount,
+            amount: ntdAmount,
             date: date,
             category: .investment,
             period: .once,
@@ -1808,7 +1811,8 @@ struct StockDividendEditor: View {
         list.append(BankDeposit(
             id: depositId,
             date: date,
-            amount: amount,
+            // 美股＝USD 金額，台幣帳戶按匯率換算（v25.316）
+            amount: stockAmountForAccount(amount, stock: stock, accountCurrency: currency),
             currencyCode: currency,
             isWithdrawal: false,
             linkedExpenseId: nil,
@@ -1843,6 +1847,18 @@ struct StockDividendEditor: View {
 }
 
 // MARK: - 分享圖片
+
+/// [修正 v25.316] 美股金額寫入銀行帳戶時的幣別換算。
+/// 交易金額（張數×單價）與配息金額對美股而言是 **USD**；
+/// 扣款/入帳帳戶是台幣（或未指定幣別）→ 乘 USD→TWD 匯率換算成 NT$，
+/// 外幣（USD）帳戶則保留原幣金額。先前直接把 USD 數字當台幣寫入，
+/// 財富卡片的扣款金額整個少一個匯率倍數。
+func stockAmountForAccount(_ raw: Double, stock: Stock, accountCurrency: String?) -> Double {
+    guard stock.isUSStock else { return raw }
+    let code = (accountCurrency ?? "NT$").uppercased()
+    let isUSD = code.contains("USD") || code.contains("US$")
+    return isUSD ? raw : raw * Stock.usdTwdRate
+}
 
 /// 分享面板項目的 Identifiable 包裝（供 .sheet(item:) 使用）
 struct StockCardSharePayload: Identifiable { let id = UUID(); let items: [Any] }
