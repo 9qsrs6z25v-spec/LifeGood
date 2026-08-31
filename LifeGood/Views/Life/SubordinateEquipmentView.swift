@@ -479,6 +479,10 @@ struct SubordinateEquipmentTimelineSection: View {
                 if !e.text.isEmpty {
                     Text(e.text).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                 }
+                // [v25.315] 警報→任務的處理回報子項目（點開查看處理過程）
+                if e.kind == .alarm {
+                    AlarmResponseDisclosure(alarmId: e.id)
+                }
             }
             .padding(.bottom, isLast ? 4 : 12)
         }
@@ -1236,6 +1240,10 @@ struct EquipmentDetailCard: View {
                     Text(e.text).font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                // [v25.315] 警報→任務的處理回報子項目（點開查看處理過程）
+                if !e.isPM {
+                    AlarmResponseDisclosure(alarmId: e.id)
+                }
             }
             .padding(.bottom, isLast ? 4 : 12)
         }
@@ -1348,3 +1356,96 @@ struct EquipmentTimelineQuickAddSheet: View {
     }
 }
 
+
+// MARK: - 警報處理回報子項目（v25.315）
+
+/// 警報→任務自動建立後，把任務的處理內容「回寫」到時間軸：
+/// 顯示在警報列下方的子項目，點一下展開查看處理過程
+///（處理人、處理措施、回復結果、完成時間）。任務還沒完成顯示「處理中」。
+/// 警報沒有對應任務（手動補登的舊警報、任務被刪）就什麼都不顯示。
+struct AlarmResponseDisclosure: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    let alarmId: UUID
+
+    @State private var expanded = false
+
+    private static let doneFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
+
+    /// 全部屬掃描找出連到這則警報的任務（警報自動掛任務時寫入 equipmentLink.alarmId）
+    private var linked: (subName: String, task: SubordinateTask)? {
+        for sub in lifeStore.subordinates {
+            if let t = sub.tasks.first(where: { $0.equipmentLink?.alarmId == alarmId }) {
+                return (sub.name.isEmpty ? "未命名" : sub.name, t)
+            }
+        }
+        return nil
+    }
+
+    var body: some View {
+        if let l = linked {
+            let done = l.task.isCompleted
+            let color: Color = done ? .green : .orange
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        expanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(color)
+                        Image(systemName: done ? "checkmark.seal.fill" : "person.fill.checkmark")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(done ? "已完成回報" : "處理中")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(l.subName)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(color.opacity(0.10))
+                    .foregroundStyle(color)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 0.6))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                if expanded {
+                    VStack(alignment: .leading, spacing: 5) {
+                        responseRow("處理措施", l.task.responseAction)
+                        responseRow("回復結果", l.task.responseResult)
+                        if done, let at = l.task.completedAt {
+                            HStack(spacing: 5) {
+                                Text("完成時間").font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(Self.doneFmt.string(from: at))
+                                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func responseRow(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+            Text(value.isEmpty ? "（未填）" : value)
+                .font(.caption2)
+                .foregroundStyle(value.isEmpty ? Color(.tertiaryLabel) : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
