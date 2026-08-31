@@ -2437,11 +2437,12 @@ struct SideRoleResolutionCard: View {
         headerBlock(role: role, r: r)
         metaBlock(r)
         if !r.categories.isEmpty { categoryBlock(r) }
+        // [v25.319] 參照前案章節（標題＋日期＋內文＋跳轉超連結）插在決議內容**上方**
+        if !r.references.isEmpty {
+            referenceBlock(r, forExport: forExport)
+        }
         if forExport {
             staticBlock("決議內容", r.content.isEmpty ? "（未填內容）" : r.content)
-            if !r.references.isEmpty {
-                referenceBlock(r, forExport: true)
-            }
             Text("美好人生・\(Self.dateFmt.string(from: Date())) 匯出")
                 .font(.caption2).foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -2452,40 +2453,37 @@ struct SideRoleResolutionCard: View {
                 updated.content = new
                 lifeStore.upsertSideRoleResolution(updated, in: roleId)
             }
-            // [v25.299] 參照前案超連結：點一列跳到該前案的決議卡片
-            if !r.references.isEmpty {
-                referenceBlock(r, forExport: false)
-            }
         }
     }
 
-    /// 參照前案區塊：畫面上是可點的超連結列（跳到前案卡片）；匯出為靜態清單
+    /// [v25.319] 參照前案章節（插在決議內容上方）：每個前案一小節——
+    /// 標題＋流水號＋日期＋完整內文；畫面版標題列可點跳到前案卡片，匯出為靜態。
     private func referenceBlock(_ r: SideRoleResolution, forExport: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("參照前案").font(.caption).foregroundStyle(.secondary)
             ForEach(r.references, id: \.self) { rid in
                 if let ref = role?.sideRoleResolutions?.first(where: { $0.id == rid }) {
-                    if forExport {
-                        HStack(spacing: 6) {
-                            Image(systemName: "link")
-                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(.indigo)
-                            Text("\(ref.serialLabel.isEmpty ? "" : "\(ref.serialLabel)｜")\(Self.refDateFmt.string(from: ref.date))｜\(ref.title.isEmpty ? "（未填標題）" : ref.title)")
-                                .font(.caption.weight(.medium))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    } else {
-                        Button { viewingReferenceId = rid } label: {
-                            HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if forExport {
+                            HStack(spacing: 6) {
                                 Image(systemName: "link")
-                                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.indigo)
-                                if !ref.serialLabel.isEmpty {
-                                    Text(ref.serialLabel)
-                                        .font(.system(size: 10, weight: .bold))
-                                        .padding(.horizontal, 6).padding(.vertical, 1.5)
-                                        .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
-                                        .clipShape(Capsule())
-                                }
-                                VStack(alignment: .leading, spacing: 1) {
+                                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(.indigo)
+                                Text("\(ref.serialLabel.isEmpty ? "" : "\(ref.serialLabel)｜")\(Self.refDateFmt.string(from: ref.date))｜\(ref.title.isEmpty ? "（未填標題）" : ref.title)")
+                                    .font(.caption.weight(.semibold))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        } else {
+                            Button { viewingReferenceId = rid } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "link")
+                                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.indigo)
+                                    if !ref.serialLabel.isEmpty {
+                                        Text(ref.serialLabel)
+                                            .font(.system(size: 10, weight: .bold))
+                                            .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                            .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
+                                            .clipShape(Capsule())
+                                    }
                                     Text(ref.title.isEmpty ? "（未填標題）" : ref.title)
                                         .font(.subheadline.weight(.medium))
                                         .foregroundStyle(.indigo)
@@ -2493,15 +2491,23 @@ struct SideRoleResolutionCard: View {
                                         .lineLimit(1)
                                     Text(Self.refDateFmt.string(from: ref.date))
                                         .font(.caption2).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Image(systemName: "arrow.up.forward.app")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(.indigo.opacity(0.7))
                                 }
-                                Spacer()
-                                Image(systemName: "arrow.up.forward.app")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.indigo.opacity(0.7))
+                                .contentShape(Rectangle())
                             }
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        Text(ref.content.isEmpty ? "（未填內容）" : ref.content)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(9)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.tertiarySystemFill))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 } else {
                     HStack(spacing: 6) {
@@ -2668,9 +2674,7 @@ struct SideRoleResolutionCard: View {
         if !r.site.isEmpty { lines.append("🏭 廠區：\(r.site)") }
         if !r.categories.isEmpty { lines.append("⚙️ 系統分類：\(r.categories.joined(separator: "、"))") }
         if !r.initiator.isEmpty { lines.append("🙋 發起人：\(r.initiator)") }
-        lines.append("")
-        lines.append("📝 決議內容")
-        lines.append(r.content.isEmpty ? "（未填內容）" : r.content)
+        // [v25.319] 參照前案章節放在決議內容上方（與卡片一致），帶前案內文
         let refs = r.references.compactMap { rid in
             role.sideRoleResolutions?.first { $0.id == rid }
         }
@@ -2679,8 +2683,12 @@ struct SideRoleResolutionCard: View {
             lines.append("🔗 參照前案")
             for ref in refs {
                 lines.append("• \(ref.serialLabel.isEmpty ? "" : "\(ref.serialLabel)｜")\(Self.refDateFmt.string(from: ref.date))｜\(ref.title.isEmpty ? "（未填標題）" : ref.title)")
+                lines.append("  \(ref.content.isEmpty ? "（未填內容）" : ref.content)")
             }
         }
+        lines.append("")
+        lines.append("📝 決議內容")
+        lines.append(r.content.isEmpty ? "（未填內容）" : r.content)
         shareItem = ResolutionSharePayload(items: [lines.joined(separator: "\n")])
     }
 }
@@ -2864,7 +2872,7 @@ struct SideRoleResolutionEditor: View {
                         if let ref = findReference(rid) {
                             Image(systemName: "link")
                                 .font(.system(size: 11, weight: .semibold)).foregroundStyle(.indigo)
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: 6) {
                                     if !ref.serialLabel.isEmpty {
                                         Text(ref.serialLabel)
@@ -2879,6 +2887,17 @@ struct SideRoleResolutionEditor: View {
                                 }
                                 Text(Self.refDateFmt.string(from: ref.date))
                                     .font(.caption2).foregroundStyle(.secondary)
+                                // [v25.319] 前案內文直接顯示成章節（不再插進內容欄位）
+                                if !ref.content.isEmpty {
+                                    Text(ref.content)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .padding(8)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color(.tertiarySystemFill))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
                             }
                         } else {
                             Image(systemName: "link.badge.plus")
@@ -2902,7 +2921,7 @@ struct SideRoleResolutionEditor: View {
             } header: {
                 Text("參照前案")
             } footer: {
-                Text("加入參照時會把前案的決議日期、標題與內容帶進下方內容欄位，接著寫本次的內容即可；決議卡片會出現可點的超連結跳到前案。")
+                Text("參照的前案以獨立章節顯示（標題、日期、內文），在卡片上會插在決議內容上方並附可點的超連結；下方內容欄位只需要寫本次的內容。")
             }
             Section("內容") {
                 TextField("決議內容、脈絡、金額等（會被行事曆搜尋索引）",
@@ -3046,23 +3065,12 @@ struct ResolutionReferencePicker: View {
     }
 
     private func toggle(_ ref: SideRoleResolution, currentlyOn: Bool) {
+        // [v25.319] 不再把前案文字插進內容欄位——參照改以獨立章節顯示在
+        // 決議內容上方（編輯頁與卡片都是），內容欄位保持乾淨只寫本次的事
         if currentlyOn {
             resolution.references.removeAll { $0 == ref.id }
         } else {
             resolution.references.append(ref.id)
-            insertQuote(ref)
-        }
-    }
-
-    /// 把前案的日期＋標題＋內容以引用區塊帶進內容欄位頂端群（已帶過不重複）
-    private func insertQuote(_ ref: SideRoleResolution) {
-        let header = "── 參照前案 \(ref.serialLabel.isEmpty ? "" : "\(ref.serialLabel)｜")\(Self.dateFmt.string(from: ref.date))｜\(ref.title.isEmpty ? "（未填標題）" : ref.title) ──"
-        guard !resolution.content.contains(header) else { return }
-        let quote = "\(header)\n\(ref.content.isEmpty ? "（未填內容）" : ref.content)"
-        if resolution.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            resolution.content = quote + "\n\n"
-        } else {
-            resolution.content = quote + "\n\n" + resolution.content
         }
     }
 }
