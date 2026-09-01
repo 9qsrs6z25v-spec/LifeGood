@@ -1042,7 +1042,16 @@ struct TalentStatsView: View {
             StatChart(title: "主動性分數（目前）", icon: "bolt.fill", color: .indigo,
                       unit: "分", values: members.map { (name($0), Double(proactivity[$0.id] ?? 0)) }),
             StatChart(title: "潛力分數（目前）", icon: "star.fill", color: .blue,
-                      unit: "分", values: members.map { (name($0), Double(potential[$0.id] ?? 0)) })
+                      unit: "分", values: members.map { (name($0), Double(potential[$0.id] ?? 0)) }),
+            // [v25.322] 總分＝主動性與潛力的平均（與部屬列表的綜合分數同一套算法）
+            StatChart(title: "總分（目前）", icon: "trophy.fill",
+                      color: Color(red: 0.85, green: 0.65, blue: 0.13),
+                      unit: "分",
+                      values: members.map {
+                          (name($0),
+                           ((Double(proactivity[$0.id] ?? 0) + Double(potential[$0.id] ?? 0)) / 2).rounded())
+                      },
+                      footer: "主動性與潛力的平均，與部屬列表左側的綜合分數一致。")
         ]
     }
 
@@ -1098,7 +1107,12 @@ struct TalentStatsView: View {
     /// forExport＝分享渲染版：隱藏右上小分享鈕。
     @ViewBuilder
     private func statsBarCard(_ c: StatChart, forExport: Bool = false) -> some View {
-        let sorted = c.values.filter { $0.value > 0 }.sorted { $0.value > $1.value }
+        // [v25.322] 團隊平均：對「全部成員」取平均（含 0 值的人，才是真平均），
+        // 以灰色條插進排序裡當對照基準
+        let avg = c.values.isEmpty ? 0 : c.values.reduce(0.0) { $0 + $1.value } / Double(c.values.count)
+        let withAvg = c.values.filter { $0.value > 0 }
+            + (avg > 0 ? [(name: "團隊平均", value: avg)] : [])
+        let sorted = withAvg.sorted { $0.value > $1.value }
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Capsule()
@@ -1132,7 +1146,9 @@ struct TalentStatsView: View {
                         x: .value(c.unit, item.value),
                         y: .value("成員", item.name)
                     )
-                    .foregroundStyle(c.color.gradient)
+                    .foregroundStyle(item.name == "團隊平均"
+                                     ? AnyShapeStyle(Color(.systemGray2).gradient)
+                                     : AnyShapeStyle(c.color.gradient))
                     .cornerRadius(3)
                     .annotation(position: .trailing, spacing: 4) {
                         Text(item.value == item.value.rounded()
