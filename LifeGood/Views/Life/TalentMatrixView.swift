@@ -396,8 +396,12 @@ struct TalentMatrixView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { exportJPG() } label: { Label("匯出 JPG", systemImage: "square.and.arrow.up") }
+                // [v25.321] 分享鈕跟著分頁走：矩陣分頁＝原本的整張矩陣匯出；
+                // 統計分頁的分享選單由 TalentStatsView 自帶（單張圖卡也有小分享鈕）
+                if tab == 0 {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { exportJPG() } label: { Label("匯出 JPG", systemImage: "square.and.arrow.up") }
+                    }
                 }
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
@@ -947,12 +951,11 @@ struct TalentMatrixView: View {
     }
 }
 
-// MARK: - 統計圖表分頁（v25.320）
+// MARK: - 統計圖表分頁（v25.320；v25.321 加分享）
 
 /// 人才矩陣的第二分頁：以人為單位的年度統計橫條圖。
 /// 年度膠囊切換（資料裡出現過的年份）；部門篩選沿用矩陣頁的選擇。
-/// 圖表：請假時數／任務完成數／報告完成數／加分與扣分紀錄數（年度），
-/// 加上逾期件數與主動性/潛力分數排行（目前狀態、不分年度）。
+/// 分享：工具列選單可選「全部圖表一張圖」或單一圖表；每張圖卡右上也有小分享鈕。
 struct TalentStatsView: View {
     @EnvironmentObject var lifeStore: LifeStore
     let members: [Subordinate]
@@ -961,6 +964,7 @@ struct TalentStatsView: View {
     let potential: [UUID: Int]
 
     @State private var year = Calendar.current.component(.year, from: Date())
+    @State private var shareItem: MatrixShareURL?
 
     private var cal: Calendar { Calendar.current }
 
@@ -1004,6 +1008,44 @@ struct TalentStatsView: View {
             && ($0.type == .con || $0.type == .fault || $0.type == .missOperation) }.count
     }
 
+    // MARK: 圖表定義（畫面與分享共用同一份）
+
+    private struct StatChart: Identifiable {
+        let title: String
+        let icon: String
+        let color: Color
+        let unit: String
+        let values: [(name: String, value: Double)]
+        var footer: String? = nil
+        var id: String { title }
+    }
+
+    private var charts: [StatChart] {
+        [
+            StatChart(title: "請假時數（\(year) 年）", icon: "calendar.badge.minus", color: .orange,
+                      unit: "小時", values: members.map { (name($0), leaveHours($0)) },
+                      footer: "含所有假別（病假／喪假／公假等不計分假別也列入時數）。"),
+            StatChart(title: "任務完成數（\(year) 年）", icon: "checklist", color: .green,
+                      unit: "件", values: members.map { (name($0), Double(tasksDone($0))) },
+                      footer: "以完成時間歸入年度；含兼任連動任務。"),
+            StatChart(title: "報告完成數（\(year) 年）", icon: "doc.text.fill", color: .purple,
+                      unit: "份", values: members.map { (name($0), Double(reportsDone($0))) }),
+            StatChart(title: "加分紀錄（\(year) 年）", icon: "hand.thumbsup.fill", color: .teal,
+                      unit: "筆", values: members.map { (name($0), Double(plusRecords($0))) },
+                      footer: "優點＋成就＋進步的紀錄筆數。"),
+            StatChart(title: "扣分紀錄（\(year) 年）", icon: "hand.thumbsdown.fill", color: .red,
+                      unit: "筆", values: members.map { (name($0), Double(minusRecords($0))) },
+                      footer: "缺點＋缺失＋疏失的紀錄筆數。"),
+            StatChart(title: "逾期件數（目前）", icon: "exclamationmark.triangle.fill", color: .pink,
+                      unit: "件", values: members.map { (name($0), Double($0.overdueOpenCount)) },
+                      footer: "逾期未完成＋逾期才完成（與逾期扣分同一套定義）。"),
+            StatChart(title: "主動性分數（目前）", icon: "bolt.fill", color: .indigo,
+                      unit: "分", values: members.map { (name($0), Double(proactivity[$0.id] ?? 0)) }),
+            StatChart(title: "潛力分數（目前）", icon: "star.fill", color: .blue,
+                      unit: "分", values: members.map { (name($0), Double(potential[$0.id] ?? 0)) })
+        ]
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             // 年度膠囊
@@ -1026,54 +1068,58 @@ struct TalentStatsView: View {
                 .padding(.horizontal)
             }
 
-            statsBarCard(title: "請假時數（\(year) 年）", icon: "calendar.badge.minus", color: .orange,
-                         unit: "小時",
-                         values: members.map { (name($0), leaveHours($0)) },
-                         footer: "含所有假別（病假／喪假／公假等不計分假別也列入時數）。")
-            statsBarCard(title: "任務完成數（\(year) 年）", icon: "checklist", color: .green,
-                         unit: "件",
-                         values: members.map { (name($0), Double(tasksDone($0))) },
-                         footer: "以完成時間歸入年度；含兼任連動任務。")
-            statsBarCard(title: "報告完成數（\(year) 年）", icon: "doc.text.fill", color: .purple,
-                         unit: "份",
-                         values: members.map { (name($0), Double(reportsDone($0))) })
-            statsBarCard(title: "加分紀錄（\(year) 年）", icon: "hand.thumbsup.fill", color: .teal,
-                         unit: "筆",
-                         values: members.map { (name($0), Double(plusRecords($0))) },
-                         footer: "優點＋成就＋進步的紀錄筆數。")
-            statsBarCard(title: "扣分紀錄（\(year) 年）", icon: "hand.thumbsdown.fill", color: .red,
-                         unit: "筆",
-                         values: members.map { (name($0), Double(minusRecords($0))) },
-                         footer: "缺點＋缺失＋疏失的紀錄筆數。")
-            statsBarCard(title: "逾期件數（目前）", icon: "exclamationmark.triangle.fill", color: .pink,
-                         unit: "件",
-                         values: members.map { (name($0), Double($0.overdueOpenCount)) },
-                         footer: "逾期未完成＋逾期才完成（與逾期扣分同一套定義）。")
-            statsBarCard(title: "主動性分數（目前）", icon: "bolt.fill", color: .indigo,
-                         unit: "分",
-                         values: members.map { (name($0), Double(proactivity[$0.id] ?? 0)) })
-            statsBarCard(title: "潛力分數（目前）", icon: "star.fill", color: .blue,
-                         unit: "分",
-                         values: members.map { (name($0), Double(potential[$0.id] ?? 0)) })
+            ForEach(charts) { c in
+                statsBarCard(c)
+                    .padding(.horizontal)
+            }
         }
+        // [v25.321] 統計分頁的工具列分享選單（矩陣分頁的匯出鈕只在矩陣分頁出現）
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button { exportAll() } label: {
+                        Label("全部圖表（一張圖）", systemImage: "square.grid.2x2")
+                    }
+                    Divider()
+                    ForEach(charts) { c in
+                        Button { exportChart(c) } label: {
+                            Label(c.title, systemImage: c.icon)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+            }
+        }
+        .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
     }
 
-    /// 橫條圖卡：依數值大到小排序、零值不畫（全部為零顯示空狀態提示）
+    /// 橫條圖卡：依數值大到小排序、零值不畫（全部為零顯示空狀態提示）。
+    /// forExport＝分享渲染版：隱藏右上小分享鈕。
     @ViewBuilder
-    private func statsBarCard(title: String, icon: String, color: Color, unit: String,
-                              values: [(name: String, value: Double)],
-                              footer: String? = nil) -> some View {
-        let sorted = values.filter { $0.value > 0 }.sorted { $0.value > $1.value }
+    private func statsBarCard(_ c: StatChart, forExport: Bool = false) -> some View {
+        let sorted = c.values.filter { $0.value > 0 }.sorted { $0.value > $1.value }
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Capsule()
-                    .fill(LinearGradient(colors: [color, color.opacity(0.55)],
+                    .fill(LinearGradient(colors: [c.color, c.color.opacity(0.55)],
                                          startPoint: .top, endPoint: .bottom))
                     .frame(width: 4, height: 16)
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(color)
-                Text(title).font(.subheadline.weight(.bold))
+                Image(systemName: c.icon)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(c.color)
+                Text(c.title).font(.subheadline.weight(.bold))
                 Spacer()
+                // [v25.321] 單張圖卡的小分享鈕
+                if !forExport {
+                    Button { exportChart(c) } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(c.color)
+                            .padding(5)
+                            .background(c.color.opacity(0.10), in: Circle())
+                    }
+                    .buttonStyle(.borderless)
+                }
             }
             if sorted.isEmpty {
                 Text("此範圍沒有資料")
@@ -1083,10 +1129,10 @@ struct TalentStatsView: View {
             } else {
                 Chart(Array(sorted.enumerated()), id: \.offset) { _, item in
                     BarMark(
-                        x: .value(unit, item.value),
+                        x: .value(c.unit, item.value),
                         y: .value("成員", item.name)
                     )
-                    .foregroundStyle(color.gradient)
+                    .foregroundStyle(c.color.gradient)
                     .cornerRadius(3)
                     .annotation(position: .trailing, spacing: 4) {
                         Text(item.value == item.value.rounded()
@@ -1101,7 +1147,7 @@ struct TalentStatsView: View {
                 }
                 .frame(height: max(60, CGFloat(sorted.count) * 30))
             }
-            if let footer {
+            if let footer = c.footer {
                 Text(footer).font(.caption2).foregroundStyle(.tertiary)
             }
         }
@@ -1109,6 +1155,63 @@ struct TalentStatsView: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
-        .padding(.horizontal)
+    }
+
+    // MARK: 分享（單張圖卡／全部圖表；規格對齊全 App：寬 420、scale ≥3、JPG 0.95、戳記）
+
+    private static let statsStampFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd_HHmm"; return f
+    }()
+    private static let statsDisplayStampFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d HH:mm"; return f
+    }()
+
+    @MainActor
+    private func renderAndShare(_ content: some View, baseName: String) {
+        let framed = content
+            .frame(width: 420)
+            .padding(16)
+            .background(Color(.systemGroupedBackground))
+            .environmentObject(lifeStore)
+        let renderer = ImageRenderer(content: framed)
+        renderer.scale = max(UIScreen.main.scale, 3)
+        guard let ui = renderer.uiImage, let data = ui.jpegData(compressionQuality: 0.95) else { return }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(baseName)_\(Self.statsStampFmt.string(from: Date())).jpg")
+        do {
+            try data.write(to: url)
+            shareItem = MatrixShareURL(url: url)
+        } catch { }
+    }
+
+    @MainActor
+    private func exportChart(_ c: StatChart) {
+        let content = VStack(alignment: .leading, spacing: 10) {
+            statsBarCard(c, forExport: true)
+            Text("美好人生・\(Self.statsDisplayStampFmt.string(from: Date())) 匯出")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        let safe = c.title.components(separatedBy: CharacterSet(charactersIn: "（）/ ")).joined()
+        renderAndShare(content, baseName: "部屬統計_\(safe)")
+    }
+
+    @MainActor
+    private func exportAll() {
+        let content = VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("📊 部屬統計圖表｜\(year) 年")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            ForEach(charts) { c in
+                statsBarCard(c, forExport: true)
+            }
+            Text("美好人生・\(Self.statsDisplayStampFmt.string(from: Date())) 匯出")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        renderAndShare(content, baseName: "部屬統計_全部圖表")
     }
 }
