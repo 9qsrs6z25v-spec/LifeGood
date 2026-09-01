@@ -856,7 +856,11 @@ struct SubordinateDetailView: View {
             return n.isEmpty ? "未命名" : n
         }
         switch ref {
-        case .task(let s, let t):    return ("checklist", .cyan, t.topic.isEmpty ? "未命名任務" : t.topic, owner(s), "任務")
+        case .task(let s, let t):
+            // [v25.325] 應做未作為＝紅色缺失樣式
+            return t.isDereliction
+                ? ("exclamationmark.triangle.fill", .red, t.topic.isEmpty ? "未命名任務" : t.topic, owner(s), "缺失")
+                : ("checklist", .cyan, t.topic.isEmpty ? "未命名任務" : t.topic, owner(s), "任務")
         case .meeting(let s, let m): return ("person.3.fill", .indigo, m.topic.isEmpty ? "未命名會議" : m.topic, owner(s), "會議")
         case .report(let s, let r):  return ("doc.text.fill", .purple, r.topic.isEmpty ? "未命名報告" : r.topic, owner(s), "報告")
         case .leave(let s, let rec): return ("calendar.badge.minus", .teal, rec.leaveType?.rawValue ?? "請假", owner(s), "請假")
@@ -1226,6 +1230,20 @@ struct SubordinateDetailView: View {
                                         .foregroundStyle(dueColor)
                                         .clipShape(Capsule())
                                         .overlay(Capsule().stroke(dueColor.opacity(0.22), lineWidth: 0.6))
+                                    }
+                                    // [v25.325] 應做未作為：紅色缺失膠囊
+                                    if t.isDereliction {
+                                        HStack(spacing: 3) {
+                                            Image(systemName: "exclamationmark.triangle.fill")
+                                                .font(.system(size: 7))
+                                            Text("缺失")
+                                        }
+                                        .font(.caption2.weight(.bold))
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Color.red.opacity(0.12))
+                                        .foregroundStyle(.red)
+                                        .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(Color.red.opacity(0.22), lineWidth: 0.6))
                                     }
                                     // [v25.294] 自訂分數任務：顯示分數膠囊（正綠負紅）
                                     if let cs = t.customScore {
@@ -3478,6 +3496,8 @@ struct TaskEditorSheet: View {
     @State private var responseResult = ""
     /// 任務分數（onAppear 帶入自訂值或全域預設；等於預設值時存檔存 nil＝跟隨預設）
     @State private var scoreValue = ScoreWeights.actTask
+    /// [v25.325] 應做未作為（缺失）：開啟時任務轉為扣分事項、分數自動設 -1
+    @State private var isDereliction = false
 
     /// 機台警報任務的來源機台顯示（優先現查機台池，機台被刪則用連結快照）
     private func equipmentDisplay(_ link: EquipmentAlarmLink) -> (name: String, system: String) {
@@ -3520,6 +3540,17 @@ struct TaskEditorSheet: View {
                             FiveMinuteDateTimePicker(selection: $dueDate).fixedSize()
                         }
                     }
+                    // [v25.325] 應做未作為（缺失）：開啟即轉為扣分事項，分數自動 -1
+                    Toggle(isOn: $isDereliction) {
+                        Label("應做未作為（缺失）",
+                              systemImage: isDereliction ? "exclamationmark.triangle.fill" : "exclamationmark.triangle")
+                            .foregroundStyle(isDereliction ? .red : .primary)
+                    }
+                    .tint(.red)
+                    .onChange(of: isDereliction) { _, on in
+                        // 開＝自動設 -1（仍可用下方加減微調）；關＝回到全域預設
+                        scoreValue = on ? -1 : ScoreWeights.actTask
+                    }
                     // [v25.294] 任務自訂分數：右側加減調整，可正可負；等於全域預設值
                     // 時存 nil（跟隨進階設定的「完成任務」權重，日後調整會跟著變）
                     HStack(spacing: 10) {
@@ -3555,7 +3586,9 @@ struct TaskEditorSheet: View {
                 } header: {
                     editorSectionHeader("任務資訊", icon: "checklist")
                 } footer: {
-                    Text("完成這個任務時計入主動性評分的分數（可正可負）。沒有調整就跟隨進階設定的「完成任務」權重（目前 +\(ScoreWeights.actTask)）。")
+                    Text(isDereliction
+                         ? "應做未作為＝缺失事項：完成（結案）時計 \(scoreValue) 分（可用加減微調）。卡片與列表會以紅色缺失樣式顯示。"
+                         : "完成這個任務時計入主動性評分的分數（可正可負）。沒有調整就跟隨進階設定的「完成任務」權重（目前 +\(ScoreWeights.actTask)）。")
                 }
                 Section {
                     Picker(selection: $assignedSubId) {
@@ -3643,6 +3676,7 @@ struct TaskEditorSheet: View {
                     isCompleted = e.isCompleted
                     responseAction = e.responseAction; responseResult = e.responseResult
                     scoreValue = e.customScore ?? ScoreWeights.actTask
+                    isDereliction = e.isDereliction
                     if let d = e.dueDate { hasDueDate = true; dueDate = d }
                 } else {
                     // 新任務：預設時間用排程時段（整點/半點，過 18:00 則隔天 09:30）
@@ -3671,8 +3705,11 @@ struct TaskEditorSheet: View {
             equipmentLink: editing?.equipmentLink,
             responseAction: responseAction.trimmingCharacters(in: .whitespacesAndNewlines),
             responseResult: responseResult.trimmingCharacters(in: .whitespacesAndNewlines),
-            // 等於全域預設＝視同沒自訂（存 nil，進階設定調整權重時跟著變）
-            customScore: scoreValue == ScoreWeights.actTask ? nil : scoreValue
+            // 等於全域預設＝視同沒自訂（存 nil，進階設定調整權重時跟著變）；
+            // 缺失任務一律存明確分數（預設 -1），不跟隨全域權重
+            customScore: isDereliction ? scoreValue
+                : (scoreValue == ScoreWeights.actTask ? nil : scoreValue),
+            isDereliction: isDereliction
         )
         let targetId = assignedSubId
         // 換人：先從原持有者移除該任務
@@ -4852,7 +4889,13 @@ struct SubordinateItemCard: View {
         switch ref {
         case .task(let subId, let snap):
             let t = lifeStore.subordinates.first { $0.id == subId }?.tasks.first { $0.id == snap.id } ?? snap
-            titleBlock(icon: "checklist", color: .cyan, title: t.topic.isEmpty ? "未命名任務" : t.topic)
+            // [v25.325] 應做未作為＝紅色缺失抬頭
+            titleBlock(icon: t.isDereliction ? "exclamationmark.triangle.fill" : "checklist",
+                       color: t.isDereliction ? .red : .cyan,
+                       title: t.topic.isEmpty ? "未命名任務" : t.topic)
+            if t.isDereliction {
+                field("性質", "應做未作為（缺失）")
+            }
             ownerBlock(subId: subId, accent: .cyan)
             taskStatusRow(t)
             if let info = cardEquipmentInfo(t.equipmentLink) {
