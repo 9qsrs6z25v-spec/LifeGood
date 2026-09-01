@@ -4524,8 +4524,16 @@ struct SubordinateItemCard: View {
     @State private var openSub: Subordinate?
     @State private var openCard: IDBox?
     @State private var shareItem: CardSharePayload?
+    /// [v25.324] 會議卡片就地「加開一場」（免進編輯頁）
+    @State private var quickSessionTarget: QuickSessionTarget?
     // [v1] 卡片內容進場動畫旗標，對齊本檔案其餘 sheet／卡片一致採用的淡入進場規格
     @State private var cardAppeared = false
+
+    struct QuickSessionTarget: Identifiable {
+        let subId: UUID
+        let meetingId: UUID
+        var id: UUID { meetingId }
+    }
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d (E) HH:mm"; return f
@@ -4802,6 +4810,9 @@ struct SubordinateItemCard: View {
             .sheet(item: $openSub) { s in SubordinateDetailView(subordinate: s) }
             .sheet(item: $openCard) { box in BusinessCardDetailView(cardId: box.id) }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items) }
+            .sheet(item: $quickSessionTarget) { t in
+                MeetingQuickAddSessionSheet(subId: t.subId, meetingId: t.meetingId)
+            }
             .environment(\.openURL, OpenURLAction { url in handleMention(url) })
             .onAppear {
                 withAnimation(.spring(response: 0.46, dampingFraction: 0.82)) {
@@ -4881,6 +4892,27 @@ struct SubordinateItemCard: View {
                 }
             } else if !m.allItems.isEmpty {
                 agendaBlock(title: "議程項目", items: m.allItems, meeting: m, subId: subId)
+            }
+            // [v25.324] 就地加開一場（免進編輯頁）：接在場次/議程正下方
+            if !forExport {
+                Button {
+                    quickSessionTarget = QuickSessionTarget(subId: subId, meetingId: m.id)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar.badge.plus")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("加開一場").font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .foregroundStyle(.indigo)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Color.indigo.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.indigo.opacity(0.18), lineWidth: 0.75))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             editBlock("備註", m.note, accent: .indigo, forExport: forExport) { new in
                 lifeStore.mutateSubordinateMeetingFields(subordinateId: subId, meetingId: m.id) { $0.note = new }
@@ -5228,5 +5260,70 @@ struct PromotionSheet: View {
         sub.jobTitle = ""
         lifeStore.subordinates[idx] = sub   // didSet 觸發 save + iCloud 同步
         dismiss()
+    }
+}
+
+// MARK: - 就地加開場次（v25.324：會議卡片直接加開，免進編輯頁）
+
+/// 會議卡片「加開一場」的輕量表單：只挑日期時間，一鍵寫入臨時場次。
+/// 議程項目之後在卡片上點該場次即可編輯（與編輯頁加開的臨時場次同一種東西）。
+struct MeetingQuickAddSessionSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let subId: UUID
+    let meetingId: UUID
+
+    @State private var date = FiveMinuteDateTimePicker.defaultSchedulingTime()
+
+    private var meetingTopic: String {
+        let t = lifeStore.subordinates.first { $0.id == subId }?
+            .meetings.first { $0.id == meetingId }?.topic ?? ""
+        return t.isEmpty ? "未命名會議" : t
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "person.3.fill")
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(.indigo)
+                        Text(meetingTopic).font(.subheadline.weight(.medium)).lineLimit(1)
+                        Spacer()
+                        Text("臨時場次")
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Color.indigo.opacity(0.12)).foregroundStyle(.indigo)
+                            .clipShape(Capsule())
+                    }
+                    HStack {
+                        Text("開會時間")
+                        Spacer()
+                        FiveMinuteDateTimePicker(selection: $date).fixedSize()
+                    }
+                } footer: {
+                    Text("臨時場次是在原本時間（或週期）之外加開的一場，日期時間自由指定。加開後在卡片上點該場次即可填議程、改期或取消。")
+                }
+            }
+            .navigationTitle("加開一場")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("加開") {
+                        lifeStore.mutateSubordinateMeetingFields(
+                            subordinateId: subId, meetingId: meetingId
+                        ) { m in
+                            m.occurrences.append(MeetingOccurrence(scheduledDate: date, isAdHoc: true))
+                        }
+                        dismiss()
+                    }
+                    .bold().foregroundStyle(.indigo)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 }
