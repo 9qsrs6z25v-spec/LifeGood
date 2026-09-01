@@ -2656,6 +2656,18 @@ struct OrgPersonRelation: Identifiable, Codable, Equatable {
     }
 }
 
+/// 組織人員的簡易作品／報告項目（v25.323）：給「不是我的部屬」的同仁記
+/// 他報告過的東西——只要項目名稱＋日期就好（部屬的完整報告走部屬那套）。
+struct OrgPersonWorkItem: Identifiable, Codable, Equatable {
+    let id: UUID
+    var title: String
+    var date: Date
+
+    init(id: UUID = UUID(), title: String = "", date: Date = Date()) {
+        self.id = id; self.title = title; self.date = date
+    }
+}
+
 struct OrgPerson: Identifiable, Codable {
     let id: UUID
     var name: String
@@ -2681,6 +2693,9 @@ struct OrgPerson: Identifiable, Codable {
     var linkedSubordinateId: UUID?
     /// 連結的職等職稱 ID（讀取 lifeStore.gradeTitles），nil 代表使用 jobTitle 自訂文字
     var gradeTitleId: UUID?
+    /// [v25.323] 簡易作品／報告項目（人員卡片可直接新增；刻意不進 memberwise init，
+    /// 編輯重建時由呼叫端帶回——比照 Expense.amountHistory 慣例）
+    var works: [OrgPersonWorkItem] = []
 
     init(id: UUID = UUID(), name: String = "", jobTitle: String = "",
          departmentId: UUID? = nil, photoFileName: String? = nil,
@@ -2723,12 +2738,13 @@ struct OrgPerson: Identifiable, Codable {
         linkedBusinessCardId = try? c.decodeIfPresent(UUID.self, forKey: .linkedBusinessCardId)
         linkedSubordinateId = try? c.decodeIfPresent(UUID.self, forKey: .linkedSubordinateId)
         gradeTitleId = try? c.decodeIfPresent(UUID.self, forKey: .gradeTitleId)
+        works = (try? c.decodeIfPresent([OrgPersonWorkItem].self, forKey: .works)) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, jobTitle, departmentId, photoFileName, birthday, birthdayEventId
         case relationship, note, children, relations, dateAdded
-        case isInactive, leftDate, linkedBusinessCardId, linkedSubordinateId, gradeTitleId
+        case isInactive, leftDate, linkedBusinessCardId, linkedSubordinateId, gradeTitleId, works
     }
 
     /// 主導關係：取所有 relations 中出現最多次的類型，沒有則 nil

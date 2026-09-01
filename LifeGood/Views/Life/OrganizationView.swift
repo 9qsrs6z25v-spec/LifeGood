@@ -81,6 +81,9 @@ struct OrganizationView: View {
     // 把 .sheet(item:) 判定成「新項目」而中途關閉/重開分享面板。改成本檔案唯一一個違反此
     // struct 既有用法（其餘檔案都是直接把它存進 @State）的地方，id 建立後即固定。
     @State private var pdfURL: IdentifiableURL?
+    /// [v25.323] 頂部搜尋：人員／報告／改善項目
+    @State private var orgSearchText = ""
+    @State private var searchViewingPersonId: UUID?
     // 美化：空狀態脈衝光環動畫旗標
     @State private var orgEmptyPulse = false
     @State private var orgEmptyPulseTask: Task<Void, Never>?
@@ -102,22 +105,35 @@ struct OrganizationView: View {
             Group {
                 if lifeStore.departments.isEmpty {
                     emptyState
-                } else if directoryMode {
-                    directoryList
                 } else {
-                    ScrollView([.horizontal, .vertical]) {
-                        let ctx = makeOrgContext()
-                        VStack(spacing: 24) {
-                            statsHeader
-                            ForEach(rootDepartments) { root in
-                                deptTreeNode(root, visited: [], ctx: ctx)
+                    VStack(spacing: 0) {
+                        orgSearchBar
+                        if !orgSearchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                            orgSearchResults
+                        } else if directoryMode {
+                            directoryList
+                        } else {
+                            ScrollView([.horizontal, .vertical]) {
+                                let ctx = makeOrgContext()
+                                VStack(spacing: 24) {
+                                    statsHeader
+                                    ForEach(rootDepartments) { root in
+                                        deptTreeNode(root, visited: [], ctx: ctx)
+                                    }
+                                }
+                                .padding(24)
                             }
                         }
-                        .padding(24)
                     }
                 }
             }
             .background(Color(.systemGroupedBackground))
+            .sheet(item: Binding(
+                get: { searchViewingPersonId.map { IdentifiableUUID(id: $0) } },
+                set: { searchViewingPersonId = $0?.id }
+            )) { wrapper in
+                OrgPersonDetailView(personId: wrapper.id)
+            }
             .navigationTitle("公司組織")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1711,7 +1727,7 @@ struct OrgPersonEditor: View {
             Task { @MainActor in AppleCalendarBridge.shared.delete(eventIdentifier: bid) }
             keptEventId = nil
         }
-        let person = OrgPerson(
+        var person = OrgPerson(
             id: id,
             name: name.trimmingCharacters(in: .whitespaces),
             jobTitle: resolvedJobTitle,
@@ -1730,6 +1746,8 @@ struct OrgPersonEditor: View {
             linkedSubordinateId: existing?.linkedSubordinateId,
             gradeTitleId: gradeTitleId
         )
+        // 簡易作品項目（不在 memberwise init）：編輯重建時帶回，不然存個檔就被清空
+        person.works = existing?.works ?? []
         if isEditing { lifeStore.update(person) } else { lifeStore.add(person) }
         syncBusinessCardLink(personId: id, oldCardId: existing?.linkedBusinessCardId, newCardId: finalCardId)
         dismiss()
@@ -1796,6 +1814,8 @@ struct OrgPersonDetailView: View {
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
     @State private var showBirthdayReminder = false
+    /// [v25.323] 新增簡易作品／報告項目
+    @State private var showAddWork = false
     @State private var viewingRelatedPersonId: UUID?
     @State private var viewingLinkedCardId: UUID?
     // [v2] 英雄卡進場動畫旗標
@@ -1834,6 +1854,8 @@ struct OrgPersonDetailView: View {
                     if person.linkedBusinessCardId != nil {
                         linkedCardButton
                     }
+                    // [v25.323] 相關作品／報告／改善：部屬自動帶入＋手動記錄的簡易項目
+                    worksCard
                     if !person.relationship.isEmpty {
                         sectionCard("我與他的利害關係", systemImage: "link.circle.fill", color: .indigo) {
                             Text(person.relationship).font(.subheadline)
@@ -1875,6 +1897,9 @@ struct OrgPersonDetailView: View {
             .sheet(isPresented: $showBirthdayReminder) {
                 BirthdayReminderSheet(orgPersonId: personId)
             }
+            .sheet(isPresented: $showAddWork) {
+                OrgPersonWorkEditor(personId: personId)
+            }
             .sheet(item: Binding(
                 get: { viewingRelatedPersonId.map { IdentifiableUUID(id: $0) } },
                 set: { viewingRelatedPersonId = $0?.id }
@@ -1900,6 +1925,104 @@ struct OrgPersonDetailView: View {
                     dismiss()
                 }
                 Button("取消", role: .cancel) {}
+            }
+        }
+    }
+
+    // MARK: 相關作品／報告／改善（v25.323）
+
+    private var linkedSub: Subordinate? {
+        person.linkedSubordinateId.flatMap { sid in
+            lifeStore.subordinates.first { $0.id == sid }
+        }
+    }
+
+    private static let workDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    /// 相關作品／報告／改善：
+    /// ・是我的部屬 → 自動帶入他的報告與改善/成就紀錄（唯讀，最新在前、各取前 8 筆）
+    /// ・任何人（含非部屬的其他部門同仁）→ 可手動「新增項目」（項目名稱＋日期），長按可刪
+    private var worksCard: some View {
+        sectionCard("相關作品・報告・改善", systemImage: "doc.text.magnifyingglass", color: .purple) {
+            VStack(alignment: .leading, spacing: 10) {
+                // 手動記錄的簡易項目
+                ForEach(person.works.sorted { $0.date > $1.date }) { w in
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.text.fill")
+                            .font(.system(size: 11)).foregroundStyle(.purple)
+                        Text(w.title.isEmpty ? "（未命名項目）" : w.title)
+                            .font(.subheadline).lineLimit(2)
+                        Spacer()
+                        Text(Self.workDateFmt.string(from: w.date))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            var p = person
+                            p.works.removeAll { $0.id == w.id }
+                            lifeStore.update(p)
+                        } label: { Label("刪除此項目", systemImage: "trash") }
+                    }
+                }
+                // 部屬連動：報告
+                if let sub = linkedSub {
+                    let reports = sub.weeklyReports.sorted { $0.date > $1.date }.prefix(8)
+                    if !reports.isEmpty {
+                        Text("報告（部屬紀錄）").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        ForEach(Array(reports)) { r in
+                            HStack(spacing: 8) {
+                                Image(systemName: r.isCompleted ? "checkmark.circle.fill" : "doc.text")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(r.isCompleted ? .green : .secondary)
+                                if !r.reportType.isEmpty {
+                                    Text(r.reportType)
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                        .background(Color.purple.opacity(0.12)).foregroundStyle(.purple)
+                                        .clipShape(Capsule())
+                                }
+                                Text(r.topic.isEmpty ? "未命名報告" : r.topic)
+                                    .font(.subheadline).lineLimit(1)
+                                Spacer()
+                                Text(Self.workDateFmt.string(from: r.date))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    // 部屬連動：改善／成就紀錄
+                    let improvements = sub.records
+                        .filter { $0.type == .improvement || $0.type == .achievement }
+                        .sorted { $0.date > $1.date }.prefix(8)
+                    if !improvements.isEmpty {
+                        Text("改善・成就（部屬紀錄）").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        ForEach(Array(improvements)) { rec in
+                            HStack(spacing: 8) {
+                                Image(systemName: rec.type == .improvement ? "arrow.up.right.circle.fill" : "trophy.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(rec.type == .improvement ? .teal : .orange)
+                                Text(rec.content.isEmpty ? "（未填內容）" : rec.content)
+                                    .font(.subheadline).lineLimit(2)
+                                Spacer()
+                                Text(Self.workDateFmt.string(from: rec.date))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                if person.works.isEmpty && linkedSub == nil {
+                    Text("還沒有紀錄。非部屬的同仁也可以按下方「新增項目」記下他報告過的東西（項目＋日期）。")
+                        .font(.caption).foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button { showAddWork = true } label: {
+                    Label("新增項目", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.purple)
+                }
+                .buttonStyle(.borderless)
             }
         }
     }
@@ -2300,5 +2423,197 @@ struct OrgPersonDetailView: View {
 
     private func formatDate(_ date: Date) -> String {
         Self.dateFormatter.string(from: date)
+    }
+}
+
+// MARK: - 組織頁搜尋與簡易作品編輯（v25.323）
+
+extension OrganizationView {
+    /// 頂部搜尋列：人員／報告／改善項目
+    var orgSearchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+            TextField("搜尋人員、報告或改善項目", text: $orgSearchText)
+                .autocorrectionDisabled()
+            if !orgSearchText.isEmpty {
+                Button { orgSearchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal).padding(.top, 8).padding(.bottom, 6)
+    }
+
+    private func orgMatches(_ text: String) -> Bool {
+        let q = orgSearchText.trimmingCharacters(in: .whitespaces)
+        return !q.isEmpty && text.localizedCaseInsensitiveContains(q)
+    }
+
+    /// 搜尋結果：人員（姓名/職稱/部門）、報告（部屬報告＋人員簡易項目）、改善（部屬改善紀錄）。
+    /// 點任一列開啟該人員的卡片。
+    var orgSearchResults: some View {
+        // 人員
+        let people = lifeStore.orgPeople.filter { p in
+            let dept = p.departmentId.flatMap { id in
+                lifeStore.departments.first { $0.id == id }?.name
+            } ?? ""
+            return orgMatches(p.name) || orgMatches(p.jobTitle) || orgMatches(dept)
+        }
+        // 部屬 id → 組織人員 id（報告/改善命中時開對應人員卡）
+        let subToPerson = Dictionary(
+            lifeStore.orgPeople.compactMap { p in p.linkedSubordinateId.map { ($0, p.id) } },
+            uniquingKeysWith: { first, _ in first }
+        )
+        // 報告：部屬報告＋人員簡易項目
+        var reportRows: [(personId: UUID?, owner: String, title: String, date: Date)] = []
+        for sub in lifeStore.subordinates {
+            for r in sub.weeklyReports where orgMatches(r.topic) || orgMatches(r.reportType) {
+                reportRows.append((subToPerson[sub.id], sub.name.isEmpty ? "未命名" : sub.name,
+                                   r.topic.isEmpty ? "未命名報告" : r.topic, r.date))
+            }
+        }
+        for p in lifeStore.orgPeople {
+            for w in p.works where orgMatches(w.title) {
+                reportRows.append((p.id, p.name.isEmpty ? "未命名" : p.name,
+                                   w.title.isEmpty ? "（未命名項目）" : w.title, w.date))
+            }
+        }
+        reportRows.sort { $0.date > $1.date }
+        // 改善項目：部屬的改善／成就紀錄
+        var improveRows: [(personId: UUID?, owner: String, title: String, date: Date)] = []
+        for sub in lifeStore.subordinates {
+            for rec in sub.records
+            where (rec.type == .improvement || rec.type == .achievement) && orgMatches(rec.content) {
+                improveRows.append((subToPerson[sub.id], sub.name.isEmpty ? "未命名" : sub.name,
+                                    rec.content, rec.date))
+            }
+        }
+        improveRows.sort { $0.date > $1.date }
+
+        return List {
+            if people.isEmpty && reportRows.isEmpty && improveRows.isEmpty {
+                Text("找不到符合的人員、報告或改善項目")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+            }
+            if !people.isEmpty {
+                Section("人員（\(people.count)）") {
+                    ForEach(people) { p in
+                        Button { searchViewingPersonId = p.id } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "person.crop.circle.fill")
+                                    .font(.system(size: 16)).foregroundStyle(.indigo)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(p.name.isEmpty ? "未命名" : p.name)
+                                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                                    let dept = p.departmentId.flatMap { id in
+                                        lifeStore.departments.first { $0.id == id }?.name
+                                    } ?? ""
+                                    Text([dept, p.jobTitle].filter { !$0.isEmpty }.joined(separator: "・"))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            if !reportRows.isEmpty {
+                orgSearchRowSection(title: "報告（\(reportRows.count)）",
+                                    icon: "doc.text.fill", color: .purple, rows: reportRows)
+            }
+            if !improveRows.isEmpty {
+                orgSearchRowSection(title: "改善・成就（\(improveRows.count)）",
+                                    icon: "arrow.up.right.circle.fill", color: .teal, rows: improveRows)
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func orgSearchRowSection(title: String, icon: String, color: Color,
+                                     rows: [(personId: UUID?, owner: String, title: String, date: Date)]) -> some View {
+        Section(title) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                Button {
+                    if let pid = row.personId { searchViewingPersonId = pid }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: icon)
+                            .font(.system(size: 13)).foregroundStyle(color)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(row.title)
+                                .font(.subheadline).foregroundStyle(.primary).lineLimit(2)
+                            Text(row.owner).font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(Self.searchDateFmt.string(from: row.date))
+                            .font(.caption2).foregroundStyle(.secondary)
+                        if row.personId != nil {
+                            Image(systemName: "chevron.right")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(row.personId == nil)
+            }
+        }
+    }
+
+    static let searchDateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+}
+
+/// 人員卡片「新增項目」的小表單：項目名稱＋日期（給非部屬同仁記他報告過的東西）
+struct OrgPersonWorkEditor: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @Environment(\.dismiss) private var dismiss
+
+    let personId: UUID
+
+    @State private var title = ""
+    @State private var date = Date()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("項目名稱（例：改善提案發表、部門月報）", text: $title)
+                    DatePicker("日期", selection: $date, displayedComponents: .date)
+                } footer: {
+                    Text("簡易紀錄：只記項目與日期。這個人若是你的部屬，完整報告請照舊記在部屬頁，會自動顯示在卡片上。")
+                }
+            }
+            .navigationTitle("新增項目")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("新增") {
+                        guard var p = lifeStore.orgPeople.first(where: { $0.id == personId }) else { dismiss(); return }
+                        p.works.append(OrgPersonWorkItem(
+                            title: title.trimmingCharacters(in: .whitespaces), date: date))
+                        lifeStore.update(p)
+                        dismiss()
+                    }
+                    .bold()
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 }
