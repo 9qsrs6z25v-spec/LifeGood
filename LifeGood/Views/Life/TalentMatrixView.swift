@@ -268,6 +268,8 @@ struct TalentMatrixView: View {
     @AppStorage("talentMatrixDeptFilter") private var deptFilterRaw = ""  // 逗號分隔 UUID；空=全部部門
     @State private var selected: Subordinate?
     @State private var shareItem: MatrixShareURL?
+    /// [v25.320] 分頁：0＝人才矩陣、1＝統計圖表
+    @State private var tab = 0
 
     /// 目前選取的部門（多選，持久化於 @AppStorage）
     private var selectedDeptIds: Set<UUID> {
@@ -351,15 +353,26 @@ struct TalentMatrixView: View {
             ZStack {
                 ScrollView {
                     VStack(spacing: 12) {
+                        // [v25.320] 分頁：人才矩陣（既有）／統計圖表（年度統計）
+                        Picker("頁面", selection: $tab) {
+                            Text("人才矩陣").tag(0)
+                            Text("統計圖表").tag(1)
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
                         deptFilter
                         if members.isEmpty {
                             emptyHint
-                        } else {
+                        } else if tab == 0 {
                             // [v2] 英雄摘要卡 + section header
                             summaryHeroCard(ctx)
                             chartSectionHeader
                             chart(ctx)
                             quadrantLegend(ctx)
+                        } else {
+                            TalentStatsView(members: members,
+                                            proactivity: ctx.scores,
+                                            potential: ctx.potentialScores)
                         }
                     }
                     .padding(.top, 8)
@@ -931,5 +944,171 @@ struct TalentMatrixView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - 統計圖表分頁（v25.320）
+
+/// 人才矩陣的第二分頁：以人為單位的年度統計橫條圖。
+/// 年度膠囊切換（資料裡出現過的年份）；部門篩選沿用矩陣頁的選擇。
+/// 圖表：請假時數／任務完成數／報告完成數／加分與扣分紀錄數（年度），
+/// 加上逾期件數與主動性/潛力分數排行（目前狀態、不分年度）。
+struct TalentStatsView: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    let members: [Subordinate]
+    /// 由矩陣頁一次算好的分數（含被標註加分），避免此處重算造成分數不一致
+    let proactivity: [UUID: Int]
+    let potential: [UUID: Int]
+
+    @State private var year = Calendar.current.component(.year, from: Date())
+
+    private var cal: Calendar { Calendar.current }
+
+    /// 資料裡出現過的年份（請假/任務/報告），新到舊；保底含今年
+    private var availableYears: [Int] {
+        var years = Set<Int>([cal.component(.year, from: Date())])
+        for m in members {
+            for r in m.records { years.insert(cal.component(.year, from: r.date)) }
+            for t in m.tasks {
+                years.insert(cal.component(.year, from: t.completedAt ?? t.date))
+            }
+            for r in m.weeklyReports {
+                years.insert(cal.component(.year, from: r.completedAt ?? r.date))
+            }
+        }
+        return years.sorted(by: >)
+    }
+
+    private func inYear(_ d: Date) -> Bool { cal.component(.year, from: d) == year }
+
+    private func name(_ m: Subordinate) -> String { m.name.isEmpty ? "未命名" : m.name }
+
+    // MARK: 年度統計值
+
+    private func leaveHours(_ m: Subordinate) -> Double {
+        m.records.filter { $0.type == .leave && inYear($0.date) }
+            .reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
+    }
+    private func tasksDone(_ m: Subordinate) -> Int {
+        m.tasks.filter { $0.isCompleted && inYear($0.completedAt ?? $0.date) }.count
+    }
+    private func reportsDone(_ m: Subordinate) -> Int {
+        m.weeklyReports.filter { $0.isCompleted && inYear($0.completedAt ?? $0.date) }.count
+    }
+    private func plusRecords(_ m: Subordinate) -> Int {
+        m.records.filter { inYear($0.date)
+            && ($0.type == .pro || $0.type == .achievement || $0.type == .improvement) }.count
+    }
+    private func minusRecords(_ m: Subordinate) -> Int {
+        m.records.filter { inYear($0.date)
+            && ($0.type == .con || $0.type == .fault || $0.type == .missOperation) }.count
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // 年度膠囊
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(availableYears, id: \.self) { y in
+                        Button {
+                            year = y
+                        } label: {
+                            Text(String(y))
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(y == year ? Color.indigo : Color(.secondarySystemBackground))
+                                .foregroundStyle(y == year ? .white : .primary)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+            }
+
+            statsBarCard(title: "請假時數（\(year) 年）", icon: "calendar.badge.minus", color: .orange,
+                         unit: "小時",
+                         values: members.map { (name($0), leaveHours($0)) },
+                         footer: "含所有假別（病假／喪假／公假等不計分假別也列入時數）。")
+            statsBarCard(title: "任務完成數（\(year) 年）", icon: "checklist", color: .green,
+                         unit: "件",
+                         values: members.map { (name($0), Double(tasksDone($0))) },
+                         footer: "以完成時間歸入年度；含兼任連動任務。")
+            statsBarCard(title: "報告完成數（\(year) 年）", icon: "doc.text.fill", color: .purple,
+                         unit: "份",
+                         values: members.map { (name($0), Double(reportsDone($0))) })
+            statsBarCard(title: "加分紀錄（\(year) 年）", icon: "hand.thumbsup.fill", color: .teal,
+                         unit: "筆",
+                         values: members.map { (name($0), Double(plusRecords($0))) },
+                         footer: "優點＋成就＋進步的紀錄筆數。")
+            statsBarCard(title: "扣分紀錄（\(year) 年）", icon: "hand.thumbsdown.fill", color: .red,
+                         unit: "筆",
+                         values: members.map { (name($0), Double(minusRecords($0))) },
+                         footer: "缺點＋缺失＋疏失的紀錄筆數。")
+            statsBarCard(title: "逾期件數（目前）", icon: "exclamationmark.triangle.fill", color: .pink,
+                         unit: "件",
+                         values: members.map { (name($0), Double($0.overdueOpenCount)) },
+                         footer: "逾期未完成＋逾期才完成（與逾期扣分同一套定義）。")
+            statsBarCard(title: "主動性分數（目前）", icon: "bolt.fill", color: .indigo,
+                         unit: "分",
+                         values: members.map { (name($0), Double(proactivity[$0.id] ?? 0)) })
+            statsBarCard(title: "潛力分數（目前）", icon: "star.fill", color: .blue,
+                         unit: "分",
+                         values: members.map { (name($0), Double(potential[$0.id] ?? 0)) })
+        }
+    }
+
+    /// 橫條圖卡：依數值大到小排序、零值不畫（全部為零顯示空狀態提示）
+    @ViewBuilder
+    private func statsBarCard(title: String, icon: String, color: Color, unit: String,
+                              values: [(name: String, value: Double)],
+                              footer: String? = nil) -> some View {
+        let sorted = values.filter { $0.value > 0 }.sorted { $0.value > $1.value }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(LinearGradient(colors: [color, color.opacity(0.55)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 4, height: 16)
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(color)
+                Text(title).font(.subheadline.weight(.bold))
+                Spacer()
+            }
+            if sorted.isEmpty {
+                Text("此範圍沒有資料")
+                    .font(.caption).foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 10)
+            } else {
+                Chart(Array(sorted.enumerated()), id: \.offset) { _, item in
+                    BarMark(
+                        x: .value(unit, item.value),
+                        y: .value("成員", item.name)
+                    )
+                    .foregroundStyle(color.gradient)
+                    .cornerRadius(3)
+                    .annotation(position: .trailing, spacing: 4) {
+                        Text(item.value == item.value.rounded()
+                             ? String(format: "%.0f", item.value)
+                             : String(format: "%.1f", item.value))
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks { _ in AxisGridLine() }
+                }
+                .frame(height: max(60, CGFloat(sorted.count) * 30))
+            }
+            if let footer {
+                Text(footer).font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .padding(.horizontal)
     }
 }
