@@ -994,7 +994,9 @@ struct TalentStatsView: View {
             .reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
     }
     private func tasksDone(_ m: Subordinate) -> Int {
-        m.tasks.filter { $0.isCompleted && inYear($0.completedAt ?? $0.date) }.count
+        // [v25.326] 應做未作為（缺失）不算「完成的任務」——那是扣分事項的結案，
+        // 混進完成柱狀圖會把缺失多的人墊高成高產出
+        m.tasks.filter { $0.isCompleted && !$0.isDereliction && inYear($0.completedAt ?? $0.date) }.count
     }
     private func reportsDone(_ m: Subordinate) -> Int {
         m.weeklyReports.filter { $0.isCompleted && inYear($0.completedAt ?? $0.date) }.count
@@ -1027,7 +1029,7 @@ struct TalentStatsView: View {
                       footer: "含所有假別（病假／喪假／公假等不計分假別也列入時數）。"),
             StatChart(title: "任務完成數（\(year) 年）", icon: "checklist", color: .green,
                       unit: "件", values: members.map { (name($0), Double(tasksDone($0))) },
-                      footer: "以完成時間歸入年度；含兼任連動任務。"),
+                      footer: "以完成時間歸入年度；含兼任連動任務，不含「應做未作為（缺失）」。"),
             StatChart(title: "報告完成數（\(year) 年）", icon: "doc.text.fill", color: .purple,
                       unit: "份", values: members.map { (name($0), Double(reportsDone($0))) }),
             StatChart(title: "加分紀錄（\(year) 年）", icon: "hand.thumbsup.fill", color: .teal,
