@@ -965,6 +965,13 @@ struct TalentStatsView: View {
 
     @State private var year = Calendar.current.component(.year, from: Date())
     @State private var shareItem: MatrixShareURL?
+    /// [v25.327] 匯出前的「顯示名字」選擇（chartId nil＝全部圖表）
+    @State private var pendingExport: PendingStatExport?
+
+    struct PendingStatExport: Identifiable {
+        let id = UUID()
+        let chartId: String?
+    }
 
     private var cal: Calendar { Calendar.current }
 
@@ -1088,12 +1095,12 @@ struct TalentStatsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { exportAll() } label: {
+                    Button { pendingExport = PendingStatExport(chartId: nil) } label: {
                         Label("全部圖表（一張圖）", systemImage: "square.grid.2x2")
                     }
                     Divider()
                     ForEach(charts) { c in
-                        Button { exportChart(c) } label: {
+                        Button { pendingExport = PendingStatExport(chartId: c.id) } label: {
                             Label(c.title, systemImage: c.icon)
                         }
                     }
@@ -1103,6 +1110,68 @@ struct TalentStatsView: View {
             }
         }
         .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
+        // [v25.327] 匯出前選「顯示名字」：全部顯示，或只顯示某個人（其他人匿名為 同仁1、同仁2…）
+        .sheet(item: $pendingExport) { pending in
+            NavigationStack {
+                List {
+                    Section {
+                        Button { performExport(pending, focus: nil) } label: {
+                            Label("全部顯示", systemImage: "person.3.fill")
+                                .foregroundStyle(.indigo)
+                        }
+                    } footer: {
+                        Text("只顯示某個人時，其他人的長條仍會保留（看得出相對位置），但名字以「同仁1、同仁2…」匿名；團隊平均照常顯示。")
+                    }
+                    Section("只顯示這個人的名字") {
+                        ForEach(members) { m in
+                            Button { performExport(pending, focus: name(m)) } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "person.crop.circle")
+                                        .foregroundStyle(.secondary)
+                                    Text(name(m)).foregroundStyle(.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("匯出顯示名字")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { pendingExport = nil }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    /// 依選擇執行匯出：focus nil＝全名；有 focus＝其他成員匿名（同一次匯出中編號一致）
+    @MainActor
+    private func performExport(_ pending: PendingStatExport, focus: String?) {
+        pendingExport = nil
+        if let chartId = pending.chartId, let c = charts.first(where: { $0.id == chartId }) {
+            exportChart(maskedChart(c, focus: focus))
+        } else {
+            exportAll(focus: focus)
+        }
+    }
+
+    /// 匿名化：focus 以外的成員名字換成「同仁N」。編號依 members 順序固定，
+    /// 同一批匯出的每張圖編號一致（同仁1 在每張圖都是同一個人）。
+    private func maskedChart(_ c: StatChart, focus: String?) -> StatChart {
+        guard let focus else { return c }
+        var alias: [String: String] = [:]
+        var n = 0
+        for m in members {
+            let mn = name(m)
+            guard mn != focus, alias[mn] == nil else { continue }
+            n += 1
+            alias[mn] = "同仁\(n)"
+        }
+        return StatChart(title: c.title, icon: c.icon, color: c.color, unit: c.unit,
+                         values: c.values.map { (alias[$0.name] ?? $0.name, $0.value) },
+                         footer: c.footer)
     }
 
     /// 橫條圖卡：依數值大到小排序、零值不畫（全部為零顯示空狀態提示）。
@@ -1127,7 +1196,7 @@ struct TalentStatsView: View {
                 Spacer()
                 // [v25.321] 單張圖卡的小分享鈕
                 if !forExport {
-                    Button { exportChart(c) } label: {
+                    Button { pendingExport = PendingStatExport(chartId: c.id) } label: {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(c.color)
@@ -1216,14 +1285,14 @@ struct TalentStatsView: View {
     }
 
     @MainActor
-    private func exportAll() {
+    private func exportAll(focus: String? = nil) {
         let content = VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("📊 部屬統計圖表｜\(year) 年")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
             }
-            ForEach(charts) { c in
+            ForEach(charts.map { maskedChart($0, focus: focus) }) { c in
                 statsBarCard(c, forExport: true)
             }
             Text("美好人生・\(Self.statsDisplayStampFmt.string(from: Date())) 匯出")
